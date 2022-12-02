@@ -184,6 +184,7 @@ void Daemon::tcmalloc_gc_thread() {
                 last_ms = 0;
             }
         } else {
+            DCHECK(tc_cached_bytes <= tc_used_bytes * max_cache_percent / 100);
             last_ms = 0;
         }
     }
