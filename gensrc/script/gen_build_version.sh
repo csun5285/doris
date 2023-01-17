@@ -203,9 +203,9 @@ EOF
 
 build_version_prefix="selectdb"
 build_version_major=2
-build_version_minor=0
-build_version_patch=14
-build_version_rc_version="release"
+build_version_minor=2
+build_version_patch=0
+build_version_rc_version=""
 
 if [ -f /etc/os-release ]; then
 	build_os_version=$(cat /etc/os-release | head -n2 | tr '\n' ' ')
@@ -213,7 +213,10 @@ else
 	build_os_version="unknown-os-version"
 fi
 
-build_version="${build_version_prefix}-${build_version_major}.${build_version_minor}.${build_version_patch}-${build_version_rc_version}"
+build_version="${build_version_prefix}-${build_version_major}.${build_version_minor}.${build_version_patch}"
+if [[ "${build_version_rc_version}" != "" ]]; then
+	build_version=${build_version}"-${build_version_rc_version}"
+fi
 
 build_hash=${revision}
 build_short_hash=${short_revision}

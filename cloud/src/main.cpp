@@ -94,7 +94,7 @@ static std::string build_info() {
     ss << "version:{" SELECTDB_BUILD_VERSION "}"
        << " code_version:{commit=" SELECTDB_BUILD_HASH " time=" SELECTDB_BUILD_VERSION_TIME "}"
        << " build_info:{initiator=" SELECTDB_BUILD_INITIATOR " build_at=" SELECTDB_BUILD_TIME
-          " build_on=" SELECTDB_BUILD_OS_VERSION "}";
+          " build_on=" SELECTDB_BUILD_OS_VERSION "}\n";
     return ss.str();
 }
 
