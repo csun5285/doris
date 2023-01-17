@@ -88,6 +88,12 @@ public class TempPartitions implements Writable, GsonPostProcessable {
                 }
             }
         }
+
+        if (!Config.cloud_unique_id.isEmpty() && !Env.isCheckpointThread()
+                && Env.getCurrentEnv().isMaster()) {
+            Env.getCurrentEnv().dropPartition(partition);
+        }
+
     }
 
     public Partition getPartition(long partitionId) {
