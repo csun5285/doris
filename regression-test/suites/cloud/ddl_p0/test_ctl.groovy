@@ -25,11 +25,6 @@ suite("test_ctl") {
     ) ENGINE=OLAP
     UNIQUE KEY(`test_varchar`)
     DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
-      PROPERTIES (
-      "replication_allocation" = "tag.location.default: 1",
-      "in_memory" = "false",
-      "storage_format" = "V2"
-    )
     """
 
         sql """ 

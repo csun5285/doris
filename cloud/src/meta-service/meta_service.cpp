@@ -4769,10 +4769,11 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
     std::string val;
     copy_job_key(key_info, &key);
     ret = txn->get(key, &val);
+    LOG(INFO) << "get copy_job_key=" << hex(key);
 
     if (ret != 0) {
         code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        ss << "failed to get copy_job, instance_id=" << instance_id << " ret=" << ret;
         msg = ss.str();
         return;
     }
@@ -4795,7 +4796,7 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
             return;
         }
         txn->put(key, val);
-        LOG(INFO) << "put finished copy_job_key=" << hex(key);
+        LOG(INFO) << "put copy_job_key=" << hex(key);
     } else if (request->action() == FinishCopyRequest::ABORT) {
         // 1. remove copy job kv
         // 2. remove copy file kvs
