@@ -303,7 +303,7 @@ Status VCollectIterator::topn_next(Block* block) {
                 }
 
                 size_t base = mutable_block.rows();
-                mutable_block.add_rows(block, 0, rows_to_copy, false);
+                mutable_block.add_rows(block, 0, rows_to_copy);
                 for (size_t i = 0; i < rows_to_copy; i++) {
                     sorted_row_pos.insert(base + i);
                     changed = true;
