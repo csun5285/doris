@@ -113,7 +113,9 @@ Status AggFnEvaluator::prepare(RuntimeState* state, const RowDescriptor& desc, M
             _real_argument_types.empty() ? tmp_argument_types : _real_argument_types;
 
     if (_fn.binary_type == TFunctionBinaryType::JAVA_UDF) {
-        if (config::enable_java_support) {
+        if (config::disable_java_udf) {
+            return Status::InternalError("Java UDAF is disabled temporarily.");
+        } else if (config::enable_java_support) {
             _function = AggregateJavaUdaf::create(_fn, argument_types, {}, _data_type);
             RETURN_IF_ERROR(static_cast<AggregateJavaUdaf*>(_function.get())->check_udaf(_fn));
         } else {

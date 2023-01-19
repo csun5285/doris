@@ -59,7 +59,9 @@ doris::Status VectorizedFnCall::prepare(doris::RuntimeState* state,
     if (_fn.binary_type == TFunctionBinaryType::RPC) {
         _function = FunctionRPC::create(_fn, argument_template, _data_type);
     } else if (_fn.binary_type == TFunctionBinaryType::JAVA_UDF) {
-        if (config::enable_java_support) {
+        if (config::disable_java_udf) {
+            return Status::InternalError("Java UDF is disabled temporarily.");
+        } else if (config::enable_java_support) {
             _function = JavaFunctionCall::create(_fn, argument_template, _data_type);
         } else {
             return Status::InternalError(
