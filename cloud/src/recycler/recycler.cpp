@@ -1,6 +1,7 @@
 #include "recycler/recycler.h"
 
 #include <gen_cpp/olap_file.pb.h>
+#include <gen_cpp/selectdb_cloud.pb.h>
 
 #include <atomic>
 #include <chrono>
@@ -94,6 +95,113 @@ void Recycler::instance_scanner_callback() {
     }
 }
 
+bool Recycler::prepare_instance_recycle_job(const std::string& instance_id) {
+    JobRecycleKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    job_recycle_key(key_info, &key);
+    std::unique_ptr<Transaction> txn;
+    int ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        LOG(WARNING) << "failed to create txn";
+        return false;
+    }
+    ret = txn->get(key, &val);
+    if (ret < 0) {
+        LOG(WARNING) << "failed to get kv";
+        return false;
+    }
+
+    using namespace std::chrono;
+    auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    JobRecyclePB job_info;
+
+    auto is_expired = [&]() {
+        if (!job_info.ParseFromString(val)) {
+            LOG(WARNING) << "failed to parse JobRecyclePB";
+            // if failed to parse, just recycle it.
+            return true;
+        }
+        DCHECK(job_info.instance_id() == instance_id);
+        bool lease_expired = job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
+        bool finish_expired = job_info.status() == JobRecyclePB::IDLE
+                    && now - job_info.last_finish_time_ms() > config::recycle_interval_seconds * 1000;
+        return lease_expired || finish_expired;
+    };
+    if (ret == 1 || is_expired()) {
+        job_info.set_status(JobRecyclePB::BUSY);
+        job_info.set_instance_id(instance_id);
+        job_info.set_ip_port(ip_port_);
+        job_info.set_ctime_ms(now);
+        job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
+        job_info.set_last_finish_time_ms(-1);
+        val = job_info.SerializeAsString();
+        txn->put(key, val);
+        ret = txn->commit();
+        if (ret != 0) {
+            LOG(WARNING) << "failed to commit";
+            return false;
+        }
+        LOG(INFO) << "host: " << ip_port_ << " start recycle job, instance_id: " << instance_id;
+        return true;
+    }
+    return false;
+}
+
+void Recycler::finish_instance_recycle_job(const std::string& instance_id) {
+    JobRecycleKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    job_recycle_key(key_info, &key);
+    int retry_times = 3;
+    do {
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            LOG(WARNING) << "failed to create txn";
+            return;
+        }
+        ret = txn->get(key, &val);
+        if (ret < 0 || ret == 1) {
+            LOG(WARNING) << "failed to get kv";
+            return;
+        }
+
+        using namespace std::chrono;
+        auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        JobRecyclePB job_info;
+        if (!job_info.ParseFromString(val)) {
+            LOG(WARNING) << "failed to parse JobRecyclePB";
+            return;
+        }
+        DCHECK(job_info.instance_id() == instance_id);
+        if (job_info.ip_port() != ip_port_) {
+            LOG(WARNING) << "recycle job of instance_id: " << instance_id
+                         << " is doing at other machine: " << job_info.ip_port();
+            return;
+        }
+        if (job_info.status() != JobRecyclePB::BUSY) {
+            LOG(WARNING) << "recycle job of instance_id: " << instance_id
+                         << " is not busy";
+            return;
+        }
+        job_info.set_status(JobRecyclePB::IDLE);
+        job_info.set_instance_id(instance_id);
+        job_info.set_last_finish_time_ms(now);
+        val = job_info.SerializeAsString();
+        txn->put(key, val);
+        ret = txn->commit();
+        if (ret == 0) {
+            LOG(INFO) << "succ to commit to finish recycle job, instance_id: " << instance_id;
+            return;
+        }
+        // maybe conflict with the commit of the leased thread
+        LOG(WARNING) << "failed to commit to finish recycle job, instance_id: " << instance_id 
+                     << " try it again";
+    } while(retry_times--);
+    LOG(WARNING) << "finally failed to commit to finish recycle job, instance_id: " << instance_id;
+}
+
 void Recycler::recycle_callback() {
     while (is_working()) {
         InstanceInfoPB instance;
@@ -114,7 +222,12 @@ void Recycler::recycle_callback() {
                 // skip instance in recycling
                 continue;
             }
+            if (!prepare_instance_recycle_job(instance.instance_id())) {
+                recycling_instance_set_.erase(instance.instance_id());
+                continue;
+            }
         }
+
         auto& instance_id = instance.instance_id();
         if (instance.obj_info().empty()) {
             LOG_WARNING("instance has no object store info").tag("instance_id", instance_id);
@@ -130,6 +243,7 @@ void Recycler::recycle_callback() {
         instance_recycler->recycle_expired_txn_label();
         instance_recycler->recycle_copy_jobs();
         instance_recycler->recycle_stage();
+        finish_instance_recycle_job(instance_id);
         {
             std::lock_guard lock(recycling_instance_set_mtx_);
             recycling_instance_set_.erase(instance_id);
@@ -138,7 +252,67 @@ void Recycler::recycle_callback() {
     }
 }
 
+void Recycler::lease_instance_recycle_job(const std::string& instance_id) {
+    JobRecycleKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    job_recycle_key(key_info, &key);
+
+    std::unique_ptr<Transaction> txn;
+    int ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        LOG(WARNING) << "failed to create txn";
+        return;
+    }
+    ret = txn->get(key, &val);
+    if (ret < 0 || ret == 1) {
+        LOG(WARNING) << "failed to get kv";
+        return;
+    }
+
+    using namespace std::chrono;
+    auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    JobRecyclePB job_info;
+    if (!job_info.ParseFromString(val)) {
+        LOG(WARNING) << "failed to parse JobRecyclePB";
+        return;
+    }
+    DCHECK(job_info.instance_id() == instance_id);
+    if (job_info.ip_port() != ip_port_) {
+        LOG(WARNING) << "recycle job of instance_id: " << instance_id
+                    << " is doing at other machine: " << job_info.ip_port();
+        // Todo: abort the recycle of this instance_id
+        return;
+    }
+    if (job_info.status() != JobRecyclePB::BUSY) {
+        LOG(WARNING) << "recycle job of instance_id: " << instance_id
+                    << " is not busy";
+        return;
+    }
+    job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
+    val = job_info.SerializeAsString();
+    txn->put(key, val);
+    ret = txn->commit();
+    if (ret != 0) {
+        LOG(WARNING) << "failed to commit, failed to lease recycle job of instance_id: " << instance_id;
+    }
+}
+void Recycler::do_lease() {
+    while (is_working()) {
+        std::unordered_set<std::string> instance_set;
+        {
+            std::lock_guard lock(recycling_instance_set_mtx_);
+            instance_set = recycling_instance_set_;
+        }
+        for (const auto& instance_id : instance_set) {
+            lease_instance_recycle_job(instance_id);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3));
+    }
+}
+
 int Recycler::start() {
+#ifndef UNIT_TEST
     int ret = 0;
     txn_kv_ = std::make_shared<FdbTxnKv>();
     LOG(INFO) << "begin to init txn kv";
@@ -149,6 +323,7 @@ int Recycler::start() {
     }
     LOG(INFO) << "successfully init txn kv";
 
+    ip_port_ = std::string(butil::my_ip_cstr()) + ":" + std::to_string(config::brpc_listen_port);
     // Add service
     auto recycler_service = new RecyclerServiceImpl(txn_kv_, this);
     server_->AddService(recycler_service, brpc::SERVER_OWNS_SERVICE);
@@ -164,7 +339,7 @@ int Recycler::start() {
                      << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
         return -1;
     }
-
+#endif
     s_is_working = true;
 
     if (config::recycle_standalone_mode) {
@@ -173,13 +348,16 @@ int Recycler::start() {
     for (int i = 0; i < config::recycle_concurrency; ++i) {
         workers_.push_back(std::thread(std::bind(&Recycler::recycle_callback, this)));
     }
+
+    workers_.push_back(std::thread(std::mem_fn(&Recycler::do_lease), this));
     return 0;
 }
 
 void Recycler::join() {
+#ifndef UNIT_TEST
     server_->RunUntilAskedToQuit();
     server_->ClearServices();
-
+#endif
     s_is_working = false;
 
     instance_scanner_cond_.notify_all();
@@ -187,6 +365,7 @@ void Recycler::join() {
     for (auto& w : workers_) {
         w.join();
     }
+
 }
 
 InstanceRecycler::InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance)

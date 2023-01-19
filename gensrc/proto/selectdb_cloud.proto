@@ -281,6 +281,19 @@ message RecycleStagePB {
     optional StagePB stage = 3;
 }
 
+message JobRecyclePB {
+    enum Status {
+        IDLE = 0;
+        BUSY = 1;
+    }
+    optional string instance_id = 1;
+    optional string ip_port = 2;
+    optional int64 ctime_ms = 3;
+    optional int64 expiration_time_ms = 4;
+    optional int64 last_finish_time_ms = 5;
+    optional Status status = 6;
+}
+
 message TabletIndexPB {
     optional int64 db_id = 1;
     optional int64 table_id = 2;

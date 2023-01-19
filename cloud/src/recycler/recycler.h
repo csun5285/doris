@@ -34,6 +34,10 @@ private:
     std::vector<InstanceInfoPB> get_instances();
     void instance_scanner_callback();
 
+    bool prepare_instance_recycle_job(const std::string& instance_id);
+    void finish_instance_recycle_job(const std::string& instance_id);
+    void lease_instance_recycle_job(const std::string& instance_id);
+    void do_lease();
 private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::unique_ptr<brpc::Server> server_;
@@ -50,6 +54,8 @@ private:
     // standalone mode
     std::mutex instance_scanner_mtx_;
     std::condition_variable instance_scanner_cond_;
+
+    std::string ip_port_;
 };
 
 class InstanceRecycler {

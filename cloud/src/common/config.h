@@ -53,6 +53,7 @@ CONF_mInt64(recycle_interval_seconds, "3600");
 CONF_mInt64(retention_seconds, "259200"); // 72h
 CONF_Int32(recycle_concurrency, "16");
 CONF_Bool(recycle_standalone_mode, "false");
+CONF_Int32(recycle_job_lease_expired_ms, "60000");
 
 CONF_String(test_s3_ak, "ak");
 CONF_String(test_s3_sk, "sk");

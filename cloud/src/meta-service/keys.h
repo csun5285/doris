@@ -34,6 +34,7 @@
 // 0x01 "recycle" ${instance_id} "stage" ${stage_id}                                         -> RecycleStagePB
 //
 // 0x01 "job" ${instance_id} "tablet" ${tablet_id}                                           -> TabletJobInfoPB
+// 0x01 "job" ${instance_id} "recycle"                                                       -> JobRecyclePB
 //
 // 0x01 "system" "meta-service" "registry"                                                   -> MetaServiceRegistryPB
 //
@@ -122,6 +123,9 @@ using CopyFileKeyInfo      = BasicKeyInfo<18, std::tuple<std::string,  std::stri
 //                                                      0:instance_id  1:stage_id
 using RecycleStageKeyInfo  = BasicKeyInfo<19, std::tuple<std::string,  std::string>>;
 
+//                                                      0:instance_id
+using JobRecycleKeyInfo    = BasicKeyInfo<20 , std::tuple<std::string>>;
+
 void instance_key(const InstanceKeyInfo& in, std::string* out);
 
 void txn_label_key(const TxnLabelKeyInfo& in, std::string* out);
@@ -140,6 +144,7 @@ static inline std::string meta_rowset_tmp_key(const MetaRowsetTmpKeyInfo& in) { 
 static inline std::string meta_tablet_idx_key(const MetaTabletIdxKeyInfo& in) { std::string s; meta_tablet_idx_key(in, &s); return s; }
 static inline std::string meta_tablet_key(const MetaTabletKeyInfo& in) { std::string s; meta_tablet_key(in, &s); return s; }
 
+void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out);
 void recycle_index_key(const RecycleIndexKeyInfo& in, std::string* out);
 void recycle_partition_key(const RecyclePartKeyInfo& in, std::string* out);
 void recycle_rowset_key(const RecycleRowsetKeyInfo& in, std::string* out);

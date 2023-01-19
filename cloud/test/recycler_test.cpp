@@ -5,8 +5,10 @@
 #include <gen_cpp/selectdb_cloud.pb.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "common/config.h"
 #include "common/logging.h"
@@ -1008,4 +1010,64 @@ TEST(RecyclerTest, recycle_stage) {
     ASSERT_EQ(0, txn_kv->create_txn(&txn));
     ASSERT_EQ(1, txn->get(key, &val));
 }
+
+TEST(RecyclerTest, multi_recycler) {
+    config::recycle_standalone_mode = true;
+    config::recycle_concurrency = 2;
+    config::recycle_interval_seconds = 2;
+    config::recycle_job_lease_expired_ms = 3;
+    auto mem_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(mem_kv->init(), 0);
+    {
+        for (int i = 0; i < 10; ++i) {
+            InstanceInfoPB instance;
+            instance.set_instance_id(std::to_string(i));
+            auto obj_info = instance.add_obj_info();
+            obj_info->set_id("multi_recycler_test");
+            obj_info->set_ak(config::test_s3_ak);
+            obj_info->set_sk(config::test_s3_sk);
+            obj_info->set_endpoint(config::test_s3_endpoint);
+            obj_info->set_region(config::test_s3_region);
+            obj_info->set_bucket(config::test_s3_bucket);
+            obj_info->set_prefix("multi_recycler_test");
+            InstanceKeyInfo key_info {std::to_string(i)};
+            std::string key;
+            instance_key(key_info, &key);
+            std::string val = instance.SerializeAsString();
+            std::unique_ptr<Transaction> txn;
+            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            txn->put(key, val);
+            ASSERT_EQ(0, txn->commit());
+        }
+    }
+    Recycler r1;
+    r1.txn_kv_ = mem_kv;
+    r1.ip_port_ = "r1:p1";
+    r1.start();
+    Recycler r2;
+    r2.txn_kv_ = mem_kv;
+    r2.ip_port_ = "r2:p2";
+    r2.start();
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    r1.join();
+    r2.join();
+
+    for (int i = 0; i < 10; ++i) {
+        JobRecycleKeyInfo key_info {std::to_string(i)};
+        JobRecyclePB job_info;
+        std::string key;
+        std::string val;
+        job_recycle_key(key_info, &key);
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(0, mem_kv->create_txn(&txn));
+        int ret = txn->get(key, &val);
+        if (ret == 0) {
+            ASSERT_EQ(true, job_info.ParseFromString(val));
+        }
+        ASSERT_EQ(JobRecyclePB::IDLE, job_info.status());
+        std::cout << "host: " << job_info.ip_port() << " finish recycle job of instance_id: " << i << std::endl;
+    }
+}
+
 } // namespace selectdb
