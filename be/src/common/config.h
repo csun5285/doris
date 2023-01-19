@@ -946,14 +946,16 @@ CONF_mDouble(inverted_index_ram_buffer_size, "512");
 CONF_mInt32(inverted_index_max_buffer_docs, "100000000");
 // setMergeFactor for lucene
 CONF_mInt32(inverted_index_merge_factor, "100000000");
+
 // inverted index searcher sweep time interval, default 30min
 CONF_mInt32(index_searcher_cache_stale_sweep_time_sec, "1800");
 // Cache for inverted index cache capacity
 CONF_Int32(inverted_index_searcher_cache_capacity, "1000000");
 // Cache for inverted index cache size
-CONF_String(inverted_index_searcher_cache_limit, "10%");
+CONF_String(inverted_index_searcher_cache_limit, "5%");
 // set `true` to enable insert searcher into cache when write inverted index data
-CONF_Bool(enable_write_index_searcher_cache, "true");
+CONF_Bool(enable_write_index_searcher_cache, "false");
+
 // inverted index
 CONF_Int32(query_bkd_inverted_index_limit_percent, "5"); // 5%
 // tree depth for bkd
