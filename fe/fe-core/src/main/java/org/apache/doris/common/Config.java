@@ -1771,6 +1771,14 @@ public class Config extends ConfigBase {
     @ConfField
     public static String cloud_unique_id = "";
 
+    public static boolean isCloudMode() {
+        return !cloud_unique_id.isEmpty();
+    }
+
+    public static boolean isNotCloudMode() {
+        return !isCloudMode();
+    }
+
     @ConfField
     public static String cloud_sql_server_cluster_name = "RESERVED_CLUSTER_NAME_FOR_SQL_SERVER";
 

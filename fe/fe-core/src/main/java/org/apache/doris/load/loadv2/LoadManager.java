@@ -841,7 +841,7 @@ public class LoadManager implements Writable {
 
         // 2. Remove from DatabaseTransactionMgr
         try {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 // FIXME(zhanglei): process CloudGloabalTransactionManager
                 LOG.error("not supported in cloud mode yet");
                 throw new AnalysisException("not supported in cloud mode yet");

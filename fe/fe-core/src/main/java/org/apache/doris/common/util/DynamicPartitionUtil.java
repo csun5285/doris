@@ -227,7 +227,7 @@ public class DynamicPartitionUtil {
     }
 
     private static void checkReplicaAllocation(ReplicaAllocation replicaAlloc, Database db) throws DdlException {
-        if (!Config.cloud_unique_id.isEmpty()) { // selectdb cloud, skip checking
+        if (Config.isCloudMode()) { // selectdb cloud, skip checking
             return;
         }
         if (replicaAlloc.getTotalReplicaNum() <= 0) {

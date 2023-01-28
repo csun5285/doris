@@ -204,13 +204,13 @@ public class ConnectProcessor {
                 .setStmtId(ctx.getStmtId())
                 .setQueryId(ctx.queryId() == null ? "NaN" : DebugUtil.printId(ctx.queryId()))
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
-                .setCloudCluster(!Config.cloud_unique_id.isEmpty() && ctx.cloudCluster != null
+                .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
                             ? ctx.cloudCluster : "UNKNOWN");
 
 
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
-            if (!Config.cloud_unique_id.isEmpty() && ctx.cloudCluster != null) {
+            if (Config.isCloudMode() && ctx.cloudCluster != null) {
                 String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(ctx.cloudCluster);
                 MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
                     LongCounterMetric counterQueryAll = new LongCounterMetric("query_total", MetricUnit.REQUESTS,
@@ -242,12 +242,12 @@ public class ConnectProcessor {
                     && ctx.getState().getErrType() != QueryState.ErrType.ANALYSIS_ERR) {
                 // err query
                 MetricRepo.COUNTER_QUERY_ERR.increase(1L);
-                if (!Config.cloud_unique_id.isEmpty() && ctx.cloudCluster != null) {
+                if (Config.isCloudMode() && ctx.cloudCluster != null) {
                     MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.get(ctx.cloudCluster).increase(1L);
                 }
             } else if (ctx.getState().getStateType() == MysqlStateType.OK
                     || ctx.getState().getStateType() == MysqlStateType.EOF) {
-                if (!Config.cloud_unique_id.isEmpty() && ctx.cloudCluster != null) {
+                if (Config.isCloudMode() && ctx.cloudCluster != null) {
                     MetricRepo.CLOUD_CLUSTER_HISTO_QUERY_LATENCY.get(ctx.cloudCluster).update(elapseMs);
                 }
                 // ok query
@@ -294,11 +294,11 @@ public class ConnectProcessor {
     // only throw an exception when there is a problem interacting with the requesting client
     private void handleQuery() {
         MetricRepo.COUNTER_REQUEST_ALL.increase(1L);
-        if (!Config.cloud_unique_id.isEmpty() && Strings.isNullOrEmpty(ctx.cloudCluster)) {
+        if (Config.isCloudMode() && Strings.isNullOrEmpty(ctx.cloudCluster)) {
             ctx.setCloudCluster();
             LOG.debug("handle Query set ctx cloud cluster, get cluster: {}", ctx.getCloudCluster());
         }
-        if (!Config.cloud_unique_id.isEmpty() && ctx.cloudCluster != null) {
+        if (Config.isCloudMode() && ctx.cloudCluster != null) {
             String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(ctx.cloudCluster);
             MetricRepo.CLOUD_CLUSTER_COUNTER_REQUEST_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
                 LongCounterMetric counterRequestAll = new LongCounterMetric("request_total", MetricUnit.REQUESTS,

@@ -406,7 +406,7 @@ public class MaterializedViewHandler extends AlterHandler {
                     Preconditions.checkState(baseReplica.getState() == ReplicaState.NORMAL,
                             baseReplica.getState());
                     // replica's init state is ALTER, so that tablet report process will ignore its report
-                    Replica mvReplica = Config.cloud_unique_id.isEmpty()
+                    Replica mvReplica = Config.isNotCloudMode()
                             ? new Replica(mvReplicaId, backendId, ReplicaState.ALTER,
                                     Partition.PARTITION_INIT_VERSION, mvSchemaHash)
                             : new CloudReplica(mvReplicaId, null, ReplicaState.ALTER,
@@ -796,7 +796,7 @@ public class MaterializedViewHandler extends AlterHandler {
             LOG.info("finished drop rollup index[{}] in table[{}]",
                     String.join("", rollupNameSet), olapTable.getName());
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 deleteIndexList = new ArrayList<Long>();
                 for (Long deleteIdx : indexIdSet) {
                     deleteIndexList.add(deleteIdx);
@@ -806,7 +806,7 @@ public class MaterializedViewHandler extends AlterHandler {
             olapTable.writeUnlock();
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
                 try {
@@ -851,7 +851,7 @@ public class MaterializedViewHandler extends AlterHandler {
             editLog.logDropRollup(new DropInfo(db.getId(), olapTable.getId(), mvIndexId, false, 0));
             LOG.info("finished drop materialized view [{}] in table [{}]", mvName, olapTable.getName());
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 deleteIndexList = new ArrayList<Long>();
                 deleteIndexList.add(mvIndexId);
             }
@@ -865,7 +865,7 @@ public class MaterializedViewHandler extends AlterHandler {
             olapTable.writeUnlock();
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
                 try {
@@ -968,7 +968,7 @@ public class MaterializedViewHandler extends AlterHandler {
             olapTable.writeUnlock();
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             List<Long> deleteIndexList = new ArrayList<Long>();
             deleteIndexList.add(rollupIndexId);
             int tryCnt = 0;

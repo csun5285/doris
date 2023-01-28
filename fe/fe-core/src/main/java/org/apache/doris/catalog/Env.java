@@ -605,7 +605,7 @@ public class Env {
         this.brokerMgr = new BrokerMgr();
         this.resourceMgr = new ResourceMgr();
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             this.globalTransactionMgr = new CloudGlobalTransactionMgr(this);
         } else {
             this.globalTransactionMgr = new GlobalTransactionMgr(this);
@@ -635,7 +635,7 @@ public class Env {
         // So that we can guarantee that all submitted load jobs can be scheduled without being starved.
         this.pendingLoadTaskScheduler = new MasterTaskExecutor("pending-load-task-scheduler",
                 Config.async_pending_load_task_pool_size,
-                Config.cloud_unique_id.isEmpty() ? Config.desired_max_waiting_jobs
+                Config.isNotCloudMode() ? Config.desired_max_waiting_jobs
                         : Config.cluster_max_waiting_copy_jobs, !isCheckpointCatalog);
         // The loadingLoadTaskScheduler's queue size is unlimited, so that it can receive all loading tasks
         // created after pending tasks finish. And don't worry about the high concurrency, because the
@@ -965,7 +965,7 @@ public class Env {
     private void getClusterIdAndRole() throws IOException, InterruptedException {
         NodeInfoPB.NodeType type = NodeInfoPB.NodeType.UNKNOWN;
         String feNodeNameFromMeta = "";
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             // cloud mode
             while (true) {
                 SelectdbCloud.NodeInfoPB nodeInfoPB = null;
@@ -999,7 +999,7 @@ public class Env {
 
         // if helper node is point to self, or there is ROLE and VERSION file in local.
         // get the node type from local
-        if ((!Config.cloud_unique_id.isEmpty() && type == NodeInfoPB.NodeType.FE_MASTER)
+        if ((Config.isCloudMode() && type == NodeInfoPB.NodeType.FE_MASTER)
                 || type != NodeInfoPB.NodeType.FE_OBSERVER && (isMyself()
                 || (roleFile.exists() && versionFile.exists()))) {
             if (!isMyself()) {
@@ -1028,7 +1028,7 @@ public class Env {
                 // For compatibility. Because this is the very first time to start, so we arbitrarily choose
                 // a new name for this node
                 role = FrontendNodeType.FOLLOWER;
-                if (!Config.cloud_unique_id.isEmpty() && type == NodeInfoPB.NodeType.FE_MASTER) {
+                if (Config.isCloudMode() && type == NodeInfoPB.NodeType.FE_MASTER) {
                     nodeName = feNodeNameFromMeta;
                 } else {
                     nodeName = genFeNodeName(selfNode.first, selfNode.second, false /* new style */);
@@ -1048,7 +1048,7 @@ public class Env {
                     // But we will get a empty nodeName after upgrading.
                     // So for forward compatibility, we use the "old-style" way of naming: "ip_port",
                     // and update the ROLE file.
-                    if (!Config.cloud_unique_id.isEmpty() && type == NodeInfoPB.NodeType.FE_MASTER) {
+                    if (Config.isCloudMode() && type == NodeInfoPB.NodeType.FE_MASTER) {
                         nodeName = feNodeNameFromMeta;
                     } else {
                         nodeName = genFeNodeName(selfNode.first, selfNode.second, true /* old style */);
@@ -1483,7 +1483,7 @@ public class Env {
         checkpointer.start();
         LOG.info("checkpointer thread started. thread id is {}", checkpointThreadId);
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             cloudClusterCheck.start();
         }
 
@@ -1505,7 +1505,7 @@ public class Env {
         ExportChecker.init(Config.export_checker_interval_second * 1000L);
         ExportChecker.startAll();
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             // Tablet checker and scheduler
             tabletChecker.start();
             tabletScheduler.start();
@@ -1515,7 +1515,7 @@ public class Env {
         // Colocate tables checker and balancer
         ColocateTableCheckerAndBalancer.getInstance().start();
         // Publish Version Daemon
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             publishVersionDaemon.start();
             // Start txn cleaner
             txnCleaner.start();
@@ -1524,7 +1524,7 @@ public class Env {
         // Alter
         getAlterInstance().start();
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             // Consistency checker
             getConsistencyChecker().start();
             // Backup handler
@@ -1560,7 +1560,7 @@ public class Env {
 
     // start threads that should running on all FE
     private void startNonMasterDaemonThreads() {
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             tabletStatMgr.start();
         } else {
             cloudTabletStatMgr.start();
@@ -2006,7 +2006,7 @@ public class Env {
     }
 
     public long loadTransactionState(DataInputStream dis, long checksum) throws IOException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             //for CloudGlobalTransactionMgr do nothing.
             return checksum;
         }
@@ -2322,7 +2322,7 @@ public class Env {
     }
 
     public long saveTransactionState(CountingDataOutputStream dos, long checksum) throws IOException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             //for CloudGlobalTransactionMgr do nothing.
             return checksum;
         }
@@ -2901,7 +2901,7 @@ public class Env {
     public static void getDdlStmt(DdlStmt ddlStmt, String dbName, TableIf table, List<String> createTableStmt,
             List<String> addPartitionStmt, List<String> createRollupStmt, boolean separatePartition,
             boolean hidePassword, boolean getDdlForLike, long specificVersion) {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             getCloudDdlStmt(ddlStmt, dbName, table, createTableStmt, addPartitionStmt, createRollupStmt,
                             separatePartition, hidePassword, getDdlForLike, specificVersion);
             return;
@@ -5039,7 +5039,7 @@ public class Env {
     }
 
     public String analyzeCloudCluster(String name, ConnectContext ctx) throws DdlException {
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             return name;
         }
 
@@ -5796,7 +5796,7 @@ public class Env {
             }
         }
 
-        if (!Config.cloud_unique_id.isEmpty() && Env.getCurrentEnv().isMaster()) {
+        if (Config.isCloudMode() && Env.getCurrentEnv().isMaster()) {
             dropTableByIndexs(olapTable);
             return;
         }
@@ -5869,7 +5869,7 @@ public class Env {
             }
         }
 
-        if (!Config.cloud_unique_id.isEmpty() && Env.getCurrentEnv().isMaster()) {
+        if (Config.isCloudMode() && Env.getCurrentEnv().isMaster()) {
             dropPartition(partition);
         }
     }
@@ -5962,14 +5962,14 @@ public class Env {
 
     // SELECTDB_CODE_BEGIN
     public void createStage(CreateStageStmt stmt) throws DdlException {
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             throw new DdlException("stage is only supported in cloud mode");
         }
         getInternalCatalog().createStage(stmt.toStageProto(), stmt.isIfNotExists());
     }
 
     public void dropStage(DropStageStmt stmt) throws DdlException {
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             throw new DdlException("stage is only supported in cloud mode");
         }
         getInternalCatalog().dropStage(StagePB.StageType.EXTERNAL, null, null, stmt.getStageName(), null,

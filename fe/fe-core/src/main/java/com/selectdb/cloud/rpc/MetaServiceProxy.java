@@ -23,7 +23,7 @@ public class MetaServiceProxy {
     private static Pair<String, Integer> metaServiceHostPort = null;
 
     static {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             try {
                 metaServiceHostPort = SystemInfoService.validateHostAndPort(Config.meta_service_endpoint);
             } catch (AnalysisException e) {

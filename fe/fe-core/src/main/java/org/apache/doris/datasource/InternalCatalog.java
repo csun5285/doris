@@ -1161,7 +1161,7 @@ public class InternalCatalog implements CatalogIf<Database> {
      * 11. add this table to ColocateGroup if necessary
      */
     public void createTable(CreateTableStmt stmt) throws UserException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             createCloudTable(stmt);
             return;
         }
@@ -1516,7 +1516,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         try {
             long partitionId = idGeneratorBuffer.getNextId();
             Partition partition;
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -1781,7 +1781,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         // create partition with base index
         Partition partition;
-        if (Config.cloud_unique_id.equals("")) {
+        if (Config.isNotCloudMode()) {
             partition = new Partition(partitionId, partitionName, baseIndex, distributionInfo);
         } else {
             partition = new CloudPartition(partitionId, partitionName, baseIndex, distributionInfo, dbId, tableId);
@@ -1898,7 +1898,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         List<Column> baseSchema = stmt.getColumns();
         validateColumns(baseSchema);
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             PropertyAnalyzer.checkCloudTableProperty(stmt.getProperties());
         }
 
@@ -2225,7 +2225,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 }
                 // create partition
                 Partition partition;
-                if (Config.cloud_unique_id.isEmpty()) {
+                if (Config.isNotCloudMode()) {
                     partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                         olapTable.getBaseIndexId(), partitionId, partitionName, olapTable.getIndexIdToMeta(),
                         partitionDistributionInfo, partitionInfo.getDataProperty(partitionId).getStorageMedium(),
@@ -2286,7 +2286,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                                     + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
                 }
 
-                if (!Config.cloud_unique_id.isEmpty()) {
+                if (Config.isCloudMode()) {
                     prepareCloudMaterializedIndex(olapTable, olapTable.getIndexIdList(), 0);
                 }
 
@@ -2301,7 +2301,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     }
                     Env.getCurrentEnv().getPolicyMgr().checkStoragePolicyExist(storagePolicy);
 
-                    if (!Config.cloud_unique_id.isEmpty()) {
+                    if (Config.isCloudMode()) {
                         Partition partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(),
                                 olapTable.getId(), olapTable.getBaseIndexId(), entry.getValue(), entry.getKey(),
                                 olapTable.getIndexIdToMeta(), partitionDistributionInfo,
@@ -2326,7 +2326,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.addPartition(partition);
                 }
 
-                if (!Config.cloud_unique_id.isEmpty()) {
+                if (Config.isCloudMode()) {
                     commitCloudMaterializedIndex(olapTable, olapTable.getIndexIdList());
                 }
             } else {
@@ -2722,13 +2722,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                 newPartitionIds.add(newPartitionId);
             }
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 List<Long> indexIds = copiedTbl.getIndexIdToMeta().keySet().stream().collect(Collectors.toList());
                 prepareCloudPartition(copiedTbl.getId(), newPartitionIds, indexIds, 0);
             }
 
             for (Map.Entry<String, Long> entry : origPartitions.entrySet()) {
-                if (!Config.cloud_unique_id.isEmpty()) { // TODO(gaivn): extract as function
+                if (Config.isCloudMode()) { // TODO(gaivn): extract as function
                     long oldPartitionId = entry.getValue();
                     long newPartitionId = oldToNewPartitionId.get(oldPartitionId);
                     Partition newPartition = createCloudPartitionWithIndices(db.getClusterName(),
@@ -2767,7 +2767,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 newPartitions.add(newPartition);
             }
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 commitCloudPartition(copiedTbl.getId(), newPartitionIds);
             }
         } catch (DdlException e) {
@@ -2840,7 +2840,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             olapTable.writeUnlock();
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
                 try {
@@ -2933,7 +2933,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             olapTable.writeUnlock();
         }
 
-        if (!Config.cloud_unique_id.isEmpty() && !Env.isCheckpointThread()) {
+        if (Config.isCloudMode() && !Env.isCheckpointThread()) {
             int tryCnt = 0;
             while (true) {
                 try {

@@ -152,7 +152,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
 
     public SchemaChangeJobV2(long jobId, long dbId, long tableId, String tableName, long timeoutMs) {
         super(jobId, JobType.SCHEMA_CHANGE, dbId, tableId, tableName, timeoutMs);
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
             if (context != null) {
                 LOG.debug("schema change job add cloud cluster, context not null, cluster: {}",
@@ -463,7 +463,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         Preconditions.checkState(jobState == JobState.PENDING, jobState);
         LOG.info("begin to send create replica tasks. job: {}", jobId);
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             Database db = Env.getCurrentInternalCatalog()
                     .getDbOrException(dbId, s -> new AlterCancelException("Database " + s + " does not exist"));
             if (!checkTableStable(db)) {
@@ -724,7 +724,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             try {
                 Preconditions.checkState(tbl.getState() == OlapTableState.SCHEMA_CHANGE);
                 tbl.setState(OlapTableState.NORMAL);
-                if (!Config.cloud_unique_id.isEmpty()) {
+                if (Config.isCloudMode()) {
                     List<Long> shadowIdxList = new ArrayList<Long>();
                     for (Long shadowIdx : indexIdMap.keySet()) {
                         shadowIdxList.add(shadowIdx);
@@ -746,7 +746,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             LOG.info("schema change job finished: {}", jobId);
             List<Long> originIdxList = null;
             try {
-                if (!Config.cloud_unique_id.isEmpty()) {
+                if (Config.isCloudMode()) {
                     originIdxList = new ArrayList<Long>();
                     for (Long originIdx : indexIdMap.values()) {
                         originIdxList.add(originIdx);
@@ -803,7 +803,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             // all partitions are good
             onFinished(tbl);
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 List<Long> shadowIdxList = new ArrayList<Long>();
                 for (Long shadowIdx : indexIdMap.keySet()) {
                     shadowIdxList.add(shadowIdx);
@@ -825,7 +825,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         Env.getCurrentEnv().getEditLog().logAlterJob(this);
         LOG.info("schema change job finished: {}", jobId);
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             List<Long> originIdxList = new ArrayList<Long>();
             for (Long originIdx : indexIdMap.values()) {
                 originIdxList.add(originIdx);
@@ -1086,7 +1086,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
 
             }
 
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 List<Long> originIdxList = new ArrayList<Long>();
                 for (Long originIdx : indexIdMap.values()) {
                     originIdxList.add(originIdx);

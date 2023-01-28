@@ -186,7 +186,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
         String clusterName = "UNKNOWN";
         String clusterId = "UNKNOWN";
         int idx = fullName.indexOf(MetricRepo.SELECTDB_TAG);
-        if (!Config.cloud_unique_id.isEmpty() && idx != -1) {
+        if (Config.isCloudMode() && idx != -1) {
             clusterName = fullName.substring(idx + MetricRepo.SELECTDB_TAG.length() + 1);
             fullName = fullName.substring(0, idx - 1);
             clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(clusterName);

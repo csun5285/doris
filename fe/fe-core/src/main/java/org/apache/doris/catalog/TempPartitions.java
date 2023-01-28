@@ -89,7 +89,7 @@ public class TempPartitions implements Writable, GsonPostProcessable {
             }
         }
 
-        if (!Config.cloud_unique_id.isEmpty() && !Env.isCheckpointThread()
+        if (Config.isCloudMode() && !Env.isCheckpointThread()
                 && Env.getCurrentEnv().isMaster()) {
             Env.getCurrentEnv().dropPartition(partition);
         }
@@ -150,7 +150,7 @@ public class TempPartitions implements Writable, GsonPostProcessable {
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
             Partition partition;
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 partition = Partition.read(in);
             } else {
                 partition = CloudPartition.read(in);

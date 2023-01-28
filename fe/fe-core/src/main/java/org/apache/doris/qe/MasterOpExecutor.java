@@ -108,7 +108,7 @@ public class MasterOpExecutor {
         params.setStmtId(ctx.getStmtId());
         params.setCurrentUserIdent(ctx.getCurrentUserIdentity().toThrift());
 
-        if (!Config.cloud_unique_id.isEmpty() && !Strings.isNullOrEmpty(ctx.getCloudCluster())) {
+        if (Config.isCloudMode() && !Strings.isNullOrEmpty(ctx.getCloudCluster())) {
             params.setCloudCluster(ctx.getCloudCluster());
         }
 

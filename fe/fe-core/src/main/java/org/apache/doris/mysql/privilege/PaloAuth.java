@@ -1048,7 +1048,7 @@ public class PaloAuth implements Writable {
             writeUnlock();
         }
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             LOG.info("run in non-cloud mode, does not need notify Ms");
             return;
         }
@@ -1680,7 +1680,7 @@ public class PaloAuth implements Writable {
         } finally {
             readUnlock();
         }
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             List<List<String>> userAuthInfosTmp = Lists.newArrayList();
             for (List<String> userAuthInfo : userAuthInfos) {
                 if (userAuthInfo == null) {

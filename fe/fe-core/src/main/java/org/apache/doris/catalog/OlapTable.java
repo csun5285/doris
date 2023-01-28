@@ -1258,7 +1258,7 @@ public class OlapTable extends Table {
         int partitionCount = in.readInt();
         for (int i = 0; i < partitionCount; ++i) {
             Partition partition;
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 partition = Partition.read(in);
             } else {
                 partition = CloudPartition.read(in);
@@ -1424,7 +1424,7 @@ public class OlapTable extends Table {
 
         //In cloud mode we just return true, because
         //we don't need tabletScheduler
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             return;
         }
 

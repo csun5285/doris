@@ -680,7 +680,7 @@ public class OlapScanNode extends ScanNode {
             List<String> errs = Lists.newArrayList();
             for (Replica replica : replicas) {
                 long backendId = replica.getBackendId();
-                if (backendId == -1 && !Config.cloud_unique_id.isEmpty()) {
+                if (backendId == -1 && Config.isCloudMode()) {
                     throw new UserException(InternalErrorCode.META_NOT_FOUND_ERR, "Not using valid cloud clusters, "
                             + "please use a cluster before issuing any queries");
                 }

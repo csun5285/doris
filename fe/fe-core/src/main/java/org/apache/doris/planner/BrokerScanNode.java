@@ -224,7 +224,7 @@ public class BrokerScanNode extends LoadScanNode {
         }
 
         // Get all broker file status
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             assignBackends();
         } else {
             setCloudCluster();

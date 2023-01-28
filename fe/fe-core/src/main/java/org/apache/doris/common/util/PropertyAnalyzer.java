@@ -466,7 +466,7 @@ public class PropertyAnalyzer {
         if (value.equalsIgnoreCase("true")) {
             return true;
         }
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             throw new AnalysisException(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE
                     + " must be `true`");
         }
@@ -698,7 +698,7 @@ public class PropertyAnalyzer {
     // prefix is for property key such as "dynamic_partition.replication_num", which prefix is "dynamic_partition"
     public static ReplicaAllocation analyzeReplicaAllocation(Map<String, String> properties, String prefix)
             throws AnalysisException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             if (properties != null && !properties.isEmpty()) {
                 String propKey = Strings.isNullOrEmpty(prefix) ? PROPERTIES_REPLICATION_ALLOCATION
                         : prefix + "." + PROPERTIES_REPLICATION_ALLOCATION;
@@ -816,7 +816,7 @@ public class PropertyAnalyzer {
         if (value.equals("false")) {
             return false;
         }
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `false`");
         }
         if (value.equals("true")) {

@@ -126,7 +126,7 @@ public class PartitionPersistInfo implements Writable {
     public void readFields(DataInput in) throws IOException {
         dbId = in.readLong();
         tableId = in.readLong();
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             partition = Partition.read(in);
         } else {
             partition = CloudPartition.read(in);

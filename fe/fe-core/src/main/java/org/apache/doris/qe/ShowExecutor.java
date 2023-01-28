@@ -349,21 +349,21 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowTrashDiskStmt) {
             handleShowTrashDisk();
         } else if (stmt instanceof AdminShowReplicaStatusStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletStatus();
         } else if (stmt instanceof AdminShowReplicaDistributionStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletDistribution();
         } else if (stmt instanceof AdminShowConfigStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
@@ -400,13 +400,13 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowLastInsertStmt) {
             handleShowLastInsert();
         } else if (stmt instanceof AdminShowTabletStorageFormatStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletStorageFormat();
         } else if (stmt instanceof AdminDiagnoseTabletStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
@@ -423,7 +423,7 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowAnalyzeStmt) {
             handleShowAnalyze();
         } else if (stmt instanceof AdminCopyTabletStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
@@ -626,7 +626,7 @@ public class ShowExecutor {
         final ShowClusterStmt showStmt = (ShowClusterStmt) stmt;
         final List<List<String>> rows = Lists.newArrayList();
         List<String> clusterNames = null;
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             clusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         } else {
             clusterNames = ctx.getEnv().getClusterNames();
@@ -639,7 +639,7 @@ public class ShowExecutor {
         for (String clusterName : clusterNameSet) {
             ArrayList<String> row = Lists.newArrayList(clusterName);
             // current_used, users
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 row.add(clusterName.equals(ctx.getCloudCluster()) ? "TRUE" : "FALSE");
                 List<String> users = Env.getCurrentEnv().getAuth().getCloudClusterUsers(clusterName);
                 // non-root do not display root information

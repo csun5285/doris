@@ -151,7 +151,7 @@ public class VariableMgr {
                     } else if (value.equalsIgnoreCase("OFF")
                             || value.equalsIgnoreCase("FALSE")
                             || value.equalsIgnoreCase("0")) {
-                        if (!Config.cloud_unique_id.isEmpty()
+                        if (Config.isCloudMode()
                                 && field.getName().equals("enableVectorizedEngine")) {
                             ErrorReport.reportDdlException(ErrorCode.ERR_WRONG_VALUE_FOR_VAR, attr.name(), value);
                         }

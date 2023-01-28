@@ -202,7 +202,7 @@ public class DdlExecutor {
                         + " Try using broker load. See 'help broker load;'");
             }
             if (jobType == EtlJobType.HADOOP) {
-                if (!Config.cloud_unique_id.isEmpty()) {
+                if (Config.isCloudMode()) {
                     LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                     throw new DdlException("Unsupported operaiton");
                 }
@@ -265,31 +265,31 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof CreateViewStmt) {
             env.createView((CreateViewStmt) ddlStmt);
         } else if (ddlStmt instanceof BackupStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.backup((BackupStmt) ddlStmt);
         } else if (ddlStmt instanceof RestoreStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.restore((RestoreStmt) ddlStmt);
         } else if (ddlStmt instanceof CancelBackupStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.cancelBackup((CancelBackupStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateRepositoryStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.getBackupHandler().createRepository((CreateRepositoryStmt) ddlStmt);
         } else if (ddlStmt instanceof DropRepositoryStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
@@ -299,25 +299,25 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof TruncateTableStmt) {
             env.truncateTable((TruncateTableStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminRepairTableStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.getTabletChecker().repairTable((AdminRepairTableStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminCancelRepairTableStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.getTabletChecker().cancelRepairTable((AdminCancelRepairTableStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminCompactTableStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.compactTable((AdminCompactTableStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminSetConfigStmt) {
-            if (!Config.cloud_unique_id.isEmpty()
+            if (Config.isCloudMode()
                     && !ConnectContext.get().getCurrentUserIdentity().getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
@@ -332,13 +332,13 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof UninstallPluginStmt) {
             env.uninstallPlugin((UninstallPluginStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminCheckTabletsStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.checkTablets((AdminCheckTabletsStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminSetReplicaStatusStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
@@ -363,19 +363,19 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof StopSyncJobStmt) {
             env.getSyncJobManager().stopSyncJob((StopSyncJobStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminCleanTrashStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.cleanTrash((AdminCleanTrashStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminRebalanceDiskStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
             env.getTabletScheduler().rebalanceDisk((AdminRebalanceDiskStmt) ddlStmt);
         } else if (ddlStmt instanceof AdminCancelRebalanceDiskStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
@@ -395,7 +395,7 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof AnalyzeStmt) {
             env.createAnalysisJob((AnalyzeStmt) ddlStmt);
         } else if (ddlStmt instanceof AlterResourceStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }
@@ -405,7 +405,7 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof DropPolicyStmt) {
             env.getPolicyMgr().dropPolicy((DropPolicyStmt) ddlStmt);
         } else if (ddlStmt instanceof AlterPolicyStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
                 throw new DdlException("Unsupported operaiton");
             }

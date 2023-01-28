@@ -60,7 +60,7 @@ public class ShowClusterStmt extends ShowStmt {
 
     @Override
     public void analyze(Analyzer analyzer) throws AnalysisException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             // admin role
             if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
                     PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV), Operator.OR))) {

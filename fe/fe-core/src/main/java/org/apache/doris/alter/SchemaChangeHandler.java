@@ -1529,7 +1529,7 @@ public class SchemaChangeHandler extends AlterHandler {
                         Preconditions.checkState(originReplica.getState() == ReplicaState.NORMAL,
                                 originReplica.getState());
                         // replica's init state is ALTER, so that tablet report process will ignore its report
-                        Replica shadowReplica = Config.cloud_unique_id.isEmpty()
+                        Replica shadowReplica = Config.isNotCloudMode()
                                 ? new Replica(shadowReplicaId, backendId, ReplicaState.ALTER,
                                         Partition.PARTITION_INIT_VERSION, newSchemaHash)
                                 : new CloudReplica(shadowReplicaId, null, ReplicaState.ALTER,
@@ -2017,7 +2017,7 @@ public class SchemaChangeHandler extends AlterHandler {
             String partitionName,
             String storagePolicy,
             boolean isInMemory) throws UserException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             updateCloudPartitionInMemoryMeta(db, tableName, partitionName, isInMemory);
             return;
         }
@@ -2200,7 +2200,7 @@ public class SchemaChangeHandler extends AlterHandler {
             String tableName,
             String partitionName,
             boolean isPersistent) throws UserException {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             updateCloudPartitionPersistentMeta(db, tableName, partitionName, isPersistent);
             return;
         }

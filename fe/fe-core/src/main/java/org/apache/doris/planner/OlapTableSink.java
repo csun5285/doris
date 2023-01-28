@@ -393,7 +393,7 @@ public class OlapTableSink extends DataSink {
             throw new DdlException(st.getErrorMsg());
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             return Arrays.asList(locationParam, slaveLocationParam);
         }
 

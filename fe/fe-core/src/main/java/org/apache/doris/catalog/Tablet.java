@@ -145,7 +145,7 @@ public class Tablet extends MetaObject implements Writable {
         Iterator<Replica> iterator = replicas.iterator();
         while (iterator.hasNext()) {
             Replica replica = iterator.next();
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 if (-1 == backendId) {
                     hasBackend = true;
                     if (replica.getVersion() <= version) {
@@ -169,7 +169,7 @@ public class Tablet extends MetaObject implements Writable {
     }
 
     public void addReplica(Replica replica, boolean isRestore) {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             if (deleteRedundantReplica(-1, replica.getVersion())) {
                 replicas.add(replica);
                 if (!isRestore) {
@@ -231,7 +231,7 @@ public class Tablet extends MetaObject implements Writable {
 
             ReplicaState state = replica.getState();
             long backendId = replica.getBackendId();
-            if (backendId == -1 && !Config.cloud_unique_id.isEmpty()) {
+            if (backendId == -1 && Config.isCloudMode()) {
                 throw new UserException(InternalErrorCode.META_NOT_FOUND_ERR, "Not using valid cloud clusters, "
                     + "please use a cluster before issuing any queries");
             }
@@ -289,7 +289,7 @@ public class Tablet extends MetaObject implements Writable {
     }
 
     public Replica getReplicaByBackendId(long backendId) {
-        if (!Config.cloud_unique_id.isEmpty() && !replicas.isEmpty()) {
+        if (Config.isCloudMode() && !replicas.isEmpty()) {
             LOG.debug("cloud mode one backend only has one replica, backendId: {}, replicas: {}", backendId, replicas);
             return replicas.get(0);
         }
@@ -380,7 +380,7 @@ public class Tablet extends MetaObject implements Writable {
         id = in.readLong();
         int replicaCount = in.readInt();
         for (int i = 0; i < replicaCount; ++i) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 replicas.add(CloudReplica.read(in));
                 continue;
             }
