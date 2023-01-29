@@ -75,4 +75,9 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
     sql """
         drop role ${roleName}
         """
+    
+    order_qt_show_roles5 """
+        show roles
+    """
 }
+

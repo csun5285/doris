@@ -132,7 +132,7 @@ public class PaloAuth implements Writable {
     }
 
     public enum PrivLevel {
-        GLOBAL, CATALOG, DATABASE, TABLE, RESOURCE
+        GLOBAL, CATALOG, DATABASE, TABLE, RESOURCE, CLUSTER, STAGE
     }
 
     public PaloAuth() {

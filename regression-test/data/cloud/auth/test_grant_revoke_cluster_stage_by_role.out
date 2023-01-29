@@ -11,3 +11,7 @@
 -- !show_role4 --
 'test_grant_revoke_cluster_stage_to_user1'@'%'	No	 (false)	\N	internal.information_schema: Select_priv  (false)	\N	\N	\N	\N
 
+-- !show_roles5 --
+admin	'admin'@'%'	Admin_priv  Admin_priv  Admin_priv  Admin_priv 	\N	\N	\N	\N	\N	\N
+operator	'root'@'%'	Node_priv Admin_priv  Node_priv Admin_priv  Node_priv Admin_priv  Node_priv Admin_priv 	\N	\N	\N	\N	\N	\N
+
