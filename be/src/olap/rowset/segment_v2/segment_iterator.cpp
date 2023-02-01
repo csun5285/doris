@@ -470,10 +470,6 @@ Status SegmentIterator::_get_row_ranges_from_conditions(RowRanges* condition_row
     RowRanges zone_map_row_ranges = RowRanges::create_single(num_rows());
     // second filter data by zone map
     for (auto& cid : cids) {
-        if (_inverted_index_iterators[cid] != nullptr &&
-            field_is_slice_type(_schema.column(cid)->type())) {
-            continue;
-        }
         // get row ranges by zone map of this column,
         RowRanges column_row_ranges = RowRanges::create_single(num_rows());
         DCHECK(_opts.col_id_to_predicates.count(cid) > 0);
@@ -553,12 +549,9 @@ bool SegmentIterator::_is_handle_predicate_by_fulltext(ColumnPredicate* predicat
     auto column_id = predicate->column_id();
     int32_t unique_id = _schema.unique_id(column_id);
     bool handle_by_fulltext =
-            (_inverted_index_iterators[unique_id] != nullptr) &&
-            (is_string_type(_schema.column(column_id)->type())) &&
-            ((_inverted_index_iterators[unique_id]->get_inverted_index_analyser_type() ==
-              InvertedIndexParserType::PARSER_ENGLISH) ||
-             (_inverted_index_iterators[unique_id]->get_inverted_index_analyser_type() ==
-              InvertedIndexParserType::PARSER_STANDARD));
+            _inverted_index_iterators[unique_id] != nullptr &&
+            _inverted_index_iterators[unique_id]->get_inverted_index_reader_type() ==
+                    InvertedIndexReaderType::FULLTEXT;
 
     return handle_by_fulltext;
 }
@@ -595,7 +588,7 @@ Status SegmentIterator::_apply_inverted_index() {
              pred->predicate_params()->marked_by_runtime_filter)) {
             // 1. this column no inverted index
             // 2. equal or range for fulltext index
-            // 3. is_null or is_not_null predicate in OrPredicate
+            // 3. is_null or is_not_null predicate
             // 4. in_list or not_in_list predicate produced by runtime filter
             // 5. bloom filter predicate
             remaining_predicates.push_back(pred);
