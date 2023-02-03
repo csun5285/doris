@@ -23,6 +23,7 @@ import org.apache.doris.analysis.AdminShowConfigStmt;
 import org.apache.doris.analysis.AdminShowReplicaDistributionStmt;
 import org.apache.doris.analysis.AdminShowReplicaStatusStmt;
 import org.apache.doris.analysis.AdminShowTabletStorageFormatStmt;
+import org.apache.doris.analysis.CompoundPredicate.Operator;
 import org.apache.doris.analysis.DescribeStmt;
 import org.apache.doris.analysis.HelpStmt;
 import org.apache.doris.analysis.PartitionNames;
@@ -184,6 +185,8 @@ import org.apache.doris.mtmv.MTMVJobManager;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.mtmv.metadata.MTMVTask;
 import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.PaloPrivilege;
+import org.apache.doris.mysql.privilege.PrivBitSet;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.statistics.ColumnStatistic;
 import org.apache.doris.statistics.StatisticsJobManager;
@@ -640,11 +643,21 @@ public class ShowExecutor {
             ArrayList<String> row = Lists.newArrayList(clusterName);
             // current_used, users
             if (Config.isCloudMode()) {
+                if (!Env.getCurrentEnv().getAuth()
+                        .checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(), clusterName,
+                        PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
+                    continue;
+                }
                 row.add(clusterName.equals(ctx.getCloudCluster()) ? "TRUE" : "FALSE");
                 List<String> users = Env.getCurrentEnv().getAuth().getCloudClusterUsers(clusterName);
                 // non-root do not display root information
                 if (!"root".equals(ctx.getQualifiedUser())) {
                     users.remove("root");
+                }
+                // common user, not admin
+                if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
+                        PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV), Operator.OR))) {
+                    users.removeIf(user -> !user.equals(ClusterNamespace.getNameFromFullName(ctx.getQualifiedUser())));
                 }
                 String result = Joiner.on(", ").join(users);
                 row.add(result);

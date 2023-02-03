@@ -60,13 +60,7 @@ public class ShowClusterStmt extends ShowStmt {
 
     @Override
     public void analyze(Analyzer analyzer) throws AnalysisException {
-        if (Config.isCloudMode()) {
-            // admin role
-            if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
-                    PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV), Operator.OR))) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN");
-            }
-        } else {
+        if (Config.isNotCloudMode()) {
             // just user root
             if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
                     PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV, PaloPrivilege.NODE_PRIV), Operator.OR))) {
