@@ -128,6 +128,7 @@ public:
     ThreadPool* limited_scan_thread_pool() { return _limited_scan_thread_pool.get(); }
     ThreadPool* send_batch_thread_pool() { return _send_batch_thread_pool.get(); }
     ThreadPool* download_cache_thread_pool() { return _download_cache_thread_pool.get(); }
+    ThreadPool* buffered_reader_prefetch_thread_pool() { return _buffered_reader_prefetch_thread_pool.get(); }
     void set_serial_download_cache_thread_token() {
         _serial_download_cache_thread_token =
                 download_cache_thread_pool()->new_token(ThreadPool::ExecutionMode::SERIAL, 1);
@@ -227,6 +228,8 @@ private:
 
     // Threadpool used to download cache from remote storage
     std::unique_ptr<ThreadPool> _download_cache_thread_pool;
+    // Threadpool used to prefetch remote file for buffered reader
+    std::unique_ptr<ThreadPool> _buffered_reader_prefetch_thread_pool;
     // A token used to submit download cache task serially
     std::unique_ptr<ThreadPoolToken> _serial_download_cache_thread_token;
     // ThreadPoolToken -> buffer

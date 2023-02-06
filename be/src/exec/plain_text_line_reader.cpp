@@ -18,6 +18,7 @@
 #include "exec/plain_text_line_reader.h"
 
 #include "common/status.h"
+#include "common/config.h"
 #include "exec/decompressor.h"
 #include "io/file_reader.h"
 
@@ -26,7 +27,7 @@
 //  larger than 300B for correct lzo header decompressing
 #define INPUT_CHUNK (2 * 1024 * 1024)
 // #define INPUT_CHUNK  (34)
-#define OUTPUT_CHUNK (8 * 1024 * 1024)
+#define OUTPUT_CHUNK (doris::config::output_chunk_size_mb * 1024 * 1024)
 // #define OUTPUT_CHUNK (32)
 // leave these 2 size small for debugging
 

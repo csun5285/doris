@@ -19,17 +19,71 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include "io/local_file_reader.h"
+#include "runtime/exec_env.h"
 #include "util/stopwatch.hpp"
 
 namespace doris {
 class BufferedReaderTest : public testing::Test {
 public:
-    BufferedReaderTest() {}
+    BufferedReaderTest() {
+        std::unique_ptr<ThreadPool> _pool;
+        ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
+                .set_min_threads(config::max_parallel_prefetch_threads)
+                .set_max_threads(config::max_parallel_prefetch_threads)
+                .build(&_pool);
+        ExecEnv::GetInstance()->_buffered_reader_prefetch_thread_pool = std::move(_pool);
+    }
 
 protected:
     virtual void SetUp() {}
     virtual void TearDown() {}
+};
+
+class SyncLocalFileReader : public FileReader {
+public:
+    SyncLocalFileReader(LocalFileReader* reader) : _reader(reader) {}
+    ~SyncLocalFileReader() override = default;
+
+    Status open() override { return _reader->open(); }
+
+    // Read content to 'buf', 'buf_len' is the max size of this buffer.
+    // Return ok when read success, and 'buf_len' is set to size of read content
+    // If reach to end of file, the eof is set to true. meanwhile 'buf_len'
+    // is set to zero.
+    Status read(uint8_t* buf, int64_t buf_len, int64_t* bytes_read, bool* eof) override {
+        std::unique_lock lck {_lock};
+        return _reader->read(buf, buf_len, bytes_read, eof);
+    }
+    Status readat(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out) override {
+        std::unique_lock lck {_lock};
+        return _reader->readat(position, nbytes, bytes_read, out);
+    }
+    Status read_one_message(std::unique_ptr<uint8_t[]>* buf, int64_t* length) override {
+        std::unique_lock lck {_lock};
+        return _reader->read_one_message(buf, length);
+    }
+    int64_t size() override {
+        return _reader->size();
+    }
+    Status seek(int64_t position) override {
+        return _reader->seek(position);
+    }
+    Status tell(int64_t* position) override {
+        return _reader->tell(position);
+    }
+    void close() override {
+        return _reader->close();
+    }
+    bool closed() override {
+        return _reader->closed();
+    }
+
+private:
+    std::unique_ptr<LocalFileReader> _reader;
+    std::mutex _lock;
 };
 
 TEST_F(BufferedReaderTest, normal_use) {
@@ -37,7 +91,9 @@ TEST_F(BufferedReaderTest, normal_use) {
     // buffered_reader_test_file 950 bytes
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file", 0);
-    BufferedReader reader(&profile, file_reader, 1024);
+    auto sync_local_reader = new SyncLocalFileReader(file_reader);
+    config::prefetch_single_buffer_size_mb = 200;
+    BufferedReader reader(&profile, sync_local_reader, 1024);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[1024];
@@ -55,7 +111,9 @@ TEST_F(BufferedReaderTest, test_validity) {
     // buffered_reader_test_file.txt 45 bytes
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
-    BufferedReader reader(&profile, file_reader, 64);
+    auto sync_local_reader = new SyncLocalFileReader(file_reader);
+    config::prefetch_single_buffer_size_mb = 10;
+    BufferedReader reader(&profile, sync_local_reader, 64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[10];
@@ -98,7 +156,9 @@ TEST_F(BufferedReaderTest, test_seek) {
     // buffered_reader_test_file.txt 45 bytes
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
-    BufferedReader reader(&profile, file_reader, 64);
+    auto sync_local_reader = new SyncLocalFileReader(file_reader);
+    config::prefetch_single_buffer_size_mb = 10;
+    BufferedReader reader(&profile, sync_local_reader, 64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[10];
@@ -150,7 +210,9 @@ TEST_F(BufferedReaderTest, test_miss) {
     // buffered_reader_test_file.txt 45 bytes
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
-    BufferedReader reader(&profile, file_reader, 64);
+    auto sync_local_reader = new SyncLocalFileReader(file_reader);
+    config::prefetch_single_buffer_size_mb = 10;
+    BufferedReader reader(&profile, sync_local_reader, 64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[128];

@@ -20,31 +20,132 @@
 #include <algorithm>
 #include <sstream>
 
+#include "common/compiler_util.h"
 #include "common/config.h"
+#include "common/status.h"
 #include "olap/olap_define.h"
+#include "runtime/exec_env.h"
 #include "util/bit_util.h"
 
 namespace doris {
 
+// there exists occasions where the buffer is already closed but
+// some prior tasks are still queued in threadpool, so we have to check wheher
+// the buffer is closed each time the condition variable is norified
+void PrefetchBuffer::reset_offset(int64_t offset) {
+    {
+        std::unique_lock lck {_lock};
+        _prefetched.wait(lck, [this]() { return _buffer_status != BufferStatus::PENDING; });
+        if (_buffer_status == BufferStatus::CLOSED) [[unlikely]] {
+            _prefetched.notify_all();
+            return;
+        }
+        _buffer_status = BufferStatus::RESET;
+        _offset = offset;
+        _prefetched.notify_all();
+    }
+    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+            [buffer_ptr = shared_from_this()]() { buffer_ptr->prefetch_buffer(); });
+}
+
+// only this function would run concurrently in another thread
+void PrefetchBuffer::prefetch_buffer() {
+    {
+        std::unique_lock lck {_lock};
+        _prefetched.wait(lck, [this]() {
+            return _buffer_status == BufferStatus::RESET || _buffer_status == BufferStatus::CLOSED;
+        });
+        // in case buffer is already closed
+        if (_buffer_status == BufferStatus::CLOSED) [[unlikely]] {
+            _prefetched.notify_all();
+            return;
+        }
+        _buffer_status = BufferStatus::PENDING;
+        _prefetched.notify_all();
+    }
+    _len = 0;
+    Status s;
+    {
+        SCOPED_TIMER(_remote_read_timer);
+        s = _reader->readat(_offset, _size, &_len, _buf.data());
+    }
+    COUNTER_UPDATE(_remote_read_counter, 1);
+    std::unique_lock lck {_lock};
+    _prefetched.wait(lck, [this]() { return _buffer_status == BufferStatus::PENDING; });
+    if (!s.ok()) {
+        _prefetch_status = std::move(s);
+    }
+    COUNTER_UPDATE(_remote_read_bytes, _len);
+    _buffer_status = BufferStatus::PREFETCHED;
+    _prefetched.notify_all();
+    // eof would come up with len == 0, it would be handled by read_buffer
+}
+
+Status PrefetchBuffer::read_buffer(int64_t off, uint8_t* out, int64_t buf_len,
+                                   int64_t* bytes_read) {
+    {
+        std::unique_lock lck {_lock};
+        // buffer must be prefetched or it's closed
+        _prefetched.wait(lck, [this]() {
+            return _buffer_status == BufferStatus::PREFETCHED ||
+                   _buffer_status == BufferStatus::CLOSED;
+        });
+        if (BufferStatus::CLOSED == _buffer_status) [[unlikely]] {
+            return Status::OK();
+        }
+    }
+    RETURN_IF_ERROR(_prefetch_status);
+    // there is only parquet would do not sequence read
+    // it would read the end of the file first
+    if (!contains(off)) [[unlikely]] {
+        reset_offset((off / _size) * _size);
+        return read_buffer(off, out, buf_len, bytes_read);
+    }
+    if (0 == _len || _offset + _len < off) [[unlikely]] {
+        return Status::OK();
+    }
+    // [0]: maximum len trying to read, [1] maximum length buffer can provide, [2] actual len buffer has
+    int64_t read_len = std::min({buf_len, _offset + _size - off, _offset + _len - off});
+    memcpy(out, _buf.data() + (off - _offset), read_len);
+    *bytes_read = read_len;
+    if (off + *bytes_read == _offset + _len) {
+        reset_offset(_offset + _whole_buffer_size);
+    }
+    return Status::OK();
+}
+
+void PrefetchBuffer::close() {
+    std::unique_lock lck {_lock};
+    // in case _reader still tries to write to the buf after we close the buffer
+    _prefetched.wait(lck, [this]() { return _buffer_status != BufferStatus::PENDING; });
+    _buffer_status = BufferStatus::CLOSED;
+    _prefetched.notify_all();
+}
+
 // buffered reader
 BufferedReader::BufferedReader(RuntimeProfile* profile, FileReader* reader, int64_t buffer_size)
-        : _profile(profile),
-          _reader(reader),
-          _buffer_size(buffer_size),
-          _buffer_offset(0),
-          _buffer_limit(0),
-          _cur_offset(0) {
-    if (_buffer_size == -1L) {
-        _buffer_size = config::remote_storage_read_buffer_mb * 1024 * 1024;
+        : _profile(profile), _reader(reader) {
+    if (buffer_size == -1L) {
+        buffer_size = config::remote_storage_read_buffer_mb * 1024 * 1024;
     }
-    _buffer = new char[_buffer_size];
+    _whole_pre_buffer_size = buffer_size;
+#ifdef BE_TEST
+    s_max_pre_buffer_size = config::prefetch_single_buffer_size_mb;
+#endif
+    int buffer_num = buffer_size > s_max_pre_buffer_size ? buffer_size / s_max_pre_buffer_size : 1;
     // set the _cur_offset of this reader as same as the inner reader's,
     // to make sure the buffer reader will start to read at right position.
     _reader->tell(&_cur_offset);
+    for (int i = 0; i < buffer_num; i++) {
+        _pre_buffers.emplace_back(std::make_shared<PrefetchBuffer>(
+                profile, _cur_offset + i * s_max_pre_buffer_size, s_max_pre_buffer_size,
+                _whole_pre_buffer_size, _reader.get()));
+    }
 }
 
 BufferedReader::~BufferedReader() {
     close();
+    _closed = true;
 }
 
 Status BufferedReader::open() {
@@ -54,7 +155,7 @@ Status BufferedReader::open() {
 
     // the macro ADD_XXX is idempotent.
     // So although each scanner calls the ADD_XXX method, they all use the same counters.
-    _read_timer = ADD_TIMER(_profile, "FileReadTime");
+    _read_timer = ADD_TIMER(_profile, "BufferedReaderFileReadTime");
     _remote_read_timer = ADD_TIMER(_profile, "FileRemoteReadTime");
     _read_counter = ADD_COUNTER(_profile, "FileReadCalls", TUnit::UNIT);
     _remote_read_counter = ADD_COUNTER(_profile, "FileRemoteReadCalls", TUnit::UNIT);
@@ -66,94 +167,54 @@ Status BufferedReader::open() {
             "");
 
     RETURN_IF_ERROR(_reader->open());
+    _reader_size = _reader->size();
+    // init all buffer and submit task
+    resetAllBuffer(_cur_offset);
     return Status::OK();
 }
 
 //not support
-Status BufferedReader::read_one_message(std::unique_ptr<uint8_t[]>* buf, int64_t* length) {
+Status BufferedReader::read_one_message(std::unique_ptr<uint8_t[]>* /*buf*/, int64_t* /*length*/) {
     return Status::NotSupported("Not support");
 }
 
 Status BufferedReader::read(uint8_t* buf, int64_t buf_len, int64_t* bytes_read, bool* eof) {
     DCHECK_NE(buf_len, 0);
-    RETURN_IF_ERROR(readat(_cur_offset, buf_len, bytes_read, buf));
-    if (*bytes_read == 0) {
-        *eof = true;
-    } else {
-        *eof = false;
+    if (buf_len < 0 || _cur_offset < 0 || _cur_offset >= size()) [[unlikely]] {
+        *eof = (_cur_offset >= _reader_size);
+        return Status::OK();
     }
+    int64_t actual_bytes_read = 0;
+    RETURN_IF_ERROR(readat(_cur_offset, buf_len, &actual_bytes_read, buf));
+    *eof = (actual_bytes_read == 0);
+    _cur_offset += actual_bytes_read;
+    *bytes_read = actual_bytes_read;
     return Status::OK();
 }
 
 Status BufferedReader::readat(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out) {
-    SCOPED_TIMER(_read_timer);
-    if (nbytes <= 0) {
+    if (nbytes <= 0 || position < 0 || position >= size()) [[unlikely]] {
         *bytes_read = 0;
         return Status::OK();
     }
-    RETURN_IF_ERROR(_read_once(position, nbytes, bytes_read, out));
-    //EOF
-    if (*bytes_read <= 0) {
-        return Status::OK();
+    SCOPED_TIMER(_read_timer);
+    int actual_bytes_read = 0;
+    while (actual_bytes_read < nbytes && position < _reader_size) {
+        int64_t read_num = 0;
+        auto buffer_pos = get_buffer_pos(position);
+        RETURN_IF_ERROR(_pre_buffers[buffer_pos]->read_buffer(
+                position, reinterpret_cast<uint8*>(out) + actual_bytes_read,
+                nbytes - actual_bytes_read, &read_num));
+        actual_bytes_read += read_num;
+        position += read_num;
     }
-    while (*bytes_read < nbytes) {
-        int64_t len;
-        RETURN_IF_ERROR(_read_once(position + *bytes_read, nbytes - *bytes_read, &len,
-                                   reinterpret_cast<char*>(out) + *bytes_read));
-        // EOF
-        if (len <= 0) {
-            break;
-        }
-        *bytes_read += len;
-    }
-    return Status::OK();
-}
-
-Status BufferedReader::_read_once(int64_t position, int64_t nbytes, int64_t* bytes_read,
-                                  void* out) {
-    ++_read_count;
-    // requested bytes missed the local buffer
-    if (position >= _buffer_limit || position < _buffer_offset) {
-        // if requested length is larger than the capacity of buffer, do not
-        // need to copy the character into local buffer.
-        if (nbytes > _buffer_size) {
-            auto st = _reader->readat(position, nbytes, bytes_read, out);
-            if (st.ok()) {
-                _cur_offset = position + *bytes_read;
-                ++_remote_read_count;
-                _remote_bytes += *bytes_read;
-            }
-            return st;
-        }
-        _buffer_offset = position;
-        RETURN_IF_ERROR(_fill());
-        if (position >= _buffer_limit) {
-            *bytes_read = 0;
-            return Status::OK();
-        }
-    }
-    int64_t len = std::min(_buffer_limit - position, nbytes);
-    int64_t off = position - _buffer_offset;
-    memcpy(out, _buffer + off, len);
-    *bytes_read = len;
-    _cur_offset = position + *bytes_read;
-    return Status::OK();
-}
-
-Status BufferedReader::_fill() {
-    if (_buffer_offset >= 0) {
-        int64_t bytes_read = 0;
-        SCOPED_TIMER(_remote_read_timer);
-        RETURN_IF_ERROR(_reader->readat(_buffer_offset, _buffer_size, &bytes_read, _buffer));
-        _buffer_limit = _buffer_offset + bytes_read;
-        ++_remote_read_count;
-        _remote_bytes += bytes_read;
-    }
+    COUNTER_UPDATE(_read_counter, 1);
+    *bytes_read = actual_bytes_read;
     return Status::OK();
 }
 
 int64_t BufferedReader::size() {
-    return _reader->size();
+    return _reader_size;
 }
 
 Status BufferedReader::seek(int64_t position) {
@@ -167,8 +228,9 @@ Status BufferedReader::tell(int64_t* position) {
 }
 
 void BufferedReader::close() {
+    std::for_each(_pre_buffers.begin(), _pre_buffers.end(),
+                  [](std::shared_ptr<PrefetchBuffer>& buffer) { buffer->close(); });
     _reader->close();
-    SAFE_DELETE_ARRAY(_buffer);
 
     if (_read_counter != nullptr) {
         COUNTER_UPDATE(_read_counter, _read_count);
