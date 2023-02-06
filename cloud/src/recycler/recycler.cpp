@@ -1677,19 +1677,6 @@ void InstanceRecycler::recycle_copy_jobs() {
 int InstanceRecycler::init_copy_job_accessor(const std::string& stage_id,
                                              const StagePB::StageType& stage_type,
                                              std::shared_ptr<ObjStoreAccessor>* accessor) {
-    // init s3 accessor and add to accessor map
-    ObjectStoreInfoPB object_store_info;
-    for (auto& s : instance_info_.stages()) {
-        if (s.stage_id() == stage_id) {
-            object_store_info = s.obj_info();
-            break;
-        }
-    }
-    if (object_store_info.prefix().empty()) {
-        LOG(INFO) << "Recycle nonexisted stage copy jobs. instance_id=" << instance_id_
-                  << ", stage_id=" << stage_id << ", stage_type=" << stage_type;
-        return 1;
-    }
 #ifdef UNIT_TEST
     // In unit test, external use the same accessor as the internal stage
     auto it = accessor_map_.find(stage_id);
@@ -1697,17 +1684,45 @@ int InstanceRecycler::init_copy_job_accessor(const std::string& stage_id,
         *accessor = it->second;
     } else {
         std::cout << "UT can not find accessor with stage_id: " << stage_id << std::endl;
-        return -1;
+        return 1;
     }
 #else
+    // init s3 accessor and add to accessor map
+    bool found = false;
+    ObjectStoreInfoPB object_store_info;
+    StagePB::StageAccessType stage_access_type = StagePB::AKSK;
+    for (auto& s : instance_info_.stages()) {
+        if (s.stage_id() == stage_id) {
+            object_store_info = s.obj_info();
+            if (s.has_access_type()) {
+                stage_access_type = s.access_type();
+            }
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        LOG(INFO) << "Recycle nonexisted stage copy jobs. instance_id=" << instance_id_
+                  << ", stage_id=" << stage_id << ", stage_type=" << stage_type;
+        return 1;
+    }
     S3Conf s3_conf;
     if (stage_type == StagePB::EXTERNAL) {
-        s3_conf.ak = object_store_info.ak();
-        s3_conf.sk = object_store_info.sk();
         s3_conf.endpoint = object_store_info.endpoint();
         s3_conf.region = object_store_info.region();
         s3_conf.bucket = object_store_info.bucket();
         s3_conf.prefix = object_store_info.prefix();
+        if (stage_access_type == StagePB::AKSK) {
+            s3_conf.ak = object_store_info.ak();
+            s3_conf.sk = object_store_info.sk();
+        } else if (stage_access_type == StagePB::BUCKET_ACL) {
+            s3_conf.ak = instance_info_.ram_user().ak();
+            s3_conf.sk = instance_info_.ram_user().sk();
+        } else {
+            LOG(INFO) << "Unsupported stage access type=" << stage_access_type
+                      << ", instance_id=" << instance_id_ << ", stage_id=" << stage_id;
+            return -1;
+        }
     } else if (stage_type == StagePB::INTERNAL) {
         int idx = stoi(object_store_info.id());
         if (idx > instance_info_.obj_info().size() || idx < 1) {

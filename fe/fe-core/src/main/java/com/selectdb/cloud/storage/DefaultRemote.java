@@ -2,10 +2,13 @@ package com.selectdb.cloud.storage;
 
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.doris.common.DdlException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentials;
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.regions.Region;
@@ -64,6 +67,11 @@ public class DefaultRemote extends RemoteBase {
         }
     }
 
+    @Override
+    public Triple<String, String, String> getStsToken() throws DdlException {
+        throw new DdlException("Get sts token is unsupported");
+    }
+
     private ListObjectsResult listObjectsInner(String prefix, String continuationToken) throws DdlException {
         initClient();
         try {
@@ -91,7 +99,12 @@ public class DefaultRemote extends RemoteBase {
              * https://github.com/aws/aws-sdk-java-v2/blob/master/docs/LaunchChangelog.md#133-client-override-configuration
              * There are several timeout configuration, please config if needed.
              */
-            AwsBasicCredentials credentials = AwsBasicCredentials.create(obj.getAk(), obj.getSk());
+            AwsCredentials credentials;
+            if (obj.getToken() != null) {
+                credentials = AwsSessionCredentials.create(obj.getAk(), obj.getSk(), obj.getToken());
+            } else {
+                credentials = AwsBasicCredentials.create(obj.getAk(), obj.getSk());
+            }
             StaticCredentialsProvider scp = StaticCredentialsProvider.create(credentials);
             URI endpointUri = URI.create("http://" + obj.getEndpoint());
             s3Client = S3Client.builder().endpointOverride(endpointUri).credentialsProvider(scp)

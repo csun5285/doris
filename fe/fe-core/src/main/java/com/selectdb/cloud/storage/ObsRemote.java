@@ -1,13 +1,27 @@
 package com.selectdb.cloud.storage;
 
+import com.huaweicloud.sdk.core.auth.GlobalCredentials;
+import com.huaweicloud.sdk.core.auth.ICredential;
+import com.huaweicloud.sdk.iam.v3.IamClient;
+import com.huaweicloud.sdk.iam.v3.model.AgencyAuth;
+import com.huaweicloud.sdk.iam.v3.model.AgencyAuthIdentity;
+import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByAgencyRequest;
+import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByAgencyRequestBody;
+import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByAgencyResponse;
+import com.huaweicloud.sdk.iam.v3.model.Credential;
+import com.huaweicloud.sdk.iam.v3.model.IdentityAssumerole;
 import com.obs.services.ObsClient;
 import com.obs.services.model.HttpMethodEnum;
 import com.obs.services.model.TemporarySignatureRequest;
 import com.obs.services.model.TemporarySignatureResponse;
+import org.apache.commons.lang3.tuple.Triple;
+import org.apache.doris.common.DdlException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 
 public class ObsRemote extends DefaultRemote {
     private static final Logger LOG = LogManager.getLogger(ObsRemote.class);
@@ -34,6 +48,35 @@ public class ObsRemote extends DefaultRemote {
         String url = response.getSignedUrl();
         LOG.info("obs temporary signature url: {}", url);
         return url;
+    }
+
+    @Override
+    public Triple<String, String, String> getStsToken() throws DdlException {
+        ICredential auth = new GlobalCredentials().withAk(obj.getAk()).withSk(obj.getSk());
+        IamClient client = IamClient.newBuilder().withEndpoint("iam." + obj.getRegion() + ".myhuaweicloud.com")
+                .withCredential(auth)/*.withRegion(IamRegion.valueOf(obj.getRegion()))*/.build();
+        CreateTemporaryAccessKeyByAgencyRequestBody body = new CreateTemporaryAccessKeyByAgencyRequestBody();
+        IdentityAssumerole assumeRoleIdentity = new IdentityAssumerole();
+        assumeRoleIdentity.withAgencyName(obj.getRoleName()).withDomainName(obj.getArn())
+                .withDurationSeconds(getDurationSeconds());
+        List<AgencyAuthIdentity.MethodsEnum> listIdentityMethods = new ArrayList<>();
+        listIdentityMethods.add(AgencyAuthIdentity.MethodsEnum.fromValue("assume_role"));
+        AgencyAuthIdentity identityAuth = new AgencyAuthIdentity();
+        identityAuth.withMethods(listIdentityMethods).withAssumeRole(assumeRoleIdentity);
+        AgencyAuth authbody = new AgencyAuth();
+        authbody.withIdentity(identityAuth);
+        body.withAuth(authbody);
+        CreateTemporaryAccessKeyByAgencyRequest request = new CreateTemporaryAccessKeyByAgencyRequest();
+        request.withBody(body);
+        try {
+            CreateTemporaryAccessKeyByAgencyResponse response = client.createTemporaryAccessKeyByAgency(request);
+            Credential credential = response.getCredential();
+            return Triple.of(credential.getAccess(), credential.getSecret(),
+                    credential.getSecuritytoken());
+        } catch (Throwable e) {
+            LOG.warn("Failed get obs sts token", e);
+            throw new DdlException(e.getMessage());
+        }
     }
 
     @Override

@@ -135,7 +135,7 @@ public class CopyJob extends BrokerLoadJob {
         for (Entry<FileGroupAggKey, List<BrokerFileGroup>> entry : fileGroupAggInfo.getAggKeyToFileGroups()
                 .entrySet()) {
             long tableId = entry.getKey().getTableId();
-            LOG.info("Start cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
+            LOG.info("Cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
             Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, false);
         }
         abortedCopy = true;
@@ -164,7 +164,7 @@ public class CopyJob extends BrokerLoadJob {
                 .entrySet()) {
             long tableId = entry.getKey().getTableId();
             try {
-                LOG.info("Start cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
+                LOG.info("Cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
                 Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, false);
                 abortedCopy = true;
             } catch (DdlException e) {
@@ -172,6 +172,10 @@ public class CopyJob extends BrokerLoadJob {
                 LOG.warn("Failed to cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId(), e);
             }
         }
+    }
+
+    public void setAbortedCopy(boolean abortedCopy) {
+        this.abortedCopy = abortedCopy;
     }
 
     @Override

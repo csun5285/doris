@@ -48,6 +48,7 @@ public class StageTest extends TestWithFeService {
             + "\"prefix\" = \"tmp_prefix\", "
             + "\"sk\" = \"tmp_sk\", "
             + "\"ak\" = \"tmp_ak\", "
+            + "\"access_type\" = \"aksk\", "
             + "\"region\" = \"ap-beijing\"";
 
     private static final String CREATE_STAGE_SQL = "create stage if not exists ex_stage_1 " + OBJ_INFO;
@@ -68,7 +69,7 @@ public class StageTest extends TestWithFeService {
                 + "PROPERTIES ('endpoint' = 'cos.ap-beijing.myqcloud.com', "
                 + "'region' = 'ap-beijing', "
                 + "'prefix' = 'tmp_prefix', "
-                + "'ak'='tmp_ak', 'sk'='tmp_sk');";
+                + "'ak'='tmp_ak', 'sk'='tmp_sk', 'access_type'='aksk');";
         parseAndAnalyzeWithException(sql, "bucket is required for ExternalStage");
 
         // test prefix
@@ -85,7 +86,7 @@ public class StageTest extends TestWithFeService {
             sql = "create stage ex_stage_1 PROPERTIES "
                     + "('endpoint' = 'cos.ap-beijing.myqcloud.com', "
                     + "'bucket' = 'test_bucket', "
-                    + "'region' = 'ap-beijing', " + "'ak'='tmp_ak', 'sk'='tmp_sk', "
+                    + "'region' = 'ap-beijing', " + "'ak'='tmp_ak', 'sk'='tmp_sk', 'access_type'='aksk', "
                     + (entry.getKey() == null ? "" : ("'prefix'='" + entry.getKey()) + "', ")
                     + "'provider'='oss');";
             CreateStageStmt stmt = parseAndAnalyze(sql);
@@ -101,7 +102,7 @@ public class StageTest extends TestWithFeService {
                 + "'bucket' = 'tmp_bucket', "
                 + "'prefix' = 'tmp_prefix', "
                 + "'provider' = 'abc', "
-                + "'ak'='tmp_ak', 'sk'='tmp_sk');";
+                + "'ak'='tmp_ak', 'sk'='tmp_sk', 'access_type'='aksk');";
         parseAndAnalyzeWithException(sql, "Property provider with invalid value abc");
 
         // test getObjectInfoPB
@@ -246,7 +247,7 @@ public class StageTest extends TestWithFeService {
     public void testToSql() throws Exception {
         String sql = "create stage ex_stage_1 properties (\"bucket\" = \"tmp_bucket\", "
                 + "\"default.copy.size_limit\" = \"100\", "
-                + "\"endpoint\" = \"cos.ap-beijing.myqcloud.com\", "
+                + "\"endpoint\" = \"cos.ap-beijing.myqcloud.com\", \"access_type\" = \"aksk\", "
                 + "\"default.file.type\" = \"csv\", "
                 + "\"provider\" = \"cos\", "
                 + "\"prefix\" = \"tmp_prefix\", "
@@ -264,7 +265,7 @@ public class StageTest extends TestWithFeService {
                 + ", 'default.file.type' = 'csv', 'default.file.column_separator'=\",\" "
                 + ", 'default.copy.on_error' = 'abort_statement', 'default.copy.size_limit' = '100')";
         CreateStageStmt createStageStmt = parseAndAnalyze(sql);
-        Assert.assertEquals(11, createStageStmt.getStageProperties().getProperties().size());
+        Assert.assertEquals(12, createStageStmt.getStageProperties().getProperties().size());
         // check default properties
         do {
             Map<String, String> properties = createStageStmt.getStageProperties().getDefaultProperties();

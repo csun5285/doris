@@ -43,6 +43,11 @@ public class ShowStageStmt extends ShowStmt {
     private static final String SK_COL = "SK";
     private static final String PROVIDER_COL = "Provider";
     private static final String DEFAULT_PROP_COL = "DefaultProperties";
+    private static final String COMMENT = "Comment";
+    private static final String CREATE_TIME = "CreateTime";
+    private static final String ACCESS_TYPE = "AccessType";
+    private static final String ROLE_NAME = "RoleName";
+    private static final String ARN = "Arn";
 
     private static final ShowResultSetMetaData META_DATA =
             ShowResultSetMetaData.builder()
@@ -56,6 +61,11 @@ public class ShowStageStmt extends ShowStmt {
                     .addColumn(new Column(SK_COL, ScalarType.createVarchar(128)))
                     .addColumn(new Column(PROVIDER_COL, ScalarType.createVarchar(10)))
                     .addColumn(new Column(DEFAULT_PROP_COL, ScalarType.createVarchar(512)))
+                    .addColumn(new Column(COMMENT, ScalarType.createVarchar(512)))
+                    .addColumn(new Column(CREATE_TIME, ScalarType.createVarchar(64)))
+                    .addColumn(new Column(ACCESS_TYPE, ScalarType.createVarchar(64)))
+                    .addColumn(new Column(ROLE_NAME, ScalarType.createVarchar(64)))
+                    .addColumn(new Column(ARN, ScalarType.createVarchar(64)))
                     .build();
 
     public ShowStageStmt() {

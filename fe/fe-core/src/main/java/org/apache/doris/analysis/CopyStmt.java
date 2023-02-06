@@ -37,6 +37,7 @@ import com.google.common.collect.Lists;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
+import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
@@ -212,14 +213,16 @@ public class CopyStmt extends DdlStmt {
         stageType = stagePB.getType();
         stageId = stagePB.getStageId();
         ObjectStoreInfoPB objInfo = stagePB.getObjInfo();
-        objectInfo = new ObjectInfo(objInfo);
+        objectInfo = RemoteBase.analyzeStageObjectStoreInfo(stagePB);
         brokerProperties.put(S3Resource.S3_ENDPOINT, objInfo.getEndpoint());
         brokerProperties.put(S3Resource.S3_REGION, objInfo.getRegion());
-        brokerProperties.put(S3Resource.S3_ACCESS_KEY, objInfo.getAk());
-        brokerProperties.put(S3Resource.S3_SECRET_KEY, objInfo.getSk());
+        brokerProperties.put(S3Resource.S3_ACCESS_KEY, objectInfo.getAk());
+        brokerProperties.put(S3Resource.S3_SECRET_KEY, objectInfo.getSk());
+        if (objectInfo.getToken() != null) {
+            brokerProperties.put(S3Resource.S3_TOKEN, objectInfo.getToken());
+        }
         brokerProperties.put(S3_BUCKET, objInfo.getBucket());
         brokerProperties.put(S3_PREFIX, objInfo.getPrefix());
-
         StageProperties stageProperties = new StageProperties(stagePB.getPropertiesMap());
         this.copyIntoProperties.mergeProperties(stageProperties);
         this.copyIntoProperties.analyze();

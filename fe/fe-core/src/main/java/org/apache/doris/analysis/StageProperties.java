@@ -22,13 +22,18 @@ import org.apache.doris.common.AnalysisException;
 import com.google.common.collect.ImmutableSet;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB.Provider;
+import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageAccessType;
 import org.apache.commons.lang3.EnumUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
 public class StageProperties extends CopyProperties {
+    private static final Logger LOG = LogManager.getLogger(StageProperties.class);
     private static final String KEY_PREFIX = "default.";
 
     // properties for object storage
@@ -38,11 +43,20 @@ public class StageProperties extends CopyProperties {
     public static final String PREFIX = "prefix";
     public static final String AK = "ak";
     public static final String SK = "sk";
+    public static final String ROLE_NAME = "role_name";
+    public static final String ARN = "arn";
     public static final String PROVIDER = "provider";
+    public static final String COMMENT = "comment";
+    public static final String CREATE_TIME = "create_time";
+    public static final String ACCESS_TYPE = "access_type";
+    private static final String ACCESS_BY_AKSK = "aksk";
+    private static final String ACCESS_BY_IAM = "iam";
+    private static final String ACCESS_BY_BUCKET_ACL = "bucket_acl";
+
     private static final ImmutableSet<String> STORAGE_REQUIRED_PROPERTIES = new ImmutableSet.Builder<String>().add(
-            ENDPOINT).add(REGION).add(BUCKET).add(AK).add(SK).add(PROVIDER).build();
+            ENDPOINT).add(REGION).add(BUCKET).add(PROVIDER).add(ACCESS_TYPE).build();
     private static final ImmutableSet<String> STORAGE_PROPERTIES = new ImmutableSet.Builder<String>().add(PREFIX)
-            .addAll(STORAGE_REQUIRED_PROPERTIES).build();
+            .addAll(STORAGE_REQUIRED_PROPERTIES).add(COMMENT).add(AK).add(SK).add(ROLE_NAME).add(ARN).build();
 
     private static final ImmutableSet<String> STAGE_PROPERTIES = new ImmutableSet.Builder<String>()
             .addAll(STORAGE_PROPERTIES)
@@ -65,10 +79,34 @@ public class StageProperties extends CopyProperties {
         analyzeAsync();
         analyzeStrictMode();
         analyzeLoadParallelism();
+        analyzeAccessType();
         for (Entry<String, String> entry : properties.entrySet()) {
             if (!STAGE_PROPERTIES.contains(entry.getKey())) {
                 throw new AnalysisException("Property '" + entry.getKey() + "' is invalid");
             }
+        }
+    }
+
+    private void analyzeAccessType() throws AnalysisException {
+        String accessType = properties.get(ACCESS_TYPE);
+        if (accessType.equalsIgnoreCase(ACCESS_BY_AKSK)) {
+            if (StringUtils.isEmpty(properties.get(AK))) {
+                throw new AnalysisException("Property " + AK + " is required for ExternalStage");
+            }
+            if (StringUtils.isEmpty(properties.get(SK))) {
+                throw new AnalysisException("Property " + SK + " is required for ExternalStage");
+            }
+        } else if (accessType.equalsIgnoreCase(ACCESS_BY_IAM)) {
+            if (StringUtils.isEmpty(ROLE_NAME)) {
+                throw new AnalysisException("Property " + ROLE_NAME + " is required for ExternalStage");
+            }
+            if (StringUtils.isEmpty(ARN)) {
+                throw new AnalysisException("Property " + ARN + " is required for ExternalStage");
+            }
+        } else if (accessType.equalsIgnoreCase(ACCESS_BY_BUCKET_ACL)) {
+            return;
+        } else {
+            throw new AnalysisException("Invalid value for property " + ACCESS_TYPE);
         }
     }
 
@@ -101,10 +139,41 @@ public class StageProperties extends CopyProperties {
     }
 
     public ObjectStoreInfoPB getObjectStoreInfoPB() {
-        return ObjectStoreInfoPB.newBuilder().setEndpoint(properties.get(ENDPOINT)).setRegion(properties.get(REGION))
-                .setBucket(properties.get(BUCKET)).setPrefix(properties.get(PREFIX)).setAk(properties.get(AK))
-                .setSk(properties.get(SK)).setProvider(Provider.valueOf(properties.get(PROVIDER).toUpperCase()))
-                .build();
+        ObjectStoreInfoPB.Builder builder = ObjectStoreInfoPB.newBuilder().setEndpoint(properties.get(ENDPOINT))
+                .setRegion(properties.get(REGION)).setBucket(properties.get(BUCKET)).setPrefix(properties.get(PREFIX))
+                .setProvider(Provider.valueOf(properties.get(PROVIDER).toUpperCase()));
+        if (getAccessType() == StageAccessType.AKSK) {
+            builder.setAk(properties.get(AK)).setSk(properties.get(SK));
+        }
+        return builder.build();
+    }
+
+    public String getEndpoint() {
+        return properties.get(ENDPOINT);
+    }
+
+    public String getComment() {
+        return properties.containsKey(COMMENT) ? properties.get(COMMENT) : "";
+    }
+
+    public String getRoleName() {
+        return properties.get(ROLE_NAME);
+    }
+
+    public String getArn() {
+        return properties.get(ARN);
+    }
+
+    public StageAccessType getAccessType() {
+        String accessType = properties.get(ACCESS_TYPE);
+        if (accessType.equalsIgnoreCase(ACCESS_BY_AKSK)) {
+            return StageAccessType.AKSK;
+        } else if (accessType.equalsIgnoreCase(ACCESS_BY_IAM)) {
+            return StageAccessType.IAM;
+        } else if (accessType.equalsIgnoreCase(ACCESS_BY_BUCKET_ACL)) {
+            return StageAccessType.BUCKET_ACL;
+        }
+        return StageAccessType.UNKNOWN;
     }
 
     public Map<String, String> getDefaultProperties() {

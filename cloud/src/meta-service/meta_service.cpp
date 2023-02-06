@@ -2930,6 +2930,11 @@ std::pair<MetaServiceCode, std::string> get_instance_info(const std::shared_ptr<
         return ec;
     }
 
+    RamUserPB arn_user;
+    arn_user.set_user_id(config::arn_id);
+    arn_user.set_ak(config::arn_ak);
+    arn_user.set_sk(config::arn_sk);
+    instance.mutable_iam_user()->CopyFrom(arn_user);
     msg = proto_to_json(instance);
     return ec;
 }
@@ -3346,6 +3351,24 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
         return;
     }
 
+    if (unresolved_path == "alter_ram_user") {
+        AlterRamUserRequest r;
+        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
+        if (!st.ok()) {
+            msg = "failed to AlterRamUser, error: " + st.message().ToString();
+            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            response_body = msg;
+            LOG(WARNING) << msg;
+            return;
+        }
+        AlterRamUserResponse res;
+        alter_ram_user(cntl, &r, &res, nullptr);
+        ret = res.status().code();
+        msg = res.status().msg();
+        response_body = msg;
+        return;
+    }
+
     // TODO:
     // * unresolved_path == "encode_key"
     // * unresolved_path == "set_token"
@@ -3626,6 +3649,18 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
         return;
     }
 
+    if (request->has_ram_user()) {
+        auto& ram_user = request->ram_user();
+        std::string ram_user_id = ram_user.has_user_id() ? ram_user.user_id() : "";
+        std::string ram_user_ak = ram_user.has_ak() ? ram_user.ak() : "";
+        std::string ram_user_sk = ram_user.has_sk() ? ram_user.sk() : "";
+        if (ram_user_id.empty() || ram_user_ak.empty() || ram_user_sk.empty()) {
+            code = MetaServiceCode::INVALID_ARGUMENT;
+            msg = "ram user info err, please check it";
+            return;
+        }
+    }
+
     InstanceInfoPB instance;
     instance.set_instance_id(instance_id);
     instance.set_user_id(request->has_user_id() ? request->user_id() : "");
@@ -3648,6 +3683,9 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
             std::chrono::duration_cast<std::chrono::seconds>(now_time.time_since_epoch()).count();
     obj_info->set_ctime(time);
     obj_info->set_mtime(time);
+    if (request->has_ram_user()) {
+        instance.mutable_ram_user()->CopyFrom(request->ram_user());
+    }
 
     if (instance.instance_id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -4472,7 +4510,25 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
     for (int i = 0; i < instance.stages_size(); ++i) {
         auto& s = instance.stages(i);
         if (s.type() == type && s.name() == request->stage_name()) {
-            response->add_stage()->CopyFrom(s);
+            StagePB stage;
+            stage.CopyFrom(s);
+            if (!stage.has_access_type()) {
+                stage.set_access_type(StagePB::AKSK);
+            } else if (stage.access_type() == StagePB::BUCKET_ACL) {
+                if (!instance.has_ram_user()) {
+                    ss << "instance does not have ram user";
+                    msg = ss.str();
+                    code = MetaServiceCode::INVALID_ARGUMENT;
+                    return;
+                }
+                stage.mutable_obj_info()->set_ak(instance.ram_user().ak());
+                stage.mutable_obj_info()->set_sk(instance.ram_user().sk());
+            } else if (stage.access_type() == StagePB::IAM) {
+                stage.mutable_obj_info()->set_ak(config::arn_ak);
+                stage.mutable_obj_info()->set_sk(config::arn_sk);
+                stage.set_external_id(instance_id);
+            }
+            response->add_stage()->CopyFrom(stage);
             return;
         }
     }
@@ -4632,6 +4688,140 @@ void MetaServiceImpl::drop_stage(google::protobuf::RpcController* controller,
     }
 }
 
+void MetaServiceImpl::get_iam(google::protobuf::RpcController* controller,
+                              const ::selectdb::GetIamRequest* request,
+                              ::selectdb::GetIamResponse* response,
+                              ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_iam);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
+        return;
+    }
+    RPC_RATE_LIMIT(get_iam)
+
+    InstanceKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    instance_key(key_info, &key);
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        LOG(WARNING) << msg << " ret=" << ret;
+        return;
+    }
+    ret = txn->get(key, &val);
+    LOG(INFO) << "get instance_key=" << hex(key);
+
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+
+    InstanceInfoPB instance;
+    if (!instance.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse InstanceInfoPB";
+        return;
+    }
+
+    RamUserPB iam_user;
+    iam_user.set_user_id(config::arn_id);
+    iam_user.set_external_id(instance_id);
+    iam_user.set_ak(config::arn_ak);
+    iam_user.set_sk(config::arn_sk);
+    response->mutable_iam_user()->CopyFrom(iam_user);
+    if (instance.has_ram_user()) {
+        response->mutable_ram_user()->CopyFrom(instance.ram_user());
+    }
+}
+
+void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller,
+                                     const ::selectdb::AlterRamUserRequest* request,
+                                     ::selectdb::AlterRamUserResponse* response,
+                                     ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(alter_ram_user);
+    instance_id = request->has_instance_id() ? request->instance_id() : "";
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        return;
+    }
+    if (!request->has_ram_user() || request->ram_user().user_id().empty()
+        || request->ram_user().ak().empty() || request->ram_user().sk().empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "ram user info err " + proto_to_json(*request);
+        return;
+    }
+    auto& ram_user = request->ram_user();
+    RPC_RATE_LIMIT(alter_ram_user)
+    InstanceKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    instance_key(key_info, &key);
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        LOG(WARNING) << msg << " ret=" << ret;
+        return;
+    }
+    ret = txn->get(key, &val);
+    LOG(INFO) << "get instance_key=" << hex(key);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+    InstanceInfoPB instance;
+    if (!instance.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse InstanceInfoPB";
+        return;
+    }
+    if (instance.status() != InstanceInfoPB::NORMAL) {
+        code = MetaServiceCode::CLUSTER_NOT_FOUND;
+        msg = "instance status has been set delete, plz check it";
+        return;
+    }
+    if (instance.has_ram_user()) {
+        LOG(WARNING) << "instance has ram user. instance_id=" << instance_id
+                     << ", ram_user_id=" << ram_user.user_id();
+    }
+    instance.mutable_ram_user()->CopyFrom(ram_user);
+    val = instance.SerializeAsString();
+    if (val.empty()) {
+        msg = "failed to serialize";
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        return;
+    }
+    txn->put(key, val);
+    LOG(INFO) << "put instance_id=" << instance_id << " instance_key=" << hex(key);
+    ret = txn->commit();
+    if (ret != 0) {
+        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
+        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+        LOG(WARNING) << msg;
+    }
+}
+
 void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
                                  const ::selectdb::BeginCopyRequest* request,
                                  ::selectdb::BeginCopyResponse* response,
@@ -4676,6 +4866,7 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
 
     std::vector<std::pair<std::string, std::string>> copy_files;
     auto object_files = request->object_files();
+    int file_num = 0;
     for (auto i = 0; i < object_files.size(); ++i) {
         auto& file = object_files.at(i);
         // 1. get copy file kv to check if file is loading or loaded
@@ -4694,6 +4885,7 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
             return;
         }
         // 2. put copy file kv
+        ++file_num;
         CopyFilePB copy_file;
         copy_file.set_copy_id(request->copy_id());
         copy_file.set_group_id(request->group_id());
@@ -4707,6 +4899,10 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
         // 3. add file to copy job value
         copy_job.add_object_files()->CopyFrom(file);
         response->add_filtered_object_files()->CopyFrom(file);
+    }
+
+    if (file_num == 0) {
+        return;
     }
 
     val = copy_job.SerializeAsString();
@@ -4771,7 +4967,12 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
     ret = txn->get(key, &val);
     LOG(INFO) << "get copy_job_key=" << hex(key);
 
-    if (ret != 0) {
+    if (ret == 1) { // not found
+        code = MetaServiceCode::COPY_JOB_NOT_FOUND;
+        ss << "copy job does not found";
+        msg = ss.str();
+        return;
+    } else if (ret < 0) { // error
         code = MetaServiceCode::KV_TXN_GET_ERR;
         ss << "failed to get copy_job, instance_id=" << instance_id << " ret=" << ret;
         msg = ss.str();

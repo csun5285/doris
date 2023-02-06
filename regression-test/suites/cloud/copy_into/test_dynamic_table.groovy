@@ -38,6 +38,7 @@ suite("test_dynamic_table") {
             'ak' = '${getS3AK()}' ,
             'sk' = '${getS3SK()}' ,
             'provider' = '${getProvider()}' , 
+            'access_type' = 'aksk',
             'default.file.type' = "json");
         """
 

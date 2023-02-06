@@ -7,6 +7,16 @@ import com.qcloud.cos.auth.COSCredentials;
 import com.qcloud.cos.http.HttpMethodName;
 import com.qcloud.cos.http.HttpProtocol;
 import com.qcloud.cos.region.Region;
+import com.tencentcloudapi.common.Credential;
+import com.tencentcloudapi.common.profile.ClientProfile;
+import com.tencentcloudapi.common.profile.HttpProfile;
+import com.tencentcloudapi.sts.v20180813.StsClient;
+import com.tencentcloudapi.sts.v20180813.models.AssumeRoleRequest;
+import com.tencentcloudapi.sts.v20180813.models.AssumeRoleResponse;
+import com.tencentcloudapi.sts.v20180813.models.Credentials;
+import org.apache.commons.lang3.tuple.Triple;
+import org.apache.doris.common.Config;
+import org.apache.doris.common.DdlException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -35,6 +45,35 @@ public class CosRemote extends DefaultRemote {
         cosClient.shutdown();
         LOG.info("generate cos presigned url: {}", url);
         return url.toString();
+    }
+
+    @Override
+    public Triple<String, String, String> getStsToken() throws DdlException {
+        ClientProfile clientProfile = null;
+        if (Config.enable_sts_vpc) {
+            HttpProfile httpProfile = new HttpProfile();
+            // https://cloud.tencent.com/document/product/1312/48200
+            httpProfile.setEndpoint("sts.internal.tencentcloudapi.com");
+            clientProfile = new ClientProfile();
+            clientProfile.setHttpProfile(httpProfile);
+        }
+        Credential credential = new Credential(obj.getAk(), obj.getSk());
+        StsClient stsClient = (clientProfile != null) ? new StsClient(credential, obj.getRegion(), clientProfile)
+                : new StsClient(credential, obj.getRegion());
+        AssumeRoleRequest request = new AssumeRoleRequest();
+        request.setRoleArn(obj.getArn());
+        request.setDurationSeconds((long) getDurationSeconds());
+        request.setRoleSessionName(getNewRoleSessionName());
+        request.setExternalId(obj.getExternalId());
+        try {
+            AssumeRoleResponse assumeRoleResponse = stsClient.AssumeRole(request);
+            Credentials credentials = assumeRoleResponse.getCredentials();
+            return Triple.of(credentials.getTmpSecretId(), credentials.getTmpSecretKey(),
+                    credentials.getToken());
+        } catch (Exception e) {
+            LOG.warn("Failed get oss sts token", e);
+            throw new DdlException(e.getMessage());
+        }
     }
 
     @Override

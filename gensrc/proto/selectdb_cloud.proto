@@ -11,6 +11,13 @@ option cc_generic_services = true;
 // Resources
 //==============================================================================
 
+message RamUserPB {
+    optional string user_id = 1;
+    optional string ak = 2;
+    optional string sk = 3;
+    optional string external_id = 4;
+}
+
 message InstanceInfoPB {
     enum Status {
         NORMAL = 0;
@@ -26,6 +33,8 @@ message InstanceInfoPB {
     repeated ObjectStoreInfoPB obj_info = 8;
     repeated StagePB stages = 9;
     optional Status status = 10;
+    optional RamUserPB ram_user = 11;
+    optional RamUserPB iam_user = 12;
 }
 
 message StagePB {
@@ -34,6 +43,7 @@ message StagePB {
         EXTERNAL = 1;
     }
     optional StageType type = 1;
+    // mysql user name and id only used for internal stage
     repeated string mysql_user_name = 2;
     // external stage name
     optional string name = 3;
@@ -42,6 +52,21 @@ message StagePB {
     // file and copy properties
     map<string, string> properties = 8;
     repeated string mysql_user_id = 9;
+    optional string comment = 10;
+    optional int64 create_time = 11;
+    enum StageAccessType {
+        UNKNOWN = 0;
+        AKSK = 1;
+        IAM = 2;
+        BUCKET_ACL = 3;
+    }
+    optional StageAccessType access_type = 12 [default = AKSK];
+    // used when access_type is IAM
+    // In OBS, role name is agency name, arn is domain name.
+    optional string role_name = 13;
+    optional string arn = 14;
+    // only used for aws
+    optional string external_id = 15;
 }
 
 message ClusterPB {
@@ -659,6 +684,7 @@ message CreateInstanceRequest {
     optional string user_id = 2;
     optional string name = 3; // Alias
     optional ObjectStoreInfoPB obj_info = 4;
+    optional RamUserPB ram_user = 5;
 }
 
 message CreateInstanceResponse {
@@ -756,6 +782,25 @@ message DropStageRequest {
 }
 
 message DropStageResponse {
+    optional MetaServiceResponseStatus status = 1;
+}
+
+message GetIamRequest {
+    optional string cloud_unique_id = 1;
+}
+
+message GetIamResponse {
+    optional MetaServiceResponseStatus status = 1;
+    optional RamUserPB iam_user = 2;
+    optional RamUserPB ram_user = 3;
+}
+
+message AlterRamUserRequest {
+    optional string instance_id = 1;
+    optional RamUserPB ram_user = 2;
+}
+
+message AlterRamUserResponse {
     optional MetaServiceResponseStatus status = 1;
 }
 
@@ -886,6 +931,7 @@ enum MetaServiceCode {
     STAGE_NOT_FOUND = 4001;
     STAGE_GET_ERR = 4002;
     STATE_ALREADY_EXISTED_FOR_USER = 4003;
+    COPY_JOB_NOT_FOUND = 4004;
 
     // Job
     JOB_EXPIRED = 5000;
@@ -941,6 +987,8 @@ service MetaService {
     rpc create_stage(CreateStageRequest) returns (CreateStageResponse);
     rpc get_stage(GetStageRequest) returns (GetStageResponse);
     rpc drop_stage(DropStageRequest) returns (DropStageResponse);
+    rpc get_iam(GetIamRequest) returns (GetIamResponse);
+    rpc alter_ram_user(AlterRamUserRequest) returns (AlterRamUserResponse);
     // copy into
     rpc begin_copy(BeginCopyRequest) returns (BeginCopyResponse);
     rpc finish_copy(FinishCopyRequest) returns (FinishCopyResponse);

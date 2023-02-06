@@ -4310,6 +4310,19 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
+    public SelectdbCloud.GetIamResponse getIam() throws DdlException {
+        SelectdbCloud.GetIamRequest.Builder builder = SelectdbCloud.GetIamRequest.newBuilder()
+                .setCloudUniqueId(Config.cloud_unique_id);
+        SelectdbCloud.GetIamResponse response = null;
+        try {
+            response = MetaServiceProxy.getInstance().getIam(builder.build());
+        } catch (RpcException e) {
+            LOG.warn("getStage rpc exception: {} ", e.getMessage(), e);
+            throw new DdlException("internal error, try later");
+        }
+        return response;
+    }
+
     public void finishCopy(String stageId, SelectdbCloud.StagePB.StageType stageType, long tableId, String copyJobId,
             int groupId, boolean success) throws DdlException {
         SelectdbCloud.FinishCopyRequest request = SelectdbCloud.FinishCopyRequest.newBuilder()
@@ -4323,6 +4336,15 @@ public class InternalCatalog implements CatalogIf<Database> {
                 response = MetaServiceProxy.getInstance().finishCopy(request);
                 if (response.getStatus().getCode() == SelectdbCloud.MetaServiceCode.OK) {
                     return;
+                }
+                if (response.getStatus().getCode() == MetaServiceCode.COPY_JOB_NOT_FOUND) {
+                    if (success) {
+                        LOG.warn("finish copy error with copy job not found, tableId={}, stageId={}, queryId={}",
+                                tableId, stageId, copyJobId);
+                        throw new DdlException(response.getStatus().getMsg());
+                    } else {
+                        return;
+                    }
                 }
                 if (retry < Config.cloud_copy_txn_conflict_error_retry_num
                         && response.getStatus().getCode() == SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
