@@ -1837,6 +1837,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static boolean range_desc_read_by_column_def = true;
 
+    @ConfField
+    public static int default_query_timeout_second = 1800;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
