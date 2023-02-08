@@ -25,10 +25,12 @@
 #include "runtime/define_primitive_type.h"
 #include "runtime/user_function_cache.h"
 #include "util/jni-util.h"
+#include "util/runtime_profile.h"
 #include "vec/columns/column_array.h"
 #include "vec/columns/column_nullable.h"
 #include "vec/data_types/data_type_factory.hpp"
 #include "vec/data_types/data_type_string.h"
+#include "vec/exec/scan/new_jdbc_scanner.h"
 #include "vec/functions/simple_function_factory.h"
 
 namespace doris {
@@ -63,6 +65,7 @@ JdbcConnector::~JdbcConnector() {
 #define DELETE_BASIC_JAVA_CLAZZ_REF(CPP_TYPE) env->DeleteGlobalRef(_executor_##CPP_TYPE##_clazz);
 
 Status JdbcConnector::close() {
+    SCOPED_RAW_TIMER(&_jdbc_statistic._connector_close_timer);
     _closed = true;
     if (!_is_open) {
         return Status::OK();
@@ -123,10 +126,12 @@ Status JdbcConnector::open(RuntimeState* state, bool read) {
         if (_conn_param.resource_name.empty()) {
             // for jdbcExternalTable, _conn_param.resource_name == ""
             // so, we use _conn_param.driver_path as key of jarpath
+            SCOPED_RAW_TIMER(&_jdbc_statistic._load_jar_timer);
             RETURN_IF_ERROR(function_cache->get_jarpath(
                     std::abs((int64_t)hash_str(_conn_param.driver_path)), _conn_param.driver_path,
                     _conn_param.driver_checksum, &local_location));
         } else {
+            SCOPED_RAW_TIMER(&_jdbc_statistic._load_jar_timer);
             RETURN_IF_ERROR(function_cache->get_jarpath(
                     std::abs((int64_t)hash_str(_conn_param.resource_name)), _conn_param.driver_path,
                     _conn_param.driver_checksum, &local_location));
@@ -146,8 +151,10 @@ Status JdbcConnector::open(RuntimeState* state, bool read) {
         // Pushed frame will be popped when jni_frame goes out-of-scope.
         RETURN_IF_ERROR(jni_frame.push(env));
         RETURN_IF_ERROR(SerializeThriftMsg(env, &ctor_params, &ctor_params_bytes));
-        _executor_obj = env->NewObject(_executor_clazz, _executor_ctor_id, ctor_params_bytes);
-
+        {
+            SCOPED_RAW_TIMER(&_jdbc_statistic._init_connector_timer);
+            _executor_obj = env->NewObject(_executor_clazz, _executor_ctor_id, ctor_params_bytes);
+        }
         jbyte* pBytes = env->GetByteArrayElements(ctor_params_bytes, nullptr);
         env->ReleaseByteArrayElements(ctor_params_bytes, pBytes, JNI_ABORT);
         env->DeleteLocalRef(ctor_params_bytes);
@@ -172,19 +179,23 @@ Status JdbcConnector::query() {
 
     JNIEnv* env = nullptr;
     RETURN_IF_ERROR(JniUtil::GetJNIEnv(&env));
-    jint colunm_count =
-            env->CallNonvirtualIntMethod(_executor_obj, _executor_clazz, _executor_read_id);
-    RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));
-
-    if (colunm_count != materialize_num) {
-        return Status::InternalError("input and output column num not equal of jdbc query.");
+    {
+        SCOPED_RAW_TIMER(&_jdbc_statistic._execte_read_timer);
+        jint colunm_count =
+                env->CallNonvirtualIntMethod(_executor_obj, _executor_clazz, _executor_read_id);
+        RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));
+        if (colunm_count != materialize_num) {
+            return Status::InternalError("input and output column num not equal of jdbc query.");
+        }
     }
+
     LOG(INFO) << "JdbcConnector::query has exec success: " << _sql_str;
     RETURN_IF_ERROR(_check_column_type());
     return Status::OK();
 }
 
 Status JdbcConnector::_check_column_type() {
+    SCOPED_RAW_TIMER(&_jdbc_statistic._check_type_timer);
     JNIEnv* env = nullptr;
     RETURN_IF_ERROR(JniUtil::GetJNIEnv(&env));
     jobject type_lists =
@@ -235,7 +246,8 @@ Status JdbcConnector::_check_type(SlotDescriptor* slot_desc, const std::string& 
             type_str, slot_desc->type().debug_string(), slot_desc->col_name());
     switch (slot_desc->type().type) {
     case TYPE_BOOLEAN: {
-        if (type_str != "java.lang.Boolean" && type_str != "java.math.BigDecimal") {
+        if (type_str != "java.lang.Boolean" && type_str != "java.math.BigDecimal" &&
+            type_str != "java.lang.Byte") {
             return Status::InternalError(error_msg);
         }
         break;
@@ -244,7 +256,7 @@ Status JdbcConnector::_check_type(SlotDescriptor* slot_desc, const std::string& 
     case TYPE_SMALLINT:
     case TYPE_INT: {
         if (type_str != "java.lang.Short" && type_str != "java.lang.Integer" &&
-            type_str != "java.math.BigDecimal") {
+            type_str != "java.math.BigDecimal" && type_str != "java.lang.Byte") {
             return Status::InternalError(error_msg);
         }
         break;
@@ -281,7 +293,8 @@ Status JdbcConnector::_check_type(SlotDescriptor* slot_desc, const std::string& 
     case TYPE_DATETIME:
     case TYPE_DATETIMEV2: {
         if (type_str != "java.sql.Timestamp" && type_str != "java.time.LocalDateTime" &&
-            type_str != "java.sql.Date") {
+            type_str != "java.sql.Date" && type_str != "java.time.LocalDate" &&
+            type_str != "oracle.sql.TIMESTAMP") {
             return Status::InternalError(error_msg);
         }
         break;
@@ -331,6 +344,7 @@ Status JdbcConnector::get_next(bool* eos, std::vector<MutableColumnPtr>& columns
     if (!_is_open) {
         return Status::InternalError("get_next before open of jdbc connector.");
     }
+    SCOPED_RAW_TIMER(&_jdbc_statistic._get_data_timer);
     JNIEnv* env = nullptr;
     RETURN_IF_ERROR(JniUtil::GetJNIEnv(&env));
     jboolean has_next =
@@ -356,8 +370,8 @@ Status JdbcConnector::get_next(bool* eos, std::vector<MutableColumnPtr>& columns
         const std::string& column_name = slot_desc->col_name();
         jobject column_data =
                 env->CallObjectMethod(block_obj, _executor_get_list_id, materialized_column_index);
-        jint num_rows = env->CallIntMethod(column_data, _executor_get_list_size_id);
-
+        jint num_rows = env->CallNonvirtualIntMethod(_executor_obj, _executor_clazz,
+                                                     _executor_block_rows_id);
         for (int row = 0; row < num_rows; ++row) {
             jobject cur_data = env->CallObjectMethod(column_data, _executor_get_list_id, row);
             RETURN_IF_ERROR(_convert_column_data(env, cur_data, slot_desc,
@@ -399,6 +413,8 @@ Status JdbcConnector::_register_func_id(JNIEnv* env) {
                                 _executor_close_id));
     RETURN_IF_ERROR(register_id(_executor_clazz, "hasNext", JDBC_EXECUTOR_HAS_NEXT_SIGNATURE,
                                 _executor_has_next_id));
+    RETURN_IF_ERROR(
+            register_id(_executor_clazz, "getCurBlockRows", "()I", _executor_block_rows_id));
     RETURN_IF_ERROR(register_id(_executor_clazz, "getBlock", JDBC_EXECUTOR_GET_BLOCK_SIGNATURE,
                                 _executor_get_blocks_id));
     RETURN_IF_ERROR(register_id(_executor_clazz, "convertDateToLong",
@@ -506,11 +522,13 @@ Status JdbcConnector::_insert_column_data(JNIEnv* env, jobject jobj, const TypeD
     }
     case TYPE_DATETIME: {
         int64_t num = _jobject_to_datetime(env, jobj, false);
+        RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));
         reinterpret_cast<vectorized::ColumnVector<vectorized::Int64>*>(col_ptr)->insert_value(num);
         break;
     }
     case TYPE_DATETIMEV2: {
         int64_t num = _jobject_to_datetime(env, jobj, true);
+        RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));
         uint64_t num2 = static_cast<uint64_t>(num);
         reinterpret_cast<vectorized::ColumnVector<vectorized::UInt64>*>(col_ptr)->insert_value(
                 num2);

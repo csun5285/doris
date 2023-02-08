@@ -19,10 +19,8 @@
 // and modified by Doris
 
 #include "vec/data_types/data_type_factory.hpp"
-
-#include "vec/data_types/data_type_hll.h"
-#include "vec/data_types/data_type_jsonb.h"
 #include "vec/data_types/data_type_object.h"
+#include "data_type_time.h"
 
 namespace doris::vectorized {
 
@@ -96,6 +94,8 @@ DataTypePtr DataTypeFactory::create_data_type(const TypeDescriptor& col_desc, bo
         break;
     case TYPE_TIME:
     case TYPE_TIMEV2:
+        nested = std::make_shared<vectorized::DataTypeTime>();
+        break;
     case TYPE_DOUBLE:
         nested = std::make_shared<vectorized::DataTypeFloat64>();
         break;

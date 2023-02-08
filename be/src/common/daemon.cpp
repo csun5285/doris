@@ -81,7 +81,9 @@ void Daemon::tcmalloc_gc_thread() {
     double release_rates[10] = {1.0, 1.0, 1.0, 5.0, 5.0, 20.0, 50.0, 100.0, 500.0, 2000.0};
     int64_t pressure_limit = 90;
     bool is_performance_mode = false;
-    int64_t physical_limit_bytes = std::min(MemInfo::hard_mem_limit(), MemInfo::mem_limit());
+    int64_t physical_limit_bytes =
+            std::min(MemInfo::physical_mem() - MemInfo::sys_mem_available_low_water_mark(),
+                     MemInfo::mem_limit());
 
     if (config::memory_mode == std::string("performance")) {
         max_cache_percent = 100;
@@ -274,13 +276,15 @@ void Daemon::calculate_metrics_thread() {
         DorisMetrics::instance()->metric_registry()->trigger_all_hooks(true);
 
         if (last_ts == -1L) {
-            last_ts = GetCurrentTimeMicros() / 1000;
+            last_ts = GetMonoTimeMicros() / 1000;
             lst_query_bytes = DorisMetrics::instance()->query_scan_bytes->value();
-            DorisMetrics::instance()->system_metrics()->get_disks_io_time(&lst_disks_io_time);
-            DorisMetrics::instance()->system_metrics()->get_network_traffic(&lst_net_send_bytes,
-                                                                            &lst_net_receive_bytes);
+            if (config::enable_system_metrics) {
+                DorisMetrics::instance()->system_metrics()->get_disks_io_time(&lst_disks_io_time);
+                DorisMetrics::instance()->system_metrics()->get_network_traffic(
+                        &lst_net_send_bytes, &lst_net_receive_bytes);
+            }
         } else {
-            int64_t current_ts = GetCurrentTimeMicros() / 1000;
+            int64_t current_ts = GetMonoTimeMicros() / 1000;
             long interval = (current_ts - last_ts) / 1000;
             last_ts = current_ts;
 
@@ -290,23 +294,27 @@ void Daemon::calculate_metrics_thread() {
             DorisMetrics::instance()->query_scan_bytes_per_second->set_value(qps < 0 ? 0 : qps);
             lst_query_bytes = current_query_bytes;
 
-            // 2. max disk io util
-            DorisMetrics::instance()->max_disk_io_util_percent->set_value(
-                    DorisMetrics::instance()->system_metrics()->get_max_io_util(lst_disks_io_time,
-                                                                                15));
-            // update lst map
-            DorisMetrics::instance()->system_metrics()->get_disks_io_time(&lst_disks_io_time);
+            if (config::enable_system_metrics) {
+                // 2. max disk io util
+                DorisMetrics::instance()->system_metrics()->update_max_disk_io_util_percent(
+                        lst_disks_io_time, 15);
 
-            // 3. max network traffic
-            int64_t max_send = 0;
-            int64_t max_receive = 0;
-            DorisMetrics::instance()->system_metrics()->get_max_net_traffic(
-                    lst_net_send_bytes, lst_net_receive_bytes, 15, &max_send, &max_receive);
-            DorisMetrics::instance()->max_network_send_bytes_rate->set_value(max_send);
-            DorisMetrics::instance()->max_network_receive_bytes_rate->set_value(max_receive);
-            // update lst map
-            DorisMetrics::instance()->system_metrics()->get_network_traffic(&lst_net_send_bytes,
-                                                                            &lst_net_receive_bytes);
+                // update lst map
+                DorisMetrics::instance()->system_metrics()->get_disks_io_time(&lst_disks_io_time);
+
+                // 3. max network traffic
+                int64_t max_send = 0;
+                int64_t max_receive = 0;
+                DorisMetrics::instance()->system_metrics()->get_max_net_traffic(
+                        lst_net_send_bytes, lst_net_receive_bytes, 15, &max_send, &max_receive);
+                DorisMetrics::instance()->system_metrics()->update_max_network_send_bytes_rate(
+                        max_send);
+                DorisMetrics::instance()->system_metrics()->update_max_network_receive_bytes_rate(
+                        max_receive);
+                // update lst map
+                DorisMetrics::instance()->system_metrics()->get_network_traffic(
+                        &lst_net_send_bytes, &lst_net_receive_bytes);
+            }
         }
     } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(15)));
 }
@@ -434,12 +442,6 @@ void Daemon::start() {
     CHECK(st.ok()) << st.to_string();
 
     if (config::enable_metric_calculator) {
-        CHECK(DorisMetrics::instance()->is_inited())
-                << "enable metric calculator failed, maybe you set enable_system_metrics to false "
-                << " or there may be some hardware error which causes metric init failed, please "
-                   "check log first;"
-                << " you can set enable_metric_calculator = false to quickly recover ";
-
         st = Thread::create(
                 "Daemon", "calculate_metrics_thread",
                 [this]() { this->calculate_metrics_thread(); }, &_calculate_metrics_thread);

@@ -238,6 +238,7 @@ public class UserPrivTable extends PrivTable {
                     removeUsagePriv.unset(PaloPrivilege.USAGE_PRIV.getIdx());
                     removeUsagePriv.xor(PrivBitSet.of(PaloPrivilege.USAGE_PRIV,
                             PaloPrivilege.CLUSTER_USAGE_PRIV, PaloPrivilege.STAGE_USAGE_PRIV));
+                    removeUsagePriv.unset(PaloPrivilege.NODE_PRIV.getIdx());
                     CatalogPrivEntry entry = CatalogPrivEntry.create(globalPrivEntry.origUser, globalPrivEntry.origHost,
                             InternalCatalog.INTERNAL_CATALOG_NAME, globalPrivEntry.isDomain, removeUsagePriv);
                     entry.setSetByDomainResolver(false);

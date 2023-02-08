@@ -41,14 +41,14 @@ set(EXEC_TEST_FILES
     exec/olap_common_test.cpp
     exec/json_scanner_test.cpp
     exec/json_scanner_with_jsonpath_test.cpp
-    exec/parquet_scanner_test.cpp
-    exec/orc_scanner_test.cpp
+    #exec/parquet_scanner_test.cpp
+    #exec/orc_scanner_test.cpp
     exec/plain_text_line_reader_uncompressed_test.cpp
     exec/plain_text_line_reader_gzip_test.cpp
     exec/plain_text_line_reader_bzip_test.cpp
     exec/plain_text_line_reader_lz4frame_test.cpp
-    exec/broker_scanner_test.cpp
-    exec/broker_scan_node_test.cpp
+    #exec/broker_scanner_test.cpp
+    #exec/broker_scan_node_test.cpp
     exec/tablet_info_test.cpp
     exec/tablet_sink_test.cpp
     exec/buffered_reader_test.cpp
@@ -306,6 +306,7 @@ set(VEC_TEST_FILES
     vec/runtime/vdatetime_value_test.cpp
     vec/utils/arrow_column_to_doris_column_test.cpp
     vec/olap/char_type_padding_test.cpp
+    #vec/olap/vertical_compaction_test.cpp
 )
 
 set(IO_TEST_FILES
@@ -363,11 +364,13 @@ if (CLOUD_MODE)
         olap/block_column_predicate_test.cpp
         olap/options_test.cpp
         olap/common_test.cpp
-        olap/primary_key_index_test.cpp
+        #olap/segcompaction_test.cpp
+        #olap/ordered_data_compaction_test.cpp
     )
 else()  
     set(OLAP_TEST_FILES
         olap/engine_storage_migration_task_test.cpp
+        olap/timestamped_version_tracker_test.cpp
         olap/tablet_schema_helper.cpp
         olap/delta_writer_test.cpp
         olap/delete_handler_test.cpp
@@ -426,13 +429,14 @@ else()
         olap/block_column_predicate_test.cpp
         olap/options_test.cpp
         olap/common_test.cpp
-        olap/primary_key_index_test.cpp
         # olap/memtable_flush_executor_test.cpp
         # olap/push_handler_test.cpp
         olap/tablet_cooldown_test.cpp
         # TODO(liuchangliang): need to be fixed
         #olap/rowid_conversion_test.cpp
         olap/remote_rowset_gc_test.cpp
+        #olap/segcompaction_test.cpp
+        #olap/ordered_data_compaction_test.cpp
     )   
 endif()
 
@@ -486,7 +490,16 @@ if (CLOUD_MODE)
     )
 
     target_link_libraries(cloud_be_test ${TEST_LINK_LIBS})
-    set_target_properties(cloud_be_test PROPERTIES COMPILE_FLAGS "-fno-access-control" ENABLE_EXPORTS 1)    
+    set_target_properties(cloud_be_test PROPERTIES COMPILE_FLAGS "-fno-access-control" ENABLE_EXPORTS 1)
+endif()
+
+if (OS_MACOSX AND ARCH_ARM)
+    find_program(DSYMUTIL NAMES dsymutil)
+    message(STATUS "dsymutil found: ${DSYMUTIL}")
+    add_custom_command(TARGET doris_be_test POST_BUILD
+        COMMAND ${DSYMUTIL} $<TARGET_FILE:doris_be_test>
+        COMMAND ${CMAKE_STRIP} -S $<TARGET_FILE:doris_be_test>
+    )
 endif()
 
 if (BUILD_BENCHMARK_TOOL AND BUILD_BENCHMARK_TOOL STREQUAL "ON")

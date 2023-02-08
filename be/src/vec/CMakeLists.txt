@@ -97,6 +97,7 @@ set(VEC_FILES
   data_types/data_type_time_v2.cpp
   data_types/data_type_jsonb.cpp
   data_types/data_type_object.cpp
+  data_types/data_type_time.cpp
   exec/vaggregation_node.cpp
   exec/varrow_scanner.cpp
   exec/vsort_node.cpp
@@ -241,6 +242,8 @@ set(VEC_FILES
   olap/vcollect_iterator.cpp
   olap/block_reader.cpp
   olap/olap_data_convertor.cpp
+  olap/vertical_merge_iterator.cpp
+  olap/vertical_block_reader.cpp
   sink/vmysql_result_writer.cpp
   sink/vresult_sink.cpp
   sink/vdata_stream_sender.cpp
@@ -285,6 +288,8 @@ set(VEC_FILES
   exec/scan/new_jdbc_scan_node.cpp
   exec/scan/new_es_scanner.cpp
   exec/scan/new_es_scan_node.cpp
+  exec/scan/vmeta_scan_node.cpp
+  exec/scan/vmeta_scanner.cpp
   exec/format/csv/csv_reader.cpp
   exec/format/orc/vorc_reader.cpp
   exec/format/json/new_json_reader.cpp

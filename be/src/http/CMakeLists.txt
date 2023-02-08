@@ -57,4 +57,5 @@ add_library(Webserver STATIC
   action/version_action.cpp
   action/pad_segment_action.cpp
   action/injection_point_action.cpp
+  action/jeprofile_actions.cpp
 )

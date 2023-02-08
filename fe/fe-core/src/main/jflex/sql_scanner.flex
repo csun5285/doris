@@ -476,6 +476,7 @@ import org.apache.doris.qe.SqlModeHelper;
         keywordMap.put("stage", new Integer(SqlParserSymbols.KW_STAGE));
         keywordMap.put("stages", new Integer(SqlParserSymbols.KW_STAGES));
         keywordMap.put("mtmv", new Integer(SqlParserSymbols.KW_MTMV));
+        keywordMap.put("auto", new Integer(SqlParserSymbols.KW_AUTO));
    }
 
   // map from token id to token description

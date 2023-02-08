@@ -24,9 +24,10 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-<version since="1.2.0">
 
 # Multi-Catalog
+
+<version since="1.2.0">
 
 Multi-Catalog is a feature introduced in Doris 1.2.0, which aims to make it easier to interface with external data sources to enhance Doris' data lake analysis and federated data query capabilities.
 
@@ -38,6 +39,8 @@ The new Multi-Catalog function adds a new layer of Catalog to the original metad
 2. Elasticsearch: Connect to an ES cluster and directly access the tables and shards in it.
 
 This function will be used as a supplement and enhancement to the previous external table connection method (External Table) to help users perform fast multi-catalog federated queries.
+
+</version>
 
 ## Basic Concepts
 
@@ -145,6 +148,11 @@ CREATE CATALOG hive PROPERTIES (
     'hadoop.kerberos.xxx' = 'xxx',
     ...
 );
+```
+
+If you want to connect to Hadoop with KMS authentication, you should add the follow configuration into properties:
+```
+'dfs.encryption.key.provider.uri' = 'kms://http@kms_host:kms_port/kms'
 ```
 
 Once created, you can view the catalog with the `SHOW CATALOGS` command:
@@ -373,7 +381,7 @@ Parameter | Description
 ### Connect JDBC
 
 
-The following example creates a Catalog connection named jdbc. This jdbc Catalog will connect to the specified database according to the 'jdbc.jdbc_url' parameter(`jdbc::mysql` in the example, so connect to the mysql database). Currently, only the MYSQL database type is supported.
+The following example creates a Catalog connection named jdbc. This jdbc Catalog will connect to the specified database according to the 'jdbc.jdbc_url' parameter(`jdbc::mysql` in the example, so connect to the mysql database). Currently, supports MYSQL, POSTGRESQL, CLICKHOUSE database types.
 
 **mysql catalog example**
 
@@ -383,8 +391,8 @@ CREATE RESOURCE mysql_resource PROPERTIES (
     "type"="jdbc",
     "user"="root",
     "password"="123456",
-    "jdbc_url" = "jdbc:mysql://127.0.0.1:13396/demo",
-    "driver_url" = "file:/path/to/mysql-connector-java-5.1.47.jar",
+    "jdbc_url" = "jdbc:mysql://127.0.0.1:3306/demo",
+    "driver_url" = "file:///path/to/mysql-connector-java-5.1.47.jar",
     "driver_class" = "com.mysql.jdbc.Driver"
 )
 CREATE CATALOG jdbc WITH RESOURCE mysql_resource;
@@ -392,7 +400,7 @@ CREATE CATALOG jdbc WITH RESOURCE mysql_resource;
 -- 1.2.0 Version
 CREATE CATALOG jdbc PROPERTIES (
     "type"="jdbc",
-    "jdbc.jdbc_url" = "jdbc:mysql://127.0.0.1:13396/demo",
+    "jdbc.jdbc_url" = "jdbc:mysql://127.0.0.1:3306/demo",
     ...
 )
 ```
@@ -406,7 +414,7 @@ CREATE RESOURCE pg_resource PROPERTIES (
     "user"="postgres",
     "password"="123456",
     "jdbc_url" = "jdbc:postgresql://127.0.0.1:5449/demo",
-    "driver_url" = "file:/path/to/postgresql-42.5.1.jar",
+    "driver_url" = "file:///path/to/postgresql-42.5.1.jar",
     "driver_class" = "org.postgresql.Driver"
 );
 CREATE CATALOG jdbc WITH RESOURCE pg_resource;
@@ -417,6 +425,53 @@ CREATE CATALOG jdbc PROPERTIES (
     "jdbc.jdbc_url" = "jdbc:postgresql://127.0.0.1:5449/demo",
     ...
 )
+```
+
+**CLICKHOUSE catalog example**
+
+```sql
+-- The first way
+CREATE RESOURCE clickhouse_resource PROPERTIES (
+    "type"="jdbc",
+    "user"="default",
+    "password"="123456",
+    "jdbc_url" = "jdbc:clickhouse://127.0.0.1:8123/demo",
+    "driver_url" = "file:///path/to/clickhouse-jdbc-0.3.2-patch11-all.jar",
+    "driver_class" = "com.clickhouse.jdbc.ClickHouseDriver"
+)
+CREATE CATALOG jdbc WITH RESOURCE clickhouse_resource;
+
+-- The second way, note: keys have 'jdbc' prefix in front.
+CREATE CATALOG jdbc PROPERTIES (
+    "type"="jdbc",
+    "jdbc.jdbc_url" = "jdbc:clickhouse://127.0.0.1:8123/demo",
+    ...
+)
+```
+
+**oracle catalog example**
+
+```sql
+-- The first way
+CREATE RESOURCE oracle_resource PROPERTIES (
+    "type"="jdbc",
+    "user"="doris",
+    "password"="123456",
+    "jdbc_url" = "jdbc:oracle:thin:@127.0.0.1:1521:helowin",
+    "driver_url" = "file:/path/to/ojdbc6.jar",
+    "driver_class" = "oracle.jdbc.driver.OracleDriver"
+);
+CREATE CATALOG jdbc WITH RESOURCE oracle_resource;
+
+-- The second way, note: keys have 'jdbc' prefix in front.
+CREATE CATALOG jdbc PROPERTIES (
+    "type"="jdbc",
+    "jdbc.user"="doris",
+    "jdbc.password"="123456",
+    "jdbc.jdbc_url" = "jdbc:oracle:thin:@127.0.0.1:1521:helowin",
+    "jdbc.driver_url" = "file:/path/to/ojdbc6.jar",
+    "jdbc.driver_class" = "oracle.jdbc.driver.OracleDriver"
+);	
 ```
 
 Where `jdbc.driver_url` can be a remote jar package
@@ -451,7 +506,9 @@ MySQL [(none)]> show catalogs;
 2 rows in set (0.02 sec)
 ```
 
-> Note: In the `postgresql catalog`, a database for doris corresponds to a schema in the postgresql specified catalog (specified in the `jdbc.jdbc_url` parameter), tables under this database corresponds to tables under this postgresql's schema.
+> Note: 
+> 1. In the `postgresql catalog`, a database for doris corresponds to a schema in the postgresql specified catalog (specified in the `jdbc.jdbc_url` parameter), tables under this database corresponds to tables under this postgresql's schema.
+> 2. In the `oracle catalog`, a database for doris corresponds to a user in the oracle, tables under this database corresponds to tables under this oracle's user.
 
 Switch to the jdbc catalog with the `SWITCH` command and view the databases in it:
 
@@ -598,6 +655,28 @@ MySQL [db1]> select * from tbl1;
 
 After the user creates the catalog, Doris will automatically synchronize the database and tables of the data catalog. For different data catalog and data table formats, Doris will perform the following mapping relationships.
 
+<version since="dev">
+
+For types that cannot currently be mapped to Doris column types, such as map, struct, etc. Doris will map the column type to UNSUPPORTED type. For queries of type UNSUPPORTED, an example is as follows:
+
+Suppose the table schema after synchronization is:
+
+```
+k1 INT,
+k2 INT,
+k3 UNSUPPORTED,
+k4 INT
+```
+
+```
+select * from table;                // Error: Unsupported type 'UNSUPPORTED_TYPE' in '`k3`
+select * except(k3) from table;     // Query OK.
+select k1, k3 from table;           // Error: Unsupported type 'UNSUPPORTED_TYPE' in '`k3`
+select k1, k4 from table;           // Query OK.
+```
+
+</version>
+
 ### Hive MetaStore
 
 For Hive/Iceberge/Hudi
@@ -693,6 +772,37 @@ For Hive/Iceberge/Hudi
 | bit/bit(n)/bit varying(n) | STRING | `bit` type corresponds to the `STRING` type of DORIS. The data read is `true/false`, not `1/0` |
 | uuid/josnb | STRING | |
 
+#### CLICKHOUSE
+
+| ClickHouse Type        | Doris Type | Comment                                                                                                                              |
+|------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| Bool                   | BOOLEAN    |                                                                                                                                      |
+| String                 | STRING     |                                                                                                                                      |
+| Date/Date32            | DATE       |                                                                                                                                      |
+| DateTime/DateTime64    | DATETIME   | Data that exceeds Doris's maximum DateTime accuracy is truncated                                                                     |
+| Float32                | FLOAT      |                                                                                                                                      |
+| Float64                | DOUBLE     |                                                                                                                                      |
+| Int8                   | TINYINT    |                                                                                                                                      |
+| Int16/UInt8            | SMALLINT   | DORIS does not have the UNSIGNED data type, so expand the type                                                                       |
+| Int32/UInt16           | INT        | DORIS does not have the UNSIGNED data type, so expand the type                                                                       |
+| Int64/Uint32           | BIGINT     | DORIS does not have the UNSIGNED data type, so expand the type                                                                       |
+| Int128/UInt64          | LARGEINT   | DORIS does not have the UNSIGNED data type, so expand the type                                                                       |
+| Int256/UInt128/UInt256 | STRING     | Doris does not have a data type of this magnitude and is processed with STRING                                                       |
+| DECIMAL                | DECIMAL    | Data that exceeds Doris's maximum Decimal precision is mapped to a STRING                                                            |
+| Enum/IPv4/IPv6/UUID    | STRING     | In the display of IPv4 and IPv6, an extra `/` is displayed before the data, which needs to be processed by the `split_part` function |
+
+#### ORACLE
+ ORACLE Type | Doris Type | Comment |
+|---|---|---|
+| number(p) / number(p,0) |  | Doris will choose the corresponding doris type based on the p: p<3 -> TINYINT; p<5 -> SMALLINT; p<10 -> INT; p<19 -> BIGINT; p>19 -> LARGEINT |
+| number(p,s) | DECIMAL | |
+| decimal | DECIMAL | |
+| float/real | DOUBLE | |
+| DATE | DATETIME | |
+| CHAR/NCHAR | CHAR | |
+| VARCHAR2/NVARCHAR2 | VARCHAR | |
+| LONG/ RAW/ LONG RAW/ INTERVAL | TEXT | |
+
 ## Privilege Management
 
 Using Doris to access the databases and tables in the External Catalog is not controlled by the permissions of the external data source itself, but relies on Doris's own permission access management.
@@ -707,4 +817,3 @@ Currently, users need to manually refresh metadata via the [REFRESH CATALOG](../
 
 Automatic synchronization of metadata will be supported soon.
 
-</version>

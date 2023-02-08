@@ -261,12 +261,27 @@ CONF_Bool(enable_storage_vectorization, "true");
 CONF_Bool(enable_low_cardinality_optimize, "true");
 
 // be policy
+// whether check compaction checksum
+CONF_mBool(enable_compaction_checksum, "false");
 // whether disable automatic compaction task
 CONF_mBool(disable_auto_compaction, "false");
 // whether enable vectorized compaction
 CONF_Bool(enable_vectorized_compaction, "true");
 // whether enable vectorized schema change/material-view/rollup task.
 CONF_Bool(enable_vectorized_alter_table, "true");
+// whether enable vertical compaction
+CONF_mBool(enable_vertical_compaction, "false");
+// whether enable ordered data compaction
+CONF_mBool(enable_ordered_data_compaction, "false");
+// In vertical compaction, column number for every group
+CONF_mInt32(vertical_compaction_num_columns_per_group, "5");
+// In vertical compaction, max memory usage for row_source_buffer
+CONF_Int32(vertical_compaction_max_row_source_memory_mb, "200");
+// In vertical compaction, max dest segment file size
+CONF_mInt64(max_segment_size_in_vertical_compaction, "268435456");
+
+// In ordered data compaction, min segment size for input rowset
+CONF_mInt32(ordered_data_compaction_min_segment_size, "10485760");
 
 // check the configuration of auto compaction in seconds when auto compaction disabled
 CONF_mInt32(check_auto_compaction_interval_seconds, "5");
@@ -462,6 +477,8 @@ CONF_Bool(enable_quadratic_probing, "false");
 
 // for pprof
 CONF_String(pprof_profile_dir, "${DORIS_HOME}/log");
+// for jeprofile in jemalloc
+CONF_mString(jeprofile_dir, "${DORIS_HOME}/log");
 
 // to forward compatibility, will be removed later
 CONF_mBool(enable_token_check, "true");
@@ -507,6 +524,8 @@ CONF_mInt64(write_buffer_size, "209715200");
 
 // max buffer size used in memtable for the aggregated table
 CONF_mInt64(memtable_max_buffer_size, "419430400");
+// write buffer size in push task for sparkload, default 1GB
+CONF_mInt64(flush_size_for_sparkload, "1073741824");
 
 // following 2 configs limit the memory consumption of load process on a Backend.
 // eg: memory limit to 80% of mem limit config but up to 100GB(default)

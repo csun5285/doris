@@ -364,6 +364,8 @@ public:
 
     Status create_rowset_writer(RowsetWriterContext& context,
                                 std::unique_ptr<RowsetWriter>* rowset_writer);
+    Status create_vertical_rowset_writer(RowsetWriterContext& context,
+                                         std::unique_ptr<RowsetWriter>* rowset_writer);
 
     Status create_rowset(RowsetMetaSharedPtr rowset_meta, RowsetSharedPtr* rowset);
     // Cooldown to remote fs.

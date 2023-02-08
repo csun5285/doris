@@ -125,7 +125,7 @@ public class FunctionCallExpr extends Expr {
             Preconditions.checkArgument(children != null && children.size() > 0);
             if (children.get(0).getType().isDecimalV3()) {
                 return ScalarType.createDecimalV3Type(ScalarType.MAX_DECIMAL128_PRECISION,
-                        ((ScalarType) children.get(0).getType()).getScalarScale());
+                        Math.max(((ScalarType) children.get(0).getType()).getScalarScale(), 4));
             } else {
                 return returnType;
             }
@@ -725,6 +725,14 @@ public class FunctionCallExpr extends Expr {
                 && ((!arg.type.isNumericType() && !arg.type.isNull()) || arg.type.isOnlyMetricType())) {
             throw new AnalysisException(fnName.getFunction() + " requires a numeric parameter: " + this.toSql());
         }
+        // DecimalV3 scale lower than DEFAULT_MIN_AVG_DECIMAL128_SCALE should do cast
+        if (fnName.getFunction().equalsIgnoreCase("avg") && arg.type.isDecimalV3()
+                && arg.type.getDecimalDigits() < ScalarType.DEFAULT_MIN_AVG_DECIMAL128_SCALE) {
+            Type t = ScalarType.createDecimalType(arg.type.getPrimitiveType(), arg.type.getPrecision(),
+                    ScalarType.DEFAULT_MIN_AVG_DECIMAL128_SCALE);
+            Expr e = getChild(0).castTo(t);
+            setChild(0, e);
+        }
         if (fnName.getFunction().equalsIgnoreCase("sum_distinct")
                 && ((!arg.type.isNumericType() && !arg.type.isNull()) || arg.type.isOnlyMetricType())) {
             throw new AnalysisException(
@@ -1306,8 +1314,11 @@ public class FunctionCallExpr extends Expr {
                             && argTypes[i].isDecimalV3() && args[ix].isDecimalV2()) {
                         uncheckedCastChild(ScalarType.createDecimalV3Type(argTypes[i].getPrecision(),
                                 ((ScalarType) argTypes[i]).getScalarScale()), i);
+                    } else if (fnName.getFunction().equalsIgnoreCase("money_format")
+                            && children.get(0).getType().isDecimalV3() && args[ix].isDecimalV3()) {
+                        continue;
                     } else if (!argTypes[i].matchesType(args[ix]) && !(
-                            argTypes[i].isDateType() && args[ix].isDateType())
+                            argTypes[i].isDateOrDateTime() && args[ix].isDateOrDateTime())
                             && (!fn.getReturnType().isDecimalV3()
                             || (argTypes[i].isValid() && !argTypes[i].isDecimalV3() && args[ix].isDecimalV3()))) {
                         uncheckedCastChild(args[ix], i);

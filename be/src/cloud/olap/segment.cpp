@@ -55,11 +55,12 @@ Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr table
         : _segment_id(segment_id),
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
-          _meta_mem_usage(0) {}
+          _meta_mem_usage(0),
+          _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {}
 
 Segment::~Segment() {
 #ifndef BE_TEST
-    StorageEngine::instance()->segment_meta_mem_tracker()->release(_meta_mem_usage);
+    _segment_meta_mem_tracker->release(_meta_mem_usage);
 #endif
 }
 
@@ -162,8 +163,7 @@ Status Segment::_parse_footer() {
                                   _file_reader->path().native(), file_size, 12 + footer_length);
     }
     _meta_mem_usage += footer_length;
-    if (StorageEngine::instance())
-        StorageEngine::instance()->segment_meta_mem_tracker()->consume(footer_length);
+    _segment_meta_mem_tracker->consume(footer_length);
 
     std::string footer_buf;
     footer_buf.resize(footer_length);
@@ -184,6 +184,10 @@ Status Segment::_parse_footer() {
     if (!_footer.ParseFromString(footer_buf)) {
         return Status::Corruption("Bad segment file {}: failed to parse SegmentFooterPB",
                                   _file_reader->path().native());
+    }
+    if (_footer.num_rows() == 0) {
+        // this is a pad segment
+        return Status::OLAPInternalError(EMPTY_SEGMENT);
     }
     return Status::OK();
 }
@@ -222,6 +226,7 @@ Status Segment::load_index() {
             opts.stats = &tmp_stats;
             opts.type = INDEX_PAGE;
             opts.is_persistent = true;
+            opts.read_segmeng_index = true;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(
@@ -230,8 +235,7 @@ Status Segment::load_index() {
             DCHECK(footer.has_short_key_page_footer());
 
             _meta_mem_usage += body.get_size();
-            if (StorageEngine::instance())
-                StorageEngine::instance()->segment_meta_mem_tracker()->consume(body.get_size());
+            _segment_meta_mem_tracker->consume(body.get_size());
             _sk_index_decoder.reset(new ShortKeyIndexDecoder);
             return _sk_index_decoder->parse(body, footer.short_key_page_footer());
         }

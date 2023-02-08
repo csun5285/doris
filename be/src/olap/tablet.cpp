@@ -1925,10 +1925,16 @@ Status Tablet::create_initial_rowset(const int64_t req_version) {
     return res;
 }
 
+Status Tablet::create_vertical_rowset_writer(
+        RowsetWriterContext& context, std::unique_ptr<RowsetWriter>* rowset_writer) {
+    _init_context_common_fields(context);
+    return RowsetFactory::create_rowset_writer(context, true, rowset_writer);
+}
+
 Status Tablet::create_rowset_writer(RowsetWriterContext& context,
                                     std::unique_ptr<RowsetWriter>* rowset_writer) {
     _init_context_common_fields(context);
-    return RowsetFactory::create_rowset_writer(context, rowset_writer);
+    return RowsetFactory::create_rowset_writer(context, false, rowset_writer);
 }
 
 void Tablet::_init_context_common_fields(RowsetWriterContext& context) {
@@ -2189,8 +2195,8 @@ Status Tablet::lookup_row_key(const Slice& encoded_key, const RowsetIdUnorderedS
             return s;
         }
         loc.rowset_id = rs.first->rowset_id();
-        if (version >= 0 && _tablet_meta->delete_bitmap().contains_agg(
-                                    {loc.rowset_id, loc.segment_id, version}, loc.row_id)) {
+        if (_tablet_meta->delete_bitmap().contains_agg({loc.rowset_id, loc.segment_id, version},
+                                                       loc.row_id)) {
             // if has sequence col, we continue to compare the sequence_id of
             // all rowsets, util we find an existing key.
             if (_schema->has_sequence_col()) {

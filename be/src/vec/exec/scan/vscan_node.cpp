@@ -555,7 +555,7 @@ Status VScanNode::_normalize_bloom_filter(VExpr* expr, VExprContext* expr_ctx, S
 
 Status VScanNode::_normalize_bitmap_filter(VExpr* expr, VExprContext* expr_ctx,
                                            SlotDescriptor* slot, PushDownType* pdt) {
-    if (TExprNodeType::BITMAP_PRED == expr->node_type() && expr->type().is_integer_type()) {
+    if (TExprNodeType::BITMAP_PRED == expr->node_type()) {
         DCHECK(expr->children().size() == 1);
         PushDownType temp_pdt = _should_push_down_bitmap_filter();
         if (temp_pdt != PushDownType::UNACCEPTABLE) {
@@ -617,6 +617,11 @@ bool VScanNode::_is_predicate_acting_on_slot(
             // the type of predicate not match the slot's type
             return false;
         }
+    } else if (child_contains_slot->type().is_datetime_type() &&
+               child_contains_slot->node_type() == doris::TExprNodeType::CAST_EXPR) {
+        // Expr `CAST(CAST(datetime_col AS DATE) AS DATETIME) = datetime_literal` should not be
+        // push down.
+        return false;
     }
     *range = &(entry->second.second);
     return true;
@@ -757,7 +762,8 @@ Status VScanNode::_normalize_not_in_and_not_eq_predicate(VExpr* expr, VExprConte
                                                          ColumnValueRange<T>& range,
                                                          PushDownType* pdt) {
     bool is_fixed_range = range.is_fixed_value_range();
-    auto not_in_range = ColumnValueRange<T>::create_empty_column_value_range(range.column_name());
+    auto not_in_range = ColumnValueRange<T>::create_empty_column_value_range(
+            range.column_name(), slot->type().precision, slot->type().scale);
     PushDownType temp_pdt = PushDownType::UNACCEPTABLE;
     // 1. Normalize in conjuncts like 'where col in (v1, v2, v3)'
     if (TExprNodeType::IN_PRED == expr->node_type()) {
@@ -773,6 +779,9 @@ Status VScanNode::_normalize_not_in_and_not_eq_predicate(VExpr* expr, VExprConte
                         ->get_function_state(FunctionContext::FRAGMENT_LOCAL));
         HybridSetBase::IteratorBase* iter = state->hybrid_set->begin();
         auto fn_name = std::string("");
+        if (!is_fixed_range && state->null_in_set) {
+            _eos = true;
+        }
         while (iter->has_next()) {
             // column not in (nullptr) is always true
             if (nullptr == iter->get_value()) {
