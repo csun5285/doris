@@ -603,19 +603,19 @@ void InvertedIndexVisitor::visit(int rowID) {
     }
 }
 
-void InvertedIndexVisitor::visit(lucene::util::bkd::bkd_docID_set_iterator* iter,
+void InvertedIndexVisitor::visit(lucene::util::bkd::bkd_docid_set_iterator* iter,
                                  std::vector<uint8_t>& packedValue) {
     if (!matches(packedValue.data())) {
         return;
     }
-    int32_t docID = iter->docID_set->nextDoc();
-    while (docID != lucene::util::bkd::bkd_docID_set::NO_MORE_DOCS) {
+    int32_t docID = iter->docid_set->nextDoc();
+    while (docID != lucene::util::bkd::bkd_docid_set::NO_MORE_DOCS) {
         if (only_count) {
             num_hits++;
         } else {
             hits->add(docID);
         }
-        docID = iter->docID_set->nextDoc();
+        docID = iter->docid_set->nextDoc();
     }
 }
 

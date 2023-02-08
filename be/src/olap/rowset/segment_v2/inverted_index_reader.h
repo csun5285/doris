@@ -168,7 +168,7 @@ public:
     void visit(roaring::Roaring* docID, std::vector<uint8_t>& packedValue) override;
     void visit(std::vector<char>& docID, std::vector<uint8_t>& packedValue) override;
     void visit(int rowID, std::vector<uint8_t>& packedValue) override;
-    void visit(lucene::util::bkd::bkd_docID_set_iterator* iter,
+    void visit(lucene::util::bkd::bkd_docid_set_iterator* iter,
                std::vector<uint8_t>& packedValue) override;
     bool matches(uint8_t* packedValue);
     lucene::util::bkd::relation compare(std::vector<uint8_t>& minPacked,
