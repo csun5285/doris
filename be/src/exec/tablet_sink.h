@@ -254,19 +254,6 @@ public:
 
     size_t get_pending_bytes() { return _pending_batches_bytes; }
 
-    // if input block fitted with NodeChannel's pending block
-    // dynamic table may return false
-    virtual bool fitted_with(VecBlock* input_block) {
-        LOG(FATAL) << "fitted_with with NodeChannel not supported";
-        return false;
-    }
-
-    // force to send current block to pending queue
-    // used in dynamic columns
-    virtual void force_send_cur_block() {
-        LOG(FATAL) << "force_send_cur_block NodeChannel not supported";
-    }
-
 protected:
     void _cancel_with_msg(const std::string& msg);
 

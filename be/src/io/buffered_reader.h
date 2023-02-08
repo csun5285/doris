@@ -21,16 +21,80 @@
 
 #include <memory>
 
+#include "common/config.h"
 #include "common/status.h"
 #include "io/file_reader.h"
-#include "olap/olap_define.h"
 #include "util/runtime_profile.h"
+#include "util/threadpool.h"
 
 namespace doris {
+
+class BufferedReader;
+struct PrefetchBuffer : std::enable_shared_from_this<PrefetchBuffer> {
+    enum class BufferStatus { RESET, PENDING, PREFETCHED, CLOSED };
+    PrefetchBuffer() = default;
+    PrefetchBuffer(RuntimeProfile* profile, int64_t offset, int64_t buffer_size,
+                   int64_t whole_buffer_size, FileReader* reader)
+            : _offset(offset),
+              _size(buffer_size),
+              _whole_buffer_size(whole_buffer_size),
+              _reader(reader),
+              _buf(buffer_size, '0') {
+        _remote_read_timer = ADD_TIMER(profile, "FileRemoteReadTime");
+        _remote_read_counter = ADD_COUNTER(profile, "FileRemoteReadCalls", TUnit::UNIT);
+        _remote_read_bytes = ADD_COUNTER(profile, "FileRemoteReadBytes", TUnit::BYTES);
+        _remote_buffer_reset_conter =
+                ADD_COUNTER(profile, "FileRemoteBufferResetTimes", TUnit::UNIT);
+    }
+    PrefetchBuffer(PrefetchBuffer&& other)
+            : _offset(other._offset),
+              _size(other._size),
+              _whole_buffer_size(other._whole_buffer_size),
+              _reader(other._reader),
+              _buf(std::move(other._buf)),
+              _remote_read_timer(other._remote_read_timer),
+              _remote_read_counter(other._remote_read_counter),
+              _remote_read_bytes(other._remote_read_bytes) {}
+    ~PrefetchBuffer() = default;
+    int64_t _offset;
+    int64_t _size;
+    int64_t _len {0};
+    int64_t _whole_buffer_size;
+    FileReader* _reader;
+    std::string _buf;
+    BufferStatus _buffer_status {BufferStatus::RESET};
+    std::mutex _lock;
+    std::condition_variable _prefetched;
+    Status _prefetch_status {Status::OK()};
+    // time cost of "_reader", "remote" because "_reader" is always a remote reader
+    RuntimeProfile::Counter* _remote_read_timer = nullptr;
+    // counter of calling "remote read()"
+    RuntimeProfile::Counter* _remote_read_counter = nullptr;
+    RuntimeProfile::Counter* _remote_read_bytes = nullptr;
+    // counter of reset buffer
+    RuntimeProfile::Counter* _remote_buffer_reset_conter = nullptr;
+    // @brief: reset the start offset of this buffer to offset
+    // @param: the new start offset for this buffer
+    void reset_offset(int64_t offset);
+    // @brief: start to fetch the content between [_offset, _offset + _size)
+    void prefetch_buffer();
+    // @brief: used by BufferedReader to read the prefetched data
+    // @param[off] read start address
+    // @param[buf] buffer to put the actual content
+    // @param[buf_len] maximum len trying to read
+    // @param[bytes_read] actual bytes read
+    Status read_buffer(int64_t off, uint8_t* buf, int64_t buf_len, int64_t* bytes_read);
+    // @brief: shut down the buffer until the prior prefetching task is done
+    void close();
+    // @brief: to detect whether this buffer contains off
+    // @param[off] detect offset
+    bool inline contains(int64_t off) const { return _offset <= off && off < _offset + _size; }
+};
 
 // Buffered Reader
 // Add a cache layer between the caller and the file reader to reduce the
 // times of calls to the read function to speed up.
+// **Attention**: make sure the inner reader is thread safe
 class BufferedReader : public FileReader {
 public:
     // If the reader need the file size, set it when construct FileReader.
@@ -54,17 +118,23 @@ public:
     virtual bool closed() override;
 
 private:
-    Status _fill();
-    Status _read_once(int64_t position, int64_t nbytes, int64_t* bytes_read, void* out);
+    size_t get_buffer_pos(int64_t position) const {
+        return (position % _whole_pre_buffer_size) / s_max_pre_buffer_size;
+    }
+    size_t get_buffer_offset(int64_t position) const {
+        return (position / s_max_pre_buffer_size) * s_max_pre_buffer_size;
+    }
+    void resetAllBuffer(size_t position) {
+        for (int64_t i = 0; i < _pre_buffers.size(); i++) {
+            int64_t cur_pos = position + i * s_max_pre_buffer_size;
+            int cur_buf_pos = get_buffer_pos(cur_pos);
+            // reset would do all the prefetch work
+            _pre_buffers[cur_buf_pos]->reset_offset(get_buffer_offset(cur_pos));
+        }
+    }
 
-private:
     RuntimeProfile* _profile;
     std::unique_ptr<FileReader> _reader;
-    char* _buffer;
-    int64_t _buffer_size;
-    int64_t _buffer_offset;
-    int64_t _buffer_limit;
-    int64_t _cur_offset;
 
     int64_t _read_count = 0;
     int64_t _remote_read_count = 0;
@@ -80,6 +150,13 @@ private:
     RuntimeProfile::Counter* _remote_read_counter = nullptr;
     RuntimeProfile::Counter* _remote_read_bytes = nullptr;
     RuntimeProfile::Counter* _remote_read_rate = nullptr;
+
+    int64_t s_max_pre_buffer_size = config::prefetch_single_buffer_size_mb * 1024 * 1024;
+    std::vector<std::shared_ptr<PrefetchBuffer>> _pre_buffers;
+    int64_t _whole_pre_buffer_size;
+    std::atomic_bool _closed {false};
+    int64_t _cur_offset {0};
+    int64_t _reader_size {0};
 };
 
 /**

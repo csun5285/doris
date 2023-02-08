@@ -148,9 +148,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             }
             if (fileStatusList.stream().flatMap(List::stream).map(l -> l.second).count() == 0) {
                 retryTime = 0;
-                LOG.warn(NO_FILES_ERROR_MSG + ", matched {} files, filtered {} files "
-                                + "because files may be loading or loaded, queryId={}" + reachLimitStr, matchedFileNum,
-                        loadedFileNum, copyJob.getCopyId());
+                copyJob.setAbortedCopy(true);
                 throw new UserException(String.format(NO_FILES_ERROR_MSG + ", matched %d files, "
                         + "filtered %d files because files may be loading or loaded"
                         + reachLimitStr, matchedFileNum, loadedFileNum));
@@ -183,10 +181,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                                     copyJob.getCopyId(), 0, startTime, timeoutTime, objectFiles);
             if (filteredObjectFiles.isEmpty()) {
                 retryTime = 0;
-                LOG.warn(NO_FILES_ERROR_MSG + ", matched {} files, filtered {} files "
-                                + "because files may be loading or loaded" + reachLimitStr
-                                + ", {} files left after beginCopy, queryId={}", matchedFileNum, loadedFileNum, 0,
-                        copyJob.getCopyId());
+                copyJob.setAbortedCopy(true);
                 throw new UserException(String.format(NO_FILES_ERROR_MSG + ", matched %d files, "
                         + "filtered %d files because files may be loading or loaded" + reachLimitStr
                         + ", %d files left after beginCopy", matchedFileNum, loadedFileNum, 0));

@@ -131,6 +131,11 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .build(&_send_batch_thread_pool);
 
     init_download_cache_required_components();
+    
+    ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
+            .set_min_threads(1024)
+            .set_max_threads(1024)
+            .build(&_buffered_reader_prefetch_thread_pool);
 
     _scanner_scheduler = new doris::vectorized::ScannerScheduler();
 

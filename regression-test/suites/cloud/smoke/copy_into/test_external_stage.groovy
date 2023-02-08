@@ -29,6 +29,7 @@ suite("smoke_test_external_stage", "smoke") {
             'ak' = '${getS3AK()}' ,
             'sk' = '${getS3SK()}' ,
             'provider' = '${getProvider()}',
+            'access_type' = 'aksk',
             'default.file.column_separator' = "|");
         """
 

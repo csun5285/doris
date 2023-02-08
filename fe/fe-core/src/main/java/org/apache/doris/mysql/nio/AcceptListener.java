@@ -79,7 +79,7 @@ public class AcceptListener implements ChannelListener<AcceptingChannel<StreamCo
                         MysqlProto.sendResponsePacket(context);
                         throw new AfterConnectedException("Reach limit of connections");
                     }
-                    if (!Config.cloud_unique_id.isEmpty()) {
+                    if (Config.isCloudMode()) {
                         String defaultCloudCluster = Env.getCurrentEnv().getAuth()
                                 .getDefaultCloudCluster(context.getQualifiedUser());
                         if (!Strings.isNullOrEmpty(defaultCloudCluster)) {

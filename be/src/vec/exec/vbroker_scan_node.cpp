@@ -166,12 +166,14 @@ Status VBrokerScanNode::get_next(RuntimeState* state, vectorized::Block* block, 
 
         if (UNLIKELY(!_mutable_block)) {
             _mutable_block.reset(new MutableBlock(scanner_block->clone_empty()));
+            if (_need_align_block) {
+                _mutable_block->set_block_type(BlockType::DYNAMIC);
+            }
         }
 
         if (_mutable_block->rows() + scanner_block->rows() < batch_size) {
             // merge scanner_block into _mutable_block
-            _mutable_block->add_rows(scanner_block.get(), 0, scanner_block->rows(),
-                                     _need_align_block);
+            _mutable_block->add_rows(scanner_block.get(), 0, scanner_block->rows());
             continue;
         } else {
             if (_mutable_block->empty()) {
@@ -181,8 +183,7 @@ Status VBrokerScanNode::get_next(RuntimeState* state, vectorized::Block* block, 
                 // copy _mutable_block firstly, then merge scanner_block into _mutable_block for next.
                 *block = _mutable_block->to_block();
                 _mutable_block->set_muatable_columns(scanner_block->clone_empty_columns());
-                _mutable_block->add_rows(scanner_block.get(), 0, scanner_block->rows(),
-                                         _need_align_block);
+                _mutable_block->add_rows(scanner_block.get(), 0, scanner_block->rows());
             }
             break;
         }

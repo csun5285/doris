@@ -1264,7 +1264,7 @@ public class SystemInfoService {
         copiedReportVersions.put(newBackend.getId(), new AtomicLong(0L));
         idToReportVersionRef = ImmutableMap.copyOf(copiedReportVersions);
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             List<Backend> toAdd = new ArrayList<>();
             toAdd.add(newBackend);
             updateCloudClusterMap(toAdd, new ArrayList<>());
@@ -1297,7 +1297,7 @@ public class SystemInfoService {
         ImmutableMap<Long, AtomicLong> newIdToReportVersion = ImmutableMap.copyOf(copiedReportVersions);
         idToReportVersionRef = newIdToReportVersion;
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             List<Backend> toDel = new ArrayList<>();
             toDel.add(backend);
             updateCloudClusterMap(new ArrayList<>(), toDel);

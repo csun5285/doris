@@ -33,7 +33,6 @@ import com.google.common.collect.Maps;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -151,41 +150,48 @@ public class RoleManager implements Writable {
         return null;
     }
 
+    private void replaceResourceLevel(Map<PrivLevel, List<Entry<ResourcePattern, PrivBitSet>>> map, PrivLevel type) {
+        List<Entry<ResourcePattern, PrivBitSet>> clusterSet = map.get(PrivLevel.RESOURCE);
+        if (clusterSet != null && !clusterSet.isEmpty()) {
+            map.remove(PrivLevel.RESOURCE);
+            map.put(type, clusterSet);
+        }
+    }
+
     public void getRoleInfo(List<List<String>> results) {
         for (PaloRole role : roles.values()) {
             List<String> info = Lists.newArrayList();
             info.add(role.getRoleName());
             info.add(Joiner.on(", ").join(role.getUsers()));
 
-            Map<PrivLevel, String> infoMap =
+            Map<PrivLevel, List<Entry<ResourcePattern, PrivBitSet>>> clusterMap = role.getClusterPatternToPrivs()
+                    .entrySet().stream().collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel()));
+            replaceResourceLevel(clusterMap, PrivLevel.CLUSTER);
+
+            Map<PrivLevel, List<Entry<ResourcePattern, PrivBitSet>>> stageMap = role.getStagePatternToPrivs()
+                    .entrySet().stream().collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel()));
+            replaceResourceLevel(stageMap, PrivLevel.STAGE);
+
+            Map<PrivLevel, String> infoMap = Stream.concat(
                     Stream.concat(
-                        role.getTblPatternToPrivs().entrySet().stream()
-                            .collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel())).entrySet().stream(),
-                        role.getResourcePatternToPrivs().entrySet().stream()
-                            .collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel())).entrySet().stream()
-                    ).collect(Collectors.toMap(Entry::getKey, entry -> {
+                        Stream.concat(
+                            role.getTblPatternToPrivs().entrySet().stream()
+                                .collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel()))
+                                .entrySet().stream(),
+                            role.getResourcePatternToPrivs().entrySet().stream()
+                                .collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel()))
+                                .entrySet()
+                                .stream()
+                        ),
+                        clusterMap.entrySet().stream()
+                    ),
+                    stageMap.entrySet().stream()
+            ).collect(Collectors.toMap(Entry::getKey, entry -> {
                         if (entry.getKey() == PrivLevel.GLOBAL) {
                             return entry.getValue().stream().findFirst().map(priv -> priv.getValue().toString())
                                     .orElse(FeConstants.null_string);
                         } else {
                             return entry.getValue().stream()
-                                    .map(priv -> priv.getKey() + ": " + priv.getValue())
-                                    .collect(Collectors.joining("; "));
-                        }
-                    }, (s1, s2) -> s1 + " " + s2
-                ));
-
-            List<Map<ResourcePattern, PrivBitSet>> resourcePatterToPrivs = Arrays.asList(
-                    role.getResourcePatternToPrivs(), role.getClusterPatternToPrivs(), role.getStagePatternToPrivs());
-            resourcePatterToPrivs.forEach(r -> {
-                Map<PrivLevel, String> resourceInfoMap = r.entrySet().stream()
-                        .collect(Collectors.groupingBy(entry -> entry.getKey().getPrivLevel())).entrySet().stream()
-                        .collect(Collectors.toMap(Entry::getKey, entry -> {
-                            if (entry.getKey() == PrivLevel.GLOBAL) {
-                                return entry.getValue().stream().findFirst().map(priv -> priv.getValue().toString())
-                                    .orElse(FeConstants.null_string);
-                            } else {
-                                return entry.getValue().stream()
                                     .map(priv -> {
                                         if (priv.getValue().isEmpty()) {
                                             return "";
@@ -193,23 +199,17 @@ public class RoleManager implements Writable {
                                         return priv.getKey() + ": " + priv.getValue();
                                     })
                                     .collect(Collectors.joining("; "));
+                        }
+                    }, (s1, s2) -> {
+                            if (s1.isEmpty()) {
+                                return s2;
                             }
-                        }));
-                resourceInfoMap.forEach((key, value) -> {
-                    String s = infoMap.putIfAbsent(key, value);
-                    if (value.isEmpty() || value.equals(s) || s == null) {
-                        return;
+                            return s1 + " " + s2;
                     }
-                    if (s.isEmpty()) {
-                        s = value;
-                    } else {
-                        s += " ; " + value;
-                    }
-                    infoMap.put(key, s);
-                });
-            });
+            ));
 
-            Stream.of(PrivLevel.GLOBAL, PrivLevel.CATALOG, PrivLevel.DATABASE, PrivLevel.TABLE, PrivLevel.RESOURCE)
+            Stream.of(PrivLevel.GLOBAL, PrivLevel.CATALOG, PrivLevel.DATABASE, PrivLevel.TABLE,
+                      PrivLevel.RESOURCE, PrivLevel.CLUSTER, PrivLevel.STAGE)
                     .forEach(level -> {
                         String infoItem = infoMap.get(level);
                         if (Strings.isNullOrEmpty(infoItem)) {

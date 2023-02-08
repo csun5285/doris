@@ -125,7 +125,7 @@ public abstract class BulkLoadJob extends LoadJob {
                             stmt.getOrigStmt(), stmt.getUserInfo());
                     break;
                 case SPARK:
-                    if (!Config.cloud_unique_id.isEmpty()) {
+                    if (Config.isCloudMode()) {
                         LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                         throw new DdlException("Unsupported operaiton");
                     }

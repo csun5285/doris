@@ -25,22 +25,12 @@ suite("test_ctas") {
     ) ENGINE=OLAP
     UNIQUE KEY(`test_varchar`)
     DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
-      PROPERTIES (
-      "replication_allocation" = "tag.location.default: 1",
-      "in_memory" = "false",
-      "storage_format" = "V2"
-    )
     """
 
         sql """ INSERT INTO test_ctas(test_varchar, test_datetime) VALUES ('test1','2022-04-27 16:00:33'),('test2','2022-04-27 16:00:54') """
 
         sql """ 
-    CREATE TABLE IF NOT EXISTS `test_ctas1` 
-    PROPERTIES (
-      "replication_allocation" = "tag.location.default: 1",
-      "in_memory" = "false",
-      "storage_format" = "V2"
-    ) as select * from test_ctas;
+    CREATE TABLE IF NOT EXISTS `test_ctas1` as select * from test_ctas;
     """
 
         qt_select """SHOW CREATE TABLE `test_ctas1`"""

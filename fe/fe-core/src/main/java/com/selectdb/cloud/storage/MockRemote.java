@@ -1,6 +1,7 @@
 package com.selectdb.cloud.storage;
 
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.doris.common.DdlException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -46,6 +47,11 @@ public class MockRemote extends RemoteBase {
             objectInfoList.add(new ObjectFile(key, getRelativePath(key), objectFile.getEtag(), objectFile.getSize()));
         }
         return new ListObjectsResult(objectInfoList, false, null);
+    }
+
+    @Override
+    public Triple<String, String, String> getStsToken() throws DdlException {
+        throw new DdlException("Get sts token for Mock is unsupported");
     }
 
     private ListObjectsResult listObjectsInner(String prefix, String continuationToken) throws DdlException {

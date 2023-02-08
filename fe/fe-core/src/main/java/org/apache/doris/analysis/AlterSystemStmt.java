@@ -42,7 +42,7 @@ public class AlterSystemStmt extends DdlStmt {
 
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
-        if (!Config.cloud_unique_id.isEmpty()
+        if (Config.isCloudMode()
                 && !ConnectContext.get().getCurrentUserIdentity().getUser().equals(PaloAuth.ROOT_USER)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_UNSUPPORTED_OPERATION_ERROR);
         }

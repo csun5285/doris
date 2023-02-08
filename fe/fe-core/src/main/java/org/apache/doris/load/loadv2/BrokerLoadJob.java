@@ -105,7 +105,7 @@ public class BrokerLoadJob extends BulkLoadJob {
             enableProfile = true;
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
             if (context != null) {
                 cluster = context.getCloudCluster();
@@ -242,7 +242,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                 TUniqueId loadId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
 
                 LOG.info("sqlQueryId={}, loadId={}", DebugUtil.printId(queryId), DebugUtil.printId(loadId));
-                if (Config.cloud_unique_id.isEmpty()) {
+                if (Config.isNotCloudMode()) {
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
                             attachment.getFileNumByTable(aggKey), getUserInfo());
                 } else {

@@ -309,7 +309,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                     }
                     String comment = tColumnDef.getComment();
                     if (comment == null || comment.length() == 0) {
-                        Instant ins = Instant.ofEpochSecond(1568568760);
+                        Instant ins = Instant.ofEpochSecond(System.currentTimeMillis() / 1000);
                         ZonedDateTime zdt = ins.atZone(ZoneId.systemDefault());
                         comment = "auto change " + zdt.toString();
                     }
@@ -699,7 +699,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         ConnectContext context = new ConnectContext(null);
         // Set current connected FE to the client address, so that we can know where this request come from.
         context.setCurrentConnectedFEIp(clientAddr.getHostname());
-        if (!Config.cloud_unique_id.isEmpty() && !Strings.isNullOrEmpty(params.getCloudCluster())) {
+        if (Config.isCloudMode() && !Strings.isNullOrEmpty(params.getCloudCluster())) {
             context.setCloudCluster(params.getCloudCluster());
         }
 

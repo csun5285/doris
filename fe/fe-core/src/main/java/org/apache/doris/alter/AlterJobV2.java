@@ -178,7 +178,7 @@ public abstract class AlterJobV2 implements Writable {
             return;
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             LOG.debug("set context to job");
             ConnectContext ctx = new ConnectContext();
             ctx.setThreadLocalInfo();
@@ -205,7 +205,7 @@ public abstract class AlterJobV2 implements Writable {
             e.printStackTrace();
             LOG.warn("state {} exception {}", jobState, e.getMessage());
         } finally {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.debug("remove context from job");
                 ConnectContext.remove();
             }

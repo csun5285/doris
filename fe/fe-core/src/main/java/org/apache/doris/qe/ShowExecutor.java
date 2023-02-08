@@ -23,6 +23,7 @@ import org.apache.doris.analysis.AdminShowConfigStmt;
 import org.apache.doris.analysis.AdminShowReplicaDistributionStmt;
 import org.apache.doris.analysis.AdminShowReplicaStatusStmt;
 import org.apache.doris.analysis.AdminShowTabletStorageFormatStmt;
+import org.apache.doris.analysis.CompoundPredicate.Operator;
 import org.apache.doris.analysis.DescribeStmt;
 import org.apache.doris.analysis.HelpStmt;
 import org.apache.doris.analysis.PartitionNames;
@@ -185,6 +186,8 @@ import org.apache.doris.mtmv.MTMVJobManager;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.mtmv.metadata.MTMVTask;
 import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.PaloPrivilege;
+import org.apache.doris.mysql.privilege.PrivBitSet;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.statistics.ColumnStatistic;
 import org.apache.doris.statistics.StatisticsJobManager;
@@ -211,6 +214,7 @@ import com.google.common.collect.Sets;
 import com.google.gson.GsonBuilder;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -220,11 +224,13 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.net.URLConnection;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -350,21 +356,21 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowTrashDiskStmt) {
             handleShowTrashDisk();
         } else if (stmt instanceof AdminShowReplicaStatusStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletStatus();
         } else if (stmt instanceof AdminShowReplicaDistributionStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletDistribution();
         } else if (stmt instanceof AdminShowConfigStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
@@ -401,13 +407,13 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowLastInsertStmt) {
             handleShowLastInsert();
         } else if (stmt instanceof AdminShowTabletStorageFormatStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
             handleAdminShowTabletStorageFormat();
         } else if (stmt instanceof AdminDiagnoseTabletStmt) {
-            if (!Config.cloud_unique_id.isEmpty() && !ctx.getCurrentUserIdentity()
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
@@ -424,7 +430,7 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowAnalyzeStmt) {
             handleShowAnalyze();
         } else if (stmt instanceof AdminCopyTabletStmt) {
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operaiton");
             }
@@ -627,7 +633,7 @@ public class ShowExecutor {
         final ShowClusterStmt showStmt = (ShowClusterStmt) stmt;
         final List<List<String>> rows = Lists.newArrayList();
         List<String> clusterNames = null;
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             clusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         } else {
             clusterNames = ctx.getEnv().getClusterNames();
@@ -640,12 +646,22 @@ public class ShowExecutor {
         for (String clusterName : clusterNameSet) {
             ArrayList<String> row = Lists.newArrayList(clusterName);
             // current_used, users
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
+                if (!Env.getCurrentEnv().getAuth()
+                        .checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(), clusterName,
+                        PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
+                    continue;
+                }
                 row.add(clusterName.equals(ctx.getCloudCluster()) ? "TRUE" : "FALSE");
                 List<String> users = Env.getCurrentEnv().getAuth().getCloudClusterUsers(clusterName);
                 // non-root do not display root information
                 if (!"root".equals(ctx.getQualifiedUser())) {
                     users.remove("root");
+                }
+                // common user, not admin
+                if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
+                        PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV), Operator.OR))) {
+                    users.removeIf(user -> !user.equals(ClusterNamespace.getNameFromFullName(ctx.getQualifiedUser())));
                 }
                 String result = Joiner.on(", ").join(users);
                 row.add(result);
@@ -2534,12 +2550,17 @@ public class ShowExecutor {
                 result.add(stage.getObjInfo().getBucket());
                 result.add(stage.getObjInfo().getPrefix());
                 result.add(stage.getObjInfo().getAk());
-                // result.add(stage.getObjInfo().getSk());
-                result.add("**********");
+                result.add(StringUtils.isEmpty(stage.getObjInfo().getSk()) ? "" : "**********");
                 result.add(stage.getObjInfo().getProvider().name());
                 Map<String, String> propertiesMap = new HashMap<>();
                 propertiesMap.putAll(stage.getPropertiesMap());
                 result.add(new GsonBuilder().disableHtmlEscaping().create().toJson(propertiesMap));
+                result.add(stage.getComment());
+                result.add(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(stage.getCreateTime())));
+                result.add(stage.hasAccessType() ? stage.getAccessType().name()
+                        : (StringUtils.isEmpty(stage.getObjInfo().getSk()) ? "" : "AKSK"));
+                result.add(stage.getRoleName());
+                result.add(stage.getArn());
                 results.add(result);
             }
             resultSet = new ShowResultSet(showStmt.getMetaData(), results);

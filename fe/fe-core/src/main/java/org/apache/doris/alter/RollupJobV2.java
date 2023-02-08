@@ -147,7 +147,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
             int baseSchemaHash, int rollupSchemaHash, KeysType rollupKeysType, short rollupShortKeyColumnCount,
             OriginStatement origStmt) {
         super(jobId, JobType.ROLLUP, dbId, tableId, tableName, timeoutMs);
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
             if (context != null) {
                 LOG.debug("rollup job add cloud cluster, context not null, cluster: {}", context.getCloudCluster());
@@ -374,7 +374,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
         LOG.info("begin to send create rollup replica tasks. job: {}", jobId);
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             Database db = Env.getCurrentInternalCatalog()
                     .getDbOrException(dbId, s -> new AlterCancelException("Database " + s + " does not exist"));
             if (!checkTableStable(db)) {
@@ -607,7 +607,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
             } // end for partitions
 
             onFinished(tbl);
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 List<Long> rollupIndexList = new ArrayList<Long>();
                 rollupIndexList.add(rollupIndexId);
                 try {

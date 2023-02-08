@@ -98,6 +98,7 @@ suite("sync_load") {
         'ak' = '${getS3AK()}' ,
         'sk' = '${getS3SK()}' ,
         'provider' = '${getProvider()}',
+        'access_type' = 'aksk',
         'default.file.column_separator' = "|" 
         );
     """

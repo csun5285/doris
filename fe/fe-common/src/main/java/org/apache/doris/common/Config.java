@@ -1772,6 +1772,14 @@ public class Config extends ConfigBase {
     @ConfField
     public static String cloud_unique_id = "";
 
+    public static boolean isCloudMode() {
+        return !cloud_unique_id.isEmpty();
+    }
+
+    public static boolean isNotCloudMode() {
+        return !isCloudMode();
+    }
+
     @ConfField
     public static String cloud_sql_server_cluster_name = "RESERVED_CLUSTER_NAME_FOR_SQL_SERVER";
 
@@ -1829,6 +1837,9 @@ public class Config extends ConfigBase {
 
     @ConfField
     public static boolean range_desc_read_by_column_def = true;
+
+    @ConfField
+    public static int default_query_timeout_second = 1800;
 
     //==========================================================================
     //                    end of cloud config
@@ -2088,5 +2099,11 @@ public class Config extends ConfigBase {
      */
     @ConfField(masterOnly = true)
     public static int hms_events_polling_interval_ms = 10000;
+
+    @ConfField(mutable = false)
+    public static boolean enable_sts_vpc = true;
+
+    @ConfField(mutable = true)
+    public static int sts_duration = 3600;
 }
 

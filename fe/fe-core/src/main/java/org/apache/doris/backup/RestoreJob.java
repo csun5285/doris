@@ -1861,7 +1861,7 @@ public class RestoreJob extends AbstractJob {
         for (int i = 0; i < size; i++) {
             String tblName = Text.readString(in);
             Partition part;
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 part = Partition.read(in);
             } else {
                 part = CloudPartition.read(in);

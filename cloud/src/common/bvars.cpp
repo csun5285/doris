@@ -35,6 +35,8 @@ BvarLatencyRecorderWithTag g_bvar_ms_get_cluster("ms", "get_cluster");
 BvarLatencyRecorderWithTag g_bvar_ms_create_stage("ms", "create_stage");
 BvarLatencyRecorderWithTag g_bvar_ms_get_stage("ms", "get_stage");
 BvarLatencyRecorderWithTag g_bvar_ms_drop_stage("ms", "drop_stage");
+BvarLatencyRecorderWithTag g_bvar_ms_get_iam("ms", "get_iam");
+BvarLatencyRecorderWithTag g_bvar_ms_alter_ram_user("ms", "alter_ram_user");
 BvarLatencyRecorderWithTag g_bvar_ms_begin_copy("ms", "begin_copy");
 BvarLatencyRecorderWithTag g_bvar_ms_finish_copy("ms", "finish_copy");
 BvarLatencyRecorderWithTag g_bvar_ms_get_copy_job("ms", "get_copy_job");

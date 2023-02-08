@@ -510,7 +510,7 @@ public class UserProperty implements Writable {
         }
 
         // ATTN: cloud mode doesn't show default_load_cluster
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             // load cluster
             if (defaultLoadCluster != null) {
                 result.add(Lists.newArrayList(PROP_DEFAULT_LOAD_CLUSTER, defaultLoadCluster));

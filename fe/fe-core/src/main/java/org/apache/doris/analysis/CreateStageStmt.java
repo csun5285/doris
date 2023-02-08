@@ -27,7 +27,12 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 
+import com.selectdb.cloud.proto.SelectdbCloud.GetIamResponse;
+import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
+import com.selectdb.cloud.proto.SelectdbCloud.RamUserPB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
+import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageAccessType;
+import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
 import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 import lombok.Getter;
@@ -81,11 +86,31 @@ public class CreateStageStmt extends DdlStmt {
     private void checkObjectStorageInfo() throws AnalysisException {
         RemoteBase remote = null;
         try {
-            tryConnect(stageProperties.getObjectStoreInfoPB().getEndpoint());
-            remote = RemoteBase.newInstance(new ObjectInfo(stageProperties.getObjectStoreInfoPB()));
+            tryConnect(stageProperties.getEndpoint());
+            StagePB stagePB = toStageProto();
+            if (stagePB.getAccessType() == StageAccessType.IAM
+                    || stagePB.getAccessType() == StageAccessType.BUCKET_ACL) {
+                GetIamResponse iamUsers = Env.getCurrentInternalCatalog().getIam();
+                RamUserPB user;
+                if (stagePB.getAccessType() == StageAccessType.BUCKET_ACL) {
+                    if (!iamUsers.hasRamUser()) {
+                        throw new AnalysisException("Instance does not have ram user");
+                    }
+                    user = iamUsers.getRamUser();
+                } else {
+                    user = iamUsers.getIamUser();
+                }
+                ObjectStoreInfoPB objInfoPB = ObjectStoreInfoPB.newBuilder(stagePB.getObjInfo()).setAk(user.getAk())
+                        .setSk(user.getSk()).build();
+                stagePB = StagePB.newBuilder(stagePB).setExternalId(user.getExternalId()).setObjInfo(objInfoPB).build();
+            }
+            ObjectInfo objectInfo = RemoteBase.analyzeStageObjectStoreInfo(stagePB);
+            remote = RemoteBase.newInstance(objectInfo);
             // RemoteBase#headObject does not throw exception if key does not exist.
             remote.headObject("1");
+            remote.listObjects(null);
         } catch (Exception e) {
+            LOG.warn("Failed check object storage info={}", stageProperties.getObjectStoreInfoPB(), e);
             String message = e.getMessage();
             if (message != null) {
                 int index = message.indexOf("Error message=");
@@ -129,14 +154,18 @@ public class CreateStageStmt extends DdlStmt {
         stageBuilder.setStageId(UUID.randomUUID().toString());
         switch (type) {
             case EXTERNAL:
-                stageBuilder.setName(getStageName()).setType(StagePB.StageType.EXTERNAL)
-                        .setObjInfo(stageProperties.getObjectStoreInfoPB());
+                stageBuilder.setName(getStageName()).setType(StageType.EXTERNAL)
+                        .setObjInfo(stageProperties.getObjectStoreInfoPB()).setComment(stageProperties.getComment())
+                        .setCreateTime(System.currentTimeMillis()).setAccessType(stageProperties.getAccessType());
                 break;
             case INTERNAL:
             default:
                 throw new DdlException("Cant not create stage with type=" + type);
         }
         stageBuilder.putAllProperties(stageProperties.getDefaultProperties());
+        if (stageBuilder.getAccessType() == StageAccessType.IAM) {
+            stageBuilder.setRoleName(stageProperties.getRoleName()).setArn(stageProperties.getArn());
+        }
         return stageBuilder.build();
     }
 

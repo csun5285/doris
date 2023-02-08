@@ -52,7 +52,7 @@ public class ShowTrashStmt extends ShowStmt {
     @Override
     public void analyze(Analyzer analyzer) throws AnalysisException {
         // ATTN: root has admin and operator Privileges
-        if (!Config.cloud_unique_id.isEmpty()
+        if (Config.isCloudMode()
                 && !Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_UNSUPPORTED_OPERATION_ERROR);
         }

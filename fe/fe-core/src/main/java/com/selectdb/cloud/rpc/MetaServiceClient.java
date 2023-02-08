@@ -220,6 +220,10 @@ public class MetaServiceClient {
         return blockingStub.dropStage(request);
     }
 
+    public SelectdbCloud.GetIamResponse getIam(SelectdbCloud.GetIamRequest request) {
+        return blockingStub.getIam(request);
+    }
+
     public SelectdbCloud.BeginCopyResponse beginCopy(SelectdbCloud.BeginCopyRequest request) {
         return blockingStub.beginCopy(request);
     }

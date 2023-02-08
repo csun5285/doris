@@ -167,7 +167,7 @@ public class EditLog {
                     String idString = ((Text) journal.getData()).toString();
                     long id = Long.parseLong(idString);
                     // SELECTDB_CODE_BEGIN
-                    if (Config.cloud_unique_id.isEmpty()) {
+                    if (Config.isNotCloudMode()) {
                         GlobalTransactionMgr globalTransactionMgr = (GlobalTransactionMgr) (Env
                                 .getCurrentGlobalTransactionMgr());
                         globalTransactionMgr.getTransactionIDGenerator().initTransactionId(id + 1);

@@ -29,6 +29,7 @@ suite("test_json", "p0") {
          'ak' = '${getS3AK()}' ,
          'sk' = '${getS3SK()}' ,
          'provider' = '${getProvider()}',
+         'access_type' = 'aksk',
          'default.file.column_separator' = "|");
      """
 

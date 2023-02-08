@@ -1275,6 +1275,29 @@ TEST(MetaServiceTest, CopyJobTest) {
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         ASSERT_EQ(res.object_files_size(), 20);
     }
+    {
+        // begin a copy job whose files are all loaded, the copy job key should not be created
+        begin_copy_request.set_copy_id("tmp_id");
+        begin_copy_request.clear_object_files();
+        for (int i = 0; i < 20; ++i) {
+            ObjectFilePB object_file_pb;
+            object_file_pb.set_relative_path("obj_" + std::to_string(i));
+            object_file_pb.set_etag("obj_" + std::to_string(i) + "_etag");
+            begin_copy_request.add_object_files()->CopyFrom(object_file_pb);
+        }
+        BeginCopyResponse res;
+        meta_service->begin_copy(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                 &begin_copy_request, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.filtered_object_files_size(), 0);
+        // get copy job
+        get_copy_job_request.set_copy_id("tmp_id");
+        GetCopyJobResponse res2;
+        meta_service->get_copy_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                   &get_copy_job_request, &res2, nullptr);
+        ASSERT_EQ(res2.status().code(), MetaServiceCode::OK);
+        ASSERT_FALSE(res2.has_copy_job());
+    }
     // scan fdb
     {
         std::unique_ptr<Transaction> txn;
@@ -1298,6 +1321,9 @@ TEST(MetaServiceTest, CopyJobTest) {
                 ASSERT_EQ(ret, 0);
                 while (it->has_next()) {
                     auto [k, v] = it->next();
+                    CopyFilePB copy_file;
+                    ASSERT_TRUE(copy_file.ParseFromArray(v.data(), v.size()));
+                    ASSERT_EQ(copy_file.copy_id(), "test_copy_id");
                     ++file_cnt;
                     if (!it->has_next()) {
                         key0 = k;
@@ -1694,5 +1720,132 @@ TEST(MetaServiceTest, StageTest) {
     }
 }
 
+TEST(MetaServiceTest, GetIamTest) {
+    auto meta_service = get_meta_service();
+    brpc::Controller cntl;
+    auto cloud_unique_id = "test_cloud_unique_id";
+    std::string instance_id = "get_iam_test_instance_id";
+    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    config::arn_id = "iam_arn";
+    config::arn_ak = "iam_ak";
+    config::arn_sk = "iam_sk";
+
+    // create instance
+    {
+        ObjectStoreInfoPB obj;
+        obj.set_ak("123");
+        obj.set_sk("321");
+        obj.set_bucket("456");
+        obj.set_prefix("654");
+        obj.set_endpoint("789");
+        obj.set_region("987");
+        obj.set_provider(ObjectStoreInfoPB::BOS);
+
+        RamUserPB ram_user;
+        ram_user.set_user_id("test_user_id");
+        ram_user.set_ak("test_ak");
+        ram_user.set_sk("test_sk");
+
+        CreateInstanceRequest req;
+        req.set_instance_id(instance_id);
+        req.set_user_id("test_user");
+        req.set_name("test_name");
+        req.mutable_ram_user()->CopyFrom(ram_user);
+        req.mutable_obj_info()->CopyFrom(obj);
+
+        CreateInstanceResponse res;
+        meta_service->create_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                      &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
+
+    GetIamRequest request;
+    request.set_cloud_unique_id(cloud_unique_id);
+    GetIamResponse response;
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                          &request, &response, nullptr);
+    ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(response.ram_user().user_id(), "test_user_id");
+    ASSERT_EQ(response.ram_user().ak(), "test_ak");
+    ASSERT_EQ(response.ram_user().sk(), "test_sk");
+    ASSERT_TRUE(response.ram_user().external_id().empty());
+
+    ASSERT_EQ(response.iam_user().user_id(), "iam_arn");
+    ASSERT_EQ(response.iam_user().external_id(), instance_id);
+    ASSERT_EQ(response.iam_user().ak(), "iam_ak");
+    ASSERT_EQ(response.iam_user().sk(), "iam_sk");
+}
+
+TEST(MetaServiceTest, AlterIamTest) {
+    auto meta_service = get_meta_service();
+    brpc::Controller cntl;
+    auto cloud_unique_id = "test_cloud_unique_id";
+    std::string instance_id = "alter_iam_test_instance_id";
+    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    config::arn_id = "iam_arn";
+    config::arn_ak = "iam_ak";
+    config::arn_sk = "iam_sk";
+
+    ObjectStoreInfoPB obj;
+    obj.set_ak("123");
+    obj.set_sk("321");
+    obj.set_bucket("456");
+    obj.set_prefix("654");
+    obj.set_endpoint("789");
+    obj.set_region("987");
+    obj.set_provider(ObjectStoreInfoPB::BOS);
+
+    // create instance without ram user
+    CreateInstanceRequest create_instance_req;
+    create_instance_req.set_instance_id(instance_id);
+    create_instance_req.set_user_id("test_user");
+    create_instance_req.set_name("test_name");
+    create_instance_req.mutable_obj_info()->CopyFrom(obj);
+    CreateInstanceResponse create_instance_res;
+    meta_service->create_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                  &create_instance_req, &create_instance_res, nullptr);
+    ASSERT_EQ(create_instance_res.status().code(), MetaServiceCode::OK);
+
+    // get iam and ram user
+    GetIamRequest request;
+    request.set_cloud_unique_id(cloud_unique_id);
+    GetIamResponse response;
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                          &request, &response, nullptr);
+    ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(response.has_ram_user(), false);
+    ASSERT_EQ(response.iam_user().user_id(), "iam_arn");
+    ASSERT_EQ(response.iam_user().ak(), "iam_ak");
+    ASSERT_EQ(response.iam_user().sk(), "iam_sk");
+
+    // alter ram user
+    RamUserPB ram_user;
+    ram_user.set_user_id("test_user_id");
+    ram_user.set_ak("test_ak");
+    ram_user.set_sk("test_sk");
+    AlterRamUserRequest alter_ram_user_request;
+    alter_ram_user_request.set_instance_id(instance_id);
+    alter_ram_user_request.mutable_ram_user()->CopyFrom(ram_user);
+    AlterRamUserResponse alter_ram_user_response;
+    meta_service->alter_ram_user(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                 &alter_ram_user_request, &alter_ram_user_response, nullptr);
+
+    // get iam and ram user
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                          &request, &response, nullptr);
+    ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(response.has_ram_user(), true);
+    ASSERT_EQ(response.ram_user().user_id(), "test_user_id");
+    ASSERT_EQ(response.ram_user().ak(), "test_ak");
+    ASSERT_EQ(response.ram_user().sk(), "test_sk");
+}
 } // namespace selectdb
 // vim: et tw=100 ts=4 sw=4 cc=80:

@@ -23,7 +23,7 @@ public class MetaServiceProxy {
     private static Pair<String, Integer> metaServiceHostPort = null;
 
     static {
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             try {
                 metaServiceHostPort = SystemInfoService.validateHostAndPort(Config.meta_service_endpoint);
             } catch (AnalysisException e) {
@@ -387,6 +387,19 @@ public class MetaServiceProxy {
         try {
             final MetaServiceClient client = getProxy(metaAddress);
             return client.dropStage(request);
+        } catch (Exception e) {
+            throw new RpcException(metaAddress.hostname, e.getMessage(), e);
+        }
+    }
+
+    public SelectdbCloud.GetIamResponse getIam(SelectdbCloud.GetIamRequest request) throws RpcException {
+        if (metaServiceHostPort == null) {
+            throw new RpcException("", "cloud mode, please configure cloud_unique_id and meta_service_endpoint");
+        }
+        TNetworkAddress metaAddress = new TNetworkAddress(metaServiceHostPort.first, metaServiceHostPort.second);
+        try {
+            final MetaServiceClient client = getProxy(metaAddress);
+            return client.getIam(request);
         } catch (Exception e) {
             throw new RpcException(metaAddress.hostname, e.getMessage(), e);
         }

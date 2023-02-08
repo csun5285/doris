@@ -911,6 +911,9 @@ CONF_String(jvm_max_heap_size, "1024M");
 // enable java udf and jdbc scannode
 CONF_Bool(enable_java_support, "true");
 
+// disable java udf
+CONF_Bool(disable_java_udf, "true");
+
 // Set config randomly to check more issues in github workflow
 CONF_Bool(enable_fuzzy_mode, "false");
 
@@ -927,6 +930,9 @@ CONF_String(test_s3_prefix, "prefix");
 
 // reader prefetch
 CONF_Int32(max_column_reader_prefetch_size, "0");
+// buffered prefetch
+CONF_mInt32(prefetch_single_buffer_size_mb, "16");
+CONF_mInt32(output_chunk_size_mb, "8")
 
 // file cache
 CONF_Bool(enable_file_cache, "false");
@@ -965,14 +971,16 @@ CONF_mDouble(inverted_index_ram_buffer_size, "512");
 CONF_mInt32(inverted_index_max_buffer_docs, "100000000");
 // setMergeFactor for lucene
 CONF_mInt32(inverted_index_merge_factor, "100000000");
-// inverted index searcher sweep time interval, default 30min
-CONF_mInt32(index_searcher_cache_stale_sweep_time_sec, "1800");
-// Cache for inverted index cache capacity
-CONF_Int32(inverted_index_searcher_cache_capacity, "1000000");
-// Cache for inverted index cache size
-CONF_String(inverted_index_searcher_cache_limit, "10%");
+
+// inverted index searcher cache
+// cache entry stay time after lookup, default 1h
+CONF_mInt32(index_cache_entry_stay_time_after_lookup_s, "3600");
+// inverted index searcher cache size
+CONF_String(inverted_index_searcher_cache_limit, "5%");
 // set `true` to enable insert searcher into cache when write inverted index data
-CONF_Bool(enable_write_index_searcher_cache, "true");
+CONF_Bool(enable_write_index_searcher_cache, "false");
+CONF_Bool(enable_index_cache_check_timestamp, "true");
+
 // inverted index
 CONF_Int32(query_bkd_inverted_index_limit_percent, "5"); // 5%
 // tree depth for bkd

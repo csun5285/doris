@@ -25,6 +25,7 @@ suite("test_stage_ddl") {
             'prefix' = 'regression' ,
             'ak' = '${getS3AK()}' ,
             'sk' = '${sk}' ,
+            'access_type' = 'aksk',
             'provider' = '${getProvider()}');
             """
             assertTrue(success, "Expected create stage success")

@@ -93,7 +93,7 @@ static void encode_prefix(const T& t, std::string* key) {
         MetaRowsetKeyInfo, MetaRowsetTmpKeyInfo, MetaTabletKeyInfo, MetaTabletIdxKeyInfo,
         VersionKeyInfo,
         RecycleIndexKeyInfo, RecyclePartKeyInfo, RecycleRowsetKeyInfo, RecycleTxnKeyInfo,
-        StatsTabletKeyInfo, JobTabletKeyInfo, CopyJobKeyInfo, CopyFileKeyInfo, RecycleStageKeyInfo>);
+        StatsTabletKeyInfo, JobTabletKeyInfo, CopyJobKeyInfo, CopyFileKeyInfo, RecycleStageKeyInfo, JobRecycleKeyInfo>);
 
     key->push_back(CLOUD_USER_KEY_SPACE01);
     // Prefixes for key families
@@ -119,7 +119,8 @@ static void encode_prefix(const T& t, std::string* key) {
         encode_bytes(RECYCLE_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, StatsTabletKeyInfo>) {
         encode_bytes(STATS_KEY_PREFIX, key);
-    } else if constexpr (std::is_same_v<T, JobTabletKeyInfo>) {
+    } else if constexpr (std::is_same_v<T, JobTabletKeyInfo>
+                      || std::is_same_v<T, JobRecycleKeyInfo>) {
         encode_bytes(JOB_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, CopyJobKeyInfo>
                       || std::is_same_v<T, CopyFileKeyInfo>) {
@@ -300,6 +301,11 @@ std::string system_meta_service_registry_key() {
 //==============================================================================
 // Other keys
 //==============================================================================
+
+void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out) {
+    encode_prefix(in, out);                     // 0x01 "job" ${instance_id}
+    encode_bytes("recycle", out);               // "recycle"
+}
 
 //==============================================================================
 // Decode keys

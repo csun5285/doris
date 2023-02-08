@@ -184,6 +184,16 @@ public:
                     ::selectdb::DropStageResponse* response,
                     ::google::protobuf::Closure* done) override;
 
+    void get_iam(google::protobuf::RpcController* controller,
+                 const ::selectdb::GetIamRequest* request,
+                 ::selectdb::GetIamResponse* response,
+                 ::google::protobuf::Closure* done) override;
+
+    void alter_ram_user(google::protobuf::RpcController* controller,
+                        const ::selectdb::AlterRamUserRequest* request,
+                        ::selectdb::AlterRamUserResponse* response,
+                        ::google::protobuf::Closure* done) override;
+
     void begin_copy(google::protobuf::RpcController* controller,
                     const ::selectdb::BeginCopyRequest* request,
                     ::selectdb::BeginCopyResponse* response,

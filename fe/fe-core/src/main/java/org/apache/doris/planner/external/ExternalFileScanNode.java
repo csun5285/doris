@@ -201,7 +201,7 @@ public class ExternalFileScanNode extends ExternalScanNode {
                 throw new UserException("Unknown type: " + type);
         }
 
-        if (Config.cloud_unique_id.isEmpty()) {
+        if (Config.isNotCloudMode()) {
             backendPolicy.init();
         } else {
             setCloudCluster();

@@ -12,8 +12,16 @@ import com.aliyun.oss.model.ListObjectsV2Request;
 import com.aliyun.oss.model.ListObjectsV2Result;
 import com.aliyun.oss.model.OSSObjectSummary;
 import com.aliyun.oss.model.ObjectMetadata;
+import com.aliyuncs.DefaultAcsClient;
+import com.aliyuncs.auth.BasicCredentials;
+import com.aliyuncs.auth.StaticCredentialsProvider;
+import com.aliyuncs.auth.sts.AssumeRoleRequest;
+import com.aliyuncs.auth.sts.AssumeRoleResponse;
+import com.aliyuncs.profile.DefaultProfile;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Triple;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -90,6 +98,29 @@ public class OssRemote extends DefaultRemote {
         }
     }
 
+    @Override
+    public Triple<String, String, String> getStsToken() throws DdlException {
+        AssumeRoleRequest assumeRoleRequest = new AssumeRoleRequest();
+        assumeRoleRequest.setRoleArn(obj.getArn());
+        assumeRoleRequest.setRoleSessionName(getNewRoleSessionName());
+        assumeRoleRequest.setDurationSeconds((long) getDurationSeconds());
+        try {
+            DefaultProfile profile = DefaultProfile.getProfile(obj.getRegion());
+            if (Config.enable_sts_vpc) {
+                profile.enableUsingVpcEndpoint();
+            }
+            BasicCredentials basicCredentials = new BasicCredentials(obj.getAk(), obj.getSk());
+            DefaultAcsClient ramClient = new DefaultAcsClient(profile, new StaticCredentialsProvider(basicCredentials));
+            AssumeRoleResponse response = ramClient.getAcsResponse(assumeRoleRequest);
+            AssumeRoleResponse.Credentials credentials = response.getCredentials();
+            return Triple.of(credentials.getAccessKeyId(), credentials.getAccessKeySecret(),
+                    credentials.getSecurityToken());
+        } catch (Exception e) {
+            LOG.warn("Failed get oss sts token", e);
+            throw new DdlException(e.getMessage());
+        }
+    }
+
     private ListObjectsResult listObjectsInner(String prefix, String continuationToken) throws DdlException {
         initClient();
         try {
@@ -118,7 +149,11 @@ public class OssRemote extends DefaultRemote {
              * There are several timeout configuration, see {@link com.aliyun.oss.ClientConfiguration},
              * please config if needed.
              */
-            ossClient = new OSSClientBuilder().build(obj.getEndpoint(), obj.getAk(), obj.getSk());
+            if (obj.getToken() != null) {
+                ossClient = new OSSClientBuilder().build(obj.getEndpoint(), obj.getAk(), obj.getSk(), obj.getToken());
+            } else {
+                ossClient = new OSSClientBuilder().build(obj.getEndpoint(), obj.getAk(), obj.getSk());
+            }
         }
     }
 

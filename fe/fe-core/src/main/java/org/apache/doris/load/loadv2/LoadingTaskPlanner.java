@@ -178,7 +178,7 @@ public class LoadingTaskPlanner {
         ScanNode scanNode;
         boolean useNewScanNode = Config.enable_new_load_scan_node || useNewLoadScanNode;
         if (useNewScanNode) {
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 scanNode = new ExternalFileScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc);
             } else {
                 scanNode = new ExternalFileScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc,
@@ -187,7 +187,7 @@ public class LoadingTaskPlanner {
             ((ExternalFileScanNode) scanNode).setLoadInfo(loadJobId, txnId, table, brokerDesc, fileGroups,
                     fileStatusesList, filesAdded, strictMode, loadParallelism, userInfo);
         } else {
-            if (Config.cloud_unique_id.isEmpty()) {
+            if (Config.isNotCloudMode()) {
                 scanNode = new BrokerScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc, "BrokerScanNode",
                         fileStatusesList, filesAdded);
             } else {
@@ -219,7 +219,7 @@ public class LoadingTaskPlanner {
         } finally {
             // connectContext is a thread local variable, so you must claar
             // context to avoid it from containing old cluster information
-            if (!Config.cloud_unique_id.isEmpty()) {
+            if (Config.isCloudMode()) {
                 if (scanNode instanceof BrokerScanNode) {
                     if (((BrokerScanNode) scanNode).needClearContext()) {
                         ConnectContext.remove();

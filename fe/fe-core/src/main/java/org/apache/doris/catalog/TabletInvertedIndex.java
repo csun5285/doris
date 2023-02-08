@@ -428,7 +428,7 @@ public class TabletInvertedIndex {
         }
         long stamp = writeLock();
         try {
-            long backendId = Config.cloud_unique_id.isEmpty() ? replica.getBackendId() : -1L;
+            long backendId = Config.isNotCloudMode() ? replica.getBackendId() : -1L;
             Preconditions.checkState(tabletMetaMap.containsKey(tabletId));
             replicaMetaTable.put(tabletId, backendId, replica);
             replicaToTabletMap.put(replica.getId(), tabletId);

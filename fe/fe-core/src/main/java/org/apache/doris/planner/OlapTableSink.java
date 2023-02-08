@@ -202,6 +202,7 @@ public class OlapTableSink extends DataSink {
         schemaParam.setDbId(dbId);
         schemaParam.setTableId(table.getId());
         schemaParam.setVersion(table.getIndexMetaByIndexId(table.getBaseIndexId()).getSchemaVersion());
+        schemaParam.setIsDynamicSchema(table.isDynamicSchema());
 
         schemaParam.tuple_desc = tupleDescriptor.toThrift();
         for (SlotDescriptor slotDesc : tupleDescriptor.getSlots()) {
@@ -392,7 +393,7 @@ public class OlapTableSink extends DataSink {
             throw new DdlException(st.getErrorMsg());
         }
 
-        if (!Config.cloud_unique_id.isEmpty()) {
+        if (Config.isCloudMode()) {
             return Arrays.asList(locationParam, slaveLocationParam);
         }
 
