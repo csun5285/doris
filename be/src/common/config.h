@@ -912,8 +912,7 @@ CONF_String(test_s3_prefix, "prefix");
 // reader prefetch
 CONF_Int32(max_column_reader_prefetch_size, "0");
 // buffered prefetch
-CONF_mInt32(prefetch_single_buffer_size_mb, "16");
-CONF_mInt32(output_chunk_size_mb, "8")
+CONF_mInt32(prefetch_single_buffer_size_mb, "4");
 
 // file cache
 CONF_Bool(enable_file_cache, "false");

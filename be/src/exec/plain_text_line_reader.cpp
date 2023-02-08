@@ -27,7 +27,7 @@
 //  larger than 300B for correct lzo header decompressing
 #define INPUT_CHUNK (2 * 1024 * 1024)
 // #define INPUT_CHUNK  (34)
-#define OUTPUT_CHUNK (doris::config::output_chunk_size_mb * 1024 * 1024)
+#define OUTPUT_CHUNK (doris::config::prefetch_single_buffer_size_mb * 1024 * 1024)
 // #define OUTPUT_CHUNK (32)
 // leave these 2 size small for debugging
 

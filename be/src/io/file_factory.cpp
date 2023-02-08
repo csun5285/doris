@@ -130,8 +130,12 @@ doris::Status doris::FileFactory::create_file_reader(RuntimeProfile* profile,
         return Status::InternalError("unsupported file reader type: {}", std::to_string(type));
     }
 
-    if (buffer_size > 0) {
-        file_reader.reset(new BufferedReader(profile, file_reader_ptr, buffer_size));
+    // if the buffer size is 0, we would set it as the dafault whole remote buffer size
+    if (buffer_size >= 0) {
+        file_reader.reset(new BufferedReader(
+                profile, file_reader_ptr,
+                buffer_size == 0 ? config::remote_storage_read_buffer_mb * 1024 * 1024
+                                 : buffer_size));
     } else {
         file_reader.reset(file_reader_ptr);
     }
