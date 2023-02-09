@@ -348,7 +348,6 @@ Status HashJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
 
 Status HashJoinNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(VJoinNodeBase::prepare(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
     // Build phase
     _build_phase_profile = runtime_profile()->create_child("BuildPhase", true, true);
     runtime_profile()->add_child(_build_phase_profile, false, nullptr);
@@ -639,7 +638,6 @@ Status HashJoinNode::open(RuntimeState* state) {
         RETURN_IF_ERROR((*_vother_join_conjunct_ptr)->open(state));
     }
     RETURN_IF_ERROR(VJoinNodeBase::open(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
     RETURN_IF_CANCELLED(state);
     return Status::OK();
 }
@@ -780,7 +778,14 @@ Status HashJoinNode::_materialize_build_side(RuntimeState* state) {
     }
     child(1)->close(state);
 
-    _process_hashtable_ctx_variants_init(state);
+    if (eos || !_should_build_hash_table) {
+        _process_hashtable_ctx_variants_init(state);
+    }
+    // Since the comparison of null values is meaningless, null aware left anti join should not output null
+    // when the build side is not empty.
+    if (eos && !_build_blocks->empty() && _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
+        _probe_ignore_null = true;
+    }
     return Status::OK();
 }
 
@@ -1084,7 +1089,8 @@ std::vector<uint16_t> HashJoinNode::_convert_block_to_null(Block& block) {
 
 HashJoinNode::~HashJoinNode() {
     if (_shared_hashtable_controller && _should_build_hash_table) {
-        _shared_hashtable_controller->signal(id());
+        // signal at here is abnormal
+        _shared_hashtable_controller->signal(id(), Status::Cancelled("signaled in destructor"));
     }
 }
 

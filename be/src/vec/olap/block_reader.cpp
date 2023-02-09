@@ -33,6 +33,31 @@ BlockReader::~BlockReader() {
     }
 }
 
+bool BlockReader::_rowsets_overlapping(const std::vector<RowsetReaderSharedPtr>& rs_readers) {
+    std::string cur_max_key;
+    for (const auto& rs_reader : rs_readers) {
+        // version 0-1 of every tablet is empty, just skip this rowset
+        if (rs_reader->rowset()->version().second == 1) {
+            continue;
+        }
+        if (rs_reader->rowset()->num_rows() == 0) {
+            continue;
+        }
+        if (rs_reader->rowset()->is_segments_overlapping()) {
+            return true;
+        }
+        std::string min_key;
+        bool has_min_key = rs_reader->rowset()->min_key(&min_key);
+        if (!has_min_key) {
+            return true;
+        }
+        if (min_key <= cur_max_key) {
+            return true;
+        }
+        CHECK(rs_reader->rowset()->max_key(&cur_max_key));
+    }
+    return false;
+}
 Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
                                        std::vector<RowsetReaderSharedPtr>* valid_rs_readers) {
     std::vector<RowsetReaderSharedPtr> rs_readers;
@@ -45,6 +70,10 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
                      << ", version:" << read_params.version;
         return res;
     }
+    // check if rowsets are noneoverlapping
+    _is_rowsets_overlapping = _rowsets_overlapping(rs_readers);
+    _vcollect_iter.init(this, _is_rowsets_overlapping, read_params.read_orderby_key,
+                        read_params.read_orderby_key_reverse);
 
     _vcollect_iter.init(this, read_params.read_orderby_key, read_params.read_orderby_key_reverse);
 

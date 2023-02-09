@@ -82,8 +82,6 @@ Status VScanNode::init(const TPlanNode& tnode, RuntimeState* state) {
 
 Status VScanNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(ExecNode::prepare(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
-
     RETURN_IF_ERROR(_init_profile());
 
     // init profile for runtime filter
@@ -100,9 +98,7 @@ Status VScanNode::open(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_CANCELLED(state);
     RETURN_IF_ERROR(ExecNode::open(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
 
-    RETURN_IF_ERROR(_acquire_runtime_filter());
     RETURN_IF_ERROR(_process_conjuncts());
     if (_eos) {
         return Status::OK();
@@ -123,7 +119,6 @@ Status VScanNode::get_next(RuntimeState* state, vectorized::Block* block, bool* 
     INIT_AND_SCOPE_GET_NEXT_SPAN(state->get_tracer(), _get_next_span, "VScanNode::get_next");
     SCOPED_TIMER(_get_next_timer);
     SCOPED_TIMER(_runtime_profile->total_time_counter());
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
     // in inverted index apply logic, in order to optimize query performance,
     // we built some temporary columns into block, these columns only used in scan node level,
     // remove them when query leave scan node to avoid other nodes use block->columns() to make a wrong decision
@@ -137,8 +132,14 @@ Status VScanNode::get_next(RuntimeState* state, vectorized::Block* block, bool* 
     }};
 
     if (state->is_cancelled()) {
-        _scanner_ctx->set_status_on_error(Status::Cancelled("query cancelled"));
-        return _scanner_ctx->status();
+        // ISSUE: https://github.com/apache/doris/issues/16360
+        // _scanner_ctx may be null here, see: `VScanNode::alloc_resource` (_eos == null)
+        if (_scanner_ctx) {
+            _scanner_ctx->set_status_on_error(Status::Cancelled("query cancelled"));
+            return _scanner_ctx->status();
+        } else {
+            return Status::Cancelled("query cancelled");
+        }
     }
 
     if (_eos) {

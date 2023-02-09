@@ -51,6 +51,6 @@ suite("test_external_catalog_icebergv2", "p2") {
         }
         sql """ use `tpch_1000_icebergv2`; """
         q01()
-        // q02()
+        q02()
     }
 }

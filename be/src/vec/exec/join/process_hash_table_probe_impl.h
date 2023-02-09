@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "common/status.h"
 #include "process_hash_table_probe.h"
 #include "vhash_join_node.h"
 
@@ -232,9 +233,10 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
                             ? decltype(key_getter.find_key(hash_table_ctx.hash_table, probe_index,
                                                            *_arena)) {nullptr, false}
                             : key_getter.find_key(hash_table_ctx.hash_table, probe_index, *_arena);
-            if (probe_index + PREFETCH_STEP < probe_rows)
+            if (probe_index + PREFETCH_STEP < probe_rows) {
                 key_getter.template prefetch<true>(hash_table_ctx.hash_table,
                                                    probe_index + PREFETCH_STEP, *_arena);
+            }
 
             if constexpr (JoinOpType == TJoinOp::LEFT_ANTI_JOIN ||
                           JoinOpType == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
@@ -414,9 +416,10 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
                             ? decltype(key_getter.find_key(hash_table_ctx.hash_table, probe_index,
                                                            *_arena)) {nullptr, false}
                             : key_getter.find_key(hash_table_ctx.hash_table, probe_index, *_arena);
-            if (probe_index + PREFETCH_STEP < probe_rows)
+            if (probe_index + PREFETCH_STEP < probe_rows) {
                 key_getter.template prefetch<true>(hash_table_ctx.hash_table,
                                                    probe_index + PREFETCH_STEP, *_arena);
+            }
             if (find_result.is_found()) {
                 auto& mapped = find_result.get_mapped();
                 auto origin_offset = current_offset;
@@ -493,7 +496,8 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
         if (output_block->rows()) {
             int result_column_id = -1;
             int orig_columns = output_block->columns();
-            (*_join_node->_vother_join_conjunct_ptr)->execute(output_block, &result_column_id);
+            RETURN_IF_ERROR((*_join_node->_vother_join_conjunct_ptr)
+                                    ->execute(output_block, &result_column_id));
 
             auto column = output_block->get_by_position(result_column_id).column;
             if constexpr (JoinOpType == TJoinOp::LEFT_OUTER_JOIN ||
@@ -653,6 +657,7 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
 
         auto& iter = hash_table_ctx.iter;
         auto block_size = 0;
+        auto& visited_iter = _join_node->_outer_join_pull_visited_iter;
 
         auto insert_from_hash_table = [&](uint8_t offset, uint32_t row_num) {
             block_size++;
@@ -661,6 +666,16 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
                 mcol[j + right_col_idx]->insert_from(column, row_num);
             }
         };
+
+        if (visited_iter.ok()) {
+            DCHECK((std::is_same_v<Mapped, RowRefListWithFlag>));
+            for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
+                insert_from_hash_table(visited_iter->block_offset, visited_iter->row_num);
+            }
+            if (!visited_iter.ok()) {
+                ++iter;
+            }
+        }
 
         for (; iter != hash_table_ctx.hash_table.end() && block_size < _batch_size; ++iter) {
             auto& mapped = iter->get_second();
@@ -672,9 +687,15 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
                         }
                     }
                 } else {
-                    for (auto it = mapped.begin(); it.ok(); ++it) {
-                        if constexpr (JoinOpType != TJoinOp::RIGHT_SEMI_JOIN) {
-                            insert_from_hash_table(it->block_offset, it->row_num);
+                    if constexpr (JoinOpType != TJoinOp::RIGHT_SEMI_JOIN) {
+                        visited_iter = mapped.begin();
+                        for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
+                            insert_from_hash_table(visited_iter->block_offset,
+                                                   visited_iter->row_num);
+                        }
+                        if (visited_iter.ok()) {
+                            // block_size >= _batch_size, quit for loop
+                            break;
                         }
                     }
                 }

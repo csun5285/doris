@@ -246,7 +246,6 @@ void ScannerScheduler::_scanner_scan(ScannerScheduler* scheduler, ScannerContext
                                      VScanner* scanner) {
     auto tracker_config = [&] {
         SCOPED_ATTACH_TASK(scanner->runtime_state());
-        SCOPED_CONSUME_MEM_TRACKER(scanner->runtime_state()->scanner_mem_tracker());
         Thread::set_self_name("_scanner_scan");
     };
 #if !defined(USE_BTHREAD_SCANNER)
@@ -306,7 +305,7 @@ void ScannerScheduler::_scanner_scan(ScannerScheduler* scheduler, ScannerContext
 
         auto block = ctx->get_free_block(&get_free_block);
         status = scanner->get_block(state, block, &eos);
-        VLOG_ROW << "VOlapScanNode input rows: " << block->rows() << ", eos: " << eos;
+        VLOG_ROW << "VScanNode input rows: " << block->rows() << ", eos: " << eos;
         // The VFileScanner for external table may try to open not exist files,
         // Because FE file cache for external table may out of date.
         // So, NOT_FOUND for VFileScanner is not a fail case.
@@ -314,7 +313,7 @@ void ScannerScheduler::_scanner_scan(ScannerScheduler* scheduler, ScannerContext
         if (!status.ok() && (typeid(*scanner) != typeid(doris::vectorized::VFileScanner) ||
                              (typeid(*scanner) == typeid(doris::vectorized::VFileScanner) &&
                               !status.is_not_found()))) {
-            LOG(WARNING) << "Scan thread read VOlapScanner failed: " << status.to_string();
+            LOG(WARNING) << "Scan thread read VScanner failed: " << status.to_string();
             // Add block ptr in blocks, prevent mem leak in read failed
             blocks.push_back(block);
             break;

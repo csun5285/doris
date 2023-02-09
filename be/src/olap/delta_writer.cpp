@@ -20,6 +20,7 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
+#include "exec/tablet_info.h"
 #include "olap/base_compaction.h"
 #include "olap/cumulative_compaction.h"
 #include "olap/data_dir.h"
@@ -336,11 +337,11 @@ void DeltaWriter::_reset_mem_table() {
     auto mem_table_insert_tracker = std::make_shared<MemTracker>(
             fmt::format("MemTableManualInsert:TabletId={}:MemTableNum={}#loadID={}",
                         std::to_string(tablet_id()), _mem_table_num, _load_id.to_string()),
-            nullptr, ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker_set());
+            ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker());
     auto mem_table_flush_tracker = std::make_shared<MemTracker>(
             fmt::format("MemTableHookFlush:TabletId={}:MemTableNum={}#loadID={}",
                         std::to_string(tablet_id()), _mem_table_num++, _load_id.to_string()),
-            nullptr, ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker_set());
+            ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker());
 #else
     auto mem_table_insert_tracker = std::make_shared<MemTracker>(
             fmt::format("MemTableManualInsert:TabletId={}:MemTableNum={}#loadID={}",
@@ -533,22 +534,22 @@ int64_t DeltaWriter::partition_id() const {
 }
 
 void DeltaWriter::_build_current_tablet_schema(int64_t index_id,
-                                               const POlapTableSchemaParam& ptable_schema_param,
+                                               const OlapTableSchemaParam* table_schema_param,
                                                const TabletSchema& ori_tablet_schema) {
     _tablet_schema->copy_from(ori_tablet_schema);
-
     // find the right index id
     int i = 0;
-    for (; i < ptable_schema_param.indexes_size(); i++) {
-        if (ptable_schema_param.indexes(i).id() == index_id) break;
+    auto indexes = table_schema_param->indexes();
+    for (; i < indexes.size(); i++) {
+        if (indexes[i]->index_id == index_id) {
+            break;
+        }
     }
 
-    if (ptable_schema_param.indexes_size() > 0 &&
-        ptable_schema_param.indexes(i).columns_desc_size() != 0 &&
-        ptable_schema_param.indexes(i).columns_desc(0).unique_id() >= 0) {
-        _tablet_schema->build_current_tablet_schema(index_id, ptable_schema_param.version(),
-                                                    ptable_schema_param.indexes(i),
-                                                    ori_tablet_schema);
+    if (indexes.size() > 0 && indexes[i]->columns.size() != 0 &&
+        indexes[i]->columns[0]->unique_id() >= 0) {
+        _tablet_schema->build_current_tablet_schema(index_id, table_schema_param->version(),
+                                                    indexes[i], ori_tablet_schema);
     }
     if (_tablet_schema->schema_version() > ori_tablet_schema.schema_version()) {
         _tablet->update_max_version_schema(_tablet_schema);

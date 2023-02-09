@@ -78,11 +78,6 @@ public:
     Status init(const TUniqueId& fragment_instance_id, const TQueryOptions& query_options,
                 const TQueryGlobals& query_globals, ExecEnv* exec_env);
 
-    // after SCOPED_ATTACH_TASK;
-    void init_scanner_mem_trackers() {
-        _scanner_mem_tracker = std::make_shared<MemTracker>(
-                fmt::format("Scanner#QueryId={}", print_id(_query_id)));
-    }
     // for ut and non-query.
     Status init_mem_trackers(const TUniqueId& query_id = TUniqueId());
 
@@ -102,6 +97,7 @@ public:
         return _query_options.abort_on_default_limit_exceeded;
     }
     int max_errors() const { return _query_options.max_errors; }
+    int query_timeout() const { return _query_options.query_timeout; }
     int max_io_buffers() const { return _query_options.max_io_buffers; }
     int num_scanner_threads() const { return _query_options.num_scanner_threads; }
     TQueryType::type query_type() const { return _query_options.query_type; }
@@ -115,7 +111,6 @@ public:
     const TUniqueId& fragment_instance_id() const { return _fragment_instance_id; }
     ExecEnv* exec_env() { return _exec_env; }
     std::shared_ptr<MemTrackerLimiter> query_mem_tracker() { return _query_mem_tracker; }
-    std::shared_ptr<MemTracker> scanner_mem_tracker() { return _scanner_mem_tracker; }
     ThreadResourceMgr::ResourcePool* resource_pool() { return _resource_pool; }
 
     void set_fragment_root_id(PlanNodeId id) {
@@ -418,8 +413,6 @@ private:
     static const int DEFAULT_BATCH_SIZE = 2048;
 
     std::shared_ptr<MemTrackerLimiter> _query_mem_tracker;
-    // Count the memory consumption of Scanner
-    std::shared_ptr<MemTracker> _scanner_mem_tracker;
 
     // put runtime state before _obj_pool, so that it will be deconstructed after
     // _obj_pool. Because some of object in _obj_pool will use profile when deconstructing.
