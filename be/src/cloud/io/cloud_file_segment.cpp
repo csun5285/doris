@@ -126,10 +126,14 @@ bool FileSegment::is_downloader_impl(std::lock_guard<std::mutex>& /* segment_loc
 
 Status FileSegment::append(Slice data) {
     DCHECK(data.size != 0) << "Writing zero size is not allowed";
-
+    Status st = Status::OK();
     if (!_cache_writer) {
         auto download_path = get_path_in_local_cache();
-        RETURN_IF_ERROR(global_local_filesystem()->create_file(download_path, &_cache_writer));
+        st = global_local_filesystem()->create_file(download_path, &_cache_writer);
+        if (!st) {
+            _cache_writer.reset();
+            return st;
+        }
     }
 
     RETURN_IF_ERROR(_cache_writer->append(data));
@@ -137,7 +141,7 @@ Status FileSegment::append(Slice data) {
     std::lock_guard download_lock(_download_mutex);
 
     _downloaded_size += data.size;
-    return Status::OK();
+    return st;
 }
 
 std::string FileSegment::get_path_in_local_cache() const {

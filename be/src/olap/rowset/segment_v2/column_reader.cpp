@@ -770,7 +770,7 @@ Status FileColumnIterator::get_all_contiguous_pages(
     _enable_prefetch = true;
     for (auto pair : row_ranges) {
         OrdinalPageIndexIterator iter;
-        _reader->seek_at_or_before(pair.first, &iter);
+        RETURN_IF_ERROR(_reader->seek_at_or_before(pair.first, &iter));
         while (iter.valid()) {
             if (_page_iters.empty() || _page_iters.back().page_index() != iter.page_index()) {
                 _page_iters.push_back(iter);
