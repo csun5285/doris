@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,9 +88,29 @@ public class CloudLoadAction extends RestBaseController {
         return mat.find();
     }
 
+    private static Map<String, String> getHeadersInfo(HttpServletRequest request) {
+        Map<String, String> map = new HashMap<>();
+        try {
+            Enumeration<String> headerNames = request.getHeaderNames();
+            if (headerNames == null) {
+                return map;
+            }
+            while (headerNames.hasMoreElements()) {
+                String key = headerNames.nextElement();
+                String value = request.getHeader(key);
+                map.put(key, value);
+            }
+            return map;
+        } catch (Exception ignore) {
+            LOG.warn("get request header info failed.");
+        }
+        return map;
+    }
+
     // curl  -u user:password -H "fileName: file" -T file -L http://127.0.0.1:12104/copy/upload
     @RequestMapping(path = "/upload", method = RequestMethod.PUT)
     public Object copy(HttpServletRequest request, HttpServletResponse response) {
+        LOG.info("upload request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
             executeCheckPassword(request, response);
@@ -159,6 +180,7 @@ public class CloudLoadAction extends RestBaseController {
 
     @RequestMapping(path = "/query", method = RequestMethod.POST)
     public Object loadQuery(HttpServletRequest request, HttpServletResponse response) throws InterruptedException {
+        LOG.info("query request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
         String postContent = HttpUtil.getBody(request);
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
