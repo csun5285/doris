@@ -637,19 +637,6 @@ void OlapScanner::update_counter() {
     COUNTER_UPDATE(_parent->_filtered_segment_counter, stats.filtered_segment_number);
     COUNTER_UPDATE(_parent->_total_segment_counter, stats.total_segment_number);
 
-    COUNTER_UPDATE(_parent->_num_io_total, stats.file_cache_stats.num_io_total);
-    COUNTER_UPDATE(_parent->_num_io_hit_cache, stats.file_cache_stats.num_io_hit_cache);
-    COUNTER_UPDATE(_parent->_num_io_bytes_read_total,
-                   stats.file_cache_stats.num_io_bytes_read_total);
-    COUNTER_UPDATE(_parent->_num_io_bytes_read_from_file_cache,
-                   stats.file_cache_stats.num_io_bytes_read_from_file_cache);
-    COUNTER_UPDATE(_parent->_num_io_bytes_read_from_write_cache,
-                   stats.file_cache_stats.num_io_bytes_read_from_write_cache);
-    COUNTER_UPDATE(_parent->_num_io_written_in_file_cache,
-                   stats.file_cache_stats.num_io_written_in_file_cache);
-    COUNTER_UPDATE(_parent->_num_io_bytes_written_in_file_cache,
-                   stats.file_cache_stats.num_io_bytes_written_in_file_cache);
-
     DorisMetrics::instance()->query_scan_bytes->increment(_compressed_bytes_read);
     DorisMetrics::instance()->query_scan_rows->increment(_raw_rows_read);
 

@@ -310,6 +310,7 @@ message TabletMetaPB {
     optional int64 index_id = 25;
     optional bool is_in_memory = 26 [default=false];
     optional bool is_persistent = 27 [default=false];
+    optional string table_name = 28;
 }
 
 message OLAPRawDeltaHeaderMessage {

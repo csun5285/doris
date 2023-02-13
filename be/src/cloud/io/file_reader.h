@@ -45,6 +45,7 @@ struct IOState {
     bool is_persistent = false;
     bool use_disposable_cache = false;
     bool read_segmeng_index = false;
+    bool read_from_tmp_file = false;
 };
 class FileReader {
 public:

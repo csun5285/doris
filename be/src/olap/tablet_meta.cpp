@@ -248,7 +248,8 @@ TabletMeta::TabletMeta(const TabletMeta& b)
           _enable_unique_key_merge_on_write(b._enable_unique_key_merge_on_write),
           _delete_bitmap(b._delete_bitmap),
           _is_in_memory(b._is_in_memory),
-          _is_persistent(b._is_persistent) {};
+          _is_persistent(b._is_persistent),
+          _table_name(b._table_name) {};
 
 void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tcolumn,
                                           ColumnPB* column) {
@@ -457,6 +458,7 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     _partition_id = tablet_meta_pb.partition_id();
     _tablet_id = tablet_meta_pb.tablet_id();
     _replica_id = tablet_meta_pb.replica_id();
+    _table_name = tablet_meta_pb.table_name();
     _schema_hash = tablet_meta_pb.schema_hash();
     _shard_id = tablet_meta_pb.shard_id();
     _creation_time = tablet_meta_pb.creation_time();
@@ -546,6 +548,7 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
     tablet_meta_pb->set_index_id(index_id());
     tablet_meta_pb->set_partition_id(partition_id());
     tablet_meta_pb->set_tablet_id(tablet_id());
+    tablet_meta_pb->set_table_name(table_name());
     tablet_meta_pb->set_replica_id(replica_id());
     tablet_meta_pb->set_schema_hash(schema_hash());
     tablet_meta_pb->set_shard_id(shard_id());

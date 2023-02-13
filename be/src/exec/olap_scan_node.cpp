@@ -172,18 +172,6 @@ void OlapScanNode::_init_counter(RuntimeState* state) {
     // time of node to wait for batch/block queue
     _olap_wait_batch_queue_timer = ADD_TIMER(_runtime_profile, "BatchQueueWaitTime");
 
-    _num_io_total = ADD_COUNTER(_scanner_profile, "NumIOTotal", TUnit::UNIT);
-    _num_io_hit_cache = ADD_COUNTER(_scanner_profile, "NumIOHitCache", TUnit::UNIT);
-    _num_io_bytes_read_total = ADD_COUNTER(_scanner_profile, "NumIOBytesReadTotal", TUnit::UNIT);
-    _num_io_bytes_read_from_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesReadFromFileCache", TUnit::UNIT);
-    _num_io_bytes_read_from_write_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesReadFromWriteCache", TUnit::UNIT);
-    _num_io_written_in_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOWrittenInFileCache", TUnit::UNIT);
-    _num_io_bytes_written_in_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesWrittenInFileCache", TUnit::UNIT);
-
     // for the purpose of debugging or profiling
     for (int i = 0; i < GENERAL_DEBUG_COUNT; ++i) {
         char name[64];

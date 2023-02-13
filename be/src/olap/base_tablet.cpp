@@ -46,6 +46,10 @@ BaseTablet::BaseTablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir)
     INT_COUNTER_METRIC_REGISTER(_metric_entity, query_scan_bytes);
     INT_COUNTER_METRIC_REGISTER(_metric_entity, query_scan_rows);
     INT_COUNTER_METRIC_REGISTER(_metric_entity, query_scan_count);
+    std::lock_guard lock(s_mtx);
+    if (s_table_id_to_table_name.find(_tablet_meta->table_id()) != s_table_id_to_table_name.end()) {
+        s_table_id_to_table_name.insert(std::make_pair(_tablet_meta->table_id(), _tablet_meta->table_name()));
+    }
 }
 
 BaseTablet::~BaseTablet() {

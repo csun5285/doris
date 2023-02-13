@@ -30,6 +30,7 @@
 #include "olap/olap_common.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
+#include "util/runtime_profile.h"
 #include "vec/common/sip_hash.h"
 
 namespace doris {
@@ -97,7 +98,6 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         return _remote_file_reader->read_at(offset, result, bytes_read, state);
     }
     ReadStatistics stats;
-    stats.bytes_read = bytes_req;
     // if state == nullptr, the method is called for read footer
     // if state->read_segmeng_index, read all the end of file
     size_t align_left = offset, align_size = size() - offset;
@@ -113,16 +113,27 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
             cache->get_or_set(_cache_key, align_left, align_size, is_persistent, query_id);
     std::vector<FileSegmentSPtr> empty_segments;
     for (auto& segment : holder.file_segments) {
-        if (segment->state() == FileSegment::State::EMPTY) {
+        switch (segment->state()) {
+        case FileSegment::State::EMPTY:
             segment->get_or_set_downloader();
             if (segment->is_downloader()) {
                 empty_segments.push_back(segment);
             }
-        } else if (segment->state() == FileSegment::State::SKIP_CACHE) {
+            stats.hit_cache = false;
+            break;
+        case FileSegment::State::SKIP_CACHE:
             empty_segments.push_back(segment);
-            stats.bytes_skip_cache += segment->range().size();
+            stats.hit_cache = false;
+            stats.skip_cache = true;
+            break;
+        case FileSegment::State::DOWNLOADING:
+            stats.hit_cache = false;
+            break;
+        case FileSegment::State::DOWNLOADED:
+            break;
         }
     }
+    stats.bytes_read += bytes_req;
 
     size_t empty_start = 0;
     size_t empty_end = 0;
@@ -131,18 +142,26 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         empty_end = empty_segments.back()->range().right;
         size_t size = empty_end - empty_start + 1;
         std::unique_ptr<char[]> buffer(new char[size]);
-        RETURN_IF_ERROR(
-                _remote_file_reader->read_at(empty_start, Slice(buffer.get(), size), &size, state));
+        {
+            SCOPED_RAW_TIMER(&stats.remote_read_timer);
+            RETURN_IF_ERROR(_remote_file_reader->read_at(empty_start, Slice(buffer.get(), size),
+                                                         &size, state));
+        }
+        if (state && state->read_from_tmp_file) {
+            stats.hit_cache = true;
+            stats.local_read_timer = stats.remote_read_timer;
+            stats.remote_read_timer = 0;
+        }
         for (auto& segment : empty_segments) {
             if (segment->state() == FileSegment::State::SKIP_CACHE) {
                 continue;
             }
+            SCOPED_RAW_TIMER(&stats.local_write_timer);
             char* cur_ptr = buffer.get() + segment->range().left - empty_start;
             size_t segment_size = segment->range().size();
             RETURN_IF_ERROR(segment->append(Slice(cur_ptr, segment_size)));
             RETURN_IF_ERROR(segment->finalize_write());
-            stats.write_in_file_cache++;
-            stats.bytes_write_in_file_cache += segment_size;
+            stats.bytes_write_into_file_cache += segment_size;
         }
         // copy from memory directly
         size_t right_offset = offset + result.size - 1;
@@ -154,8 +173,6 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
             size_t copy_size = copy_right_offset - copy_left_offset + 1;
             memcpy(dst, src, copy_size);
         }
-    } else {
-        stats.hit_cache = true;
     }
 
     size_t current_offset = offset;
@@ -180,25 +197,33 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         FileSegment::State segment_state;
         int64_t wait_time = 0;
         static int64_t MAX_WAIT_TIME = 10;
-        do {
-            segment_state = segment->wait();
-            if (segment_state == FileSegment::State::DOWNLOADED) {
-                break;
-            }
-            if (segment_state != FileSegment::State::DOWNLOADING) {
-                return Status::IOError(
-                        "File Cache State is {}, the cache downloader encounters an error, please "
-                        "retry it",
-                        segment_state);
-            }
-        } while (++wait_time < MAX_WAIT_TIME);
+        if (segment->state() != FileSegment::State::DOWNLOADED) {
+            do {
+                {
+                    SCOPED_RAW_TIMER(&stats.remote_read_timer);
+                    segment_state = segment->wait();
+                }
+                if (segment_state == FileSegment::State::DOWNLOADED) {
+                    break;
+                }
+                if (segment_state != FileSegment::State::DOWNLOADING) {
+                    return Status::IOError(
+                            "File Cache State is {}, the cache downloader encounters an error, "
+                            "please "
+                            "retry it",
+                            segment_state);
+                }
+            } while (++wait_time < MAX_WAIT_TIME);
+        }
         if (UNLIKELY(wait_time) == MAX_WAIT_TIME) {
             return Status::IOError("Waiting too long for the download to complete");
         }
         size_t file_offset = current_offset - left;
-        RETURN_IF_ERROR(segment->read_at(Slice(result.data + (current_offset - offset), read_size),
-                                         file_offset));
-        stats.bytes_read_from_file_cache += read_size;
+        {
+            SCOPED_RAW_TIMER(&stats.local_read_timer);
+            RETURN_IF_ERROR(segment->read_at(
+                    Slice(result.data + (current_offset - offset), read_size), file_offset));
+        }
         *bytes_read += read_size;
         current_offset = right + 1;
     }
@@ -216,17 +241,18 @@ void CachedRemoteFileReader::_update_state(const ReadStatistics& read_stats, IOS
         return;
     }
     auto stats = state->stats;
-    stats->file_cache_stats.num_io_total++;
-    stats->file_cache_stats.num_io_bytes_read_total += read_stats.bytes_read;
-    stats->file_cache_stats.num_io_bytes_written_in_file_cache +=
-            read_stats.bytes_write_in_file_cache;
     if (read_stats.hit_cache) {
-        stats->file_cache_stats.num_io_hit_cache++;
+        stats->file_cache_stats.num_local_io_total++;
+        stats->file_cache_stats.bytes_read_from_local += read_stats.bytes_read;
+    } else {
+        stats->file_cache_stats.num_remote_io_total++;
+        stats->file_cache_stats.bytes_read_from_remote += read_stats.bytes_read;
     }
-    stats->file_cache_stats.num_io_bytes_read_from_file_cache +=
-            read_stats.bytes_read_from_file_cache;
-    stats->file_cache_stats.num_io_written_in_file_cache += read_stats.write_in_file_cache;
-    stats->file_cache_stats.num_io_bytes_skip_cache += read_stats.bytes_skip_cache;
+    stats->file_cache_stats.remote_io_timer += read_stats.remote_read_timer;
+    stats->file_cache_stats.local_io_timer += read_stats.local_read_timer;
+    stats->file_cache_stats.num_skip_cache_io_total += read_stats.skip_cache ? 1 : 0;
+    stats->file_cache_stats.bytes_write_into_cache += read_stats.bytes_write_into_file_cache;
+    stats->file_cache_stats.write_cache_io_timer += read_stats.local_write_timer;
 }
 
 } // namespace io

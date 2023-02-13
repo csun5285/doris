@@ -17,13 +17,8 @@ namespace doris {
 namespace io {
 
 struct AtomicStatistics {
-    std::atomic<int64_t> num_io_total = 0;
-    std::atomic<int64_t> num_io_hit_cache = 0;
-    std::atomic<int64_t> num_io_bytes_read_total = 0;
-    std::atomic<int64_t> num_io_bytes_read_from_file_cache = 0;
-    std::atomic<int64_t> num_io_bytes_read_from_write_cache = 0;
-    std::atomic<int64_t> num_io_written_in_file_cache = 0;
-    std::atomic<int64_t> num_io_bytes_written_in_file_cache = 0;
+    std::atomic<int64_t> num_io_bytes_read_from_cache = 0;
+    std::atomic<int64_t> num_io_bytes_read_from_remote = 0;
 };
 
 struct FileCacheProfile;
@@ -48,13 +43,9 @@ struct FileCacheMetric {
     int64_t table_id = -1;
     int64_t partition_id = -1;
     std::shared_ptr<MetricEntity> entity;
-    IntAtomicCounter* file_cache_num_io_total = nullptr;
-    IntAtomicCounter* file_cache_num_io_hit_cache = nullptr;
-    IntAtomicCounter* file_cache_num_io_bytes_read_total = nullptr;
-    IntAtomicCounter* file_cache_num_io_bytes_read_from_file_cache = nullptr;
-    IntAtomicCounter* file_cache_num_io_bytes_read_from_write_cache = nullptr;
-    IntAtomicCounter* file_cache_num_io_written_in_file_cache = nullptr;
-    IntAtomicCounter* file_cache_num_io_bytes_written_in_file_cache = nullptr;
+    IntAtomicCounter* num_io_bytes_read_total = nullptr;
+    IntAtomicCounter* num_io_bytes_read_from_cache = nullptr;
+    IntAtomicCounter* num_io_bytes_read_from_remote = nullptr;
 };
 
 struct FileCacheProfile {
@@ -90,8 +81,8 @@ struct FileCacheProfile {
     std::unordered_map<int64_t, std::shared_ptr<FileCacheMetric>> _table_metrics;
     std::unordered_map<int64_t, std::unordered_map<int64_t, std::shared_ptr<FileCacheMetric>>>
             _partition_metrics;
-    FileCacheStatistics report(int64_t table_id);
-    FileCacheStatistics report(int64_t table_id, int64_t partition_id);
+    std::shared_ptr<AtomicStatistics> report(int64_t table_id);
+    std::shared_ptr<AtomicStatistics> report(int64_t table_id, int64_t partition_id);
 };
 
 } // namespace io

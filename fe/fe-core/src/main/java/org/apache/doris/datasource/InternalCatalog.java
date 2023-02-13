@@ -1537,7 +1537,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getCopiedIndexes(), singlePartitionDesc.isInMemory(), olapTable.getStorageFormat(),
                         singlePartitionDesc.getTabletType(), olapTable.getCompressionType(),
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
-                        olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema());
+                        olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
+                        olapTable.getName());
                 commitCloudPartition(olapTable.getId(), partitionIds);
             }
 
@@ -2232,7 +2233,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionInfo.getReplicaAllocation(partitionId), versionInfo, bfColumns, bfFpp, tabletIdSet,
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
-                        idGeneratorBuffer, olapTable.disableAutoCompaction(), isPersistent, isDynamicSchema);
+                            idGeneratorBuffer, olapTable.disableAutoCompaction(), isPersistent, isDynamicSchema);
                 } else {
                     prepareCloudMaterializedIndex(olapTable, olapTable.getIndexIdList(), 0);
                     partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(),
@@ -2242,7 +2243,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionInfo.getReplicaAllocation(partitionId), versionInfo, bfColumns, bfFpp, tabletIdSet,
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
-                        isPersistent, isDynamicSchema);
+                        isPersistent, isDynamicSchema, olapTable.getName());
                     commitCloudMaterializedIndex(olapTable, olapTable.getIndexIdList());
                 }
                 olapTable.addPartition(partition);
@@ -2310,7 +2311,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                                 bfFpp, tabletIdSet, olapTable.getCopiedIndexes(), isInMemory, storageFormat,
                                 partitionInfo.getTabletType(entry.getValue()), compressionType,
                                 olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
-                                storagePolicy, isPersistent, isDynamicSchema);
+                                storagePolicy, isPersistent, isDynamicSchema,  olapTable.getName());
                         olapTable.addPartition(partition);
                         continue;
                     }
@@ -2742,7 +2743,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                             copiedTbl.getPartitionInfo().getTabletType(oldPartitionId),
                             copiedTbl.getCompressionType(), copiedTbl.getDataSortInfo(),
                             copiedTbl.getEnableUniqueKeyMergeOnWrite(), olapTable.getStoragePolicy(),
-                            copiedTbl.isPersistent(), olapTable.isDynamicSchema());
+                            copiedTbl.isPersistent(), olapTable.isDynamicSchema(), olapTable.getName());
                     newPartitions.add(newPartition);
                     continue;
                 }
@@ -3725,13 +3726,14 @@ public class InternalCatalog implements CatalogIf<Database> {
                 Set<String> bfColumns, double bfFpp, List<Index> indexes, List<Column> schemaColumns,
                 DataSortInfo dataSortInfo, TCompressionType compressionType, String storagePolicy,
                 boolean isInMemory, boolean isPersistent, boolean isShadow,
-                boolean isDynamicSchema) throws DdlException {
+                boolean isDynamicSchema, String tableName) throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
         builder.setIndexId(indexId);
         builder.setPartitionId(partitionId);
         builder.setTabletId(tablet.getId());
         builder.setSchemaHash(schemaHash);
+        builder.setTableName(tableName);
         builder.setCreationTime(System.currentTimeMillis() / 1000);
         builder.setCumulativeLayerPoint(-1);
         builder.setTabletState(isShadow ? OlapFile.TabletStatePB.PB_NOTREADY : OlapFile.TabletStatePB.PB_RUNNING);
@@ -3840,7 +3842,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             Long versionInfo, Set<String> bfColumns, double bfFpp, Set<Long> tabletIdSet, List<Index> indexes,
             boolean isInMemory, TStorageFormat storageFormat, TTabletType tabletType, TCompressionType compressionType,
             DataSortInfo dataSortInfo, boolean enableUniqueKeyMergeOnWrite, String storagePolicy,
-            boolean isPersistent, boolean isDynamicSchema) throws DdlException {
+            boolean isPersistent, boolean isDynamicSchema, String tableName) throws DdlException {
         // create base index first.
         Preconditions.checkArgument(baseIndexId != -1);
         MaterializedIndex baseIndex = new MaterializedIndex(baseIndexId, IndexState.NORMAL);
@@ -3892,7 +3894,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 OlapFile.TabletMetaPB.Builder builder = createCloudTabletMetaBuilder(tableId, indexId,
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
-                        storagePolicy, isInMemory, isPersistent, false, isDynamicSchema);
+                        storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName);
                 requestBuilder.addTabletMetas(builder);
             }
 

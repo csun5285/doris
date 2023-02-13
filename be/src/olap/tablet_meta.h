@@ -228,6 +228,8 @@ public:
     void set_is_in_memory(bool is_in_memory) { _is_in_memory = is_in_memory; }
     void set_is_persistent(bool is_persistent) { _is_persistent = is_persistent; }
 
+    const std::string& table_name() const { return _table_name; }
+
 private:
     Status _save_meta(DataDir* data_dir);
 
@@ -272,6 +274,8 @@ private:
 
     bool _is_in_memory = false;
     bool _is_persistent = false;
+
+    std::string _table_name;
 
     mutable std::shared_mutex _meta_lock;
 };

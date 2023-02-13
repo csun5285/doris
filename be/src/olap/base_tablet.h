@@ -53,7 +53,7 @@ public:
     // Returns a string can be used to uniquely identify a tablet.
     // The result string will often be printed to the log.
     const std::string full_name() const;
-    int64_t index_id() const; 
+    int64_t index_id() const;
     int64_t partition_id() const;
     int64_t tablet_id() const;
     int64_t replica_id() const;
@@ -93,6 +93,21 @@ public:
 
 private:
     DISALLOW_COPY_AND_ASSIGN(BaseTablet);
+
+private:
+    static inline std::unordered_map<int64_t, std::string> s_table_id_to_table_name;
+    static inline std::mutex s_mtx;
+
+public:
+    static const std::string& get_table_name(int64_t table_id) {
+        std::lock_guard lock(s_mtx);
+        auto iter = s_table_id_to_table_name.find(table_id);
+        if (iter == s_table_id_to_table_name.end()) {
+            static std::string default_table_name = "UNKNOWN";
+            return default_table_name;
+        }
+        return iter->second;
+    }
 };
 
 inline DataDir* BaseTablet::data_dir() const {
