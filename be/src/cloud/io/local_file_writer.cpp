@@ -120,7 +120,7 @@ Status LocalFileWriter::append(const Slice& data) {
 
 Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
     DCHECK(!_closed);
-    if (!_closed) [[unlikely]] {
+    if (_closed) [[unlikely]] {
         return Status::IOError("The writer cannot append, fd={}, closed={}, path={}", _fd, _closed,
                                path().native());
     }
