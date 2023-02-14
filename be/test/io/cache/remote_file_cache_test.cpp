@@ -25,8 +25,8 @@
 
 #include "gen_cpp/olap_file.pb.h"
 #include "gtest/gtest.h"
-#include "io/fs/s3_common.h"
-#include "io/fs/s3_file_system.h"
+#include "cloud/io/s3_common.h"
+#include "cloud/io/s3_file_system.h"
 #include "olap/comparison_predicate.h"
 #include "olap/data_dir.h"
 #include "olap/options.h"

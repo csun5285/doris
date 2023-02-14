@@ -25,9 +25,9 @@
 #include <memory>
 #include <vector>
 
-#include "io/fs/file_system.h"
-#include "io/fs/file_writer.h"
-#include "io/fs/local_file_system.h"
+#include "cloud/io/file_system.h"
+#include "cloud/io/file_writer.h"
+#include "cloud/io/local_file_system.h"
 #include "olap/comparison_predicate.h"
 #include "olap/data_dir.h"
 #include "olap/in_list_predicate.h"

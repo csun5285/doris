@@ -78,7 +78,6 @@ public class BrokerLoadJob extends BulkLoadJob {
     private RuntimeProfile jobProfile;
     // If set to true, the profile of load job with be pushed to ProfileManager
     private boolean enableProfile = false;
-    private TUniqueId queryId;
 
     private String cluster = null;
     private String qualifiedUser = null;
@@ -115,10 +114,6 @@ public class BrokerLoadJob extends BulkLoadJob {
                 }
                 qualifiedUser = context.getQualifiedUser();
             }
-        }
-
-        if (ConnectContext.get() != null) {
-            queryId = ConnectContext.get().queryId();
         }
     }
 
@@ -242,7 +237,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                 UUID uuid = UUID.randomUUID();
                 TUniqueId loadId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
 
-                LOG.info("sqlQueryId={}, loadId={}", DebugUtil.printId(queryId), DebugUtil.printId(loadId));
+                LOG.info("sqlQueryId={}, loadId={}", queryId, DebugUtil.printId(loadId));
                 if (Config.isNotCloudMode()) {
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
                             attachment.getFileNumByTable(aggKey), getUserInfo());
