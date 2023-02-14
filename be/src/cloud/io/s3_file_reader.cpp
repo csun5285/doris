@@ -70,9 +70,12 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
     FileReaderSPtr _cache_file_reader = TmpFileMgr::instance()->lookup_tmp_file(_local_path);
     if (_cache_file_reader) {
         if (state) {
-            state->stats->file_cache_stats.num_io_bytes_read_from_write_cache += result.size;
+            state->read_from_tmp_file = true;
         }
         return _cache_file_reader->read_at(offset, result, bytes_read, state);
+    }
+    if (state) {
+        state->read_from_tmp_file = false;
     }
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",

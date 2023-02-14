@@ -17,10 +17,11 @@
 
 #include "vec/exec/scan/new_olap_scanner.h"
 
+#include "cloud/utils.h"
 #include "olap/storage_engine.h"
+#include "util/runtime_profile.h"
 #include "vec/exec/scan/new_olap_scan_node.h"
 #include "vec/olap/block_reader.h"
-#include "cloud/utils.h"
 
 namespace doris::vectorized {
 
@@ -119,7 +120,7 @@ Status NewOlapScanner::prepare(const TPaloScanRange& scan_range,
             std::set<int32_t> exclude_read_column;
             if (_output_tuple_desc->slots().back()->col_name() == BeConsts::ROWID_COL) {
                 // inject ROWID_COL
-                TabletColumn rowid_column; 
+                TabletColumn rowid_column;
                 rowid_column.set_is_nullable(false);
                 rowid_column.set_name(BeConsts::ROWID_COL);
                 // avoid column reader init error
@@ -131,9 +132,9 @@ Status NewOlapScanner::prepare(const TPaloScanRange& scan_range,
             }
         }
 
-	// Initialize tablet_reader_params
+        // Initialize tablet_reader_params
         RETURN_IF_ERROR(_init_tablet_reader_params(key_ranges, filters, filter_predicates,
-                                                       function_filters));
+                                                   function_filters));
     }
 
     return Status::OK();
@@ -199,14 +200,15 @@ Status NewOlapScanner::_init_tablet_reader_params(
                 real_parent->_olap_scan_node.push_down_agg_type_opt;
     }
     _tablet_reader_params.version = Version(0, _version);
-    _tablet_reader_params.remaining_vconjunct_root = (_vconjunct_ctx == nullptr) ? nullptr : _vconjunct_ctx->root();
+    _tablet_reader_params.remaining_vconjunct_root =
+            (_vconjunct_ctx == nullptr) ? nullptr : _vconjunct_ctx->root();
     _tablet_reader_params.output_columns = ((NewOlapScanNode*)_parent)->_maybe_read_column_ids;
 
     // Condition
     for (auto& filter : filters) {
         if (is_match_condition(filter.condition_op) &&
             !_tablet_schema->has_inverted_index(
-                _tablet_schema->column(filter.column_name).unique_id())) {
+                    _tablet_schema->column(filter.column_name).unique_id())) {
             return Status::NotSupported("Match query must with inverted index, column `" +
                                         filter.column_name + "` is not inverted index column");
         }
@@ -217,15 +219,15 @@ Status NewOlapScanner::_init_tablet_reader_params(
         for (auto& filter : filters) {
             if (is_match_condition(filter.condition_op) &&
                 !_tablet_schema->has_inverted_index(
-                    _tablet_schema->column(filter.column_name).unique_id())) {
+                        _tablet_schema->column(filter.column_name).unique_id())) {
                 return Status::NotSupported("Match query must with inverted index, column `" +
                                             filter.column_name + "` is not inverted index column");
             }
         }
     }
     std::copy(_compound_filters.cbegin(), _compound_filters.cend(),
-            std::inserter(_tablet_reader_params.compound_conditions,
-                        _tablet_reader_params.compound_conditions.begin()));
+              std::inserter(_tablet_reader_params.compound_conditions,
+                            _tablet_reader_params.compound_conditions.begin()));
 
     std::copy(filter_predicates.bloom_filters.cbegin(), filter_predicates.bloom_filters.cend(),
               std::inserter(_tablet_reader_params.bloom_filters,
@@ -485,25 +487,26 @@ void NewOlapScanner::_update_counters_before_close() {
     COUNTER_UPDATE(olap_parent->_inverted_index_filter_counter, stats.rows_inverted_index_filtered);
     COUNTER_UPDATE(olap_parent->_inverted_index_filter_timer, stats.inverted_index_filter_timer);
 
-    COUNTER_UPDATE(olap_parent->_output_index_return_column_timer, stats.output_index_return_column_timer);
+    COUNTER_UPDATE(olap_parent->_output_index_return_column_timer,
+                   stats.output_index_return_column_timer);
 
     COUNTER_UPDATE(olap_parent->_filtered_segment_counter, stats.filtered_segment_number);
     COUNTER_UPDATE(olap_parent->_total_segment_counter, stats.total_segment_number);
 
-    COUNTER_UPDATE(olap_parent->_num_io_total, stats.file_cache_stats.num_io_total);
-    COUNTER_UPDATE(olap_parent->_num_io_hit_cache, stats.file_cache_stats.num_io_hit_cache);
-    COUNTER_UPDATE(olap_parent->_num_io_bytes_read_total,
-                   stats.file_cache_stats.num_io_bytes_read_total);
-    COUNTER_UPDATE(olap_parent->_num_io_bytes_read_from_file_cache,
-                   stats.file_cache_stats.num_io_bytes_read_from_file_cache);
-    COUNTER_UPDATE(olap_parent->_num_io_bytes_read_from_write_cache,
-                   stats.file_cache_stats.num_io_bytes_read_from_write_cache);
-    COUNTER_UPDATE(olap_parent->_num_io_written_in_file_cache,
-                   stats.file_cache_stats.num_io_written_in_file_cache);
-    COUNTER_UPDATE(olap_parent->_num_io_bytes_written_in_file_cache,
-                   stats.file_cache_stats.num_io_bytes_written_in_file_cache);
-    COUNTER_UPDATE(olap_parent->_num_io_bytes_skip_cache,
-                   stats.file_cache_stats.num_io_bytes_skip_cache);
+    COUNTER_UPDATE(olap_parent->_num_local_io_total, stats.file_cache_stats.num_local_io_total);
+    COUNTER_UPDATE(olap_parent->_num_remote_io_total, stats.file_cache_stats.num_remote_io_total);
+    COUNTER_UPDATE(olap_parent->_local_io_timer, stats.file_cache_stats.local_io_timer);
+    COUNTER_UPDATE(olap_parent->_remote_io_timer, stats.file_cache_stats.remote_io_timer);
+    COUNTER_UPDATE(olap_parent->_write_cache_io_timer, stats.file_cache_stats.write_cache_io_timer);
+    COUNTER_UPDATE(olap_parent->_bytes_write_into_cache,
+                   stats.file_cache_stats.bytes_write_into_cache);
+    COUNTER_UPDATE(olap_parent->_num_skip_cache_io_total,
+                   stats.file_cache_stats.num_skip_cache_io_total);
+    COUNTER_UPDATE(olap_parent->_bytes_scanned_from_cache,
+                   stats.file_cache_stats.bytes_read_from_local);
+    COUNTER_UPDATE(olap_parent->_bytes_scanned_from_remote,
+                   stats.file_cache_stats.bytes_read_from_remote);
+    COUNTER_UPDATE(olap_parent->_load_segments_timer, stats.load_segments_timer);
 
     // Update metrics
     DorisMetrics::instance()->query_scan_bytes->increment(_compressed_bytes_read);

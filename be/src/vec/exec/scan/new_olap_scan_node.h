@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "util/runtime_profile.h"
 #include "vec/exec/scan/vscan_node.h"
 
 namespace doris::vectorized {
@@ -153,16 +154,18 @@ private:
     RuntimeProfile::Counter* _general_debug_timer[GENERAL_DEBUG_COUNT] = {};
 
     // file cache
-    RuntimeProfile::Counter* _num_io_total = nullptr;
-    RuntimeProfile::Counter* _num_io_hit_cache = nullptr;
-    RuntimeProfile::Counter* _num_io_bytes_read_total = nullptr;
-    RuntimeProfile::Counter* _num_io_bytes_read_from_file_cache = nullptr;
-    RuntimeProfile::Counter* _num_io_bytes_read_from_write_cache = nullptr;
-    RuntimeProfile::Counter* _num_io_written_in_file_cache = nullptr;
-    RuntimeProfile::Counter* _num_io_bytes_written_in_file_cache = nullptr;
-    RuntimeProfile::Counter* _num_io_bytes_skip_cache = nullptr;
+    RuntimeProfile::Counter* _num_local_io_total = nullptr;
+    RuntimeProfile::Counter* _num_remote_io_total = nullptr;
+    RuntimeProfile::Counter* _local_io_timer = nullptr;
+    RuntimeProfile::Counter* _bytes_scanned_from_cache = nullptr;
+    RuntimeProfile::Counter* _bytes_scanned_from_remote = nullptr;
+    RuntimeProfile::Counter* _remote_io_timer = nullptr;
+    RuntimeProfile::Counter* _write_cache_io_timer = nullptr;
+    RuntimeProfile::Counter* _bytes_write_into_cache = nullptr;
+    RuntimeProfile::Counter* _num_skip_cache_io_total = nullptr;
 
     RuntimeProfile::Counter* _cloud_get_rowset_version_timer = nullptr;
+    RuntimeProfile::Counter* _load_segments_timer = nullptr;
 };
 
 } // namespace doris::vectorized

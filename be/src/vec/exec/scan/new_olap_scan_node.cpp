@@ -17,6 +17,7 @@
 
 #include "vec/exec/scan/new_olap_scan_node.h"
 
+#include "cloud/utils.h"
 #include "common/status.h"
 #include "olap/storage_engine.h"
 #include "olap/tablet.h"
@@ -24,7 +25,6 @@
 #include "vec/columns/column_const.h"
 #include "vec/exec/scan/new_olap_scanner.h"
 #include "vec/exprs/vslot_ref.h"
-#include "cloud/utils.h"
 
 namespace doris::vectorized {
 
@@ -38,7 +38,8 @@ NewOlapScanNode::NewOlapScanNode(ObjectPool* pool, const TPlanNode& tnode,
 }
 
 // SELECTDB_CODE_BEGIN
-std::unique_ptr<vectorized::Block> NewOlapScanNode::_allocate_block(const TupleDescriptor* desc, size_t sz) {
+std::unique_ptr<vectorized::Block> NewOlapScanNode::_allocate_block(const TupleDescriptor* desc,
+                                                                    size_t sz) {
     vectorized::Block* block = new vectorized::Block;
     for (auto slot : desc->slots()) {
         // avoid allocate pruned columns
@@ -48,7 +49,7 @@ std::unique_ptr<vectorized::Block> NewOlapScanNode::_allocate_block(const TupleD
         auto column_ptr = slot->get_empty_mutable_column();
         column_ptr->reserve(sz);
         block->insert(ColumnWithTypeAndName(std::move(column_ptr), slot->get_data_type_ptr(),
-                                    slot->col_name()));
+                                            slot->col_name()));
     }
     return std::unique_ptr<vectorized::Block>(block);
 }
@@ -70,7 +71,7 @@ bool NewOlapScanNode::_maybe_prune_columns() {
                     continue;
                 }
                 _maybe_read_column_ids.emplace(col_id);
-                output_columns.emplace(col_id); 
+                output_columns.emplace(col_id);
             }
         }
     }
@@ -107,13 +108,14 @@ bool NewOlapScanNode::_maybe_prune_columns() {
     }
 
     for (int32_t cid : _conjuct_column_unique_ids) {
-        output_columns.emplace(cid); 
+        output_columns.emplace(cid);
     }
 
-    // get pruned column ids    
-    std::set_difference(output_tuple_column_unique_ids.begin(), output_tuple_column_unique_ids.end(),
-                    output_columns.begin(), output_columns.end(),
-                    std::inserter(_pruned_column_ids, _pruned_column_ids.end()));
+    // get pruned column ids
+    std::set_difference(output_tuple_column_unique_ids.begin(),
+                        output_tuple_column_unique_ids.end(), output_columns.begin(),
+                        output_columns.end(),
+                        std::inserter(_pruned_column_ids, _pruned_column_ids.end()));
     if (!_pruned_column_ids.empty()) {
         // Since some columns are pruned, the indexes of columns in the block
         // maybe change. In order to find proper column id for VSlotRef,
@@ -212,18 +214,16 @@ Status NewOlapScanNode::_init_profile() {
     _filtered_segment_counter = ADD_COUNTER(_segment_profile, "NumSegmentFiltered", TUnit::UNIT);
     _total_segment_counter = ADD_COUNTER(_segment_profile, "NumSegmentTotal", TUnit::UNIT);
 
-    _num_io_total = ADD_COUNTER(_scanner_profile, "NumIOTotal", TUnit::UNIT);
-    _num_io_hit_cache = ADD_COUNTER(_scanner_profile, "NumIOHitCache", TUnit::UNIT);
-    _num_io_bytes_read_total = ADD_COUNTER(_scanner_profile, "NumIOBytesReadTotal", TUnit::UNIT);
-    _num_io_bytes_read_from_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesReadFromFileCache", TUnit::UNIT);
-    _num_io_bytes_read_from_write_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesReadFromWriteCache", TUnit::UNIT);
-    _num_io_written_in_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOWrittenInFileCache", TUnit::UNIT);
-    _num_io_bytes_written_in_file_cache =
-            ADD_COUNTER(_scanner_profile, "NumIOBytesWrittenInFileCache", TUnit::UNIT);
-    _num_io_bytes_skip_cache = ADD_COUNTER(_scanner_profile, "NumIOBytesSkipCache", TUnit::UNIT);
+    _num_local_io_total = ADD_COUNTER(_segment_profile, "NumLocalIOTotal", TUnit::UNIT);
+    _num_remote_io_total = ADD_COUNTER(_segment_profile, "NumRemoteIOTotal", TUnit::UNIT);
+    _local_io_timer = ADD_TIMER(_segment_profile, "LocalIOUseTimer");
+    _remote_io_timer = ADD_TIMER(_segment_profile, "RemoteIOUseTimer");
+    _write_cache_io_timer = ADD_TIMER(_segment_profile, "WriteCacheIOUseTimer");
+    _bytes_write_into_cache = ADD_COUNTER(_segment_profile, "BytesWriteIntoCache", TUnit::UNIT);
+    _num_skip_cache_io_total = ADD_COUNTER(_segment_profile, "NumSkipCacheIOTotal", TUnit::UNIT);
+    _bytes_scanned_from_cache = ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::UNIT);
+    _bytes_scanned_from_remote = ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::UNIT);
+    _load_segments_timer = ADD_TIMER(_segment_profile, "LoadSegmentUseTimer");
     _cloud_get_rowset_version_timer = ADD_TIMER(_scanner_profile, "CloudGetVersionTime");
 
     // for the purpose of debugging or profiling
@@ -263,13 +263,13 @@ static std::string olap_filters_to_string(const std::vector<doris::TCondition>& 
 
 // iterate through conjuncts tree
 void NewOlapScanNode::_iterate_conjuncts_tree(const VExpr* conjunct_expr_root,
-                        std::function<void(const VExpr*)> fn) {
+                                              std::function<void(const VExpr*)> fn) {
     if (!conjunct_expr_root) {
         return;
     }
     fn(conjunct_expr_root);
     for (const VExpr* child : conjunct_expr_root->children()) {
-        _iterate_conjuncts_tree(child, fn); 
+        _iterate_conjuncts_tree(child, fn);
     }
     return;
 }
@@ -380,18 +380,19 @@ Status NewOlapScanNode::_build_key_ranges_and_filters() {
             }
         }
 
-    	for (auto i = 0; i < _compound_value_ranges.size(); ++i) {
+        for (auto i = 0; i < _compound_value_ranges.size(); ++i) {
             std::vector<TCondition> conditions;
             for (auto& iter : _compound_value_ranges[i]) {
                 std::vector<TCondition> filters;
-                std::visit([&](auto&& range) { 
-                    if (range.is_boundary_value_range()) {
-                        range.to_boundary_condition(filters); 
-                    } else {
-                        range.to_olap_filter(filters);
-                    }
-                
-                }, iter);
+                std::visit(
+                        [&](auto&& range) {
+                            if (range.is_boundary_value_range()) {
+                                range.to_boundary_condition(filters);
+                            } else {
+                                range.to_olap_filter(filters);
+                            }
+                        },
+                        iter);
 
                 for (const auto& filter : filters) {
                     conditions.push_back(std::move(filter));
