@@ -95,6 +95,8 @@ public class AuditEvent {
 
     @AuditField(value = "TraceId")
     public String traceId = "";
+    @AuditField(value = "FuzzyVariables")
+    public String fuzzyVariables = "";
 
     public static class AuditEventBuilder {
 
@@ -219,6 +221,11 @@ public class AuditEvent {
 
         public AuditEventBuilder setTraceId(String traceId) {
             auditEvent.traceId = traceId;
+            return this;
+        }
+
+        public AuditEventBuilder setFuzzyVariables(String variables) {
+            auditEvent.fuzzyVariables = variables;
             return this;
         }
 

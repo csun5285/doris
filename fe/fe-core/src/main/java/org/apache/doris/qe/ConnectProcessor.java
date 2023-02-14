@@ -208,9 +208,9 @@ public class ConnectProcessor {
                 .setStmtId(ctx.getStmtId())
                 .setQueryId(ctx.queryId() == null ? "NaN" : DebugUtil.printId(ctx.queryId()))
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
+                .setFuzzyVariables(ctx.getSessionVariable().printFuzzyVariables())
                 .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
                             ? ctx.cloudCluster : "UNKNOWN");
-
 
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);

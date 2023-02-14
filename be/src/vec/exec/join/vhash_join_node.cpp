@@ -519,14 +519,15 @@ Status HashJoinNode::get_next(RuntimeState* state, Block* output_block, bool* eo
                                                      need_null_map_for_probe
                                                              ? &_null_map_column->get_data()
                                                              : nullptr,
-                                                     mutable_join_block, &temp_block, probe_rows);
+                                                     mutable_join_block, &temp_block, probe_rows,
+                                                     _is_mark_join);
                             } else {
                                 st = process_hashtable_ctx.template do_process<
                                         need_null_map_for_probe, ignore_null>(
                                         arg,
                                         need_null_map_for_probe ? &_null_map_column->get_data()
                                                                 : nullptr,
-                                        mutable_join_block, &temp_block, probe_rows);
+                                        mutable_join_block, &temp_block, probe_rows, _is_mark_join);
                             }
                         } else {
                             LOG(FATAL) << "FATAL: uninited hash table";
@@ -566,6 +567,8 @@ Status HashJoinNode::get_next(RuntimeState* state, Block* output_block, bool* eo
     if (_is_outer_join) {
         _add_tuple_is_null_column(&temp_block);
     }
+    auto output_rows = temp_block.rows();
+    DCHECK(output_rows <= state->batch_size());
     {
         SCOPED_TIMER(_join_filter_timer);
         RETURN_IF_ERROR(
@@ -940,6 +943,9 @@ void HashJoinNode::_hash_table_init(RuntimeState* state) {
                                                    JoinOpType::value == TJoinOp::RIGHT_OUTER_JOIN ||
                                                    JoinOpType::value == TJoinOp::FULL_OUTER_JOIN,
                                            RowRefListWithFlag, RowRefList>>;
+                _probe_row_match_iter.emplace<ForwardIterator<RowRefListType>>();
+                _outer_join_pull_visited_iter.emplace<ForwardIterator<RowRefListType>>();
+
                 if (_build_expr_ctxs.size() == 1 && !_store_null_in_hash_table[0]) {
                     // Single column optimization
                     switch (_build_expr_ctxs[0]->root()->result_type()) {
