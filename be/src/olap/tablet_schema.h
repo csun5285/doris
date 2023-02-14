@@ -31,7 +31,7 @@ namespace vectorized {
 class Block;
 }
 
-class POlapTableIndexSchema;
+struct OlapTableIndexSchema;
 
 class TabletColumn {
 public:
@@ -209,7 +209,7 @@ public:
     void set_table_id(int32_t table_id) { _table_id = table_id; }
     int32_t table_id() const { return _table_id; }
     void build_current_tablet_schema(int64_t index_id, int32_t version,
-                                     const POlapTableIndexSchema& index,
+                                     const OlapTableIndexSchema* index,
                                      const TabletSchema& out_tablet_schema);
 
     // Merge columns that not exit in current schema, these column is dropped in current schema
