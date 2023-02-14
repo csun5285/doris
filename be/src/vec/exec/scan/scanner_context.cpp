@@ -118,23 +118,13 @@ Status ScannerContext::get_block_from_queue(vectorized::Block** block, bool* eos
     // Wait for block from queue
     {
         SCOPED_TIMER(_parent->_scanner_wait_batch_timer);
-#if !defined(USE_BTHREAD_SCANNER)
-        _blocks_queue_added_cv.wait(l, [this]() {
-            return !blocks_queue.empty() || _is_finished || !_process_status.ok() ||
-                   _state->is_cancelled();
-        });
+        while(!(!blocks_queue.empty() || _is_finished || !_process_status.ok() ||
+                   _state->is_cancelled())) {
+            _blocks_queue_added_cv.wait(l);
+        }
         if (_state->is_cancelled()) {
             _process_status = Status::Cancelled("cancelled");
         }
-#else
-        while (_process_status.ok() && !_is_finished && blocks_queue.empty()) {
-            if (_state->is_cancelled()) {
-                _process_status = Status::Cancelled("cancelled");
-                break;
-            }
-            _blocks_queue_added_cv.wait_for(l, 1000000 /*us*/);
-        }
-#endif
     }
 
     if (!_process_status.ok()) {
