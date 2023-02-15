@@ -75,7 +75,7 @@ protected:
         TabletSchemaSPtr tablet_schema = std::make_shared<TabletSchema>();
         TabletSchemaPB tablet_schema_pb;
         tablet_schema_pb.set_keys_type(keys_type);
-        tablet_schema_pb.set_num_short_key_columns(2);
+        tablet_schema_pb.set_num_short_key_columns(1);
         tablet_schema_pb.set_num_rows_per_row_block(1024);
         tablet_schema_pb.set_compress_kind(COMPRESS_NONE);
         tablet_schema_pb.set_next_column_unique_id(4);
@@ -164,7 +164,7 @@ protected:
         create_rowset_writer_context(tablet_schema, overlap, UINT32_MAX, &writer_context);
 
         std::unique_ptr<RowsetWriter> rowset_writer;
-        Status s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        Status s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_TRUE(s.ok());
 
         RowCursor input_row;
@@ -355,6 +355,22 @@ protected:
             input_rowsets.push_back(rowset);
         }
 
+        // create output rowset writer
+        RowsetWriterContext writer_context;
+        create_rowset_writer_context(tablet_schema, NONOVERLAPPING, 3456, &writer_context);
+        std::unique_ptr<RowsetWriter> output_rs_writer;
+        Status s = RowsetFactory::create_rowset_writer(writer_context, false, &output_rs_writer);
+        EXPECT_TRUE(s.ok());
+
+        // merge input rowset
+        TabletSharedPtr tablet =
+                create_tablet(*tablet_schema, enable_unique_key_merge_on_write,
+                              output_rs_writer->version().first - 1, has_delete_handler);
+        if (enable_unique_key_merge_on_write) {
+            tablet->tablet_meta()->delete_bitmap().add({input_rowsets[0]->rowset_id(), 0, 0}, 0);
+            tablet->tablet_meta()->delete_bitmap().add({input_rowsets[0]->rowset_id(), 0, 0}, 3);
+        }
+
         // create input rowset reader
         vector<RowsetReaderSharedPtr> input_rs_readers;
         for (auto& rowset : input_rowsets) {
@@ -363,17 +379,6 @@ protected:
             input_rs_readers.push_back(std::move(rs_reader));
         }
 
-        // create output rowset writer
-        RowsetWriterContext writer_context;
-        create_rowset_writer_context(tablet_schema, NONOVERLAPPING, 3456, &writer_context);
-        std::unique_ptr<RowsetWriter> output_rs_writer;
-        Status s = RowsetFactory::create_rowset_writer(writer_context, &output_rs_writer);
-        EXPECT_TRUE(s.ok());
-
-        // merge input rowset
-        TabletSharedPtr tablet =
-                create_tablet(*tablet_schema, enable_unique_key_merge_on_write,
-                              output_rs_writer->version().first - 1, has_delete_handler);
         Merger::Statistics stats;
         RowIdConversion rowid_conversion;
         stats.rowid_conversion = &rowid_conversion;
@@ -424,10 +429,16 @@ protected:
                     RowLocation src(input_rowsets[rs_id]->rowset_id(), s_id, row_id);
                     RowLocation dst;
                     int res = rowid_conversion.get(src, &dst);
+                    // key deleted by delete bitmap
+                    if (enable_unique_key_merge_on_write && rs_id == 0 && s_id == 0 &&
+                        (row_id == 0 || row_id == 3)) {
+                        EXPECT_LT(res, 0);
+                    }
                     if (res < 0) {
                         continue;
                     }
                     size_t rowid_in_output_data = dst.row_id;
+                    EXPECT_GT(segment_num_rows[dst.segment_id], dst.row_id);
                     for (auto n = 1; n <= dst.segment_id; n++) {
                         rowid_in_output_data += segment_num_rows[n - 1];
                     }

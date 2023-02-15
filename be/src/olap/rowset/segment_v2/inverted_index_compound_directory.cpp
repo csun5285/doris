@@ -16,16 +16,13 @@
 // under the License.
 
 #include "olap/rowset/segment_v2/inverted_index_compound_directory.h"
-
-#include <fcntl.h>
-
 #include "cloud/io/file_reader.h"
 #include "cloud/io/file_writer.h"
-#include "util/md5.h"
 
-// #include <CLucene/_ApiHeader.h>
 #include "CLucene/SharedHeader.h"
 #include "CLucene/StdHeader.h"
+//#include "olap/iterators.h"
+#include "util/md5.h"
 
 #ifdef _CL_HAVE_IO_H
 #include <io.h>
@@ -41,22 +38,12 @@
 #endif
 #include <CLucene/index/IndexReader.h>
 #include <CLucene/index/IndexWriter.h>
+#include <CLucene/store/LockFactory.h>
 #include <CLucene/util/Misc.h>
 #include <assert.h>
 #include <errno.h>
-// #include <CLucene/util/_MD5Digester.h>
-#include <CLucene/store/LockFactory.h>
-
-#ifdef LUCENE_FS_MMAP
-#include "_MMapIndexInput.h"
-#endif
 
 #define CL_MAX_PATH 4096
-//this is the max filename... for now its just the same,
-//but this could change, so we use a different name
-#define CL_MAX_NAME CL_MAX_PATH
-//this used to be CL_MAX_NAME * 32, but as Alex Hudson points out, this could come to be 128kb.
-//the above logic for CL_MAX_NAME should be correct enough to handle all file names
 #define CL_MAX_DIR CL_MAX_PATH
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -72,47 +59,8 @@ const char* WRITE_LOCK_FILE = "write.lock";
 const char* COMPOUND_FILE_EXTENSION = ".idx";
 const int64_t MAX_HEADER_DATA_SIZE = 1024 * 128; // 128k
 
-/** This cache of directories ensures that there is a unique Directory
-   * instance per path, so that synchronization on the Directory can be used to
-   * synchronize access between readers and writers.
-   */
-//static CL_NS(util)::CLHashMap<const char*, DorisCompoundDirectory*, CL_NS(util)::Compare::Char,
-//                              CL_NS(util)::Equals::Char> DIRECTORIES(false, false);
-//STATIC_DEFINE_MUTEX(DIRECTORIES_LOCK)
-//static doris::Mutex _DIRECTORIES_LOCK;
-
 bool DorisCompoundDirectory::disableLocks = false;
 
-/**
- * Lucene compound file format
- *
- * <p>Files:
- *
- * <ul>
- *   <li><code>.idx</code>: An "virtual" file consisting of all the other index files for
- *       systems that frequently run out of file handles.
- * </ul>
- *
- * <p>Description:
- *
- * <ul>
- *   <li>Compound (.idx) --&gt; FileCount, &lt;FileName, DataOffset,
- *       DataLength, [FileData]<sup>HeaderFileCount</sup>&gt; <sup>FileCount</sup>,
- *       FileData <sup>FileCount-HeaderFileCount</sup>
- * </ul>
- *
- * <p>Notes:
- *
- * <ul>
- *   <li>HeaderFileCount indicates how many files' are contained in compound file header. The max
- *       data size in header is at most 128k.
- *   <li>FileCount indicates how many files are contained in this compound file. The entry table
- *       that follows has that many entries.
- *   <li>Each directory entry contains a long pointer to the start of this file's data section, the
- *       files length, and a String with that file's name.
- * </ul>
- * @param dir
- */
 DorisCompoundFileWriter::DorisCompoundFileWriter(CL_NS(store)::Directory* dir) {
     if (dir == nullptr) {
         _CLTHROWA(CL_ERR_NullPointer, "directory cannot be null");
@@ -145,11 +93,6 @@ void DorisCompoundFileWriter::writeCompoundFile() {
                  const std::pair<std::string, int64_t>& b) { return (a.second < b.second); });
 
     int32_t file_count = sorted_files.size();
-
-    // get index file name
-    //io::Path path(((DorisCompoundDirectory*)directory)->getDirName());
-    //auto idx_path = path.parent_path();
-    //std::string idx_name = std::string(path.stem().c_str()) + COMPOUND_FILE_EXTENSION;
 
     io::Path cfs_path(((DorisCompoundDirectory*)directory)->getCfsDirName());
     auto idx_path = cfs_path.parent_path();
@@ -185,9 +128,6 @@ void DorisCompoundFileWriter::writeCompoundFile() {
     ram_dir.deleteFile(idx_name.c_str());
     ram_dir.close();
 
-    // write real file
-    // rowset data file home
-    // lock problem?
     auto compound_fs = ((DorisCompoundDirectory*)directory)->getCompoundFileSystem();
     auto out_dir = DorisCompoundDirectory::getDirectory(compound_fs, idx_path.c_str(), false);
 
@@ -228,7 +168,7 @@ void DorisCompoundFileWriter::writeCompoundFile() {
     out_dir->close();
     // NOTE: need to decrease ref count, but not to delete here,
     // because index cache may get the same directory from DIRECTORIES
-    _CLDECDELETE(out_dir);
+    _CLDECDELETE(out_dir)
     output->close();
 }
 
@@ -276,113 +216,82 @@ void DorisCompoundFileWriter::copyFile(const char* fileName, lucene::store::Inde
 
 class DorisCompoundDirectory::FSIndexOutput : public lucene::store::BufferedIndexOutput {
 private:
-    // int32_t fhandle;
     io::FileWriterPtr writer;
 
 protected:
-    // output methods:
     void flushBuffer(const uint8_t* b, const int32_t size) override;
 
 public:
     FSIndexOutput() = default;
     void init(const io::FileSystemSPtr& fileSystem, const char* path);
     ~FSIndexOutput() override;
-
-    // output methods:
     void close() override;
-
-    // Random-access methods
-    void seek(const int64_t pos) override;
     int64_t length() const override;
 };
 
 bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, const char* path,
                                                 IndexInput*& ret, CLuceneError& error,
-                                                int32_t __bufferSize) {
-    //Func - Constructor.
-    //       Opens the file named path
-    //Pre  - path != NULL
-    //Post - if the file could not be opened  an exception is thrown.
+                                                int32_t buffer_size) {
+    CND_PRECONDITION(path != nullptr, "path is NULL");
 
-    CND_PRECONDITION(path != NULL, "path is NULL");
+    if (buffer_size == -1) {
+        buffer_size = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
+    }
+    SharedHandle* h = _CLNEW SharedHandle(path);
 
-    if (__bufferSize == -1) __bufferSize = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
-    SharedHandle* handle = _CLNEW SharedHandle(path);
-
-    //Open the file
-    // handle->fhandle = ::_cl_open(path, _O_BINARY | O_RDONLY | _O_RANDOM, _S_IREAD);
-    if (!fs->open_file(path, &handle->reader).ok()) {
+    if (!fs->open_file(path, &h->_reader).ok()) {
         error.set(CL_ERR_IO, "open file error");
     }
 
     //Check if a valid handle was retrieved
-    if (handle->reader) {
+    if (h->_reader) {
         //Store the file length
-        handle->_length = handle->reader->size();
-        // if (handle->_length == -1)
-        if (handle->reader->size() < 0)
-            error.set(CL_ERR_IO, "fileStat error");
-        else {
-            handle->_fpos = 0;
-            ret = _CLNEW FSIndexInput(handle, __bufferSize);
-            return true;
-        }
+        h->_length = h->_reader->size();
+        h->_fpos = 0;
+        ret = _CLNEW FSIndexInput(h, buffer_size);
+        return true;
+
     } else {
         int err = errno;
-        if (err == ENOENT)
+        if (err == ENOENT) {
             error.set(CL_ERR_IO, "File does not exist");
-        else if (err == EACCES)
+        } else if (err == EACCES) {
             error.set(CL_ERR_IO, "File Access denied");
-        else if (err == EMFILE)
+        } else if (err == EMFILE) {
             error.set(CL_ERR_IO, "Too many open files");
-        else
+        } else {
             error.set(CL_ERR_IO, "Could not open file");
+        }
     }
-#ifndef _CL_DISABLE_MULTITHREADING
-    //delete handle->SHARED_LOCK;
-#endif
-    _CLDECDELETE(handle);
+    _CLDECDELETE(h)
     return false;
 }
 
 DorisCompoundDirectory::FSIndexInput::FSIndexInput(const FSIndexInput& other)
         : BufferedIndexInput(other) {
-    //Func - Constructor
-    //       Uses clone for its initialization
-    //Pre  - clone is a valide instance of FSIndexInput
-    //Post - The instance has been created and initialized by clone
-    if (other.handle == NULL) _CLTHROWA(CL_ERR_NullPointer, "other handle is null");
-
-    // SCOPED_LOCK_MUTEX(*other.handle->SHARED_LOCK)
-    std::lock_guard<doris::Mutex> wlock(other.handle->_shared_lock);
-    handle = _CL_POINTER(other.handle);
-    _pos = other.handle->_fpos; //note where we are currently...
+    if (other._handle == nullptr) {
+        _CLTHROWA(CL_ERR_NullPointer, "other handle is null");
+    }
+    std::lock_guard<doris::Mutex> wlock(other._handle->_shared_lock);
+    _handle = _CL_POINTER(other._handle);
+    _pos = other._handle->_fpos; //note where we are currently...
 }
 
 DorisCompoundDirectory::FSIndexInput::SharedHandle::SharedHandle(const char* path) {
-    // fhandle = 0;
-    // reader = nullptr;
     _length = 0;
     _fpos = 0;
     strcpy(this->path, path);
-
-#ifndef _CL_DISABLE_MULTITHREADING
-    //SHARED_LOCK = new _LUCENE_THREADMUTEX;
-#endif
 }
 
 DorisCompoundDirectory::FSIndexInput::SharedHandle::~SharedHandle() {
-    if (reader) {
-        if (reader->close().ok()) reader = nullptr;
+    if (_reader) {
+        if (_reader->close().ok()) {
+            _reader = nullptr;
+        }
     }
 }
 
 DorisCompoundDirectory::FSIndexInput::~FSIndexInput() {
-    //Func - Destructor
-    //Pre  - True
-    //Post - The file for which this instance is responsible has been closed.
-    //       The instance has been destroyed
-
     FSIndexInput::close();
 }
 
@@ -391,78 +300,55 @@ lucene::store::IndexInput* DorisCompoundDirectory::FSIndexInput::clone() const {
 }
 void DorisCompoundDirectory::FSIndexInput::close() {
     BufferedIndexInput::close();
-#ifndef _CL_DISABLE_MULTITHREADING
-    if (handle != NULL) {
-        //here we have a bit of a problem... we need to lock the handle to ensure that we can
-        //safely delete the handle... but if we delete the handle, then the scoped unlock,
-        //won't be able to unlock the mutex...
-
-        //take a reference of the lock object...
-        //_LUCENE_THREADMUTEX* mutex = handle->SHARED_LOCK;
-        //lock the mutex
-        handle->_shared_lock.lock();
+    if (_handle != nullptr) {
+        _handle->_shared_lock.lock();
 
         //determine if we are about to delete the handle...
-        bool dounlock = (_LUCENE_ATOMIC_INT_GET(handle->__cl_refcount) > 1);
+        bool dounlock = (_LUCENE_ATOMIC_INT_GET(_handle->__cl_refcount) > 1);
 
         //decdelete (deletes if refcount is down to 0
-        _CLDECDELETE(handle);
+        _CLDECDELETE(_handle)
 
-        //printf("handle=%d\n", handle->__cl_refcount);
         if (dounlock) {
-            handle->_shared_lock.unlock();
+            _handle->_shared_lock.unlock();
         }
     }
-#else
-    _CLDECDELETE(handle);
-#endif
 }
 
 void DorisCompoundDirectory::FSIndexInput::seekInternal(const int64_t position) {
-    CND_PRECONDITION(position >= 0 && position < handle->_length, "Seeking out of range");
+    CND_PRECONDITION(position >= 0 && position < _handle->_length, "Seeking out of range");
     _pos = position;
 }
 
 /** IndexInput methods */
 void DorisCompoundDirectory::FSIndexInput::readInternal(uint8_t* b, const int32_t len) {
-    CND_PRECONDITION(handle != NULL, "shared file handle has closed");
-    // CND_PRECONDITION(handle->fhandle >= 0, "file is not open");
-    CND_PRECONDITION(handle->reader != nullptr, "file is not open");
-    // SCOPED_LOCK_MUTEX(*handle->SHARED_LOCK)
-    std::lock_guard<doris::Mutex> wlock(handle->_shared_lock);
+    CND_PRECONDITION(_handle != nullptr, "shared file handle has closed");
+    CND_PRECONDITION(_handle->_reader != nullptr, "file is not open");
+    std::lock_guard<doris::Mutex> wlock(_handle->_shared_lock);
 
-    if (handle->_fpos != _pos) {
-        // if (fileSeek(handle->fhandle, _pos, SEEK_SET) != _pos) {
-        //     _CLTHROWA(CL_ERR_IO, "File IO Seek error");
-        // }
-        handle->_fpos = _pos;
+    if (_handle->_fpos != _pos) {
+        _handle->_fpos = _pos;
     }
 
-    // bufferLength = _read(handle->fhandle, b, len); // 2004.10.31:SF 1037836
-    // if (bufferLength == 0) {
     Slice result {b, (size_t)len};
     size_t bytes_read = 0;
-    if (!handle->reader->read_at(_pos, result, &bytes_read).ok()) {
+    if (!_handle->_reader->read_at(_pos, result, &bytes_read).ok()) {
         _CLTHROWA(CL_ERR_IO, "read past EOF");
     }
-    bufferLength = len; // TODO xk read should return size
+    bufferLength = len;
     if (bytes_read != len) {
-        //if (EINTR == errno) we could do something else... but we have
-        //to guarantee some return, or throw EOF
-
         _CLTHROWA(CL_ERR_IO, "read error");
     }
     _pos += bufferLength;
-    handle->_fpos = _pos;
+    _handle->_fpos = _pos;
 }
 
-void DorisCompoundDirectory::FSIndexOutput::init(const io::FileSystemSPtr& fileSystem, const char* path) {
-    // create file path
+void DorisCompoundDirectory::FSIndexOutput::init(const io::FileSystemSPtr& fileSystem,
+                                                 const char* path) {
     Status status = fileSystem->create_file(path, &writer);
     if (!status.ok()) {
-        // create file failed, set writer to nullptr
         writer.reset(nullptr);
-        auto err = "Create compound file error: " + status.get_error_msg();
+        auto err = "Create compound file error: " + status.to_string();
         LOG(WARNING) << err;
         _CLTHROWA(CL_ERR_IO, err.c_str());
     }
@@ -479,17 +365,12 @@ DorisCompoundDirectory::FSIndexOutput::~FSIndexOutput() {
     }
 }
 
-/** output methods: */
 void DorisCompoundDirectory::FSIndexOutput::flushBuffer(const uint8_t* b, const int32_t size) {
-    // CND_PRECONDITION(fhandle >= 0, "file is not open");
-    // if (size > 0 && _write(fhandle, b, size) != size) _CLTHROWA(CL_ERR_IO, "File IO Write error");
-    //CND_PRECONDITION(writer != nullptr, "file is not open");
-    // insure file_writer is not nullptr
     if (writer != nullptr && b != nullptr && size > 0) {
         Slice data {b, (size_t)size};
         Status st = writer->append(data);
         if (!st.ok()) {
-            LOG(WARNING) << "File IO Write error: " << st.get_error_msg();
+            LOG(WARNING) << "File IO Write error: " << st.to_string();
         }
     } else {
         LOG(WARNING) << "File writer is nullptr, ignore flush.";
@@ -500,10 +381,10 @@ void DorisCompoundDirectory::FSIndexOutput::close() {
     try {
         BufferedIndexOutput::close();
     } catch (CLuceneError& err) {
-        //ignore IO errors...
         LOG(WARNING) << "FSIndexOutput close, BufferedIndexOutput close error: " << err.what();
         if (err.number() != CL_ERR_IO) {
-            LOG(WARNING) << "FSIndexOutput close, BufferedIndexOutput close IO error: " << err.what();
+            LOG(WARNING) << "FSIndexOutput close, BufferedIndexOutput close IO error: "
+                         << err.what();
             throw;
         }
     }
@@ -524,61 +405,23 @@ void DorisCompoundDirectory::FSIndexOutput::close() {
     writer = nullptr;
 }
 
-void DorisCompoundDirectory::FSIndexOutput::seek(const int64_t pos) {
-    // CND_PRECONDITION(fhandle >= 0, "file is not open");
-    CND_PRECONDITION(writer != nullptr, "file is not open");
-    BufferedIndexOutput::seek(pos);
-    // int64_t ret = fileSeek(fhandle, pos, SEEK_SET);
-    int64_t ret = pos; // TODO xk
-    if (ret != pos) {
-        _CLTHROWA(CL_ERR_IO, "File IO Seek error");
-    }
-}
-
 int64_t DorisCompoundDirectory::FSIndexOutput::length() const {
-    // CND_PRECONDITION(fhandle >= 0, "file is not open");
-    // return fileSize(fhandle);
     CND_PRECONDITION(writer != nullptr, "file is not open");
-    // return writer->bytes_appended(); // TODO xk
-
-    struct stat64 buf;
-    char buffer[CL_MAX_DIR];
-    buffer[0] = 0;
-    strcat(buffer, writer->path().c_str());
-    if (stat64(buffer, &buf) == -1) // TODO xk
-        return 0;
-    else
-        return buf.st_size;
+    size_t ret;
+    if (!writer->fs()->file_size(writer->path(), &ret).ok()) {
+        return -1;
+    }
+    return ret;
 }
 
-const char* DorisCompoundDirectory::LOCK_DIR = NULL;
-const char* DorisCompoundDirectory::getLockDir() {
-#ifdef LUCENE_LOCK_DIR
-    LOCK_DIR = LUCENE_LOCK_DIR;
-#else
-#ifdef LUCENE_LOCK_DIR_ENV_1
-    if (LOCK_DIR == NULL) LOCK_DIR = getenv(LUCENE_LOCK_DIR_ENV_1);
-#endif
-#ifdef LUCENE_LOCK_DIR_ENV_2
-    if (LOCK_DIR == NULL) LOCK_DIR = getenv(LUCENE_LOCK_DIR_ENV_2);
-#endif
-#ifdef LUCENE_LOCK_DIR_ENV_FALLBACK
-    if (LOCK_DIR == NULL) LOCK_DIR = LUCENE_LOCK_DIR_ENV_FALLBACK;
-#endif
-    if (LOCK_DIR == NULL) _CLTHROWA(CL_ERR_IO, "Couldn't get determine lock dir");
-#endif
-
-    return LOCK_DIR;
-}
-
-DorisCompoundDirectory::DorisCompoundDirectory() : Directory(), useMMap(LUCENE_USE_MMAP) {
+DorisCompoundDirectory::DorisCompoundDirectory() {
     filemode = 0644;
-    this->lockFactory = NULL;
+    this->lockFactory = nullptr;
 }
 
 void DorisCompoundDirectory::init(const io::FileSystemSPtr& _fs, const char* _path,
-                                  lucene::store::LockFactory* lockFactory, const io::FileSystemSPtr& cfs,
-                                  const char* cfs_path) {
+                                  lucene::store::LockFactory* lock_factory,
+                                  const io::FileSystemSPtr& cfs, const char* cfs_path) {
     fs = _fs;
     directory = _path;
 
@@ -594,19 +437,19 @@ void DorisCompoundDirectory::init(const io::FileSystemSPtr& _fs, const char* _pa
     }
     bool doClearLockID = false;
 
-    if (lockFactory == NULL) {
+    if (lock_factory == nullptr) {
         if (disableLocks) {
-            lockFactory = lucene::store::NoLockFactory::getNoLockFactory();
+            lock_factory = lucene::store::NoLockFactory::getNoLockFactory();
         } else {
-            lockFactory = _CLNEW lucene::store::FSLockFactory(directory.c_str(), this->filemode);
+            lock_factory = _CLNEW lucene::store::FSLockFactory(directory.c_str(), this->filemode);
             doClearLockID = true;
         }
     }
 
-    setLockFactory(lockFactory);
+    setLockFactory(lock_factory);
 
     if (doClearLockID) {
-        lockFactory->setLockPrefix(NULL);
+        lockFactory->setLockPrefix(nullptr);
     }
 
     // It's meaningless checking directory existence in S3.
@@ -616,7 +459,7 @@ void DorisCompoundDirectory::init(const io::FileSystemSPtr& _fs, const char* _pa
     bool exists = false;
     Status status = fs->exists(directory, &exists);
     if (!status.ok()) {
-        auto err = "File system error: " + status.get_error_msg();
+        auto err = "File system error: " + status.to_string();
         LOG(WARNING) << err;
         _CLTHROWA_DEL(CL_ERR_IO, err.c_str());
     }
@@ -628,17 +471,16 @@ void DorisCompoundDirectory::init(const io::FileSystemSPtr& _fs, const char* _pa
 }
 
 void DorisCompoundDirectory::create() {
-    // SCOPED_LOCK_MUTEX(THIS_LOCK)
     std::lock_guard<doris::Mutex> wlock(_this_lock);
 
     //clear old files
     std::vector<std::string> files;
-    lucene::util::Misc::listFiles(directory.c_str(), files, false); // TODO fs.list
+    lucene::util::Misc::listFiles(directory.c_str(), files, false);
     std::vector<std::string>::iterator itr = files.begin();
     while (itr != files.end()) {
         if (CL_NS(index)::IndexReader::isLuceneFile(itr->c_str())) {
-            if (unlink((directory + PATH_DELIMITERA + *itr).c_str()) == -1) { // TODO
-                _CLTHROWA(CL_ERR_IO, "Couldn't delete file "); //todo: make richer error
+            if (unlink((directory + PATH_DELIMITERA + *itr).c_str()) == -1) {
+                _CLTHROWA(CL_ERR_IO, "Couldn't delete file ");
             }
         }
         itr++;
@@ -653,32 +495,13 @@ void DorisCompoundDirectory::priv_getFN(char* buffer, const char* name) const {
     strcat(buffer, name);
 }
 
-DorisCompoundDirectory::~DorisCompoundDirectory() {}
+DorisCompoundDirectory::~DorisCompoundDirectory() = default;
 
-void DorisCompoundDirectory::setFileMode(int mode) {
-    this->filemode = mode;
-}
-int DorisCompoundDirectory::getFileMode() {
-    return this->filemode;
-}
-void DorisCompoundDirectory::setUseMMap(bool value) {
-    useMMap = value;
-}
-bool DorisCompoundDirectory::getUseMMap() const {
-    return useMMap;
-}
 const char* DorisCompoundDirectory::getClassName() {
     return "DorisCompoundDirectory";
 }
 const char* DorisCompoundDirectory::getObjectName() const {
     return getClassName();
-}
-
-void DorisCompoundDirectory::setDisableLocks(bool doDisableLocks) {
-    disableLocks = doDisableLocks;
-}
-bool DorisCompoundDirectory::getDisableLocks() {
-    return disableLocks;
 }
 
 bool DorisCompoundDirectory::list(std::vector<std::string>* names) const {
@@ -702,42 +525,25 @@ bool DorisCompoundDirectory::fileExists(const char* name) const {
     return exists;
 }
 
-const char* DorisCompoundDirectory::getDirName() const {
-    return directory.c_str();
-}
-
 const char* DorisCompoundDirectory::getCfsDirName() const {
     return cfs_directory.c_str();
 }
 
-DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(
-        const io::FileSystemSPtr& fileSystem, const char* file, bool create,
-        lucene::store::LockFactory* lockFactory) {
-    DorisCompoundDirectory* dir = getDirectory(fileSystem, file, (lucene::store::LockFactory*)NULL);
-
-    // This is now deprecated (creation should only be done
-    // by IndexWriter):
-    if (create) {
-        dir->create();
-    }
-
-    return dir;
-}
-
-DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(const io::FileSystemSPtr& fs, const char* file,
-                                                             bool useCompoundFileWriter,
+DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(const io::FileSystemSPtr& fs,
+                                                             const char* file,
+                                                             bool use_compound_file_writer,
                                                              const io::FileSystemSPtr& cfs_fs,
                                                              const char* cfs_file) {
     DorisCompoundDirectory* dir =
             getDirectory(fs, file, (lucene::store::LockFactory*)nullptr, cfs_fs, cfs_file);
-    dir->useCompoundFileWriter = useCompoundFileWriter;
+    dir->useCompoundFileWriter = use_compound_file_writer;
     return dir;
 }
 
 //static
 DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(
-        const io::FileSystemSPtr& fs, const char* _file, lucene::store::LockFactory* lockFactory,
-        const io::FileSystemSPtr& cfs, const char* _cfs_file) {
+        const io::FileSystemSPtr& _fs, const char* _file, lucene::store::LockFactory* lock_factory,
+        const io::FileSystemSPtr& _cfs, const char* _cfs_file) {
     const char* cfs_file = _cfs_file;
     if (cfs_file == nullptr) {
         cfs_file = _file;
@@ -747,38 +553,30 @@ DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(
         _CLTHROWA(CL_ERR_IO, "Invalid directory");
     }
 
-    const char* file = _file; // TODO xk
+    const char* file = _file;
 
     bool exists = false;
-    fs->exists(file, &exists);
+    _fs->exists(file, &exists);
     if (!exists) {
-        mkdir(file, 0777); // TODO xk
+        mkdir(file, 0777);
     }
 
     dir = _CLNEW DorisCompoundDirectory();
-    dir->init(fs, file, lockFactory, cfs, cfs_file);
+    dir->init(_fs, file, lock_factory, _cfs, cfs_file);
 
-    return dir; // TODO: Isn't this a double ref increment?
+    return dir;
 }
 
 int64_t DorisCompoundDirectory::fileModified(const char* name) const {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
-    struct stat64 buf;
+    struct stat buf;
     char buffer[CL_MAX_DIR];
     priv_getFN(buffer, name);
-    if (stat64(buffer, &buf) == -1) // TODO xk
+    if (stat(buffer, &buf) == -1) {
         return 0;
-    else
+    } else {
         return buf.st_mtime;
-}
-
-//static
-int64_t DorisCompoundDirectory::fileModified(const char* dir, const char* name) {
-    struct stat64 buf;
-    char buffer[CL_MAX_DIR];
-    snprintf(buffer, CL_MAX_DIR, "%s%s%s", dir, PATH_DELIMITERA, name);
-    stat64(buffer, &buf); // TODO xk
-    return buf.st_mtime;
+    }
 }
 
 void DorisCompoundDirectory::touchFile(const char* name) {
@@ -786,13 +584,10 @@ void DorisCompoundDirectory::touchFile(const char* name) {
     char buffer[CL_MAX_DIR];
     snprintf(buffer, CL_MAX_DIR, "%s%s%s", directory.c_str(), PATH_DELIMITERA, name);
 
-    // int32_t r = _cl_open(buffer, O_RDWR, this->filemode);
-    // if (r < 0) _CLTHROWA(CL_ERR_IO, "IO Error while touching file");
-    // ::_close(r);
-
     io::FileWriterPtr tmp_writer;
-    if (!fs->create_file(buffer, &tmp_writer).ok())
+    if (!fs->create_file(buffer, &tmp_writer).ok()) {
         _CLTHROWA(CL_ERR_IO, "IO Error while touching file");
+    }
 }
 
 int64_t DorisCompoundDirectory::fileLength(const char* name) const {
@@ -809,17 +604,7 @@ bool DorisCompoundDirectory::openInput(const char* name, lucene::store::IndexInp
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
-#ifdef LUCENE_FS_MMAP
-    //todo: do some tests here... like if the file
-    //is >2gb, then some system cannot mmap the file
-    //also some file systems mmap will fail?? could detect here too
-    if (useMMap &&
-        Misc::file_Size(fl) <
-                LUCENE_INT32_MAX_SHOULDBE) //todo: would this be bigger on 64bit systems?. i suppose it would be...test first
-        return MMapIndexInput::open(fl, ret, error, bufferSize);
-    else
-#endif
-        return FSIndexInput::open(fs, fl, ret, error, bufferSize);
+    return FSIndexInput::open(fs, fl, ret, error, bufferSize);
 }
 
 void DorisCompoundDirectory::close() {
@@ -829,47 +614,14 @@ void DorisCompoundDirectory::close() {
         cfsWriter->writeCompoundFile();
         // delete index path, which contains separated inverted index files
         deleteDirectory();
-        _CLDELETE(cfsWriter);
+        _CLDELETE(cfsWriter)
     }
-}
-
-/**
-   * So we can do some byte-to-hexchar conversion below
-   */
-char HEX_DIGITS[] = {'0', '1', '2', '3', '4', '5', '6', '7',
-                     '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-
-char* DorisCompoundDirectory::getLockPrefix() const {
-    char dirName[CL_MAX_PATH]; // name to be hashed
-    if (realpath(directory.c_str(), dirName) == NULL) {
-        _CLTHROWA(CL_ERR_Runtime, "Invalid directory path");
-    }
-
-    //to make a compatible name with jlucene, we need to make some changes...
-    if (dirName[1] == ':') dirName[0] = (char)toupper((char)dirName[0]);
-
-    // char* smd5 = lucene::util::MD5String(dirName);
-
-    Md5Digest digest;
-    digest.update(dirName, CL_MAX_PATH);
-    digest.digest();
-    const char* smd5 = digest.hex().c_str();
-
-    char* ret = _CL_NEWARRAY(char, 32 + 7 + 1); //32=2*16, 7=strlen("lucene-")
-    strcpy(ret, "lucene-");
-    strcat(ret, smd5);
-
-    // _CLDELETE_CaARRAY(smd5);
-    delete[] smd5;
-
-    return ret;
 }
 
 bool DorisCompoundDirectory::doDeleteFile(const char* name) {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
-    // return _unlink(fl) != -1;
     return fs->delete_file(fl).ok();
 }
 
@@ -880,9 +632,9 @@ bool DorisCompoundDirectory::deleteDirectory() {
     Status status = fs->delete_directory(fl);
     if (!status.ok()) {
         char* err = _CL_NEWARRAY(
-                char, 16 + status.get_error_msg().length() + 1); //16: len of "couldn't delete "
+                char, 16 + status.to_string().length() + 1); //16: len of "couldn't delete "
         strcpy(err, "couldn't delete directory: ");
-        strcat(err, status.get_error_msg().c_str());
+        strcat(err, status.to_string().c_str());
         _CLTHROWA_DEL(CL_ERR_IO, err);
     }
     return true;
@@ -890,7 +642,6 @@ bool DorisCompoundDirectory::deleteDirectory() {
 
 void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
-    // SCOPED_LOCK_MUTEX(THIS_LOCK)
     std::lock_guard<doris::Mutex> wlock(_this_lock);
     char old[CL_MAX_DIR];
     priv_getFN(old, from);
@@ -898,18 +649,9 @@ void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
     char nu[CL_MAX_DIR];
     priv_getFN(nu, to);
 
-    /* This is not atomic.  If the program crashes between the call to
-    delete() and the call to renameTo() then we're screwed, but I've
-    been unable to figure out how else to do this... */
-
     bool exists = false;
     fs->exists(nu, &exists);
-    // if (lucene::util::Misc::dir_Exists(nu)) {
     if (exists) {
-        //we run this sequence of unlinking an arbitary 100 times
-        //on some platforms (namely windows), there can be a
-        //delay between unlink and dir_exists==false
-        // if (Misc::file_Unlink(nu) == -1) {
         if (!fs->delete_directory(nu).ok()) {
             char* err = _CL_NEWARRAY(char, 16 + strlen(to) + 1); //16: len of "couldn't delete "
             strcpy(err, "couldn't delete ");
@@ -917,10 +659,7 @@ void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
             _CLTHROWA_DEL(CL_ERR_IO, err);
         }
     }
-    if (rename(old, nu) != 0) { // TODO xk
-        //todo: jlucene has some extra rename code - if the rename fails, it copies
-        //the whole file to the new file... might want to implement that if renaming
-        //fails on some platforms
+    if (rename(old, nu) != 0) {
         char buffer[20 + CL_MAX_PATH + CL_MAX_PATH];
         strcpy(buffer, "couldn't rename ");
         strcat(buffer, from);
@@ -937,7 +676,7 @@ lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* nam
     bool exists = false;
     auto status = fs->exists(fl, &exists);
     if (!status.ok()) {
-        LOG(WARNING) << "Doris compound directory create output error: " << status.get_error_msg();
+        LOG(WARNING) << "Doris compound directory create output error: " << status.to_string();
         return nullptr;
     }
     if (exists) {
@@ -953,7 +692,7 @@ lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* nam
     auto ret = _CLNEW FSIndexOutput();
     try {
         ret->init(fs, fl);
-    } catch(CLuceneError& err) {
+    } catch (CLuceneError& err) {
         LOG(WARNING) << "FSIndexOutput init error: " << err.what();
         _CLTHROWA(CL_ERR_IO, "FSIndexOutput init error");
     }

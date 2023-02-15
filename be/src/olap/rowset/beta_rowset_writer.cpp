@@ -700,7 +700,7 @@ Status BetaRowsetWriter::flush_single_memtable(MemTable* memtable, int64_t* flus
     return Status::OK();
 }
 
-Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block) {
+Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, int64* flush_size) {
     if (block->rows() == 0) {
         return Status::OK();
     }
@@ -708,7 +708,7 @@ Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block) {
     std::unique_ptr<segment_v2::SegmentWriter> writer;
     RETURN_NOT_OK(_create_segment_writer(&writer, block));
     RETURN_NOT_OK(_add_block(block, &writer));
-    RETURN_NOT_OK(_flush_segment_writer(&writer));
+    RETURN_NOT_OK(_flush_segment_writer(&writer, flush_size));
     return Status::OK();
 }
 
@@ -727,6 +727,27 @@ Status BetaRowsetWriter::_wait_flying_segcompaction() {
         return Status::OLAPInternalError(OLAP_ERR_SEGCOMPACTION_FAILED);
     }
     return Status::OK();
+}
+
+RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_rowset_meta) {
+    if (_rowset_meta->oldest_write_timestamp() == -1) {
+        _rowset_meta->set_oldest_write_timestamp(UnixSeconds());
+    }
+
+    if (_rowset_meta->newest_write_timestamp() == -1) {
+        _rowset_meta->set_newest_write_timestamp(UnixSeconds());
+    }
+
+    _build_rowset_meta_with_spec_field(_rowset_meta, spec_rowset_meta);
+    RowsetSharedPtr rowset;
+    auto status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir,
+                                               _rowset_meta, &rowset);
+    if (!status.ok()) {
+        LOG(WARNING) << "rowset init failed when build new rowset, res=" << status;
+        return nullptr;
+    }
+    _already_built = true;
+    return rowset;
 }
 
 RowsetSharedPtr BetaRowsetWriter::build() {
@@ -804,33 +825,62 @@ RowsetSharedPtr BetaRowsetWriter::build() {
     return rowset;
 }
 
+bool BetaRowsetWriter::_is_segment_overlapping(
+        const std::vector<KeyBoundsPB>& segments_encoded_key_bounds) {
+    std::string last;
+    for (auto segment_encode_key : segments_encoded_key_bounds) {
+        auto cur_min = segment_encode_key.min_key();
+        auto cur_max = segment_encode_key.max_key();
+        if (cur_min < last) {
+            return true;
+        }
+        last = cur_max;
+    }
+    return false;
+}
+
+void BetaRowsetWriter::_build_rowset_meta_with_spec_field(
+        RowsetMetaSharedPtr rowset_meta, const RowsetMetaSharedPtr& spec_rowset_meta) {
+    rowset_meta->set_num_rows(spec_rowset_meta->num_rows());
+    rowset_meta->set_total_disk_size(spec_rowset_meta->total_disk_size());
+    rowset_meta->set_data_disk_size(spec_rowset_meta->total_disk_size());
+    rowset_meta->set_index_disk_size(spec_rowset_meta->index_disk_size());
+    // TODO write zonemap to meta
+    rowset_meta->set_empty(spec_rowset_meta->num_rows() == 0);
+    rowset_meta->set_creation_time(time(nullptr));
+    rowset_meta->set_num_segments(spec_rowset_meta->num_segments());
+    rowset_meta->set_segments_overlap(spec_rowset_meta->segments_overlap());
+    rowset_meta->set_rowset_state(spec_rowset_meta->rowset_state());
+
+    std::vector<KeyBoundsPB> segments_key_bounds;
+    spec_rowset_meta->get_segments_key_bounds(&segments_key_bounds);
+    rowset_meta->set_segments_key_bounds(segments_key_bounds);
+}
+
 void BetaRowsetWriter::_build_rowset_meta(std::shared_ptr<RowsetMeta> rowset_meta) {
     int64_t num_seg = _is_segcompacted() ? _num_segcompacted : _num_segment;
     int64_t num_rows_written = 0;
     int64_t total_data_size = 0;
     int64_t total_index_size = 0;
-    std::vector<uint32_t> segment_num_rows;
     std::vector<KeyBoundsPB> segments_encoded_key_bounds;
     {
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
         for (const auto& itr : _segid_statistics_map) {
             num_rows_written += itr.second.row_num;
-            segment_num_rows.push_back(itr.second.row_num);
             total_data_size += itr.second.data_size;
             total_index_size += itr.second.index_size;
             segments_encoded_key_bounds.push_back(itr.second.key_bounds);
         }
     }
-    rowset_meta->set_num_segments(num_seg);
-    if (num_seg <= 1) {
-        rowset_meta->set_segments_overlap(NONOVERLAPPING);
-    }
-    _segment_num_rows = segment_num_rows;
     for (auto itr = _segments_encoded_key_bounds.begin(); itr != _segments_encoded_key_bounds.end();
          ++itr) {
         segments_encoded_key_bounds.push_back(*itr);
     }
+    if (!_is_segment_overlapping(segments_encoded_key_bounds)) {
+        rowset_meta->set_segments_overlap(NONOVERLAPPING);
+    }
 
+    rowset_meta->set_num_segments(num_seg);
     // TODO(zhangzhengyu): key_bounds.size() should equal num_seg, but currently not always
     rowset_meta->set_num_rows(num_rows_written + _num_rows_written);
     rowset_meta->set_total_disk_size(total_data_size + _total_data_size);
@@ -928,12 +978,12 @@ Status BetaRowsetWriter::_create_segment_writer(std::unique_ptr<segment_v2::Segm
                                                 const vectorized::Block* block) {
     size_t total_segment_num = _num_segment - _segcompacted_point + 1 + _num_segcompacted;
     if (UNLIKELY(total_segment_num > config::max_segment_num_per_rowset)) {
-        LOG(ERROR) << "too many segments in rowset."
-                   << " tablet_id:" << _context.tablet_id << " rowset_id:" << _context.rowset_id
-                   << " max:" << config::max_segment_num_per_rowset
-                   << " _num_segment:" << _num_segment
-                   << " _segcompacted_point:" << _segcompacted_point
-                   << " _num_segcompacted:" << _num_segcompacted;
+        LOG(WARNING) << "too many segments in rowset."
+                     << " tablet_id:" << _context.tablet_id << " rowset_id:" << _context.rowset_id
+                     << " max:" << config::max_segment_num_per_rowset
+                     << " _num_segment:" << _num_segment
+                     << " _segcompacted_point:" << _segcompacted_point
+                     << " _num_segcompacted:" << _num_segcompacted;
         return Status::OLAPInternalError(OLAP_ERR_TOO_MANY_SEGMENTS);
     } else {
         return _do_create_segment_writer(writer, false, -1, -1, block);
@@ -976,6 +1026,8 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
         CHECK_EQ(_segid_statistics_map.find(segid) == _segid_statistics_map.end(), true);
         _segid_statistics_map.emplace(segid, segstat);
+        _segment_num_rows.resize(_num_segment);
+        _segment_num_rows[_num_segment - 1] = row_num;
     }
     VLOG_DEBUG << "_segid_statistics_map add new record. segid:" << segid << " row_num:" << row_num
                << " data_size:" << segment_size << " index_size:" << index_size;

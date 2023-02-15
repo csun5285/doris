@@ -25,8 +25,8 @@
 
 #include "gen_cpp/olap_file.pb.h"
 #include "gtest/gtest.h"
-#include "io/fs/s3_common.h"
-#include "io/fs/s3_file_system.h"
+#include "cloud/io/s3_common.h"
+#include "cloud/io/s3_file_system.h"
 #include "olap/comparison_predicate.h"
 #include "olap/data_dir.h"
 #include "olap/options.h"
@@ -139,8 +139,8 @@ protected:
         EXPECT_TRUE(st.ok());
         EXPECT_TRUE(file_writer->close().ok());
 
-        EXPECT_EQ("", writer.min_encoded_key().to_string());
-        EXPECT_EQ("", writer.max_encoded_key().to_string());
+        EXPECT_NE("", writer.min_encoded_key().to_string());
+        EXPECT_NE("", writer.max_encoded_key().to_string());
 
         st = segment_v2::Segment::open(fs, path, "", 0, {}, query_schema, res);
         EXPECT_TRUE(st.ok());

@@ -85,6 +85,8 @@ sk=""
 enableJdbcTest=false
 mysql_57_port=3316
 pg_14_port=5442
+oracle_11_port=1521
+sqlserver_2022_port=1433
 
 // hive catalog test config
 // To enable jdbc test, you need first start hive container.
@@ -105,6 +107,35 @@ multiClusterBes = "127.0.0.1:9712:9711:be_1_id,127.0.0.1:9732:9731:be_2_id"
 metaServiceToken = "greedisgood9999"
 multiClusterInstance = "test_instance_id"
 cacheDataPath = "/tmp"
+
+//hive  catalog test config for bigdata
+enableExternalHiveTest = false
+extHiveHmsHost = "***.**.**.**"
+extHiveHmsPort = 7004
+extHdfsPort = 4007
+extHiveHmsUser = "****"
+extHiveHmsPassword= "***********"
+
+//mysql jdbc connector test config for bigdata
+enableExternalMysqlTest = false
+extMysqlHost = "***.**.**.**"
+extMysqlPort = 3306
+extMysqlUser = "****"
+extMysqlPassword = "***********"
+
+//postgresql jdbc connector test config for bigdata
+enableExternalPgTest = false
+extPgHost = "***.**.**.*"
+extPgPort = 5432
+extPgUser = "****"
+extPgPassword = "***********"
+
+// elasticsearch external test config for bigdata
+enableExternalEsTest = false
+extEsHost = "***********"
+extEsPort = 9200
+extEsUser = "*******"
+extEsPassword = "***********"
 
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"

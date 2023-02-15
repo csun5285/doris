@@ -49,17 +49,18 @@ import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.BrokerFileGroupAggInfo.FileGroupAggKey;
 import org.apache.doris.load.FailMsg;
 import org.apache.doris.load.Load;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlColumn;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlColumnMapping;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlFileGroup;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlIndex;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlJobProperty;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlPartition;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlPartitionInfo;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.EtlTable;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.FilePatternVersion;
-import org.apache.doris.load.loadv2.etl.EtlJobConfig.SourceType;
+import org.apache.doris.sparkdpp.EtlJobConfig;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlColumn;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlColumnMapping;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlFileGroup;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlIndex;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlJobProperty;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlPartition;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlPartitionInfo;
+import org.apache.doris.sparkdpp.EtlJobConfig.EtlTable;
+import org.apache.doris.sparkdpp.EtlJobConfig.FilePatternVersion;
+import org.apache.doris.sparkdpp.EtlJobConfig.SourceType;
+import org.apache.doris.transaction.TransactionState;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -166,12 +167,12 @@ public class SparkLoadPendingTask extends LoadTask {
                     tables.put(tableId, etlTable);
 
                     // add table indexes to transaction state
-                    try {
-                        Env.getCurrentGlobalTransactionMgr()
-                                .addTableIndexes(db.getId(), transactionId, table);
-                    } catch (UserException e) {
-                        throw new LoadException("txn does not exist: " + transactionId);
+                    TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
+                            .getTransactionState(dbId, transactionId);
+                    if (txnState == null) {
+                        throw new LoadException("txn does not exist. id: " + transactionId);
                     }
+                    txnState.addTableIndexes(table);
                 }
 
                 // file group

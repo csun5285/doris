@@ -89,8 +89,8 @@ public class ConnectContextTest {
 
         // Current cluster
         Assert.assertEquals("", ctx.getClusterName());
-        ctx.setCluster("testCluster");
-        Assert.assertEquals("testCluster", ctx.getClusterName());
+        ctx.setCloudCluster("testCluster");
+        Assert.assertEquals("testCluster", ctx.getCloudCluster());
 
         // Current db
         Assert.assertEquals("", ctx.getDatabase());
@@ -123,6 +123,7 @@ public class ConnectContextTest {
         // Thread info
         Assert.assertNotNull(ctx.toThreadInfo(false));
         List<String> row = ctx.toThreadInfo(false).toRow(1000);
+
         Assert.assertEquals(9, row.size());
         Assert.assertEquals("101", row.get(0));
         Assert.assertEquals("testUser", row.get(1));

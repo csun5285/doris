@@ -47,6 +47,7 @@ import org.apache.doris.catalog.StructType;
 import org.apache.doris.catalog.View;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Pair;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Version;
 import org.apache.doris.mysql.MysqlPassword;
 import org.apache.doris.load.loadv2.LoadTask;
@@ -469,6 +470,7 @@ terminal String
     KW_NULL,
     KW_NULLS,
     KW_OBSERVER,
+    KW_OF,
     KW_OFFSET,
     KW_ON,
     KW_ONLY,
@@ -607,6 +609,7 @@ terminal String
     KW_VARCHAR,
     KW_VARIABLES,
     KW_VERBOSE,
+    KW_VERSION,
     KW_VIEW,
     KW_WARNINGS,
     KW_WEEK,
@@ -617,7 +620,8 @@ terminal String
     KW_WORK,
     KW_WRITE,
     KW_YEAR,
-    KW_MTMV;
+    KW_MTMV,
+    KW_AUTO;
 
 terminal COMMA, COLON, DOT, DOTDOTDOT, AT, STAR, LPAREN, RPAREN, SEMICOLON, LBRACKET, RBRACKET, DIVIDE, MOD, ADD, SUBTRACT;
 terminal BITAND, BITOR, BITXOR, BITNOT;
@@ -698,6 +702,7 @@ nonterminal ArrayList<String> ident_list;
 nonterminal PartitionNames opt_partition_names, partition_names;
 nonterminal ArrayList<Long> opt_tablet_list, tablet_list;
 nonterminal TableSample opt_table_sample, table_sample;
+nonterminal TableSnapshot opt_table_snapshot, table_snapshot;
 nonterminal ClusterName cluster_name;
 nonterminal ClusterName des_cluster_name;
 nonterminal TableName table_name, opt_table_name;
@@ -3033,12 +3038,16 @@ opt_distribution ::=
     /* Hash distributed */
     | KW_DISTRIBUTED KW_BY KW_HASH LPAREN ident_list:columns RPAREN opt_distribution_number:numDistribution
     {:
-        RESULT = new HashDistributionDesc(numDistribution, columns);
+        int bucketNum = (numDistribution == null ? -1 : numDistribution);
+        boolean is_auto_bucket = (numDistribution == null);
+        RESULT = new HashDistributionDesc(bucketNum, is_auto_bucket, columns);
     :}
     /* Random distributed */
     | KW_DISTRIBUTED KW_BY KW_RANDOM opt_distribution_number:numDistribution
     {:
-        RESULT = new RandomDistributionDesc(numDistribution);
+        int bucketNum = (numDistribution == null ? -1 : numDistribution);
+        boolean is_auto_bucket = (numDistribution == null);
+        RESULT = new RandomDistributionDesc(bucketNum, is_auto_bucket);
     :}
     ;
 
@@ -3056,12 +3065,16 @@ opt_rollup ::=
 opt_distribution_number ::=
     /* Empty */
     {:
-        /* If distribution number is null, default distribution number is 10. */
-        RESULT = 10;
+        /* If distribution number is null, default distribution number is FeConstants.default_bucket_num. */
+        RESULT = FeConstants.default_bucket_num;
     :}
     | KW_BUCKETS INTEGER_LITERAL:numDistribution
     {:
         RESULT = numDistribution.intValue();
+    :}
+    | KW_BUCKETS KW_AUTO
+    {:
+        RESULT = null;
     :}
     ;
 
@@ -4131,6 +4144,10 @@ cancel_param ::=
     KW_LOAD opt_db:db opt_wild_where
     {:
         RESULT = new CancelLoadStmt(db, parser.where);
+    :}
+    | KW_EXPORT opt_db:db opt_wild_where
+    {:
+        RESULT = new CancelExportStmt(db, parser.where);
     :}
     | KW_ALTER KW_TABLE opt_alter_type:type KW_FROM table_name:table cancel_rollup_job_id_list:list
     {:
@@ -5268,9 +5285,31 @@ base_table_ref_list ::=
   ;
 
 base_table_ref ::=
-    table_name:name opt_partition_names:partitionNames opt_tablet_list:tabletIds opt_table_alias:alias opt_table_sample:tableSample opt_common_hints:commonHints
+    table_name:name opt_table_snapshot:tableSnapshot opt_partition_names:partitionNames opt_tablet_list:tabletIds opt_table_alias:alias opt_table_sample:tableSample opt_common_hints:commonHints
     {:
-        RESULT = new TableRef(name, alias, partitionNames, tabletIds, tableSample, commonHints);
+        RESULT = new TableRef(name, alias, partitionNames, tabletIds, tableSample, commonHints, tableSnapshot);
+    :}
+    ;
+
+opt_table_snapshot ::=
+    /* empty */
+    {:
+        RESULT = null;
+    :}
+    | table_snapshot:tableSnapshot
+    {:
+        RESULT = tableSnapshot;
+    :}
+    ;
+
+table_snapshot ::=
+    KW_FOR KW_VERSION KW_AS KW_OF INTEGER_LITERAL:version
+    {:
+        RESULT = new TableSnapshot(version);
+    :}
+    | KW_FOR KW_TIME KW_AS KW_OF STRING_LITERAL:time
+    {:
+        RESULT = new TableSnapshot(time);
     :}
     ;
 
@@ -6868,6 +6907,8 @@ keyword ::=
     {: RESULT = id; :}
     | KW_NULLS:id
     {: RESULT = id; :}
+    | KW_OF:id
+    {: RESULT = id; :}
     | KW_OFFSET:id
     {: RESULT = id; :}
     | KW_ONLY:id
@@ -6993,6 +7034,8 @@ keyword ::=
     | KW_VALUE:id
     {: RESULT = id; :}
     | KW_VERBOSE:id
+    {: RESULT = id; :}
+    | KW_VERSION:id
     {: RESULT = id; :}
     | KW_VIEW:id
     {: RESULT = id; :}

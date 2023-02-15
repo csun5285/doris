@@ -254,6 +254,7 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         }
     }
 #endif
+    auto max_version = tablet->max_version().first;
     int transient_size = 0;
     *compaction_score = 0;
     int64_t total_size = 0;
@@ -271,6 +272,13 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
                 input_rowsets->clear();
                 *compaction_score = 0;
                 transient_size = 0;
+                continue;
+            }
+        }
+        if (tablet->tablet_state() == TABLET_NOTREADY) {
+            // If tablet under alter, keep latest 10 version so that base tablet max version
+            // not merged in new tablet, and then we can copy data from base tablet
+            if (rowset->version().second < max_version - 10) {
                 continue;
             }
         }

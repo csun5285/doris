@@ -50,7 +50,7 @@ struct WriteRequest {
     const std::vector<SlotDescriptor*>* slots;
     bool is_high_priority = false;
     OlapTableSchemaParam* table_schema_param;
-    int64_t index_id;
+    int64_t index_id = 0;
 };
 
 // Writer for a particular (load, index, tablet).

@@ -80,24 +80,29 @@ public class CreateUserStmtTest {
     }
 
     @Test(expected = AnalysisException.class)
-    public void testEmptyUser(@Injectable Analyzer analyzer) throws UserException, AnalysisException {
+    public void testEmptyUser(@Injectable Analyzer analyzer, @Mocked PaloAuth auth) throws UserException, AnalysisException {
         new Expectations() {
             {
                 analyzer.getClusterName();
                 result = "testCluster";
+                auth.getUserId(anyString);
+                result = "userid";
             }
         };
+
         CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "passwd", true));
         stmt.analyze(analyzer);
         Assert.fail("No exception throws.");
     }
 
     @Test(expected = AnalysisException.class)
-    public void testBadPass(@Injectable Analyzer analyzer) throws UserException, AnalysisException {
+    public void testBadPass(@Injectable Analyzer analyzer, @Mocked PaloAuth auth) throws UserException, AnalysisException {
         new Expectations() {
             {
                 analyzer.getClusterName();
                 result = "testCluster";
+                auth.getUserId(anyString);
+                result = "userid";
             }
         };
         CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "passwd", false));

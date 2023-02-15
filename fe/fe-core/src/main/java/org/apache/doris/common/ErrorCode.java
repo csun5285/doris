@@ -1698,12 +1698,15 @@ public enum ErrorCode {
             "Access denied for user '%s' to catalog '%s'"),
     ERR_NONSUPPORT_HMS_TABLE(5088, new byte[]{'4', '2', '0', '0', '0'},
             "Nonsupport hive metastore table named '%s' in database '%s' with catalog '%s'."),
-    ERR_NO_CLUSTER_ERROR(5089, new byte[]{'4', '2', '0', '0', '0'}, "No cluster selected"),
-    ERR_UNSUPPORTED_OPERATION_ERROR(5090, new byte[]{'4', '2', '0', '0', '0'}, "Unsupported operation"),
+    ERR_TABLE_NAME_LENGTH_LIMIT(5089, new byte[]{'4', '2', '0', '0', '0'}, "Table name length exceeds limit, "
+     + "the length of table name '%s' is %d which is greater than the configuration 'table_name_length_limit' (%d)."),
 
-    ERR_ClOUD_CLUSTER_ERROR(5091, new byte[]{'4', '2', '0', '0', '0'}, "Cluster %s not exist, use SQL 'SHOW CLUSTERS' to get a valid cluster"),
-    ERR_TABLE_NAME_LENGTH_LIMIT(5092, new byte[]{'4', '2', '0', '0', '0'}, "Table name length exceeds limit, "
-     + "the length of table name '%s' is %d which is greater than the configuration 'table_name_length_limit' (%d).");
+    ERR_NONSUPPORT_TIME_TRAVEL_TABLE(5090, new byte[]{'4', '2', '0', '0', '0'}, "Only iceberg external"
+     + " table supports time travel in current version"),
+    ERR_NO_CLUSTER_ERROR(5091, new byte[]{'4', '2', '0', '0', '0'}, "No cluster selected"),
+    ERR_UNSUPPORTED_OPERATION_ERROR(5092, new byte[]{'4', '2', '0', '0', '0'}, "Unsupported operation"),
+
+    ERR_ClOUD_CLUSTER_ERROR(5093, new byte[]{'4', '2', '0', '0', '0'}, "Cluster %s not exist, use SQL 'SHOW CLUSTERS' to get a valid cluster");
 
     // This is error code
     private final int code;

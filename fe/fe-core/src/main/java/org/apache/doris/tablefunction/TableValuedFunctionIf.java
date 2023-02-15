@@ -47,6 +47,10 @@ public abstract class TableValuedFunctionIf {
                 return new NumbersTableValuedFunction(params);
             case S3TableValuedFunction.NAME:
                 return new S3TableValuedFunction(params);
+            case HdfsTableValuedFunction.NAME:
+                return new HdfsTableValuedFunction(params);
+            case IcebergTableValuedFunction.NAME:
+                return new IcebergTableValuedFunction(params);
             default:
                 throw new AnalysisException("Could not find table function " + funcName);
         }

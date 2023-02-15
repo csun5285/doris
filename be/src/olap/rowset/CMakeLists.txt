@@ -31,4 +31,5 @@ add_library(Rowset STATIC
     beta_rowset_reader.cpp
     # FIXME(cyx): use compile options
     # beta_rowset_writer.cpp
+    vertical_beta_rowset_writer.cpp
     rowset_tree.cpp)

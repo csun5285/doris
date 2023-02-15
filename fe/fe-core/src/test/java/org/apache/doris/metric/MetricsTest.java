@@ -20,6 +20,8 @@ package org.apache.doris.metric;
 import org.apache.doris.common.FeConstants;
 
 import com.codahale.metrics.Histogram;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -29,6 +31,7 @@ import java.util.Map;
 import java.util.SortedMap;
 
 public class MetricsTest {
+    private static final Logger LOG = LogManager.getLogger(MetricsTest.class);
 
     @BeforeClass
     public static void setUp() {
@@ -67,9 +70,8 @@ public class MetricsTest {
             visitor.visitHistogram(sb, MetricVisitor.FE_PREFIX, entry.getKey(), entry.getValue());
         }
         String metricResult = sb.toString();
+        LOG.info("metric result " + metricResult);
         Assert.assertTrue(metricResult.contains("# TYPE doris_fe_query_latency_ms summary"));
-        Assert.assertTrue(metricResult.contains("doris_fe_query_latency_ms{quantile=\"0.999\"} 0.0"));
-        Assert.assertTrue(metricResult.contains("doris_fe_query_latency_ms{quantile=\"0.999\",db=\"test_db\"} 10.0"));
-
+        Assert.assertTrue(metricResult.contains("doris_fe_query_latency_ms{cluster_id=\"UNKNOWN\", cluster_name=\"UNKNOWN\", quantile=\"0.999\"} 0.0"));
     }
 }

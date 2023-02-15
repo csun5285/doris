@@ -672,12 +672,12 @@ std::vector<TabletSharedPtr> StorageEngine::_generate_cloud_compaction_tasks(
         }
     }
 
-    return tablets_compaction;}
+    return tablets_compaction;
+}
 
 std::vector<TabletSharedPtr> StorageEngine::_generate_compaction_tasks(
         CompactionType compaction_type, std::vector<DataDir*>& data_dirs, bool check_score) {
     _update_cumulative_compaction_policy();
-
     std::vector<TabletSharedPtr> tablets_compaction;
     uint32_t max_compaction_score = 0;
 

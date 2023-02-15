@@ -195,7 +195,11 @@ public class ConnectProcessor {
 
         ctx.getAuditEventBuilder().setEventType(EventType.AFTER_QUERY)
                 .setDb(ClusterNamespace.getNameFromFullName(ctx.getDatabase()))
-                .setState(ctx.getState().toString()).setQueryTime(elapseMs)
+                .setState(ctx.getState().toString())
+                .setErrorCode(ctx.getState().getErrorCode() == null ? 0 : ctx.getState().getErrorCode().getCode())
+                .setErrorMessage((ctx.getState().getErrorMessage() == null ? "" :
+                        ctx.getState().getErrorMessage().replace("\n", " ").replace("\t", " ")))
+                .setQueryTime(elapseMs)
                 .setScanBytes(statistics == null ? 0 : statistics.getScanBytes())
                 .setScanRows(statistics == null ? 0 : statistics.getScanRows())
                 .setCpuTimeMs(statistics == null ? 0 : statistics.getCpuMs())
@@ -204,9 +208,9 @@ public class ConnectProcessor {
                 .setStmtId(ctx.getStmtId())
                 .setQueryId(ctx.queryId() == null ? "NaN" : DebugUtil.printId(ctx.queryId()))
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
+                .setFuzzyVariables(ctx.getSessionVariable().printFuzzyVariables())
                 .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
                             ? ctx.cloudCluster : "UNKNOWN");
-
 
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
@@ -259,11 +263,14 @@ public class ConnectProcessor {
                 }
             }
             ctx.getAuditEventBuilder().setIsQuery(true);
-            ctx.getQueryDetail().setEventTime(endTime);
-            ctx.getQueryDetail().setEndTime(endTime);
-            ctx.getQueryDetail().setLatency(elapseMs);
-            ctx.getQueryDetail().setState(QueryDetail.QueryMemState.FINISHED);
-            QueryDetailQueue.addOrUpdateQueryDetail(ctx.getQueryDetail());
+            if (ctx.getQueryDetail() != null) {
+                ctx.getQueryDetail().setEventTime(endTime);
+                ctx.getQueryDetail().setEndTime(endTime);
+                ctx.getQueryDetail().setLatency(elapseMs);
+                ctx.getQueryDetail().setState(QueryDetail.QueryMemState.FINISHED);
+                QueryDetailQueue.addOrUpdateQueryDetail(ctx.getQueryDetail());
+                ctx.setQueryDetail(null);
+            }
         } else {
             ctx.getAuditEventBuilder().setIsQuery(false);
         }

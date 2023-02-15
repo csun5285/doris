@@ -20,7 +20,7 @@
 #include <gtest/gtest.h>
 
 #include "common/logging.h"
-#include "io/fs/local_file_system.h"
+#include "cloud/io/local_file_system.h"
 #include "util/file_utils.h"
 #include "util/time.h"
 

@@ -32,6 +32,9 @@ suite("test_round") {
         PROPERTIES ( "replication_num" = "1" ); """
 
     sql """ insert into `${tableName}` values(16.025, 16.025, 16.025); """
+    qt_select """ SELECT round(col1), round(col2), round(col3) FROM `${tableName}`; """
+    qt_select """ SELECT floor(col1), floor(col2), floor(col3) FROM `${tableName}`; """
+    qt_select """ SELECT ceil(col1), ceil(col2), ceil(col3) FROM `${tableName}`; """
     qt_select """ SELECT round(col1, 2), round(col2, 2), round(col3, 2) FROM `${tableName}`; """
     qt_select """ SELECT floor(col1, 2), floor(col2, 2), floor(col3, 2) FROM `${tableName}`; """
     qt_select """ SELECT ceil(col1, 2), ceil(col2, 2), ceil(col3, 2) FROM `${tableName}`; """

@@ -91,7 +91,8 @@ enum TPrimitiveType {
   DECIMAL64,
   DECIMAL128I,
   JSONB,
-  VARIANT
+  VARIANT,
+  UNSUPPORTED
 }
 
 enum TTypeNodeType {
@@ -106,6 +107,7 @@ enum TStorageBackendType {
     BROKER,
     S3,
     HDFS,
+    JFS,
     LOCAL,
     OFS
 }

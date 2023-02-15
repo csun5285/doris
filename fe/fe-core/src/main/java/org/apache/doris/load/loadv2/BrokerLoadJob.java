@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.stream.Collectors;
 
 /**
  * There are 3 steps in BrokerLoadJob: BrokerPendingTask, LoadLoadingTask, CommitAndPublishTxn.
@@ -77,7 +78,6 @@ public class BrokerLoadJob extends BulkLoadJob {
     private RuntimeProfile jobProfile;
     // If set to true, the profile of load job with be pushed to ProfileManager
     private boolean enableProfile = false;
-    private TUniqueId queryId;
 
     private String cluster = null;
     private String qualifiedUser = null;
@@ -114,10 +114,6 @@ public class BrokerLoadJob extends BulkLoadJob {
                 }
                 qualifiedUser = context.getQualifiedUser();
             }
-        }
-
-        if (ConnectContext.get() != null) {
-            queryId = ConnectContext.get().queryId();
         }
     }
 
@@ -241,7 +237,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                 UUID uuid = UUID.randomUUID();
                 TUniqueId loadId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
 
-                LOG.info("sqlQueryId={}, loadId={}", DebugUtil.printId(queryId), DebugUtil.printId(loadId));
+                LOG.info("sqlQueryId={}, loadId={}", queryId, DebugUtil.printId(loadId));
                 if (Config.isNotCloudMode()) {
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
                             attachment.getFileNumByTable(aggKey), getUserInfo());
@@ -361,7 +357,8 @@ public class BrokerLoadJob extends BulkLoadJob {
         }
 
         RuntimeProfile summaryProfile = new RuntimeProfile("Summary");
-        summaryProfile.addInfoString(ProfileManager.QUERY_ID, String.valueOf(id));
+        summaryProfile.addInfoString(ProfileManager.JOB_ID, String.valueOf(this.id));
+        summaryProfile.addInfoString(ProfileManager.QUERY_ID, this.queryId);
         summaryProfile.addInfoString(ProfileManager.START_TIME, TimeUtils.longToTimeString(createTimestamp));
         summaryProfile.addInfoString(ProfileManager.END_TIME, TimeUtils.longToTimeString(finishTimestamp));
         summaryProfile.addInfoString(ProfileManager.TOTAL_TIME,
@@ -369,15 +366,21 @@ public class BrokerLoadJob extends BulkLoadJob {
 
         summaryProfile.addInfoString(ProfileManager.QUERY_TYPE, "Load");
         summaryProfile.addInfoString(ProfileManager.QUERY_STATE, "N/A");
-        summaryProfile.addInfoString(ProfileManager.USER, "N/A");
-        summaryProfile.addInfoString(ProfileManager.DEFAULT_DB, "N/A");
-        summaryProfile.addInfoString(ProfileManager.SQL_STATEMENT, "N/A");
+        summaryProfile.addInfoString(ProfileManager.USER,
+                getUserInfo() != null ? getUserInfo().getQualifiedUser() : "N/A");
+        summaryProfile.addInfoString(ProfileManager.DEFAULT_DB, getDefaultDb());
+        summaryProfile.addInfoString(ProfileManager.SQL_STATEMENT, this.getOriginStmt().originStmt);
         summaryProfile.addInfoString(ProfileManager.IS_CACHED, "N/A");
 
         // Add the summary profile to the first
         jobProfile.addFirstChild(summaryProfile);
         jobProfile.computeTimeInChildProfile();
         ProfileManager.getInstance().pushProfile(jobProfile);
+    }
+
+    private String getDefaultDb() {
+        Database database = Env.getCurrentEnv().getInternalCatalog().getDb(this.dbId).orElse(null);
+        return database == null ? "N/A" : database.getFullName();
     }
 
     private void updateLoadingStatus(BrokerLoadingTaskAttachment attachment) {
@@ -391,7 +394,8 @@ public class BrokerLoadJob extends BulkLoadJob {
             loadingStatus.setTrackingUrl(attachment.getTrackingUrl());
         }
         commitInfos.addAll(attachment.getCommitInfoList());
-        errorTabletInfos.addAll(attachment.getErrorTabletInfos());
+        errorTabletInfos.addAll(attachment.getErrorTabletInfos().stream().limit(Config.max_error_tablet_of_broker_load)
+                .collect(Collectors.toList()));
 
         progress = (int) ((double) finishedTaskIds.size() / idToTasks.size() * 100);
         if (progress == 100) {

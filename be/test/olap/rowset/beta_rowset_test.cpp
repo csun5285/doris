@@ -23,7 +23,7 @@
 
 #include "gen_cpp/olap_file.pb.h"
 #include "gtest/gtest.h"
-#include "io/fs/s3_file_system.h"
+#include "cloud/io/s3_file_system.h"
 #include "olap/comparison_predicate.h"
 #include "olap/data_dir.h"
 #include "olap/row_block.h"
@@ -182,7 +182,7 @@ TEST_F(BetaRowsetTest, BasicFunctionTest) {
         create_rowset_writer_context(tablet_schema, &writer_context);
 
         std::unique_ptr<RowsetWriter> rowset_writer;
-        s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_EQ(Status::OK(), s);
 
         RowCursor input_row;
