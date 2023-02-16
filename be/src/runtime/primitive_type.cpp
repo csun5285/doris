@@ -637,7 +637,7 @@ int get_slot_size(PrimitiveType type) {
 }
 
 PrimitiveType get_primitive_type(vectorized::TypeIndex v_type) {
-    switch (v_type) {
+   switch (v_type) {
     case vectorized::TypeIndex::Int8:
         return PrimitiveType::TYPE_TINYINT;
     case vectorized::TypeIndex::Int16:
@@ -646,12 +646,18 @@ PrimitiveType get_primitive_type(vectorized::TypeIndex v_type) {
         return PrimitiveType::TYPE_INT;
     case vectorized::TypeIndex::Int64:
         return PrimitiveType::TYPE_BIGINT;
+    case vectorized::TypeIndex::Int128:
+        return PrimitiveType::TYPE_LARGEINT;
     case vectorized::TypeIndex::Float32:
         return PrimitiveType::TYPE_FLOAT;
     case vectorized::TypeIndex::Float64:
         return PrimitiveType::TYPE_DOUBLE;
     case vectorized::TypeIndex::Decimal32:
-        return PrimitiveType::TYPE_DECIMALV2;
+        return PrimitiveType::TYPE_DECIMAL32;
+    case vectorized::TypeIndex::Decimal64:
+        return PrimitiveType::TYPE_DECIMAL64;
+    case vectorized::TypeIndex::Decimal128:
+        return PrimitiveType::TYPE_DECIMAL128I;
     case vectorized::TypeIndex::Array:
         return PrimitiveType::TYPE_ARRAY;
     case vectorized::TypeIndex::String:
@@ -660,12 +666,14 @@ PrimitiveType get_primitive_type(vectorized::TypeIndex v_type) {
         return PrimitiveType::TYPE_DATE;
     case vectorized::TypeIndex::DateTime:
         return PrimitiveType::TYPE_DATETIME;
-    case vectorized::TypeIndex::DateV2:
-        return PrimitiveType::TYPE_DATEV2;
-    case vectorized::TypeIndex::DateTimeV2:
-        return PrimitiveType::TYPE_DATETIMEV2;
     case vectorized::TypeIndex::Tuple:
         return PrimitiveType::TYPE_STRUCT;
+    case vectorized::TypeIndex::JSONB:
+        return PrimitiveType::TYPE_JSONB;
+    case vectorized::TypeIndex::DateTimeV2:
+        return PrimitiveType::TYPE_DATETIMEV2;
+    case vectorized::TypeIndex::DateV2:
+        return PrimitiveType::TYPE_DATEV2;
     // TODO add vectorized::more types
     default:
         LOG(FATAL) << "unknow data_type: " << getTypeName(v_type);

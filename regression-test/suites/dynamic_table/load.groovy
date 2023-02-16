@@ -95,8 +95,29 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         load_json_data.call(table_name, 'true', 'json', 'true', src_json, 'true')
         sleep(1000)
     }
+
+    def json_load_nested_with_jsonb = {src_json, table_name ->
+        //create table
+        sql "DROP TABLE IF EXISTS ${table_name}"
+        sql """
+            CREATE TABLE IF NOT EXISTS ${table_name} (
+                qid bigint,
+                creationDate datetimev2,
+                `answers` JSONB,
+                ...
+            )
+            DUPLICATE KEY(`qid`)
+            DISTRIBUTED BY RANDOM BUCKETS 5 
+            properties("replication_num" = "1");
+        """
+
+        //stream load src_json
+        load_json_data.call(table_name, 'true', 'json', 'true', src_json, 'true')
+        sleep(1000)
+    }
     json_load("btc_transactions.json", "test_btc_json")
     json_load("ghdata_sample.json", "test_ghdata_json")
     json_load("nbagames_sample.json", "test_nbagames_json")
     json_load_nested("es_nested.json", "test_es_nested_json")
+    json_load_nested_with_jsonb("es_nested.json", "test_es_nested_json_jsonb")
 }
