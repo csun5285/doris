@@ -72,6 +72,7 @@ Status VFileScanner::prepare(
     _pre_filter_timer = ADD_TIMER(_parent->_scanner_profile, "FileScannerPreFilterTimer");
     _convert_to_output_block_timer =
             ADD_TIMER(_parent->_scanner_profile, "FileScannerConvertOuputBlockTime");
+    _next_reader_timer = ADD_TIMER(_parent->_scanner_profile, "GetNextReaderTime");
 
     if (vconjunct_ctx_ptr != nullptr) {
         // Copy vconjunct_ctx_ptr from scan node to this scanner's _vconjunct_ctx.
@@ -153,6 +154,7 @@ Status VFileScanner::_handle_dynamic_block(Block* block) {
 Status VFileScanner::_get_block_impl(RuntimeState* state, Block* block, bool* eof) {
     do {
         if (_cur_reader == nullptr || _cur_reader_eof) {
+            SCOPED_TIMER(_next_reader_timer);
             RETURN_IF_ERROR(_get_next_reader());
         }
 
