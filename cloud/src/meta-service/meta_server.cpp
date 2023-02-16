@@ -3,6 +3,7 @@
 #include "meta_server.h"
 
 #include "common/config.h"
+#include "common/metric.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
@@ -69,6 +70,11 @@ int MetaServer::start() {
         return -1;
     }
 
+    fdb_metric_exporter_.reset(new FdbMetricExporter(txn_kv_));
+    if (fdb_metric_exporter_->start() != 0) {
+        LOG(WARNING) << "failed to start fdb metric exporter";
+        return -1;
+    }
 
     auto rate_limiter = std::make_shared<RateLimiter>();
 
@@ -100,6 +106,7 @@ void MetaServer::join() {
     // server_->Join();
     server_->ClearServices();
     server_register_->stop();
+    fdb_metric_exporter_->stop();
 }
 
 void MetaServerRegister::prepare_registry(ServiceRegistryPB* reg) {

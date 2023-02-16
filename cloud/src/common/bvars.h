@@ -112,3 +112,24 @@ extern bvar::LatencyRecorder g_bvar_txn_kv_get_committed_version;
 
 extern bvar::Adder<int64_t> g_bvar_txn_kv_commit_error_counter;
 extern bvar::Adder<int64_t> g_bvar_txn_kv_commit_conflict_counter;
+
+extern const int64_t BVAR_FDB_INVALID_VALUE;
+extern bvar::Status<int64_t> g_bvar_fdb_configuration_coordinators_count;
+extern bvar::Status<int64_t> g_bvar_fdb_configuration_usable_regions;
+extern bvar::Status<int64_t> g_bvar_fdb_process_count;
+extern bvar::Status<int64_t> g_bvar_fdb_machines_count;
+extern bvar::Status<int64_t> g_bvar_fdb_fault_tolerance_count;
+extern bvar::Status<int64_t> g_bvar_fdb_data_total_kv_size_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_data_total_disk_used_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_data_log_server_space_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_data_storage_server_space_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_workload_read_rate_hz;
+extern bvar::Status<int64_t> g_bvar_fdb_workload_write_rate_hz;
+extern bvar::Status<int64_t> g_bvar_fdb_workload_transactions_started_hz;
+extern bvar::Status<int64_t> g_bvar_fdb_workload_transactions_committed_hz;
+extern bvar::Status<int64_t> g_bvar_fdb_workload_conflict_rate_hz;
+extern bvar::Status<int64_t> g_bvar_fdb_client_count;
+extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_highest_priority;
+extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_flight_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_queue_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_data_moving_total_written_bytes;
