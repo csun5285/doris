@@ -24,7 +24,10 @@ public:
 
     // Return weak ptr of all cached tablets.
     // We return weak ptr to avoid extend lifetime of tablets that are no longer cached.
-    std::vector<std::weak_ptr<Tablet>> get_weak_tablets();
+    static std::vector<std::weak_ptr<Tablet>> get_weak_tablets();
+
+    static uint64_t get_rowset_nums();
+    static uint64_t get_segment_nums();
 
     void sync_tablets();
 
@@ -40,8 +43,7 @@ public:
      */
     Status get_topn_tablets_to_compact(int n, CompactionType compaction_type,
                                        const std::function<bool(Tablet*)>& filter_out,
-                                       std::vector<TabletSharedPtr>* tablets,
-                                       int64_t* max_score);
+                                       std::vector<TabletSharedPtr>* tablets, int64_t* max_score);
 
 private:
     std::unique_ptr<Cache> _cache;

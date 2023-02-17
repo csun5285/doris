@@ -204,6 +204,28 @@ std::vector<std::weak_ptr<Tablet>> CloudTabletMgr::get_weak_tablets() {
     return weak_tablets;
 }
 
+uint64_t CloudTabletMgr::get_rowset_nums() {
+    uint64_t n = 0;
+    auto tablets = get_weak_tablets();
+    for (auto& t : tablets) {
+        if (auto tablet = t.lock()) {
+            n += tablet->version_count();
+        }
+    }
+    return n;
+}
+
+uint64_t CloudTabletMgr::get_segment_nums() {
+    uint64_t n = 0;
+    auto tablets = get_weak_tablets();
+    for (auto& t : tablets) {
+        if (auto tablet = t.lock()) {
+            n += tablet->segment_count();
+        }
+    }
+    return n;
+}
+
 void CloudTabletMgr::sync_tablets() {
     LOG_INFO("begin to sync tablets");
     using namespace std::chrono;

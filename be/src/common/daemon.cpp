@@ -21,6 +21,7 @@
 #include <gperftools/malloc_extension.h>
 #include <signal.h>
 
+#include "cloud/cloud_tablet_mgr.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "exprs/array_functions.h"
@@ -340,10 +341,17 @@ void Daemon::calculate_metrics_thread() {
                         &lst_net_send_bytes, &lst_net_receive_bytes);
             }
 
+#ifdef CLOUD_MODE
+            DorisMetrics::instance()->all_rowset_nums->set_value(
+                    cloud::CloudTabletMgr::get_rowset_nums());
+            DorisMetrics::instance()->all_segment_nums->set_value(
+                    cloud::CloudTabletMgr::get_segment_nums());
+#else
             DorisMetrics::instance()->all_rowset_nums->set_value(
                     StorageEngine::instance()->tablet_manager()->get_rowset_nums());
             DorisMetrics::instance()->all_segment_nums->set_value(
                     StorageEngine::instance()->tablet_manager()->get_segment_nums());
+#endif
         }
     } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(15)));
 }
