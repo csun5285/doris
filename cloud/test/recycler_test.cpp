@@ -324,7 +324,8 @@ static int create_instance(const std::string& internal_stage_id,
 
 static int create_copy_job(TxnKv* txn_kv, const std::string& stage_id, int64_t table_id,
                            StagePB::StageType stage_type, CopyJobPB::JobStatus job_status,
-                           std::vector<ObjectFilePB> object_files, int64_t timeout_time) {
+                           std::vector<ObjectFilePB> object_files, int64_t timeout_time,
+                           int64_t start_time = 0, int64_t finish_time = 0) {
     std::string key;
     std::string val;
     CopyJobKeyInfo key_info {instance_id, stage_id, table_id, "copy_id", 0};
@@ -333,7 +334,13 @@ static int create_copy_job(TxnKv* txn_kv, const std::string& stage_id, int64_t t
     CopyJobPB copy_job;
     copy_job.set_stage_type(stage_type);
     copy_job.set_job_status(job_status);
-    copy_job.set_timeout_time(timeout_time);
+    copy_job.set_timeout_time_ms(timeout_time);
+    if (start_time != 0) {
+        copy_job.set_start_time_ms(start_time);
+    }
+    if (finish_time != 0) {
+        copy_job.set_finish_time_ms(finish_time);
+    }
     for (const auto& file : object_files) {
         copy_job.add_object_files()->CopyFrom(file);
     }
@@ -395,11 +402,7 @@ static int create_object_files(ObjStoreAccessor* accessor,
         if (accessor->put_object(key, key) != 0) {
             return -1;
         }
-        std::string etag;
-        if (accessor->get_etag(key, &etag) != 0) {
-            return -1;
-        }
-        file.set_etag(etag);
+        file.set_etag("");
     }
     return 0;
 }
@@ -738,7 +741,18 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
     }
 }
 
+void create_object_file_pb(std::string prefix, std::vector<ObjectFilePB>* object_files) {
+    for (int i = 0; i < 10; ++i) {
+        ObjectFilePB object_file;
+        // create object in S3, pay attention to the relative path
+        object_file.set_relative_path(prefix + "/obj_" + std::to_string(i));
+        object_file.set_etag("");
+        object_files->push_back(object_file);
+    }
+}
+
 TEST(RecyclerTest, recycle_copy_jobs) {
+    using namespace std::chrono;
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     ASSERT_NE(txn_kv.get(), nullptr);
     ASSERT_EQ(txn_kv->init(), 0);
@@ -753,76 +767,19 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     create_instance(internal_stage_id, external_stage_id, instance_info);
     InstanceRecycler recycler(txn_kv, instance_info);
     auto internal_accessor = recycler.accessor_map_.find(internal_stage_id)->second;
-    auto external_accessor = recycler.accessor_map_.find(external_stage_id)->second;
 
     // create internal stage copy job with finish status
     {
         std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            // create object in S3, pay attention to the relative path
-            object_file.set_relative_path("0/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
+        create_object_file_pb("0", &object_files);
         ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
         create_copy_job(txn_kv.get(), internal_stage_id, 0, StagePB::INTERNAL, CopyJobPB::FINISH,
                         object_files, 0);
     }
-    // create external stage copy job with finish status whose files are deleted
-    {
-        std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            object_file.set_relative_path(external_stage_id + "_1/obj_" + std::to_string(i));
-            object_file.set_etag("1234");
-            object_files.push_back(object_file);
-        }
-        create_copy_job(txn_kv.get(), external_stage_id, 1, StagePB::EXTERNAL, CopyJobPB::FINISH,
-                        object_files, 0);
-    }
-    // create external stage copy job with finish status whose files are not deleted
-    {
-        std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            object_file.set_relative_path(external_stage_id + "_2/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
-        ASSERT_EQ(create_object_files(external_accessor.get(), &object_files), 0);
-        create_copy_job(txn_kv.get(), external_stage_id, 2, StagePB::EXTERNAL, CopyJobPB::FINISH,
-                        object_files, 0);
-    }
-    // create external stage copy job and files with loading status which is timeout
-    {
-        std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            object_file.set_relative_path(external_stage_id + "_3/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
-        create_copy_job(txn_kv.get(), external_stage_id, 3, StagePB::EXTERNAL, CopyJobPB::LOADING,
-                        object_files, 0);
-    }
-    // create external stage copy job and files with loading status which is not timeout
-    {
-        std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            object_file.set_relative_path(external_stage_id + "_4/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
-        create_copy_job(txn_kv.get(), external_stage_id, 4, StagePB::EXTERNAL, CopyJobPB::LOADING,
-                        object_files, 9963904963479L);
-    }
     // create internal stage copy job and files with loading status which is timeout
     {
         std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            // create object in S3, pay attention to the relative path
-            object_file.set_relative_path("5/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
+        create_object_file_pb("5", &object_files);
         ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
         create_copy_job(txn_kv.get(), internal_stage_id, 5, StagePB::INTERNAL, CopyJobPB::LOADING,
                         object_files, 0);
@@ -830,58 +787,70 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     // create internal stage copy job and files with loading status which is not timeout
     {
         std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            // create object in S3, pay attention to the relative path
-            object_file.set_relative_path("6/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
+        create_object_file_pb("6", &object_files);
         ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
         create_copy_job(txn_kv.get(), internal_stage_id, 6, StagePB::INTERNAL, CopyJobPB::LOADING,
                         object_files, 9963904963479L);
     }
-    // create external stage copy job with deleted stage id
-    {
-        std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            object_file.set_relative_path(nonexist_external_stage_id + "_7/obj_" +
-                                          std::to_string(i));
-            object_files.push_back(object_file);
-        }
-        ASSERT_EQ(0, create_copy_job(txn_kv.get(), nonexist_external_stage_id, 7, StagePB::EXTERNAL,
-                                     CopyJobPB::FINISH, object_files, 0));
-    }
     // create internal stage copy job with deleted stage id
     {
         std::vector<ObjectFilePB> object_files;
-        for (int i = 0; i < 10; ++i) {
-            ObjectFilePB object_file;
-            // create object in S3, pay attention to the relative path
-            object_file.set_relative_path("8/obj_" + std::to_string(i));
-            object_files.push_back(object_file);
-        }
+        create_object_file_pb("8", &object_files);
         ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
         ASSERT_EQ(0, create_copy_job(txn_kv.get(), nonexist_internal_stage_id, 8, StagePB::INTERNAL,
                                      CopyJobPB::FINISH, object_files, 0));
     }
+    // ----- external stage ----
+    // <table_id, timeout_time, start_time, finish_time, job_status>
+    std::vector<std::tuple<int, int64_t, int64_t , int64_t, CopyJobPB::JobStatus>> external_copy_jobs;
+    uint64_t current_time =
+            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    int64_t expire_time = current_time - config::copy_job_max_retention_second * 1000 - 1000;
+    int64_t not_expire_time = current_time - config::copy_job_max_retention_second * 1000 / 2;
+    // create external stage copy job with start time not expired and no finish time
+    external_copy_jobs.emplace_back(1, 0, 9963904963479L, 0, CopyJobPB::FINISH);
+    // create external stage copy job with start time expired and no finish time
+    external_copy_jobs.emplace_back(2, 0, expire_time, 0, CopyJobPB::FINISH);
+    // create external stage copy job with start time not expired and finish time not expired
+    external_copy_jobs.emplace_back(9, 0, expire_time, not_expire_time, CopyJobPB::FINISH);
+    // create external stage copy job with start time expired and finish time expired
+    external_copy_jobs.emplace_back(10, 0, expire_time, expire_time + 1, CopyJobPB::FINISH);
+    // create external stage copy job and files with loading status which is timeout
+    external_copy_jobs.emplace_back(3, 0, 0, 0, CopyJobPB::LOADING);
+    // create external stage copy job and files with loading status which is not timeout
+    external_copy_jobs.emplace_back(4, 9963904963479L, 0, 0, CopyJobPB::LOADING);
+    for (const auto& [table_id, timeout_time, start_time, finish_time, job_status] : external_copy_jobs) {
+        std::vector<ObjectFilePB> object_files;
+        create_object_file_pb(external_stage_id + "_" + std::to_string(table_id), &object_files);
+        create_copy_job(txn_kv.get(), external_stage_id, table_id, StagePB::EXTERNAL,
+                        job_status, object_files, timeout_time, start_time, finish_time);
+    }
+    // create external stage copy job with deleted stage id
     {
+        std::vector<ObjectFilePB> object_files;
+        create_object_file_pb(nonexist_external_stage_id + "_7", &object_files);
+        ASSERT_EQ(0, create_copy_job(txn_kv.get(), nonexist_external_stage_id, 7, StagePB::EXTERNAL,
+                                     CopyJobPB::FINISH, object_files, 0));
+    }
+    {
+        // <stage_id, table_id>
+        std::vector<std::tuple<std::string, int>> stage_table_files;
+        stage_table_files.emplace_back(internal_stage_id, 0);
+        stage_table_files.emplace_back(nonexist_internal_stage_id, 8);
+        stage_table_files.emplace_back(external_stage_id, 1);
+        stage_table_files.emplace_back(external_stage_id, 2);
+        stage_table_files.emplace_back(external_stage_id, 9);
+        stage_table_files.emplace_back(external_stage_id, 10);
+        stage_table_files.emplace_back(external_stage_id, 3);
+        stage_table_files.emplace_back(external_stage_id, 4);
+        stage_table_files.emplace_back(external_stage_id, 9);
+        stage_table_files.emplace_back(nonexist_external_stage_id, 7);
         // check copy files
-        int file_num = 0;
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), internal_stage_id, 0, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 1, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 2, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 3, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 4, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), nonexist_external_stage_id, 7, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), nonexist_internal_stage_id, 8, &file_num));
-        ASSERT_EQ(10, file_num);
+        for (const auto& [stage_id, table_id] : stage_table_files) {
+            int file_num = 0;
+            ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), stage_id, table_id, &file_num));
+            ASSERT_EQ(10, file_num);
+        }
     }
 
     recycler.recycle_copy_jobs();
@@ -890,13 +859,8 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     std::vector<std::tuple<std::shared_ptr<ObjStoreAccessor>, std::string, int>>
             prefix_and_files_list;
     prefix_and_files_list.emplace_back(internal_accessor, "0/", 0);
-    prefix_and_files_list.emplace_back(external_accessor, external_stage_id + "_1/", 0);
-    prefix_and_files_list.emplace_back(external_accessor, external_stage_id + "_2/", 10);
-    prefix_and_files_list.emplace_back(external_accessor, external_stage_id + "_3/", 0);
-    prefix_and_files_list.emplace_back(external_accessor, external_stage_id + "_4/", 0);
     prefix_and_files_list.emplace_back(internal_accessor, "5/", 10);
     prefix_and_files_list.emplace_back(internal_accessor, "6/", 10);
-    prefix_and_files_list.emplace_back(external_accessor, external_stage_id + "_7/", 0);
     prefix_and_files_list.emplace_back(internal_accessor, "8/", 10);
     for (const auto& [accessor, relative_path, file_num] : prefix_and_files_list) {
         std::vector<std::string> object_files;
@@ -905,48 +869,29 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     }
 
     // check fdb kvs
-    {
-        // check copy jobs
-        bool exist = false;
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), internal_stage_id, 0, &exist));
-        ASSERT_EQ(false, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), external_stage_id, 1, &exist));
-        ASSERT_EQ(false, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), external_stage_id, 2, &exist));
-        ASSERT_EQ(true, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), external_stage_id, 3, &exist));
-        ASSERT_EQ(false, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), external_stage_id, 4, &exist));
-        ASSERT_EQ(true, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), internal_stage_id, 5, &exist));
-        ASSERT_EQ(false, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), internal_stage_id, 6, &exist));
-        ASSERT_EQ(true, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), nonexist_external_stage_id, 7, &exist));
-        ASSERT_EQ(false, exist);
-        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), nonexist_internal_stage_id, 8, &exist));
-        ASSERT_EQ(false, exist);
-
+    // <stage_id, table_id, expected_files, expected_job_exists>
+    std::vector<std::tuple<std::string, int, int, bool>> stage_table_files;
+    stage_table_files.emplace_back(internal_stage_id, 0, 0, false);
+    stage_table_files.emplace_back(nonexist_internal_stage_id, 8, 0, false);
+    stage_table_files.emplace_back(internal_stage_id, 5, 0, false);
+    stage_table_files.emplace_back(internal_stage_id, 6, 10, true);
+    stage_table_files.emplace_back(external_stage_id, 1, 10, true);
+    stage_table_files.emplace_back(external_stage_id, 2, 0, false);
+    stage_table_files.emplace_back(external_stage_id, 9, 10, true);
+    stage_table_files.emplace_back(external_stage_id, 10, 0, false);
+    stage_table_files.emplace_back(external_stage_id, 3, 0, false);
+    stage_table_files.emplace_back(external_stage_id, 4, 10, true);
+    stage_table_files.emplace_back(nonexist_external_stage_id, 7, 0, false);
+    for (const auto& [stage_id, table_id, files, expected_job_exists] : stage_table_files) {
+        // std::cout << "table_id=" << table_id << std::endl;
         // check copy files
         int file_num = 0;
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), internal_stage_id, 0, &file_num));
-        ASSERT_EQ(0, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 1, &file_num));
-        ASSERT_EQ(0, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 2, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 3, &file_num));
-        ASSERT_EQ(0, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), external_stage_id, 4, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), internal_stage_id, 5, &file_num));
-        ASSERT_EQ(0, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), internal_stage_id, 6, &file_num));
-        ASSERT_EQ(10, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), nonexist_external_stage_id, 7, &file_num));
-        ASSERT_EQ(0, file_num);
-        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), nonexist_internal_stage_id, 8, &file_num));
-        ASSERT_EQ(0, file_num);
+        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), stage_id, table_id, &file_num));
+        ASSERT_EQ(files, file_num);
+        // check copy jobs
+        bool exist = false;
+        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), stage_id, table_id, &exist));
+        ASSERT_EQ(expected_job_exists, exist);
     }
 }
 

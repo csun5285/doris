@@ -4301,8 +4301,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             throws DdlException {
         SelectdbCloud.BeginCopyRequest request = SelectdbCloud.BeginCopyRequest.newBuilder()
                 .setCloudUniqueId(Config.cloud_unique_id).setStageId(stageId).setStageType(stageType)
-                .setTableId(tableId).setCopyId(copyJobId).setGroupId(groupId).setStartTime(startTime)
-                .setTimeoutTime(timeoutTime).addAllObjectFiles(objectFiles).build();
+                .setTableId(tableId).setCopyId(copyJobId).setGroupId(groupId).setStartTimeMs(startTime)
+                .setTimeoutTimeMs(timeoutTime).addAllObjectFiles(objectFiles).build();
         SelectdbCloud.BeginCopyResponse response = null;
         try {
             int retry = 0;
@@ -4345,7 +4345,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         SelectdbCloud.FinishCopyRequest request = SelectdbCloud.FinishCopyRequest.newBuilder()
                 .setCloudUniqueId(Config.cloud_unique_id).setStageId(stageId).setStageType(stageType)
                 .setTableId(tableId).setCopyId(copyJobId).setGroupId(groupId)
-                .setAction(success ? Action.COMMIT : Action.ABORT).build();
+                .setAction(success ? Action.COMMIT : Action.ABORT).setFinishTimeMs(System.currentTimeMillis()).build();
         SelectdbCloud.FinishCopyResponse response = null;
         try {
             int retry = 0;

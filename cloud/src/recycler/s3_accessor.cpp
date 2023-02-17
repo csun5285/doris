@@ -212,47 +212,6 @@ int S3Accessor::list(const std::string& relative_path, std::vector<std::string>*
     return 0;
 }
 
-int S3Accessor::exists( const std::string& relative_path, const std::string& etag, bool* exist) {
-    Aws::S3::Model::HeadObjectRequest request;
-    auto key = get_key(relative_path);
-    request.WithBucket(conf_.bucket).WithKey(key);
-    auto outcome = s3_client_->HeadObject(request);
-    if (outcome.IsSuccess()) {
-        *exist = outcome.GetResult().GetETag() == etag;
-        return 0;
-    } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
-        *exist = false;
-        return 0;
-    } else {
-        LOG_WARNING("failed to head object")
-                .tag("endpoint", conf_.endpoint)
-                .tag("bucket", conf_.bucket)
-                .tag("key", key)
-                .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
-                .tag("error", outcome.GetError().GetMessage());
-        return -1;
-    }
-}
-
-int S3Accessor::get_etag(const std::string& relative_path, std::string* etag) {
-    Aws::S3::Model::HeadObjectRequest request;
-    auto key = get_key(relative_path);
-    request.WithBucket(conf_.bucket).WithKey(key);
-    auto outcome = s3_client_->HeadObject(request);
-    if (outcome.IsSuccess()) {
-        *etag = outcome.GetResult().GetETag();
-        return 0;
-    } else {
-        LOG_WARNING("failed to head object")
-                .tag("endpoint", conf_.endpoint)
-                .tag("bucket", conf_.bucket)
-                .tag("key", key)
-                .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
-                .tag("error", outcome.GetError().GetMessage());
-        return -1;
-    }
-}
-
 int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time) {
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);

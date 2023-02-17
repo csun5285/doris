@@ -1152,8 +1152,8 @@ TEST(MetaServiceTest, CopyJobTest) {
     begin_copy_request.set_table_id(table_id);
     begin_copy_request.set_copy_id("test_copy_id");
     begin_copy_request.set_group_id(0);
-    begin_copy_request.set_start_time(200);
-    begin_copy_request.set_timeout_time(300);
+    begin_copy_request.set_start_time_ms(200);
+    begin_copy_request.set_timeout_time_ms(300);
     for (int i = 0; i < 20; ++i) {
         ObjectFilePB object_file_pb;
         object_file_pb.set_relative_path("obj_" + std::to_string(i));

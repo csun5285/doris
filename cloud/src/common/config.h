@@ -89,6 +89,7 @@ CONF_String(specific_max_qps_limit, "get_cluster:5000000;begin_txn:5000000");
 CONF_Bool(enable_rate_limit, "true");
 CONF_Int64(bvar_qps_update_second, "5");
 
+CONF_Int32(copy_job_max_retention_second, "259200"); //3 * 24 * 3600 seconds
 CONF_String(arn_id, "");
 CONF_String(arn_ak, "");
 CONF_String(arn_sk, "");

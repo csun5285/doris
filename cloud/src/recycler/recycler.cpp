@@ -1550,26 +1550,23 @@ void InstanceRecycler::recycle_copy_jobs() {
         if (copy_job.job_status() == CopyJobPB::FINISH) {
             ++num_finished;
 
-            auto it = stage_accessor_map.find(stage_id);
-            std::shared_ptr<ObjStoreAccessor> accessor;
-            if (it != stage_accessor_map.end()) {
-                accessor = it->second;
-            } else {
-                auto ret = init_copy_job_accessor(stage_id, copy_job.stage_type(), &accessor);
-                if (ret < 0) { // error
-                    return false;
-                } else if (ret == 0) {
-                    stage_accessor_map.emplace(stage_id, accessor);
-                } else { // stage not found, skip check storage
-                    check_storage = false;
+            if (copy_job.stage_type() == StagePB::INTERNAL) {
+                auto it = stage_accessor_map.find(stage_id);
+                std::shared_ptr<ObjStoreAccessor> accessor;
+                if (it != stage_accessor_map.end()) {
+                    accessor = it->second;
+                } else {
+                    auto ret = init_copy_job_accessor(stage_id, copy_job.stage_type(), &accessor);
+                    if (ret < 0) { // error
+                        return false;
+                    } else if (ret == 0) {
+                        stage_accessor_map.emplace(stage_id, accessor);
+                    } else { // stage not found, skip check storage
+                        check_storage = false;
+                    }
                 }
-            }
-
-            if (check_storage) {
-                if (copy_job.stage_type() == StagePB::INTERNAL) {
-                    // 1. delete objects on storage
-                    // 2. delete copy file kvs
-                    // 3. delete copy job kv
+                if (check_storage) {
+                    // delete objects on storage
                     std::vector<std::string> relative_paths;
                     for (const auto& file : copy_job.object_files()) {
                         auto relative_path = file.relative_path();
@@ -1602,39 +1599,24 @@ void InstanceRecycler::recycle_copy_jobs() {
                                 .tag("num_objects", relative_paths.size());
                         return false;
                     }
-                } else if (copy_job.stage_type() == StagePB::EXTERNAL) {
-                    // Check if objects on storage are deleted.
-                    // If all deleted, then delete copy file kvs and copy job kv.
-                    for (auto& file : copy_job.object_files()) {
-                        bool exist = false;
-                        auto ret = accessor->exists(file.relative_path(), file.etag(), &exist);
-                        if (ret != 0) {
-                            LOG(WARNING) << "failed to check if object exists for instance_id="
-                                         << instance_id_ << ", stage_id=" << stage_id
-                                         << ", table_id=" << table_id << ", query_id=" << copy_id
-                                         << "stage_path" << accessor->path()
-                                         << ", relative_path=" << file.relative_path()
-                                         << ", etag=" << file.etag() << ", ret=" << ret;
-                            return false;
-                        }
-                        LOG_INFO("check if external stage object exists")
-                                .tag("instance_id", instance_id_)
-                                .tag("stage_id", stage_id)
-                                .tag("table_id", table_id)
-                                .tag("query_id", copy_id)
-                                .tag("stage_path", accessor->path())
-                                .tag("relative_path", file.relative_path())
-                                .tag("etag", file.etag())
-                                .tag("exist", exist);
-                        if (exist) {
-                            return false;
-                        }
+                }
+            } else if (copy_job.stage_type() == StagePB::EXTERNAL) {
+                if (copy_job.finish_time_ms() > 0) {
+                    if (current_time <
+                        copy_job.finish_time_ms() + config::copy_job_max_retention_second * 1000) {
+                        return false;
+                    }
+                } else {
+                    // For compatibility, copy job does not contain finish time before 2.2.2, use start time
+                    if (current_time <
+                        copy_job.start_time_ms() + config::copy_job_max_retention_second * 1000) {
+                        return false;
                     }
                 }
             }
         } else if (copy_job.job_status() == CopyJobPB::LOADING) {
             // if copy job is timeout: delete all copy file kvs and copy job kv
-            if (current_time <= copy_job.timeout_time()) {
+            if (current_time <= copy_job.timeout_time_ms()) {
                 return false;
             }
             ++num_expired;

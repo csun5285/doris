@@ -4861,8 +4861,8 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
     CopyJobPB copy_job;
     copy_job.set_stage_type(request->stage_type());
     copy_job.set_job_status(CopyJobPB::LOADING);
-    copy_job.set_start_time(request->start_time());
-    copy_job.set_timeout_time(request->timeout_time());
+    copy_job.set_start_time_ms(request->start_time_ms());
+    copy_job.set_timeout_time_ms(request->timeout_time_ms());
 
     std::vector<std::pair<std::string, std::string>> copy_files;
     auto object_files = request->object_files();
@@ -4990,6 +4990,9 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
     if (request->action() == FinishCopyRequest::COMMIT) {
         // 1. update copy job status from Loading to Finish
         copy_job.set_job_status(CopyJobPB::FINISH);
+        if (request->has_finish_time_ms()) {
+            copy_job.set_finish_time_ms(request->finish_time_ms());
+        }
         val = copy_job.SerializeAsString();
         if (val.empty()) {
             msg = "failed to serialize";

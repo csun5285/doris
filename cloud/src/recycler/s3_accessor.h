@@ -36,12 +36,6 @@ public:
     // returns 0 for success otherwise error
     virtual int list(const std::string& relative_path, std::vector<std::string>* keys) = 0;
 
-    // returns 0 for success otherwise error
-    virtual int exists(const std::string& relative_path, const std::string& etag, bool* exist) = 0;
-
-    // returns 0 for success otherwise error
-    virtual int get_etag(const std::string& relative_path, std::string* etag) = 0;
-
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
     virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
@@ -81,13 +75,6 @@ public:
 
     // returns 0 for success otherwise error
     int list(const std::string& relative_path, std::vector<std::string>* keys) override;
-
-    // returns 0 for success otherwise error
-    int exists(const std::string& relative_path, const std::string& etag,
-               bool* exist) override;
-
-    // returns 0 for success otherwise error
-    int get_etag(const std::string& relative_path, std::string* etag) override;
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
