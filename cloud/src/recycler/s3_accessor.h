@@ -41,6 +41,10 @@ public:
 
     // returns 0 for success otherwise error
     virtual int get_etag(const std::string& relative_path, std::string* etag) = 0;
+
+    // delete objects which last modified time is less than the input expired time and under the input relative path
+    // returns 0 for success otherwise error
+    virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
 };
 
 struct S3Conf {
@@ -85,8 +89,13 @@ public:
     // returns 0 for success otherwise error
     int get_etag(const std::string& relative_path, std::string* etag) override;
 
+    // delete objects which last modified time is less than the input expired time and under the input relative path
+    // returns 0 for success otherwise error
+    int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override;
 private:
     std::string get_key(const std::string& relative_path) const;
+    // return empty string if the input key does not start with the prefix of S3 conf
+    std::string get_relative_path(const std::string& key) const;
 
 private:
     std::shared_ptr<Aws::S3::S3Client> s3_client_;

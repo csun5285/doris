@@ -33,6 +33,10 @@ std::string S3Accessor::get_key(const std::string& relative_path) const {
     return conf_.prefix + '/' + relative_path;
 }
 
+std::string S3Accessor::get_relative_path(const std::string& key) const {
+    return key.find(conf_.prefix + "/") != 0 ? "" : key.substr(conf_.prefix.length() + 1);
+}
+
 int S3Accessor::init() {
     static S3Environment s3_env;
     Aws::Auth::AWSCredentials aws_cred(conf_.ak, conf_.sk);
@@ -247,5 +251,59 @@ int S3Accessor::get_etag(const std::string& relative_path, std::string* etag) {
                 .tag("error", outcome.GetError().GetMessage());
         return -1;
     }
+}
+
+int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time) {
+    Aws::S3::Model::ListObjectsV2Request request;
+    auto prefix = get_key(relative_path);
+    request.WithBucket(conf_.bucket).WithPrefix(prefix);
+
+    bool is_truncated = false;
+    do {
+        auto outcome = s3_client_->ListObjectsV2(request);
+        if (!outcome.IsSuccess()) {
+            LOG_WARNING("failed to list objects")
+                    .tag("endpoint", conf_.endpoint)
+                    .tag("bucket", conf_.bucket)
+                    .tag("prefix", prefix)
+                    .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
+                    .tag("error", outcome.GetError().GetMessage());
+            return -1;
+        }
+        const auto& result = outcome.GetResult();
+        std::vector<std::string> expired_keys;
+        for (const auto& obj : result.GetContents()) {
+            if (obj.GetLastModified().Seconds() < expired_time) {
+                auto relative_key = get_relative_path(obj.GetKey());
+                if (relative_key.empty()) {
+                    LOG_WARNING("failed get relative path")
+                            .tag("prefix", conf_.prefix)
+                            .tag("key", obj.GetKey());
+                } else {
+                    expired_keys.push_back(relative_key);
+                    LOG_INFO("delete expired object")
+                            .tag("prefix", conf_.prefix)
+                            .tag("key", obj.GetKey())
+                            .tag("relative_key", relative_key)
+                            .tag("lastModifiedTime", obj.GetLastModified().Seconds())
+                            .tag("expiredTime", expired_time);
+                }
+            }
+        }
+
+        auto ret = delete_objects(expired_keys);
+        if (ret != 0) {
+            return ret;
+        }
+        LOG_INFO("delete expired objects")
+                .tag("endpoint", conf_.endpoint)
+                .tag("bucket", conf_.bucket)
+                .tag("prefix", conf_.prefix)
+                .tag("num_scanned", result.GetContents().size())
+                .tag("num_recycled", expired_keys.size());
+        is_truncated = result.GetIsTruncated();
+        request.SetContinuationToken(result.GetNextContinuationToken());
+    } while (is_truncated);
+    return 0;
 }
 } // namespace selectdb

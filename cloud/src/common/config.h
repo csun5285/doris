@@ -92,5 +92,6 @@ CONF_Int64(bvar_qps_update_second, "5");
 CONF_String(arn_id, "");
 CONF_String(arn_ak, "");
 CONF_String(arn_sk, "");
+CONF_Int64(internal_stage_objects_expire_time_second, "259200"); // 3 * 24 * 3600 seconds
 
 } // namespace selectdb::config

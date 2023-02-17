@@ -101,6 +101,9 @@ public:
 
     // scan and recycle dropped internal stage
     void recycle_stage();
+
+    // scan and recycle expired stage objects
+    void recycle_expired_stage_objects();
 private:
     /**
      * Scan key-value pairs between [`begin`, `end`), and perform `recycle_func` on each key-value pair.

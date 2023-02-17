@@ -243,6 +243,7 @@ void Recycler::recycle_callback() {
         instance_recycler->recycle_expired_txn_label();
         instance_recycler->recycle_copy_jobs();
         instance_recycler->recycle_stage();
+        instance_recycler->recycle_expired_stage_objects();
         finish_instance_recycle_job(instance_id);
         {
             std::lock_guard lock(recycling_instance_set_mtx_);
@@ -1825,5 +1826,58 @@ void InstanceRecycler::recycle_stage() {
     };
 
     scan_and_recycle(key0, key1, std::move(recycle_func));
+}
+
+void InstanceRecycler::recycle_expired_stage_objects() {
+    LOG_INFO("begin to recycle expired stage objects").tag("instance_id", instance_id_);
+
+    using namespace std::chrono;
+    auto start_time = steady_clock::now();
+
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        auto cost = duration<float>(steady_clock::now() - start_time).count();
+        LOG_INFO("recycle expired stage objects, cost={}s", cost)
+                .tag("instance_id", instance_id_);
+    });
+
+    int64_t expired_time = duration_cast<seconds>(system_clock::now().time_since_epoch()).count() -
+                           config::internal_stage_objects_expire_time_second;
+    for (const auto& stage : instance_info_.stages()) {
+        if (stage.type() == stage.EXTERNAL) {
+            continue;
+        }
+        int idx = stoi(stage.obj_info().id());
+        if (idx > instance_info_.obj_info().size() || idx < 1) {
+            LOG(WARNING) << "invalid idx: " << idx << ", id: " << stage.obj_info().id();
+            continue;
+        }
+        auto& old_obj = instance_info_.obj_info()[idx - 1];
+        S3Conf s3_conf;
+        s3_conf.ak = old_obj.ak();
+        s3_conf.sk = old_obj.sk();
+        s3_conf.endpoint = old_obj.endpoint();
+        s3_conf.region = old_obj.region();
+        s3_conf.bucket = old_obj.bucket();
+        s3_conf.prefix = stage.obj_info().prefix();
+        std::shared_ptr<ObjStoreAccessor> accessor =
+                std::make_shared<S3Accessor>(std::move(s3_conf));
+        auto ret = accessor->init();
+        if (ret != 0) {
+            LOG(WARNING) << "failed to init s3 accessor ret=" << ret;
+            continue;
+        }
+
+        LOG(INFO) << "recycle expired stage objects, instance_id=" << instance_id_
+                  << ", stage_id=" << stage.stage_id()
+                  << ", user_name=" << stage.mysql_user_name().at(0)
+                  << ", user_id=" << stage.mysql_user_id().at(0)
+                  << ", prefix=" << stage.obj_info().prefix();
+        ret = accessor->delete_expired_objects("", expired_time);
+        if (ret != 0) {
+            LOG(WARNING) << "failed to recycle expired stage objects, instance_id=" << instance_id_
+                         << ", stage_id=" << stage.stage_id() << ", ret=" << ret;
+            continue;
+        }
+    }
 }
 } // namespace selectdb

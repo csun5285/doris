@@ -140,3 +140,56 @@ Suite.metaClass.checkRecycleInternalStage = { String token, String instanceId, S
 }
 logger.info("Added 'checkRecycleInternalStage' function to Suite")
 
+Suite.metaClass.checkRecycleExpiredStageObjects = { String token, String instanceId, String cloudUniqueId, Set<String> nonExistFileNames, Set<String> existFileNames ->
+    // which suite invoke current function?
+    Suite suite = delegate as Suite
+
+    // function body
+    suite.getLogger().info("""Test plugin: suiteName: ${suite.name}, instanceId: ${instanceId}, token:${token}, cloudUniqueId:${cloudUniqueId}""".toString())
+
+    def getObjStoreInfoApiResult = suite.getObjStoreInfo(token, cloudUniqueId);
+    suite.getLogger().info("checkRecycleExpiredStageObjects(): getObjStoreInfoApiResult:${getObjStoreInfoApiResult}".toString())
+
+    String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
+    String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
+    String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
+    String region = getObjStoreInfoApiResult.result.obj_info[0].region
+    String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
+    String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
+    suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
+
+    def credentials = new BasicAWSCredentials(ak, sk)
+    def endpointConfiguration = new EndpointConfiguration(endpoint, region)
+    def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
+            .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
+
+    // for root and admin, userId equal userName
+    String userName = suite.context.config.jdbcUser;
+    String userId = suite.context.config.jdbcUser;
+    def objectListing = s3Client.listObjects(
+            new ListObjectsRequest()
+                    .withBucketName(bucket)
+                    .withPrefix("${prefix}/stage/${userName}/${userId}/"))
+
+    suite.getLogger().info("${prefix}/stage/${userName}/${userId}/, objectListing:${objectListing.getObjectSummaries()}".toString())
+    Set<String> fileNames = new HashSet<>()
+    for (def os: objectListing.getObjectSummaries()) {
+        def split = os.key.split("/")
+        if (split.length <= 0 ) {
+            continue
+        }
+        fileNames.add(split[split.length-1])
+    }
+    for(def f : nonExistFileNames) {
+        if (fileNames.contains(f)) {
+            return false
+        }
+    }
+    for(def f : existFileNames) {
+        if (!fileNames.contains(f)) {
+            return false
+        }
+    }
+    return true
+}
+logger.info("Added 'checkRecycleExpiredStageObjects' function to Suite")
