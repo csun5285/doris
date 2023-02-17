@@ -534,7 +534,7 @@ public class CopyIntoTest extends TestWithFeService {
                 Assert.assertTrue(e.getMessage().contains(errorMsg));
                 break;
             } catch (Exception e) {
-                Assert.fail("must be AnalysisException.");
+                Assert.fail("must be AnalysisException. sql: " + sql + ", exception: " + e.getMessage());
             }
             Assert.fail("must be AnalysisException.");
         } while (false);

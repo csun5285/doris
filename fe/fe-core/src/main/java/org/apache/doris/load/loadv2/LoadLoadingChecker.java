@@ -33,7 +33,7 @@ public class LoadLoadingChecker extends MasterDaemon {
     private LoadManager loadManager;
 
     public LoadLoadingChecker(LoadManager loadManager) {
-        super("Load loading checker", Config.load_checker_interval_second * 1000);
+        super("Load loading checker", Config.load_checker_interval_ms);
         this.loadManager = loadManager;
     }
 

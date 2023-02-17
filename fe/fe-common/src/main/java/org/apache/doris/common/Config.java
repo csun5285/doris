@@ -510,7 +510,7 @@ public class Config extends ConfigBase {
      *      while the txn callback will transfer load job from LOADING to FINISHED.
      * So a load job will cost at most one interval to finish when the concurrency has not reached the upper limit.
      */
-    @ConfField public static int load_checker_interval_second = 5;
+    @ConfField public static int load_checker_interval_ms = 100;
 
     /**
      * The spark load scheduler running interval.

@@ -1496,7 +1496,7 @@ public class Env {
         heartbeatMgr.start();
 
         // Load checker
-        LoadChecker.init(Config.load_checker_interval_second * 1000L);
+        LoadChecker.init(Config.load_checker_interval_ms);
         LoadChecker.startAll();
         // New load scheduler
         pendingLoadTaskScheduler.start();

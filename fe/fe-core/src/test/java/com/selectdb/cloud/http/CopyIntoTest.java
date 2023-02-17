@@ -51,7 +51,7 @@ public class CopyIntoTest extends DorisHttpTestCase {
         JSONObject jsonObject = (JSONObject) JSONValue.parse(respStr);
         Assert.assertEquals(403, (long) jsonObject.get("code"));
         String exception = (String) jsonObject.get("data");
-        Assert.assertTrue(exception.contains("http header must have fileName entry"));
+        Assert.assertTrue(exception.contains("http header must have filename entry"));
 
         // case 1
         request = new Request.Builder()

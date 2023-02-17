@@ -45,7 +45,7 @@ public class LoadJobScheduler extends MasterDaemon {
     private LinkedBlockingQueue<LoadJob> needScheduleJobs = Queues.newLinkedBlockingQueue();
 
     public LoadJobScheduler() {
-        super("Load job scheduler", Config.load_checker_interval_second * 1000);
+        super("Load job scheduler", Config.load_checker_interval_ms);
     }
 
     @Override
