@@ -24,6 +24,7 @@ const int32_t MAX_FIELD_LEN = 0x7FFFFFFFL;
 const int32_t MAX_LEAF_COUNT = 1024;
 const float MAXMBSortInHeap = 512.0 * 8;
 const int DIMS = 1;
+const std::string empty_value;
 
 template <FieldType field_type>
 class InvertedIndexColumnWriterImpl : public InvertedIndexColumnWriter {
@@ -195,9 +196,7 @@ public:
             }
 
             for (int i = 0; i < count; ++i) {
-                std::string empty_value;
-                auto empty_val = lucene::util::Misc::_charToWide(empty_value.c_str());
-                _field->setValue(empty_val, false);
+                new_fulltext_field(empty_value.c_str(), 0);
                 _index_writer->addDocument(_doc);
             }
         }
@@ -262,8 +261,6 @@ public:
 
     Status add_array_values(size_t field_size, const CollectionValue* values,
                             size_t count) override {
-        auto* item_data_ptr = const_cast<CollectionValue*>(values)->mutable_data();
-
         if constexpr (field_is_slice_type(field_type)) {
             if (_field == nullptr) {
                 LOG(ERROR)
@@ -272,6 +269,7 @@ public:
                 return Status::InternalError("could not find field in clucene");
             }
             for (int i = 0; i < count; ++i) {
+                auto* item_data_ptr = const_cast<CollectionValue*>(values)->mutable_data();
                 std::vector<std::string> strings;
 
                 for (size_t j = 0; j < values->length(); ++j) {
@@ -286,11 +284,14 @@ public:
                 new_fulltext_field(value.c_str(), value.length());
                 _rid++;
                 _index_writer->addDocument(_doc);
+                values++;
             }
         } else if constexpr (field_is_numeric_type(field_type)) {
-            auto p = reinterpret_cast<const CppType*>(item_data_ptr);
             for (int i = 0; i < count; ++i) {
+                auto* item_data_ptr = const_cast<CollectionValue*>(values)->mutable_data();
+
                 for (size_t j = 0; j < values->length(); ++j) {
+                    const CppType* p = reinterpret_cast<const CppType*>(item_data_ptr);
                     if (values->is_null_at(j)) {
                         // bkd do not index null values, so we do nothing here.
                     } else {
@@ -300,10 +301,11 @@ public:
                         _value_key_coder->full_encode_ascending(p, &new_value);
                         _bkd_writer->add((const uint8_t*)new_value.c_str(), value_length, _rid);
                     }
-                    p++;
+                    item_data_ptr = (uint8_t*)item_data_ptr + field_size;
                 }
                 _row_ids_seen_for_bkd++;
                 _rid++;
+                values++;
             }
         }
         return Status::OK();
