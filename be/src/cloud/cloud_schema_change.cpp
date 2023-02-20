@@ -382,7 +382,7 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     RowsetReaderContext reader_context;
     reader_context.reader_type = READER_ALTER_TABLE;
     reader_context.tablet_schema = tablet_schema;
-    reader_context.need_ordered_result = true;
+    reader_context.need_ordered_result = false;
     reader_context.delete_handler = &delete_handler;
     reader_context.return_columns = &return_columns;
     reader_context.sequence_id_idx = reader_context.tablet_schema->sequence_col_idx();
