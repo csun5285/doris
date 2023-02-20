@@ -562,7 +562,7 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
     auto st = _timestamped_version_tracker.capture_consistent_versions(version_range, &version_path);
     if (!st.ok()) {
         st.append(" tablet_id=" + std::to_string(tablet_id()));
-        VLOG_DEBUG << st << '\n' << [this]() { std::string json; get_compaction_status(&json); return json; }();
+        LOG(WARNING) << st << '\n' << [this]() { std::string json; get_compaction_status(&json); return json; }();
         return st;
     }
     // clang-format on
