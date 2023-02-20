@@ -563,6 +563,7 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
     if (!st.ok()) {
         st.append(" tablet_id=" + std::to_string(tablet_id()));
         LOG(WARNING) << st << '\n' << [this]() { std::string json; get_compaction_status(&json); return json; }();
+        DCHECK(st.ok()) << st;
         return st;
     }
     // clang-format on
