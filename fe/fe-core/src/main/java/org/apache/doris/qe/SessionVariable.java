@@ -257,6 +257,8 @@ public class SessionVariable implements Serializable, Writable {
 
     public static final String GROUP_BY_AND_HAVING_USE_ALIAS_FIRST = "group_by_and_having_use_alias_first";
 
+    public static final String TOPN_OPT_LIMIT_THRESHOLD = "topn_opt_limit_threshold";
+
     // session origin value
     public Map<Field, String> sessionOriginValue = new HashMap<Field, String>();
     // check stmt is or not [select /*+ SET_VAR(...)*/ ...]
@@ -669,6 +671,9 @@ public class SessionVariable implements Serializable, Writable {
     // should first use column name not alias. According to mysql.
     @VariableMgr.VarAttr(name = GROUP_BY_AND_HAVING_USE_ALIAS_FIRST)
     public boolean groupByAndHavingUseAliasFirst = false;
+
+    @VariableMgr.VarAttr(name = TOPN_OPT_LIMIT_THRESHOLD)
+    public long topnOptLimitThreshold = 1024;
 
     // If this fe is in fuzzy mode, then will use initFuzzyModeVariables to generate some variables,
     // not the default value set in the code.

@@ -483,10 +483,12 @@ public class OriginalPlanner extends Planner {
             SortNode sortNode = (SortNode) node;
             PlanNode child = sortNode.getChild(0);
             if (child instanceof OlapScanNode && sortNode.getLimit() > 0
-                    && sortNode.getSortInfo().getOrderingExprs().size() > 0) {
-                Expr firstSortExpr = sortNode.getSortInfo().getOrderingExprs().get(0);
-                if (firstSortExpr instanceof SlotRef && ((SlotRef) firstSortExpr).hasCol()
-                        && !firstSortExpr.getType().isStringType()) {
+                    && ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null
+                    && sortNode.getLimit() <= ConnectContext.get().getSessionVariable().topnOptLimitThreshold
+                    && sortNode.getSortInfo().getMaterializedOrderingExprs().size() > 0) {
+                Expr firstSortExpr = sortNode.getSortInfo().getMaterializedOrderingExprs().get(0);
+                if (firstSortExpr instanceof SlotRef && !firstSortExpr.getType().isStringType()
+                        && !firstSortExpr.getType().isFloatingPointType()) {
                     OlapScanNode scanNode = (OlapScanNode) child;
                     if (scanNode.isDupKeysOrMergeOnWrite()) {
                         sortNode.setUseTopnOpt(true);

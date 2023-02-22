@@ -561,3 +561,7 @@ Translated with www.DeepL.com/Translator (free version)
 *   `group_by_and_having_use_alias_first`
 
     Specifies whether group by and having clauses use column aliases rather than searching for column name in From clause. The default value is false.
+
+* `topn_opt_limit_threshold`
+
+    Set threshold for limit of topn query (eg. SELECT * FROM t ORDER BY k LIMIT n). If n <= threshold, topn optimizations(runtime predicate pushdown, two phase result fetch and read order by key) will enable automatically, otherwise disable. Default value is 1024.

@@ -71,22 +71,25 @@ public:
         return false;
     }
 
+    inline bool use_topn_next() const { return _topn_limit > 0; }
+
 private:
     // next for topn query
-    Status topn_next(Block* block);
+    Status _topn_next(Block* block);
 
-    class BlockRowposComparator {
+    class BlockRowPosComparator {
     public:
-        BlockRowposComparator(MutableBlock* mutable_block, size_t compare_column_idx, bool is_reverse)
+        BlockRowPosComparator(MutableBlock* mutable_block,
+                              const std::vector<uint32_t>* compare_columns, bool is_reverse)
                 : _mutable_block(mutable_block),
-                  _compare_column_idx(compare_column_idx),
+                  _compare_columns(compare_columns),
                   _is_reverse(is_reverse) {}
 
         bool operator()(const size_t& lpos, const size_t& rpos) const;
 
     private:
         const MutableBlock* _mutable_block = nullptr;
-        const size_t _compare_column_idx = 0;
+        const std::vector<uint32_t>* _compare_columns;
         // reverse the compare order
         const bool _is_reverse = false;
     };
