@@ -44,6 +44,8 @@ int decode_bytes(std::string_view* in, std::string* out);
 
 /**
  * Encodes int64 to 8-byte big endian
+ * Negative 0x11 0000000000000000
+ * Posotive 0x12 0000000000000000
  * FIXME: use entire 8-bytes
  */
 void encode_int64(int64_t val, std::string* b);
