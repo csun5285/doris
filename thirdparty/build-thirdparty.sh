@@ -1769,6 +1769,7 @@ build_clucene
 build_fast_float
 
 # Full build done
+cd "${TP_DIR}"
 if [[ -f version.txt ]]; then
     cp -f version.txt ${TP_INSTALL_DIR}/version.txt
 fi
