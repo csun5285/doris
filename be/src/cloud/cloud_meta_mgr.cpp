@@ -90,6 +90,10 @@ Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tab
 }
 
 Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet) {
+    int tried = 0;
+
+TRY_AGAIN:
+
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::GetRowsetRequest req;
@@ -147,6 +151,26 @@ Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet) {
     {
         auto& stats = resp.stats();
         std::lock_guard wlock(tablet->get_header_lock());
+
+        // ATTN: we are facing following data race
+        //
+        // resp_base_compaction_cnt=0|base_compaction_cnt=0|resp_cumulative_compaction_cnt=0|cumulative_compaction_cnt=1|resp_max_version=11|max_version=8
+        //
+        //   BE-compaction-thread                 meta-service                                     BE-query-thread
+        //            |                                |                                                |
+        //    local   |    commit cumu-compaction      |                                                |
+        //   cc_cnt=0 |  --------------------------->  |     sync rowset (long rpc, local cc_cnt=0 )    |   local
+        //            |                                |  <-----------------------------------------    |  cc_cnt=0
+        //            |                                |  -.                                            |
+        //    local   |       done cc_cnt=1            |    \                                           |
+        //   cc_cnt=1 |  <---------------------------  |     \                                          |
+        //            |                                |      \  returned with resp cc_cnt=0 (snapshot) |
+        //            |                                |       '------------------------------------>   |   local
+        //            |                                |                                                |  cc_cnt=1
+        //            |                                |                                                |
+        //            |                                |                                                |  CHECK FAIL
+        //            |                                |                                                |  need retry
+        // To get rid of just retry syncing tablet
         if (stats.base_compaction_cnt() < tablet->base_compaction_cnt() ||
             stats.cumulative_compaction_cnt() < tablet->cumulative_compaction_cnt() ||
             (resp_max_version < tablet->local_max_version() &&
@@ -159,7 +183,9 @@ Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet) {
                     .tag("resp_cumulative_compaction_cnt", stats.cumulative_compaction_cnt())
                     .tag("cumulative_compaction_cnt", tablet->cumulative_compaction_cnt())
                     .tag("resp_max_version", resp_max_version)
-                    .tag("max_version", tablet->local_max_version());
+                    .tag("max_version", tablet->local_max_version())
+                    .tag("tried", tried);
+            if (tried++ < 10) goto TRY_AGAIN;
             return Status::OK();
         }
         std::vector<RowsetSharedPtr> rowsets;
