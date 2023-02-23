@@ -1,6 +1,7 @@
 package com.selectdb.cloud.catalog;
 
 import com.selectdb.cloud.proto.SelectdbCloud;
+import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
 
 import com.google.gson.annotations.SerializedName;
@@ -119,7 +120,8 @@ public class CloudPartition extends Partition {
      */
     @Override
     public boolean hasData() {
-        return true;
+        // Every partition starts from version 1, version 1 has no deta
+        return getVisibleVersion() > 1;
     }
 
     /**
@@ -149,32 +151,31 @@ public class CloudPartition extends Partition {
                 }
             }
 
-            if (pResult.hasStatus() && pResult.getStatus().hasCode()
-                    && pResult.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
-                // meta Service return -1 or -2
-                // -1 txn error
-                // -2 no such key
-                LOG.warn("get version from meta error, code : {}, msg: {}",
-                        pResult.getStatus().getCode(),
-                        Optional.ofNullable(pResult.getStatus().getMsg()).orElse(""));
-                return -1;
-            } else if (pResult.hasStatus() && pResult.getStatus().hasCode()) {
+            MetaServiceCode code = null;
+            if (pResult.hasStatus() && pResult.getStatus().hasCode()) {
+                code = pResult.getStatus().getCode();
+            }
+
+            if (code == null) {
+                throw new RuntimeException("impossible, code must present");
+            }
+
+            if (code == SelectdbCloud.MetaServiceCode.OK) {
                 // java8 lambda syntax, Assignment function ref.
                 AtomicLong version = new AtomicLong(-1);
                 Optional.ofNullable(pResult.getVersion()).ifPresent(version::set);
                 LOG.info("get version {}", version);
                 return version.get();
+            } else if (code == SelectdbCloud.MetaServiceCode.VERSION_NOT_FOUND) {
+                LOG.info("partition {} has no data", getId());
+                return 0;
             }
-            LOG.warn("get version from meta, not set error status");
+
+            LOG.warn("get version from meta error, code : {}, msg: {}", code,
+                    Optional.ofNullable(pResult.getStatus().getMsg()).orElse(""));
             return -1;
-        } catch (RpcException e) {
-            LOG.warn("get version from meta RpcException: ", e);
-            return -1;
-        } catch (ExecutionException e) {
-            LOG.warn("get version from meta ExecutionException: ", e);
-            return -1;
-        } catch (TimeoutException e) {
-            LOG.warn("get version from meta TimeoutException: ", e);
+        } catch (RpcException | ExecutionException | TimeoutException | RuntimeException e) {
+            LOG.warn("get version from meta service exception: ", e);
             return -1;
         }
     }

@@ -29,4 +29,44 @@ suite("load") {
     for (String table in tables) {
         sql new File("""${context.file.parent}/ddl/${table}.sql""").text
     }
+
+    // Empty tables shoud not trigger scanning
+    sql """drop table if exists t1 force"""
+    sql """
+CREATE TABLE `t1` (
+  `id` int(11) NULL,
+  `name` varchar(255) NULL,
+  `score` int(11) SUM NULL
+) ENGINE=OLAP
+AGGREGATE KEY(`id`, `name`)
+COMMENT 'OLAP'
+DISTRIBUTED BY HASH(`id`) BUCKETS 1
+PROPERTIES (
+"persistent" = "false"
+);
+    """
+
+    String res = sql """explain select * from t1"""
+    // """
+    // +---------------------------------------------------------------------------------------+
+    // | Explain String                                                                        |
+    // +---------------------------------------------------------------------------------------+
+    // | PLAN FRAGMENT 0                                                                       |
+    // |   OUTPUT EXPRS:                                                                       |
+    // |     `default_cluster:db1`.`t1`.`id`                                                   |
+    // |     `default_cluster:db1`.`t1`.`name`                                                 |
+    // |     `default_cluster:db1`.`t1`.`score`                                                |
+    // |   PARTITION: HASH_PARTITIONED: `default_cluster:db1`.`t1`.`id`                        |
+    // |                                                                                       |
+    // |   VRESULT SINK                                                                        |
+    // |                                                                                       |
+    // |   0:VOlapScanNode                                                                     |
+    // |      TABLE: default_cluster:db1.t1(t1), PREAGGREGATION: OFF. Reason: No AggregateInfo |
+    // |      partitions=0/1, tablets=0/0, tabletList=                                         |
+    // |      cardinality=0, avgRowSize=24.0, numNodes=1                                       |
+    // +---------------------------------------------------------------------------------------+
+    // """
+    // println(res)
+    assertTrue(res.contains("partitions=0/1, tablets=0/0, tabletList="))
+    sql """drop table if exists t1 force"""
 }
