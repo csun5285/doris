@@ -396,8 +396,8 @@ Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_ra
 
             iter_opts.query_id = _opts.query_id;
             iter_opts.kept_in_memory = _opts.kept_in_memory;
-            iter_opts.is_persistent = _opts.is_persistent;
             iter_opts.use_disposable_cache = _opts.use_disposable_cache;
+            iter_opts.expiration_time = _opts.expiration_time;
 
             RETURN_IF_ERROR(_column_iterators[unique_id]->init(iter_opts));
         }
@@ -1188,8 +1188,8 @@ Status SegmentIterator::_init_return_column_iterators() {
 
             iter_opts.query_id = _opts.query_id;
             iter_opts.kept_in_memory = _opts.kept_in_memory;
-            iter_opts.is_persistent = _opts.is_persistent;
             iter_opts.use_disposable_cache = _opts.use_disposable_cache;
+            iter_opts.expiration_time = _opts.expiration_time;
 
             RETURN_IF_ERROR(_column_iterators[unique_id]->init(iter_opts));
         }

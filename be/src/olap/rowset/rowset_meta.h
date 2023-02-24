@@ -378,6 +378,16 @@ public:
 
     TabletSchemaSPtr tablet_schema() { return _schema; }
 
+    void add_segment_file_size(int64_t size) { _rowset_meta_pb.add_segment_file_size(size); }
+
+    int64_t get_segment_file_size(int idx) const {
+        DCHECK(_rowset_meta_pb.segment_file_size_size() == 0 ||
+               _rowset_meta_pb.segment_file_size_size() > idx);
+        return _rowset_meta_pb.segment_file_size_size() != 0
+                       ? _rowset_meta_pb.segment_file_size(idx)
+                       : 0;
+    }
+
 private:
     bool _deserialize_from_pb(const std::string& value) {
         RowsetMetaPB rowset_meta_pb;

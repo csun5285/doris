@@ -45,11 +45,11 @@ public:
 
     DISALLOW_COPY_AND_ASSIGN(FileSystem);
 
-    virtual Status create_file(const Path& path, FileWriterPtr* writer) = 0;
+    virtual Status create_file(const Path& path, FileWriterPtr* writer, IOState* = nullptr) = 0;
 
     virtual Status open_file(const Path& path, FileReaderSPtr* reader) = 0;
 
-    virtual Status open_file(const Path& path, metrics_hook, FileReaderSPtr* reader) {
+    virtual Status open_file(const Path& path, metrics_hook, FileReaderSPtr* reader, size_t) {
         return open_file(path, reader);
     }
 

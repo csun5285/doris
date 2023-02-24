@@ -222,6 +222,7 @@ Status CloudCumulativeCompaction::update_tablet_meta() {
 }
 
 void CloudCumulativeCompaction::garbage_collection() {
+    file_cache_garbage_collection();
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();
     idx->set_tablet_id(_tablet->tablet_id());

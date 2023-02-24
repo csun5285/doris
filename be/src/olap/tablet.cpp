@@ -37,6 +37,8 @@
 #include <shared_mutex>
 #include <string>
 
+#include "cloud/io/cloud_file_cache.h"
+#include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/io/path.h"
 #include "cloud/io/remote_file_system.h"
 #include "cloud/utils.h"
@@ -571,6 +573,50 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
     return capture_rs_readers(version_path, rs_readers);
 }
 
+Status Tablet::cloud_sync_meta() {
+    TabletMetaSharedPtr tablet_meta;
+    RETURN_IF_ERROR(cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta));
+    if (tablet_meta->tablet_state() != TABLET_RUNNING) { // impossible
+        return Status::InternalError("invalid tablet state. tablet_id={}", tablet_id());
+    }
+    auto table_name = tablet_meta->table_name();
+    if (_tablet_meta->table_name() != table_name) {
+        _tablet_meta->set_table_name(table_name);
+    }
+    auto new_ttl_seconds = tablet_meta->ttl_seconds();
+    if (_tablet_meta->ttl_seconds() != new_ttl_seconds) {
+        _tablet_meta->set_ttl_seconds(new_ttl_seconds);
+        int64_t cur_time = UnixSeconds();
+        std::shared_lock rlock(_meta_lock);
+        for (auto& [_, rs] : _rs_version_map) {
+            for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+                int64_t new_expiration_time = new_ttl_seconds + rs->rowset_meta()->newest_write_timestamp();
+                new_expiration_time = new_expiration_time > cur_time? new_expiration_time : 0;
+                auto file_key = io::IFileCache::hash(
+                        io::Path(rs->segment_file_path(seg_id)).filename().native());
+                auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+                file_cache->modify_expiration_time(file_key, new_expiration_time);
+            }
+        }
+    }
+    auto new_is_persistent = tablet_meta->is_persistent();
+    if (_tablet_meta->is_persistent() != new_is_persistent) {
+        _tablet_meta->set_is_persistent(new_is_persistent);
+        std::shared_lock rlock(_meta_lock);
+        for (auto& [_, rs] : _rs_version_map) {
+            for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+                int64_t new_expiration_time = new_is_persistent ? INT64_MAX : 0;
+                auto file_key = io::IFileCache::hash(
+                        io::Path(rs->segment_file_path(seg_id)).filename().native());
+                auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+                file_cache->modify_expiration_time(file_key, new_expiration_time);
+            }
+        }
+    }
+    return Status::OK();
+}
+
+// There are only two tablet_states RUNNING and NOT_READY in cloud mode
 Status Tablet::cloud_sync_rowsets(int64_t query_version) {
     do {
         // Sync tablet if not running.
@@ -715,8 +761,16 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
         // delete stale versions in version graph
         auto version_path = _timestamped_version_tracker.fetch_and_delete_path_by_id(path_id);
         for (auto& v_ts : version_path->timestamped_versions()) {
+            auto rs = _stale_rs_version_map[v_ts->version()];
+            for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+                auto file_key = io::IFileCache::hash(
+                        io::Path(rs->segment_file_path(seg_id)).filename().native());
+                auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+                file_cache->remove_if_cached(file_key);
+            }
             _stale_rs_version_map.erase(v_ts->version());
             _tablet_meta->delete_stale_rs_meta_by_version(v_ts->version());
+            std::vector<std::string> segment_paths;
             VLOG_DEBUG << "delete stale rowset " << v_ts->version();
         }
         num_deleted += version_path->timestamped_versions().size();
@@ -1925,8 +1979,8 @@ Status Tablet::create_initial_rowset(const int64_t req_version) {
     return res;
 }
 
-Status Tablet::create_vertical_rowset_writer(
-        RowsetWriterContext& context, std::unique_ptr<RowsetWriter>* rowset_writer) {
+Status Tablet::create_vertical_rowset_writer(RowsetWriterContext& context,
+                                             std::unique_ptr<RowsetWriter>* rowset_writer) {
     _init_context_common_fields(context);
     return RowsetFactory::create_rowset_writer(context, true, rowset_writer);
 }

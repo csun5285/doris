@@ -28,7 +28,7 @@ public:
     static std::shared_ptr<LocalFileSystem> create(Path path, ResourceId resource_id = "");
     ~LocalFileSystem() override;
 
-    Status create_file(const Path& path, FileWriterPtr* writer) override;
+    Status create_file(const Path& path, FileWriterPtr* writer, IOState* = nullptr) override;
 
     Status open_file(const Path& path, FileReaderSPtr* reader) override;
 

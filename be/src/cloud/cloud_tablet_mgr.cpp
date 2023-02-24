@@ -258,9 +258,13 @@ void CloudTabletMgr::sync_tablets() {
             if (tablet->last_sync_time() > last_sync_time_bound) {
                 continue;
             }
-            auto st = tablet->cloud_sync_rowsets();
-            if (!st.ok()) {
-                LOG_WARNING("failed to sync tablet {}", tablet->tablet_id()).error(st);
+            auto st = tablet->cloud_sync_meta();
+            if (!st) {
+                LOG_WARNING("failed to sync tablet meta {}", tablet->tablet_id()).error(st);
+            }
+            st = tablet->cloud_sync_rowsets();
+            if (!st) {
+                LOG_WARNING("failed to sync tablet rowsets {}", tablet->tablet_id()).error(st);
             }
             ++num_sync;
         }

@@ -1,23 +1,19 @@
 #include "cloud/io/cloud_file_cache.h"
 
 #include <filesystem>
+#include <string>
 
 #include "cloud/io/cloud_file_cache_fwd.h"
 #include "cloud/io/cloud_file_cache_settings.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
 
-namespace fs = std::filesystem;
-
 namespace doris {
 namespace io {
 
 IFileCache::IFileCache(const std::string& cache_base_path, const FileCacheSettings& cache_settings)
         : _cache_base_path(cache_base_path),
-          _max_size(cache_settings.max_size),
-          _max_element_size(cache_settings.max_elements),
-          _persistent_max_size(cache_settings.persistent_max_size),
-          _persistent_max_element_size(cache_settings.persistent_max_elements),
+          _total_size(cache_settings.total_size),
           _max_file_segment_size(cache_settings.max_file_segment_size),
           _max_query_cache_size(cache_settings.max_query_cache_size) {}
 
@@ -31,16 +27,44 @@ IFileCache::Key IFileCache::hash(const std::string& path) {
     return Key(key);
 }
 
-std::string IFileCache::get_path_in_local_cache(const Key& key, size_t offset,
-                                                bool is_persistent) const {
-    auto key_str = key.to_string();
-    std::string suffix = is_persistent ? "_persistent" : "";
-    return fs::path(_cache_base_path) / key_str / (std::to_string(offset) + suffix);
+std::string IFileCache::cache_type_to_string(CacheType type) {
+    switch (type) {
+    case CacheType::INDEX:
+        return "_idx";
+    case CacheType::DISPOSABLE:
+        return "_disposable";
+    case CacheType::NORMAL:
+        return "";
+    case CacheType::TTL:
+        return "_ttl";
+    }
+    return "";
 }
 
-std::string IFileCache::get_path_in_local_cache(const Key& key) const {
+CacheType IFileCache::string_to_cache_type(const std::string& str) {
+    switch (str[0]) {
+    case 'i':
+        return CacheType::INDEX;
+    case 't':
+        return CacheType::TTL;
+    case 'd':
+        return CacheType::DISPOSABLE;
+    default:
+        DCHECK(false);
+    }
+    return CacheType::DISPOSABLE;
+}
+
+std::string IFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time,
+                                                size_t offset, CacheType type) const {
+    return get_path_in_local_cache(key, expiration_time) /
+           (std::to_string(offset) + cache_type_to_string(type));
+}
+
+std::string IFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time) const {
     auto key_str = key.to_string();
-    return fs::path(_cache_base_path) / key_str;
+    return std::filesystem::path(_cache_base_path) /
+           (key_str + "_" + std::to_string(expiration_time));
 }
 
 IFileCache::QueryContextHolderPtr IFileCache::get_query_context_holder(const TUniqueId& query_id) {
@@ -57,7 +81,8 @@ IFileCache::QueryContextHolderPtr IFileCache::get_query_context_holder(const TUn
 }
 
 IFileCache::QueryContextPtr IFileCache::get_query_context(const TUniqueId& query_id,
-                                                          std::lock_guard<std::mutex>& cache_lock) {
+                                                          std::lock_guard<std::mutex>& cache_lock
+                                                          [[maybe_unused]]) {
     auto query_iter = _query_map.find(query_id);
     return (query_iter == _query_map.end()) ? nullptr : query_iter->second;
 }
@@ -87,18 +112,18 @@ IFileCache::QueryContextPtr IFileCache::get_or_set_query_context(
     return query_iter->second;
 }
 
-void IFileCache::QueryContext::remove(const Key& key, size_t offset, bool is_presistent,
-                                      size_t size, std::lock_guard<std::mutex>& cache_lock) {
-    auto record = records.find({key, offset, is_presistent});
+void IFileCache::QueryContext::remove(const Key& key, size_t offset,
+                                      std::lock_guard<std::mutex>& cache_lock) {
+    auto record = records.find({key, offset});
     DCHECK(record != records.end());
     lru_queue.remove(record->second, cache_lock);
-    records.erase({key, offset, is_presistent});
+    records.erase({key, offset});
 }
 
-void IFileCache::QueryContext::reserve(const Key& key, size_t offset, bool is_presistent,
-                                       size_t size, std::lock_guard<std::mutex>& cache_lock) {
-    auto queue_iter = lru_queue.add(key, offset, is_presistent, size, cache_lock);
-    records.insert({{key, offset, is_presistent}, queue_iter});
+void IFileCache::QueryContext::reserve(const Key& key, size_t offset, size_t size,
+                                       std::lock_guard<std::mutex>& cache_lock) {
+    auto queue_iter = lru_queue.add(key, offset, size, cache_lock);
+    records.insert({{key, offset}, queue_iter});
 }
 
 } // namespace io

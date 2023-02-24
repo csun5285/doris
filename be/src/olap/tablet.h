@@ -135,6 +135,7 @@ public:
     double bloom_filter_fpp() const;
     size_t next_unique_id() const;
     size_t row_size() const;
+    int64_t ttl_seconds() const;
 
     // operation in rowsets
     Status add_rowset(RowsetSharedPtr rowset);
@@ -170,6 +171,9 @@ public:
     // If tablet state is not `TABLET_RUNNING`, sync tablet meta and all visible rowsets.
     // If `query_version` > 0 and local max_version of the tablet >= `query_version`, do nothing.
     Status cloud_sync_rowsets(int64_t query_version = -1);
+
+    // Synchronize the tablet meta from meta service.
+    Status cloud_sync_meta();
 
     // If `version_overlap` is true, function will delete rowsets with overlapped version in this tablet.
     // MUST hold EXCLUSIVE `_meta_lock`.
@@ -699,6 +703,10 @@ inline size_t Tablet::next_unique_id() const {
 
 inline size_t Tablet::row_size() const {
     return _schema->row_size();
+}
+
+inline int64_t Tablet::ttl_seconds() const {
+    return _tablet_meta->ttl_seconds();
 }
 
 } // namespace doris

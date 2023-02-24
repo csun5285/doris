@@ -63,9 +63,9 @@ struct PageReadOptions {
     // if true, use DURABLE CachePriority in page cache
     // currently used for in memory olap table
     bool kept_in_memory = false;
-    bool is_persistent = false;
     bool use_disposable_cache = false;
-    bool read_segmeng_index = false;
+    int64_t expiration_time {0};
+    bool read_segment_index = false;
     // for page cache allocation
     // page types are divided into DATA_PAGE & INDEX_PAGE
     // INDEX_PAGE including index_page, dict_page and short_key_page

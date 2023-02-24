@@ -223,12 +223,34 @@ public:
                               const Version& version, const RowIdConversion& rowid_conversion);
 
     bool is_in_memory() const { return _is_in_memory; }
-    bool is_persistent() const { return _is_persistent; }
 
     void set_is_in_memory(bool is_in_memory) { _is_in_memory = is_in_memory; }
-    void set_is_persistent(bool is_persistent) { _is_persistent = is_persistent; }
 
-    const std::string& table_name() const { return _table_name; }
+    // use for cloud
+    bool is_persistent() const {
+        std::shared_lock rlock(_meta_lock);
+        return _is_persistent;
+    }
+    const std::string& table_name() const {
+        std::shared_lock rlock(_meta_lock);
+        return _table_name;
+    }
+    int64_t ttl_seconds() const {
+        std::shared_lock rlock(_meta_lock);
+        return _ttl_seconds;
+    }
+    void set_is_persistent(bool is_persistent) {
+        std::lock_guard wlock(_meta_lock);
+        _is_persistent = is_persistent;
+    }
+    void set_table_name(const std::string& table_name) {
+        std::lock_guard wlock(_meta_lock);
+        _table_name = table_name;
+    }
+    void set_ttl_seconds(int64_t ttl_seconds) {
+        std::lock_guard wlock(_meta_lock);
+        _ttl_seconds = ttl_seconds;
+    }
 
 private:
     Status _save_meta(DataDir* data_dir);
@@ -274,6 +296,7 @@ private:
 
     bool _is_in_memory = false;
     bool _is_persistent = false;
+    int64_t _ttl_seconds = 0;
 
     std::string _table_name;
 

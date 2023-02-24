@@ -94,6 +94,8 @@ struct RowsetWriterContext {
     int64_t oldest_write_timestamp = -1;
     int64_t newest_write_timestamp = -1;
     bool enable_unique_key_merge_on_write = false;
+    int64_t ttl_seconds {0};
+    bool is_hot_data {false};
     std::set<int32_t> skip_inverted_index;
 
     TabletSharedPtr tablet = nullptr;

@@ -10,7 +10,7 @@ namespace io {
 
 using uint128_t = vectorized::UInt128;
 using UInt128Hash = vectorized::UInt128Hash;
-static constexpr size_t REMOTE_FS_OBJECTS_CACHE_DEFAULT_ELEMENTS = 100 * 1024;
+static constexpr size_t FILE_CACHE_QUEUE_DEFAULT_ELEMENTS = 100 * 1024;
 
 struct FileCacheSettings;
 } // namespace io

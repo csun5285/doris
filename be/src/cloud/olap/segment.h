@@ -66,7 +66,7 @@ using SegmentSharedPtr = std::shared_ptr<Segment>;
 class Segment : public std::enable_shared_from_this<Segment> {
 public:
     static Status open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
-                       RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
+                       const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
                        std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr);
 
     ~Segment();

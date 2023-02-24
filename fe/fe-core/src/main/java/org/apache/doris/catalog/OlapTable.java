@@ -1700,6 +1700,22 @@ public class OlapTable extends Table {
         tableProperty.buildPersistent();
     }
 
+    public Long getTTLSeconds() {
+        if (tableProperty != null) {
+            return tableProperty.getTTLSeconds();
+        }
+        return 0L;
+    }
+
+    public void setTTLSeconds(Long ttlSeconds) {
+        if (tableProperty == null) {
+            tableProperty = new TableProperty(new HashMap<>());
+        }
+        tableProperty.modifyTableProperties(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS,
+                Long.valueOf(ttlSeconds).toString());
+        tableProperty.buildTTLSeconds();
+    }
+
     public void setEnableLightSchemaChange(boolean enableLightSchemaChange) {
         if (tableProperty == null) {
             tableProperty = new TableProperty(new HashMap<>());

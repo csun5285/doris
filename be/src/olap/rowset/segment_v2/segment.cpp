@@ -237,8 +237,7 @@ Status Segment::load_index() {
             OlapReaderStatistics tmp_stats;
             opts.stats = &tmp_stats;
             opts.type = INDEX_PAGE;
-            opts.is_persistent = true;
-            opts.read_segmeng_index = true;
+            opts.read_segment_index = true;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(

@@ -42,7 +42,7 @@ Path LocalFileSystem::absolute_path(const Path& path) const {
     return _root_path / path;
 }
 
-Status LocalFileSystem::create_file(const Path& path, FileWriterPtr* writer) {
+Status LocalFileSystem::create_file(const Path& path, FileWriterPtr* writer, IOState*) {
     auto fs_path = absolute_path(path);
     *writer = std::make_unique<LocalFileWriter>(
             std::move(fs_path), std::static_pointer_cast<LocalFileSystem>(shared_from_this()));

@@ -17,7 +17,6 @@
 
 #pragma once
 
-#include <gen_cpp/Types_types.h>
 #include <memory>
 
 #include "common/status.h"
@@ -106,8 +105,9 @@ public:
     std::vector<uint32_t>* read_orderby_key_columns = nullptr;
 
     bool kept_in_memory = false;
-    bool is_persistent = false;
     bool use_disposable_cache = false;
+    int64_t expiration_time {0};
+    bool is_persistent {false};
     // runtime state
     RuntimeState* runtime_state = nullptr;
 

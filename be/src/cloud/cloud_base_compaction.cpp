@@ -205,6 +205,7 @@ Status CloudBaseCompaction::update_tablet_meta() {
 }
 
 void CloudBaseCompaction::garbage_collection() {
+    file_cache_garbage_collection();
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();
     idx->set_tablet_id(_tablet->tablet_id());

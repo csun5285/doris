@@ -46,7 +46,7 @@ public:
 
     Status create_reader(RowsetReaderSharedPtr* result) override;
 
-    std::string segment_file_path(int segment_id);
+    std::string segment_file_path(int segment_id) override;
 
     std::string segment_cache_path(int segment_id);
 

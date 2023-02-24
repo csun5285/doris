@@ -40,11 +40,13 @@ namespace doris {
 namespace segment_v2 {
 
 Status Segment::open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
-                     RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
+                     const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
                      std::shared_ptr<Segment>* output, metrics_hook metrics) {
-    std::shared_ptr<Segment> segment(new Segment(segment_id, rowset_id, tablet_schema));
+    std::shared_ptr<Segment> segment(
+            new Segment(segment_id, rowset_meta->rowset_id(), tablet_schema));
     io::FileReaderSPtr file_reader;
-    RETURN_IF_ERROR(fs->open_file(path, metrics, &file_reader));
+    RETURN_IF_ERROR(fs->open_file(path, metrics, &file_reader,
+                                  rowset_meta->get_segment_file_size(segment_id)));
     segment->_file_reader = std::move(file_reader);
     RETURN_IF_ERROR(segment->_open());
     *output = std::move(segment);
@@ -133,9 +135,10 @@ Status Segment::_parse_footer() {
 
     uint8_t fixed_buf[12];
     size_t bytes_read = 0;
-
+    io::IOState state;
+    state.read_segment_index = true;
     RETURN_IF_ERROR(
-            _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read));
+            _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read, &state));
     DCHECK_EQ(bytes_read, 12);
 
     // validate magic number
@@ -156,7 +159,7 @@ Status Segment::_parse_footer() {
     std::string footer_buf;
     footer_buf.resize(footer_length);
     RETURN_IF_ERROR(
-            _file_reader->read_at(file_size - 12 - footer_length, footer_buf, &bytes_read));
+            _file_reader->read_at(file_size - 12 - footer_length, footer_buf, &bytes_read, &state));
     DCHECK_EQ(bytes_read, footer_length);
 
     // validate footer PB's checksum
@@ -213,8 +216,7 @@ Status Segment::load_index() {
             OlapReaderStatistics tmp_stats;
             opts.stats = &tmp_stats;
             opts.type = INDEX_PAGE;
-            opts.is_persistent = true;
-            opts.read_segmeng_index = true;
+            opts.read_segment_index = true;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(

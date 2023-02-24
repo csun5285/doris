@@ -116,6 +116,8 @@ public:
     // Derived class implements the load logic by overriding the `do_load_once()` method.
     Status load(bool use_cache = true);
 
+    virtual std::string segment_file_path(int segment_id) = 0;
+
     // returns Status::OLAPInternalError(OLAP_ERR_ROWSET_CREATE_READER) when failed to create reader
     virtual Status create_reader(std::shared_ptr<RowsetReader>* result) = 0;
 
@@ -289,6 +291,13 @@ public:
 
     bool check_rowset_segment();
 
+    bool is_hot() const {
+        static constexpr int64_t hot_interval = 24 * 60 * 60;
+        return std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count() - atime > hot_interval;
+    }
+
 protected:
     friend class RowsetFactory;
 
@@ -311,6 +320,12 @@ protected:
 
     virtual bool check_current_rowset_segment() = 0;
 
+    void update_atime() {
+        atime = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+    }
+
     TabletSchemaSPtr _schema;
 
     std::string _tablet_path;
@@ -327,6 +342,7 @@ protected:
     std::atomic<uint64_t> _refs_by_reader;
     // rowset state machine
     RowsetStateMachine _rowset_state_machine;
+    int64_t atime {0};
 };
 
 } // namespace doris

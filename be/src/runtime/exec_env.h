@@ -229,6 +229,8 @@ private:
     std::unique_ptr<ThreadPool> _download_cache_thread_pool;
     // Threadpool used to prefetch remote file for buffered reader
     std::unique_ptr<ThreadPool> _buffered_reader_prefetch_thread_pool;
+    // Threadpool used to write data to file cache async
+    std::unique_ptr<ThreadPool> _async_write_file_cache_thread_pool;
     // A token used to submit download cache task serially
     std::unique_ptr<ThreadPoolToken> _serial_download_cache_thread_token;
     // ThreadPoolToken -> buffer

@@ -19,6 +19,7 @@
 
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <bvar/bvar.h>
 
 #include "cloud/io/s3_common.h"
 #include "cloud/io/tmp_file_mgr.h"
@@ -29,6 +30,8 @@
 namespace doris {
 namespace io {
 
+bvar::Adder<uint64_t> s3_file_reader_counter("s3_file_reader", "read_at");
+
 S3FileReader::S3FileReader(Path path, size_t file_size, std::string key, std::string bucket,
                            std::shared_ptr<S3FileSystem> fs)
         : _path(std::move(path)),
@@ -36,9 +39,6 @@ S3FileReader::S3FileReader(Path path, size_t file_size, std::string key, std::st
           _fs(std::move(fs)),
           _bucket(std::move(bucket)),
           _key(std::move(key)) {
-    auto tmp_file_name = _key;
-    std::replace(tmp_file_name.begin(), tmp_file_name.end(), '/', '_');
-    _local_path = Path(TmpFileMgr::instance()->get_tmp_file_dir(tmp_file_name)) / tmp_file_name;
     DorisMetrics::instance()->s3_file_open_reading->increment(1);
     DorisMetrics::instance()->s3_file_reader_total->increment(1);
 }
@@ -65,18 +65,8 @@ Status S3FileReader::read_at(size_t offset, Slice result, size_t* bytes_read, IO
     return s;
 }
 
-Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read, IOState* state) {
+Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read, IOState*) {
     DCHECK(!closed());
-    FileReaderSPtr _cache_file_reader = TmpFileMgr::instance()->lookup_tmp_file(_local_path);
-    if (_cache_file_reader) {
-        if (state) {
-            state->read_from_tmp_file = true;
-        }
-        return _cache_file_reader->read_at(offset, result, bytes_read, state);
-    }
-    if (state) {
-        state->read_from_tmp_file = false;
-    }
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
                                offset, _file_size, _path.native());
@@ -98,6 +88,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
     if (!client) {
         return Status::InternalError("init s3 client error");
     }
+    s3_file_reader_counter << 1;
     auto outcome = client->GetObject(request);
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", _path.native(),

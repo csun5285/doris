@@ -19,6 +19,7 @@
 
 #include <mutex>
 
+#include "cloud/io/file_reader.h"
 #include "cloud/io/remote_file_system.h"
 #include "util/s3_util.h"
 
@@ -42,13 +43,14 @@ public:
 
     ~S3FileSystem() override;
 
-    Status create_file(const Path& path, FileWriterPtr* writer) override;
+    Status create_file(const Path& path, FileWriterPtr* writer, IOState*) override;
 
     Status open_file(const Path& path, FileReaderSPtr* reader) override;
 
-    Status open_file_impl(const Path& path, metrics_hook, FileReaderSPtr* reader);
+    Status open_file_impl(const Path& path, metrics_hook, FileReaderSPtr* reader, size_t file_size = 0);
 
-    Status open_file(const Path& path, metrics_hook, FileReaderSPtr* reader) override;
+    Status open_file(const Path& path, metrics_hook, FileReaderSPtr* reader,
+                     size_t file_size = 0) override;
 
     Status delete_file(const Path& path) override;
 

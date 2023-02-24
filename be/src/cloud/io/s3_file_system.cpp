@@ -175,15 +175,12 @@ Status S3FileSystem::batch_upload(const std::vector<Path>& local_paths,
     return Status::OK();
 }
 
-Status S3FileSystem::create_file(const Path& path, FileWriterPtr* writer) {
+Status S3FileSystem::create_file(const Path& path, FileWriterPtr* writer, IOState* io_state) {
     auto key = get_key(path);
     auto fs_path = Path(_s3_conf.endpoint) / _s3_conf.bucket / key;
     *writer = std::make_unique<S3FileWriter>(
-            std::move(fs_path), std::move(key), _s3_conf.bucket,
-            std::static_pointer_cast<S3FileSystem>(shared_from_this()));
-    if (config::enable_file_cache) {
-        *writer = std::make_unique<CachedRemoteFileWriter>(std::move(*writer));
-    }
+            std::move(fs_path), std::move(key), _s3_conf.bucket, _client,
+            std::static_pointer_cast<S3FileSystem>(shared_from_this()), io_state);
     return (*writer)->open();
 }
 
@@ -197,27 +194,31 @@ Status S3FileSystem::open_file(const Path& path, FileReaderSPtr* reader) {
     return s;
 }
 
-Status S3FileSystem::open_file_impl(const Path& path, metrics_hook metrics,
-                                    FileReaderSPtr* reader) {
-    size_t fsize = 0;
-    RETURN_IF_ERROR(file_size(path, &fsize));
+Status S3FileSystem::open_file_impl(const Path& path, metrics_hook metrics, FileReaderSPtr* reader,
+                                    size_t fsize) {
+    if (fsize == 0) [[unlikely]] {
+        RETURN_IF_ERROR(file_size(path, &fsize));
+    }
     auto key = get_key(path);
     auto fs_path = Path(_s3_conf.endpoint) / _s3_conf.bucket / key;
     *reader = std::make_shared<S3FileReader>(
             std::move(fs_path), fsize, std::move(key), _s3_conf.bucket,
             std::static_pointer_cast<S3FileSystem>(shared_from_this()));
     if (config::enable_file_cache) {
+        if (config::enable_file_cache) {
         *reader = std::make_shared<CachedRemoteFileReader>(std::move(*reader), std::move(metrics));
+    }
     }
     return Status::OK();
 }
 
-Status S3FileSystem::open_file(const Path& path, metrics_hook metrics, FileReaderSPtr* reader) {
+Status S3FileSystem::open_file(const Path& path, metrics_hook metrics, FileReaderSPtr* reader,
+                               size_t file_size) {
     if (bthread_self() == 0) {
-        return open_file_impl(path, metrics, reader);
+        return open_file_impl(path, metrics, reader, file_size);
     }
     Status s;
-    auto task = [&] { s = open_file_impl(path, metrics, reader); };
+    auto task = [&] { s = open_file_impl(path, metrics, reader, file_size); };
     AsyncIO::run_task(task, io::FileSystemType::S3);
     return s;
 }

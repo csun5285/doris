@@ -80,7 +80,8 @@ struct RowsetReaderContext {
     bool is_key_column_group = false;
     std::shared_ptr<Schema> reuse_input_schema;
     bool kept_in_memory = false;
-    bool is_persistent = false;
+    int64_t ttl_seconds {0};
+    bool is_persistent {false};
 
     const std::set<int32_t>* output_columns = nullptr;
 };

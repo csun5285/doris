@@ -19,11 +19,13 @@
 
 #include <gen_cpp/olap_file.pb.h>
 
+#include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/utils.h"
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "gutil/strings/substitute.h"
 #include "olap/rowset/beta_rowset.h"
+#include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/segment_v2/inverted_index_compaction.h"
@@ -31,7 +33,6 @@
 #include "olap/task/engine_checksum_task.h"
 #include "util/time.h"
 #include "util/trace.h"
-
 using std::vector;
 
 namespace doris {
@@ -197,6 +198,7 @@ bool Compaction::is_rowset_tidy(std::string& pre_max_key, const RowsetSharedPtr&
 Status Compaction::do_compact_ordered_rowsets() {
     build_basic_info();
     RowsetWriterContext context;
+    context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                      std::numeric_limits<int64_t>::max(); // MUST be positive
     context.txn_expiration = _expiration;
@@ -335,9 +337,12 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     LOG(INFO) << "start " << merge_type << compaction_name() << ". tablet=" << _tablet->full_name()
               << ", output_version=" << _output_version << ", permits: " << permits;
     bool vertical_compaction = should_vertical_compaction();
-
-	  // construct output rowset writer
+    // construct output rowset writer
     RowsetWriterContext context;
+    std::for_each(_input_rowsets.cbegin(), _input_rowsets.cend(), [&](const RowsetSharedPtr& rowset) {
+        context.is_hot_data = context.is_hot_data || rowset->is_hot();
+    });
+    context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                      std::numeric_limits<int64_t>::max(); // MUST be positive
     context.txn_expiration = _expiration;
@@ -370,16 +375,15 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta(), true));
 #endif
 
-		RETURN_NOT_OK(construct_input_rowset_readers());
+    RETURN_NOT_OK(construct_input_rowset_readers());
     TRACE("prepare finished");
 
     // 2. write merged rows to output rowset
     // The test results show that merger is low-memory-footprint, there is no need to tracker its mem pool
     Merger::Statistics stats;
     Status res;
-    if ( context.skip_inverted_index.size() > 0 ||
-        (_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
-         _tablet->enable_unique_key_merge_on_write())) {
+    if (context.skip_inverted_index.size() > 0 || (_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
+                                                   _tablet->enable_unique_key_merge_on_write())) {
         stats.rowid_conversion = &_rowid_conversion;
     }
 
@@ -473,13 +477,16 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                   << ". tablet=" << _tablet->full_name()
                   << ", source index size=" << src_segment_num
                   << ", destination index size=" << dest_segment_num << ".";
-        std::for_each(context.skip_inverted_index.cbegin(), context.skip_inverted_index.cend(),
-                      [this, &src_segment_num, &dest_segment_num, &index_writer_path, &src_index_files,
-                       &dest_index_files, &fs, &tablet_path, &trans_vec, &dest_segment_num_rows](int32_t column_uniq_id) {
-            compact_column(_cur_tablet_schema->get_inverted_index(column_uniq_id)->index_id(), src_segment_num, dest_segment_num, src_index_files,
-                           dest_index_files, fs, index_writer_path, tablet_path, trans_vec,
-                           dest_segment_num_rows);
-        });
+        std::for_each(
+                context.skip_inverted_index.cbegin(), context.skip_inverted_index.cend(),
+                [this, &src_segment_num, &dest_segment_num, &index_writer_path, &src_index_files,
+                 &dest_index_files, &fs, &tablet_path, &trans_vec,
+                 &dest_segment_num_rows](int32_t column_uniq_id) {
+                    compact_column(
+                            _cur_tablet_schema->get_inverted_index(column_uniq_id)->index_id(),
+                            src_segment_num, dest_segment_num, src_index_files, dest_index_files,
+                            fs, index_writer_path, tablet_path, trans_vec, dest_segment_num_rows);
+                });
 
         LOG(INFO) << "succeed to do index compaction"
                   << ". tablet=" << _tablet->full_name() << ", input row number=" << _input_row_num
@@ -640,6 +647,18 @@ int64_t Compaction::get_compaction_permits() {
         permits += rowset->rowset_meta()->get_compaction_score();
     }
     return permits;
+}
+
+void Compaction::file_cache_garbage_collection() {
+    if (_output_rs_writer) {
+        auto* beta_rowset_writer = dynamic_cast<BetaRowsetWriter*>(_output_rs_writer.get());
+        DCHECK(beta_rowset_writer);
+        for (auto& file_writer : beta_rowset_writer->get_file_writers()) {
+            auto file_key = io::IFileCache::hash(file_writer->path().filename().native());
+            auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+            file_cache->remove_if_cached(file_key);
+        }
+    }
 }
 
 #ifdef BE_TEST

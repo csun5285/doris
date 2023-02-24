@@ -96,6 +96,8 @@ public class PropertyAnalyzer {
 
     public static final String PROPERTIES_PERSISTENT = "persistent";
 
+    public static final String PROPERTIES_FILE_CACHE_TTL_SECONDS = "file_cache_ttl_seconds";
+
     public static final String PROPERTIES_DYNAMIC_SCHEMA = "dynamic_schema";
 
     public static final String PROPERTIES_REMOTE_STORAGE_RESOURCE = "remote_storage_resource";
@@ -185,6 +187,7 @@ public class PropertyAnalyzer {
         properties.remove(PROPERTIES_STORAGE_COOLDOWN_TIME);
         properties.remove(PROPERTIES_STORAGE_POLICY);
         properties.remove(PROPERTIES_DATA_BASE_TIME);
+        properties.remove(PROPERTIES_FILE_CACHE_TTL_SECONDS);
 
         Preconditions.checkNotNull(storageMedium);
 
@@ -342,6 +345,19 @@ public class PropertyAnalyzer {
             properties.remove(PROPERTIES_VERSION_INFO);
         }
         return version;
+    }
+
+    public static long analyzeTTL(Map<String, String> properties) throws AnalysisException {
+        long ttlSeconds = 0;
+        if (properties != null && properties.containsKey(PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            String ttlSecondsStr = properties.get(PROPERTIES_FILE_CACHE_TTL_SECONDS);
+            try {
+                ttlSeconds = Long.parseLong(ttlSecondsStr);
+            } catch (NumberFormatException e) {
+                throw new AnalysisException("TTL integer format error: " + ttlSecondsStr);
+            }
+        }
+        return ttlSeconds;
     }
 
     public static int analyzeSchemaVersion(Map<String, String> properties) throws AnalysisException {

@@ -52,6 +52,7 @@ public:
 };
 
 TEST_F(S3FileWriterTest, normal) {
+    io::IOState state;
     auto fs = io::global_local_filesystem();
     {
         io::FileReaderSPtr local_file_reader;
@@ -63,7 +64,7 @@ TEST_F(S3FileWriterTest, normal) {
         constexpr int buf_size = 8192;
 
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("normal", &s3_file_writer));
+        ASSERT_EQ(Status::OK(), s3_fs->create_file("normal", &s3_file_writer, &state));
 
         char buf[buf_size];
         Slice slice(buf, buf_size);
@@ -91,10 +92,11 @@ TEST_F(S3FileWriterTest, normal) {
 }
 
 TEST_F(S3FileWriterTest, abort) {
+    io::IOState state;
     auto fs = io::global_local_filesystem();
     {
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("abort1", &s3_file_writer));
+        ASSERT_EQ(Status::OK(), s3_fs->create_file("abort1", &s3_file_writer, &state));
         s3_file_writer->abort();
     }
     bool exists = true;
@@ -104,7 +106,7 @@ TEST_F(S3FileWriterTest, abort) {
     ASSERT_FALSE(exists);
     {
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("abort2", &s3_file_writer));
+        ASSERT_EQ(Status::OK(), s3_fs->create_file("abort2", &s3_file_writer, &state));
         ASSERT_TRUE(s3_file_writer->finalize().ok());
         s3_file_writer->abort();
     }

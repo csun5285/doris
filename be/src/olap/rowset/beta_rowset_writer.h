@@ -99,6 +99,8 @@ public:
 
     int32_t get_atomic_num_segment() const override { return _num_segment.load(); }
 
+    const std::vector<io::FileWriterPtr>& get_file_writers() const { return _file_writers; }
+
 private:
     template <typename RowType>
     Status _add_row(const RowType& row);
@@ -201,6 +203,11 @@ protected:
     std::atomic<ErrorCode> _segcompaction_status;
 
     fmt::memory_buffer vlog_buffer;
+
+    // use for file cache
+    int64_t _create_time = UnixSeconds();
+    int64_t _file_cache_ttl_seconds {0};
+    bool _is_hot_data {false};
 };
 
 } // namespace doris

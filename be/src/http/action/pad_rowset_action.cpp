@@ -87,6 +87,7 @@ Status PadRowsetAction::_pad_rowset(TabletSharedPtr tablet, const Version& versi
 
     std::unique_ptr<RowsetWriter> writer;
     RowsetWriterContext context;
+    context.ttl_seconds = tablet->ttl_seconds();
     context.txn_id = -1;
     context.rowset_state = VISIBLE;
     context.segments_overlap = NONOVERLAPPING;

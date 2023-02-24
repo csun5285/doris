@@ -1,4 +1,5 @@
 #include "cloud/io/cached_remote_file_writer.h"
+#include <gen_cpp/Types_types.h>
 
 #include <memory>
 
@@ -62,8 +63,11 @@ Status CachedRemoteFileWriter::finalize() {
 Status CachedRemoteFileWriter::put_buffer_to_cache() {
     std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01,
                                                           [this](int*) { _need_buffer = false; });
+    io::CacheContext context;
+    context.cache_type = INDEX;
+    context.query_id = TUniqueId();
     io::FileSegmentsHolder holder =
-            _cache->get_or_set(_cache_key, _buffer_start_offset, _buffer.size(), true, TUniqueId());
+            _cache->get_or_set(_cache_key, _buffer_start_offset, _buffer.size(), context);
     for (auto& segment : holder.file_segments) {
         switch (segment->state()) {
         case FileSegment::State::EMPTY: {

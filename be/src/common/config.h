@@ -942,7 +942,7 @@ CONF_Bool(enable_file_cache, "false");
 // format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","normal":21474836480,"persistent":10737418240,"query_limit":10737418240}]
 CONF_String(file_cache_path, "");
 CONF_String(disposable_file_cache_path, "");
-CONF_Int64(file_cache_max_file_segment_size, "4194304"); // 4MB
+CONF_Int64(file_cache_max_file_segment_size, "1048576"); // 1MB
 CONF_Bool(clear_file_cache, "false");
 CONF_Bool(enable_file_cache_query_limit, "false");
 
@@ -964,6 +964,10 @@ CONF_mInt32(schedule_sync_tablets_interval_seconds, "600");
 CONF_mInt32(compaction_timeout_seconds, "86400");
 CONF_mInt32(lease_compaction_interval_seconds, "20");
 CONF_mInt32(meta_service_rpc_retry_times, "200");
+CONF_Bool(enable_cache_segment_size, "true");
+// it must be larger than or equal to 5MB
+CONF_mInt32(s3_write_buffer_size, "5242880");
+CONF_mInt32(s3_write_buffer_whole_size, "524288000");
 
 // semi-structure configs
 CONF_Bool(enable_parse_multi_dimession_array, "true");

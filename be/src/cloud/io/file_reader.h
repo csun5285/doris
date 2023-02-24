@@ -23,7 +23,6 @@
 
 #include "cloud/io/path.h"
 #include "common/status.h"
-#include "gutil/macros.h"
 #include "olap/olap_common.h"
 #include "util/slice.h"
 namespace doris {
@@ -33,19 +32,21 @@ namespace io {
 class FileSystem;
 
 struct IOState {
-    IOState(const TUniqueId* query_id, OlapReaderStatistics* stats, bool is_presistent,
-            bool use_disposable_cache, bool read_segmeng_index)
+    IOState(const TUniqueId* query_id, OlapReaderStatistics* stats, bool is_disposable,
+            bool read_segment_index, int64_t expiration_time)
             : query_id(query_id),
               stats(stats),
-              is_persistent(is_presistent),
-              use_disposable_cache(use_disposable_cache),
-              read_segmeng_index(read_segmeng_index) {}
+              is_disposable(is_disposable),
+              read_segment_index(read_segment_index),
+              expiration_time(expiration_time) {}
+    IOState() = default;
     const TUniqueId* query_id = nullptr;
     OlapReaderStatistics* stats = nullptr;
     bool is_persistent = false;
-    bool use_disposable_cache = false;
-    bool read_segmeng_index = false;
-    bool read_from_tmp_file = false;
+    bool is_disposable = false;
+    bool read_segment_index = false;
+    int64_t expiration_time {0};
+    bool is_cold_data {false};
 };
 class FileReader {
 public:

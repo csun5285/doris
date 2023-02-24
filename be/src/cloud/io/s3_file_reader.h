@@ -55,8 +55,6 @@ private:
     std::string _bucket;
     std::string _key;
     std::atomic<bool> _closed = false;
-
-    Path _local_path;
 };
 
 } // namespace io

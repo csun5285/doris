@@ -81,8 +81,8 @@ struct ColumnIteratorOptions {
     IOContext io_ctx;
 
     bool kept_in_memory = false;
-    bool is_persistent = false;
     bool use_disposable_cache = false;
+    int64_t expiration_time {0};
 
     void sanity_check() const {
         CHECK_NOTNULL(file_reader);

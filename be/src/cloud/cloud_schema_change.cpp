@@ -191,6 +191,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
 
         std::unique_ptr<RowsetWriter> rowset_writer;
         RowsetWriterContext context;
+        context.ttl_seconds = new_tablet->ttl_seconds();
         context.txn_id = rs_reader->rowset()->txn_id();
         context.txn_expiration = _expiration;
         context.version = rs_reader->version();

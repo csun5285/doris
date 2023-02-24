@@ -18,19 +18,24 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <list>
 #include <memory>
-#include <unordered_set>
 
-#include "common/config.h"
-#include "gutil/int128.h"
+#include "cloud/io/cloud_file_cache.h"
+#include "cloud/io/file_reader.h"
 #include "cloud/io/file_writer.h"
 #include "cloud/io/s3_file_system.h"
+#include "cloud/io/s3_file_write_bufferpool.h"
+#include "util/wait_group.h"
 
 namespace Aws::Transfer {
 class TransferHandle;
 }
+namespace Aws::S3 {
+namespace Model {
+class CompletedPart;
+}
+class S3Client;
+} // namespace Aws::S3
 
 namespace doris {
 namespace io {
@@ -39,7 +44,8 @@ class S3FileSystem;
 class TmpFileMgr;
 class S3FileWriter final : public FileWriter {
 public:
-    S3FileWriter(Path path, std::string key, std::string bucket, std::shared_ptr<S3FileSystem> fs);
+    S3FileWriter(Path path, std::string key, std::string bucket, std::shared_ptr<Aws::S3::S3Client>,
+                 std::shared_ptr<S3FileSystem> fs, IOState* state);
     ~S3FileWriter() override;
 
     Status open() override;
@@ -56,25 +62,64 @@ public:
 
     Status finalize() override;
 
-    size_t bytes_appended() const override { return _tmp_file_writer->bytes_appended(); }
+    size_t bytes_appended() const override { return _bytes_appended; }
 
     FileSystemSPtr fs() const override { return _fs; }
     int64_t upload_cost_ms() const { return *_upload_cost_ms; }
 
     const Path& path() const override { return _path; }
 
+    void mark_index_offset() {
+        if (_expiration_time == 0) {
+            _index_offset = _bytes_appended;
+            // Only the normal data need to change to index data
+            if (_pending_buf) {
+                _pending_buf->set_index_offset(_index_offset);
+            }
+        }
+    }
+
 private:
+    Status _complete();
+    // void _upload_to_cache(const Slice& data, S3FileBuffer& buf);
+    void _upload_one_part(int64_t part_num, S3FileBuffer& buf);
+
+    FileSegmentsHolderPtr _allocate_file_segments(size_t offset);
+
     Path _path;
     std::shared_ptr<S3FileSystem> _fs;
 
     std::string _bucket;
     std::string _key;
     bool _closed = true;
-
-    FileWriterPtr _tmp_file_writer;
-    std::shared_ptr<Aws::Transfer::TransferHandle> _handle;
+    bool _opened = false;
 
     std::shared_ptr<int64_t> _upload_cost_ms;
+
+    std::shared_ptr<Aws::S3::S3Client> _client;
+    std::string _upload_id;
+    size_t _bytes_appended {0};
+    size_t _index_offset {0};
+    // size_t _index_offset {0};
+    // bool _set_index_idx {false};
+
+    // Current Part Num for CompletedPart
+    int _cur_part_num = 1;
+    std::mutex _completed_lock;
+    std::vector<std::shared_ptr<Aws::S3::Model::CompletedPart>> _completed_parts;
+
+    IFileCache::Key _cache_key;
+    CloudFileCachePtr _cache;
+
+    WaitGroup _wait;
+
+    std::atomic_bool _failed = false;
+    Status _st = Status::OK();
+    size_t _bytes_written = 0;
+
+    std::shared_ptr<S3FileBuffer> _pending_buf = nullptr;
+    int64_t _expiration_time;
+    bool _is_cold_data;
 };
 
 } // namespace io

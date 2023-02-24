@@ -17,16 +17,13 @@
 
 #include "cloud/io/cached_remote_file_reader.h"
 
-#include <aws/s3/S3Client.h>
-#include <aws/s3/model/GetObjectRequest.h>
-
 #include <memory>
 #include <utility>
 
 #include "cloud/io/cloud_file_cache.h"
 #include "cloud/io/cloud_file_cache_factory.h"
-#include "cloud/io/cloud_file_cache_fwd.h"
-#include "cloud/io/s3_common.h"
+#include "cloud/io/cloud_file_segment.h"
+#include "common/config.h"
 #include "olap/olap_common.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
@@ -41,7 +38,6 @@ CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader
         : _remote_file_reader(std::move(remote_file_reader)), _metrics(metrics) {
     _cache_key = IFileCache::hash(path().filename().native());
     _cache = FileCacheFactory::instance().get_by_path(_cache_key);
-    _disposable_cache = FileCacheFactory::instance().get_disposable_cache(_cache_key);
 }
 
 CachedRemoteFileReader::~CachedRemoteFileReader() {
@@ -79,6 +75,7 @@ Status CachedRemoteFileReader::read_at(size_t offset, Slice result, size_t* byte
 Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                                             IOState* state) {
     DCHECK(!closed());
+    DCHECK(state);
     if (offset > size()) {
         return Status::IOError(
                 fmt::format("offset exceeds file size(offset: {), file size: {}, path: {})", offset,
@@ -90,27 +87,12 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         *bytes_read = 0;
         return Status::OK();
     }
-    CloudFileCachePtr cache = !state                        ? _cache
-                              : state->use_disposable_cache ? _disposable_cache
-                                                            : _cache;
-    // cache == nullptr since use_disposable_cache = true and don't set  disposable cache in conf
-    if (cache == nullptr) {
-        return _remote_file_reader->read_at(offset, result, bytes_read, state);
-    }
     ReadStatistics stats;
-    // if state == nullptr, the method is called for read footer
-    // if state->read_segmeng_index, read all the end of file
-    size_t align_left = offset, align_size = size() - offset;
-    if (state && !state->read_segmeng_index) {
-        auto pair = _align_size(offset, bytes_req);
-        align_left = pair.first;
-        align_size = pair.second;
-        DCHECK((align_left % config::file_cache_max_file_segment_size) == 0);
-    }
-    bool is_persistent = state ? state->is_persistent : true;
-    TUniqueId query_id = state && state->query_id ? *state->query_id : TUniqueId();
+    auto [align_left, align_size] = _align_size(offset, bytes_req);
+    DCHECK((align_left % config::file_cache_max_file_segment_size) == 0);
+    auto cache_context = CacheContext::create(state);
     FileSegmentsHolder holder =
-            cache->get_or_set(_cache_key, align_left, align_size, is_persistent, query_id);
+            _cache->get_or_set(_cache_key, align_left, align_size, cache_context);
     std::vector<FileSegmentSPtr> empty_segments;
     for (auto& segment : holder.file_segments) {
         switch (segment->state()) {
@@ -146,11 +128,6 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
             SCOPED_RAW_TIMER(&stats.remote_read_timer);
             RETURN_IF_ERROR(_remote_file_reader->read_at(empty_start, Slice(buffer.get(), size),
                                                          &size, state));
-        }
-        if (state && state->read_from_tmp_file) {
-            stats.hit_cache = true;
-            stats.local_read_timer = stats.remote_read_timer;
-            stats.remote_read_timer = 0;
         }
         for (auto& segment : empty_segments) {
             if (segment->state() == FileSegment::State::SKIP_CACHE) {
@@ -228,18 +205,15 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         current_offset = right + 1;
     }
     DCHECK(*bytes_read == bytes_req);
-    _update_state(stats, state);
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
-    if (state != nullptr && _metrics != nullptr) {
+    if (state && state->stats && _metrics) {
+        _update_state(stats, state);
         _metrics(state->stats);
     }
     return Status::OK();
 }
 
 void CachedRemoteFileReader::_update_state(const ReadStatistics& read_stats, IOState* state) const {
-    if (state == nullptr) {
-        return;
-    }
     auto stats = state->stats;
     if (read_stats.hit_cache) {
         stats->file_cache_stats.num_local_io_total++;

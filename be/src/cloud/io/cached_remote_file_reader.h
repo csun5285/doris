@@ -18,13 +18,9 @@
 #pragma once
 
 #include "cloud/io/cloud_file_cache.h"
-#include "cloud/io/cloud_file_cache_fwd.h"
-#include "cloud/io/cloud_file_cache_profile.h"
-#include "cloud/io/cloud_file_segment.h"
 #include "cloud/io/file_reader.h"
 #include "cloud/io/path.h"
-#include "cloud/io/s3_file_system.h"
-#include "gutil/macros.h"
+#include "cloud/io/file_system.h"
 
 namespace doris {
 namespace io {
@@ -56,7 +52,6 @@ private:
     FileReaderSPtr _remote_file_reader;
     IFileCache::Key _cache_key;
     CloudFileCachePtr _cache;
-    CloudFileCachePtr _disposable_cache;
 
 private:
     struct ReadStatistics {

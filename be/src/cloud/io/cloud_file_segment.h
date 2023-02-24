@@ -43,8 +43,8 @@ public:
         SKIP_CACHE,
     };
 
-    FileSegment(size_t offset_, size_t size_, const Key& key_, IFileCache* cache_,
-                State download_state_, bool is_persistent);
+    FileSegment(size_t offset, size_t size, const Key& key, IFileCache* cache, State download_state,
+                CacheType cache_type, int64_t expiration_time);
 
     ~FileSegment();
 
@@ -92,13 +92,15 @@ public:
 
     std::string get_downloader() const;
 
+    int64_t expiration_time() const { return _expiration_time; }
+
     void reset_downloader(std::lock_guard<std::mutex>& segment_lock);
 
     bool is_downloader() const;
 
     bool is_downloaded() const { return _is_downloaded.load(); }
 
-    bool is_persistent() const { return _is_persistent; }
+    CacheType cache_type() const { return _cache_type; }
 
     static std::string get_caller_id();
 
@@ -109,6 +111,16 @@ public:
     std::string get_info_for_log() const;
 
     std::string get_path_in_local_cache() const;
+
+    bool change_cache_type(CacheType new_type);
+
+    Status change_cache_type_self(CacheType new_type);
+
+    void update_expiration_time(int64_t expiration_time) { _expiration_time = expiration_time; }
+
+    // only used for s3 file writer
+    // should guarantee that the fragment don't have concurrency problem
+    void reset_range();
 
     FileSegment& operator=(const FileSegment&) = delete;
     FileSegment(const FileSegment&) = delete;
@@ -131,7 +143,7 @@ private:
 
     void reset_downloader_impl(std::lock_guard<std::mutex>& segment_lock);
 
-    const Range _segment_range;
+    Range _segment_range;
 
     State _download_state;
 
@@ -161,7 +173,8 @@ private:
     IFileCache* _cache;
 
     std::atomic<bool> _is_downloaded {false};
-    bool _is_persistent = false;
+    CacheType _cache_type;
+    int64_t _expiration_time {0};
 };
 
 struct FileSegmentsHolder {
@@ -180,6 +193,8 @@ struct FileSegmentsHolder {
 
     std::string to_string();
 };
+
+using FileSegmentsHolderPtr = std::unique_ptr<FileSegmentsHolder>;
 
 } // namespace io
 } // namespace doris

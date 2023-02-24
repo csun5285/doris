@@ -85,6 +85,7 @@ protected:
     Status do_compact_ordered_rowsets();
     bool is_rowset_tidy(std::string& pre_max_key, const RowsetSharedPtr& rhs);
     void build_basic_info();
+    void file_cache_garbage_collection();
 
 protected:
     // the root tracker for this compaction

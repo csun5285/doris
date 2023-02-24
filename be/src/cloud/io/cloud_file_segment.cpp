@@ -3,23 +3,24 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 
 #include "cloud/io/file_writer.h"
 #include "cloud/io/local_file_system.h"
 #include "common/status.h"
-#include "vec/common/hex.h"
 
 namespace doris {
 namespace io {
 
-FileSegment::FileSegment(size_t offset_, size_t size_, const Key& key_, IFileCache* cache_,
-                         State download_state_, bool is_persistent)
-        : _segment_range(offset_, offset_ + size_ - 1),
-          _download_state(download_state_),
-          _file_key(key_),
-          _cache(cache_),
-          _is_persistent(is_persistent) {
+FileSegment::FileSegment(size_t offset, size_t size, const Key& key, IFileCache* cache,
+                         State download_state, CacheType cache_type, int64_t expiration_time)
+        : _segment_range(offset, offset + size - 1),
+          _download_state(download_state),
+          _file_key(key),
+          _cache(cache),
+          _cache_type(cache_type),
+          _expiration_time(expiration_time) {
     /// On creation, file segment state can be EMPTY, DOWNLOADED, DOWNLOADING.
     switch (_download_state) {
     /// EMPTY is used when file segment is not in cache and
@@ -31,7 +32,7 @@ FileSegment::FileSegment(size_t offset_, size_t size_, const Key& key_, IFileCac
     /// DOWNLOADED is used either on initial cache metadata load into memory on server startup
     /// or on reduceSizeToDownloaded() -- when file segment object is updated.
     case State::DOWNLOADED: {
-        _downloaded_size = size_;
+        _downloaded_size = size;
         break;
     }
     /// DOWNLOADING is used only for write-through caching (e.g. getOrSetDownloader() is not
@@ -107,6 +108,7 @@ void FileSegment::reset_downloader_impl(std::lock_guard<std::mutex>& segment_loc
         _downloaded_size = 0;
         _download_state = State::EMPTY;
         _downloader_id.clear();
+        _cache_writer.reset();
     }
 }
 
@@ -145,7 +147,7 @@ Status FileSegment::append(Slice data) {
 }
 
 std::string FileSegment::get_path_in_local_cache() const {
-    return _cache->get_path_in_local_cache(key(), offset(), _is_persistent);
+    return _cache->get_path_in_local_cache(key(), _expiration_time, offset(), _cache_type);
 }
 
 Status FileSegment::read_at(Slice buffer, size_t offset) {
@@ -164,6 +166,59 @@ Status FileSegment::read_at(Slice buffer, size_t offset) {
     size_t bytes_reads = buffer.size;
     RETURN_IF_ERROR(_cache_reader->read_at(offset, buffer, &bytes_reads));
     DCHECK(bytes_reads == buffer.size);
+    return st;
+}
+
+bool FileSegment::change_cache_type(CacheType new_type) {
+    std::unique_lock segment_lock(_mutex);
+    if (new_type == _cache_type) {
+        return true;
+    }
+    if (_download_state == State::DOWNLOADED) {
+        segment_lock.unlock();
+        int retry_time = 10;
+        while (retry_time-- && wait() == State::DOWNLOADING) {
+        }
+        if (retry_time == 10) {
+            LOG(WARNING) << fmt::format("Segment change type too long, {} to {}", _cache_type,
+                                        new_type);
+            return false;
+        }
+        segment_lock.lock();
+    }
+    if (_download_state == State::DOWNLOADED) {
+        std::error_code ec;
+        std::filesystem::rename(
+                get_path_in_local_cache(),
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
+        if (ec) {
+            LOG(ERROR) << ec.message();
+            return false;
+        }
+    }
+    _cache_type = new_type;
+    return true;
+}
+
+Status FileSegment::change_cache_type_self(CacheType new_type) {
+    std::unique_lock segment_lock(_mutex);
+    Status st = Status::OK();
+    if (_cache_type == CacheType::TTL || new_type == _cache_type) {
+        return st;
+    }
+    if (_cache_writer) {
+        std::error_code ec;
+        std::filesystem::rename(
+                get_path_in_local_cache(),
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
+        if (ec) {
+            LOG(ERROR) << ec.message();
+            st = Status::IOError(ec.message());
+            return st;
+        }
+    }
+    _cache_type = new_type;
+    _cache->change_cache_type(_file_key, _segment_range.left, new_type);
     return st;
 }
 
@@ -208,13 +263,19 @@ Status FileSegment::set_downloaded(std::lock_guard<std::mutex>& /* segment_lock 
     return Status::OK();
 }
 
+void FileSegment::reset_range() {
+    _segment_range.right = _downloaded_size == _segment_range.size()
+                                   ? _segment_range.right
+                                   : _segment_range.left + _downloaded_size;
+}
+
 void FileSegment::complete(std::lock_guard<std::mutex>& cache_lock) {
     std::lock_guard segment_lock(_mutex);
 
     complete_unlocked(cache_lock, segment_lock);
 }
 
-void FileSegment::complete_unlocked(std::lock_guard<std::mutex>& cache_lock,
+void FileSegment::complete_unlocked(std::lock_guard<std::mutex>&,
                                     std::lock_guard<std::mutex>& segment_lock) {
     if (is_downloader_impl(segment_lock)) {
         reset_downloader(segment_lock);
@@ -232,9 +293,6 @@ std::string FileSegment::get_info_for_log_impl(std::lock_guard<std::mutex>& segm
     info << "File segment: " << range().to_string() << ", ";
     info << "state: " << state_to_string(_download_state) << ", ";
     info << "downloaded size: " << get_downloaded_size(segment_lock) << ", ";
-    info << "downloader id: " << _downloader_id << ", ";
-    info << "caller id: " << get_caller_id();
-
     return info.str();
 }
 

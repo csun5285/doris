@@ -424,7 +424,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                                     shadowSchemaHash, originKeysType, shadowShortKeyColumnCount, bfColumns,
                                     bfFpp, indexes, shadowSchema, tbl.getDataSortInfo(), tbl.getCompressionType(),
                                     tbl.getStoragePolicy(), tbl.isInMemory(), tbl.isPersistent(), true,
-                                    tbl.isDynamicSchema(), tbl.getName());
+                                    tbl.isDynamicSchema(), tbl.getName(), tbl.getTTLSeconds());
                             requestBuilder.addTabletMetas(builder);
                         } // end for rollupTablets
                         Env.getCurrentInternalCatalog().sendCreateTabletsRpc(requestBuilder);

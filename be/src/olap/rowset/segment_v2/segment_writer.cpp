@@ -18,7 +18,7 @@
 #include "olap/rowset/segment_v2/segment_writer.h"
 
 #include "cloud/io/file_writer.h"
-#include "cloud/io/cached_remote_file_writer.h"
+#include "cloud/io/s3_file_writer.h"
 #include "common/logging.h" // LOG
 #include "env/env.h"        // Env
 #include "olap/data_dir.h"
@@ -428,10 +428,9 @@ Status SegmentWriter::finalize_columns(uint64_t* index_size) {
     }
     RETURN_IF_ERROR(_write_data());
     uint64_t index_offset = _file_writer->bytes_appended();
-    io::CachedRemoteFileWriter* cached_remote_file_writer =
-            dynamic_cast<io::CachedRemoteFileWriter*>(_file_writer);
-    if (cached_remote_file_writer) {
-        cached_remote_file_writer->cache_data_from_current_offset();
+    io::S3FileWriter* s3_file_writer = dynamic_cast<io::S3FileWriter*>(_file_writer);
+    if (s3_file_writer) {
+        s3_file_writer->mark_index_offset();
     }
     RETURN_IF_ERROR(_write_ordinal_index());
     RETURN_IF_ERROR(_write_zone_map());
