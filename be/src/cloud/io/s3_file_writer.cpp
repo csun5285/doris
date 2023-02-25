@@ -52,8 +52,8 @@ S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
           _key(std::move(key)),
           _upload_cost_ms(std::make_shared<int64_t>(0)),
           _client(std::move(client)),
-          _expiration_time(state->expiration_time),
-          _is_cold_data(state->is_cold_data) {}
+          _expiration_time(state ? state->expiration_time : 0),
+          _is_cold_data(state ? state->is_cold_data : true) {}
 
 S3FileWriter::~S3FileWriter() {
     if (!_closed) {

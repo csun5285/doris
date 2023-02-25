@@ -208,6 +208,7 @@ protected:
     int64_t _create_time = UnixSeconds();
     int64_t _file_cache_ttl_seconds {0};
     bool _is_hot_data {false};
+    bool _file_cache_is_persistent {false};
 };
 
 } // namespace doris

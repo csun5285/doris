@@ -96,6 +96,7 @@ struct RowsetWriterContext {
     bool enable_unique_key_merge_on_write = false;
     int64_t ttl_seconds {0};
     bool is_hot_data {false};
+    bool is_persistent {false};
     std::set<int32_t> skip_inverted_index;
 
     TabletSharedPtr tablet = nullptr;

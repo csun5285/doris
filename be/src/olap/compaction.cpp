@@ -198,6 +198,7 @@ bool Compaction::is_rowset_tidy(std::string& pre_max_key, const RowsetSharedPtr&
 Status Compaction::do_compact_ordered_rowsets() {
     build_basic_info();
     RowsetWriterContext context;
+    context.is_persistent = _tablet->is_persistent();
     context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                      std::numeric_limits<int64_t>::max(); // MUST be positive
@@ -342,6 +343,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     std::for_each(_input_rowsets.cbegin(), _input_rowsets.cend(), [&](const RowsetSharedPtr& rowset) {
         context.is_hot_data = context.is_hot_data || rowset->is_hot();
     });
+    context.is_persistent = _tablet->is_persistent();
     context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                      std::numeric_limits<int64_t>::max(); // MUST be positive

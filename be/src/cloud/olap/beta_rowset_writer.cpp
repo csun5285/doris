@@ -108,6 +108,7 @@ Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) 
     _rowset_meta->set_txn_id(_context.txn_id);
     _rowset_meta->set_txn_expiration(_context.txn_expiration);
     _file_cache_ttl_seconds = _context.ttl_seconds;
+    _file_cache_is_persistent = _context.is_persistent;
     if (_context.rowset_state == PREPARED || _context.rowset_state == COMMITTED) {
         _is_pending = true;
         _rowset_meta->set_load_id(_context.load_id);
@@ -931,7 +932,10 @@ Status BetaRowsetWriter::_do_create_segment_writer(
     }
     io::FileWriterPtr file_writer;
     io::IOState io_state;
-    io_state.expiration_time = _file_cache_ttl_seconds == 0 ? 0 : _create_time + _file_cache_ttl_seconds;
+    io_state.expiration_time = _file_cache_is_persistent ? INT64_MAX
+                               : _file_cache_ttl_seconds == 0
+                                       ? 0
+                                       : _create_time + _file_cache_ttl_seconds;
     io_state.is_cold_data = !_is_hot_data;
     Status st = fs->create_file(path, &file_writer, &io_state);
     if (!st.ok()) {

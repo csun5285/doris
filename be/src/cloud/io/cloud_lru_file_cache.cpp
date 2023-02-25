@@ -646,6 +646,7 @@ bool LRUFileCache::remove_if_ttl_file_unlock(const IFileCache::Key& file_key, bo
             }
         }
         // remove from _time_to_key
+        // the param key maybe be passed by _time_to_key, if removed it, cannot use it anymore
         auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
         while (_time_to_key_iter.first != _time_to_key_iter.second) {
             if (_time_to_key_iter.first->second == file_key) {
@@ -654,7 +655,7 @@ bool LRUFileCache::remove_if_ttl_file_unlock(const IFileCache::Key& file_key, bo
             }
             _time_to_key_iter.first++;
         }
-        _key_to_time.erase(file_key);
+        _key_to_time.erase(iter);
         return true;
     }
     return false;

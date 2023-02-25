@@ -154,6 +154,7 @@ Status DeltaWriter::init() {
     // build tablet schema in request level
     _build_current_tablet_schema(_req.index_id, _req.table_schema_param, *_tablet->tablet_schema());
     RowsetWriterContext context;
+    context.is_persistent = _tablet->is_persistent();
     context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = _req.txn_id;
     context.txn_expiration = _req.txn_expiration;

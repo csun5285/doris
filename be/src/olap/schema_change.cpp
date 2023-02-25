@@ -1910,6 +1910,7 @@ bool SchemaChangeWithSorting::_internal_sorting(
 
     std::unique_ptr<RowsetWriter> rowset_writer;
     RowsetWriterContext context;
+    context.is_persistent = new_tablet->is_persistent();
     context.ttl_seconds = new_tablet->ttl_seconds();
     context.version = version;
     context.rowset_state = VISIBLE;
@@ -1943,6 +1944,7 @@ Status VSchemaChangeWithSorting::_internal_sorting(
 
     std::unique_ptr<RowsetWriter> rowset_writer;
     RowsetWriterContext context;
+    context.is_persistent = new_tablet->is_persistent();
     context.ttl_seconds = new_tablet->ttl_seconds();
     context.version = version;
     context.rowset_state = VISIBLE;
@@ -2796,6 +2798,7 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
         // linked schema change will not be used.
         std::unique_ptr<RowsetWriter> rowset_writer;
         RowsetWriterContext context;
+        context.is_persistent = new_tablet->is_persistent();
         context.ttl_seconds = new_tablet->ttl_seconds();
         context.version = rs_reader->version();
         context.rowset_state = VISIBLE;
