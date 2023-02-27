@@ -625,7 +625,8 @@ Status send_add_columns_rpc(ColumnsWithTypeAndName column_type_names,
             [&req, &res](FrontendServiceConnection& client) { client->addColumns(res, req); },
             config::txn_commit_rpc_timeout_ms);
     if (!rpc_st.ok()) {
-        return Status::InternalError("Failed to do schema change, rpc error");
+        return Status::InternalError(fmt::format(
+                        "Failed to do schema change, rpc error {}", rpc_st.to_string()));
     }
     // TODO(lhy) handle more status code
     if (res.status.status_code != TStatusCode::OK) {
