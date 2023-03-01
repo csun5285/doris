@@ -1,6 +1,9 @@
 #include "cloud/io/cloud_file_cache.h"
 
+#include <bvar/status.h>
+
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "cloud/io/cloud_file_cache_fwd.h"
@@ -15,7 +18,12 @@ IFileCache::IFileCache(const std::string& cache_base_path, const FileCacheSettin
         : _cache_base_path(cache_base_path),
           _total_size(cache_settings.total_size),
           _max_file_segment_size(cache_settings.max_file_segment_size),
-          _max_query_cache_size(cache_settings.max_query_cache_size) {}
+          _max_query_cache_size(cache_settings.max_query_cache_size) {
+    _cur_size_metrics =
+            std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(), "cur_size", 0);
+    _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
+                                                                         "cur_ttl_cache_size", 0);
+}
 
 std::string IFileCache::Key::to_string() const {
     return vectorized::get_hex_uint_lowercase(key);

@@ -210,6 +210,22 @@ Status parse_conf_cache_paths(const std::string& config_path, std::vector<CacheP
     return Status::OK();
 }
 
+Status parse_conf_rm_paths(const std::string& config_path, std::vector<std::string>& path) {
+    if (config_path.empty()) return Status::OK();
+    using namespace rapidjson;
+    Document document;
+    document.Parse(config_path.c_str());
+    DCHECK(document.IsArray()) << config_path << " " << document.GetType();
+    for (auto& config : document.GetArray()) {
+        if (config.IsString()) {
+            path.push_back(config.GetString());
+        } else {
+            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        }
+    }
+    return Status::OK();
+}
+
 io::FileCacheSettings CachePath::init_settings() const {
     io::FileCacheSettings settings;
     settings.total_size = total_bytes;

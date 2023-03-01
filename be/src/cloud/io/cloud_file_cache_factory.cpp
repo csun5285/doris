@@ -29,6 +29,12 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
             fs->create_directory(cache_base_path);
         }
     }
+
+    std::unique_ptr<IFileCache> cache =
+            std::make_unique<LRUFileCache>(cache_base_path, file_cache_settings);
+    RETURN_IF_ERROR(cache->initialize());
+    _caches.push_back(std::move(cache));
+
     struct statfs stat;
     if (statfs(cache_base_path.c_str(), &stat) < 0) {
         LOG_ERROR("").tag("file cache path", cache_base_path).tag("error", strerror(errno));
@@ -41,17 +47,13 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
                                      file_cache_settings.total_size);
     }
 
-    std::unique_ptr<IFileCache> cache =
-            std::make_unique<LRUFileCache>(cache_base_path, file_cache_settings);
-    RETURN_IF_ERROR(cache->initialize());
-    _caches.push_back(std::move(cache));
     LOG(INFO) << "[FileCache] path: " << cache_base_path
               << " total_size: " << file_cache_settings.total_size;
     return Status::OK();
 }
 
 CloudFileCachePtr FileCacheFactory::get_by_path(const IFileCache::Key& key) {
-    return _caches[KeyHash()(key) % _caches.size()].get();
+    return _caches[IFileCache::KeyHash()(key) % _caches.size()].get();
 }
 
 std::vector<IFileCache::QueryContextHolderPtr> FileCacheFactory::get_query_context_holders(

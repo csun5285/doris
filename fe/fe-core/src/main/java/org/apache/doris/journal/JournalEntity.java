@@ -598,6 +598,7 @@ public class JournalEntity implements Writable {
             case OperationType.OP_DYNAMIC_PARTITION:
             case OperationType.OP_MODIFY_IN_MEMORY:
             case OperationType.OP_MODIFY_PERSISTENT:
+            case OperationType.OP_MODIFY_TTL_SECONDS:
             case OperationType.OP_MODIFY_REPLICATION_NUM: {
                 data = ModifyTablePropertyOperationLog.read(in);
                 isRead = true;

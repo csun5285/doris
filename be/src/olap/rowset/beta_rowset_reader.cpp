@@ -186,13 +186,10 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     _read_options.runtime_state = read_context->runtime_state;
     _read_options.output_columns = read_context->output_columns;
 
-    _read_options.expiration_time =
-            _rowset->rowset_meta()->newest_write_timestamp() + read_context->ttl_seconds;
-    if (_read_options.expiration_time < UnixSeconds()) {
+    _read_options.expiration_time = _read_options.is_persistent ? INT64_MAX :
+                    read_context->ttl_seconds == 0 ? 0 : _rowset->rowset_meta()->newest_write_timestamp() + read_context->ttl_seconds;
+    if (_read_options.expiration_time <= UnixSeconds()) {
         _read_options.expiration_time = 0;
-    }
-    if (_read_options.is_persistent) {
-        _read_options.expiration_time = INT64_MAX;
     }
 
     {

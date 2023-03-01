@@ -29,8 +29,8 @@ public:
     LRUFileCache(const std::string& cache_base_path, const FileCacheSettings& cache_settings);
     ~LRUFileCache() override {
         _close = true;
-        if (_ttl_gc_thread.joinable()) {
-            _ttl_gc_thread.join();
+        if (_cache_background_thread.joinable()) {
+            _cache_background_thread.join();
         }
     };
 
@@ -52,6 +52,9 @@ public:
     void modify_expiration_time(const IFileCache::Key&, int64_t new_expiration_time) override;
 
     void change_cache_type(const Key& key, size_t offset, CacheType new_type) override;
+
+    void reset_range(const IFileCache::Key&, size_t offset, size_t old_size,
+                     size_t new_size) override;
 
 private:
     struct FileSegmentCell {
@@ -98,9 +101,9 @@ private:
     size_t _cur_cache_size = 0;
     std::multimap<int64_t, Key> _time_to_key;
     std::unordered_map<Key, int64_t, HashCachedFileKey> _key_to_time;
-    LRUQueue _index_queue {7 * 24 * 60 * 60};
-    LRUQueue _normal_queue {24 * 60 * 60};
-    LRUQueue _disposable_queue {60 * 60};
+    LRUQueue _index_queue;
+    LRUQueue _normal_queue;
+    LRUQueue _disposable_queue;
 
     LRUFileCache::LRUQueue& get_queue(CacheType type);
     const LRUFileCache::LRUQueue& get_queue(CacheType type) const;
@@ -166,22 +169,14 @@ private:
     bool remove_if_ttl_file_unlock(const IFileCache::Key& file_key, bool remove_directly,
                                    std::lock_guard<std::mutex>&);
 
-    void ttl_cache_gc();
-
-    void report_cache_metrcs();
+    void run_background_operation();
 
 public:
     std::string dump_structure(const Key& key) override;
 
 private:
     std::atomic_bool _close {false};
-    std::shared_ptr<MetricEntity> entity;
-    uint64_t hot_eviction = 0;
-    UIntGauge* _hot_eviction_counter = nullptr;
-    static inline int64_t s_hot_eviction_interval_seconds = 10 * 60;
-    std::thread _ttl_gc_thread;
-    UIntGauge* _ttl_cache_percentage = nullptr;
-    UIntGauge* _cur_file_cache_size = nullptr;
+    std::thread _cache_background_thread;
 };
 
 } // namespace io

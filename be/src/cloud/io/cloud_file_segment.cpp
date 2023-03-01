@@ -163,8 +163,9 @@ Status FileSegment::read_at(Slice buffer, size_t offset) {
             }
         }
     }
+    io::IOState state;
     size_t bytes_reads = buffer.size;
-    RETURN_IF_ERROR(_cache_reader->read_at(offset, buffer, &bytes_reads));
+    RETURN_IF_ERROR(_cache_reader->read_at(offset, buffer, &bytes_reads, &state));
     DCHECK(bytes_reads == buffer.size);
     return st;
 }
@@ -264,19 +265,19 @@ Status FileSegment::set_downloaded(std::lock_guard<std::mutex>& /* segment_lock 
 }
 
 void FileSegment::reset_range() {
+    size_t old_size = _segment_range.size();
     _segment_range.right = _downloaded_size == _segment_range.size()
                                    ? _segment_range.right
-                                   : _segment_range.left + _downloaded_size;
+                                   : _segment_range.left + _downloaded_size - 1;
+    // new size must be smaller than old size or equal
+    size_t new_size = _segment_range.size();
+    DCHECK(new_size <= old_size);
+    if (new_size < old_size) {
+        _cache->reset_range(_file_key, _segment_range.left, old_size, new_size);
+    }
 }
 
-void FileSegment::complete(std::lock_guard<std::mutex>& cache_lock) {
-    std::lock_guard segment_lock(_mutex);
-
-    complete_unlocked(cache_lock, segment_lock);
-}
-
-void FileSegment::complete_unlocked(std::lock_guard<std::mutex>&,
-                                    std::lock_guard<std::mutex>& segment_lock) {
+void FileSegment::complete_unlocked(std::lock_guard<std::mutex>& segment_lock) {
     if (is_downloader_impl(segment_lock)) {
         reset_downloader(segment_lock);
         _cv.notify_all();
@@ -316,10 +317,6 @@ bool FileSegment::has_finalized_state() const {
     return _download_state == State::DOWNLOADED;
 }
 
-FileSegment::~FileSegment() {
-    std::lock_guard segment_lock(_mutex);
-}
-
 FileSegmentsHolder::~FileSegmentsHolder() {
     /// In CacheableReadBufferFromRemoteFS file segment's downloader removes file segments from
     /// FileSegmentsHolder right after calling file_segment->complete(), so on destruction here
@@ -335,11 +332,14 @@ FileSegmentsHolder::~FileSegmentsHolder() {
             cache = file_segment->_cache;
         }
 
-        /// File segment pointer must be reset right after calling complete() and
-        /// under the same mutex, because complete() checks for segment pointers.
-        std::lock_guard cache_lock(cache->_mutex);
-
-        file_segment->complete(cache_lock);
+        {
+            std::lock_guard cache_lock(cache->_mutex);
+            std::lock_guard segment_lock(file_segment->_mutex);
+            file_segment->complete_unlocked(segment_lock);
+            if (file_segment->_download_state == FileSegment::State::EMPTY) {
+                cache->remove(file_segment, cache_lock, segment_lock);
+            }
+        }
 
         file_segment_it = file_segments.erase(current_file_segment_it);
     }

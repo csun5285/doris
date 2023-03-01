@@ -1,6 +1,6 @@
 #pragma once
 
-#include <gen_cpp/Types_types.h>
+#include <bvar/bvar.h>
 
 #include <list>
 #include <memory>
@@ -66,6 +66,10 @@ public:
         bool operator==(const Key& other) const { return key == other.key; }
     };
 
+    struct KeyHash {
+        std::size_t operator()(const Key& k) const { return UInt128Hash()(k.key); }
+    };
+
     IFileCache(const std::string& cache_base_path, const FileCacheSettings& cache_settings);
 
     virtual ~IFileCache() = default;
@@ -114,6 +118,9 @@ public:
     virtual void remove_if_cached(const IFileCache::Key&) = 0;
     virtual void modify_expiration_time(const IFileCache::Key&, int64_t new_expiration_time) = 0;
 
+    virtual void reset_range(const IFileCache::Key&, size_t offset, size_t old_size,
+                             size_t new_size) = 0;
+
     IFileCache& operator=(const IFileCache&) = delete;
     IFileCache(const IFileCache&) = delete;
 
@@ -127,17 +134,29 @@ protected:
 
     mutable std::mutex _mutex;
 
+    // metrics
+    std::shared_ptr<bvar::Status<size_t>> _cur_size_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_ttl_cache_size_metrics;
+
     virtual bool try_reserve(const Key& key, const CacheContext& context, size_t offset,
                              size_t size, std::lock_guard<std::mutex>& cache_lock) = 0;
 
     virtual void remove(FileSegmentSPtr file_segment, std::lock_guard<std::mutex>& cache_lock,
                         std::lock_guard<std::mutex>& segment_lock) = 0;
 
-    class LRUQueue {
-    public:
-        LRUQueue(int64_t hot_data_interval) : hot_data_interval(hot_data_interval) {};
-        LRUQueue(size_t max_size, size_t max_element_size)
-                : max_size(max_size), max_element_size(max_element_size) {}
+    struct LRUQueue {
+        LRUQueue() = default;
+        LRUQueue(size_t max_size, size_t max_element_size, int64_t hot_data_interval)
+                : max_size(max_size),
+                  max_element_size(max_element_size),
+                  hot_data_interval(hot_data_interval) {}
+
+        struct HashFileKeyAndOffset {
+            std::size_t operator()(const std::pair<Key, size_t>& pair) const {
+                return KeyHash()(pair.first) + pair.second;
+            }
+        };
+
         struct FileKeyAndOffset {
             Key key;
             size_t offset;
@@ -177,12 +196,15 @@ protected:
 
         void remove_all(std::lock_guard<std::mutex>& cache_lock);
 
+        Iterator get(const IFileCache::Key& key, size_t offset,
+                     std::lock_guard<std::mutex>& /* cache_lock */) const;
+
         int64_t get_hot_data_interval() const { return hot_data_interval; }
 
-    private:
         size_t max_size;
         size_t max_element_size;
         std::list<FileKeyAndOffset> queue;
+        std::unordered_map<std::pair<Key, size_t>, Iterator, HashFileKeyAndOffset> map;
         size_t cache_size {0};
         int64_t hot_data_interval {0};
     };
@@ -203,7 +225,7 @@ protected:
         LRUQueue lru_queue;
         AccessRecord records;
 
-        QueryContext(size_t max_cache_size) : lru_queue(max_cache_size, 0) {}
+        QueryContext(size_t max_cache_size) : lru_queue(max_cache_size, 0, 0) {}
 
         void remove(const Key& key, size_t offset, std::lock_guard<std::mutex>& cache_lock);
 
@@ -261,10 +283,6 @@ public:
 };
 
 using CloudFileCachePtr = IFileCache*;
-
-struct KeyHash {
-    std::size_t operator()(const IFileCache::Key& k) const { return UInt128Hash()(k.key); }
-};
 
 } // namespace io
 } // namespace doris

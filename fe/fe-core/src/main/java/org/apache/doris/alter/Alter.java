@@ -480,9 +480,11 @@ public class Alter {
                 // currently, only in memory and storage policy property could reach here
                 Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
+                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
+                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
                 ((SchemaChangeHandler) schemaChangeHandler).updateTableInMemoryMeta(db, tableName, properties);
                 ((SchemaChangeHandler) schemaChangeHandler).updateTablePersistentMeta(db, tableName, properties);
+                ((SchemaChangeHandler) schemaChangeHandler).updateTableTtlSecondsMeta(db, tableName, properties);
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
             }

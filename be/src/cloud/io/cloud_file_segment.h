@@ -46,7 +46,7 @@ public:
     FileSegment(size_t offset, size_t size, const Key& key, IFileCache* cache, State download_state,
                 CacheType cache_type, int64_t expiration_time);
 
-    ~FileSegment();
+    ~FileSegment() = default;
 
     State state() const;
 
@@ -133,13 +133,7 @@ private:
     Status set_downloaded(std::lock_guard<std::mutex>& segment_lock);
     bool is_downloader_impl(std::lock_guard<std::mutex>& segment_lock) const;
 
-    /// complete() without any completion state is called from destructor of
-    /// FileSegmentsHolder. complete() might check if the caller of the method
-    /// is the last alive holder of the segment. Therefore, complete() and destruction
-    /// of the file segment pointer must be done under the same cache mutex.
-    void complete(std::lock_guard<std::mutex>& cache_lock);
-    void complete_unlocked(std::lock_guard<std::mutex>& cache_lock,
-                           std::lock_guard<std::mutex>& segment_lock);
+    void complete_unlocked(std::lock_guard<std::mutex>& segment_lock);
 
     void reset_downloader_impl(std::lock_guard<std::mutex>& segment_lock);
 

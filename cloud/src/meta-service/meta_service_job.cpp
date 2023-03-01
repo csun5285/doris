@@ -563,6 +563,15 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         code = MetaServiceCode::INVALID_ARGUMENT;
         return;
     }
+    if (stats.data_size() < 0) {
+        INSTANCE_LOG(ERROR) << "buggy data size, tablet_id=" << tablet_id
+            << " stats.data_size=" << stats.data_size()
+            << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
+            << " compaction.size_input_rowsets= " << compaction.size_input_rowsets();
+    }
+    DCHECK(stats.data_size() >= 0) << "stats.data_size=" << stats.data_size()
+        << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
+        << " compaction.size_input_rowsets=" << compaction.size_input_rowsets();
     response->mutable_stats()->CopyFrom(stats);
 
     stats_val = stats.SerializeAsString();

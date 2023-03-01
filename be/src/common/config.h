@@ -938,9 +938,11 @@ CONF_Int32(max_column_reader_prefetch_size, "0");
 CONF_mInt32(prefetch_single_buffer_size_mb, "4");
 
 // file cache
+
 CONF_Bool(enable_file_cache, "false");
-// format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","normal":21474836480,"persistent":10737418240,"query_limit":10737418240}]
+// format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","total_size":21474836480,"query_limit":10737418240}]
 CONF_String(file_cache_path, "");
+// format: ["/mnt/disk3/selectdb_cloud/file_cache"]
 CONF_String(disposable_file_cache_path, "");
 CONF_Int64(file_cache_max_file_segment_size, "1048576"); // 1MB
 CONF_Bool(clear_file_cache, "false");
@@ -964,7 +966,6 @@ CONF_mInt32(schedule_sync_tablets_interval_seconds, "600");
 CONF_mInt32(compaction_timeout_seconds, "86400");
 CONF_mInt32(lease_compaction_interval_seconds, "20");
 CONF_mInt32(meta_service_rpc_retry_times, "200");
-CONF_Bool(enable_cache_segment_size, "true");
 // it must be larger than or equal to 5MB
 CONF_mInt32(s3_write_buffer_size, "5242880");
 CONF_mInt32(s3_write_buffer_whole_size, "524288000");

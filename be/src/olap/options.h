@@ -53,6 +53,7 @@ struct CachePath {
     int64_t query_limit_bytes = 0;
 };
 Status parse_conf_cache_paths(const std::string& config_path, std::vector<CachePath>& path);
+Status parse_conf_rm_paths(const std::string& config_path, std::vector<std::string>& path);
 
 struct EngineOptions {
     // list paths that tablet will be put into.

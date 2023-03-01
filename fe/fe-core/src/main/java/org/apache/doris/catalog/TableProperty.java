@@ -59,7 +59,7 @@ public class TableProperty implements Writable {
     private ReplicaAllocation replicaAlloc = ReplicaAllocation.DEFAULT_ALLOCATION;
     private boolean isInMemory = false;
     private boolean isPersistent = true;
-    private Long ttlSeconds = 0L;
+    private long ttlSeconds = 0L;
 
     private String storagePolicy = "";
     private boolean isDynamicSchema = false;
@@ -109,6 +109,9 @@ public class TableProperty implements Writable {
                 break;
             case OperationType.OP_MODIFY_PERSISTENT:
                 buildPersistent();
+                break;
+            case OperationType.OP_MODIFY_TTL_SECONDS:
+                buildTTLSeconds();
                 break;
             // TODO buildDynamicSchema();
             default:
@@ -168,7 +171,7 @@ public class TableProperty implements Writable {
         return this;
     }
 
-    public Long getTTLSeconds() {
+    public long getTTLSeconds() {
         return ttlSeconds;
     }
 

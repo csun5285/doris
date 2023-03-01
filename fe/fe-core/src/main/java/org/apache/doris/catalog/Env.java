@@ -3546,10 +3546,14 @@ public class Env {
 
             // properties
             sb.append("\nPROPERTIES (\n");
-
             // persistent
             sb.append("\"").append(PropertyAnalyzer.PROPERTIES_PERSISTENT).append("\" = \"");
             sb.append(olapTable.isPersistent()).append("\"");
+
+            if (olapTable.getTTLSeconds() != 0L) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS).append("\" = \"");
+                sb.append(olapTable.getTTLSeconds()).append("\"");
+            }
 
             // bloom filter
             Set<String> bfColumnNames = olapTable.getCopiedBfColumns();
@@ -4932,6 +4936,21 @@ public class Env {
         ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
                 properties);
         editLog.logModifyPersistent(info);
+    }
+
+    public void modifyTableTtlSecondsMeta(Database db, OlapTable table, Map<String, String> properties) {
+        Preconditions.checkArgument(table.isWriteLockHeldByCurrentThread());
+        TableProperty tableProperty = table.getTableProperty();
+        if (tableProperty == null) {
+            tableProperty = new TableProperty(properties);
+        } else {
+            tableProperty.modifyTableProperties(properties);
+        }
+        tableProperty.buildTTLSeconds();
+        table.setTTLSeconds(tableProperty.getTTLSeconds());
+        ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
+                properties);
+        editLog.logModifyTTLSeconds(info);
     }
 
     public void replayModifyTableProperty(short opCode, ModifyTablePropertyOperationLog info)

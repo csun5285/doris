@@ -41,8 +41,8 @@
 #include "agent/topic_subscriber.h"
 #include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/io/cloud_file_cache_settings.h"
-#include "cloud/io/s3_file_write_bufferpool.h"
 #include "cloud/io/local_file_system.h"
+#include "cloud/io/s3_file_write_bufferpool.h"
 #include "cloud/io/tmp_file_mgr.h"
 #include "common/config.h"
 #include "common/daemon.h"
@@ -414,6 +414,16 @@ int main(int argc, char** argv) {
                 exit(-1);
             }
         }
+        std::vector<std::string> rm_paths;
+        olap_res = doris::parse_conf_rm_paths(doris::config::disposable_file_cache_path, rm_paths);
+        if (!olap_res) {
+            LOG(FATAL) << "parse config disposable_file_cache_path path failed, path="
+                       << doris::config::disposable_file_cache_path;
+            exit(-1);
+        }
+        std::for_each(rm_paths.begin(), rm_paths.end(), [](const std::string& path) {
+            doris::io::global_local_filesystem()->delete_directory(path);
+        });
     }
 
     doris::ResourceTls::init();
@@ -491,7 +501,7 @@ int main(int argc, char** argv) {
     // 3. http service
     doris::HttpService http_service(exec_env, doris::config::webserver_port,
                                     doris::config::webserver_num_workers);
-    
+
     // construct s3 file buffer pool to reduce the cost of lazy loading
     doris::io::S3FileBufferPool::GetInstance();
 #ifdef CLOUD_MODE

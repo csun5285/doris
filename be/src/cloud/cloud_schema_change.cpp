@@ -110,6 +110,18 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     sc_params.ref_rowset_readers = rs_readers;
     sc_params.delete_handler = &delete_handler;
     sc_params.base_tablet_schema = base_tablet_schema;
+    DCHECK(request.__isset.alter_tablet_type);
+    switch (request.alter_tablet_type) {
+    case TAlterTabletType::SCHEMA_CHANGE:
+        sc_params.alter_tablet_type = AlterTabletType::SCHEMA_CHANGE;
+        break;
+    case TAlterTabletType::ROLLUP:
+        sc_params.alter_tablet_type = AlterTabletType::ROLLUP;
+        break;
+    case TAlterTabletType::MIGRATION:
+        sc_params.alter_tablet_type = AlterTabletType::MIGRATION;
+        break;
+    }
     if (!request.__isset.materialized_view_params) {
         return _convert_historical_rowsets(sc_params);
     }
@@ -152,6 +164,11 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     // 1. Parse the Alter request and convert it into an internal representation
     RETURN_IF_ERROR(
             SchemaChangeHandler::_parse_request(sc_params, &rb_changer, &sc_sorting, &sc_directly));
+    if (!sc_sorting && !sc_directly && sc_params.alter_tablet_type == AlterTabletType::ROLLUP) {
+        LOG(INFO) << "Don't support to add materialized view by linked schema change";
+        return Status::InternalError(
+                "Don't support to add materialized view by linked schema change");
+    }
 
     // 2. Generate historical data converter
     auto sc_procedure = get_sc_procedure(rb_changer, sc_sorting, sc_directly);

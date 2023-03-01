@@ -772,6 +772,8 @@ public class EditLog {
                 }
                 case OperationType.OP_DYNAMIC_PARTITION:
                 case OperationType.OP_MODIFY_IN_MEMORY:
+                case OperationType.OP_MODIFY_PERSISTENT:
+                case OperationType.OP_MODIFY_TTL_SECONDS:
                 case OperationType.OP_MODIFY_REPLICATION_NUM: {
                     ModifyTablePropertyOperationLog log = (ModifyTablePropertyOperationLog) journal.getData();
                     env.replayModifyTableProperty(opCode, log);
@@ -1574,6 +1576,10 @@ public class EditLog {
     // SELECTDB_CODE_BEGIN
     public void logModifyPersistent(ModifyTablePropertyOperationLog info) {
         logEdit(OperationType.OP_MODIFY_PERSISTENT, info);
+    }
+
+    public void logModifyTTLSeconds(ModifyTablePropertyOperationLog info) {
+        logEdit(OperationType.OP_MODIFY_TTL_SECONDS, info);
     }
     // SELECTDB_CODE_END
 

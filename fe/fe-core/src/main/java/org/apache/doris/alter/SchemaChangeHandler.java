@@ -1929,6 +1929,37 @@ public class SchemaChangeHandler extends AlterHandler {
     }
 
     /**
+     * Update all tablet' ttl_seconds property of table
+     */
+    public void updateTableTtlSecondsMeta(Database db, String tableName, Map<String, String> properties)
+            throws UserException {
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+        if (ttlSeconds == olapTable.getTTLSeconds()) {
+            LOG.info("ttlSeconds == olapTable.getTTLSeconds()"
+                    + ttlSeconds + " " + olapTable.getTTLSeconds());
+            return;
+        }
+        List<Partition> partitions = Lists.newArrayList();
+        olapTable.readLock();
+        try {
+            partitions.addAll(olapTable.getPartitions());
+        } finally {
+            olapTable.readUnlock();
+        }
+        for (Partition partition : partitions) {
+            updateCloudTableTtlSecondsMeta(db, olapTable.getName(), partition.getName(), ttlSeconds);
+        }
+
+        olapTable.writeLockOrDdlException();
+        try {
+            Env.getCurrentEnv().modifyTableTtlSecondsMeta(db, olapTable, properties);
+        } finally {
+            olapTable.writeUnlock();
+        }
+    }
+
+    /**
      * Update all partitions' persistent property of table
      */
     public void updateTablePersistentMeta(Database db, String tableName, Map<String, String> properties)
@@ -2107,15 +2138,27 @@ public class SchemaChangeHandler extends AlterHandler {
         updateCloudPartitionMeta(db, tableName, partitionName, param);
     }
 
+    public void updateCloudTableTtlSecondsMeta(Database db,
+            String tableName,
+            String partitionName,
+            long ttlSeconds) throws UserException {
+        UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
+        param.ttlSeconds = ttlSeconds;
+        param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
+        updateCloudPartitionMeta(db, tableName, partitionName, param);
+    }
+
     private static class UpdatePartitionMetaParam {
         public enum TabletMetaType {
             INMEMORY,
             PERSISTENT,
+            TTL_SECONDS,
         }
 
         TabletMetaType type;
         boolean isPersistent = false;
         boolean isInMemory = false;
+        long ttlSeconds = 0;
     }
 
     public void updateCloudPartitionMeta(Database db,
@@ -2153,6 +2196,9 @@ public class SchemaChangeHandler extends AlterHandler {
                         break;
                     case INMEMORY:
                         infoBuilder.setIsInMemory(param.isInMemory);
+                        break;
+                    case TTL_SECONDS:
+                        infoBuilder.setTtlSeconds(param.ttlSeconds);
                         break;
                     default:
                         throw new RuntimeException("Unknown TabletMetaType");

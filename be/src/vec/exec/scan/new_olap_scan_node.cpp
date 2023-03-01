@@ -219,10 +219,10 @@ Status NewOlapScanNode::_init_profile() {
     _local_io_timer = ADD_TIMER(_segment_profile, "LocalIOUseTimer");
     _remote_io_timer = ADD_TIMER(_segment_profile, "RemoteIOUseTimer");
     _write_cache_io_timer = ADD_TIMER(_segment_profile, "WriteCacheIOUseTimer");
-    _bytes_write_into_cache = ADD_COUNTER(_segment_profile, "BytesWriteIntoCache", TUnit::UNIT);
+    _bytes_write_into_cache = ADD_COUNTER(_segment_profile, "BytesWriteIntoCache", TUnit::BYTES);
     _num_skip_cache_io_total = ADD_COUNTER(_segment_profile, "NumSkipCacheIOTotal", TUnit::UNIT);
-    _bytes_scanned_from_cache = ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::UNIT);
-    _bytes_scanned_from_remote = ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::UNIT);
+    _bytes_scanned_from_cache = ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::BYTES);
+    _bytes_scanned_from_remote = ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::BYTES);
     _load_segments_timer = ADD_TIMER(_segment_profile, "LoadSegmentUseTimer");
     _cloud_get_rowset_version_timer = ADD_TIMER(_scanner_profile, "CloudGetVersionTime");
 

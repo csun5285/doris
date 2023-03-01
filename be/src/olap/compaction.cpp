@@ -242,6 +242,7 @@ Status Compaction::do_compact_ordered_rowsets() {
 }
 
 void Compaction::build_basic_info() {
+#ifndef CLOUD_MODE
     for (auto& rowset : _input_rowsets) {
         _input_rowsets_size += rowset->data_disk_size();
         _input_index_size += rowset->index_disk_size();
@@ -251,6 +252,7 @@ void Compaction::build_basic_info() {
     TRACE_COUNTER_INCREMENT("input_rowsets_data_size", _input_rowsets_size);
     TRACE_COUNTER_INCREMENT("input_row_num", _input_row_num);
     TRACE_COUNTER_INCREMENT("input_segments_num", _input_num_segments);
+#endif
 
     _output_version =
             Version(_input_rowsets.front()->start_version(), _input_rowsets.back()->end_version());

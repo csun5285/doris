@@ -269,7 +269,9 @@ public class OperationType {
 
     public static final short OP_ALTER_USER = 400;
 
+    // cloud
     public static final short OP_UPDATE_CLOUD_REPLICA = 1000;
+    public static final short OP_MODIFY_TTL_SECONDS = 1001;
 
     /**
      * Get opcode name by op code.
