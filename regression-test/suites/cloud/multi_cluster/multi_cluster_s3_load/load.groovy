@@ -86,7 +86,7 @@ suite("load") {
     log.info("before_cluster1_flush : ${before_cluster1_flush}".toString())
 
     // Map[tableName, rowCount]
-    def tables = [customer: 15000000]
+    def tables = [supplier: 1000000]
     def s3BucketName = getS3BucketName()
     def s3WithProperties = """WITH S3 (
         |"AWS_ACCESS_KEY" = "${getS3AK()}",
@@ -151,7 +151,7 @@ suite("load") {
     log.info("before_cluster1_query_scan_rows : ${before_cluster1_query_scan_rows}".toString())
 
     sql """
-        SELECT * from customer order by C_CUSTKEY;
+        SELECT count(*) from supplier;
         """
 
     def after_cluster0_query_scan_rows = get_be_metric(ipList[0], httpPortList[0], "query_scan_rows");

@@ -76,7 +76,7 @@ suite("default_cluster") {
     log.info("before_cluster1_flush : ${before_cluster1_flush}".toString())
 
     sql """
-        drop table test_table
+        drop table if exists test_table
     """
 
     sql """
