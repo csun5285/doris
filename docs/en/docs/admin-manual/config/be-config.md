@@ -1620,3 +1620,10 @@ Translated with www.DeepL.com/Translator (free version)
 * Type: int32
 * Description: The segment whose row number above the threshold will be compacted during segcompaction
 * Default value: 1048576
+
+#### `enable_simdjson_reader`
+
+* Description: Whether enable simdjson to parse json while stream load
+* Default value: false
+
+</version>

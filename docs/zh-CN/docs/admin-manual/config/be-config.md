@@ -1643,3 +1643,10 @@ webserver默认工作线程数
 * 类型：int32
 * 描述：当 segment 文件超过此大小时则会在 segment compaction 时被 compact，否则跳过
 * 默认值：1048576
+
+#### `enable_simdjson_reader`
+
+* 描述: 是否在导入json数据时用simdjson来解析。
+* 默认值: false
+
+</version>
