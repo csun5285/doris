@@ -91,7 +91,11 @@ void SegmentWriter::init_column_meta(ColumnMetaPB* meta, uint32_t column_id,
 
 Status SegmentWriter::init(const vectorized::Block* block) {
     std::vector<uint32_t> column_ids;
-    for (uint32_t i = 0; i < _tablet_schema->num_columns(); ++i) {
+    int column_cnt = _tablet_schema->num_columns();
+    if (block) {
+        column_cnt = block->columns();
+    }
+    for (uint32_t i = 0; i < column_cnt; ++i) {
         column_ids.emplace_back(i);
     }
     return init(column_ids, true, block);

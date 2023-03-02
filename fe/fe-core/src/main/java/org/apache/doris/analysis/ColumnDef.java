@@ -327,7 +327,7 @@ public class ColumnDef {
             throw new AnalysisException("Can not set null default value to non nullable column: " + name);
         }
 
-        if (defaultValue.isSet && defaultValue.value != null) {
+        if (type.isScalarType() && defaultValue.isSet && defaultValue.value != null) {
             validateDefaultValue(type, defaultValue.value, defaultValue.defaultValueExprDef);
         }
     }
