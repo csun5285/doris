@@ -881,7 +881,8 @@ void LRUFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<std::mut
     auto type = file_segment->cache_type();
     auto expiration_time = file_segment->expiration_time();
     auto* cell = get_cell(key, offset, cache_lock);
-    DCHECK(cell) << "No cache cell for key: " << key.to_string() << ", offset: " << offset;
+    // It will be removed concurrently
+    if (!cell) [[unlikely]] return;
 
     if (cell->queue_iterator) {
         auto& queue = get_queue(file_segment->cache_type());
