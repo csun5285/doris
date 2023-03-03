@@ -1933,6 +1933,9 @@ public class SchemaChangeHandler extends AlterHandler {
      */
     public void updateTableTtlSecondsMeta(Database db, String tableName, Map<String, String> properties)
             throws UserException {
+        if (!properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            return;
+        }
         OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
         long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
         if (ttlSeconds == olapTable.getTTLSeconds()) {
