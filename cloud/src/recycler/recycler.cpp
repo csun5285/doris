@@ -340,6 +340,7 @@ int Recycler::start() {
                      << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
         return -1;
     }
+    LOG(INFO) << "successfully started brpc listening on port=" << port;
 #endif
     s_is_working = true;
 

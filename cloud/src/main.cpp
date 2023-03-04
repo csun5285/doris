@@ -23,7 +23,7 @@
  * @return an fd holder with auto-storage-lifecycle
  */
 std::shared_ptr<int> gen_pidfile(const std::string& process_name) {
-    std::cerr << "process current path: " << std::filesystem::current_path() << std::endl;
+    std::cerr << "process working directory: " << std::filesystem::current_path() << std::endl;
     std::string pid_path = "./bin/" + process_name + ".pid";
     int fd = ::open(pid_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     // clang-format off
@@ -32,7 +32,9 @@ std::shared_ptr<int> gen_pidfile(const std::string& process_name) {
                 if (fd <= 0) { return; }
                 [[maybe_unused]] auto x = ::lockf(fd, F_UNLCK, 0);
                 ::close(fd);
-                std::error_code ec; std::filesystem::remove(pid_path, ec);
+                // FIXME: removing the pidfile may result in missing pidfile
+                //        after launching the process...
+                // std::error_code ec; std::filesystem::remove(pid_path, ec);
             });
     // clang-format on
     if (::lockf(fd, F_TLOCK, 0) != 0) {
@@ -46,6 +48,7 @@ std::shared_ptr<int> gen_pidfile(const std::string& process_name) {
     }
     pidfile << getpid() << std::endl;
     pidfile.close();
+    std::cout << "pid=" << getpid() << " written to file=" << pid_path << std::endl;
     return holder;
 }
 
@@ -154,24 +157,36 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    // We can invoke glog from now on
+
+    std::string msg;
+    LOG(INFO) << build_info();
     std::cout << build_info() << std::endl;
     if (args.get<bool>(ARG_META_SERVICE)) {
         selectdb::MetaServer meta_server;
         int ret = meta_server.start();
         if (ret != 0) {
-            std::cerr << "failed to start meta server" << std::endl;
+            msg = "failed to start meta server";
+            LOG(ERROR) << msg;
+            std::cerr << msg << std::endl;
             return ret;
         }
-        std::cout << "successfully starts as meta-service" << std::endl;
+        msg = "successfully started as meta-service";
+        LOG(INFO) << msg;
+        std::cout << msg << std::endl;
         meta_server.join(); // Wait for signals
     } else if (args.get<bool>(ARG_RECYCLER)) {
         selectdb::Recycler recycler;
         int ret = recycler.start();
         if (ret != 0) {
-            std::cerr << "failed to start recycler" << std::endl;
+            msg = "failed to start recycler";
+            LOG(ERROR) << msg;
+            std::cerr << msg << std::endl;
             return ret;
         }
-        std::cout << "successfully starts as recycler" << std::endl;
+        msg = "successfully started as recycler";
+        LOG(INFO) << msg;
+        std::cout << msg << std::endl;
         recycler.join();
     } else {
         std::cerr << "selectdb starts without doing anything and exits" << std::endl;

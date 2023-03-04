@@ -96,6 +96,7 @@ int MetaServer::start() {
                      << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
         return -1;
     }
+    LOG(INFO) << "succesfully started brpc listening on port=" << port;
 
     return 0;
 }

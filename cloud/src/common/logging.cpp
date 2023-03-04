@@ -30,7 +30,7 @@ bool init_glog(const char* basename) {
     // Set glog log dir
     FLAGS_log_dir = config::log_dir;
     // Buffer log messages for at most this many seconds
-    FLAGS_logbufsecs = 10;
+    FLAGS_logbufsecs = 1;
     // Set log roll mode
     // Candidates: day, hour, size
     FLAGS_log_split_method = "size";
@@ -44,7 +44,7 @@ bool init_glog(const char* basename) {
     // clang-format off
     // set log level
     std::string& loglevel = config::log_level;
-    // Can be 0 1 2 3 ... the larger the higher level for loggin,
+    // Can be 0 1 2 3 ... the larger the higher level for logging,
     // corrensponding to INFO WARNING ERROR FATAL
     // const int GLOG_INFO = 0, GLOG_WARNING = 1, GLOG_ERROR = 2, GLOG_FATAL = 3, NUM_SEVERITIES = 4;
     auto tolower = [](std::string s) { for (auto& i : s) i |= 0x20; return s; };
