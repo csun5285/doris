@@ -337,6 +337,10 @@ fi
 
 if [[ -z "${DISABLE_JAVA_UDF}" ]]; then
     DISABLE_JAVA_UDF='OFF'
+    if [[ "${CLOUD_MODE}" = 'ON' ]]; then
+        echo "java_udf is disabled in cloud mode by default"
+        DISABLE_JAVA_UDF='ON'
+    fi
 fi
 
 if [[ -z "${DISABLE_JAVA_CHECK_STYLE}" ]]; then
@@ -552,7 +556,7 @@ function build_ui() {
 # FE UI must be built before building FE
 # We don't need ui on cloud mode
 if [[ "${BUILD_FE}" -eq 1 ]]; then
-    if [[ "${BUILD_UI}" = "ON" ]] || [[ "${CLOUD_MODE}" != "ON" ]] && [[ "${CLOUD_MODE}" != "1" ]]; then
+    if [[ "${BUILD_UI}" = "ON" ]] || [[ "${CLOUD_MODE}" != "ON" ]]; then
         build_ui
     fi
 fi
