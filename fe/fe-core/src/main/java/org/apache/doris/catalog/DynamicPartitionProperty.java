@@ -240,8 +240,7 @@ public class DynamicPartitionProperty {
                 + ",\n\"" + CREATE_HISTORY_PARTITION + "\" = \"" + createHistoryPartition + "\""
                 + ",\n\"" + HISTORY_PARTITION_NUM + "\" = \"" + historyPartitionNum + "\""
                 + ",\n\"" + HOT_PARTITION_NUM + "\" = \"" + hotPartitionNum + "\""
-                + ",\n\"" + RESERVED_HISTORY_PERIODS + "\" = \"" + reservedHistoryPeriods + "\""
-                + ",\n\"" + STORAGE_POLICY + "\" = \"" + storagePolicy + "\"";
+                + ",\n\"" + RESERVED_HISTORY_PERIODS + "\" = \"" + reservedHistoryPeriods + "\"";
         if (getTimeUnit().equalsIgnoreCase(TimeUnit.WEEK.toString())) {
             res += ",\n\"" + START_DAY_OF_WEEK + "\" = \"" + startOfWeek.dayOfWeek + "\"";
         } else if (getTimeUnit().equalsIgnoreCase(TimeUnit.MONTH.toString())) {
