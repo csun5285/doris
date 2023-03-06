@@ -94,7 +94,11 @@ static void help() {
 
 static std::string build_info() {
     std::stringstream ss;
-    ss << "version:{" SELECTDB_BUILD_VERSION "}"
+#if defined(NDEBUG)
+    ss << "version:{" SELECTDB_BUILD_VERSION "-release}"
+#else
+    ss << "version:{" SELECTDB_BUILD_VERSION "-debug}"
+#endif
        << " code_version:{commit=" SELECTDB_BUILD_HASH " time=" SELECTDB_BUILD_VERSION_TIME "}"
        << " build_info:{initiator=" SELECTDB_BUILD_INITIATOR " build_at=" SELECTDB_BUILD_TIME
           " build_on=" SELECTDB_BUILD_OS_VERSION "}\n";
