@@ -23,6 +23,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -136,6 +137,8 @@ public class CloudClusterChecker extends MasterDaemon {
                 currentBes.forEach(b -> b.setCloudClusterName(newClusterName));
                 // update clusterNameToId
                 Env.getCurrentSystemInfo().updateClusterNameToId(newClusterName, currentClusterName, cid);
+                // update tags
+                currentBes.forEach(b -> Env.getCurrentEnv().getEditLog().logModifyBackend(b));
             }
 
             List<String> currentBeEndpoints = currentBes.stream().map(backend ->
@@ -238,6 +241,9 @@ public class CloudClusterChecker extends MasterDaemon {
                     }
                     // clusterID local == remote, diff nodes
                     checkDiffNode(remoteClusterIdToPB, clusterIdToBackend);
+
+                    // check mem map
+                    checkFeNodesMapValid();
                 } catch (Exception e) {
                     LOG.warn("diff cluster has exception, {}", e.getMessage(), e);
                 }
@@ -281,6 +287,44 @@ public class CloudClusterChecker extends MasterDaemon {
         LOG.info("daemon cluster get cluster info succ, current cloudClusterIdToBackendMap: {}",
                 Env.getCurrentSystemInfo().getCloudClusterIdToBackend());
         getObserverFes();
+    }
+
+    private void checkFeNodesMapValid() {
+        LOG.debug("begin checkFeNodesMapValid");
+        Map<String, List<Backend>> clusterIdToBackend = Env.getCurrentSystemInfo().getCloudClusterIdToBackend();
+        Set<String> clusterIds = new HashSet<>();
+        Set<String> clusterNames = new HashSet<>();
+        clusterIdToBackend.forEach((clusterId, bes) -> {
+            if (bes.isEmpty()) {
+                LOG.warn("impossible, somewhere err, clusterId {}, clusterIdToBeMap {}", clusterId, clusterIdToBackend);
+                clusterIdToBackend.remove(clusterId);
+            }
+            bes.forEach(be -> {
+                clusterIds.add(be.getCloudClusterId());
+                clusterNames.add(be.getCloudClusterName());
+            });
+        });
+
+        Map<String, String> nameToId = Env.getCurrentSystemInfo().getCloudClusterNameToId();
+        nameToId.forEach((clusterName, clusterId) -> {
+            if (!clusterIdToBackend.containsKey(clusterId)) {
+                LOG.warn("impossible, somewhere err, clusterId {}, clusterName {}, clusterNameToIdMap {}",
+                        clusterId, clusterName, nameToId);
+                nameToId.remove(clusterName);
+            }
+        });
+
+        if (!clusterNames.containsAll(nameToId.keySet()) || !nameToId.keySet().containsAll(clusterNames)) {
+            LOG.warn("impossible, somewhere err, clusterNames {}, nameToId {}", clusterNames, nameToId);
+        }
+        if (!clusterIds.containsAll(nameToId.values()) || !nameToId.values().containsAll(clusterIds)) {
+            LOG.warn("impossible, somewhere err, clusterIds {}, nameToId {}", clusterIds, nameToId);
+        }
+        if (!clusterIds.containsAll(clusterIdToBackend.keySet())
+                || !clusterIdToBackend.keySet().containsAll(clusterIds)) {
+            LOG.warn("impossible, somewhere err, clusterIds {}, clusterIdToBackend {}",
+                    clusterIds, clusterIdToBackend);
+        }
     }
 
     private void getObserverFes() {

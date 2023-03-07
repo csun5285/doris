@@ -290,7 +290,11 @@ public class SystemInfoService {
             // ATTN: Empty clusters are treated as dropped clusters.
             if (be.size() == 0) {
                 LOG.info("del clusterId {} and clusterName {} due to be nodes eq 0", clusterId, clusterName);
-                clusterNameToId.remove(clusterName, clusterId);
+                boolean succ = clusterNameToId.remove(clusterName, clusterId);
+                if (!succ) {
+                    LOG.warn("impossible, somewhere err, clusterNameToId {}, "
+                            + "want remove cluster name {}, cluster id {}", clusterNameToId, clusterName, clusterId);
+                }
                 clusterIdToBackend.remove(clusterId);
             }
             LOG.info("update (del) cloud cluster map, clusterName={} clusterId={} backendNum={} current backend={}",
@@ -1470,6 +1474,19 @@ public class SystemInfoService {
 
     public void replayModifyBackend(Backend backend) {
         Backend memBe = getBackend(backend.getId());
+        if (Config.isCloudMode()) {
+            // for rename cluster
+            String originalClusterName = memBe.getCloudClusterName();
+            String originalClusterId = memBe.getCloudClusterId();
+            String newClusterName = backend.getTagMap().getOrDefault(Tag.CLOUD_CLUSTER_NAME, "");
+            if (!originalClusterName.equals(newClusterName)) {
+                // rename
+                updateClusterNameToId(newClusterName, originalClusterName, originalClusterId);
+            }
+            LOG.info("cloud mode replay rename cluster, "
+                    + "originalClusterName: {}, originalClusterId: {}, newClusterName: {}",
+                    originalClusterName, originalClusterId, newClusterName);
+        }
         memBe.setTagMap(backend.getTagMap());
         memBe.setQueryDisabled(backend.isQueryDisabled());
         memBe.setLoadDisabled(backend.isLoadDisabled());
