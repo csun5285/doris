@@ -252,6 +252,11 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
         msg = "no valid new_tablet_id given";
         return;
     }
+    if (new_tablet_id == tablet_id) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "not allow new_tablet_id same with base_tablet_id";
+        return;
+    }
     int64_t new_table_id = schema_change.new_tablet_idx().table_id();
     int64_t new_index_id = schema_change.new_tablet_idx().index_id();
     int64_t new_partition_id = schema_change.new_tablet_idx().partition_id();
@@ -761,6 +766,11 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     if (new_tablet_id <= 0) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "no valid new_tablet_id given";
+        return;
+    }
+    if (new_tablet_id == tablet_id) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "not allow new_tablet_id same with base_tablet_id";
         return;
     }
     int64_t new_table_id = schema_change.new_tablet_idx().table_id();
