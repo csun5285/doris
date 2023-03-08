@@ -85,3 +85,4 @@ bvar::Status<int64_t> g_bvar_fdb_workload_transactions_started_hz("fdb_workload_
 bvar::Status<int64_t> g_bvar_fdb_workload_transactions_committed_hz("fdb_workload_transactions_committed_hz", BVAR_FDB_INVALID_VALUE);
 bvar::Status<int64_t> g_bvar_fdb_workload_conflict_rate_hz("fdb_workload_conflict_rate_hz", BVAR_FDB_INVALID_VALUE);
 bvar::Status<int64_t> g_bvar_fdb_client_count("fdb_client_count", BVAR_FDB_INVALID_VALUE);
+bvar::Status<int64_t> g_bvar_fdb_coordinators_unreachable_count("fdb_coordinators_unreachable_count", BVAR_FDB_INVALID_VALUE);

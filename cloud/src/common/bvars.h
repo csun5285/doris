@@ -133,3 +133,4 @@ extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_highest_priority;
 extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_flight_bytes;
 extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_queue_bytes;
 extern bvar::Status<int64_t> g_bvar_fdb_data_moving_total_written_bytes;
+extern bvar::Status<int64_t> g_bvar_fdb_coordinators_unreachable_count;

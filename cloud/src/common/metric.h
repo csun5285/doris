@@ -81,7 +81,7 @@ static void export_fdb_status_details(const std::string& status_str) {
         LOG(WARNING) << "fail to parse status str, err: " << e.what();
         return;
     }
-    if (!document.HasMember("cluster")) {
+    if (!document.HasMember("cluster") || !document.HasMember("client")) {
         LOG(WARNING) << "err fdb status details";
         return;
     }
@@ -127,6 +127,22 @@ static void export_fdb_status_details(const std::string& status_str) {
 
     // Client Count
     g_bvar_fdb_client_count.set_value(get_value({"clients", "count"}));
+
+    // Coordinators Unreachable Count
+    auto unreachable_count = 0;
+    if (auto node = document.FindMember("client"); node->value.HasMember("coordinators")) {
+        if (node = node->value.FindMember("coordinators"); node->value.HasMember("coordinators")) {
+            if (node = node->value.FindMember("coordinators"); node->value.IsArray()) {
+                for (const auto& c: node->value.GetArray()) {
+                    if (c.HasMember("reachable")
+                        && c.FindMember("reachable")->value.IsBool() && !c.FindMember("reachable")->value.GetBool()) {
+                            ++unreachable_count;
+                        }
+                }
+                g_bvar_fdb_coordinators_unreachable_count.set_value(unreachable_count);
+            }
+        }
+    }
 }
 
 class FdbMetricExporter {
