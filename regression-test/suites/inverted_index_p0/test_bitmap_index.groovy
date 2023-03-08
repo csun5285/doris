@@ -14,7 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-suite("test_bitmap_index", "index") {
+suite("test_bitmap_index", "inverted_index") {
     def tbName1 = "test_bitmap_index_dup"
 
     def getJobState = { tableName ->

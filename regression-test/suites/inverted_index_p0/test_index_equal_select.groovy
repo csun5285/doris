@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-suite("test_index", "index_select"){
+suite("test_index_equal_select", "inverted_index_select"){
     
     def indexTbName1 = "index_equal_select"
 
@@ -44,7 +44,7 @@ suite("test_index", "index_select"){
             )
             DUPLICATE KEY(`name`)
             DISTRIBUTED BY HASH(`name`) BUCKETS 10
-            properties("replication_num" = "3");
+            properties("replication_num" = "1");
     """
     // insert data
     sql """ insert into ${indexTbName1} VALUES
