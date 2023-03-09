@@ -1,3 +1,5 @@
+import org.codehaus.groovy.runtime.IOGroovyMethods
+
 suite("test_ttl") {
     def table1 = "test_dup_tab_basic_int_tab_nullable"
 
@@ -169,5 +171,63 @@ PROPERTIES (
         if (i == 0) {
             sleep(120000)
         }
+    }
+
+    sql """
+    select * from ${table1}
+    """
+    // test if alter ttl time takes effect
+    sql """
+    alter table ${table1} set ("file_cache_ttl_seconds"="0")
+    """
+    // sql """
+    // alter table ${table1} set ("persistent"="true")
+    // """
+    // wait for cache syncing processing
+    sleep(360000)
+    println "fuck"
+
+    String[][] backends = sql """ show backends """
+    assertTrue(backends.size() > 0)
+    String backendId;
+    def backendIdToBackendIP = [:]
+    def backendIdToBackendBrpcPort = [:]
+    for (String[] backend in backends) {
+        if (backend[9].equals("true")) {
+            backendIdToBackendIP.put(backend[0], backend[2])
+            backendIdToBackendBrpcPort.put(backend[0], backend[6])
+        }
+    }
+
+    backendId = backendIdToBackendIP.keySet()[0]
+    def getMetricsMethod = { check_func ->
+        httpTest {
+            endpoint backendIdToBackendIP.get(backendId) + ":" + backendIdToBackendBrpcPort.get(backendId)
+            uri "/brpc_metrics"
+            op "get"
+            check check_func
+        }
+    }
+
+    logger.info("test if ttl cache size is zero")
+    getMetricsMethod.call() {
+        respCode, body ->
+            logger.info("test ttl expired resp Code {}", "${respCode}".toString())
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                logger.info("str: {}", line)
+                if (line.contains("ttl_cache_size")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    assertTrue(line.endsWith("0"));
+                    flag = true
+                }
+            }
+            logger.info("test flag {}", flag)
+            assertTrue(flag);
     }
 }
