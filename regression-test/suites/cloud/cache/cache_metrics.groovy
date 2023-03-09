@@ -31,7 +31,7 @@ suite("test_cache_metrics") {
             def strs = out.split('\n')
             Boolean flag = false;
             for (String line in strs) {
-                if (line.contains("cache_cur_size")) {
+                if (line.contains("file_cache")) {
                     flag = true;
                     break;
                 }

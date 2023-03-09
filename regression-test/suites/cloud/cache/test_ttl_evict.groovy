@@ -37,6 +37,15 @@ suite("test_ttl_evict") {
             sleep(5000)
         }
     }
+    // one customer table would take about 1.3GB, the total cache size is 20GB
+    // the following would take 15.6G all
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
+    load_customer_once("customer_ttl")
     load_customer_once("customer_ttl")
     load_customer_once("customer_ttl")
     load_customer_once("customer_ttl")
@@ -68,6 +77,9 @@ suite("test_ttl_evict") {
         }
     }
     long ttl_cache_size = 0
+
+    // wait 30s for the report
+    sleep(30000)
 
     getMetricsMethod.call() {
         respCode, body ->
