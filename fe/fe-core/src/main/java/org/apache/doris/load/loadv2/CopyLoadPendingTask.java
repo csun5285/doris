@@ -52,6 +52,7 @@ import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -227,26 +228,22 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
     protected void parseFileForCopyJob(String stageId, long tableId, String copyId, String pattern, long sizeLimit,
             int fileNumLimit, int fileMetaSizeLimit, List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus,
             ObjectInfo objectInfo, boolean forceCopy) throws UserException {
-        List<ObjectFilePB> copiedFiles = forceCopy ? new ArrayList<>()
-                : Env.getCurrentInternalCatalog().getCopyFiles(stageId, tableId);
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Get copy files for stage={}, table={}, size={}", stageId, tableId, copiedFiles.size());
-            for (ObjectFilePB copyFile : copiedFiles) {
-                LOG.debug("object relative_path={}, etag={}", copyFile.getRelativePath(), copyFile.getEtag());
-            }
-        }
         try {
             if (Config.cloud_copy_list_objects_version == 1) {
-                listAndFilterFiles(objectInfo, pattern, copyId, sizeLimit, fileNumLimit, fileMetaSizeLimit, copiedFiles,
-                        fileStatus);
+                listAndFilterFiles(objectInfo, pattern, copyId, sizeLimit, fileNumLimit, fileMetaSizeLimit,
+                        getCopyFiles(stageId, tableId, forceCopy), fileStatus);
             } else { // version 2
-                listAndFilterFilesV2(objectInfo, pattern, copyId, sizeLimit, fileNumLimit, fileMetaSizeLimit,
-                        copiedFiles, fileStatus);
+                listAndFilterFilesV2(objectInfo, pattern, copyId, stageId, tableId, forceCopy, sizeLimit, fileNumLimit,
+                        fileMetaSizeLimit, fileStatus);
             }
         } catch (Exception e) {
             LOG.warn("Failed to list copy files for queryId={}", copyId, e);
             throw new UserException("list copy files failed. msg=" + e.getMessage());
         }
+    }
+
+    private List<ObjectFilePB> getCopyFiles(String stageId, long tableId, boolean force) throws DdlException {
+        return force ? new ArrayList<>() : Env.getCurrentInternalCatalog().getCopyFiles(stageId, tableId);
     }
 
     protected void listAndFilterFiles(ObjectInfo objectInfo, String pattern, String copyId, long sizeLimit, int fileNum,
@@ -323,8 +320,8 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
         }
     }
 
-    protected void listAndFilterFilesV2(ObjectInfo objectInfo, String pattern, String copyId, long sizeLimit,
-            int fileNum, int metaSize, List<ObjectFilePB> copiedFiles,
+    protected void listAndFilterFilesV2(ObjectInfo objectInfo, String pattern, String copyId, String stageId,
+            long tableId, boolean force, long sizeLimit, int fileNum, int metaSize,
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus) throws Exception {
         long startTimestamp = System.currentTimeMillis();
         long listFileNum = 0;
@@ -332,10 +329,14 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
         loadedFileNum = 0;
         reachLimitStr = "";
         RemoteBase remote = RemoteBase.newInstance(objectInfo);
-        Set<String> loadedFileSet = copiedFiles.stream().map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
 
         List<Pair<String, Boolean>> globs = analyzeGlob(copyId, pattern);
         LOG.info("Input copy into glob={}, analyzed={}", pattern, globs);
+        Set<String> loadedFileSet = new HashSet<>();
+        if (globs.stream().anyMatch(g -> g.second)) { // pattern with wildcard
+            List<ObjectFilePB> copyFiles = getCopyFiles(stageId, tableId, force);
+            loadedFileSet = copyFiles.stream().map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
+        }
         try {
             long totalSize = 0;
             long totalMetaSize = 0;

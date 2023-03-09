@@ -2022,6 +2022,8 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_storage_policy = false;
+
+    @ConfField(mutable = true, masterOnly = true)
     public static int cloud_copy_list_objects_version = 2;
 
     @ConfField(mutable = true)
