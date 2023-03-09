@@ -49,6 +49,8 @@ if [ $? -eq 0 ]; then
   ldd ${bin}
 fi
 
+export JEMALLOC_CONF="percpu_arena:percpu,background_thread:true,metadata_thp:auto,muzzy_decay_ms:30000,dirty_decay_ms:30000,oversize_threshold:0,lg_tcache_max:16,prof:true,prof_prefix:jeprof.out"
+
 mkdir -p ${selectdb_home}/log
 echo "starts ${process} with args: $@"
 if [ ${daemonized} -eq 1 ]; then

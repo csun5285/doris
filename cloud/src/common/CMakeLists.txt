@@ -4,11 +4,22 @@ set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/src/common")
 # where to put generated binaries
 set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/src/common")
 
-add_library(Common
+set(COMMON_FILES
     configbase.cpp
     sync_point.cpp
     util.cpp
     logging.cpp
     bvars.cpp
 )
+
+if (USE_JEMALLOC)
+    set(COMMON_FILES ${COMMON_FILES}
+        jemalloc_hook.cpp
+        )
+endif()
+
+add_library(Common STATIC
+    ${COMMON_FILES}
+    )
+
 # vim: et tw=120 ts=4 sw=4 cc=80:

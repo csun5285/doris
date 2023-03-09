@@ -152,7 +152,7 @@ add_library(openssl STATIC IMPORTED)
 set_target_properties(openssl PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib/libssl.a)
 
 add_library(jemalloc STATIC IMPORTED)
-set_target_properties(jemalloc PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libjemalloc.a)
+set_target_properties(jemalloc PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib/libjemalloc_doris.a)
 
 # Required by brpc
 add_library(leveldb STATIC IMPORTED)
@@ -443,20 +443,20 @@ set(DORIS_LINK_LIBS ${DORIS_LINK_LIBS}
     -lstdc++fs
 )
 
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    set(ASAN_LIBS -static-libasan)
-    set(LSAN_LIBS -static-liblsan)
-    set(UBSAN_LIBS -static-libubsan tcmalloc)
-    set(TSAN_LIBS -static-libtsan)
-else ()
-    set(UBSAN_LIBS -rtlib=compiler-rt tcmalloc)
-endif ()
-
 if (USE_JEMALLOC)
     set(MALLOCLIB jemalloc)
 else ()
     set(MALLOCLIB tcmalloc)
 endif()
+
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    set(ASAN_LIBS -static-libasan)
+    set(LSAN_LIBS -static-liblsan)
+    set(UBSAN_LIBS -static-libubsan ${MALLOCLIB})
+    set(TSAN_LIBS -static-libtsan)
+else ()
+    set(UBSAN_LIBS -rtlib=compiler-rt ${MALLOCLIB})
+endif ()
 
 # Add sanitize static link flags or tcmalloc
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "DEBUG" OR "${CMAKE_BUILD_TYPE}" STREQUAL "RELEASE")
