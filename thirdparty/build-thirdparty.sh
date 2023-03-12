@@ -398,19 +398,22 @@ build_clucene() {
     mkdir -p $BUILD_DIR && cd $BUILD_DIR
     rm -rf CMakeCache.txt CMakeFiles/
 
-if [[ "$CC" == *gcc ]]
-then
-    CPPFLAGS="-fno-omit-frame-pointer -g -Wno-narrowing" \
-    CXXFLAGS="-fno-omit-frame-pointer -g -Wno-narrowing" \
-    ${CMAKE_CMD} -G "${GENERATOR}" -DCMAKE_INSTALL_PREFIX=$TP_INSTALL_DIR -DBUILD_STATIC_LIBRARIES=ON -DUSE_AVX2=${USE_AVX2} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DUSE_BTHREAD=${USE_BTHREAD} ..
+    CPPFLAGS="-fno-omit-frame-pointer"
+    if [[ "$CC" == *gcc ]]; then
+        CPPFLAGS="${CPPFLAGS} -Wno-narrowing"
+    elif [[ "$CC" == *clang ]]; then
+        CPPFLAGS="${CPPFLAGS} -Wno-c++11-narrowing"
+    fi
+    CXXFLAGS="${CPPFLAGS}"
+    ${CMAKE_CMD} -G "${GENERATOR}"                         \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON                 \
+        -DCMAKE_PREFIX_PATH=$TP_INSTALL_DIR                \
+        -DCMAKE_INSTALL_PREFIX=$TP_INSTALL_DIR             \
+        -DBUILD_STATIC_LIBRARIES=ON -DUSE_AVX2=${USE_AVX2} \
+        -DCMAKE_BUILD_TYPE=${BUILD_TYPE}                   \
+        -DUSE_BTHREAD=${USE_BTHREAD}                       \
+        ..
     ${BUILD_SYSTEM} -j $PARALLEL && ${BUILD_SYSTEM} install
-elif [[ "$CC" == *clang ]]
-then
-    CPPFLAGS="-fno-omit-frame-pointer -g -Wno-c++11-narrowing" \
-    CXXFLAGS="-fno-omit-frame-pointer -g -Wno-c++11-narrowing" \
-    ${CMAKE_CMD} -G "${GENERATOR}" -DCMAKE_INSTALL_PREFIX=$TP_INSTALL_DIR -DBUILD_STATIC_LIBRARIES=ON -DUSE_AVX2=${USE_AVX2} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DUSE_BTHREAD=${USE_BTHREAD} ..
-    ${BUILD_SYSTEM} -j $PARALLEL && ${BUILD_SYSTEM} install
-fi
 }
 
 # libevent
