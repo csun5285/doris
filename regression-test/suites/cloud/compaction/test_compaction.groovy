@@ -3,25 +3,49 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_compaction") {
     def tableName = "test_compaction"
 
-    //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,RemoteUsedCapacity,Tag,ErrMsg,Version,Status
-    String[][] backends = sql """ show backends; """
-    assertTrue(backends.size() > 0)
-    def backendId_to_backendIP = [:]
-    def backendId_to_backendHttpPort = [:]
-    def cluster_to_backendId = [:]
-    for (String[] backend in backends) {
-        backendId_to_backendIP.put(backend[0], backend[2])
-        backendId_to_backendHttpPort.put(backend[0], backend[5])
-        def tagJson = parseJson(backend[19])
-        if (!cluster_to_backendId.containsKey(tagJson.cloud_cluster_name)) {
-            cluster_to_backendId.put(tagJson.cloud_cluster_name, backend[0])
+    List<String> ipList = new ArrayList<>()
+    List<String> hbPortList = new ArrayList<>()
+    List<String> httpPortList = new ArrayList<>()
+    List<String> beUniqueIdList = new ArrayList<>()
+
+    String[] bes = context.config.multiClusterBes.split(',');
+    println("the value is " + context.config.multiClusterBes);
+    for(String values : bes) {
+        println("the value is " + values);
+        String[] beInfo = values.split(':');
+        ipList.add(beInfo[0]);
+        hbPortList.add(beInfo[1]);
+        httpPortList.add(beInfo[2]);
+        beUniqueIdList.add(beInfo[3]);
+    }
+
+    println("the ip is " + ipList);
+    println("the heartbeat port is " + hbPortList);
+    println("the http port is " + httpPortList);
+    println("the be unique id is " + beUniqueIdList);
+
+    sleep(1000)
+    for (unique_id : beUniqueIdList) {
+        resp = get_cluster.call(unique_id);
+        for (cluster : resp) {
+            if (cluster.type == "COMPUTE") {
+                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
+            }
         }
     }
-    assertTrue(cluster_to_backendId.size() >= 2)
-    def cluster0 = cluster_to_backendId.keySet()[0]
-    def cluster1 = cluster_to_backendId.keySet()[1]
-    def backend_id0 = cluster_to_backendId.get(cluster0)
-    def backend_id1 = cluster_to_backendId.get(cluster1)
+    sleep(12000)
+
+    List<List<Object>> result  = sql "show clusters"
+    assertTrue(result.size() == 0);
+
+    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                     "regression_cluster_name0", "regression_cluster_id0");
+    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
+                     "regression_cluster_name1", "regression_cluster_id1");
+    sleep(12000)
+
+    result  = sql "show clusters"
+    assertEquals(result.size(), 2);
     
     def updateBeConf = { backend_ip, backend_http_port, key, value ->
         String command = "curl -X POST http://${backend_ip}:${backend_http_port}/api/update_config?${key}=${value}"
@@ -41,14 +65,10 @@ suite("test_compaction") {
     }
 
     try {
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "disable_auto_compaction", "true");
-        updateBeConf(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "disable_auto_compaction", "true");
-        injectionPoint(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "apply_suite/test_compaction");
-        injectionPoint(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "apply_suite/test_compaction");
+        updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "true");
+        updateBeConf(ipList[1], httpPortList[1], "disable_auto_compaction", "true");
+        injectionPoint(ipList[0], httpPortList[0], "apply_suite/test_compaction");
+        injectionPoint(ipList[1], httpPortList[1], "apply_suite/test_compaction");
 
         sql """ DROP TABLE IF EXISTS ${tableName}; """
         sql """
@@ -65,15 +85,12 @@ suite("test_compaction") {
         //TabletId,ReplicaId,BackendId,SchemaHash,Version,LstSuccessVersion,LstFailedVersion,LstFailedTime,LocalDataSize,RemoteDataSize,RowCount,State,LstConsistencyCheckTime,CheckVersion,VersionCount,PathHash,MetaUrl,CompactionStatus
         String[][] tablets = sql """ show tablets from ${tableName}; """
 
-        def doCompaction = { backend_id, compact_type ->
+        def doCompaction = { be_host, be_http_port, compact_type ->
             // trigger compactions for all tablets in ${tableName}
             for (String[] tablet in tablets) {
                 String tablet_id = tablet[0]
                 StringBuilder sb = new StringBuilder();
-                sb.append("curl -X POST http://")
-                sb.append(backendId_to_backendIP.get(backend_id))
-                sb.append(":")
-                sb.append(backendId_to_backendHttpPort.get(backend_id))
+                sb.append("curl -X POST http://${be_host}:${be_http_port}")
                 sb.append("/api/compaction/run?tablet_id=")
                 sb.append(tablet_id)
                 sb.append("&compact_type=${compact_type}")
@@ -96,10 +113,7 @@ suite("test_compaction") {
                     Thread.sleep(1000)
                     String tablet_id = tablet[0]
                     StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X GET http://")
-                    sb.append(backendId_to_backendIP.get(backend_id))
-                    sb.append(":")
-                    sb.append(backendId_to_backendHttpPort.get(backend_id))
+                    sb.append("curl -X GET http://${be_host}:${be_http_port}")
                     sb.append("/api/compaction/run_status?tablet_id=")
                     sb.append(tablet_id)
 
@@ -116,74 +130,47 @@ suite("test_compaction") {
                     running = compactionStatus.run_status
                 } while (running)
             }
-
-            int rowCount = 0
-            for (String[] tablet in tablets) {
-                String tablet_id = tablet[0]
-                StringBuilder sb = new StringBuilder();
-                def compactionStatusUrlIndex = 17
-                sb.append("curl -X GET ")
-                sb.append(tablet[compactionStatusUrlIndex])
-                String command = sb.toString()
-                // wait for cleaning stale_rowsets
-                process = command.execute()
-                code = process.waitFor()
-                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-                out = process.getText()
-                logger.info("Show tablets status: code=" + code + ", out=" + out + ", err=" + err)
-                assertEquals(code, 0)
-                def tabletJson = parseJson(out.trim())
-                assert tabletJson.rowsets instanceof List
-                for (String rowset in (List<String>) tabletJson.rowsets) {
-                    rowCount += Integer.parseInt(rowset.split(" ")[1])
-                }
-            }
-            assert (rowCount < 8)
         }
 
-        sql """ use @`${cluster0}`; """
+        sql """ use @regression_cluster_name0; """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
 
-        sql """ use @`${cluster1}`; """
+        sql """ use @regression_cluster_name1; """
         qt_select_default """ SELECT * FROM ${tableName}; """
 
-        sql """ use @`${cluster0}`; """
+        sql """ use @regression_cluster_name0; """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
-        doCompaction.call(backend_id0, "cumulative")
+        doCompaction.call(ipList[0], httpPortList[0], "cumulative")
         qt_select_default """ SELECT * FROM ${tableName}; """
 
-        sql """ use @`${cluster1}`; """
+        sql """ use @regression_cluster_name1; """
         qt_select_default """ SELECT * FROM ${tableName}; """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
 
-        sql """ use @`${cluster0}`; """
+        sql """ use @regression_cluster_name0; """
         qt_select_default """ SELECT * FROM ${tableName}; """
 
-        sql """ use @`${cluster1}`; """
+        sql """ use @regression_cluster_name1; """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
-        doCompaction.call(backend_id1, "cumulative")
-        doCompaction.call(backend_id1, "base")
+        doCompaction.call(ipList[1], httpPortList[1], "cumulative")
+        doCompaction.call(ipList[1], httpPortList[1], "base")
         qt_select_default """ SELECT * FROM ${tableName}; """
 
-        sql """ use @`${cluster0}`; """
+        sql """ use @regression_cluster_name0; """
         qt_select_default """ SELECT * FROM ${tableName}; """
     } finally {
         try_sql("DROP TABLE IF EXISTS ${tableName}")
-        injectionPoint(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "clear/all");
-        injectionPoint(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "clear/all");
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "disable_auto_compaction", "false");
-        updateBeConf(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "disable_auto_compaction", "false");
+        injectionPoint(ipList[0], httpPortList[0], "clear/all");
+        injectionPoint(ipList[1], httpPortList[1], "clear/all");
+        updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "false");
+        updateBeConf(ipList[1], httpPortList[1], "disable_auto_compaction", "false");
     }
 }

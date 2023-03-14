@@ -3,25 +3,49 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_lease_compaction") {
     def tableName = "t1"
 
-    //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,RemoteUsedCapacity,Tag,ErrMsg,Version,Status
-    String[][] backends = sql """ show backends; """
-    assertTrue(backends.size() > 0)
-    def backendId_to_backendIP = [:]
-    def backendId_to_backendHttpPort = [:]
-    def cluster_to_backendId = [:]
-    for (String[] backend in backends) {
-        backendId_to_backendIP.put(backend[0], backend[2])
-        backendId_to_backendHttpPort.put(backend[0], backend[5])
-        def tagJson = parseJson(backend[19])
-        if (!cluster_to_backendId.containsKey(tagJson.cloud_cluster_name)) {
-            cluster_to_backendId.put(tagJson.cloud_cluster_name, backend[0])
+    List<String> ipList = new ArrayList<>()
+    List<String> hbPortList = new ArrayList<>()
+    List<String> httpPortList = new ArrayList<>()
+    List<String> beUniqueIdList = new ArrayList<>()
+
+    String[] bes = context.config.multiClusterBes.split(',');
+    println("the value is " + context.config.multiClusterBes);
+    for(String values : bes) {
+        println("the value is " + values);
+        String[] beInfo = values.split(':');
+        ipList.add(beInfo[0]);
+        hbPortList.add(beInfo[1]);
+        httpPortList.add(beInfo[2]);
+        beUniqueIdList.add(beInfo[3]);
+    }
+
+    println("the ip is " + ipList);
+    println("the heartbeat port is " + hbPortList);
+    println("the http port is " + httpPortList);
+    println("the be unique id is " + beUniqueIdList);
+
+    sleep(1000)
+    for (unique_id : beUniqueIdList) {
+        resp = get_cluster.call(unique_id);
+        for (cluster : resp) {
+            if (cluster.type == "COMPUTE") {
+                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
+            }
         }
     }
-    assertTrue(cluster_to_backendId.size() >= 2)
-    def cluster0 = cluster_to_backendId.keySet()[0]
-    def cluster1 = cluster_to_backendId.keySet()[1]
-    def backend_id0 = cluster_to_backendId.get(cluster0)
-    def backend_id1 = cluster_to_backendId.get(cluster1)
+    sleep(12000)
+
+    List<List<Object>> result  = sql "show clusters"
+    assertTrue(result.size() == 0);
+
+    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                     "regression_cluster_name0", "regression_cluster_id0");
+    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
+                     "regression_cluster_name1", "regression_cluster_id1");
+    sleep(12000)
+
+    result  = sql "show clusters"
+    assertEquals(result.size(), 2);
     
     def updateBeConf = { backend_ip, backend_http_port, key, value ->
         String command = "curl -X POST http://${backend_ip}:${backend_http_port}/api/update_config?${key}=${value}"
@@ -41,10 +65,8 @@ suite("test_lease_compaction") {
     }
 
     try {
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "disable_auto_compaction", "true");
-        updateBeConf(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "disable_auto_compaction", "true");
+        updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "true");
+        updateBeConf(ipList[1], httpPortList[1], "disable_auto_compaction", "true");
 
         sql """ DROP TABLE IF EXISTS ${tableName}; """
         sql """
@@ -61,14 +83,11 @@ suite("test_lease_compaction") {
         //TabletId,ReplicaId,BackendId,SchemaHash,Version,LstSuccessVersion,LstFailedVersion,LstFailedTime,LocalDataSize,RemoteDataSize,RowCount,State,LstConsistencyCheckTime,CheckVersion,VersionCount,PathHash,MetaUrl,CompactionStatus
         def tablet = (sql """ show tablets from ${tableName}; """)[0]
 
-        def triggerCompaction = { backend_id, compact_type ->
+        def triggerCompaction = { be_host, be_http_port, compact_type ->
             // trigger compactions for all tablets in ${tableName}
             String tablet_id = tablet[0]
             StringBuilder sb = new StringBuilder();
-            sb.append("curl -X POST http://")
-            sb.append(backendId_to_backendIP.get(backend_id))
-            sb.append(":")
-            sb.append(backendId_to_backendHttpPort.get(backend_id))
+            sb.append("curl -X POST http://${be_host}:${be_http_port}")
             sb.append("/api/compaction/run?tablet_id=")
             sb.append(tablet_id)
             sb.append("&compact_type=${compact_type}")
@@ -83,17 +102,14 @@ suite("test_lease_compaction") {
             assertEquals(code, 0)
             return out
         } 
-        def waitForCompaction = { backend_id ->
+        def waitForCompaction = { be_host, be_http_port ->
             // wait for all compactions done
             boolean running = true
             do {
                 Thread.sleep(1000)
                 String tablet_id = tablet[0]
                 StringBuilder sb = new StringBuilder();
-                sb.append("curl -X GET http://")
-                sb.append(backendId_to_backendIP.get(backend_id))
-                sb.append(":")
-                sb.append(backendId_to_backendHttpPort.get(backend_id))
+                sb.append("curl -X GET http://${be_host}:${be_http_port}")
                 sb.append("/api/compaction/run_status?tablet_id=")
                 sb.append(tablet_id)
 
@@ -114,13 +130,11 @@ suite("test_lease_compaction") {
         // Test rejecting compaction job when lease not expired
         //======================================================================
         // cluster0 set lease_compaction_interval_seconds=1, then lease expiration will be 4s
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "lease_compaction_interval_seconds", "1");
+        updateBeConf(ipList[0], httpPortList[0], "lease_compaction_interval_seconds", "1");
         // make cluster0 compaction time exceed 8s to longer than lease expiration
-        injectionPoint(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "set/Compaction::do_compaction?behavior=sleep&duration=8000");
+        injectionPoint(ipList[0], httpPortList[0], "set/Compaction::do_compaction?behavior=sleep&duration=8000");
 
-        sql """ use @`${cluster0}`; """
+        sql """ use @regression_cluster_name0; """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
@@ -129,18 +143,17 @@ suite("test_lease_compaction") {
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
 
         // cluster0 trigger cumu compaction
-        assertTrue(triggerCompaction(backend_id0, "cumulative").contains("Success"));
+        assertTrue(triggerCompaction(ipList[0], httpPortList[0], "cumulative").contains("Success"));
         // cluster1 trigger cumu compaction failed
-        assertTrue(triggerCompaction(backend_id1, "cumulative").contains("already started"));
+        assertTrue(triggerCompaction(ipList[1], httpPortList[1], "cumulative").contains("already started"));
         // wait cluster0 compaction success
-        waitForCompaction(backend_id0);
+        waitForCompaction(ipList[0], httpPortList[0]);
 
         //======================================================================
         // Test preempting compaction job when lease expired
         //======================================================================
         // cluster0 disable lease
-        injectionPoint(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "set/CloudCumulativeCompaction::do_lease?behavior=return");        
+        injectionPoint(ipList[0], httpPortList[0], "set/CloudCumulativeCompaction::do_lease?behavior=return");        
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
@@ -149,29 +162,25 @@ suite("test_lease_compaction") {
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
 
         // cluster0 trigger cumu compaction
-        assertTrue(triggerCompaction(backend_id0, "cumulative").contains("Success"));
+        assertTrue(triggerCompaction(ipList[0], httpPortList[0], "cumulative").contains("Success"));
         // cluster1 trigger cumu compaction. Retry for 10s to wait for the cluster0 lease to expire
         def retry_times = 10
         do { 
             Thread.sleep(1000);
-            if (triggerCompaction(backend_id1, "cumulative").contains("Success")) {
+            if (triggerCompaction(ipList[1], httpPortList[1], "cumulative").contains("Success")) {
                 break;
             }
         } while (--retry_times);
         assertTrue(retry_times > 0);
         // wait cluster1 compaction success
-        waitForCompaction(backend_id1);
+        waitForCompaction(ipList[1], httpPortList[1]);
     } finally {
         try_sql("DROP TABLE IF EXISTS ${tableName}")
-        injectionPoint(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "clear/all");
-        injectionPoint(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "clear/all");
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "lease_compaction_interval_seconds", "20");
-        updateBeConf(backendId_to_backendIP.get(backend_id0), backendId_to_backendHttpPort.get(backend_id0),
-            "disable_auto_compaction", "false");
-        updateBeConf(backendId_to_backendIP.get(backend_id1), backendId_to_backendHttpPort.get(backend_id1),
-            "disable_auto_compaction", "false");
+        injectionPoint(ipList[0], httpPortList[0], "clear/all");
+        injectionPoint(ipList[1], httpPortList[1], "clear/all");
+        // FIXME(plat1ko): reset be conf to original value
+        updateBeConf(ipList[0], httpPortList[0], "lease_compaction_interval_seconds", "20");
+        updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "false");
+        updateBeConf(ipList[1], httpPortList[1], "disable_auto_compaction", "false");
     }
 }
