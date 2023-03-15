@@ -38,6 +38,7 @@ private:
     void finish_instance_recycle_job(const std::string& instance_id);
     void lease_instance_recycle_job(const std::string& instance_id);
     void do_lease();
+
 private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::unique_ptr<brpc::Server> server_;
@@ -56,6 +57,17 @@ private:
     std::condition_variable instance_scanner_cond_;
 
     std::string ip_port_;
+
+    class InstanceFilter {
+    public:
+        void reset(const std::string& whitelist, const std::string& blacklist);
+        bool filter_out(const std::string& instance_id) const;
+
+    private:
+        std::set<std::string> whitelist_;
+        std::set<std::string> blacklist_;
+    };
+    InstanceFilter instance_filter_;
 };
 
 class InstanceRecycler {
@@ -104,6 +116,7 @@ public:
 
     // scan and recycle expired stage objects
     void recycle_expired_stage_objects();
+
 private:
     /**
      * Scan key-value pairs between [`begin`, `end`), and perform `recycle_func` on each key-value pair.

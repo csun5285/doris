@@ -45,6 +45,24 @@ int main(int argc, char** argv) {
 
 namespace selectdb {
 
+TEST(RecyclerTest, whitelist) {
+    Recycler::InstanceFilter filter;
+    filter.reset("", "");
+    EXPECT_FALSE(filter.filter_out("instance1"));
+    EXPECT_FALSE(filter.filter_out("instance2"));
+    filter.reset("", "instance1,instance2");
+    EXPECT_TRUE(filter.filter_out("instance1"));
+    EXPECT_TRUE(filter.filter_out("instance2"));
+    EXPECT_FALSE(filter.filter_out("instance3"));
+    filter.reset("instance1,instance2", "");
+    EXPECT_FALSE(filter.filter_out("instance1"));
+    EXPECT_FALSE(filter.filter_out("instance2"));
+    EXPECT_TRUE(filter.filter_out("instance3"));
+    filter.reset("instance1", "instance1"); // whitelist overrides blacklist
+    EXPECT_FALSE(filter.filter_out("instance1"));
+    EXPECT_TRUE(filter.filter_out("instance2"));
+}
+
 static int create_prepared_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
                                   const std::string& resource_id, int64_t tablet_id,
                                   int num_segments = 1) {
@@ -802,7 +820,8 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     }
     // ----- external stage ----
     // <table_id, timeout_time, start_time, finish_time, job_status>
-    std::vector<std::tuple<int, int64_t, int64_t , int64_t, CopyJobPB::JobStatus>> external_copy_jobs;
+    std::vector<std::tuple<int, int64_t, int64_t, int64_t, CopyJobPB::JobStatus>>
+            external_copy_jobs;
     uint64_t current_time =
             duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     int64_t expire_time = current_time - config::copy_job_max_retention_second * 1000 - 1000;
@@ -819,11 +838,12 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     external_copy_jobs.emplace_back(3, 0, 0, 0, CopyJobPB::LOADING);
     // create external stage copy job and files with loading status which is not timeout
     external_copy_jobs.emplace_back(4, 9963904963479L, 0, 0, CopyJobPB::LOADING);
-    for (const auto& [table_id, timeout_time, start_time, finish_time, job_status] : external_copy_jobs) {
+    for (const auto& [table_id, timeout_time, start_time, finish_time, job_status] :
+         external_copy_jobs) {
         std::vector<ObjectFilePB> object_files;
         create_object_file_pb(external_stage_id + "_" + std::to_string(table_id), &object_files);
-        create_copy_job(txn_kv.get(), external_stage_id, table_id, StagePB::EXTERNAL,
-                        job_status, object_files, timeout_time, start_time, finish_time);
+        create_copy_job(txn_kv.get(), external_stage_id, table_id, StagePB::EXTERNAL, job_status,
+                        object_files, timeout_time, start_time, finish_time);
     }
     // create external stage copy job with deleted stage id
     {
@@ -919,7 +939,7 @@ TEST(RecyclerTest, recycle_stage) {
     InstanceRecycler recycler(txn_kv, instance);
     auto accessor = recycler.accessor_map_.begin()->second;
     for (int i = 0; i < 10; ++i) {
-        accessor->put_object(std::to_string(i)+".csv", "abc");
+        accessor->put_object(std::to_string(i) + ".csv", "abc");
     }
     sp->set_call_back("recycle_stage:get_accessor", [&recycler](void* ret) {
         *reinterpret_cast<std::shared_ptr<ObjStoreAccessor>*>(ret) =
@@ -1011,7 +1031,8 @@ TEST(RecyclerTest, multi_recycler) {
             ASSERT_EQ(true, job_info.ParseFromString(val));
         }
         ASSERT_EQ(JobRecyclePB::IDLE, job_info.status());
-        std::cout << "host: " << job_info.ip_port() << " finish recycle job of instance_id: " << i << std::endl;
+        std::cout << "host: " << job_info.ip_port() << " finish recycle job of instance_id: " << i
+                  << std::endl;
     }
 }
 

@@ -1,5 +1,6 @@
 #include "recycler/recycler.h"
 
+#include <butil/strings/string_split.h>
 #include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 
@@ -22,6 +23,31 @@ static std::atomic_bool s_is_working = false;
 
 static bool is_working() {
     return s_is_working.load(std::memory_order_acquire);
+}
+
+void Recycler::InstanceFilter::reset(const std::string& whitelist, const std::string& blacklist) {
+    blacklist_.clear();
+    whitelist_.clear();
+    if (!whitelist.empty()) {
+        std::vector<std::string> list;
+        butil::SplitString(whitelist, ',', &list);
+        for (auto& str : list) {
+            whitelist_.insert(std::move(str));
+        }
+    } else {
+        std::vector<std::string> list;
+        butil::SplitString(blacklist, ',', &list);
+        for (auto& str : list) {
+            blacklist_.insert(std::move(str));
+        }
+    }
+}
+
+bool Recycler::InstanceFilter::filter_out(const std::string& instance_id) const {
+    if (whitelist_.empty()) {
+        return blacklist_.count(instance_id);
+    }
+    return !whitelist_.count(instance_id);
 }
 
 Recycler::Recycler() : server_(new brpc::Server()) {};
@@ -77,6 +103,7 @@ void Recycler::add_pending_instances(std::vector<InstanceInfoPB> instances) {
     }
     std::lock_guard lock(pending_instance_queue_mtx_);
     for (auto&& instance : instances) {
+        if (instance_filter_.filter_out(instance.instance_id())) continue;
         pending_instance_queue_.push_back(std::move(instance));
     }
     pending_instance_queue_cond_.notify_all();
@@ -123,9 +150,11 @@ bool Recycler::prepare_instance_recycle_job(const std::string& instance_id) {
             return true;
         }
         DCHECK(job_info.instance_id() == instance_id);
-        bool lease_expired = job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
-        bool finish_expired = job_info.status() == JobRecyclePB::IDLE
-                    && now - job_info.last_finish_time_ms() > config::recycle_interval_seconds * 1000;
+        bool lease_expired =
+                job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
+        bool finish_expired =
+                job_info.status() == JobRecyclePB::IDLE &&
+                now - job_info.last_finish_time_ms() > config::recycle_interval_seconds * 1000;
         return lease_expired || finish_expired;
     };
     if (ret == 1 || is_expired()) {
@@ -181,8 +210,7 @@ void Recycler::finish_instance_recycle_job(const std::string& instance_id) {
             return;
         }
         if (job_info.status() != JobRecyclePB::BUSY) {
-            LOG(WARNING) << "recycle job of instance_id: " << instance_id
-                         << " is not busy";
+            LOG(WARNING) << "recycle job of instance_id: " << instance_id << " is not busy";
             return;
         }
         job_info.set_status(JobRecyclePB::IDLE);
@@ -196,9 +224,9 @@ void Recycler::finish_instance_recycle_job(const std::string& instance_id) {
             return;
         }
         // maybe conflict with the commit of the leased thread
-        LOG(WARNING) << "failed to commit to finish recycle job, instance_id: " << instance_id 
+        LOG(WARNING) << "failed to commit to finish recycle job, instance_id: " << instance_id
                      << " try it again";
-    } while(retry_times--);
+    } while (retry_times--);
     LOG(WARNING) << "finally failed to commit to finish recycle job, instance_id: " << instance_id;
 }
 
@@ -281,13 +309,12 @@ void Recycler::lease_instance_recycle_job(const std::string& instance_id) {
     DCHECK(job_info.instance_id() == instance_id);
     if (job_info.ip_port() != ip_port_) {
         LOG(WARNING) << "recycle job of instance_id: " << instance_id
-                    << " is doing at other machine: " << job_info.ip_port();
+                     << " is doing at other machine: " << job_info.ip_port();
         // Todo: abort the recycle of this instance_id
         return;
     }
     if (job_info.status() != JobRecyclePB::BUSY) {
-        LOG(WARNING) << "recycle job of instance_id: " << instance_id
-                    << " is not busy";
+        LOG(WARNING) << "recycle job of instance_id: " << instance_id << " is not busy";
         return;
     }
     job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
@@ -295,7 +322,8 @@ void Recycler::lease_instance_recycle_job(const std::string& instance_id) {
     txn->put(key, val);
     ret = txn->commit();
     if (ret != 0) {
-        LOG(WARNING) << "failed to commit, failed to lease recycle job of instance_id: " << instance_id;
+        LOG(WARNING) << "failed to commit, failed to lease recycle job of instance_id: "
+                     << instance_id;
     }
 }
 void Recycler::do_lease() {
@@ -308,11 +336,14 @@ void Recycler::do_lease() {
         for (const auto& instance_id : instance_set) {
             lease_instance_recycle_job(instance_id);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3));
+        std::this_thread::sleep_for(
+                std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3));
     }
 }
 
 int Recycler::start() {
+    instance_filter_.reset(config::recycle_whitelist, config::recycle_blacklist);
+
 #ifndef UNIT_TEST
     int ret = 0;
     txn_kv_ = std::make_shared<FdbTxnKv>();
@@ -367,7 +398,6 @@ void Recycler::join() {
     for (auto& w : workers_) {
         w.join();
     }
-
 }
 
 InstanceRecycler::InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance)
@@ -1819,8 +1849,7 @@ void InstanceRecycler::recycle_expired_stage_objects() {
 
     std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
         auto cost = duration<float>(steady_clock::now() - start_time).count();
-        LOG_INFO("recycle expired stage objects, cost={}s", cost)
-                .tag("instance_id", instance_id_);
+        LOG_INFO("recycle expired stage objects, cost={}s", cost).tag("instance_id", instance_id_);
     });
 
     int64_t expired_time = duration_cast<seconds>(system_clock::now().time_since_epoch()).count() -
