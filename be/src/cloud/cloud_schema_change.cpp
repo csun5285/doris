@@ -11,12 +11,12 @@ namespace doris::cloud {
 
 static constexpr int ALTER_TABLE_BATCH_SIZE = 4096;
 
-static std::unique_ptr<SchemaChange> get_sc_procedure(const RowBlockChanger& rb_changer,
-                                                      bool sc_sorting, bool sc_directly) {
+static std::unique_ptr<SchemaChange> get_sc_procedure(const RowBlockChanger& rb_changer, bool sc_sorting) {
     if (sc_sorting) {
         return std::make_unique<VSchemaChangeWithSorting>(
                 rb_changer, config::memory_limitation_per_thread_for_schema_change_bytes);
     }
+    // else sc_directly
     return std::make_unique<VSchemaChangeDirectly>(rb_changer);
 }
 
@@ -55,9 +55,10 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     _output_cumulative_point = base_tablet->cumulative_layer_point();
 
     std::vector<RowsetReaderSharedPtr> rs_readers;
+    int64_t base_max_version = base_tablet->local_max_version();
     if (request.alter_version > 1) {
         // [0-1] is a placeholder rowset, no need to convert
-        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_tablet->local_max_version()},
+        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_max_version},
                                                               &rs_readers));
     }
     // FIXME(cyx): Should trigger compaction on base_tablet if there are too many rowsets to convert.
@@ -66,21 +67,18 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     TabletSchemaSPtr base_tablet_schema = std::make_shared<TabletSchema>();
     base_tablet_schema->update_tablet_columns(*base_tablet->tablet_schema(), request.columns);
 
-    // delete handlers for new tablet
+    // delete handlers to filter out deleted rows
     DeleteHandler delete_handler;
-    {
-        std::shared_lock base_tablet_lock(base_tablet->get_header_lock());
-        auto& all_del_preds = base_tablet->delete_predicates();
-        for (auto& delete_pred : all_del_preds) {
-            if (delete_pred->version().first > request.alter_version) {
-                continue;
-            }
+    std::vector<RowsetMetaSharedPtr> delete_predicates;
+    for (auto& rs_reader : rs_readers) {
+        auto& rs_meta = rs_reader->rowset()->rowset_meta();
+        if (rs_meta->has_delete_predicate()) {
             base_tablet_schema->merge_dropped_columns(
-                    base_tablet->tablet_schema(delete_pred->version()));
+                    base_tablet->tablet_schema(rs_meta->version()));
+            delete_predicates.push_back(rs_meta);
         }
-        RETURN_IF_ERROR(
-                delete_handler.init(base_tablet_schema, all_del_preds, request.alter_version));
     }
+    RETURN_IF_ERROR(delete_handler.init(base_tablet_schema, delete_predicates, base_max_version));
 
     std::vector<ColumnId> return_columns;
     return_columns.resize(base_tablet_schema->num_columns());
@@ -171,7 +169,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     }
 
     // 2. Generate historical data converter
-    auto sc_procedure = get_sc_procedure(rb_changer, sc_sorting, sc_directly);
+    auto sc_procedure = get_sc_procedure(rb_changer, sc_sorting);
 
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();
@@ -310,6 +308,12 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
 
     {
         std::lock_guard wlock(new_tablet->get_header_lock());
+        // new_tablet's state MUST be `TABLET_NOTREADY`, because we won't sync a new tablet in schema change job
+        DCHECK(new_tablet->tablet_state() == TABLET_NOTREADY);
+        if (new_tablet->tablet_state() != TABLET_NOTREADY) [[unlikely]] {
+            LOG(ERROR) << "invalid tablet state, tablet_id=" << new_tablet->tablet_id();
+            Status::InternalError("invalid tablet state, tablet_id={}", new_tablet->tablet_id());
+        }
         new_tablet->cloud_add_rowsets(std::move(_output_rowsets), true);
         new_tablet->set_cumulative_layer_point(_output_cumulative_point);
         new_tablet->reset_approximate_stats(stats.num_rowsets(), stats.num_segments(),

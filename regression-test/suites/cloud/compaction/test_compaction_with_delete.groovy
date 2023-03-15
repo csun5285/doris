@@ -117,22 +117,25 @@ suite("test_compaction_with_delete") {
         }
 
         sql """ use @regression_cluster_name0; """
+        sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
+        sql """ DELETE FROM ${tableName} WHERE id = 1; """ // [3-3]
         sql """ INSERT INTO ${tableName} VALUES (2, "a", 100); """
-        sql """ DELETE FROM ${tableName} WHERE id = 2; """
         sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
-        sql """ INSERT INTO ${tableName} VALUES (3, "a", 100); """
-        // no suitable version but promote cumulative point to delete version + 1
+        sql """ DELETE FROM ${tableName} WHERE id = 2; """ // [10-10]
+        // no suitable version(only [2-2]) but promote cumulative point to 4
         assertTrue(triggerCompaction(ipList[0], httpPortList[0], "cumulative").contains("-2000"));
         // TODO(cyx): check cumulative point
-        // after promoting cumulative point, cumulative compaction MUST be success
+        // after promoting cumulative point, cumulative compaction MUST be success, and promote cumulative point to 10
         assertTrue(triggerCompaction(ipList[0], httpPortList[0], "cumulative").contains("Success"));
         waitForCompaction(ipList[0], httpPortList[0])
         qt_select_default """ SELECT * FROM ${tableName}; """
-
+        assertTrue(triggerCompaction(ipList[0], httpPortList[0], "base").contains("Success"));
+        waitForCompaction(ipList[0], httpPortList[0])
+        qt_select_default """ SELECT * FROM ${tableName}; """
     } finally {
         try_sql("DROP TABLE IF EXISTS ${tableName}")
         updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "false");

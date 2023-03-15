@@ -563,6 +563,7 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
     // clang-format off
     auto st = _timestamped_version_tracker.capture_consistent_versions(version_range, &version_path);
     if (!st.ok()) {
+        rlock.unlock(); // avoid logging in lock range
         st.append(" tablet_id=" + std::to_string(tablet_id()));
         LOG(WARNING) << st << '\n' << [this]() { std::string json; get_compaction_status(&json); return json; }();
         DCHECK(st.ok()) << st;
@@ -634,7 +635,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version) {
         }
         TabletMetaSharedPtr tablet_meta;
         RETURN_IF_ERROR(cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta));
-        if (tablet_meta->tablet_state() != TABLET_RUNNING) { // impossible
+        if (tablet_meta->tablet_state() != TABLET_RUNNING) [[unlikely]] { // impossible
             return Status::InternalError("invalid tablet state. tablet_id={}", tablet_id());
         }
         {
@@ -1481,9 +1482,7 @@ void Tablet::pick_candidate_rowsets_to_base_compaction(vector<RowsetSharedPtr>* 
     std::shared_lock rlock(_meta_lock);
 #ifdef CLOUD_MODE
     for (auto& [v, rs] : _rs_version_map) {
-        // MUST NOT compact rowset [0-1], otherwise alter tablet after base compaction will fail.
-        // i.e. new_tablet has init rowset [0-1] and want to convert [2-5] in base_tablet,
-        // however base_tablet has compacted [0-1][2-5] to [0-5].
+        // MUST NOT compact rowset [0-1] for some historical reasons (see cloud_schema_change)
         if (v.first != 0 && v.first < _cumulative_point) {
             candidate_rowsets->push_back(rs);
         }
@@ -1866,7 +1865,7 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
             *permits = 0;
             if (res.precise_code() != OLAP_ERR_BE_NO_SUITABLE_VERSION) {
                 DorisMetrics::instance()->base_compaction_request_failed->increment(1);
-                return Status::InternalError("prepare base compaction with err: {}", res);
+                return Status::InternalError("prepare base compaction with err: {}", res.to_string());
             }
             // return OK if OLAP_ERR_BE_NO_SUITABLE_VERSION, so that we don't need to
             // print too much useless logs.

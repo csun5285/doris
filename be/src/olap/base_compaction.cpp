@@ -90,8 +90,13 @@ void BaseCompaction::_filter_input_rowset() {
     // if enable dup key skip big file and no delete predicate
     // we skip big files too save resources
     if (!config::enable_dup_key_base_compaction_skip_big_file ||
-        _tablet->keys_type() != KeysType::DUP_KEYS || _tablet->delete_predicates().size() != 0) {
+        _tablet->keys_type() != KeysType::DUP_KEYS) {
         return;
+    }
+    for (auto& rs : _input_rowsets) {
+        if (rs->rowset_meta()->has_delete_predicate()) {
+            return;
+        }
     }
     int64_t max_size = config::base_compaction_dup_key_max_file_size_mbytes * 1024 * 1024;
     // first find a proper rowset for start
@@ -116,6 +121,7 @@ Status BaseCompaction::pick_rowsets_to_compact() {
         return Status::OLAPInternalError(OLAP_ERR_BE_NO_SUITABLE_VERSION);
     }
 
+#ifndef CLOUD_MODE
     // If there are delete predicate rowsets in tablet, start_version > 0 implies some rowsets before
     // delete version cannot apply these delete predicates, which can cause incorrect query result.
     // So we must abort this base compaction.
@@ -135,6 +141,7 @@ Status BaseCompaction::pick_rowsets_to_compact() {
             return Status::OLAPInternalError(OLAP_ERR_BE_NO_SUITABLE_VERSION);
         }
     }
+#endif
 
     if (_input_rowsets.size() == 2 && _input_rowsets[0]->end_version() == 1) {
         // the tablet is with rowset: [0-1], [2-y]

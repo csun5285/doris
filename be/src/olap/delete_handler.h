@@ -81,7 +81,6 @@ public:
 
     // Initialize DeleteHandler, use the delete conditions of this tablet whose version less than or equal to
     // 'version' to fill '_del_conds'.
-    // NOTE: You should lock the tablet's header file before calling this function.
     //
     // input:
     //     * schema: tablet's schema, the delete conditions and data rows are in this schema
