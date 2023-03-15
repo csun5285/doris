@@ -17,6 +17,7 @@
 
 package org.apache.doris.mysql.privilege;
 
+import org.apache.doris.common.Config;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.persist.gson.GsonUtils;
@@ -36,7 +37,7 @@ import java.util.Set;
 public class CommonUserProperties implements Writable {
     // The max connections allowed for a user on one FE
     @SerializedName("maxConn")
-    private long maxConn = 100;
+    private long maxConn = Config.qe_max_connection;
     // The maximum total number of query instances that the user is allowed to send from this FE
     @SerializedName("maxQueryInstances")
     private long maxQueryInstances = -1;

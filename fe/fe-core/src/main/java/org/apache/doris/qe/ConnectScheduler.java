@@ -101,6 +101,7 @@ public class ConnectScheduler {
     public boolean registerConnection(ConnectContext ctx) {
         if (numberConnection.incrementAndGet() > maxConnections) {
             numberConnection.decrementAndGet();
+            LOG.info("Reach max connection limit: {}", numberConnection.get());
             return false;
         }
         // Check user
@@ -109,6 +110,8 @@ public class ConnectScheduler {
         if (conns.incrementAndGet() > ctx.getEnv().getAuth().getMaxConn(ctx.getQualifiedUser())) {
             conns.decrementAndGet();
             numberConnection.decrementAndGet();
+            LOG.info("Reach max user connection, total limit: {}, user limit: {}",
+                    numberConnection.get(), conns.get());
             return false;
         }
         connectionMap.put(ctx.getConnectionId(), ctx);
