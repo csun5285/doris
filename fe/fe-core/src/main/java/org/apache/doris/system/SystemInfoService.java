@@ -310,6 +310,20 @@ public class SystemInfoService {
         return clusterIdToBackend;
     }
 
+    public String getCloudClusterIdByName(String clusterName) {
+        return clusterNameToId.get(clusterName);
+    }
+
+    public ImmutableMap<Long, Backend> getCloudIdToBackend(String clusterName) {
+        String clusterId = clusterNameToId.get(clusterName);
+        List<Backend> backends = clusterIdToBackend.get(clusterId);
+        Map<Long, Backend> idToBackend = Maps.newHashMap();
+        for (Backend be : backends) {
+            idToBackend.put(be.getId(), be);
+        }
+        return ImmutableMap.copyOf(idToBackend);
+    }
+
     // Return the ref of concurrentMap clusterNameToId
     // It should be thread-safe to iterate.
     // reference: https://stackoverflow.com/questions/3768554/is-iterating-concurrenthashmap-values-thread-safe

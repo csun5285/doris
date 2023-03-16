@@ -32,6 +32,7 @@ import org.apache.doris.common.util.RuntimeProfile;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.FailMsg;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.Coordinator;
 import org.apache.doris.qe.QeProcessorImpl;
 import org.apache.doris.thrift.TBrokerFileStatus;
@@ -40,11 +41,13 @@ import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.ErrorTabletInfo;
 import org.apache.doris.transaction.TabletCommitInfo;
 
+import com.google.common.base.Strings;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 import java.util.UUID;
+
 
 public class LoadLoadingTask extends LoadTask {
     private static final Logger LOG = LogManager.getLogger(LoadLoadingTask.class);
@@ -75,6 +78,7 @@ public class LoadLoadingTask extends LoadTask {
 
     private RuntimeProfile jobProfile;
     private long beginTime;
+    private String cloudCluster;
 
     public LoadLoadingTask(Database db, OlapTable table,
             BrokerDesc brokerDesc, List<BrokerFileGroup> fileGroups,
@@ -121,6 +125,7 @@ public class LoadLoadingTask extends LoadTask {
                 strictMode, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
                 this.useNewLoadScanNode, userInfo, cluster, qualifiedUser);
         planner.plan(loadId, fileStatusList, fileNum);
+        this.cloudCluster = cluster;
     }
 
     public TUniqueId getLoadId() {
@@ -131,6 +136,22 @@ public class LoadLoadingTask extends LoadTask {
     protected void executeTask() throws Exception {
         LOG.info("begin to execute loading task. load id: {} job id: {}. db: {}, tbl: {}. left retry: {}",
                 DebugUtil.printId(loadId), callback.getCallbackId(), db.getFullName(), table.getName(), retryTime);
+        boolean needCleanCtx = false;
+        if (Config.isCloudMode()) {
+            if (Strings.isNullOrEmpty(cloudCluster)) {
+                throw new Exception("cluster is empty");
+            }
+
+            if (ConnectContext.get() == null) {
+                ConnectContext ctx = new ConnectContext();
+                ctx.setThreadLocalInfo();
+                ctx.setCloudCluster(cloudCluster);
+                needCleanCtx = true;
+            } else {
+                ConnectContext.get().setCloudCluster(cloudCluster);
+            }
+        }
+
         retryTime--;
         beginTime = System.nanoTime();
         if (!((BrokerLoadJob) callback).updateState(JobState.LOADING)) {
@@ -138,6 +159,10 @@ public class LoadLoadingTask extends LoadTask {
             return;
         }
         executeOnce();
+
+        if (Config.isCloudMode() && needCleanCtx) {
+            ConnectContext.remove();
+        }
     }
 
     private void executeOnce() throws Exception {

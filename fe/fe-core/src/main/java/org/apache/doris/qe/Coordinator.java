@@ -443,7 +443,13 @@ public class Coordinator {
             queryProfile.addChild(fragmentProfile.get(i));
         }
 
-        this.idToBackend = Env.getCurrentSystemInfo().getIdToBackend();
+        if (Config.isCloudMode()) {
+            String clusterName = ConnectContext.get().getCloudCluster();
+            this.idToBackend = Env.getCurrentSystemInfo().getCloudIdToBackend(clusterName);
+        } else {
+            this.idToBackend = Env.getCurrentSystemInfo().getIdToBackend();
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("idToBackend size={}", idToBackend.size());
             for (Map.Entry<Long, Backend> entry : idToBackend.entrySet()) {

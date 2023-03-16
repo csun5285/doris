@@ -628,6 +628,59 @@ class Suite implements GroovyInterceptable {
         }
     }
 
+    def d_node = { be_unique_id, ip, port, cluster_name, cluster_id ->
+        def jsonOutput = new JsonOutput()
+        def clusterInfo = [
+                     type: "COMPUTE",
+                     cluster_name : cluster_name,
+                     cluster_id : cluster_id,
+                     nodes: [
+                         [
+                             cloud_unique_id: be_unique_id,
+                             ip: ip,
+                             heartbeat_port: port
+                         ],
+                     ]
+                 ]
+        def map = [instance_id: "${instance_id}", cluster: clusterInfo]
+        def js = jsonOutput.toJson(map)
+        log.info("decommission node req: ${js} ".toString())
+
+        def add_cluster_api = { request_body, check_func ->
+            httpTest {
+                endpoint context.config.metaServiceHttpAddress
+                uri "/MetaService/http/decommission_node?token=${token}"
+                body request_body
+                check check_func
+            }
+        }
+
+        add_cluster_api.call(js) {
+            respCode, body ->
+                log.info("decommission node resp: ${body} ${respCode}".toString())
+                def json = parseJson(body)
+                assertTrue(json.code.equalsIgnoreCase("OK") || json.code.equalsIgnoreCase("ALREADY_EXISTED"))
+        }
+    }
+
+    def checkProfile = { addrSet, fragNum ->
+        List<List<Object>> profileRes = sql " show query profile '/' "
+        for (row : profileRes) {
+            //println row
+        }
+
+        for (int i = 0; i < fragNum; ++i) {
+            String exec_sql = "show query profile '/" + profileRes[0][0] + "/" + i.toString() + "'"
+            List<List<Object>> result = sql exec_sql
+            for (row : result) {
+                println row
+            }
+
+            println result[0][1]
+            println addrSet
+            assertTrue(addrSet.contains(result[0][1]));
+        }
+    }
 }
 
 
