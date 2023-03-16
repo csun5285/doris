@@ -154,10 +154,23 @@ public class AgentBatchTask implements Runnable {
             boolean ok = false;
             try {
                 Backend backend = Env.getCurrentSystemInfo().getBackend(backendId);
-                if (backend == null || !backend.isAlive()) {
+                List<AgentTask> tasks = this.backendIdToTasks.get(backendId);
+                if (backend == null) {
+                    // not found backend, set task failed
+                    for (AgentTask task : tasks) {
+                        // schema change task or rollup task will clear and finished after three failed times
+                        task.failed();
+                        task.failed();
+                        task.failed();
+                        LOG.warn("not found backend [{}], set task failed three times, task: type[{}], signature[{}]",
+                                backendId, task.getTaskType(), task.getSignature());
+                    }
                     continue;
                 }
-                List<AgentTask> tasks = this.backendIdToTasks.get(backendId);
+                if (!backend.isAlive()) {
+                    LOG.warn("backend [{}] is not alive", backendId);
+                    continue;
+                }
                 // create AgentClient
                 String host = FeConstants.runningUnitTest ? "127.0.0.1" : backend.getHost();
                 address = new TNetworkAddress(host, backend.getBePort());
@@ -183,6 +196,7 @@ public class AgentBatchTask implements Runnable {
                     ClientPool.backendPool.invalidateObject(address, client);
                 }
             }
+            LOG.info("end for send task to backend[{}]", backendId);
         } // end for backend
     }
 
