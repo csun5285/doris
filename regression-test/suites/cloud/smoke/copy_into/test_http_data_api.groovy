@@ -23,6 +23,7 @@ suite("test_internal_stage_http_data_api", "smoke") {
     // if aliyun, test internal endpoint
     if ("oss".equals(getProvider())) {
         def tmp = new StringBuilder(strBuilder)
+        def tmp1 = new StringBuilder(strBuilder)
         // test internal
         strBuilder.append(""" -H Host:www.selectdb.com --connect-timeout 5 -vv""")
         command = strBuilder.toString()
@@ -60,6 +61,22 @@ suite("test_internal_stage_http_data_api", "smoke") {
         }
         // curl -u admin:smoke_Test -H fileName:internal_customer.csv -T /mnt/disk3/smoke-test/bin/regression-test/data/cloud/smoke/copy_into/internal_customer.csv -L http://119.23.41.172:39590/copy/upload -H Host:210.211.212.213:8888 --connect-timeout 5 -vv
         assertFalse(location.toString().contains("-internal"))
+
+        // test non internal, host is special contail 'selectdb.cloud', so non internal
+        tmp1.append(""" -H Host:xxxx.studio.selectdb.cloud --connect-timeout 5 -vv""")
+        command = tmp1.toString()
+        logger.info("Test aliyun non internal endpoint command=" + command)
+        process = command.toString().execute()
+        code = process.waitFor()
+        err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+        out = process.getText()
+        location = null
+        err.eachLine {if(it.startsWith("< Location")) {
+            location = it
+        }}
+        if (null == location) {
+            assertTrue(false)
+        }
     }
 
     try {

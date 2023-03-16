@@ -12,6 +12,7 @@ import org.apache.doris.analysis.CopyStmt;
 import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.cluster.ClusterNamespace;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.DorisHttpException;
 import org.apache.doris.datasource.InternalCatalog;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
@@ -107,6 +109,11 @@ public class CloudLoadAction extends RestBaseController {
         return map;
     }
 
+    private boolean internalEndpoint(String host) {
+        return !(!Strings.isNullOrEmpty(host) && (isIP(host)
+                || Arrays.stream(Config.cloud_aliyun_internal_endpoint_white_list).anyMatch(host::contains)));
+    }
+
     // curl  -u user:password -H "fileName: file" -T file -L http://127.0.0.1:12104/copy/upload
     @RequestMapping(path = "/upload", method = RequestMethod.PUT)
     public Object copy(HttpServletRequest request, HttpServletResponse response) {
@@ -120,17 +127,9 @@ public class CloudLoadAction extends RestBaseController {
             }
             String eh = request.getHeader(endpointHeader);
             // default use endpoint
-            boolean isInternal = true;
-            if (Strings.isNullOrEmpty(eh)) {
-                // check Header's Host
-                String host = request.getHeader("Host");
-                if (!Strings.isNullOrEmpty(host) && isIP(host)) {
-                    // check host is ip, if true external, else internal
-                    isInternal = false;
-                }
-            } else {
-                isInternal = eh.equals(internal) || (!eh.equals(external));
-            }
+            String host = request.getHeader("Host");
+            boolean isInternal = Strings.isNullOrEmpty(eh) ? internalEndpoint(host)
+                    : eh.equals(internal) || (!eh.equals(external));
             String mysqlUserName = ClusterNamespace
                     .getNameFromFullName(ConnectContext.get().getCurrentUserIdentity().getQualifiedUser());
 

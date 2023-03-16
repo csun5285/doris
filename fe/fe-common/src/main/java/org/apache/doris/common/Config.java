@@ -1760,6 +1760,14 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static long remote_fragment_exec_timeout_ms = 30000; // 30 seconds
 
+
+    /*
+     * If the copy into upload api's host contain ${cloud_aliyun_distinguish_network_string}
+     * use aliyun external network
+     */
+    @ConfField
+    public static String[] cloud_aliyun_internal_endpoint_white_list = {"selectdb.cloud"};
+
     //==========================================================================
     //                    begin of cloud config
     //==========================================================================
