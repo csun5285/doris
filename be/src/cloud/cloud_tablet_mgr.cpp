@@ -1,4 +1,5 @@
 #include "cloud/cloud_tablet_mgr.h"
+#include <glog/logging.h>
 
 #include <algorithm>
 #include <condition_variable>
@@ -326,7 +327,8 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         if (buf.size() > n) buf.pop_back();
     }
 
-    VLOG_DEBUG << "get_topn_compaction_score, n=" << n << " type=" << compaction_type
+    // log every 10 sec with default config
+    LOG_EVERY_N(INFO, 1000) << "get_topn_compaction_score, n=" << n << " type=" << compaction_type
                << " num_tablets=" << weak_tablets.size() << " num_skipped=" << num_skipped
                << " num_disabled=" << num_disabled << " num_filtered=" << num_filtered
                << " max_score=" << *max_score

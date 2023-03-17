@@ -144,10 +144,6 @@ TRY_AGAIN:
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     tablet->set_last_sync_time(now);
 
-    if (resp.rowset_meta().empty()) {
-        return Status::OK();
-    }
-    int64_t resp_max_version = (resp.rowset_meta().end() - 1)->end_version();
     {
         auto& stats = resp.stats();
         std::lock_guard wlock(tablet->get_header_lock());
@@ -172,18 +168,13 @@ TRY_AGAIN:
         //            |                                |                                                |  need retry
         // To get rid of just retry syncing tablet
         if (stats.base_compaction_cnt() < tablet->base_compaction_cnt() ||
-            stats.cumulative_compaction_cnt() < tablet->cumulative_compaction_cnt() ||
-            (resp_max_version < tablet->local_max_version() &&
-             stats.base_compaction_cnt() == tablet->base_compaction_cnt() &&
-             stats.cumulative_compaction_cnt() == tablet->cumulative_compaction_cnt())) {
+            stats.cumulative_compaction_cnt() < tablet->cumulative_compaction_cnt()) [[unlikely]] {
             // stale request, ignore
             LOG_WARNING("stale get rowset meta request")
                     .tag("resp_base_compaction_cnt", stats.base_compaction_cnt())
                     .tag("base_compaction_cnt", tablet->base_compaction_cnt())
                     .tag("resp_cumulative_compaction_cnt", stats.cumulative_compaction_cnt())
                     .tag("cumulative_compaction_cnt", tablet->cumulative_compaction_cnt())
-                    .tag("resp_max_version", resp_max_version)
-                    .tag("max_version", tablet->local_max_version())
                     .tag("tried", tried);
             if (tried++ < 10) goto TRY_AGAIN;
             return Status::OK();
