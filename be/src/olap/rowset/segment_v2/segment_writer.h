@@ -62,6 +62,9 @@ struct SegmentWriterOptions {
     bool enable_unique_key_merge_on_write = false;
 
     RowsetWriterContext* rowset_ctx = nullptr;
+    // If it is directly write from load procedure, else
+    // it could be compaction or schema change etc..
+    bool is_direct_write = false;
 };
 
 class SegmentWriter {
@@ -104,7 +107,7 @@ public:
     bool is_unique_key() { return _tablet_schema->keys_type() == UNIQUE_KEYS; }
 
 private:
-    Status _create_writers_with_block(
+    Status _create_writers_with_dynamic_block(
             const vectorized::Block* block,
             std::function<Status(uint32_t, const TabletColumn&)> writer_creator);
     Status _create_writers(
@@ -122,6 +125,7 @@ private:
     Status _write_raw_data(const std::vector<Slice>& slices);
     std::string _encode_keys(const std::vector<vectorized::IOlapColumnDataAccessor*>& key_columns,
                              size_t pos, bool null_first = true);
+
     // for unique-key merge on write and segment min_max key
     std::string _full_encode_keys(
             const std::vector<vectorized::IOlapColumnDataAccessor*>& key_columns, size_t pos,
@@ -131,6 +135,8 @@ private:
     void set_max_key(const Slice& key);
 
     void _reset_column_writers();
+
+    bool _should_create_writers_with_dynamic_block(size_t num_columns_in_block);
 
 private:
     uint32_t _segment_id;

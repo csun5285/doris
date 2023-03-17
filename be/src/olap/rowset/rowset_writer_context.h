@@ -100,7 +100,9 @@ struct RowsetWriterContext {
     std::set<int32_t> skip_inverted_index;
 
     TabletSharedPtr tablet = nullptr;
-
+    // If it is directly write from load procedure, else
+    // it could be compaction or schema change etc..
+    bool is_direct_write = false;
     // for tracing local schema change record
     std::shared_ptr<vectorized::object_util::LocalSchemaChangeRecorder> schema_change_recorder =
             nullptr;

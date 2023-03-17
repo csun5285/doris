@@ -164,6 +164,8 @@ Status DeltaWriter::init() {
     context.tablet_schema = _tablet_schema;
     context.fs = cloud::latest_fs();
     context.tablet = _tablet;
+    context.tablet_id = _tablet->table_id();
+    context.is_direct_write = true;
     RETURN_NOT_OK(_tablet->create_rowset_writer(context, &_rowset_writer));
     _schema.reset(new Schema(_tablet_schema));
 #ifdef CLOUD_MODE
