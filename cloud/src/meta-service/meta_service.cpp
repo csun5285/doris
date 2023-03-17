@@ -2823,7 +2823,7 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
     msg = ss.str();
 }
 
-std::string static convert_ms_code_to_http_code(const MetaServiceCode& ret, int& status_code) {
+std::string convert_ms_code_to_http_code(const MetaServiceCode& ret, int& status_code) {
     switch (ret) {
     case OK:
         return "OK";
