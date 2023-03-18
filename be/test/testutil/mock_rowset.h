@@ -74,6 +74,8 @@ class MockRowset : public Rowset {
         return Status::OK();
     }
 
+    std::string segment_file_path(int segment_id) override { return ""; }
+
 protected:
     MockRowset(TabletSchemaSPtr schema, const std::string& rowset_path,
                RowsetMetaSharedPtr rowset_meta)
