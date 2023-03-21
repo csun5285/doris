@@ -184,8 +184,8 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                 retryTime = 0;
                 copyJob.setAbortedCopy(true);
                 throw new UserException(String.format(NO_FILES_ERROR_MSG + ", matched %d files, "
-                        + "filtered %d files because files may be loading or loaded" + reachLimitStr
-                        + ", %d files left after beginCopy", matchedFileNum, loadedFileNum, 0));
+                        + "filtered %d files because files may be loading or loaded"
+                        + reachLimitStr, matchedFileNum, matchedFileNum));
             }
             Set<String> filteredObjectSet = filteredObjectFiles.stream()
                     .map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
