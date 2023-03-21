@@ -264,7 +264,7 @@ void LRUCache::_evict_from_lru_with_time(size_t total_size, LRUHandle** to_remov
     while (_usage + total_size > _capacity && !_sort_normal_entries_with_timestamp.empty()) {
         auto entry_pair = _sort_normal_entries_with_timestamp.top();
         LRUHandle* remove_handle = entry_pair.second;
-        if (_cache_value_extractor(remove_handle->value) != entry_pair.first) {
+        if (remove_handle == nullptr || _cache_value_extractor(remove_handle->value) != entry_pair.first) {
             // time in cache value maybe updated when higher level call LRUCache::release()
             _sort_normal_entries_with_timestamp.pop();
             continue;
@@ -280,7 +280,7 @@ void LRUCache::_evict_from_lru_with_time(size_t total_size, LRUHandle** to_remov
     while (_usage + total_size > _capacity && !_sort_durable_entries_with_timestamp.empty()) {
         auto entry_pair = _sort_durable_entries_with_timestamp.top();
         LRUHandle* remove_handle = entry_pair.second;
-        if (_cache_value_extractor(remove_handle->value) != entry_pair.first) {
+        if (remove_handle == nullptr || _cache_value_extractor(remove_handle->value) != entry_pair.first) {
             // time in cache value maybe updated when higher level call LRUCache::release()
             _sort_durable_entries_with_timestamp.pop();
             continue;
