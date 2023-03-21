@@ -87,8 +87,8 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
                                   InvertedIndexParserType analyser_type, roaring::Roaring* bit_map,
                                   const void* additional_value) {
     std::string search_str = reinterpret_cast<const StringValue*>(query_value)->to_string();
-    LOG(INFO) << column_name
-              << " begin to load the fulltext index from clucene, query_str=" << search_str;
+    VLOG_DEBUG << column_name
+               << " begin to load the fulltext index from clucene, query_str=" << search_str;
     std::unique_ptr<lucene::search::Query> query;
     std::wstring field_ws = std::wstring(column_name.begin(), column_name.end());
     std::wstring search_str_ws = std::wstring(search_str.begin(), search_str.end());
@@ -301,8 +301,7 @@ BkdIndexReader::BkdIndexReader(io::FileSystemSPtr fs, const std::string& path,
         return;
     }
     compoundReader = new DorisCompoundReader(
-            DorisCompoundDirectory::getDirectory(fs, index_dir.c_str()),
-            index_file_name.c_str());
+            DorisCompoundDirectory::getDirectory(fs, index_dir.c_str()), index_file_name.c_str());
 }
 
 Status BkdIndexReader::new_iterator(const TabletIndex* index_meta,
