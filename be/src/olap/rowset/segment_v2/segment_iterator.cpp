@@ -1831,7 +1831,7 @@ void SegmentIterator::_output_non_pred_columns(vectorized::Block* block) {
 
 Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32_t& nrows_read,
                                                bool set_block_rowid) {
-    // SCOPED_RAW_TIMER(&_opts.stats->first_read_ns);
+    SCOPED_RAW_TIMER(&_opts.stats->first_read_ns);
     do {
         uint32_t range_from;
         uint32_t range_to;
