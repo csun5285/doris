@@ -26,6 +26,7 @@
 #include <aws/s3/model/ListObjectsV2Request.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/transfer/TransferManager.h>
+#include <bvar/bvar.h>
 
 #include <filesystem>
 #include <fstream>
@@ -46,6 +47,8 @@
 
 namespace doris {
 namespace io {
+
+bvar::Adder<uint64_t> s3_file_size_counter("s3_file_system", "file_size");
 
 #ifndef CHECK_S3_CLIENT
 #define CHECK_S3_CLIENT(client)                               \
@@ -206,8 +209,9 @@ Status S3FileSystem::open_file_impl(const Path& path, metrics_hook metrics, File
             std::static_pointer_cast<S3FileSystem>(shared_from_this()));
     if (config::enable_file_cache) {
         if (config::enable_file_cache) {
-        *reader = std::make_shared<CachedRemoteFileReader>(std::move(*reader), std::move(metrics));
-    }
+            *reader = std::make_shared<CachedRemoteFileReader>(std::move(*reader),
+                                                               std::move(metrics));
+        }
     }
     return Status::OK();
 }
@@ -350,6 +354,7 @@ Status S3FileSystem::file_size_impl(const Path& path, size_t* file_size) const {
                                _s3_conf.endpoint, _s3_conf.bucket, key,
                                outcome.GetError().GetMessage());
     }
+    s3_file_size_counter << 1;
     return Status::OK();
 }
 
