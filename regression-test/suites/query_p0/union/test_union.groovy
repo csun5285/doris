@@ -273,6 +273,4 @@ suite("test_union") {
         qt_union40 """(select k1 from ${new_union_table}) union (select k${idx} from ${tbName1}) order by k1"""
     }
     sql"""drop table ${new_union_table}"""
-
-    qt_union36 """SELECT a,2 as a FROM (SELECT '1' as a) b where a=1;"""
 }

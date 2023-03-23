@@ -1784,9 +1784,8 @@ public class SingleNodePlanner {
                     newConjuncts = cloneExprs(newConjuncts);
                 }
             } else {
-                for (Expr e : conjuncts) {
-                    viewAnalyzer.registerMigrateFailedConjuncts(inlineViewRef, e);
-                }
+                Preconditions.checkArgument(select.getTableRefs().size() == 1);
+                viewAnalyzer.registerConjuncts(newConjuncts, select.getTableRefs().get(0).getId());
             }
         } else {
             Preconditions.checkArgument(stmt instanceof SetOperationStmt);
@@ -2122,13 +2121,7 @@ public class SingleNodePlanner {
             scanNode = createScanNode(analyzer, tblRef, selectStmt);
         }
         if (tblRef instanceof InlineViewRef) {
-            InlineViewRef inlineViewRef = (InlineViewRef) tblRef;
-            scanNode = createInlineViewPlan(analyzer, inlineViewRef);
-            Analyzer viewAnalyzer = inlineViewRef.getAnalyzer();
-            Set<Expr> exprs = viewAnalyzer.findMigrateFailedConjuncts(inlineViewRef);
-            if (CollectionUtils.isNotEmpty(exprs)) {
-                scanNode.setVConjunct(exprs);
-            }
+            scanNode = createInlineViewPlan(analyzer, (InlineViewRef) tblRef);
         }
         if (scanNode == null) {
             throw new UserException("unknown TableRef node");
