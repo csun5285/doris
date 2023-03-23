@@ -337,10 +337,6 @@ fi
 
 if [[ -z "${DISABLE_JAVA_UDF}" ]]; then
     DISABLE_JAVA_UDF='OFF'
-    if [[ "${CLOUD_MODE}" = 'ON' ]]; then
-        echo "java_udf is disabled in cloud mode by default"
-        DISABLE_JAVA_UDF='ON'
-    fi
 fi
 
 if [[ -z "${DISABLE_JAVA_CHECK_STYLE}" ]]; then
