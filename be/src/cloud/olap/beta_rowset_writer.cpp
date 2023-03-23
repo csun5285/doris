@@ -806,7 +806,9 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
-
+    for (auto& file_writer : _file_writers) {
+        _rowset_meta->add_segment_file_size(file_writer->bytes_appended());
+    }
     RowsetSharedPtr rowset;
     status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                           &rowset);
