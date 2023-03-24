@@ -203,7 +203,6 @@ fi
 
 
 # Download thirdparties.
-${TP_DIR}/download-clucene.sh
 ${TP_DIR}/download-thirdparty.sh
 
 export LD_LIBRARY_PATH="${TP_DIR}/installed/lib:${LD_LIBRARY_PATH}"

@@ -54,10 +54,11 @@ export TP_JAR_DIR="${TP_INSTALL_DIR}/lib/jar"
 # of all thirdparties
 #####################################################
 
-CLUCENE_VERSION=v0.4.9
-CLUCENE_NAME=clucene-0.4.9.zip
-CLUCENE_SOURCE=clucene-0.4.9
-CLUCENE_MD5SUM="3958d46eca138a904eadec9fadfb11ac"
+CLUCENE_DOWNLOAD="https://doris-thirdparty-1308700295.cos.ap-beijing.myqcloud.com/thirdparty/clucene-v0.5.1.zip"
+CLUCENE_VERSION=v0.5.1
+CLUCENE_NAME=clucene-v0.5.1.zip
+CLUCENE_SOURCE=clucene-v0.5.1
+CLUCENE_MD5SUM="eed00cf53045acb2de9f0f9369d04bea"
 
 # libevent
 LIBEVENT_DOWNLOAD="https://github.com/libevent/libevent/archive/release-2.1.12-stable.tar.gz"
@@ -510,6 +511,7 @@ export TP_ARCHIVES=(
     'XXHASH'
     'CONCURRENTQUEUE'
     'FAST_FLOAT'
+    'CLUCENE'
 )
 
 if [[ "$(uname -s)" == 'Darwin' ]]; then
