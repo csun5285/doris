@@ -591,8 +591,9 @@ Status Tablet::cloud_sync_meta() {
         std::shared_lock rlock(_meta_lock);
         for (auto& [_, rs] : _rs_version_map) {
             for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
-                int64_t new_expiration_time = new_ttl_seconds + rs->rowset_meta()->newest_write_timestamp();
-                new_expiration_time = new_expiration_time > cur_time? new_expiration_time : 0;
+                int64_t new_expiration_time =
+                        new_ttl_seconds + rs->rowset_meta()->newest_write_timestamp();
+                new_expiration_time = new_expiration_time > cur_time ? new_expiration_time : 0;
                 auto file_key = io::IFileCache::hash(
                         io::Path(rs->segment_file_path(seg_id)).filename().native());
                 auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
@@ -747,36 +748,47 @@ void Tablet::cloud_delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete)
 }
 
 int Tablet::cloud_delete_expired_stale_rowsets() {
-    std::lock_guard wlock(_meta_lock);
+    std::vector<RowsetSharedPtr> expired_rowsets;
+    {
+        std::lock_guard wlock(_meta_lock);
 
-    std::vector<int64_t> path_ids;
-    // capture the path version to delete
-    _timestamped_version_tracker.capture_expired_paths(&path_ids);
+        std::vector<int64_t> path_ids;
+        // capture the path version to delete
+        _timestamped_version_tracker.capture_expired_paths(&path_ids);
 
-    if (path_ids.empty()) {
-        return 0;
-    }
-
-    int num_deleted = 0;
-    for (int64_t path_id : path_ids) {
-        // delete stale versions in version graph
-        auto version_path = _timestamped_version_tracker.fetch_and_delete_path_by_id(path_id);
-        for (auto& v_ts : version_path->timestamped_versions()) {
-            auto rs = _stale_rs_version_map[v_ts->version()];
-            for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
-                auto file_key = io::IFileCache::hash(
-                        io::Path(rs->segment_file_path(seg_id)).filename().native());
-                auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
-                file_cache->remove_if_cached(file_key);
-            }
-            _stale_rs_version_map.erase(v_ts->version());
-            _tablet_meta->delete_stale_rs_meta_by_version(v_ts->version());
-            std::vector<std::string> segment_paths;
-            VLOG_DEBUG << "delete stale rowset " << v_ts->version();
+        if (path_ids.empty()) {
+            return 0;
         }
-        num_deleted += version_path->timestamped_versions().size();
+
+        for (int64_t path_id : path_ids) {
+            // delete stale versions in version graph
+            auto version_path = _timestamped_version_tracker.fetch_and_delete_path_by_id(path_id);
+            for (auto& v_ts : version_path->timestamped_versions()) {
+                auto rs_it = _stale_rs_version_map.find(v_ts->version());
+                // clang-format off
+                DCHECK(rs_it != _stale_rs_version_map.end()) << [this]() { std::string json; get_compaction_status(&json); return json; }();
+                // clang-format on
+                if (rs_it != _stale_rs_version_map.end()) {
+                    expired_rowsets.push_back(rs_it->second);
+                    _stale_rs_version_map.erase(rs_it);
+                } else {
+                    LOG(WARNING) << "cannot find stale rowset " << v_ts->version() << " in tablet "
+                                 << tablet_id();
+                }
+                _tablet_meta->delete_stale_rs_meta_by_version(v_ts->version());
+                VLOG_DEBUG << "delete stale rowset " << v_ts->version();
+            }
+        }
     }
-    return num_deleted;
+    for (auto& rs : expired_rowsets) {
+        for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+            auto file_key = io::IFileCache::hash(
+                    io::Path(rs->segment_file_path(seg_id)).filename().native());
+            auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+            file_cache->remove_if_cached(file_key);
+        }
+    }
+    return expired_rowsets.size();
 }
 
 void Tablet::_delete_stale_rowset_by_version(const Version& version) {
@@ -1865,7 +1877,8 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
             *permits = 0;
             if (res.precise_code() != OLAP_ERR_BE_NO_SUITABLE_VERSION) {
                 DorisMetrics::instance()->base_compaction_request_failed->increment(1);
-                return Status::InternalError("prepare base compaction with err: {}", res.to_string());
+                return Status::InternalError("prepare base compaction with err: {}",
+                                             res.to_string());
             }
             // return OK if OLAP_ERR_BE_NO_SUITABLE_VERSION, so that we don't need to
             // print too much useless logs.
