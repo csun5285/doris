@@ -373,8 +373,9 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     }
     if (vertical_compaction) {
         RETURN_IF_ERROR(_tablet->create_vertical_rowset_writer(context, &_output_rs_writer));
+    } else {
+        RETURN_IF_ERROR(_tablet->create_rowset_writer(context, &_output_rs_writer));
     }
-    RETURN_IF_ERROR(_tablet->create_rowset_writer(context, &_output_rs_writer));
 #ifdef CLOUD_MODE
     RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta(), true));
 #endif
