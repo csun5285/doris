@@ -219,7 +219,8 @@ SegmentIterator::SegmentIterator(std::shared_ptr<Segment> segment, const Schema&
           _cur_rowid(0),
           _lazy_materialization_read(false),
           _inited(false),
-          _estimate_row_size(true) {}
+          _estimate_row_size(true),
+          _pool(new ObjectPool) {}
 
 SegmentIterator::~SegmentIterator() {
     for (auto iter : _column_iterators) {
@@ -235,8 +236,16 @@ SegmentIterator::~SegmentIterator() {
 
 Status SegmentIterator::init(const StorageReadOptions& opts) {
     _opts = opts;
-    if (!opts.column_predicates.empty()) {
-        _col_predicates = opts.column_predicates;
+
+    for (auto& predicate : opts.column_predicates) {
+        if (predicate->need_to_clone()) {
+            ColumnPredicate* cloned;
+            predicate->clone(&cloned);
+            _pool->add(cloned);
+            _col_predicates.emplace_back(cloned);
+        } else {
+            _col_predicates.emplace_back(predicate);
+        }
     }
     if (_schema.rowid_col_idx() > 0) {
         _opts.record_rowids = true;
@@ -1944,6 +1953,7 @@ uint16_t SegmentIterator::_evaluate_vectorization_predicate(uint16_t* sel_rowid_
         }
     }
 
+    _opts.stats->vec_cond_input_rows += original_size;
     _opts.stats->rows_vec_cond_filtered += original_size - new_size;
     return new_size;
 }
@@ -1961,7 +1971,8 @@ uint16_t SegmentIterator::_evaluate_short_circuit_predicate(uint16_t* vec_sel_ro
         auto& short_cir_column = _current_return_columns[column_id];
         selected_size = predicate->evaluate(*short_cir_column, vec_sel_rowid_idx, selected_size);
     }
-    _opts.stats->rows_vec_cond_filtered += original_size - selected_size;
+    _opts.stats->short_circuit_cond_input_rows += original_size;
+    _opts.stats->rows_short_circuit_cond_filtered += original_size - selected_size;
 
     // evaluate delete condition
     original_size = selected_size;
@@ -2208,7 +2219,7 @@ void SegmentIterator::_convert_dict_code_for_predicate_if_necessary() {
     }
 
     for (auto column_id : _delete_bloom_filter_column_ids) {
-        _current_return_columns[column_id].get()->generate_hash_values_for_runtime_filter();
+        _current_return_columns[column_id].get()->initialize_hash_values_for_runtime_filter();
     }
 }
 
@@ -2220,7 +2231,7 @@ void SegmentIterator::_convert_dict_code_for_predicate_if_necessary_impl(
     if (PredicateTypeTraits::is_range(predicate->type())) {
         col_ptr->convert_dict_codes_if_necessary();
     } else if (PredicateTypeTraits::is_bloom_filter(predicate->type())) {
-        col_ptr->generate_hash_values_for_runtime_filter();
+        col_ptr->initialize_hash_values_for_runtime_filter();
     }
 }
 
