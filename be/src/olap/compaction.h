@@ -67,7 +67,7 @@ protected:
     Status do_compaction_impl(int64_t permits);
 
     // update and persistent tablet meta
-    virtual Status update_tablet_meta();
+    virtual Status update_tablet_meta(const Merger::Statistics* stats = nullptr);
     virtual void garbage_collection();
 
     Status construct_input_rowset_readers();

@@ -590,7 +590,7 @@ void StorageEngine::_compaction_tasks_producer_callback() {
                 Status st = submit_compaction_task(tablet, compaction_type);
                 if (!st.ok()) {
                     LOG(WARNING) << "failed to submit compaction task for tablet: "
-                                 << tablet->tablet_id() << ", err: " << st.get_error_msg();
+                                 << tablet->tablet_id() << ", err: " << st;
                 }
             }
             interval = config::generate_compaction_tasks_min_interval_ms;
@@ -656,7 +656,7 @@ std::vector<TabletSharedPtr> StorageEngine::_generate_cloud_compaction_tasks(
             auto st = cloud::tablet_mgr()->get_topn_tablets_to_compact(
                     n, compaction_type, filter_out, &tablets, &max_compaction_score);
             if (!st.ok()) {
-                LOG(WARNING) << "failed to get tablets to compact, err=" << st.get_error_msg();
+                LOG(WARNING) << "failed to get tablets to compact, err=" << st;
                 break;
             }
             if (!need_pick_tablet) break;
@@ -852,7 +852,7 @@ Status StorageEngine::_submit_compaction_task(TabletSharedPtr tablet,
                     "tablet_id={}, compaction_type={}, "
                     "permit={}, current_permit={}, status={}",
                     tablet->tablet_id(), compaction_type, permits, _permit_limiter.usage(),
-                    st.get_error_msg());
+                    st.to_string());
         }
         return st;
     }
@@ -956,7 +956,7 @@ void StorageEngine::_cooldown_tasks_producer_callback() {
             });
 
             if (!st.ok()) {
-                LOG(INFO) << "failed to submit cooldown task, err msg: " << st.get_error_msg();
+                LOG(INFO) << "failed to submit cooldown task, err msg: " << st;
             }
         }
     } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));

@@ -600,7 +600,7 @@ TEST(LRUFileCache, normal1) {
         fs::remove_all(cache_base_path);
     }
     fs::create_directories(cache_base_path);
-    test_file_cache(io::CacheType::QUERY);
+    test_file_cache(io::CacheType::NORMAL);
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }

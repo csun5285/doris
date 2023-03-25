@@ -188,7 +188,7 @@ under the License.
         <commons-io.version>2.6</commons-io.version>
         <json-simple.version>1.1.1</json-simple.version>
         <junit.version>5.8.2</junit.version>
-        <hikaricp.version>3.4.5</hikaricp.version>
+        <druid.version>1.2.5</druid.version>
         <thrift.version>0.13.0</thrift.version>
         <log4j2.version>2.18.0</log4j2.version>
         <metrics-core.version>4.0.2</metrics-core.version>
@@ -227,7 +227,7 @@ under the License.
         <iceberg.version>1.1.0</iceberg.version>
         <avro.version>1.10.1</avro.version>
         <!-- hudi -->
-        <hudi.version>0.10.0</hudi.version>
+        <hudi.version>0.13.0</hudi.version>
         <parquet.version>1.10.1</parquet.version>
         <commons-collections.version>3.2.2</commons-collections.version>
         <scala.version>2.12.10</scala.version>
@@ -743,6 +743,10 @@ under the License.
                         <groupId>org.apache.hbase</groupId>
                         <artifactId>hbase-client</artifactId>
                     </exclusion>
+                    <exclusion>
+                        <groupId>log4j</groupId>
+                        <artifactId>log4j</artifactId>
+                    </exclusion>
                 </exclusions>
             </dependency>
             <dependency>
@@ -881,6 +885,12 @@ under the License.
                 <groupId>org.apache.hudi</groupId>
                 <artifactId>hudi-common</artifactId>
                 <version>${hudi.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>log4j</groupId>
+                        <artifactId>log4j</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
 
             <!-- https://mvnrepository.com/artifact/org.apache.hudi/hudi-hadoop-mr -->
@@ -986,9 +996,9 @@ under the License.
                 <version>${dlf-metastore-client-hive.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.zaxxer</groupId>
-                <artifactId>HikariCP</artifactId>
-                <version>${hikaricp.version}</version>
+                <groupId>com.alibaba</groupId>
+                <artifactId>druid</artifactId>
+                <version>${druid.version}</version>
             </dependency>
             <!-- https://mvnrepository.com/artifact/joda-time/joda-time -->
             <dependency>

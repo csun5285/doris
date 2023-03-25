@@ -135,6 +135,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 public class Coordinator {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
@@ -849,7 +850,10 @@ public class Coordinator {
     private void updateErrorTabletInfos(List<TErrorTabletInfo> errorTabletInfos) {
         lock.lock();
         try {
-            this.errorTabletInfos.addAll(errorTabletInfos);
+            if (this.errorTabletInfos.size() <= Config.max_error_tablet_of_broker_load) {
+                this.errorTabletInfos.addAll(errorTabletInfos.stream().limit(Config.max_error_tablet_of_broker_load
+                        - this.errorTabletInfos.size()).collect(Collectors.toList()));
+            }
         } finally {
             lock.unlock();
         }

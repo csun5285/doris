@@ -85,6 +85,8 @@ public:
     Status execute();
 
     Status cancel(const PPlanFragmentCancelReason& reason, const std::string& msg = "");
+    bool is_canceled() { return _cancelled; }
+
     TUniqueId fragment_instance_id() const { return _fragment_instance_id; }
 
     TUniqueId query_id() const { return _query_id; }
@@ -135,6 +137,14 @@ public:
 private:
     void coordinator_callback(const Status& status, RuntimeProfile* profile, bool done);
 
+    // This context is shared by all fragments of this host in a query
+    //
+    // NOTE: _fragments_ctx should be declared at the beginning of members so that
+    // it's destructed last.
+    // Because Objects create in _fragments_ctx.obj_pool maybe used during
+    // destruction, if _fragments_ctx is destructed too early, it will coredump.
+    std::shared_ptr<QueryFragmentsCtx> _fragments_ctx;
+
     // Id of this query
     TUniqueId _query_id;
     // Id of this instance
@@ -157,9 +167,6 @@ private:
     int _timeout_second;
     std::atomic<bool> _cancelled {false};
 
-    // This context is shared by all fragments of this host in a query
-    std::shared_ptr<QueryFragmentsCtx> _fragments_ctx;
-
     std::shared_ptr<RuntimeFilterMergeControllerEntity> _merge_controller_handler;
     // The pipe for data transfering, such as insert.
     std::shared_ptr<StreamLoadPipe> _pipe;
@@ -172,7 +179,8 @@ FragmentExecState::FragmentExecState(const TUniqueId& query_id,
                                      const TUniqueId& fragment_instance_id, int backend_num,
                                      ExecEnv* exec_env,
                                      std::shared_ptr<QueryFragmentsCtx> fragments_ctx)
-        : _query_id(query_id),
+        : _fragments_ctx(std::move(fragments_ctx)),
+          _query_id(query_id),
           _fragment_instance_id(fragment_instance_id),
           _backend_num(backend_num),
           _exec_env(exec_env),
@@ -180,8 +188,7 @@ FragmentExecState::FragmentExecState(const TUniqueId& query_id,
                                               this, std::placeholders::_1, std::placeholders::_2,
                                               std::placeholders::_3)),
           _set_rsc_info(false),
-          _timeout_second(-1),
-          _fragments_ctx(std::move(fragments_ctx)) {
+          _timeout_second(-1) {
     _start_time = DateTimeValue::local_time();
     _coord_addr = _fragments_ctx->coord_addr;
 }
@@ -717,9 +724,9 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params, Fi
         exec_state->cancel(PPlanFragmentCancelReason::INTERNAL_ERROR,
                            "push plan fragment to thread pool failed");
         return Status::InternalError(
-                strings::Substitute("push plan fragment $0 to thread pool failed. err = $1, BE: $2",
-                                    print_id(params.params.fragment_instance_id),
-                                    st.get_error_msg(), BackendOptions::get_localhost()));
+                "push plan fragment {} to thread pool failed. err = {}, BE: {}",
+                print_id(params.params.fragment_instance_id), st.to_string(),
+                BackendOptions::get_localhost());
     }
 
     return Status::OK();
@@ -808,6 +815,20 @@ void FragmentMgr::cancel_query(const TUniqueId& query_id, const PPlanFragmentCan
     for (auto it : cancel_fragment_ids) {
         cancel(it, reason, msg);
     }
+}
+
+bool FragmentMgr::query_is_canceled(const TUniqueId& query_id) {
+    std::lock_guard<std::mutex> lock(_lock);
+    auto ctx = _fragments_ctx_map.find(query_id);
+    if (ctx != _fragments_ctx_map.end()) {
+        for (auto it : ctx->second->fragment_ids) {
+            auto exec_state_iter = _fragment_map.find(it);
+            if (exec_state_iter != _fragment_map.end() && exec_state_iter->second) {
+                return exec_state_iter->second->is_canceled();
+            }
+        }
+    }
+    return true;
 }
 
 void FragmentMgr::cancel_worker() {

@@ -32,8 +32,8 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -83,7 +83,7 @@ public class ProfileManager {
         LOAD,
     }
 
-    public static final ArrayList<String> PROFILE_HEADERS = new ArrayList(
+    public static final List<String> PROFILE_HEADERS = Collections.unmodifiableList(
             Arrays.asList(JOB_ID, QUERY_ID, USER, DEFAULT_DB, SQL_STATEMENT, QUERY_TYPE,
                     START_TIME, END_TIME, TOTAL_TIME, QUERY_STATE, TRACE_ID));
 
@@ -163,8 +163,8 @@ public class ProfileManager {
         }
 
         ProfileElement element = createElement(profile);
-        String key = isQueryProfile(profile) ? element.infoStrings.get(ProfileManager.QUERY_ID)
-                : element.infoStrings.get(ProfileManager.JOB_ID);
+        // 'insert into' does have job_id, put all profiles key with query_id
+        String key = element.infoStrings.get(ProfileManager.QUERY_ID);
         // check when push in, which can ensure every element in the list has QUERY_ID column,
         // so there is no need to check when remove element from list.
         if (Strings.isNullOrEmpty(key)) {
@@ -348,9 +348,5 @@ public class ProfileManager {
         } finally {
             readLock.unlock();
         }
-    }
-
-    public boolean isQueryProfile(RuntimeProfile profile) {
-        return "Query".equals(profile.getName());
     }
 }

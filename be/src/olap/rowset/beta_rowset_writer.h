@@ -101,6 +101,8 @@ public:
 
     const std::vector<io::FileWriterPtr>& get_file_writers() const { return _file_writers; }
 
+    uint64_t get_num_mow_keys() { return _num_mow_keys; }
+
 private:
     template <typename RowType>
     Status _add_row(const RowType& row);
@@ -185,9 +187,13 @@ protected:
         int64_t data_size;
         int64_t index_size;
         KeyBoundsPB key_bounds;
+        std::shared_ptr<std::unordered_set<std::string>> key_set;
     };
-    std::map<uint32_t, Statistics> _segid_statistics_map;
     std::mutex _segid_statistics_map_mutex;
+    std::map<uint32_t, Statistics> _segid_statistics_map;
+
+    // used for check correctness of unique key mow keys.
+    std::atomic<uint64_t> _num_mow_keys;
 
     bool _is_pending = false;
     bool _already_built = false;
@@ -200,7 +206,7 @@ protected:
     std::mutex _is_doing_segcompaction_lock;
     std::condition_variable _segcompacting_cond;
 
-    std::atomic<ErrorCode> _segcompaction_status;
+    std::atomic<int> _segcompaction_status;
 
     fmt::memory_buffer vlog_buffer;
 

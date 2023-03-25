@@ -206,7 +206,8 @@ public class StreamLoadPlanner {
                 fileStatus.setSize(-1); // must set to -1, means stream.
             }
             fileScanNode.setLoadInfo(loadId, taskInfo.getTxnId(), destTable, BrokerDesc.createForStreamLoad(),
-                    fileGroup, fileStatus, taskInfo.isStrictMode(), taskInfo.getFileType());
+                    fileGroup, fileStatus, taskInfo.isStrictMode(), taskInfo.getFileType(),
+                    taskInfo.getHiddenColumns());
             scanNode = fileScanNode;
         } else {
             scanNode = new StreamLoadScanNode(loadId, new PlanNodeId(0), scanTupleDesc, destTable, taskInfo);
@@ -230,7 +231,7 @@ public class StreamLoadPlanner {
         List<Long> partitionIds = getAllPartitionIds();
         OlapTableSink olapTableSink = new OlapTableSink(destTable, tupleDesc, partitionIds,
                 Config.enable_single_replica_load);
-        olapTableSink.init(loadId, taskInfo.getTxnId(), db.getId(), taskInfo.getTimeout(),
+        olapTableSink.init(loadId, taskInfo.getTxnId(), db.getId(), timeout,
                 taskInfo.getSendBatchParallelism(), taskInfo.isLoadToSingleTablet(), timeout);
         olapTableSink.complete();
 

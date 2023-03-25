@@ -47,6 +47,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 
 public class LoadLoadingTask extends LoadTask {
@@ -211,7 +212,9 @@ public class LoadLoadingTask extends LoadTask {
                         curCoordinator.getLoadCounters(),
                         curCoordinator.getTrackingUrl(),
                         TabletCommitInfo.fromThrift(curCoordinator.getCommitInfos()),
-                        ErrorTabletInfo.fromThrift(curCoordinator.getErrorTabletInfos()));
+                        ErrorTabletInfo.fromThrift(curCoordinator.getErrorTabletInfos()
+                                .stream().limit(Config.max_error_tablet_of_broker_load).collect(Collectors.toList())));
+                curCoordinator.getErrorTabletInfos().clear();
                 // Create profile of this task and add to the job profile.
                 createProfile(curCoordinator);
             } else {

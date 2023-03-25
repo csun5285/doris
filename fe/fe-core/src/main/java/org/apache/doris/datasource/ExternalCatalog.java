@@ -26,11 +26,13 @@ import org.apache.doris.catalog.external.HMSExternalDatabase;
 import org.apache.doris.catalog.external.IcebergExternalDatabase;
 import org.apache.doris.catalog.external.JdbcExternalDatabase;
 import org.apache.doris.cluster.ClusterNamespace;
+import org.apache.doris.common.DdlException;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.Util;
 import org.apache.doris.persist.gson.GsonPostProcessable;
 import org.apache.doris.persist.gson.GsonUtils;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.MasterCatalogExecutor;
 
 import com.google.common.collect.Lists;
@@ -122,7 +124,9 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
         if (!initialized) {
             if (!Env.getCurrentEnv().isMaster()) {
                 // Forward to master and wait the journal to replay.
-                MasterCatalogExecutor remoteExecutor = new MasterCatalogExecutor();
+                int waitTimeOut = ConnectContext.get() == null ? 300
+                        : ConnectContext.get().getSessionVariable().getQueryTimeoutS();
+                MasterCatalogExecutor remoteExecutor = new MasterCatalogExecutor(waitTimeOut * 1000);
                 try {
                     remoteExecutor.forward(id, -1);
                 } catch (Exception e) {
@@ -146,6 +150,10 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
     // init some local objects such as:
     // hms client, read properties from hive-site.xml, es client
     protected abstract void initLocalObjectsImpl();
+
+    // check if all required properties are set when creating catalog
+    public void checkProperties() throws DdlException {
+    }
 
     // init schema related objects
     protected abstract void init();
@@ -199,6 +207,20 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
     @Override
     public List<String> getDbNames() {
         return listDatabaseNames(null);
+    }
+
+    @Override
+    public List<String> getDbNamesOrEmpty() {
+        if (initialized) {
+            try {
+                return getDbNames();
+            } catch (Exception e) {
+                LOG.warn("failed to get db names in catalog {}", getName(), e);
+                return Lists.newArrayList();
+            }
+        } else {
+            return Lists.newArrayList();
+        }
     }
 
     @Override
@@ -354,3 +376,4 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
         throw new NotImplementedException();
     }
 }
+

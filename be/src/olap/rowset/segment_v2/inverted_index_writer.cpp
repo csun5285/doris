@@ -58,9 +58,7 @@ public:
             return Status::InternalError("field type not supported");
         } catch (const CLuceneError& e) {
             LOG(WARNING) << "Inverted index writer init error occurred: " << e.what();
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                    fmt::format("Inverted index writer init error occurred, error msg: {}", e.what()));
+            return Status::InternalError("Inverted index writer init error occurred, error msg: {}", e.what());
         }
     }
 
@@ -385,9 +383,7 @@ public:
             FINALLY_FINALIZE_OUTPUT(index_out)
             FINALLY_FINALIZE_OUTPUT(dir)
             LOG(WARNING) << "Inverted index writer finish error occurred: " << e.what();
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                    fmt::format("Inverted index writer finish error occurred, error msg: {}", e.what()));
+            return Status::InternalError("Inverted index writer finish error occurred, error msg: {}", e.what());
         }
 
         return Status::OK();

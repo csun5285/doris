@@ -36,6 +36,7 @@
 #include "util/doris_metrics.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 std::string BetaRowset::segment_file_path(int segment_id) {
 #ifdef BE_TEST
@@ -112,7 +113,7 @@ Status BetaRowset::do_load(bool /*use_cache*/) {
 Status BetaRowset::get_segments_size(std::vector<size_t>* segments_size) {
     auto fs = _rowset_meta->fs();
     if (!fs || _schema == nullptr) {
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     for (int seg_id = 0; seg_id < num_segments(); ++seg_id) {
         auto seg_path = segment_file_path(seg_id);
@@ -125,7 +126,7 @@ Status BetaRowset::get_segments_size(std::vector<size_t>* segments_size) {
 Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments) {
     auto fs = _rowset_meta->fs();
     if (!fs || _schema == nullptr) {
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     auto count = [table_id = _rowset_meta->table_id(),
                   partition_id = _rowset_meta->partition_id()](OlapReaderStatistics* stats) {
@@ -136,10 +137,10 @@ Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segm
         std::shared_ptr<segment_v2::Segment> segment;
         auto s = segment_v2::Segment::open(fs, seg_path, seg_id, rowset_meta(), _schema, &segment,
                                            count);
-        if (UNLIKELY(s.precise_code() == EMPTY_SEGMENT)) continue;
+        if (s.is<EMPTY_SEGMENT>()) [[unlikely]] continue;
         if (!s.ok()) {
             LOG(WARNING) << "failed to open segment " << seg_path << " : " << s.to_string();
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_LOAD_FAILED);
+            return Status::Error<ROWSET_LOAD_FAILED>();
         }
         segments->push_back(std::move(segment));
     }
@@ -154,7 +155,7 @@ Status BetaRowset::load_segments(int64_t seg_id_begin, int64_t seg_id_end,
         DCHECK(seg_id >= 0);
         auto fs = _rowset_meta->fs();
         if (!fs || _schema == nullptr) {
-            return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+            return Status::Error<INIT_FAILED>();
         }
         auto seg_path = segment_file_path(seg_id);
         std::shared_ptr<segment_v2::Segment> segment;
@@ -162,7 +163,7 @@ Status BetaRowset::load_segments(int64_t seg_id_begin, int64_t seg_id_end,
         if (!s.ok()) {
             LOG(WARNING) << "failed to open segment. " << seg_path << " under rowset "
                          << unique_id() << " : " << s.to_string();
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_LOAD_FAILED);
+            return Status::Error<ROWSET_LOAD_FAILED>();
         }
         segments->push_back(std::move(segment));
         seg_id++;
@@ -191,7 +192,7 @@ Status BetaRowset::remove() {
                 << ", tabletid:" << _rowset_meta->tablet_id();
     auto fs = _rowset_meta->fs();
     if (!fs) {
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     bool success = true;
     Status st;
@@ -221,7 +222,7 @@ Status BetaRowset::remove() {
     }
     if (!success) {
         LOG(WARNING) << "failed to remove files in rowset " << unique_id();
-        return Status::OLAPInternalError(OLAP_ERR_ROWSET_DELETE_FILE_FAILED);
+        return Status::Error<ROWSET_DELETE_FILE_FAILED>();
     }
     return Status::OK();
 }
@@ -235,7 +236,7 @@ Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
     DCHECK(is_local());
     auto fs = _rowset_meta->fs();
     if (!fs) {
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     for (int i = 0; i < num_segments(); ++i) {
         auto dst_path = segment_file_path(dir, new_rowset_id, i + new_rowset_start_seg_id);
@@ -243,7 +244,7 @@ Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
         bool dst_path_exist = false;
         if (!fs->exists(dst_path, &dst_path_exist).ok() || dst_path_exist) {
             LOG(WARNING) << "failed to create hard link, file already exist: " << dst_path;
-            return Status::OLAPInternalError(OLAP_ERR_FILE_ALREADY_EXIST);
+            return Status::Error<FILE_ALREADY_EXIST>();
         }
         auto src_path = segment_file_path(i);
         // TODO(lingbin): how external storage support link?
@@ -251,7 +252,7 @@ Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
         if (!fs->link_file(src_path, dst_path).ok()) {
             LOG(WARNING) << "fail to create hard link. from=" << src_path << ", "
                          << "to=" << dst_path << ", errno=" << Errno::no();
-            return Status::OLAPInternalError(OLAP_ERR_OS_ERROR);
+            return Status::Error<OS_ERROR>();
         }
         for (auto& column : _schema->columns()) {
             // if (column.has_inverted_index()) {
@@ -270,7 +271,7 @@ Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
                                  << inverted_index_src_file_path << ", "
                                  << "to=" << inverted_index_dst_file_path
                                  << ", errno=" << Errno::no();
-                    return Status::OLAPInternalError(OLAP_ERR_OS_ERROR);
+                    return Status::Error<OS_ERROR>();
                 }
                 LOG(INFO) << "success to create hard link. from=" << inverted_index_src_file_path
                           << ", "
@@ -288,17 +289,17 @@ Status BetaRowset::copy_files_to(const std::string& dir, const RowsetId& new_row
         Status status = Env::Default()->path_exists(dst_path);
         if (status.ok()) {
             LOG(WARNING) << "file already exist: " << dst_path;
-            return Status::OLAPInternalError(OLAP_ERR_FILE_ALREADY_EXIST);
+            return Status::Error<FILE_ALREADY_EXIST>();
         }
-        if (!status.is_not_found()) {
+        if (!status.is<NOT_FOUND>()) {
             LOG(WARNING) << "file check exist error: " << dst_path;
-            return Status::OLAPInternalError(OLAP_ERR_OS_ERROR);
+            return Status::Error<OS_ERROR>();
         }
         auto src_path = segment_file_path(i);
         if (!Env::Default()->copy_path(src_path, dst_path).ok()) {
             LOG(WARNING) << "fail to copy file. from=" << src_path << ", to=" << dst_path
                          << ", errno=" << Errno::no();
-            return Status::OLAPInternalError(OLAP_ERR_OS_ERROR);
+            return Status::Error<OS_ERROR>();
         }
         for (auto& column : _schema->columns()) {
             // if (column.has_inverted_index()) {
@@ -316,7 +317,7 @@ Status BetaRowset::copy_files_to(const std::string& dir, const RowsetId& new_row
                     LOG(WARNING) << "fail to copy file. from=" << inverted_index_src_file_path
                                  << ", to=" << inverted_index_dst_file_path
                                  << ", errno=" << Errno::no();
-                    return Status::OLAPInternalError(OLAP_ERR_OS_ERROR);
+                    return Status::Error<OS_ERROR>();
                 }
                 LOG(INFO) << "success to copy file. from=" << inverted_index_src_file_path << ", "
                           << "to=" << inverted_index_dst_file_path;

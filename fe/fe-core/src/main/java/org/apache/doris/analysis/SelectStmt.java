@@ -756,12 +756,15 @@ public class SelectStmt extends QueryStmt {
                     lateralViewRef.materializeRequiredSlots(baseTblSmap, analyzer);
                 }
             }
-            boolean hasConstant = resultExprs.stream().anyMatch(Expr::isConstant);
+            boolean hasConstant = resultExprs.stream().anyMatch(e -> e.isConstant() || e.refToCountStar());
             // In such case, agg output must be materialized whether outer query block required or not.
-            if (tableRef instanceof InlineViewRef && hasConstant) {
+            if (tableRef instanceof InlineViewRef) {
                 InlineViewRef inlineViewRef = (InlineViewRef) tableRef;
                 QueryStmt queryStmt = inlineViewRef.getQueryStmt();
-                queryStmt.resultExprs.forEach(Expr::materializeSrcExpr);
+                boolean inlineViewHasConstant = queryStmt.resultExprs.stream().anyMatch(Expr::isConstant);
+                if (hasConstant || inlineViewHasConstant) {
+                    queryStmt.resultExprs.forEach(Expr::materializeSrcExpr);
+                }
             }
         }
     }
@@ -1135,9 +1138,9 @@ public class SelectStmt extends QueryStmt {
         // i) There is no GROUP-BY clause, and
         // ii) Other DISTINCT aggregates are present.
         ExprSubstitutionMap countAllMap = createCountAllMap(aggExprs, analyzer);
-        final ExprSubstitutionMap multiCountOrSumDistinctMap =
-                createSumOrCountMultiDistinctSMap(aggExprs, analyzer);
-        countAllMap = ExprSubstitutionMap.compose(multiCountOrSumDistinctMap, countAllMap, analyzer);
+        final ExprSubstitutionMap multiDistinctAggMap =
+                createMultiDistinctAggSMap(aggExprs, analyzer);
+        countAllMap = ExprSubstitutionMap.compose(multiDistinctAggMap, countAllMap, analyzer);
         List<Expr> substitutedAggs =
                 Expr.substituteList(aggExprs, countAllMap, analyzer, false);
         // the resultExprs must substitute in the same way as aggExprs
@@ -1161,11 +1164,65 @@ public class SelectStmt extends QueryStmt {
             substituteOrdinalsAliases(groupingExprs, "GROUP BY", analyzer, aliasFirst);
 
             if (!groupByClause.isGroupByExtension() && !groupingExprs.isEmpty()) {
-                ArrayList<Expr> tempExprs = new ArrayList<>(groupingExprs);
-                groupingExprs.removeIf(Expr::isConstant);
-                if (groupingExprs.isEmpty() && aggExprs.isEmpty()) {
-                    // should keep at least one expr to make the result correct
-                    groupingExprs.add(tempExprs.get(0));
+                /*
+                For performance reason, we want to remove constant column from groupingExprs.
+                For example:
+                `select sum(T.A) from T group by T.B, 'xyz'` is equivalent to `select sum(T.A) from T group by T.B`
+                We can remove constant column `abc` from groupingExprs.
+
+                But there is an exception when all groupingExpr are constant
+                For example:
+                sql1: `select 'abc' from t group by 'abc'`
+                 is not equivalent to
+                sql2: `select 'abc' from t`
+
+                sql3: `select 'abc', sum(a) from t group by 'abc'`
+                 is not equivalent to
+                sql4: `select 1, sum(a) from t`
+                (when t is empty, sql3 returns 0 tuple, sql4 return 1 tuple)
+
+                We need to keep some constant columns if all groupingExpr are constant.
+                Consider sql5 `select a from (select "abc" as a, 'def' as b) T group by b, a;`
+                if the constant column is in select list, this column should not be removed.
+                 */
+
+                Expr theFirstConstantGroupingExpr = null;
+                boolean someGroupExprRemoved = false;
+                ArrayList<Expr> tempExprs = new ArrayList<>();
+                for (Expr groupExpr : groupingExprs) {
+                    //remove groupExpr if it is const, and it is not in select list
+                    boolean removeConstGroupingKey = false;
+                    if (groupExpr.isConstant()) {
+                        if (theFirstConstantGroupingExpr == null) {
+                            theFirstConstantGroupingExpr = groupExpr;
+                        }
+                        boolean keyInSelectList = false;
+                        if (groupExpr instanceof SlotRef) {
+                            for (SelectListItem item : selectList.getItems()) {
+                                if (item.getExpr() instanceof SlotRef) {
+                                    keyInSelectList = ((SlotRef) item.getExpr()).columnEqual(groupExpr);
+                                    if (keyInSelectList) {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        removeConstGroupingKey = ! keyInSelectList;
+                    }
+                    if (removeConstGroupingKey) {
+                        someGroupExprRemoved = true;
+                    } else {
+                        tempExprs.add(groupExpr);
+                    }
+                }
+                if (someGroupExprRemoved) {
+                    groupingExprs.clear();
+                    groupingExprs.addAll(tempExprs);
+                    //groupingExprs need at least one expr, it can be
+                    //any original grouping expr. we use the first one.
+                    if (groupingExprs.isEmpty()) {
+                        groupingExprs.add(theFirstConstantGroupingExpr);
+                    }
                 }
             }
 
@@ -1279,7 +1336,7 @@ public class SelectStmt extends QueryStmt {
      * Build smap count_distinct->multi_count_distinct sum_distinct->multi_count_distinct
      * assumes that select list and having clause have been analyzed.
      */
-    private ExprSubstitutionMap createSumOrCountMultiDistinctSMap(
+    private ExprSubstitutionMap createMultiDistinctAggSMap(
             ArrayList<FunctionCallExpr> aggExprs, Analyzer analyzer) throws AnalysisException {
         final List<FunctionCallExpr> distinctExprs = Lists.newArrayList();
         for (FunctionCallExpr aggExpr : aggExprs) {
@@ -1311,6 +1368,11 @@ public class SelectStmt extends QueryStmt {
                 final FunctionCallExpr countExpr = new FunctionCallExpr("MULTI_DISTINCT_COUNT",
                         new FunctionParams(inputExpr.isDistinct(), countInputExpr));
                 replaceExpr = new ArithmeticExpr(ArithmeticExpr.Operator.DIVIDE, sumExpr, countExpr);
+            } else if (functionName.equalsIgnoreCase("GROUP_CONCAT")) {
+                final List<Expr> groupConcatInputExprs = inputExpr.getChildren();
+                replaceExpr = new FunctionCallExpr(new FunctionName("MULTI_DISTINCT_GROUP_CONCAT"),
+                        new FunctionParams(inputExpr.isDistinct(), groupConcatInputExprs),
+                        inputExpr.getOrderByElements());
             } else {
                 throw new AnalysisException(inputExpr.getFnName() + " can't support multi distinct.");
             }
@@ -1892,7 +1954,7 @@ public class SelectStmt extends QueryStmt {
             strBuilder.append("DISTINCT ");
         }
         ConnectContext ctx = ConnectContext.get();
-        if (ctx == null || ctx.getSessionVariable().internalSession || toSQLWithSelectList) {
+        if (ctx == null || ctx.getSessionVariable().internalSession || toSQLWithSelectList || resultExprs.isEmpty()) {
             for (int i = 0; i < selectList.getItems().size(); i++) {
                 strBuilder.append(selectList.getItems().get(i).toSql());
                 strBuilder.append((i + 1 != selectList.getItems().size()) ? ", " : "");

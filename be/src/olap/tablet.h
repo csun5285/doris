@@ -61,6 +61,8 @@ class CumulativeCompactionPolicy;
 class CumulativeCompaction;
 class BaseCompaction;
 class RowsetWriter;
+
+struct TabletTxnInfo;
 struct RowsetWriterContext;
 
 using TabletSharedPtr = std::shared_ptr<Tablet>;
@@ -401,8 +403,17 @@ public:
                               bool check_pre_segments = false);
 
     Status update_delete_bitmap_without_lock(const RowsetSharedPtr& rowset);
-    Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
-                                const RowsetIdUnorderedSet& pre_rowset_ids);
+    Status update_delete_bitmap(const RowsetSharedPtr& rowset, const TabletTxnInfo* load_info);
+    uint64_t calc_compaction_output_rowset_delete_bitmap(
+            const std::vector<RowsetSharedPtr>& input_rowsets,
+            const RowIdConversion& rowid_conversion, uint64_t start_version, uint64_t end_version,
+            std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>* location_map,
+            DeleteBitmap* output_rowset_delete_bitmap);
+    void merge_delete_bitmap(const DeleteBitmap& delete_bitmap);
+    Status check_rowid_conversion(
+            RowsetSharedPtr dst_rowset,
+            const std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>&
+                    location_map);
     RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
 
     void remove_self_owned_remote_rowsets();
@@ -453,8 +464,8 @@ private:
 
     Status _check_pk_in_pre_segments(RowsetId rowset_id,
                                      const std::vector<segment_v2::SegmentSharedPtr>& pre_segments,
-                                     const Slice& key, const Version& version,
-                                     DeleteBitmapPtr delete_bitmap, RowLocation* loc);
+                                     const Slice& key, DeleteBitmapPtr delete_bitmap,
+                                     RowLocation* loc);
     void _rowset_ids_difference(const RowsetIdUnorderedSet& cur, const RowsetIdUnorderedSet& pre,
                                 RowsetIdUnorderedSet* to_add, RowsetIdUnorderedSet* to_del);
     Status _load_rowset_segments(const RowsetSharedPtr& rowset,

@@ -57,6 +57,7 @@ import org.apache.commons.collections.CollectionUtils;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -624,6 +625,16 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         if (!analyzer.safeIsEnableJoinReorderBasedCost()) {
             computeOldCardinality();
         }
+        for (Expr expr : conjuncts) {
+            Set<SlotRef> slotRefs = new HashSet<>();
+            expr.getSlotRefsBoundByTupleIds(tupleIds, slotRefs);
+            for (SlotRef slotRef : slotRefs) {
+                slotRef.getDesc().setIsMaterialized(true);
+            }
+            for (TupleId tupleId : tupleIds) {
+                analyzer.getTupleDesc(tupleId).computeMemLayout();
+            }
+        }
     }
 
     protected void computeNumNodes() {
@@ -679,7 +690,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         return outputSmap;
     }
 
-    public void setOutputSmap(ExprSubstitutionMap smap) {
+    public void setOutputSmap(ExprSubstitutionMap smap, Analyzer analyzer) {
         outputSmap = smap;
     }
 
@@ -952,6 +963,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     }
 
     public SlotRef findSrcSlotRef(SlotRef slotRef) {
+        if (slotRef.getSrcSlotRef() != null) {
+            slotRef = slotRef.getSrcSlotRef();
+        }
         if (slotRef.getTable() instanceof OlapTable) {
             return slotRef;
         }
@@ -1120,5 +1134,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
 
     public List<SlotId> getOutputSlotIds() {
         return outputSlotIds;
+    }
+
+    public void setVConjunct(Set<Expr> exprs) {
+        vconjunct = convertConjunctsToAndCompoundPredicate(new ArrayList<>(exprs));
     }
 }

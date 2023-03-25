@@ -563,7 +563,9 @@ Status HashJoinNode::get_next(RuntimeState* state, Block* output_block, bool* eo
     } else {
         return Status::OK();
     }
-
+    if (!st) {
+        return st;
+    }
     if (_is_outer_join) {
         _add_tuple_is_null_column(&temp_block);
     }
@@ -786,7 +788,7 @@ Status HashJoinNode::_materialize_build_side(RuntimeState* state) {
     }
     // Since the comparison of null values is meaningless, null aware left anti join should not output null
     // when the build side is not empty.
-    if (eos && !_build_blocks->empty() && _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
+    if (!_build_blocks->empty() && _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
         _probe_ignore_null = true;
     }
     return Status::OK();

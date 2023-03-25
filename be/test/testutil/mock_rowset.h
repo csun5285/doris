@@ -66,6 +66,8 @@ class MockRowset : public Rowset {
         return Rowset::get_segments_key_bounds(segments_key_bounds);
     }
 
+    std::string segment_file_path(int segment_id) { return ""; }
+
     static Status create_rowset(TabletSchemaSPtr schema, const std::string& rowset_path,
                                 RowsetMetaSharedPtr rowset_meta, RowsetSharedPtr* rowset,
                                 bool is_mem_rowset = false) {

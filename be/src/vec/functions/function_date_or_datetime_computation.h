@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "common/logging.h"
 #include "fmt/format.h"
 #include "runtime/datetime_value.h"
@@ -120,6 +122,7 @@ extern ResultType date_time_add(const Arg& t, Int64 delta, bool& is_null) {
         }                                                                                          \
     }
 
+ADD_TIME_FUNCTION_IMPL(AddMicrosecondsImpl, microseconds_add, MICROSECOND);
 ADD_TIME_FUNCTION_IMPL(AddSecondsImpl, seconds_add, SECOND);
 ADD_TIME_FUNCTION_IMPL(AddMinutesImpl, minutes_add, MINUTE);
 ADD_TIME_FUNCTION_IMPL(AddHoursImpl, hours_add, HOUR);
@@ -237,7 +240,8 @@ struct SubtractYearsImpl : SubtractIntervalImpl<AddYearsImpl<DateType>, DateType
         using ReturnType = RETURN_TYPE;                                                            \
         static constexpr auto name = #FN_NAME;                                                     \
         static constexpr auto is_nullable = false;                                                 \
-        static inline Int32 execute(const ArgType1& t0, const ArgType2& t1, bool& is_null) {       \
+        static inline ReturnType::FieldType execute(const ArgType1& t0, const ArgType2& t1,        \
+                                                    bool& is_null) {                               \
             const auto& ts0 = reinterpret_cast<const DateValueType1&>(t0);                         \
             const auto& ts1 = reinterpret_cast<const DateValueType2&>(t1);                         \
             is_null = !ts0.is_valid_date() || !ts1.is_valid_date();                                \
@@ -274,7 +278,8 @@ TIME_DIFF_FUNCTION_IMPL(SecondsDiffImpl, seconds_diff, SECOND);
         using ReturnType = DataTypeInt32;                                                         \
         static constexpr auto name = #NAME;                                                       \
         static constexpr auto is_nullable = false;                                                \
-        static inline int64_t execute(const ArgType& t0, const Int32 mode, bool& is_null) {       \
+        static inline ReturnType::FieldType execute(const ArgType& t0, const Int32 mode,          \
+                                                    bool& is_null) {                              \
             const auto& ts0 = reinterpret_cast<const DateValueType&>(t0);                         \
             is_null = !ts0.is_valid_date();                                                       \
             return ts0.FUNCTION;                                                                  \
@@ -452,8 +457,8 @@ struct DateTimeAddIntervalImpl {
         const auto is_nullable = block.get_by_position(result).type->is_nullable();
         if (const auto* sources = check_and_get_column<ColumnVector<FromType1>>(source_col.get())) {
             auto col_to = ColumnVector<ToType>::create();
-            const IColumn& delta_column =
-                    *remove_nullable(block.get_by_position(arguments[1]).column);
+            auto delta_column_ptr = remove_nullable(block.get_by_position(arguments[1]).column);
+            const IColumn& delta_column = *delta_column_ptr;
 
             if (is_nullable) {
                 auto null_map = ColumnUInt8::create(input_rows_count, 0);
@@ -545,16 +550,17 @@ struct DateTimeAddIntervalImpl {
             auto col_to = ColumnVector<ToType>::create();
             if (is_nullable) {
                 auto null_map = ColumnUInt8::create(input_rows_count, 0);
+                auto not_nullable_column_ptr_arg1 =
+                        remove_nullable(block.get_by_position(arguments[1]).column);
                 if (const auto* delta_vec_column = check_and_get_column<ColumnVector<FromType2>>(
-                            *remove_nullable(block.get_by_position(arguments[1]).column))) {
+                            *not_nullable_column_ptr_arg1)) {
                     Op::constant_vector(sources_const->template get_value<FromType1>(),
                                         col_to->get_data(), null_map->get_data(),
                                         delta_vec_column->get_data());
                 } else {
-                    Op::constant_vector(
-                            sources_const->template get_value<FromType2>(), col_to->get_data(),
-                            null_map->get_data(),
-                            *remove_nullable(block.get_by_position(arguments[1]).column));
+                    Op::constant_vector(sources_const->template get_value<FromType2>(),
+                                        col_to->get_data(), null_map->get_data(),
+                                        *not_nullable_column_ptr_arg1);
                 }
                 if (const auto* nullable_col = check_and_get_column<ColumnNullable>(
                             block.get_by_position(arguments[0]).column.get())) {

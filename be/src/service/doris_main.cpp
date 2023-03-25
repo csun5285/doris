@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
         // Init jni
         status = doris::JniUtil::Init();
         if (!status.ok()) {
-            LOG(WARNING) << "Failed to initialize JNI: " << status.get_error_msg();
+            LOG(WARNING) << "Failed to initialize JNI: " << status;
             exit(1);
         }
     }
@@ -410,7 +410,7 @@ int main(int argc, char** argv) {
             Status st = doris::io::FileCacheFactory::instance().create_file_cache(
                     cache_path.path, cache_path.init_settings());
             if (!st) {
-                LOG(FATAL) << st.get_error_msg();
+                LOG(FATAL) << st;
                 exit(-1);
             }
         }
@@ -443,7 +443,7 @@ int main(int argc, char** argv) {
     doris::StorageEngine* engine = nullptr;
     auto st = doris::StorageEngine::open(options, &engine);
     if (!st.ok()) {
-        LOG(FATAL) << "fail to open StorageEngine, res=" << st.get_error_msg();
+        LOG(FATAL) << "fail to open StorageEngine, res=" << st;
         exit(-1);
     }
     exec_env->set_storage_engine(engine);
@@ -452,7 +452,7 @@ int main(int argc, char** argv) {
 #ifdef CLOUD_MODE
     st = doris::io::TmpFileMgr::create_tmp_file_mgrs();
     if (!st) {
-        LOG(FATAL) << "fail to create tmp file mgrs, res=" << st.get_error_msg();
+        LOG(FATAL) << "fail to create tmp file mgrs, res=" << st;
         exit(-1);
     }
     // start all background threads of storage engine.
@@ -542,8 +542,7 @@ int main(int argc, char** argv) {
 
     status = heartbeat_thrift_server->start();
     if (!status.ok()) {
-        LOG(ERROR) << "Doris BE HeartBeat Service did not start correctly, exiting: "
-                   << status.get_error_msg();
+        LOG(ERROR) << "Doris BE HeartBeat Service did not start correctly, exiting: " << status;
         doris::shutdown_logging();
         exit(1);
     }

@@ -31,6 +31,7 @@
 #include "util/path_util.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 using std::string;
 using std::vector;
@@ -65,14 +66,14 @@ Status parse_root_path(const string& root_path, StorePath* path) {
     tmp_vec[0].erase(tmp_vec[0].find_last_not_of("/") + 1);
     if (tmp_vec[0].empty() || tmp_vec[0][0] != '/') {
         LOG(WARNING) << "invalid store path. path=" << tmp_vec[0];
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::Error<INVALID_ARGUMENT>();
     }
 
     string canonicalized_path;
     Status status = Env::Default()->canonicalize(tmp_vec[0], &canonicalized_path);
     if (!status.ok()) {
         LOG(WARNING) << "path can not be canonicalized. may be not exist. path=" << tmp_vec[0];
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::Error<INVALID_ARGUMENT>();
     }
     path->path = tmp_vec[0];
 
@@ -111,7 +112,7 @@ Status parse_root_path(const string& root_path, StorePath* path) {
             medium_str = to_upper(value);
         } else {
             LOG(WARNING) << "invalid property of store path, " << tmp_vec[i];
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::Error<INVALID_ARGUMENT>();
         }
     }
 
@@ -120,7 +121,7 @@ Status parse_root_path(const string& root_path, StorePath* path) {
         if (!valid_signed_number<int64_t>(capacity_str) ||
             strtol(capacity_str.c_str(), nullptr, 10) < 0) {
             LOG(WARNING) << "invalid capacity of store path, capacity=" << capacity_str;
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::Error<INVALID_ARGUMENT>();
         }
         path->capacity_bytes = strtol(capacity_str.c_str(), nullptr, 10) * GB_EXCHANGE_BYTE;
     }
@@ -135,7 +136,7 @@ Status parse_root_path(const string& root_path, StorePath* path) {
             path->storage_medium = TStorageMedium::REMOTE_CACHE;
         } else {
             LOG(WARNING) << "invalid storage medium. medium=" << medium_str;
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::Error<INVALID_ARGUMENT>();
         }
     }
 
@@ -155,7 +156,7 @@ Status parse_conf_store_paths(const string& config_path, std::vector<StorePath>*
     }
     if (paths->empty() || (path_vec.size() != paths->size() && !config::ignore_broken_disk)) {
         LOG(WARNING) << "fail to parse storage_root_path config. value=[" << config_path << "]";
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::Error<INVALID_ARGUMENT>();
     }
     return Status::OK();
 }
@@ -182,8 +183,7 @@ Status parse_conf_cache_paths(const std::string& config_path, std::vector<CacheP
             if (value.IsInt64()) {
                 total_size = value.GetInt64();
             } else {
-                LOG(WARNING) << "normal should be int64";
-                return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+                return Status::InvalidArgument("normal should be int64");
             }
         }
         if (config::enable_file_cache_query_limit) {
@@ -192,20 +192,17 @@ Status parse_conf_cache_paths(const std::string& config_path, std::vector<CacheP
                 if (value.IsInt64()) {
                     query_limit_bytes = value.GetInt64();
                 } else {
-                    LOG(WARNING) << "query_limit should be int64";
-                    return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+                    return Status::InvalidArgument("query_limit should be int64");
                 }
             }
         }
         if (total_size <= 0 || (config::enable_file_cache_query_limit && query_limit_bytes <= 0)) {
-            LOG(WARNING) << "total_size or query_limit should not less than or equal to zero";
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::InvalidArgument("total_size or query_limit should not less than or equal to zero");
         }
         paths.emplace_back(std::move(path), total_size, query_limit_bytes);
     }
     if (paths.empty()) {
-        LOG(WARNING) << "fail to parse storage_root_path config. value=[" << config_path << "]";
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::InvalidArgument("fail to parse storage_root_path config. value={}", config_path);
     }
     return Status::OK();
 }
@@ -220,7 +217,7 @@ Status parse_conf_rm_paths(const std::string& config_path, std::vector<std::stri
         if (config.IsString()) {
             path.push_back(config.GetString());
         } else {
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::Error<INVALID_ARGUMENT>();
         }
     }
     return Status::OK();
