@@ -236,6 +236,8 @@ public class SessionVariable implements Serializable, Writable {
 
     public static final String SKIP_DELETE_SIGN = "skip_delete_sign";
 
+    public static final String SKIP_DELETE_BITMAP = "skip_delete_bitmap";
+
     public static final String ENABLE_NEW_SHUFFLE_HASH_METHOD = "enable_new_shuffle_hash_method";
 
     public static final String ENABLE_PUSH_DOWN_NO_GROUP_AGG = "enable_push_down_no_group_agg";
@@ -258,6 +260,8 @@ public class SessionVariable implements Serializable, Writable {
     public static final String GROUP_BY_AND_HAVING_USE_ALIAS_FIRST = "group_by_and_having_use_alias_first";
 
     public static final String TOPN_OPT_LIMIT_THRESHOLD = "topn_opt_limit_threshold";
+    // fix replica to query. If num = 1, query the smallest replica, if 2 is the second smallest replica.
+    public static final String USE_FIX_REPLICA = "use_fix_replica";
 
     // session origin value
     public Map<Field, String> sessionOriginValue = new HashMap<Field, String>();
@@ -629,6 +633,12 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = SKIP_DELETE_SIGN)
     public boolean skipDeleteSign = false;
 
+    /**
+     * For debug purpose, skip delete bitmap when reading data.
+     */
+    @VariableMgr.VarAttr(name = SKIP_DELETE_BITMAP)
+    public boolean skipDeleteBitmap = false;
+
     // This variable is used to avoid FE fallback to the original parser. When we execute SQL in regression tests
     // for nereids, fallback will cause the Doris return the correct result although the syntax is unsupported
     // in nereids for some mistaken modification. You should set it on the
@@ -661,7 +671,7 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = PARTITIONED_HASH_JOIN_ROWS_THRESHOLD, fuzzy = true)
     public int partitionedHashJoinRowsThreshold = 0;
 
-    @VariableMgr.VarAttr(name = ENABLE_SHARE_HASH_TABLE_FOR_BROADCAST_JOIN)
+    @VariableMgr.VarAttr(name = ENABLE_SHARE_HASH_TABLE_FOR_BROADCAST_JOIN, fuzzy = true)
     public boolean enableShareHashTableForBroadcastJoin = true;
 
     @VariableMgr.VarAttr(name = GROUP_CONCAT_MAX_LEN)
@@ -674,6 +684,9 @@ public class SessionVariable implements Serializable, Writable {
 
     @VariableMgr.VarAttr(name = TOPN_OPT_LIMIT_THRESHOLD)
     public long topnOptLimitThreshold = 1024;
+    // Default value is -1, which means not fix replica
+    @VariableMgr.VarAttr(name = USE_FIX_REPLICA)
+    public int useFixReplica = -1;
 
     // If this fe is in fuzzy mode, then will use initFuzzyModeVariables to generate some variables,
     // not the default value set in the code.
@@ -1411,6 +1424,8 @@ public class SessionVariable implements Serializable, Writable {
         tResult.setSkipStorageEngineMerge(skipStorageEngineMerge);
 
         tResult.setSkipDeletePredicate(skipDeletePredicate);
+
+        tResult.setSkipDeleteBitmap(skipDeleteBitmap);
 
         tResult.setPartitionedHashJoinRowsThreshold(partitionedHashJoinRowsThreshold);
 

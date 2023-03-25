@@ -276,7 +276,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
@@ -671,8 +670,10 @@ public class Env {
         this.refreshManager = new RefreshManager();
         this.policyMgr = new PolicyMgr();
         this.mtmvJobManager = new MTMVJobManager();
-        this.analysisManager = new AnalysisManager();
         this.extMetaCacheMgr = new ExternalMetaCacheMgr();
+        if (!isCheckpointCatalog) {
+            this.analysisManager = new AnalysisManager();
+        }
     }
 
     public static void destroyCheckpoint() {
@@ -1436,6 +1437,7 @@ public class Env {
         this.masterHttpPort = Config.http_port;
         MasterInfo info = new MasterInfo(this.masterIp, this.masterHttpPort, this.masterRpcPort);
         editLog.logMasterInfo(info);
+        LOG.info("logMasterInfo:{}", info);
 
         // for master, the 'isReady' is set behind.
         // but we are sure that all metadata is replayed if we get here.
@@ -2217,7 +2219,7 @@ public class Env {
         int jobSize = dbToLoadJob.size();
         checksum ^= jobSize;
         dos.writeInt(jobSize);
-        for (Entry<Long, List<LoadJob>> entry : dbToLoadJob.entrySet()) {
+        for (Map.Entry<Long, List<LoadJob>> entry : dbToLoadJob.entrySet()) {
             long dbId = entry.getKey();
             checksum ^= dbId;
             dos.writeLong(dbId);
@@ -3272,7 +3274,8 @@ public class Env {
             sb.append("\"max_docvalue_fields\" = \"").append(esTable.getMaxDocValueFields()).append("\",\n");
             sb.append("\"enable_keyword_sniff\" = \"").append(esTable.isEnableKeywordSniff()).append("\",\n");
             sb.append("\"nodes_discovery\" = \"").append(esTable.isNodesDiscovery()).append("\",\n");
-            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\"\n");
+            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\",\n");
+            sb.append("\"like_push_down\" = \"").append(esTable.isLikePushDown()).append("\"\n");
             sb.append(")");
         } else if (table.getType() == TableType.HIVE) {
             HiveTable hiveTable = (HiveTable) table;
@@ -4203,6 +4206,8 @@ public class Env {
         this.masterIp = info.getIp();
         this.masterHttpPort = info.getHttpPort();
         this.masterRpcPort = info.getRpcPort();
+        LOG.info("setMaster MasterInfo:{}", info);
+
     }
 
     public boolean canRead() {

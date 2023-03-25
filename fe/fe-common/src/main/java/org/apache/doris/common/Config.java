@@ -1416,6 +1416,12 @@ public class Config extends ConfigBase {
     public static boolean enable_batch_delete_by_default = true;
 
     /**
+     * Whether to add a version column when create unique table
+     */
+    @ConfField(mutable = true, masterOnly = true)
+    public static boolean enable_hidden_version_column_by_default = true;
+
+    /**
      * Used to set default db data quota bytes.
      */
     @ConfField(mutable = true, masterOnly = true)
@@ -1909,12 +1915,21 @@ public class Config extends ConfigBase {
     public static long scheduler_mtmv_task_expired = 24 * 60 * 60L; // 1day
 
     /**
-     * The candidate of the backend node for federation query such as hive table and es table query.
-     * If the backend of computation role is less than this value, it will acquire some mix backend.
-     * If the computation backend is enough, federation query will only assign to computation backend.
+     * If set to true, query on external table will prefer to assign to compute node.
+     * And the max number of compute node is controlled by min_backend_num_for_external_table.
+     * If set to false, query on external table will assign to any node.
      */
     @ConfField(mutable = true, masterOnly = false)
-    public static int backend_num_for_federation = 3;
+    public static boolean prefer_compute_node_for_external_table = false;
+
+    /**
+     * Only take effect when prefer_compute_node_for_external_table is true.
+     * If the compute node number is less than this value, query on external table will try to get some mix node
+     * to assign, to let the total number of node reach this value.
+     * If the compute node number is larger than this value, query on external table will assign to compute node only.
+     */
+    @ConfField(mutable = true, masterOnly = false)
+    public static int min_backend_num_for_external_table = 3;
 
     /**
      * Max query profile num.
@@ -1958,7 +1973,7 @@ public class Config extends ConfigBase {
      * Used to determined how many statistics collection SQL could run simultaneously.
      */
     @ConfField
-    public static int statistics_simultaneously_running_job_num = 10;
+    public static int statistics_simultaneously_running_task_num = 10;
 
     /**
      * Internal table replica num, once set, user should promise the avaible BE is greater than this value,

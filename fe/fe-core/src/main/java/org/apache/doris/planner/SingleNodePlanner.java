@@ -204,7 +204,7 @@ public class SingleNodePlanner {
         // Set the output smap to resolve exprs referencing inline views within stmt.
         // Not needed for a UnionStmt because it materializes its input operands.
         if (stmt instanceof SelectStmt) {
-            node.setOutputSmap(((SelectStmt) stmt).getBaseTblSmap());
+            node.setOutputSmap(((SelectStmt) stmt).getBaseTblSmap(), analyzer);
         }
         return node;
     }
@@ -320,7 +320,7 @@ public class SingleNodePlanner {
             scanNodes.removeIf(scanNode -> scanTupleIds.contains(scanNode.getTupleIds().get(0)));
             PlanNode node = createEmptyNode(root, stmt, analyzer);
             // Ensure result exprs will be substituted by right outputSmap
-            node.setOutputSmap(root.outputSmap);
+            node.setOutputSmap(root.outputSmap, analyzer);
             return node;
         }
 
@@ -397,6 +397,10 @@ public class SingleNodePlanner {
                 break;
             }
 
+            if (CollectionUtils.isNotEmpty(root.getConjuncts())) {
+                break;
+            }
+
             // TODO: Support muti table in the future
             if (selectStmt.getTableRefs().size() != 1) {
                 break;
@@ -407,7 +411,9 @@ public class SingleNodePlanner {
                 break;
             }
             List<Expr> allConjuncts = analyzer.getAllConjuncts(selectStmt.getTableRefs().get(0).getId());
-            if (allConjuncts != null) {
+            // planner will generate some conjuncts for analysis. These conjuncts are marked as aux expr.
+            // we skip these conjuncts when do pushAggOp
+            if (allConjuncts != null && allConjuncts.stream().noneMatch(Expr::isAuxExpr)) {
                 break;
             }
 
@@ -1149,7 +1155,7 @@ public class SingleNodePlanner {
             }
             final PlanNode emptySetNode = new EmptySetNode(ctx.getNextNodeId(), rowTuples);
             emptySetNode.init(analyzer);
-            emptySetNode.setOutputSmap(selectStmt.getBaseTblSmap());
+            emptySetNode.setOutputSmap(selectStmt.getBaseTblSmap(), analyzer);
             return createAggregationPlan(selectStmt, analyzer, emptySetNode);
         }
 
@@ -1193,6 +1199,23 @@ public class SingleNodePlanner {
             // create left-deep sequence of binary hash joins; assign node ids as we go along
             TableRef tblRef = selectStmt.getTableRefs().get(0);
             materializeTableResultForCrossJoinOrCountStar(tblRef, analyzer);
+            if (selectStmt.getSelectList().getItems().size() == 1) {
+                final List<SlotId> slotIds = Lists.newArrayList();
+                final List<TupleId> tupleIds = Lists.newArrayList();
+                Expr resultExprSelected = selectStmt.getSelectList().getItems().get(0).getExpr();
+                if (resultExprSelected != null && resultExprSelected instanceof SlotRef) {
+                    resultExprSelected.getIds(tupleIds, slotIds);
+                    for (SlotId id : slotIds) {
+                        final SlotDescriptor slot = analyzer.getDescTbl().getSlotDesc(id);
+                        slot.setIsMaterialized(true);
+                        slot.materializeSrcExpr();
+                    }
+                    for (TupleId id : tupleIds) {
+                        final TupleDescriptor tuple = analyzer.getDescTbl().getTupleDesc(id);
+                        tuple.setIsMaterialized(true);
+                    }
+                }
+            }
             root = createTableRefNode(analyzer, tblRef, selectStmt);
             // to change the inner contains analytic function
             // selectStmt.seondSubstituteInlineViewExprs(analyzer.getChangeResSmap());
@@ -1558,7 +1581,7 @@ public class SingleNodePlanner {
                     // conjuncts into outer-joined inline views, so hasEmptyResultSet() cannot be
                     // true for an outer-joined inline view that has no table refs.
                     Preconditions.checkState(!analyzer.isOuterJoined(inlineViewRef.getId()));
-                    emptySetNode.setOutputSmap(inlineViewRef.getSmap());
+                    emptySetNode.setOutputSmap(inlineViewRef.getSmap(), analyzer);
                     return emptySetNode;
                 }
                 // Analysis should have generated a tuple id into which to materialize the exprs.
@@ -1575,7 +1598,7 @@ public class SingleNodePlanner {
                 unionNode.init(analyzer);
                 //set outputSmap to substitute literal in outputExpr
                 unionNode.setWithoutTupleIsNullOutputSmap(inlineViewRef.getSmap());
-                unionNode.setOutputSmap(inlineViewRef.getSmap());
+                unionNode.setOutputSmap(inlineViewRef.getSmap(), analyzer);
                 if (analyzer.isOuterJoined(inlineViewRef.getId())) {
                     List<Expr> nullableRhs;
                     if (analyzer.isOuterJoinedLeftSide(inlineViewRef.getId())) {
@@ -1585,7 +1608,8 @@ public class SingleNodePlanner {
                         nullableRhs = TupleIsNullPredicate.wrapExprs(inlineViewRef.getSmap().getRhs(),
                             unionNode.getTupleIds(), TNullSide.RIGHT, analyzer);
                     }
-                    unionNode.setOutputSmap(new ExprSubstitutionMap(inlineViewRef.getSmap().getLhs(), nullableRhs));
+                    unionNode.setOutputSmap(
+                            new ExprSubstitutionMap(inlineViewRef.getSmap().getLhs(), nullableRhs), analyzer);
                 }
                 return unionNode;
             }
@@ -1616,7 +1640,7 @@ public class SingleNodePlanner {
             outputSmap = new ExprSubstitutionMap(outputSmap.getLhs(), nullableRhs);
         }
         // Set output smap of rootNode *before* creating a SelectNode for proper resolution.
-        rootNode.setOutputSmap(outputSmap);
+        rootNode.setOutputSmap(outputSmap, analyzer);
         if (rootNode instanceof UnionNode && ((UnionNode) rootNode).isConstantUnion()) {
             rootNode.setWithoutTupleIsNullOutputSmap(outputSmap);
         }
@@ -1784,8 +1808,9 @@ public class SingleNodePlanner {
                     newConjuncts = cloneExprs(newConjuncts);
                 }
             } else {
-                Preconditions.checkArgument(select.getTableRefs().size() == 1);
-                viewAnalyzer.registerConjuncts(newConjuncts, select.getTableRefs().get(0).getId());
+                for (Expr e : conjuncts) {
+                    viewAnalyzer.registerMigrateFailedConjuncts(inlineViewRef, e);
+                }
             }
         } else {
             Preconditions.checkArgument(stmt instanceof SetOperationStmt);
@@ -2071,6 +2096,7 @@ public class SingleNodePlanner {
             result.setJoinConjuncts(joinConjuncts);
             result.addConjuncts(analyzer.getMarkConjuncts(innerRef));
             result.init(analyzer);
+            result.setOutputLeftSideOnly(innerRef.isInBitmap() && joinConjuncts.isEmpty());
             return result;
         }
 
@@ -2121,7 +2147,13 @@ public class SingleNodePlanner {
             scanNode = createScanNode(analyzer, tblRef, selectStmt);
         }
         if (tblRef instanceof InlineViewRef) {
-            scanNode = createInlineViewPlan(analyzer, (InlineViewRef) tblRef);
+            InlineViewRef inlineViewRef = (InlineViewRef) tblRef;
+            scanNode = createInlineViewPlan(analyzer, inlineViewRef);
+            Analyzer viewAnalyzer = inlineViewRef.getAnalyzer();
+            Set<Expr> exprs = viewAnalyzer.findMigrateFailedConjuncts(inlineViewRef);
+            if (CollectionUtils.isNotEmpty(exprs)) {
+                scanNode.setVConjunct(exprs);
+            }
         }
         if (scanNode == null) {
             throw new UserException("unknown TableRef node");

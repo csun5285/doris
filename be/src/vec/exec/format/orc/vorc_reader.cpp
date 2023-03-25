@@ -76,7 +76,8 @@ OrcReader::OrcReader(RuntimeProfile* profile, const TFileScanRangeParams& params
           _range_start_offset(range.start_offset),
           _range_size(range.size),
           _ctz(ctz),
-          _column_names(column_names) {
+          _column_names(column_names),
+          _is_hive(params.__isset.slot_name_to_schema_pos) {
     TimezoneUtils::find_cctz_time_zone(ctz, _time_zone);
     _init_profile();
 }
@@ -87,7 +88,8 @@ OrcReader::OrcReader(const TFileScanRangeParams& params, const TFileRangeDesc& r
           _scan_params(params),
           _scan_range(range),
           _ctz(ctz),
-          _column_names(column_names) {}
+          _column_names(column_names),
+          _is_hive(params.__isset.slot_name_to_schema_pos) {}
 
 OrcReader::~OrcReader() {
     close();
@@ -140,7 +142,7 @@ Status OrcReader::init_reader(
         _file_reader = new ORCFileInputStream(_scan_range.path, inner_reader.release());
     }
     if (_file_reader->getLength() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("init reader failed, empty orc file: " + _scan_range.path);
     }
 
     // create orc reader
@@ -151,7 +153,8 @@ Status OrcReader::init_reader(
         return Status::InternalError("Init OrcReader failed. reason = {}", e.what());
     }
     if (_reader->getNumberOfRows() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("init reader failed, empty orc file with row num 0: " +
+                                 _scan_range.path);
     }
     // _init_bloom_filter(colname_to_value_range);
 
@@ -170,7 +173,15 @@ Status OrcReader::init_reader(
     auto& selected_type = _row_reader->getSelectedType();
     _col_orc_type.resize(selected_type.getSubtypeCount());
     for (int i = 0; i < selected_type.getSubtypeCount(); ++i) {
-        _colname_to_idx[_get_field_name_lower_case(&selected_type, i)] = i;
+        std::string name;
+        // For hive engine, translate the column name in orc file to schema column name.
+        // This is for Hive 1.x which use internal column name _col0, _col1...
+        if (_is_hive) {
+            name = _file_col_to_schema_col[selected_type.getFieldName(i)];
+        } else {
+            name = _get_field_name_lower_case(&selected_type, i);
+        }
+        _colname_to_idx[name] = i;
         _col_orc_type[i] = selected_type.getSubtype(i);
     }
     return Status::OK();
@@ -187,7 +198,7 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
         _file_reader = new ORCFileInputStream(_scan_range.path, inner_reader.release());
     }
     if (_file_reader->getLength() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("get parsed schema fail, empty orc file: " + _scan_range.path);
     }
 
     // create orc reader
@@ -196,10 +207,6 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
         _reader = orc::createReader(std::unique_ptr<ORCFileInputStream>(_file_reader), options);
     } catch (std::exception& e) {
         return Status::InternalError("Init OrcReader failed. reason = {}", e.what());
-    }
-
-    if (_reader->getNumberOfRows() == 0) {
-        return Status::EndOfFile("Empty orc file");
     }
 
     auto& root_type = _reader->getType();
@@ -219,6 +226,12 @@ Status OrcReader::_init_read_columns() {
         orc_cols_lower_case.emplace_back(_get_field_name_lower_case(&root_type, i));
     }
     for (auto& col_name : _column_names) {
+        if (_is_hive) {
+            auto iter = _scan_params.slot_name_to_schema_pos.find(col_name);
+            DCHECK(iter != _scan_params.slot_name_to_schema_pos.end());
+            int pos = iter->second;
+            orc_cols_lower_case[pos] = iter->first;
+        }
         auto iter = std::find(orc_cols_lower_case.begin(), orc_cols_lower_case.end(), col_name);
         if (iter == orc_cols_lower_case.end()) {
             _missing_cols.emplace_back(col_name);
@@ -226,6 +239,11 @@ Status OrcReader::_init_read_columns() {
             int pos = std::distance(orc_cols_lower_case.begin(), iter);
             _read_cols.emplace_back(orc_cols[pos]);
             _read_cols_lower_case.emplace_back(col_name);
+            // For hive engine, store the orc column name to schema column name map.
+            // This is for Hive 1.x orc file with internal column name _col0, _col1...
+            if (_is_hive) {
+                _file_col_to_schema_col[orc_cols[pos]] = col_name;
+            }
         }
     }
     return Status::OK();

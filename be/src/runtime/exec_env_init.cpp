@@ -137,6 +137,21 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_threads(1024)
             .build(&_buffered_reader_prefetch_thread_pool);
 
+    // min num equal to fragment pool's min num
+    // max num is useless because it will start as many as requested in the past
+    // queue size is useless because the max thread num is very large
+    ThreadPoolBuilder("SendReportThreadPool")
+            .set_min_threads(config::fragment_pool_thread_num_min)
+            .set_max_threads(std::numeric_limits<int>::max())
+            .set_max_queue_size(config::fragment_pool_queue_size)
+            .build(&_send_report_thread_pool);
+
+    ThreadPoolBuilder("JoinNodeThreadPool")
+            .set_min_threads(config::fragment_pool_thread_num_min)
+            .set_max_threads(std::numeric_limits<int>::max())
+            .set_max_queue_size(config::fragment_pool_queue_size)
+            .build(&_join_node_thread_pool);
+
     _scanner_scheduler = new doris::vectorized::ScannerScheduler();
 
     _cgroups_mgr = new CgroupsMgr(this, config::doris_cgroups);
@@ -169,7 +184,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _cgroups_mgr->init_cgroups();
     Status status = _load_path_mgr->init();
     if (!status.ok()) {
-        LOG(ERROR) << "load path mgr init failed." << status.get_error_msg();
+        LOG(ERROR) << "load path mgr init failed." << status;
         exit(-1);
     }
     _broker_mgr->init();

@@ -182,6 +182,8 @@ CONF_Bool(doris_enable_scanner_thread_pool_per_disk, "true");
 CONF_mInt64(doris_blocking_priority_queue_wait_timeout_ms, "500");
 // number of olap scanner thread pool size
 CONF_Int32(doris_scanner_thread_pool_thread_num, "48");
+// max number of remote scanner thread pool size
+CONF_Int32(doris_max_remote_scanner_thread_pool_thread_num, "512");
 // number of olap scanner thread pool queue size
 CONF_Int32(doris_scanner_thread_pool_queue_size, "102400");
 
@@ -218,7 +220,7 @@ CONF_mInt64(memory_limitation_per_thread_for_schema_change_bytes, "2147483648");
 CONF_mInt64(memory_limitation_per_thread_for_storage_migration_bytes, "100000000");
 
 // the clean interval of file descriptor cache and segment cache
-CONF_mInt32(cache_clean_interval, "1800");
+CONF_mInt32(cache_clean_interval, "60");
 CONF_mInt32(disk_stat_monitor_interval, "5");
 CONF_mInt32(unused_rowset_monitor_interval, "30");
 CONF_String(storage_root_path, "${DORIS_HOME}/storage");
@@ -515,7 +517,11 @@ CONF_String(buffer_pool_limit, "20%");
 CONF_String(buffer_pool_clean_pages_limit, "50%");
 
 // Sleep time in milliseconds between memory maintenance iterations
-CONF_mInt32(memory_maintenance_sleep_time_ms, "500");
+CONF_mInt32(memory_maintenance_sleep_time_ms, "100");
+
+// After full gc, no longer full gc and minor gc during sleep.
+// After minor gc, no minor gc during sleep, but full gc is possible.
+CONF_mInt32(memory_gc_sleep_time_s, "1");
 
 // Sleep time in milliseconds between load channel memory refresh iterations
 CONF_mInt64(load_channel_memory_refresh_sleep_time_ms, "100");
@@ -602,6 +608,7 @@ CONF_mInt32(path_gc_check_interval_second, "86400");
 CONF_mInt32(path_gc_check_step, "1000");
 CONF_mInt32(path_gc_check_step_interval_ms, "10");
 CONF_mInt32(path_scan_interval_second, "86400");
+CONF_mInt32(path_scan_step_interval_ms, "70");
 
 // The following 2 configs limit the max usage of disk capacity of a data dir.
 // If both of these 2 threshold reached, no more data can be writen into that data dir.
@@ -920,6 +927,11 @@ CONF_Bool(disable_java_udf, "true");
 
 // Set config randomly to check more issues in github workflow
 CONF_Bool(enable_fuzzy_mode, "false");
+
+// max depth of expression tree allowed.
+CONF_Int32(max_depth_of_expr_tree, "600");
+
+CONF_mBool(enable_stack_trace, "true");
 
 #ifdef BE_TEST
 // test s3

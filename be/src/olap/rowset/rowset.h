@@ -66,7 +66,7 @@ public:
             break;
 
         default:
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_INVALID_STATE_TRANSITION);
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
         }
         return Status::OK();
     }
@@ -82,7 +82,7 @@ public:
             break;
 
         default:
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_INVALID_STATE_TRANSITION);
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
         }
         return Status::OK();
     }
@@ -94,7 +94,7 @@ public:
             break;
 
         default:
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_INVALID_STATE_TRANSITION);
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
         }
         return Status::OK();
     }
@@ -118,7 +118,7 @@ public:
 
     virtual std::string segment_file_path(int segment_id) = 0;
 
-    // returns Status::OLAPInternalError(OLAP_ERR_ROWSET_CREATE_READER) when failed to create reader
+    // returns Status::Error<ErrorCode::ROWSET_CREATE_READER>() when failed to create reader
     virtual Status create_reader(std::shared_ptr<RowsetReader>* result) = 0;
 
     // Split range denoted by `start_key` and `end_key` into sub-ranges, each contains roughly

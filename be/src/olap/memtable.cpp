@@ -31,6 +31,7 @@
 #include "vec/core/field.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 MemTable::MemTable(TabletSharedPtr tablet, Schema* schema, const TabletSchema* tablet_schema,
                    const std::vector<SlotDescriptor*>* slot_descs, TupleDescriptor* tuple_desc,
@@ -337,6 +338,9 @@ void MemTable::_aggregate_two_row_in_block(RowInBlock* new_row, RowInBlock* row_
         if (res > 0) {
             return;
         }
+        // need to update the row pos in skiplist to the new row pos when has
+        // sequence column
+        row_in_skiplist->_row_pos = new_row->_row_pos;
     }
     // dst is non-sequence row, or dst sequence is smaller
     for (uint32_t cid = _schema->num_key_columns(); cid < _schema->num_columns(); ++cid) {
@@ -478,7 +482,7 @@ Status MemTable::_do_flush(int64_t& duration_ns) {
     SCOPED_RAW_TIMER(&duration_ns);
     if (_skip_list) {
         Status st = _rowset_writer->flush_single_memtable(this, &_flush_size);
-        if (st.precise_code() == OLAP_ERR_FUNC_NOT_IMPLEMENTED) {
+        if (st.is<NOT_IMPLEMENTED_ERROR>()) {
             // For alpha rowset, we do not implement "flush_single_memtable".
             // Flush the memtable like the old way.
             Table::Iterator it(_skip_list.get());

@@ -8,6 +8,7 @@
 #include "olap/tablet_meta.h"
 
 namespace doris::cloud {
+using namespace ErrorCode;
 
 static constexpr int ALTER_TABLE_BATCH_SIZE = 4096;
 
@@ -47,7 +48,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     if (!schema_change_lock.owns_lock()) {
         LOG(WARNING) << "Failed to obtain schema change lock. base_tablet="
                      << request.base_tablet_id;
-        return Status::OLAPInternalError(OLAP_ERR_TRY_LOCK_FAILED);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
 
     // MUST sync rowsets before capturing rowset readers and building DeleteHandler
@@ -188,7 +189,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     new_tablet_idx->set_partition_id(new_tablet->partition_id());
     auto st = cloud::meta_mgr()->prepare_tablet_job(job);
     if (!st.ok()) {
-        if (st.precise_code() == JOB_ALREADY_SUCCESS) {
+        if (st.is<JOB_ALREADY_SUCCESS>()) {
             st = new_tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -222,7 +223,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         RowsetMetaSharedPtr existed_rs_meta;
         auto st = meta_mgr()->prepare_rowset(rowset_writer->rowset_meta(), true, &existed_rs_meta);
         if (!st.ok()) {
-            if (st.is_already_exist()) {
+            if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "
                           << new_tablet->tablet_id();
                 // Add already committed rowset to _output_rowsets.
@@ -249,7 +250,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
 
         st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta(), true, &existed_rs_meta);
         if (!st.ok()) {
-            if (st.is_already_exist()) {
+            if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "
                           << new_tablet->tablet_id();
                 // Add already committed rowset to _output_rowsets.
@@ -294,7 +295,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     selectdb::TabletStatsPB stats;
     st = cloud::meta_mgr()->commit_tablet_job(job, &stats);
     if (!st.ok()) {
-        if (st.precise_code() == JOB_ALREADY_SUCCESS) {
+        if (st.is<JOB_ALREADY_SUCCESS>()) {
             st = new_tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -330,17 +331,11 @@ Status CloudSchemaChange::process_alter_inverted_index(const TAlterInvertedIndex
               << ", job_id=" << _job_id;
     TabletSharedPtr tablet;
     RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(request.tablet_id, &tablet));
-    if (tablet == nullptr) {
-        LOG(WARNING) << "fail to find tablet. tablet=" << request.tablet_id;
-        return Status::OLAPInternalError(OLAP_ERR_TABLE_NOT_FOUND);
-    }
 
     if (tablet->tablet_state() == TABLET_TOMBSTONED || 
             tablet->tablet_state() == TABLET_STOPPED ||
             tablet->tablet_state() == TABLET_SHUTDOWN) {
-        LOG(INFO) << "tablet's state=" << tablet->tablet_state()
-                  << " cannot alter inverted index";
-        return Status::OLAPInternalError(OLAP_ERR_OTHER_ERROR);
+        return Status::InternalError("tablet's state={} cannot alter inverted index", tablet->tablet_state());
     }
 
     std::unique_lock<std::mutex> schema_change_lock(tablet->get_schema_change_lock(),
@@ -348,7 +343,7 @@ Status CloudSchemaChange::process_alter_inverted_index(const TAlterInvertedIndex
     if (!schema_change_lock.owns_lock()) {
         LOG(WARNING) << "failed to obtain schema change lock. tablet="
                      << request.tablet_id;
-        return Status::OLAPInternalError(OLAP_ERR_TRY_LOCK_FAILED);
+        return Status::Error<TRY_LOCK_FAILED>();;
     }
 
     Status res = _do_process_alter_inverted_index(tablet, request);
@@ -435,7 +430,7 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     new_tablet_idx->set_partition_id(tablet->partition_id());
     auto st = cloud::meta_mgr()->prepare_tablet_job(job);
     if (!st.ok()) {
-        if (st.precise_code() == JOB_ALREADY_SUCCESS) {
+        if (st.is<JOB_ALREADY_SUCCESS>()) {
             st = tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -485,7 +480,7 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     selectdb::TabletStatsPB stats;
     st = cloud::meta_mgr()->commit_tablet_job(job, &stats);
     if (!st.ok()) {
-        if (st.precise_code() == JOB_ALREADY_SUCCESS) {
+        if (st.is<JOB_ALREADY_SUCCESS>()) {
             st = tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync tablet")
@@ -525,7 +520,7 @@ Status CloudSchemaChange::_add_inverted_index(
         VLOG_TRACE << "begin to read a history rowset. version=" << rs_reader->version().first
                    << "-" << rs_reader->version().second;
         res = sc_procedure->process(rs_reader, nullptr, nullptr, tablet, nullptr);
-        if (!res.ok() && res.precise_code() != OLAP_ERR_DATA_EOF) {
+        if (!res.ok() && !res.is<END_OF_FILE>()) {
             LOG(WARNING) << "failed to process the version."
                          << " version=" << rs_reader->version().first << "-"
                          << rs_reader->version().second;
@@ -557,7 +552,7 @@ Status CloudSchemaChange::_add_inverted_index(
 
         auto st = meta_mgr()->commit_rowset(rowset_meta, true, nullptr);
         if (!st.ok()) {
-            if (st.is_already_exist()) {
+            if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "rowset " << rs_reader->version() << " has already existed in tablet "
                           << tablet->tablet_id();
                 _output_rowsets.push_back(std::move(rowset));
@@ -574,7 +569,7 @@ Status CloudSchemaChange::_add_inverted_index(
     }
 
     LOG(INFO) << "finish to write inverted index to tablet: " << tablet->full_name();
-    return res;
+    return Status::OK();
 }
 
 Status CloudSchemaChange::_drop_inverted_index(
@@ -645,7 +640,7 @@ Status CloudSchemaChange::_drop_inverted_index(
 
         auto st = meta_mgr()->commit_rowset(rowset_meta, true, nullptr);
         if (!st.ok()) {
-            if (st.is_already_exist()) {
+            if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "rowset " << rs_reader->version() << " has already existed in tablet "
                           << tablet->tablet_id();
                 _output_rowsets.push_back(std::move(rowset));

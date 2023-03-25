@@ -19,7 +19,7 @@ public:
 protected:
     std::string compaction_name() const override { return "CloudBaseCompaction"; }
 
-    Status update_tablet_meta() override;
+    Status update_tablet_meta(const Merger::Statistics* stats = nullptr) override;
     void garbage_collection() override;
 
 private:

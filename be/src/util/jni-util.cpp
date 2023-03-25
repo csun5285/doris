@@ -28,6 +28,7 @@
 #include "common/config.h"
 #include "gutil/once.h"
 #include "gutil/strings/substitute.h"
+#include "jni_native_method.h"
 #include "libjvm_loader.h"
 
 using std::string;
@@ -69,26 +70,68 @@ void FindOrCreateJavaVM() {
     int num_vms;
     int rv = LibJVMLoader::JNI_GetCreatedJavaVMs(&g_vm, 1, &num_vms);
     if (rv == 0) {
+        JavaVMOption* options;
         auto classpath = GetDorisJNIClasspath();
+        // The following 4 opts are default opts,
+        // they can be override by JAVA_OPTS env var.
         std::string heap_size = fmt::format("-Xmx{}", config::jvm_max_heap_size);
         std::string log_path = fmt::format("-DlogPath={}/log/udf-jdbc.log", getenv("DORIS_HOME"));
-        JavaVMOption options[] = {
-                {const_cast<char*>(classpath.c_str()), nullptr},
-                {const_cast<char*>(heap_size.c_str()), nullptr},
-                {const_cast<char*>(log_path.c_str()), nullptr},
+        std::string critical_jni = "-XX:-CriticalJNINatives";
+        std::string max_fd_limit = "-XX:-MaxFDLimit";
+
+        char* java_opts = getenv("JAVA_OPTS");
+        int no_args;
+        if (java_opts == nullptr) {
+            no_args = 4; // classpath, heapsize, log path, critical
 #ifdef __APPLE__
-                // On macOS, we should disable MaxFDLimit, otherwise the RLIMIT_NOFILE
-                // will be assigned the minimum of OPEN_MAX (10240) and rlim_cur (See src/hotspot/os/bsd/os_bsd.cpp)
-                // and it can not pass the check performed by storage engine.
-                // The newer JDK has fixed this issue.
-                {const_cast<char*>("-XX:-MaxFDLimit"), nullptr},
+            no_args++; // -XX:-MaxFDLimit
 #endif
-        };
+            options = (JavaVMOption*)calloc(no_args, sizeof(JavaVMOption));
+            options[0].optionString = const_cast<char*>(classpath.c_str());
+            options[1].optionString = const_cast<char*>(heap_size.c_str());
+            options[2].optionString = const_cast<char*>(log_path.c_str());
+            options[3].optionString = const_cast<char*>(critical_jni.c_str());
+#ifdef __APPLE__
+            // On macOS, we should disable MaxFDLimit, otherwise the RLIMIT_NOFILE
+            // will be assigned the minimum of OPEN_MAX (10240) and rlim_cur (See src/hotspot/os/bsd/os_bsd.cpp)
+            // and it can not pass the check performed by storage engine.
+            // The newer JDK has fixed this issue.
+            options[4].optionString = const_cast<char*>(max_fd_limit.c_str());
+#endif
+        } else {
+            // user specified opts
+            // 1. find the number of args
+            java_opts = strdup(java_opts);
+            char *str, *token, *save_ptr;
+            char jvm_arg_delims[] = " ";
+            for (no_args = 1, str = java_opts;; no_args++, str = nullptr) {
+                token = strtok_r(str, jvm_arg_delims, &save_ptr);
+                if (token == nullptr) {
+                    break;
+                }
+            }
+            free(java_opts);
+            // 2. set args
+            options = (JavaVMOption*)calloc(no_args, sizeof(JavaVMOption));
+            options[0].optionString = const_cast<char*>(classpath.c_str());
+            java_opts = getenv("JAVA_OPTS");
+            if (java_opts != NULL) {
+                java_opts = strdup(java_opts);
+                for (no_args = 1, str = java_opts;; no_args++, str = nullptr) {
+                    token = strtok_r(str, jvm_arg_delims, &save_ptr);
+                    if (token == nullptr) {
+                        break;
+                    }
+                    options[no_args].optionString = token;
+                }
+            }
+        }
+
         JNIEnv* env;
         JavaVMInitArgs vm_args;
         vm_args.version = JNI_VERSION_1_8;
         vm_args.options = options;
-        vm_args.nOptions = sizeof(options) / sizeof(JavaVMOption);
+        vm_args.nOptions = no_args;
         // Set it to JNI_FALSE because JNI_TRUE will let JVM ignore the max size config.
         vm_args.ignoreUnrecognized = JNI_FALSE;
 
@@ -96,6 +139,11 @@ void FindOrCreateJavaVM() {
         if (JNI_OK != res) {
             DCHECK(false) << "Failed to create JVM, code= " << res;
         }
+
+        if (java_opts != nullptr) {
+            free(java_opts);
+        }
+        free(options);
     } else {
         CHECK_EQ(rv, 0) << "Could not find any created Java VM";
         CHECK_EQ(num_vms, 1) << "No VMs returned";
@@ -108,6 +156,7 @@ bool JniUtil::jvm_inited_ = false;
 __thread JNIEnv* JniUtil::tls_env_ = nullptr;
 jclass JniUtil::internal_exc_cl_ = NULL;
 jclass JniUtil::jni_util_cl_ = NULL;
+jclass JniUtil::jni_native_method_exc_cl_ = nullptr;
 jmethodID JniUtil::throwable_to_string_id_ = NULL;
 jmethodID JniUtil::throwable_to_stack_trace_id_ = NULL;
 jmethodID JniUtil::get_jvm_metrics_id_ = NULL;
@@ -153,7 +202,7 @@ Status JniUtil::GetJNIEnvSlowPath(JNIEnv** env) {
         rc = g_vm->AttachCurrentThread((void**)&tls_env_, nullptr);
     }
     if (rc != 0 || tls_env_ == nullptr) {
-        return Status::InternalError("Unable to get JVM!");
+        return Status::InternalError("Unable to get JVM: {}", rc);
     }
     *env = tls_env_;
     return Status::OK();
@@ -251,6 +300,37 @@ Status JniUtil::Init() {
     if (env->ExceptionOccurred()) {
         return Status::InternalError("Failed to delete local reference to JniUtil class.");
     }
+
+    // Find JNINativeMethod class and create a global ref.
+    jclass local_jni_native_exc_cl = env->FindClass("org/apache/doris/udf/JNINativeMethod");
+    if (local_jni_native_exc_cl == nullptr) {
+        if (env->ExceptionOccurred()) {
+            env->ExceptionDescribe();
+        }
+        return Status::InternalError("Failed to find JNINativeMethod class.");
+    }
+    jni_native_method_exc_cl_ =
+            reinterpret_cast<jclass>(env->NewGlobalRef(local_jni_native_exc_cl));
+    if (jni_native_method_exc_cl_ == nullptr) {
+        if (env->ExceptionOccurred()) {
+            env->ExceptionDescribe();
+        }
+        return Status::InternalError("Failed to create global reference to JNINativeMethod class.");
+    }
+    env->DeleteLocalRef(local_jni_native_exc_cl);
+    if (env->ExceptionOccurred()) {
+        return Status::InternalError("Failed to delete local reference to JNINativeMethod class.");
+    }
+    std::string function_name = "resizeColumn";
+    std::string function_sign = "(JI)J";
+    static JNINativeMethod java_native_methods[] = {
+            {const_cast<char*>(function_name.c_str()), const_cast<char*>(function_sign.c_str()),
+             (void*)&JavaNativeMethods::resizeColumn},
+    };
+
+    int res = env->RegisterNatives(jni_native_method_exc_cl_, java_native_methods,
+                                   sizeof(java_native_methods) / sizeof(java_native_methods[0]));
+    DCHECK_EQ(res, 0);
 
     // Throwable toString()
     throwable_to_string_id_ = env->GetStaticMethodID(jni_util_cl_, "throwableToString",

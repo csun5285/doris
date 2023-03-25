@@ -41,8 +41,10 @@
 #include "vec/data_types/data_type_number.h"
 #include "vec/exprs/vliteral.h"
 #include "vec/functions/function_helpers.h"
+#include "vec/data_types/data_type_factory.hpp"
 
 namespace doris {
+using namespace ErrorCode;
 namespace segment_v2 {
 
 // A fast range iterator for roaring bitmap. Output ranges use closed-open form, like [from, to).
@@ -597,15 +599,15 @@ Status SegmentIterator::_apply_inverted_index() {
             Status res = pred->evaluate(_schema, _inverted_index_iterators[unique_id], num_rows(),
                                         &bitmap);
             if (!res.ok()) {
-                if ((res.precise_code() == OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND &&
+                if ((res.is<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>() &&
                      pred->type() != PredicateType::MATCH) ||
-                    res.precise_code() == OLAP_ERR_INVERTED_INDEX_HIT_LIMIT) {
+                    res.is<ErrorCode::INVERTED_INDEX_FILE_HIT_LIMIT>()) {
                     remaining_predicates.push_back(pred);
                     continue;
                 }
                 LOG(WARNING) << "failed to evaluate inverted index"
                              << ", column predicate type: " << pred->pred_type_string(pred->type())
-                             << ", error msg: " << res.get_error_msg();
+                             << ", error msg: " << res;
                 return res;
             }
 
@@ -1118,15 +1120,15 @@ Status SegmentIterator::_apply_index_in_compound() {
         }
 
         if (!res.ok()) {
-            if ((res.precise_code() == OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND &&
+            if ((res.is<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>() &&
                  pred->type() != PredicateType::MATCH) ||
-                res.precise_code() == OLAP_ERR_INVERTED_INDEX_HIT_LIMIT) {
+                res.is<ErrorCode::INVERTED_INDEX_FILE_HIT_LIMIT>()) {
                 _not_apply_index_pred.insert(pred->column_id());
                 continue;
             }
             LOG(WARNING) << "failed to evaluate index"
                          << ", column predicate type: " << pred->pred_type_string(pred->type())
-                         << ", error msg: " << res.get_error_msg();
+                         << ", error msg: " << res;
             return res;
         }
 
@@ -1338,7 +1340,7 @@ Status SegmentIterator::_lookup_ordinal_from_pk_index(const RowCursor& key, bool
     Status status = index_iterator->seek_at_or_after(&index_key, &exact_match);
     if (UNLIKELY(!status.ok())) {
         *rowid = num_rows();
-        if (status.is_not_found()) {
+        if (status.is<NOT_FOUND>()) {
             return Status::OK();
         }
         return status;
@@ -1352,20 +1354,18 @@ Status SegmentIterator::_lookup_ordinal_from_pk_index(const RowCursor& key, bool
                 _segment->_tablet_schema->column(_segment->_tablet_schema->sequence_col_idx())
                         .length() +
                 1;
-        MemPool pool;
+        auto index_type = vectorized::DataTypeFactory::instance().create_data_type(
+                _segment->_pk_index_reader->type_info()->type(), 1, 0);
+        auto index_column = index_type->create_column();
         size_t num_to_read = 1;
-        std::unique_ptr<ColumnVectorBatch> cvb;
-        RETURN_IF_ERROR(ColumnVectorBatch::create(
-                num_to_read, false, _segment->_pk_index_reader->type_info(), nullptr, &cvb));
-        ColumnBlock block(cvb.get(), &pool);
-        ColumnBlockView column_block_view(&block);
         size_t num_read = num_to_read;
-        RETURN_IF_ERROR(index_iterator->next_batch(&num_read, &column_block_view));
+        RETURN_IF_ERROR(index_iterator->next_batch(&num_read, index_column));
         DCHECK(num_to_read == num_read);
 
-        const Slice* sought_key = reinterpret_cast<const Slice*>(cvb->cell_ptr(0));
+        Slice sought_key =
+                Slice(index_column->get_data_at(0).data, index_column->get_data_at(0).size);
         Slice sought_key_without_seq =
-                Slice(sought_key->get_data(), sought_key->get_size() - seq_col_length);
+                Slice(sought_key.get_data(), sought_key.get_size() - seq_col_length);
 
         // compare key
         if (Slice(index_key).compare(sought_key_without_seq) == 0) {
@@ -1510,8 +1510,7 @@ Status SegmentIterator::next_batch(RowBlockV2* block) {
             auto column_id = column_predicate->column_id();
             auto column_block = block->column_block(column_id);
             if (column_predicate->type() == PredicateType::MATCH) {
-                return Status::OLAPInternalError(
-                        OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
+                return Status::Error<ErrorCode::INVERTED_INDEX_NOT_SUPPORTED>(
                         fmt::format("match query should with vectorized engine"));
             }
             column_predicate->evaluate(&column_block, block->selection_vector(), &selected_size);
@@ -1865,6 +1864,33 @@ Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32
     return Status::OK();
 }
 
+void SegmentIterator::_replace_version_col(size_t num_rows) {
+    // Only the rowset with single version need to replace the version column.
+    // Doris can't determine the version before publish_version finished, so
+    // we can't write data to __DORIS_VERSION_COL__ in segment writer, the value
+    // is 0 by default.
+    // So we need to replace the value to real version while reading.
+    if (_opts.version.first != _opts.version.second) {
+        return;
+    }
+    auto cids = _schema.column_ids();
+    int32_t version_idx = _schema.version_col_idx();
+    auto iter = std::find(cids.begin(), cids.end(), version_idx);
+    if (iter == cids.end()) {
+        return;
+    }
+
+    auto column_desc = _schema.column(version_idx);
+    auto column = Schema::get_data_type_ptr(*column_desc)->create_column();
+    DCHECK(_schema.column(version_idx)->type() == FieldType::OLAP_FIELD_TYPE_BIGINT);
+    auto col_ptr = reinterpret_cast<vectorized::ColumnVector<vectorized::Int64>*>(column.get());
+    for (size_t j = 0; j < num_rows; j++) {
+        col_ptr->insert_value(_opts.version.second);
+    }
+    _current_return_columns[version_idx] = std::move(column);
+    VLOG_DEBUG << "replaced version column in segment iterator, version_col_idx:" << version_idx;
+}
+
 uint16_t SegmentIterator::_evaluate_vectorization_predicate(uint16_t* sel_rowid_idx,
                                                             uint16_t selected_size) {
     SCOPED_RAW_TIMER(&_opts.stats->vec_cond_ns);
@@ -2030,6 +2056,7 @@ Status SegmentIterator::next_batch(vectorized::Block* block) {
     }
 
     if (!_is_need_vec_eval && !_is_need_short_eval) {
+        _replace_version_col(_current_batch_rows_read);
         _output_non_pred_columns(block);
         _output_index_return_column(nullptr, 0, block);
     } else {
@@ -2057,6 +2084,7 @@ Status SegmentIterator::next_batch(vectorized::Block* block) {
         if (!_lazy_materialization_read) {
             Status ret = Status::OK();
             if (selected_size > 0) {
+                _replace_version_col(selected_size);
                 ret = _output_column_by_sel_idx(block, _first_read_column_ids, sel_rowid_idx,
                                                 selected_size);
             }
@@ -2076,6 +2104,8 @@ Status SegmentIterator::next_batch(vectorized::Block* block) {
         RETURN_IF_ERROR(_read_columns_by_rowids(_non_predicate_columns, _block_rowids,
                                                 sel_rowid_idx, selected_size,
                                                 &_current_return_columns));
+
+        _replace_version_col(selected_size);
 
         // step4: output columns
         // 4.1 output non-predicate column

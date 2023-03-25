@@ -30,6 +30,7 @@
 #include "vec/olap/vgeneric_iterators.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 BetaRowsetReader::BetaRowsetReader(BetaRowsetSharedPtr rowset)
         : _context(nullptr), _rowset(std::move(rowset)), _stats(&_owned_stats) {
@@ -70,6 +71,7 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     _read_options.rowset_id = _rowset->rowset_id();
     _read_options.tablet_id = _rowset->rowset_meta()->tablet_id();
     _read_options.remaining_vconjunct_root = _context->remaining_vconjunct_root;
+    _read_options.version = _rowset->version();
     if (read_context->lower_bound_keys != nullptr) {
         for (int i = 0; i < read_context->lower_bound_keys->size(); ++i) {
             _read_options.key_ranges.emplace_back(&read_context->lower_bound_keys->at(i),
@@ -86,7 +88,8 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
                 _rowset->end_version(), _read_options.delete_condition_predicates.get(),
                 &_read_options.del_predicates_for_zone_map);
         // if del cond is not empty, schema may be different in multiple rowset
-        _can_reuse_schema = _read_options.del_predicates_for_zone_map.empty();
+        _can_reuse_schema =
+                _read_options.delete_condition_predicates->num_of_column_predicate() == 0;
     }
     // In vertical compaction, every column group need new schema
     if (read_context->is_vertical_compaction) {
@@ -207,7 +210,7 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
         auto s = seg_ptr->new_iterator(*_input_schema, _read_options, &iter);
         if (!s.ok()) {
             LOG(WARNING) << "failed to create iterator[" << seg_ptr->id() << "]: " << s.to_string();
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_READER_INIT);
+            return Status::Error<ROWSET_READER_INIT>();
         }
         if (iter->empty()) {
             continue;
@@ -219,7 +222,7 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
         auto st = owned_it->init(_read_options);
         if (!st.ok()) {
             LOG(WARNING) << "failed to init iterator: " << st.to_string();
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_READER_INIT);
+            return Status::Error<ROWSET_READER_INIT>();
         }
         // transfer ownership of segment iterator to `_iterator`
         out_iters->push_back(owned_it.release());
@@ -237,8 +240,17 @@ Status BetaRowsetReader::init(RowsetReaderContext* read_context) {
     if (config::enable_storage_vectorization && read_context->is_vec) {
         if (read_context->need_ordered_result &&
             _rowset->rowset_meta()->is_segments_overlapping()) {
+            auto sequence_loc = -1;
+            if (read_context->sequence_id_idx != -1) {
+                for (size_t loc = 0; loc < read_context->return_columns->size(); loc++) {
+                    if (read_context->return_columns->at(loc) == read_context->sequence_id_idx) {
+                        sequence_loc = loc;
+                        break;
+                    }
+                }
+            }
             final_iterator = vectorized::new_merge_iterator(
-                    iterators, read_context->sequence_id_idx, read_context->is_unique,
+                    iterators, sequence_loc, read_context->is_unique,
                     read_context->read_orderby_key_reverse, read_context->merged_rows);
         } else {
             if (read_context->read_orderby_key_reverse) {
@@ -260,7 +272,7 @@ Status BetaRowsetReader::init(RowsetReaderContext* read_context) {
     auto s = final_iterator->init(_read_options);
     if (!s.ok()) {
         LOG(WARNING) << "failed to init iterator: " << s.to_string();
-        return Status::OLAPInternalError(OLAP_ERR_ROWSET_READER_INIT);
+        return Status::Error<ROWSET_READER_INIT>();
     }
     _iterator.reset(final_iterator);
 
@@ -309,12 +321,12 @@ Status BetaRowsetReader::next_block(RowBlock** block) {
     {
         auto s = _iterator->next_batch(_input_block.get());
         if (!s.ok()) {
-            if (s.is_end_of_file()) {
+            if (s.is<END_OF_FILE>()) {
                 *block = nullptr;
-                return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+                return Status::Error<END_OF_FILE>();
             }
             LOG(WARNING) << "failed to read next block: " << s.to_string();
-            return Status::OLAPInternalError(OLAP_ERR_ROWSET_READ_FAILED);
+            return Status::Error<ROWSET_READ_FAILED>();
         }
     }
 
@@ -334,11 +346,11 @@ Status BetaRowsetReader::next_block(vectorized::Block* block) {
         do {
             auto s = _iterator->next_batch(block);
             if (!s.ok()) {
-                if (s.is_end_of_file()) {
-                    return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+                if (s.is<END_OF_FILE>()) {
+                    return Status::Error<END_OF_FILE>();
                 } else {
                     LOG(WARNING) << "failed to read next block: " << s.to_string();
-                    return Status::OLAPInternalError(OLAP_ERR_ROWSET_READ_FAILED);
+                    return Status::Error<ROWSET_READ_FAILED>();
                 }
             }
         } while (block->rows() == 0);
@@ -352,15 +364,15 @@ Status BetaRowsetReader::next_block(vectorized::Block* block) {
                 {
                     auto s = _iterator->next_batch(_input_block.get());
                     if (!s.ok()) {
-                        if (s.is_end_of_file()) {
+                        if (s.is<END_OF_FILE>()) {
                             if (is_first) {
-                                return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+                                return Status::Error<END_OF_FILE>();
                             } else {
                                 break;
                             }
                         } else {
                             LOG(WARNING) << "failed to read next block: " << s.to_string();
-                            return Status::OLAPInternalError(OLAP_ERR_ROWSET_READ_FAILED);
+                            return Status::Error<ROWSET_READ_FAILED>();
                         }
                     } else if (_input_block->selected_size() == 0) {
                         continue;
@@ -373,7 +385,7 @@ Status BetaRowsetReader::next_block(vectorized::Block* block) {
                 auto s = _input_block->convert_to_vec_block(block);
                 if (UNLIKELY(!s.ok())) {
                     LOG(WARNING) << "failed to read next block: " << s.to_string();
-                    return Status::OLAPInternalError(OLAP_ERR_STRING_OVERFLOW_IN_VEC_ENGINE);
+                    return Status::Error<STRING_OVERFLOW_IN_VEC_ENGINE>();
                 }
             }
             is_first = false;
@@ -390,11 +402,11 @@ Status BetaRowsetReader::next_block_view(vectorized::BlockView* block_view) {
         do {
             auto s = _iterator->next_block_view(block_view);
             if (!s.ok()) {
-                if (s.is_end_of_file()) {
-                    return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+                if (s.is<END_OF_FILE>()) {
+                    return Status::Error<END_OF_FILE>();
                 } else {
                     LOG(WARNING) << "failed to read next block: " << s.to_string();
-                    return Status::OLAPInternalError(OLAP_ERR_ROWSET_READ_FAILED);
+                    return Status::Error<ROWSET_READ_FAILED>();
                 }
             }
         } while (block_view->empty());

@@ -36,6 +36,7 @@
 #include "olap/tablet_schema.h"
 #include "util/crc32c.h"
 #include "util/slice.h" // Slice
+#include "vec/data_types/data_type_factory.hpp"
 #include "vec/olap/vgeneric_iterators.h"
 
 namespace doris {
@@ -199,7 +200,7 @@ Status Segment::_parse_footer() {
     }
     if (_footer.num_rows() == 0) {
         // this is a pad segment
-        return Status::OLAPInternalError(EMPTY_SEGMENT);
+        return Status::Error<EMPTY_SEGMENT>();
     }
     return Status::OK();
 }
@@ -211,6 +212,7 @@ Status Segment::_load_pk_bloom_filter() {
     return _load_pk_bf_once.call([this] {
         RETURN_IF_ERROR(_pk_index_reader->parse_bf(_file_reader, _footer.primary_key_index_meta()));
         _meta_mem_usage += _pk_index_reader->get_bf_memory_size();
+        _segment_meta_mem_tracker->consume(_pk_index_reader->get_bf_memory_size());
         return Status::OK();
     });
 }
@@ -227,6 +229,7 @@ Status Segment::load_index() {
             RETURN_IF_ERROR(
                     _pk_index_reader->parse_index(_file_reader, _footer.primary_key_index_meta()));
             _meta_mem_usage += _pk_index_reader->get_memory_size();
+            _segment_meta_mem_tracker->consume(_pk_index_reader->get_memory_size());
             return Status::OK();
         } else {
             // read and parse short key index page
@@ -346,20 +349,18 @@ Status Segment::lookup_row_key(const Slice& key, RowLocation* row_location) {
     row_location->segment_id = _segment_id;
 
     if (has_seq_col) {
-        MemPool pool;
         size_t num_to_read = 1;
-        std::unique_ptr<ColumnVectorBatch> cvb;
-        RETURN_IF_ERROR(ColumnVectorBatch::create(num_to_read, false, _pk_index_reader->type_info(),
-                                                  nullptr, &cvb));
-        ColumnBlock block(cvb.get(), &pool);
-        ColumnBlockView column_block_view(&block);
+        auto index_type = vectorized::DataTypeFactory::instance().create_data_type(
+                _pk_index_reader->type_info()->type(), 1, 0);
+        auto index_column = index_type->create_column();
         size_t num_read = num_to_read;
-        RETURN_IF_ERROR(index_iterator->next_batch(&num_read, &column_block_view));
+        RETURN_IF_ERROR(index_iterator->next_batch(&num_read, index_column));
         DCHECK(num_to_read == num_read);
 
-        const Slice* sought_key = reinterpret_cast<const Slice*>(cvb->cell_ptr(0));
+        Slice sought_key =
+                Slice(index_column->get_data_at(0).data, index_column->get_data_at(0).size);
         Slice sought_key_without_seq =
-                Slice(sought_key->get_data(), sought_key->get_size() - seq_col_length);
+                Slice(sought_key.get_data(), sought_key.get_size() - seq_col_length);
 
         // compare key
         if (key_without_seq.compare(sought_key_without_seq) != 0) {
@@ -370,12 +371,28 @@ Status Segment::lookup_row_key(const Slice& key, RowLocation* row_location) {
         Slice sequence_id =
                 Slice(key.get_data() + key_without_seq.get_size() + 1, seq_col_length - 1);
         Slice previous_sequence_id = Slice(
-                sought_key->get_data() + sought_key_without_seq.get_size() + 1, seq_col_length - 1);
+                sought_key.get_data() + sought_key_without_seq.get_size() + 1, seq_col_length - 1);
         if (sequence_id.compare(previous_sequence_id) < 0) {
             return Status::AlreadyExist("key with higher sequence id exists");
         }
     }
 
+    return Status::OK();
+}
+
+Status Segment::read_key_by_rowid(uint32_t row_id, std::string* key) {
+    RETURN_IF_ERROR(load_pk_index_and_bf());
+    std::unique_ptr<segment_v2::IndexedColumnIterator> iter;
+    RETURN_IF_ERROR(_pk_index_reader->new_iterator(&iter));
+
+    auto index_type = vectorized::DataTypeFactory::instance().create_data_type(
+            _pk_index_reader->type_info()->type(), 1, 0);
+    auto index_column = index_type->create_column();
+    RETURN_IF_ERROR(iter->seek_to_ordinal(row_id));
+    size_t num_read = 1;
+    RETURN_IF_ERROR(iter->next_batch(&num_read, index_column));
+    CHECK(num_read == 1);
+    *key = index_column->get_data_at(0).to_string();
     return Status::OK();
 }
 

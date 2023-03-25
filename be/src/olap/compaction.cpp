@@ -36,6 +36,7 @@
 using std::vector;
 
 namespace doris {
+using namespace ErrorCode;
 
 Compaction::Compaction(TabletSharedPtr tablet, const std::string& label)
         : _tablet(tablet),
@@ -68,14 +69,14 @@ Status Compaction::quick_rowsets_compact() {
     if (!lock.owns_lock()) {
         LOG(WARNING) << "The tablet is under cumulative compaction. tablet="
                      << _tablet->full_name();
-        return Status::OLAPInternalError(OLAP_ERR_CE_TRY_CE_LOCK_ERROR);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
 
     // Clone task may happen after compaction task is submitted to thread pool, and rowsets picked
     // for compaction may change. In this case, current compaction task should not be executed.
     if (_tablet->get_clone_occurred()) {
         _tablet->set_clone_occurred(false);
-        return Status::OLAPInternalError(OLAP_ERR_CUMULATIVE_CLONE_OCCURRED);
+        return Status::Error<CUMULATIVE_CLONE_OCCURRED>();
     }
 
     _input_rowsets.clear();
@@ -421,7 +422,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     if (_output_rowset == nullptr) {
         LOG(WARNING) << "rowset writer build failed. writer version:"
                      << ", output_version=" << _output_version;
-        return Status::OLAPInternalError(OLAP_ERR_ROWSET_BUILDER_INIT);
+        return Status::Error<ROWSET_BUILDER_INIT>();
     }
 #ifdef CLOUD_MODE
     RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta(), true));
@@ -500,7 +501,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     }
 
     // 4. update and persistent tablet meta
-    RETURN_NOT_OK(update_tablet_meta());
+    RETURN_NOT_OK(update_tablet_meta(&stats));
     TRACE("update tablet finished");
 
     // 5. update last success compaction time
@@ -550,22 +551,55 @@ Status Compaction::construct_input_rowset_readers() {
     return Status::OK();
 }
 
-Status Compaction::update_tablet_meta() {
+Status Compaction::update_tablet_meta(const Merger::Statistics* stats) {
     std::vector<RowsetSharedPtr> output_rowsets;
     output_rowsets.push_back(_output_rowset);
-    {
-        std::lock_guard<std::mutex> wrlock_(_tablet->get_rowset_update_lock());
-        std::lock_guard<std::shared_mutex> wrlock(_tablet->get_header_lock());
+    uint64_t missed_rows = 0;
 
-        // update dst rowset delete bitmap
-        if (_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
-            _tablet->enable_unique_key_merge_on_write()) {
-            _tablet->tablet_meta()->update_delete_bitmap(
-                    _input_rowsets, _output_rs_writer->version(), _rowid_conversion);
+    if (_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
+        _tablet->enable_unique_key_merge_on_write()) {
+        Version version = _tablet->max_version();
+        DeleteBitmap output_rowset_delete_bitmap(_tablet->tablet_id());
+        std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>> location_map;
+        // Convert the delete bitmap of the input rowsets to output rowset.
+        // New loads are not blocked, so some keys of input rowsets might
+        // be deleted during the time. We need to deal with delete bitmap
+        // of incremental data later.
+        missed_rows += _tablet->calc_compaction_output_rowset_delete_bitmap(
+                _input_rowsets, _rowid_conversion, 0, version.second + 1, &location_map,
+                &output_rowset_delete_bitmap);
+        RETURN_IF_ERROR(_tablet->check_rowid_conversion(_output_rowset, location_map));
+        location_map.clear();
+        {
+            std::lock_guard<std::mutex> wrlock_(_tablet->get_rowset_update_lock());
+            std::lock_guard<std::shared_mutex> wrlock(_tablet->get_header_lock());
+
+            // Convert the delete bitmap of the input rowsets to output rowset for
+            // incremental data.
+            missed_rows += _tablet->calc_compaction_output_rowset_delete_bitmap(
+                    _input_rowsets, _rowid_conversion, version.second, UINT64_MAX, &location_map,
+                    &output_rowset_delete_bitmap);
+            RETURN_IF_ERROR(_tablet->check_rowid_conversion(_output_rowset, location_map));
+
+            if (compaction_type() == READER_CUMULATIVE_COMPACTION) {
+                std::string err_msg = fmt::format(
+                        "cumulative compaction: the merged rows({}) is not equal to missed "
+                        "rows({}) in rowid conversion, tablet_id: {}, table_id:{}",
+                        stats->merged_rows, missed_rows, _tablet->tablet_id(), _tablet->table_id());
+                DCHECK(stats == nullptr || stats->merged_rows == missed_rows) << err_msg;
+                if (stats != nullptr && stats->merged_rows != missed_rows) {
+                    LOG(WARNING) << err_msg;
+                }
+            }
+
+            _tablet->merge_delete_bitmap(output_rowset_delete_bitmap);
+            RETURN_NOT_OK(_tablet->modify_rowsets(output_rowsets, _input_rowsets, true));
         }
-
+    } else {
+        std::lock_guard<std::shared_mutex> wrlock(_tablet->get_header_lock());
         RETURN_NOT_OK(_tablet->modify_rowsets(output_rowsets, _input_rowsets, true));
     }
+
     {
         std::shared_lock rlock(_tablet->get_header_lock());
         _tablet->save_meta();
@@ -618,7 +652,7 @@ Status Compaction::check_version_continuity(const std::vector<RowsetSharedPtr>& 
                          << prev_rowset->end_version()
                          << ", rowset version=" << rowset->start_version() << "-"
                          << rowset->end_version();
-            return Status::OLAPInternalError(OLAP_ERR_CUMULATIVE_MISS_VERSION);
+            return Status::Error<CUMULATIVE_MISS_VERSION>();
         }
         prev_rowset = rowset;
     }
@@ -641,7 +675,7 @@ Status Compaction::check_correctness(const Merger::Statistics& stats) {
                      << ", merged_row_num=" << stats.merged_rows
                      << ", filtered_row_num=" << stats.filtered_rows
                      << ", output_row_num=" << _output_rowset->num_rows();
-        return Status::OLAPInternalError(OLAP_ERR_CHECK_LINES_ERROR);
+        return Status::Error<CHECK_LINES_ERROR>();
     }
     return Status::OK();
 }

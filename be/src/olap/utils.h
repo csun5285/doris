@@ -46,6 +46,7 @@
 namespace doris {
 void write_log_info(char* buf, size_t buf_len, const char* fmt, ...);
 static const std::string DELETE_SIGN = "__DORIS_DELETE_SIGN__";
+static const std::string VERSION_COL = "__DORIS_VERSION_COL__";
 
 // 用来加速运算
 const static int32_t g_power_table[] = {1,      10,      100,      1000,      10000,
@@ -78,7 +79,7 @@ private:
 template <typename T>
 Status split_string(const std::string& base, const T separator, std::vector<std::string>* result) {
     if (!result) {
-        return Status::OLAPInternalError(OLAP_ERR_OTHER_ERROR);
+        return Status::Error<ErrorCode::INVALID_ARGUMENT>();
     }
 
     // 处理base为空的情况
@@ -308,6 +309,20 @@ struct RowLocation {
     RowsetId rowset_id;
     uint32_t segment_id;
     uint32_t row_id;
+
+    bool operator==(const RowLocation& rhs) const {
+        return rowset_id == rhs.rowset_id && segment_id == rhs.segment_id && row_id == rhs.row_id;
+    }
+
+    bool operator<(const RowLocation& rhs) const {
+        if (rowset_id != rhs.rowset_id) {
+            return rowset_id < rhs.rowset_id;
+        } else if (segment_id != rhs.segment_id) {
+            return segment_id < rhs.segment_id;
+        } else {
+            return row_id < rhs.row_id;
+        }
+    }
 };
 
 struct GlobalRowLoacation {

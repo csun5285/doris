@@ -160,7 +160,7 @@ public class CastExpr extends Expr {
             return true;
         }
         // Disable no-op casting
-        return fromType.equals(toType) && !fromType.isDecimalV3();
+        return fromType.equals(toType) && !fromType.isDecimalV3() && !fromType.isDatetimeV2();
     }
 
     public static void initBuiltins(FunctionSet functionSet) {
@@ -398,8 +398,8 @@ public class CastExpr extends Expr {
     }
 
     @Override
-    public Expr getResultValue() throws AnalysisException {
-        recursiveResetChildrenResult();
+    public Expr getResultValue(boolean inView) throws AnalysisException {
+        recursiveResetChildrenResult(inView);
         final Expr value = children.get(0);
         if (!(value instanceof LiteralExpr)) {
             return this;

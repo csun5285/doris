@@ -15,6 +15,7 @@
 #include "util/s3_util.h"
 
 namespace doris::cloud {
+using namespace ErrorCode;
 
 static constexpr int BRPC_RETRY_TIMES = 3;
 
@@ -363,9 +364,9 @@ Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job) {
         if (res.status().code() == selectdb::MetaServiceCode::OK) {
             return Status::OK();
         } else if (res.status().code() == selectdb::MetaServiceCode::JOB_ALREADY_SUCCESS) {
-            return Status::OLAPInternalError(JOB_ALREADY_SUCCESS);
+            return Status::Error<JOB_ALREADY_SUCCESS>();
         } else if (res.status().code() == selectdb::MetaServiceCode::STALE_TABLET_CACHE) {
-            return Status::OLAPInternalError(STALE_TABLET_CACHE);
+            return Status::Error<STALE_TABLET_CACHE>();
         } else if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
             Status::NotFound("failed to prepare_tablet_job: {}", res.status().msg());
         } else if (res.status().code() == selectdb::KV_TXN_CONFLICT) {
@@ -397,7 +398,7 @@ Status CloudMetaMgr::commit_tablet_job(const selectdb::TabletJobInfoPB& job,
             stats->CopyFrom(res.stats());
             return Status::OK();
         } else if (res.status().code() == selectdb::MetaServiceCode::JOB_ALREADY_SUCCESS) {
-            return Status::OLAPInternalError(JOB_ALREADY_SUCCESS);
+            return Status::Error<JOB_ALREADY_SUCCESS>();
         } else if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
             Status::NotFound("failed to commit_tablet_job: {}", res.status().msg());
         } else if (res.status().code() == selectdb::KV_TXN_CONFLICT) {

@@ -8,6 +8,7 @@
 #include "util/uuid_generator.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 static std::mutex s_base_compaction_mtx;
 static std::vector<std::shared_ptr<CloudBaseCompaction>> s_base_compactions;
@@ -43,7 +44,7 @@ Status CloudBaseCompaction::prepare_compact() {
     }
     std::unique_lock lock(_tablet->get_base_compaction_lock(), std::try_to_lock);
     if (!lock.owns_lock()) {
-        return Status::OLAPInternalError(OLAP_ERR_BE_TRY_BE_LOCK_ERROR);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
     TRACE("got base compaction lock");
 
@@ -103,10 +104,10 @@ Status CloudBaseCompaction::prepare_compact() {
     compaction_job->set_expiration(_expiration);
     compaction_job->set_lease(now + config::lease_compaction_interval_seconds * 4);
     auto st = cloud::meta_mgr()->prepare_tablet_job(job);
-    if (st.precise_code() == STALE_TABLET_CACHE) {
+    if (st.is<STALE_TABLET_CACHE>()) {
         // set last_sync_time to 0 to force sync tablet next time
         _tablet->set_last_sync_time(0);
-    } else if (st.is_not_found()) {
+    } else if (st.is<NOT_FOUND>()) {
         // tablet not found
         cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
     }
@@ -119,7 +120,7 @@ Status CloudBaseCompaction::execute_compact_impl() {
     }
     std::unique_lock lock(_tablet->get_base_compaction_lock(), std::try_to_lock);
     if (!lock.owns_lock()) {
-        return Status::OLAPInternalError(OLAP_ERR_BE_TRY_BE_LOCK_ERROR);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
     TRACE("got base compaction lock");
 
@@ -153,7 +154,7 @@ Status CloudBaseCompaction::execute_compact_impl() {
     return Status::OK();
 }
 
-Status CloudBaseCompaction::update_tablet_meta() {
+Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* stats_unused) {
     // commit compaction job
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();

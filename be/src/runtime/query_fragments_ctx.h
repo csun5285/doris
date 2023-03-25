@@ -112,6 +112,7 @@ public:
     }
 
 public:
+    ObjectPool obj_pool;
     TUniqueId query_id;
     DescriptorTbl* desc_tbl;
     bool set_rsc_info = false;
@@ -129,7 +130,6 @@ public:
     /// will clean up QueryFragmentsCtx.
     std::atomic<int> fragment_num;
     int timeout_second;
-    ObjectPool obj_pool;
     // MemTracker that is shared by all fragment instances running on this host.
     std::shared_ptr<MemTrackerLimiter> query_mem_tracker;
 

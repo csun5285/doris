@@ -117,6 +117,7 @@ public:
     vectorized::VExpr* remaining_vconjunct_root = nullptr;
     const std::set<int32_t>* output_columns = nullptr;
     IOContext io_ctx;
+    Version version;
 };
 
 // Used to read data in RowBlockV2 one by one

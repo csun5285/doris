@@ -22,6 +22,8 @@
 #include "util/time.h"
 
 namespace doris {
+using namespace ErrorCode;
+
 namespace segment_v2 {
 
 bool InvertedIndexReader::_is_match_query(InvertedIndexQueryType query_type) {
@@ -97,10 +99,8 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
         if (analyse_result.empty()) {
             LOG(WARNING) << "invalid input query_str: " << search_str
                          << ", please check your query sql";
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_INVALID_PARAMETERS,
-                    fmt::format("invalid input query_str '{}', please check your query sql",
-                                search_str));
+            return Status::InvalidArgument(
+                    "invalid input query_str '{}', please check your query sql", search_str);
         }
 
         switch (query_type) {
@@ -131,9 +131,7 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
             break;
         }
         case InvertedIndexQueryType::MATCH_PHRASE_QUERY: {
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                    fmt::format("match phrase of fulltext is not supported"));
+            return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>("match phrase of fulltext is not supported");
             // query.reset(_CLNEW lucene::search::PhraseQuery());
             // for(auto token : analyse_result) {
             //     std::wstring token_ws = std::wstring(token.begin(), token.end());
@@ -145,18 +143,14 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
         }
         default:
             LOG(ERROR) << "fulltext query do not support query type other than match.";
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                    fmt::format(
+            return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>(
                             "fulltext query do not support query type other than match, column: {}",
-                            column_name));
+                            column_name);
         }
 
     } catch (const CLuceneError& e) {
         LOG(WARNING) << "CLuceneError occured: " << e.what();
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                fmt::format("CLuceneError occured, error msg: {}", e.what()));
+        return Status::InternalError("CLuceneError occured, error msg: {}", e.what());
     }
 
     io::Path path(_path);
@@ -167,9 +161,8 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
     auto index_file_path = index_dir / index_file_name;
     if (!indexExists(index_file_path)) {
         LOG(WARNING) << "inverted index path: " << index_file_path.string() << " not exist.";
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND,
-                fmt::format("inverted index path {} not found", index_file_path.string()));
+        return Status::Error<INVERTED_INDEX_FILE_NOT_FOUND>(
+                "inverted index path {} not found", index_file_path.string());
     }
 
     roaring::Roaring result;
@@ -186,9 +179,7 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
                                 });
     } catch (const CLuceneError& e) {
         LOG(WARNING) << "CLuceneError occured: " << e.what();
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                fmt::format("CLuceneError occured, error msg: {}", e.what()));
+        return Status::InternalError("CLuceneError occured, error msg: {}", e.what());
     }
     bit_map->swap(result);
     return Status::OK();
@@ -229,9 +220,8 @@ Status StringTypeInvertedIndexReader::query(const std::string& column_name, cons
     auto index_file_path = index_dir / index_file_name;
     if (!indexExists(index_file_path)) {
         LOG(WARNING) << "inverted index path: " << index_file_path.string() << " not exist.";
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND,
-                fmt::format("inverted index path {} not found", index_file_path.string()));
+        return Status::Error<INVERTED_INDEX_FILE_NOT_FOUND>(
+                "inverted index path {} not found", index_file_path.string());
     }
 
     switch (query_type) {
@@ -263,15 +253,12 @@ Status StringTypeInvertedIndexReader::query(const std::string& column_name, cons
     default:
         LOG(ERROR) << "invalid query type when query untokenized inverted index";
         if (_is_match_query(query_type)) {
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                    fmt::format("'{}' is untokenized inverted index, please use equal query "
-                                "instead of match query",
-                                column_name));
+            return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>(
+                    "'{}' is untokenized inverted index, please use equal query "
+                    "instead of match query", column_name);
         }
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                fmt::format("invalid query type when query untokenized inverted index"));
+        return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>(
+                "invalid query type when query untokenized inverted index");
     }
 
     roaring::Roaring result;
@@ -288,9 +275,7 @@ Status StringTypeInvertedIndexReader::query(const std::string& column_name, cons
                                 });
     } catch (const CLuceneError& e) {
         LOG(WARNING) << "CLuceneError occured: " << e.what();
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                fmt::format("CLuceneError occured, error msg: {}", e.what()));
+        return Status::InternalError("CLuceneError occured, error msg: {}", e.what());
     }
 
     bit_map->swap(result);
@@ -334,7 +319,7 @@ Status BkdIndexReader::bkd_query(const std::string& column_name, const void* que
     auto status = get_bkd_reader(tmp_reader);
     if (!status.ok()) {
         LOG(WARNING) << "get bkd reader for column " << column_name
-                     << " failed: " << status.get_error_msg();
+                     << " failed: " << status;
         return status;
     }
     r.reset(tmp_reader);
@@ -372,8 +357,7 @@ Status BkdIndexReader::bkd_query(const std::string& column_name, const void* que
     }
     default:
         LOG(ERROR) << "invalid query type when query bkd index";
-        return Status::OLAPInternalError(OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                                         fmt::format("invalid query type when query bkd index"));
+        return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>("invalid query type when query bkd index");
     }
     //visitor->set_min((uint8_t*)min.data());
     //visitor->set_max((uint8_t*)max.data());
@@ -394,9 +378,7 @@ Status BkdIndexReader::try_query(const std::string& column_name, const void* que
         *count = r->estimate_point_count(visitor.get());
     } catch (const CLuceneError& e) {
         LOG(WARNING) << "BKD Query Error Occurred: " << e.what();
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                fmt::format("BKD Query Error Occurred, error msg: {}", e.what()));
+        return Status::InternalError("BKD Query Error Occurred, error msg: {}", e.what());
     }
 
     LOG(INFO) << "BKD index try search time taken: " << UnixMillis() - start << "ms "
@@ -417,9 +399,7 @@ Status BkdIndexReader::query(const std::string& column_name, const void* query_v
         r->intersect(visitor.get());
     } catch (const CLuceneError& e) {
         LOG(WARNING) << "BKD Query Error Occurred: " << e.what();
-        return Status::OLAPInternalError(
-                OLAP_ERR_INVERTED_INDEX_CLUCENE_ERROR,
-                fmt::format("BKD Query Error Occurred, error msg: {}", e.what()));
+        return Status::InternalError("BKD Query Error Occurred, error msg: {}", e.what());
     }
 
     LOG(INFO) << "BKD index search time taken: " << UnixMillis() - start << "ms "
@@ -431,8 +411,7 @@ Status BkdIndexReader::query(const std::string& column_name, const void* query_v
 Status BkdIndexReader::get_bkd_reader(lucene::util::bkd::bkd_reader*& bkdReader) {
     // bkd file reader
     if (compoundReader == nullptr) {
-        return Status::OLAPInternalError(OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND,
-                                         fmt::format("bkd index input file not found"));
+        return Status::Error<INVERTED_INDEX_FILE_NOT_FOUND>("bkd index input file not found");
     }
     CLuceneError err;
     lucene::store::IndexInput* data_in;
@@ -448,8 +427,7 @@ Status BkdIndexReader::get_bkd_reader(lucene::util::bkd::bkd_reader*& bkdReader)
         !compoundReader->openInput(
                 InvertedIndexDescriptor::get_temporary_bkd_index_file_name().c_str(), index_in,
                 err)) {
-        return Status::OLAPInternalError(OLAP_ERR_INVERTED_INDEX_FILE_NOT_FOUND,
-                                         fmt::format("bkd index input error: {}", err.what()));
+        return Status::Error<INVERTED_INDEX_FILE_NOT_FOUND>("bkd index input error: {}", err.what());
     }
 
     bkdReader = new lucene::util::bkd::bkd_reader(data_in);
@@ -463,8 +441,7 @@ Status BkdIndexReader::get_bkd_reader(lucene::util::bkd::bkd_reader*& bkdReader)
     if (_type_info == nullptr) {
         auto type = bkdReader->type;
         delete bkdReader;
-        return Status::OLAPInternalError(OLAP_ERR_INVERTED_INDEX_NOT_SUPPORTED,
-                                         fmt::format("unsupported typeinfo, type={}", type));
+        return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>("unsupported typeinfo, type={}", type);
     }
     _value_key_coder = get_key_coder(_type_info->type());
     return Status::OK();
@@ -706,11 +683,9 @@ Status InvertedIndexIterator::read_from_inverted_index(
         if (hit_count > segment_num_rows * query_bkd_limit_percent / 100) {
             LOG(INFO) << "hit count: " << hit_count << ", reached limit " << query_bkd_limit_percent
                       << "%, segment num rows: " << segment_num_rows;
-            return Status::OLAPInternalError(
-                    OLAP_ERR_INVERTED_INDEX_HIT_LIMIT,
-                    fmt::format("hit count '{}' for bkd inverted reached limit '{}%', segment num "
-                                "rows: {}",
-                                hit_count, query_bkd_limit_percent, segment_num_rows));
+            return Status::Error<INVERTED_INDEX_FILE_HIT_LIMIT>(
+                    "hit count '{}' for bkd inverted reached limit '{}%', segment num "
+                    "rows: {}", hit_count, query_bkd_limit_percent, segment_num_rows);
         }
     }
 

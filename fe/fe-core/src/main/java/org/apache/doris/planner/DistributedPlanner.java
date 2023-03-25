@@ -538,8 +538,14 @@ public class DistributedPlanner {
         // they are naturally colocate relationship no need to check colocate group
         Collection<Long> leftPartitions = leftRoot.getSelectedPartitionIds();
         Collection<Long> rightPartitions = rightRoot.getSelectedPartitionIds();
-        boolean noNeedCheckColocateGroup = (leftTable.getId() == rightTable.getId())
-                && (leftPartitions.equals(rightPartitions)) && (leftPartitions.size() <= 1);
+
+        // For UT or no partition is selected, getSelectedIndexId() == -1, see selectMaterializedView()
+        boolean hitSameIndex = (leftTable.getId() == rightTable.getId())
+                && (leftRoot.getSelectedIndexId() != -1 && rightRoot.getSelectedIndexId() != -1)
+                && (leftRoot.getSelectedIndexId() == rightRoot.getSelectedIndexId());
+
+        boolean noNeedCheckColocateGroup = hitSameIndex && (leftPartitions.equals(rightPartitions))
+                && (leftPartitions.size() <= 1);
 
         if (!noNeedCheckColocateGroup) {
             ColocateTableIndex colocateIndex = Env.getCurrentColocateIndex();
@@ -663,7 +669,7 @@ public class DistributedPlanner {
                     continue;
                 }
 
-                SlotRef leftSlot = node.getChild(0).findSrcSlotRef(lhsJoinExpr.getSrcSlotRef());
+                SlotRef leftSlot = node.getChild(0).findSrcSlotRef(lhsJoinExpr.unwrapSlotRef());
                 if (leftSlot.getTable() instanceof OlapTable
                         && leftScanNode.desc.getSlots().contains(leftSlot.getDesc())) {
                     // table name in SlotRef is not the really name. `select * from test as t`
@@ -681,7 +687,11 @@ public class DistributedPlanner {
                 // check the rhs join expr type is same as distribute column
                 for (int j = 0; j < leftJoinColumnNames.size(); j++) {
                     if (leftJoinColumnNames.get(j).equals(distributeColumnName)) {
-                        if (rightExprs.get(j).getType().equals(leftDistributeColumns.get(i).getType())) {
+                        // varchar and string type don't need to check the length property
+                        if ((rightExprs.get(j).getType().isVarcharOrStringType()
+                                && leftDistributeColumns.get(i).getType().isVarcharOrStringType())
+                                || (rightExprs.get(j).getType()
+                                        .equals(leftDistributeColumns.get(i).getType()))) {
                             rhsJoinExprs.add(rightExprs.get(j));
                             findRhsExprs = true;
                             break;

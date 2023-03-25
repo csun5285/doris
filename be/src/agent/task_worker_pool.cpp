@@ -57,6 +57,7 @@
 #include "util/trace.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(agent_task_queue_size, MetricUnit::NOUNIT);
 
@@ -222,7 +223,7 @@ void TaskWorkerPool::start() {
 
     for (int i = 0; i < _worker_count; i++) {
         auto st = _thread_pool->submit_func(cb);
-        CHECK(st.ok()) << st.to_string();
+        CHECK(st.ok()) << st;
     }
 #endif
 }
@@ -537,7 +538,7 @@ void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_invert
         EngineAlterInvertedIndexTask engine_task(alter_inverted_index_request.alter_inverted_index_req);
         Status sc_status = _env->storage_engine()->execute_task(&engine_task);
         if (!sc_status.ok()) {
-            if (sc_status.precise_code() == OLAP_ERR_DATA_QUALITY_ERR) {
+            if (sc_status.is<DATA_QUALITY_ERR>()) {
                 error_msgs.push_back("The data quality does not satisfy, please check your data. ");
             }
             status = Status::DataQualityError("The data quality does not satisfy");
@@ -580,9 +581,8 @@ void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_invert
         error_msgs.push_back(process_name + " failed");
         error_msgs.push_back("status: " + status.to_string());
     }
-    task_status.__set_status_code(status.code());
-    task_status.__set_error_msgs(error_msgs);
-    finish_task_request->__set_task_status(task_status);
+    finish_task_request->__set_task_status(status.to_thrift());
+    finish_task_request->task_status.__set_error_msgs(error_msgs);
 }
 
 void TaskWorkerPool::_alter_tablet_worker_thread_callback() {
@@ -664,7 +664,7 @@ void TaskWorkerPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, int6
     finish_task_request->__set_task_type(task_type);
     finish_task_request->__set_signature(signature);
 
-    if (!status.ok() && status.code() != TStatusCode::NOT_IMPLEMENTED_ERROR) {
+    if (!status.ok() && !status.is<NOT_IMPLEMENTED_ERROR>()) {
         LOG_WARNING("failed to {}", process_name)
                 .tag("signature", agent_task_req.signature)
                 .tag("base_tablet_id", agent_task_req.alter_tablet_req_v2.base_tablet_id)
@@ -674,8 +674,7 @@ void TaskWorkerPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, int6
         LOG_INFO("successfully {}", process_name)
                 .tag("signature", agent_task_req.signature)
                 .tag("base_tablet_id", agent_task_req.alter_tablet_req_v2.base_tablet_id)
-                .tag("job_id", agent_task_req.alter_tablet_req_v2.job_id)
-                .tag("status", status.get_error_msg());
+                .tag("job_id", agent_task_req.alter_tablet_req_v2.job_id);
     }
     finish_task_request->__set_task_status(status.to_thrift());
 }
@@ -845,7 +844,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
             status = _env->storage_engine()->execute_task(&engine_task);
             if (status.ok()) {
                 break;
-            } else if (status.precise_code() == OLAP_ERR_PUBLISH_VERSION_NOT_CONTINUOUS) {
+            } else if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>()) {
                 int64_t time_elapsed = time(nullptr) - agent_task_req.recv_time;
                 if (time_elapsed > PUBLISH_TIMEOUT_SEC) {
                     LOG(INFO) << "task elapsed " << time_elapsed
@@ -869,7 +868,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }
-        if (status.precise_code() == OLAP_ERR_PUBLISH_VERSION_NOT_CONTINUOUS && !is_task_timeout) {
+        if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>() && !is_task_timeout) {
             continue;
         }
 
@@ -915,6 +914,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
         finish_task_request.__set_task_type(agent_task_req.task_type);
         finish_task_request.__set_signature(agent_task_req.signature);
         finish_task_request.__set_report_version(_s_report_version);
+        finish_task_request.__set_error_tablet_ids(error_tablet_ids);
 
         _finish_task(finish_task_request);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);

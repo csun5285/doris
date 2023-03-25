@@ -67,7 +67,7 @@ public:
             _data_row_ptrs.emplace_back(std::move(row));
         }
         return append_and_flush(reinterpret_cast<char*>(&row_ptr), sizeof(row_ptr),
-                sizeof(PDataRow*) + row_ptr->ByteSizeLong());
+                                sizeof(PDataRow*) + row_ptr->ByteSizeLong());
     }
 
     Status append(const char* data, size_t size) override {
