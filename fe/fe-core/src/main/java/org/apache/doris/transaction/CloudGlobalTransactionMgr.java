@@ -293,7 +293,11 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 && commitTxnResponse.getStatus().getCode() != MetaServiceCode.TXN_ALREADY_VISIBLE) {
             LOG.warn("commitTxn failed, transactionId={}, for {} times, commitTxnResponse:{}",
                     transactionId, retryTime, commitTxnResponse);
-            throw new UserException("internal error, try later");
+            StringBuilder internalMsgBuilder = new StringBuilder("commitTxn failed, transactionId=");
+            internalMsgBuilder.append(transactionId);
+            internalMsgBuilder.append(" code=");
+            internalMsgBuilder.append(commitTxnResponse.getStatus().getCode());
+            throw new UserException("internal error, try later", internalMsgBuilder.toString());
         }
 
         TransactionState txnState = TxnUtil.transactionStateFromPb(commitTxnResponse.getTxnInfo());

@@ -338,7 +338,9 @@ public class BrokerLoadJob extends BulkLoadJob {
                     .add("database_id", dbId)
                     .add("error_msg", "Failed to commit txn with error:" + e.getMessage())
                     .build(), e);
-            cancelJobWithoutCheck(new FailMsg(FailMsg.CancelType.LOAD_RUN_FAIL, e.getMessage()), true, true);
+
+            String msg = Config.isCloudMode() ? e.getInternalMsg() : e.getMessage();
+            cancelJobWithoutCheck(new FailMsg(FailMsg.CancelType.LOAD_RUN_FAIL, msg), true, true);
         } finally {
             MetaLockUtils.writeUnlockTables(tableList);
         }
