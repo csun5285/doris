@@ -114,8 +114,7 @@ suite("test_vertical_compaction_agg_keys") {
                 `min_dwell_time` INT MIN DEFAULT "99999" COMMENT "用户最小停留时间",
                 `hll_col` HLL HLL_UNION NOT NULL COMMENT "HLL列",
                 `bitmap_col` Bitmap BITMAP_UNION NOT NULL COMMENT "bitmap列" )
-            AGGREGATE KEY(`user_id`, `date`, `datev2`, `datetimev2_1`, `datetimev2_2`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`) BUCKETS 10
-            PROPERTIES ( "replication_num" = "1" );
+            AGGREGATE KEY(`user_id`, `date`, `datev2`, `datetimev2_1`, `datetimev2_2`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`) BUCKETS 10;
         """
 
         sql """ INSERT INTO ${tableName} VALUES
