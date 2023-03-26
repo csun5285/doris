@@ -2,7 +2,7 @@ suite("test_disable_management_cluster", "smoke") {
     def host = "127.0.0.1"
     def heart_port = 10086
     def edit_log_port = 10000
-    def user1 = "regression_test_cloud_user1"
+    def user1 = "test_disable_management_cluster_user_1"
     sql """drop user if exists ${user1}"""
 
     // 1. change user
