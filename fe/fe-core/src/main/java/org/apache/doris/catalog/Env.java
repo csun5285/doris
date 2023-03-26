@@ -6010,7 +6010,9 @@ public class Env {
         if (Config.isNotCloudMode()) {
             throw new DdlException("stage is only supported in cloud mode");
         }
-        getInternalCatalog().createStage(stmt.toStageProto(), stmt.isIfNotExists());
+        if (!stmt.isDryRun()) {
+            getInternalCatalog().createStage(stmt.toStageProto(), stmt.isIfNotExists());
+        }
     }
 
     public void dropStage(DropStageStmt stmt) throws DdlException {

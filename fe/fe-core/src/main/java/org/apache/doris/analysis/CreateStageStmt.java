@@ -23,6 +23,7 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.FeNameFormat;
+import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.UserException;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
@@ -83,7 +84,7 @@ public class CreateStageStmt extends DdlStmt {
         checkObjectStorageInfo();
     }
 
-    private void checkObjectStorageInfo() throws AnalysisException {
+    private void checkObjectStorageInfo() throws UserException {
         RemoteBase remote = null;
         try {
             tryConnect(stageProperties.getEndpoint());
@@ -118,7 +119,8 @@ public class CreateStageStmt extends DdlStmt {
                     message = message.substring(index);
                 }
             }
-            throw new AnalysisException("Incorrect object storage info, " + message);
+            throw new UserException(InternalErrorCode.GET_REMOTE_DATA_ERROR,
+                    "Incorrect object storage info, " + message);
         } finally {
             if (remote != null) {
                 remote.close();
@@ -167,6 +169,10 @@ public class CreateStageStmt extends DdlStmt {
             stageBuilder.setRoleName(stageProperties.getRoleName()).setArn(stageProperties.getArn());
         }
         return stageBuilder.build();
+    }
+
+    public boolean isDryRun() {
+        return stageProperties.isDryRun();
     }
 
     @Override

@@ -131,7 +131,7 @@ public class CopyProperties {
         analyzeBooleanProperty(USE_DELETE_SIGN);
     }
 
-    private void analyzeBooleanProperty(String keyWithoutPrefix) throws AnalysisException {
+    protected void analyzeBooleanProperty(String keyWithoutPrefix) throws AnalysisException {
         String key = addKeyPrefix(keyWithoutPrefix);
         if (properties.containsKey(key)) {
             String value = properties.get(key);

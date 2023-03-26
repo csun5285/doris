@@ -52,6 +52,7 @@ public class StageProperties extends CopyProperties {
     private static final String ACCESS_BY_AKSK = "aksk";
     private static final String ACCESS_BY_IAM = "iam";
     private static final String ACCESS_BY_BUCKET_ACL = "bucket_acl";
+    private static final String DRY_RUN = "dry_run";
 
     private static final ImmutableSet<String> STORAGE_REQUIRED_PROPERTIES = new ImmutableSet.Builder<String>().add(
             ENDPOINT).add(REGION).add(BUCKET).add(PROVIDER).add(ACCESS_TYPE).build();
@@ -65,7 +66,7 @@ public class StageProperties extends CopyProperties {
             .add(KEY_PREFIX + PARAM_FUZZY_PARSE).add(KEY_PREFIX + PARAM_NUM_AS_STRING)
             .add(KEY_PREFIX + PARAM_JSONPATHS).add(KEY_PREFIX + PARAM_JSONROOT)
             .add(KEY_PREFIX + SIZE_LIMIT).add(KEY_PREFIX + ON_ERROR).add(KEY_PREFIX + ASYNC)
-            .add(KEY_PREFIX + STRICT_MODE).add(KEY_PREFIX + LOAD_PARALLELISM).build();
+            .add(KEY_PREFIX + STRICT_MODE).add(KEY_PREFIX + LOAD_PARALLELISM).add(DRY_RUN).build();
 
     public StageProperties(Map<String, String> properties) {
         super(properties, KEY_PREFIX);
@@ -80,6 +81,7 @@ public class StageProperties extends CopyProperties {
         analyzeStrictMode();
         analyzeLoadParallelism();
         analyzeAccessType();
+        analyzeDryRun();
         for (Entry<String, String> entry : properties.entrySet()) {
             if (!STAGE_PROPERTIES.contains(entry.getKey())) {
                 throw new AnalysisException("Property '" + entry.getKey() + "' is invalid");
@@ -136,6 +138,14 @@ public class StageProperties extends CopyProperties {
         if (!EnumUtils.isValidEnumIgnoreCase(ObjectStoreInfoPB.Provider.class, provider)) {
             throw new AnalysisException("Property " + PROVIDER + " with invalid value " + provider);
         }
+    }
+
+    protected void analyzeDryRun() throws AnalysisException {
+        analyzeBooleanProperty(DRY_RUN);
+    }
+
+    public boolean isDryRun() {
+        return properties.containsKey(DRY_RUN) ? Boolean.parseBoolean(properties.get(DRY_RUN)) : false;
     }
 
     public ObjectStoreInfoPB getObjectStoreInfoPB() {
