@@ -26,7 +26,7 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
                                            ::selectdb::RecycleInstanceResponse* response,
                                            ::google::protobuf::Closure* done) {
     auto ctrl = static_cast<brpc::Controller*>(controller);
-    LOG(INFO) << "rpc from " << ctrl->remote_side() << " request=" << request->DebugString();
+    LOG(INFO) << "rpc from " << ctrl->remote_side() << " request=" << request->ShortDebugString();
     brpc::ClosureGuard closure_guard(done);
     int ret = 0;
     MetaServiceCode code = MetaServiceCode::OK;
@@ -124,6 +124,45 @@ void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& 
     worker.detach();
 }
 
+void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
+                      MetaServiceCode& code, std::string& msg) {
+    std::unique_ptr<Transaction> txn;
+    int ret = txn_kv->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        return;
+    }
+    std::string key, val;
+    job_recycle_key({instance_id}, &key);
+    ret = txn->get(key, &val);
+    JobRecyclePB job_info;
+    if (ret != 0) {
+        if (ret == 1) { // Not found, check instance existence
+            std::string key, val;
+            instance_key({instance_id}, &key);
+            ret = txn->get(key, &val);
+            if (ret == 0) { // Never performed a recycle on this instance before
+                job_info.set_status(JobRecyclePB::IDLE);
+                job_info.set_ctime_ms(0);
+                job_info.set_last_finish_time_ms(0);
+                job_info.set_instance_id(instance_id);
+                msg = proto_to_json(job_info);
+                return;
+            }
+        }
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        msg = fmt::format("failed to get recycle job info, instance_id={}", instance_id);
+        return;
+    }
+    if (!job_info.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = fmt::format("malformed job recycle value, key={}", hex(key));
+        return;
+    }
+    msg = proto_to_json(job_info);
+}
+
 void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
                                const ::selectdb::MetaServiceHttpRequest* request,
                                ::selectdb::MetaServiceHttpResponse* response,
@@ -203,6 +242,19 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
             return;
         }
         recycle_copy_jobs(txn_kv_, *instance_id, code, msg);
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "recycle_job_info") {
+        auto instance_id = uri.GetQuery("instance_id");
+        if (instance_id == nullptr || instance_id->empty()) {
+            msg = "no instance id";
+            response_body = msg;
+            status_code = 400;
+            return;
+        }
+        recycle_job_info(txn_kv_, *instance_id, code, msg);
         response_body = msg;
         return;
     }
