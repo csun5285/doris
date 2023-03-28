@@ -8,7 +8,7 @@
 #include "util/s3_util.h"
 
 namespace doris {
-static io::S3FileSystem* s3_fs = nullptr;
+std::shared_ptr<io::S3FileSystem> s3_fs = nullptr;
 
 class S3FileSystemTest : public testing::Test {
 public:
@@ -25,22 +25,24 @@ public:
         s3_conf.region = config::test_s3_region;
         s3_conf.bucket = config::test_s3_bucket;
         s3_conf.prefix = "s3_file_system_test";
-        s3_fs = new io::S3FileSystem(std::move(s3_conf), "s3_file_system_test");
+        s3_fs = io::S3FileSystem::create(std::move(s3_conf), "s3_file_system_test");
         ASSERT_EQ(Status::OK(), s3_fs->connect());
     }
 
-    static void TearDownTestSuite() { delete s3_fs; }
+    static void TearDownTestSuite() { s3_fs.reset(); }
 };
 
 TEST_F(S3FileSystemTest, upload) {
     auto cur_path = std::filesystem::current_path();
     // upload non-existent file
-    auto st = s3_fs->upload(cur_path / "ut_dir/s3_file_system_test/no_such_file", "no_such_file");
+    auto st = s3_fs->upload(cur_path / "be/test/io/test_data/s3_file_system_test/no_such_file",
+                            "no_such_file");
     ASSERT_FALSE(st.ok());
     // upload normal file
     auto local_fs = io::global_local_filesystem();
     io::FileWriterPtr local_file;
-    st = local_fs->create_file(cur_path / "ut_dir/s3_file_system_test/normal", &local_file);
+    st = local_fs->create_file(cur_path / "be/test/io/test_data/s3_file_system_test/normal",
+                               &local_file);
     ASSERT_TRUE(st.ok());
     std::string_view content = "some bytes";
     st = local_file->append({content.data(), content.size()});

@@ -46,6 +46,13 @@ public:
         s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
         std::cout << "s3 conf: " << s3_conf.to_string() << std::endl;
         ASSERT_EQ(Status::OK(), s3_fs->connect());
+        
+        std::unique_ptr<ThreadPool> _pool;
+        ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
+                .set_min_threads(5)
+                .set_max_threads(10)
+                .build(&_pool);
+        ExecEnv::GetInstance()->_buffered_reader_prefetch_thread_pool = std::move(_pool);
     }
 
     static void TearDownTestSuite() { }
