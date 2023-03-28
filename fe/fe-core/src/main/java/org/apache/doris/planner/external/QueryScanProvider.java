@@ -202,7 +202,8 @@ public abstract class QueryScanProvider implements FileScanProviderIf {
             rangeDesc.setPath(fileSplit.getPath().toUri().getPath());
         } else if (getLocationType() == TFileType.FILE_S3 || getLocationType() == TFileType.FILE_BROKER) {
             // need full path
-            rangeDesc.setPath(fileSplit.getPath().toString());
+            String path = fileSplit.getPath().toString();
+            rangeDesc.setPath(path.startsWith("obs://") ? path.replace("obs://", "s3://") : path);
         }
         return rangeDesc;
     }

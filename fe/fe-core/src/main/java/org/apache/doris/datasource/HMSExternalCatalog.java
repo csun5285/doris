@@ -50,7 +50,7 @@ public class HMSExternalCatalog extends ExternalCatalog {
     private static final Logger LOG = LogManager.getLogger(HMSExternalCatalog.class);
 
     private static final int MAX_CLIENT_POOL_SIZE = 8;
-    protected PooledHiveMetaStoreClient client;
+    protected volatile PooledHiveMetaStoreClient client;
     // Record the latest synced event id when processing hive events
     private long lastSyncedEventId;
 
@@ -103,6 +103,15 @@ public class HMSExternalCatalog extends ExternalCatalog {
         return catalogProperty.getOrDefault(HMSResource.HIVE_METASTORE_URIS, "");
     }
 
+    public void refreshCatalog() {
+        LOG.error("initLocalObjectsImpl");
+        initLocalObjectsImpl();
+        if (!objectCreated) {
+            objectCreated = true;
+        }
+
+    }
+
     @Override
     protected void init() {
         Map<String, Long> tmpDbNameToId = Maps.newConcurrentMap();
@@ -140,7 +149,6 @@ public class HMSExternalCatalog extends ExternalCatalog {
         for (Map.Entry<String, String> kv : catalogProperty.getHadoopProperties().entrySet()) {
             hiveConf.set(kv.getKey(), kv.getValue());
         }
-
         String authentication = catalogProperty.getOrDefault(
                 HdfsResource.HADOOP_SECURITY_AUTHENTICATION, "");
         if (AuthType.KERBEROS.getDesc().equals(authentication)) {
@@ -160,7 +168,6 @@ public class HMSExternalCatalog extends ExternalCatalog {
                 throw new HMSClientException("login with kerberos auth failed for catalog %s", e, this.getName());
             }
         }
-
         client = new PooledHiveMetaStoreClient(hiveConf, MAX_CLIENT_POOL_SIZE);
     }
 
@@ -265,5 +272,17 @@ public class HMSExternalCatalog extends ExternalCatalog {
         dbNameToId.put(dbName, dbId);
         HMSExternalDatabase db = new HMSExternalDatabase(this, dbId, dbName);
         idToDb.put(dbId, db);
+    }
+
+    @Override
+    protected boolean supportDryRun() {
+        return true;
+    }
+
+    @Override
+    protected void tryGetMetadata() {
+        initLocalObjects();
+        List<String> allDatabases = client.getAllDatabases();
+        LOG.info("TryGetMetadata:{}", allDatabases);
     }
 }

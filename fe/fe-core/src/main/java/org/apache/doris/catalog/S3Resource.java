@@ -25,8 +25,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.annotations.SerializedName;
-import org.apache.hadoop.fs.s3a.Constants;
-import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -63,7 +61,6 @@ import java.util.Optional;
 public class S3Resource extends Resource {
     private static final Logger LOG = LogManager.getLogger(S3Resource.class);
     public static final String S3_PROPERTIES_PREFIX = "AWS";
-    public static final String S3_FS_PREFIX = "fs.s3";
     // required
     public static final String S3_ENDPOINT = "AWS_ENDPOINT";
     public static final String S3_REGION = "AWS_REGION";
@@ -164,49 +161,5 @@ public class S3Resource extends Resource {
                 result.addRow(Lists.newArrayList(name, lowerCaseType, entry.getKey(), entry.getValue()));
             }
         }
-    }
-
-    public static Map<String, String> getS3HadoopProperties(Map<String, String> properties) {
-        Map<String, String> s3Properties = Maps.newHashMap();
-        if (properties.containsKey(S3_ACCESS_KEY)) {
-            s3Properties.put(Constants.ACCESS_KEY, properties.get(S3_ACCESS_KEY));
-        }
-        if (properties.containsKey(S3Resource.S3_SECRET_KEY)) {
-            s3Properties.put(Constants.SECRET_KEY, properties.get(S3_SECRET_KEY));
-        }
-        if (properties.containsKey(S3Resource.S3_ENDPOINT)) {
-            s3Properties.put(Constants.ENDPOINT, properties.get(S3_ENDPOINT));
-        }
-        if (properties.containsKey(S3Resource.S3_REGION)) {
-            s3Properties.put(Constants.AWS_REGION, properties.get(S3_REGION));
-        }
-        if (properties.containsKey(S3Resource.S3_MAX_CONNECTIONS)) {
-            s3Properties.put(Constants.MAXIMUM_CONNECTIONS, properties.get(S3_MAX_CONNECTIONS));
-        }
-        if (properties.containsKey(S3Resource.S3_REQUEST_TIMEOUT_MS)) {
-            s3Properties.put(Constants.REQUEST_TIMEOUT, properties.get(S3_REQUEST_TIMEOUT_MS));
-        }
-        if (properties.containsKey(S3Resource.S3_CONNECTION_TIMEOUT_MS)) {
-            s3Properties.put(Constants.SOCKET_TIMEOUT, properties.get(S3_CONNECTION_TIMEOUT_MS));
-        }
-        s3Properties.put(Constants.MAX_ERROR_RETRIES, "2");
-        s3Properties.put("fs.s3.impl.disable.cache", "true");
-        s3Properties.put("fs.s3.impl", S3AFileSystem.class.getName());
-
-        s3Properties.put(Constants.PATH_STYLE_ACCESS, properties.getOrDefault(S3Resource.USE_PATH_STYLE, "false"));
-        if (properties.containsKey(S3Resource.S3_TOKEN)) {
-            s3Properties.put(Constants.SESSION_TOKEN, properties.get(S3_TOKEN));
-            s3Properties.put("fs.s3a.aws.credentials.provider",
-                    "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider");
-            s3Properties.put("fs.s3.impl.disable.cache", "true");
-            s3Properties.put("fs.s3a.impl.disable.cache", "true");
-        }
-        for (Map.Entry<String, String> entry : properties.entrySet()) {
-            if (entry.getKey().startsWith(S3Resource.S3_FS_PREFIX)) {
-                s3Properties.put(entry.getKey(), entry.getValue());
-            }
-        }
-
-        return s3Properties;
     }
 }

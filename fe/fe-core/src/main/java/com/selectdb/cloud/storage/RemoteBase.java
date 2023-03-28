@@ -36,6 +36,12 @@ public abstract class RemoteBase {
         private final String externalId;
         private final String token;
 
+        // Used to get sts token
+        public ObjectInfo(SelectdbCloud.ObjectStoreInfoPB.Provider provider, String ak, String sk,
+                          String endpoint, String region, String roleName, String arn, String externalId) {
+            this(provider, ak, sk, null, endpoint, region, null, roleName, arn, externalId, null);
+        }
+
         // Used by UT
         public ObjectInfo(SelectdbCloud.ObjectStoreInfoPB.Provider provider,
                           String ak, String sk, String bucket, String endpoint, String region, String prefix) {

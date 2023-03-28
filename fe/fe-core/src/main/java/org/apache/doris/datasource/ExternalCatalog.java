@@ -17,16 +17,23 @@
 
 package org.apache.doris.datasource;
 
+import org.apache.doris.analysis.StorageBackend;
+import org.apache.doris.analysis.StorageBackend.StorageType;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.S3Resource;
 import org.apache.doris.catalog.external.EsExternalDatabase;
 import org.apache.doris.catalog.external.ExternalDatabase;
 import org.apache.doris.catalog.external.ExternalTable;
 import org.apache.doris.catalog.external.HMSExternalDatabase;
 import org.apache.doris.catalog.external.IcebergExternalDatabase;
 import org.apache.doris.catalog.external.JdbcExternalDatabase;
+import org.apache.doris.catalog.iam.IAMTokenMgr;
+import org.apache.doris.catalog.iam.RoleKeys;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.InternalErrorCode;
+import org.apache.doris.common.UserException;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.Util;
@@ -74,15 +81,22 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
     protected Map<Long, ExternalDatabase> idToDb = Maps.newConcurrentMap();
     // db name does not contains "default_cluster"
     protected Map<String, Long> dbNameToId = Maps.newConcurrentMap();
-    private boolean objectCreated = false;
+    protected volatile boolean objectCreated = false;
     protected boolean invalidCacheInInit = true;
 
     private ExternalSchemaCache schemaCache;
+
+    public static final String S3_IDENT_PROP = S3Resource.S3_REGION;
+    public static final String ROLE_NAME_PROP = "role_name";
+    public static final String ARN_PROP = "arn";
+    public static final String EXTERNAL_ID_PROP = "external_id";
 
     public ExternalCatalog(long catalogId, String name) {
         this.id = catalogId;
         this.name = name;
     }
+
+    public void refreshCatalog() {}
 
     /**
      * @return names of database in this catalog.
@@ -374,6 +388,62 @@ public abstract class ExternalCatalog implements CatalogIf<ExternalDatabase>, Wr
 
     public void createDatabase(long dbId, String dbName) {
         throw new NotImplementedException();
+    }
+
+    public void dryRun() throws UserException {
+        if (!supportDryRun()) {
+            return;
+        }
+        try {
+            tryGetMetadata();
+        } catch (Exception e) {
+            throw new UserException(InternalErrorCode.GET_REMOTE_METADATA_ERROR, "connection failed," + e.getMessage());
+        }
+        try {
+            tryGetData();
+        } catch (Exception e) {
+            throw new UserException(InternalErrorCode.GET_REMOTE_DATA_ERROR, "connection failed," + e.getMessage());
+        }
+    }
+
+    protected boolean supportDryRun() {
+        return false;
+    }
+
+    protected void tryGetMetadata() {
+        throw new NotImplementedException();
+    }
+
+    protected void tryGetData() throws DdlException {
+        StorageType storageType = getStorageType();
+        if (storageType == null) {
+            return;
+        }
+        switch (storageType) {
+            case S3:
+                tryGetS3Data();
+                break;
+            default:
+                return;
+        }
+    }
+
+    protected StorageBackend.StorageType getStorageType() {
+        if (getCatalogProperty().getProperties().containsKey(S3_IDENT_PROP)) {
+            return StorageType.S3;
+        }
+        return null;
+    }
+
+
+    protected void tryGetS3Data() throws DdlException {
+        Map<String, String> properties = getCatalogProperty().getProperties();
+        if (properties.containsKey(ARN_PROP)) {
+            IAMTokenMgr.checkGetStsToken(
+                    RoleKeys.of(properties.get(S3Resource.S3_ENDPOINT), properties.get(S3Resource.S3_REGION),
+                            properties.get(ROLE_NAME_PROP), properties.get(ARN_PROP),
+                            properties.get(EXTERNAL_ID_PROP)));
+        }
     }
 }
 

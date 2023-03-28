@@ -26,6 +26,7 @@ import org.apache.doris.analysis.ShowCatalogStmt;
 import org.apache.doris.analysis.ShowCreateCatalogStmt;
 import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.ExternalCatalogHook;
 import org.apache.doris.catalog.Resource;
 import org.apache.doris.catalog.Resource.ReferenceType;
 import org.apache.doris.catalog.TableIf;
@@ -77,6 +78,7 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
     private static final Logger LOG = LogManager.getLogger(CatalogMgr.class);
 
     private static final String YES = "yes";
+    public static final String DRY_RUN_PROP = "dry_run";
 
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock(true);
 
@@ -91,8 +93,11 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
     // internalDataSource still exists in idToDataSource and nameToDataSource
     private InternalCatalog internalCatalog;
 
+    private ExternalCatalogHook hook;
+
     public CatalogMgr() {
         initInternalCatalog();
+        hook = new ExternalCatalogHook();
     }
 
     public static CatalogMgr read(DataInput in) throws IOException {
@@ -108,6 +113,9 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
     private void addCatalog(CatalogIf catalog) {
         nameToCatalog.put(catalog.getName(), catalog);
         idToCatalog.put(catalog.getId(), catalog);
+        if (catalog instanceof ExternalCatalog) {
+            hook.addCatalog((ExternalCatalog) catalog);
+        }
         if (!Strings.isNullOrEmpty(catalog.getResource())) {
             Env.getCurrentEnv().getResourceMgr().getResource(catalog.getResource())
                     .addReference(catalog.getName(), ReferenceType.CATALOG);
@@ -116,6 +124,9 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
 
     private CatalogIf removeCatalog(long catalogId) {
         CatalogIf catalog = idToCatalog.remove(catalogId);
+        if (catalog instanceof ExternalCatalog) {
+            hook.removeCatalog((ExternalCatalog) catalog);
+        }
         if (catalog != null) {
             catalog.onClose();
             nameToCatalog.remove(catalog.getName());
@@ -235,6 +246,23 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
      * Create and hold the catalog instance and write the meta log.
      */
     public void createCatalog(CreateCatalogStmt stmt) throws UserException {
+        if (checkIfDryRun(stmt.getProperties())) {
+            createCatalogDryRun(stmt);
+        } else {
+            createCatalogReal(stmt);
+        }
+
+    }
+
+    private void createCatalogDryRun(CreateCatalogStmt stmt) throws UserException {
+        CatalogLog log = CatalogFactory.constructorCatalogLog(-1L, stmt);
+        CatalogIf catalog = CatalogFactory.constructorFromLog(log);
+        if (catalog instanceof ExternalCatalog) {
+            ((ExternalCatalog) catalog).dryRun();
+        }
+    }
+
+    private void createCatalogReal(CreateCatalogStmt stmt) throws UserException {
         writeLock();
         try {
             if (nameToCatalog.containsKey(stmt.getCatalogName())) {
@@ -254,6 +282,10 @@ public class CatalogMgr implements Writable, GsonPostProcessable {
         } finally {
             writeUnlock();
         }
+    }
+
+    private boolean checkIfDryRun(Map<String, String> properties) {
+        return "true".equalsIgnoreCase(properties.get(DRY_RUN_PROP));
     }
 
     /**
