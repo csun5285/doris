@@ -236,7 +236,10 @@ public class CopyJob extends BrokerLoadJob {
         checkAndSetDataSourceInfo(db, stmt.getDataDescriptions());
         this.stageId = stmt.getStageId();
         this.stageType = stmt.getStageType();
+        this.sizeLimit = stmt.getSizeLimit();
+        this.pattern = stmt.getPattern();
         this.objectInfo = stmt.getObjectInfo();
+        this.forceCopy = stmt.isForce();
         this.isReplay = true;
     }
 

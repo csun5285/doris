@@ -32,6 +32,7 @@ import com.google.common.collect.Sets;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -89,6 +90,7 @@ public class BackendPolicy {
         if (backends.isEmpty()) {
             throw new UserException("No available backends, cluster is: " + cluster);
         }
+        Collections.shuffle(backends);
     }
 
     public Backend getNextBe() {
