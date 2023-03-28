@@ -590,7 +590,7 @@ public class StmtExecutor implements ProfileWriter {
             throw e;
         } catch (UserException e) {
             // analysis exception only print message, not print the stack
-            LOG.warn("execute Exception. {}", context.getQueryIdentifier(), e);
+            LOG.warn("execute Exception. {}, {}", context.getQueryIdentifier(), e.getMessage(), e);
             context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
             context.getState().setErrType(QueryState.ErrType.ANALYSIS_ERR);
         } catch (Exception e) {
@@ -742,7 +742,7 @@ public class StmtExecutor implements ProfileWriter {
                     if (parsedStmt instanceof LogicalPlanAdapter) {
                         throw new NereidsException(new AnalysisException("Unexpected exception: " + e.getMessage(), e));
                     }
-                    throw new AnalysisException("Unexpected exception: " + e.getMessage());
+                    throw new AnalysisException("Unexpected exception: " + e.getMessage(), e);
                 } finally {
                     MetaLockUtils.readUnlockTables(tables);
                 }
