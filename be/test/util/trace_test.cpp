@@ -68,8 +68,8 @@ static std::string XOutDigits(const string& s) {
 
 TEST_F(TraceTest, TestBasic) {
     scoped_refptr<Trace> t(new Trace);
-    TRACE_TO(t, "hello $0, $1", "world", 12345);
-    TRACE_TO(t, "goodbye $0, $1", "cruel world", 54321);
+    TRACE_TO(t, "finish hello $0, $1", "world", 12345);
+    TRACE_TO(t, "finish goodbye $0, $1", "cruel world", 54321);
 
     std::string result = XOutDigits(t->DumpToString(Trace::NO_FLAGS));
     EXPECT_EQ(
