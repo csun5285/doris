@@ -445,8 +445,32 @@ public class Coordinator {
         }
 
         if (Config.isCloudMode()) {
-            String clusterName = ConnectContext.get().getCloudCluster();
-            this.idToBackend = Env.getCurrentSystemInfo().getCloudIdToBackend(clusterName);
+            String cluster = null;
+            ConnectContext context = ConnectContext.get();
+            if (context != null) {
+                if (!Strings.isNullOrEmpty(context.getSessionVariable().getCloudCluster())) {
+                    cluster = context.getSessionVariable().getCloudCluster();
+                    try {
+                        Env.getCurrentEnv().checkCloudClusterPriv(cluster);
+                    } catch (Exception e) {
+                        LOG.warn("get cluster by session context exception", e);
+                        return;
+                    }
+                    LOG.debug("get cluster by session context cluster: {}", cluster);
+                } else {
+                    cluster = context.getCloudCluster();
+                    LOG.debug("get cluster by context {}", cluster);
+                }
+            } else {
+                LOG.warn("connect context is null in coordinator prepare");
+                return;
+            }
+
+            if (Strings.isNullOrEmpty(cluster)) {
+                LOG.warn("invalid clusterName: {}", cluster);
+            }
+
+            this.idToBackend = Env.getCurrentSystemInfo().getCloudIdToBackend(cluster);
         } else {
             this.idToBackend = Env.getCurrentSystemInfo().getIdToBackend();
         }

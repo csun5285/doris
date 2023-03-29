@@ -112,6 +112,9 @@ public class CloudReplica extends Replica {
                 cluster = context.getCloudCluster();
                 LOG.debug("get cluster by context {}", cluster);
             }
+        } else {
+            LOG.warn("connect context is null in getBackendId");
+            return -1;
         }
 
         // check default cluster valid.
@@ -178,7 +181,8 @@ public class CloudReplica extends Replica {
         // save to clusterToBackends map
         List<Long> bes = new ArrayList<Long>();
         bes.add(pickedBeId);
-        clusterToBackends.put(cluster, bes);
+        String clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cluster);
+        clusterToBackends.put(clusterId, bes);
 
         return pickedBeId;
     }
@@ -209,6 +213,13 @@ public class CloudReplica extends Replica {
         int count = in.readInt();
         for (int i = 0; i < count; ++i) {
             String clusterId = Text.readString(in);
+            String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
+            LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+
+            if (!Strings.isNullOrEmpty(realClusterId)) {
+                clusterId = realClusterId;
+            }
+
             long beId = in.readLong();
             List<Long> bes = new ArrayList<Long>();
             bes.add(beId);

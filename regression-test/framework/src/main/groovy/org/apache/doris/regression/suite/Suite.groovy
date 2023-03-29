@@ -576,7 +576,7 @@ class Suite implements GroovyInterceptable {
         def js = jsonOutput.toJson(map)
         log.info("drop cluster req: ${js} ".toString())
 
-        def add_cluster_api = { request_body, check_func ->
+        def drop_cluster_api = { request_body, check_func ->
             httpTest {
                 endpoint context.config.metaServiceHttpAddress
                 uri "/MetaService/http/drop_cluster?token=${token}"
@@ -585,7 +585,7 @@ class Suite implements GroovyInterceptable {
             }
         }
 
-        add_cluster_api.call(js) {
+        drop_cluster_api.call(js) {
             respCode, body ->
                 log.info("dorp cluster resp: ${body} ${respCode}".toString())
                 def json = parseJson(body)
@@ -679,6 +679,33 @@ class Suite implements GroovyInterceptable {
             println result[0][1]
             println addrSet
             assertTrue(addrSet.contains(result[0][1]));
+        }
+    }
+
+    def rename_cloud_cluster = { cluster_name, cluster_id ->
+        def jsonOutput = new JsonOutput()
+        def reqBody = [
+                          cluster_name : cluster_name,
+                          cluster_id : cluster_id
+                      ]
+        def map = [instance_id: "${instance_id}", cluster: reqBody]
+        def js = jsonOutput.toJson(map)
+        log.info("rename cluster req: ${js} ".toString())
+
+        def rename_cluster_api = { request_body, check_func ->
+            httpTest {
+                endpoint context.config.metaServiceHttpAddress
+                uri "/MetaService/http/rename_cluster?token=${token}"
+                body request_body
+                check check_func
+            }
+        }
+
+        rename_cluster_api.call(js) {
+            respCode, body ->
+                log.info("rename cluster resp: ${body} ${respCode}".toString())
+                def json = parseJson(body)
+                assertTrue(json.code.equalsIgnoreCase("OK"))
         }
     }
 }

@@ -1064,7 +1064,16 @@ public class InternalCatalog implements CatalogIf<Database> {
                 Tablet tablet = materializedIndex.getTablet(info.getTabletId());
                 Replica replica = tablet.getReplicaById(info.getReplicaId());
                 Preconditions.checkNotNull(replica, info);
-                ((CloudReplica) replica).updateClusterToBe(info.getClusterId(), info.getBeId());
+
+                String clusterId = info.getClusterId();
+                String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
+                LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+                if (!Strings.isNullOrEmpty(realClusterId)) {
+                    clusterId = realClusterId;
+                }
+
+                ((CloudReplica) replica).updateClusterToBe(clusterId, info.getBeId());
+
                 LOG.debug("update single cloud replica cluster {} replica {} be {}", info.getClusterId(),
                         replica.getId(), info.getBeId());
             } else {
@@ -1073,9 +1082,17 @@ public class InternalCatalog implements CatalogIf<Database> {
                     Tablet tablet = materializedIndex.getTablet(tabletIds.get(i));
                     Replica replica = tablet.getReplicas().get(0);
                     Preconditions.checkNotNull(replica, info);
+
+                    String clusterId = info.getClusterId();
+                    String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
+                    LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+                    if (!Strings.isNullOrEmpty(realClusterId)) {
+                        clusterId = realClusterId;
+                    }
+
                     LOG.debug("update cloud replica cluster {} replica {} be {}", info.getClusterId(),
                             replica.getId(), info.getBeIds().get(i));
-                    ((CloudReplica) replica).updateClusterToBe(info.getClusterId(), info.getBeIds().get(i));
+                    ((CloudReplica) replica).updateClusterToBe(clusterId, info.getBeIds().get(i));
                 }
             }
         } catch (Exception e) {

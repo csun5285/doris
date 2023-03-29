@@ -79,7 +79,7 @@ public class BrokerLoadJob extends BulkLoadJob {
     // If set to true, the profile of load job with be pushed to ProfileManager
     private boolean enableProfile = false;
 
-    private String cluster = null;
+    private String clusterId = null;
     private String qualifiedUser = null;
 
     // for log replay and unit test
@@ -108,9 +108,15 @@ public class BrokerLoadJob extends BulkLoadJob {
         if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
             if (context != null) {
-                cluster = context.getCloudCluster();
+                String clusterName = context.getCloudCluster();
+                if (Strings.isNullOrEmpty(clusterName)) {
+                    LOG.warn("cluster name is null");
+                }
+
+                this.clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterName);
                 if (!Strings.isNullOrEmpty(context.getSessionVariable().getCloudCluster())) {
-                    cluster = context.getSessionVariable().getCloudCluster();
+                    clusterName = context.getSessionVariable().getCloudCluster();
+                    this.clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterName);
                 }
                 qualifiedUser = context.getQualifiedUser();
             }
@@ -243,7 +249,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                             attachment.getFileNumByTable(aggKey), getUserInfo());
                 } else {
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
-                            attachment.getFileNumByTable(aggKey), getUserInfo(), cluster, qualifiedUser);
+                            attachment.getFileNumByTable(aggKey), getUserInfo(), clusterId, qualifiedUser);
                 }
                 idToTasks.put(task.getSignature(), task);
                 // idToTasks contains previous LoadPendingTasks, so idToTasks is just used to save all tasks.

@@ -17,7 +17,7 @@
 
 import groovy.json.JsonOutput
 
-suite("load") {
+suite("sync_load") {
     def externalStageName = "regression_test_tpch"
     def prefix = "tpch/sf1"
 
@@ -60,7 +60,7 @@ suite("load") {
                      "regression_cluster_name0", "regression_cluster_id0");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name1", "regression_cluster_id1");
-    sleep(12000)
+    sleep(20000)
 
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
