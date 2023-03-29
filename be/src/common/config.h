@@ -882,6 +882,16 @@ CONF_Int32(doris_remote_scanner_thread_pool_thread_num, "48");
 // number of s3 scanner thread pool queue size
 CONF_Int32(doris_remote_scanner_thread_pool_queue_size, "102400");
 
+// number of s3 io thread pool size for async_io
+CONF_Int32(async_remote_io_thread_pool_thread_num, "48");
+// number of s3 io thread pool queue size for async_io
+CONF_Int32(async_remote_io_thread_pool_queue_size, "102400");
+
+// number of local io thread pool size for async_io
+CONF_Int32(async_local_io_thread_pool_thread_num, "48");
+// number of local io thread pool queue size for async_io
+CONF_Int32(async_local_io_thread_pool_queue_size, "102400");
+
 // limit the queue of pending batches which will be sent by a single nodechannel
 CONF_mInt64(nodechannel_pending_queue_max_bytes, "67108864");
 

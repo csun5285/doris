@@ -62,7 +62,7 @@ Status LocalFileReader::read_at(size_t offset, Slice result, size_t* bytes_read,
     }
     Status s;
     auto task = [&] { s = read_at_impl(offset, result, bytes_read, state); };
-    AsyncIO::run_task(task, io::FileSystemType::LOCAL);
+    AsyncIO::run_task(task, io::FileSystemType::LOCAL, state);
     return s;
 }
 

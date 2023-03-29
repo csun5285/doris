@@ -291,6 +291,32 @@ struct FileCacheStatistics {
     int64_t num_skip_cache_io_total = 0;
 };
 
+struct AsyncIOStatistics {
+    int64_t remote_total_use_timer_ns = 0;
+    int64_t remote_task_wait_worker_timer_ns = 0;
+    int64_t remote_task_wake_up_timer_ns = 0;
+    int64_t remote_task_exec_timer_ns = 0;
+    int64_t remote_task_total = 0;
+    int64_t remote_wait_for_putting_queue = 0;
+
+    int64_t local_total_use_timer_ns = 0;
+    int64_t local_task_wait_worker_timer_ns = 0;
+    int64_t local_task_wake_up_timer_ns = 0;
+    int64_t local_task_exec_timer_ns = 0;
+    int64_t local_task_total = 0;
+    int64_t local_wait_for_putting_queue = 0;
+};
+
+
+struct AsyncIOStatisticsTemplete {
+    int64_t total_use_timer_ns = 0;
+    int64_t task_wait_worker_timer_ns = 0;
+    int64_t task_wake_up_timer_ns = 0;
+    int64_t task_exec_timer_ns = 0;
+    int64_t task_total = 0;
+    int64_t wait_for_putting_queue = 0;
+};
+
 // ReaderStatistics used to collect statistics when scan data from storage
 struct OlapReaderStatistics {
     int64_t io_ns = 0;
@@ -385,6 +411,7 @@ struct OlapReaderStatistics {
 
     FileCacheStatistics file_cache_stats;
     int64_t load_segments_timer = 0;
+    AsyncIOStatistics async_io_stat;
 };
 
 using metrics_hook = std::function<void(OlapReaderStatistics*)>;

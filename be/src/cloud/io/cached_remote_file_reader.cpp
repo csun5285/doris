@@ -68,7 +68,7 @@ Status CachedRemoteFileReader::read_at(size_t offset, Slice result, size_t* byte
     }
     Status s;
     auto task = [&] { s = read_at_impl(offset, result, bytes_read, state); };
-    AsyncIO::run_task(task, io::FileSystemType::S3);
+    AsyncIO::run_task(task, io::FileSystemType::S3, state);
     return s;
 }
 

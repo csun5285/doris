@@ -169,6 +169,22 @@ private:
 
     RuntimeProfile::Counter* _cloud_get_rowset_version_timer = nullptr;
     RuntimeProfile::Counter* _load_segments_timer = nullptr;
+
+    // Async io
+    RuntimeProfile::Counter* _async_remote_total_use_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_remote_task_wait_worker_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_remote_task_wake_up_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_remote_task_exec_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_remote_task_total = nullptr;
+    RuntimeProfile::Counter* _async_remote_wait_for_putting_queue = nullptr;
+
+    RuntimeProfile::Counter* _async_local_total_use_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_local_task_wait_worker_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_local_task_wake_up_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_local_task_exec_timer_ns = nullptr;
+    RuntimeProfile::Counter* _async_local_task_total = nullptr;
+    RuntimeProfile::Counter* _async_local_wait_for_putting_queue = nullptr;
+
 };
 
 } // namespace doris::vectorized

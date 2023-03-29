@@ -233,6 +233,20 @@ Status NewOlapScanNode::_init_profile() {
     _load_segments_timer = ADD_TIMER(_segment_profile, "LoadSegmentUseTimer");
     _cloud_get_rowset_version_timer = ADD_TIMER(_scanner_profile, "CloudGetVersionTime");
 
+    _async_remote_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTotalUseTimer");
+    _async_remote_task_wait_worker_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskWaitTimer");
+    _async_remote_task_wake_up_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskWakeUpTimer");
+    _async_remote_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskExecTimer");
+    _async_remote_task_total = ADD_COUNTER(_segment_profile, "AsyncRemoteTaskTotal", TUnit::UNIT);
+    _async_remote_wait_for_putting_queue = ADD_TIMER(_segment_profile, "AsyncRemoteWaitPuttingQueue");
+
+    _async_local_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTotalUseTimer");
+    _async_local_task_wait_worker_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskWaitTimer");
+    _async_local_task_wake_up_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskWakeUpTimer");
+    _async_local_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskExecTimer");
+    _async_local_task_total = ADD_COUNTER(_segment_profile, "AsyncLocalTaskTotal", TUnit::UNIT);
+    _async_local_wait_for_putting_queue = ADD_TIMER(_segment_profile, "AsyncLocalWaitPuttingQueue");
+
     // for the purpose of debugging or profiling
     for (int i = 0; i < GENERAL_DEBUG_COUNT; ++i) {
         char name[64];
