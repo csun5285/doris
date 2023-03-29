@@ -419,12 +419,15 @@ public class SystemInfoService {
             MetricRepo.generateBackendsTabletMetrics();
         }
         for (Backend be : toDel) {
+            // drop be, set it not alive
+            be.setAlive(false);
+            be.setLastMissingHeartbeatTime(System.currentTimeMillis());
             Env.getCurrentEnv().getEditLog().logDropBackend(be);
             Cluster cluster = Env.getCurrentEnv().getCluster(be.getOwnerClusterName());
             if (null != cluster) {
                 cluster.removeBackend(be.getId());
             }
-            LOG.info("dropped cloud backend={} ", be);
+            LOG.info("dropped cloud backend={}, and lastMissingHeartbeatTime={}", be, be.getLastMissingHeartbeatTime());
             // backends is changed, regenerated tablet number metrics
             MetricRepo.generateBackendsTabletMetrics();
         }

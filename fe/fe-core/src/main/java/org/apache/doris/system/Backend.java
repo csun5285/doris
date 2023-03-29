@@ -338,6 +338,10 @@ public class Backend implements Writable {
         return lastMissingHeartbeatTime;
     }
 
+    public void setLastMissingHeartbeatTime(long lastMissingHeartbeatTime) {
+        this.lastMissingHeartbeatTime = lastMissingHeartbeatTime;
+    }
+
     public boolean isAlive() {
         return this.isAlive.get();
     }
