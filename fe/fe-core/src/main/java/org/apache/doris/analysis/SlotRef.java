@@ -261,9 +261,9 @@ public class SlotRef extends Expr {
     }
 
     public TableName getTableName() {
-        Preconditions.checkState(isAnalyzed);
-        Preconditions.checkNotNull(desc);
         if (tblName == null) {
+            Preconditions.checkState(isAnalyzed);
+            Preconditions.checkNotNull(desc);
             Preconditions.checkNotNull(desc.getParent());
             if (desc.getParent().getRef() == null) {
                 return null;
