@@ -38,6 +38,7 @@ set(IO_FILES
     io/tmp_file_mgr.cpp
     io/cached_remote_file_writer.cpp
     io/s3_file_write_bufferpool.cpp
+    io/cloud_file_cache_settings.cpp
 )
 
 set(OLAP_FILES

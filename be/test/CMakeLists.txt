@@ -470,7 +470,7 @@ set(CLOUD_TEST_FILES
     cloud/cloud_tablet_mgr_test.cpp
     cloud/cloud_tablet_test.cpp
     cloud/cloud_prefetch_test.cpp
-    #cloud/cloud_file_cache_test.cpp
+    cloud/cloud_file_cache_test.cpp
 )
 
 if (CLOUD_MODE)

@@ -337,7 +337,10 @@ FileSegmentsHolder::~FileSegmentsHolder() {
             std::lock_guard segment_lock(file_segment->_mutex);
             file_segment->complete_unlocked(segment_lock);
             if (file_segment->_download_state == FileSegment::State::EMPTY) {
-                cache->remove(file_segment, cache_lock, segment_lock);
+                // one in cache, one in here
+                if (file_segment.use_count() == 2) {
+                    cache->remove(file_segment, cache_lock, segment_lock);
+                }
             }
         }
 

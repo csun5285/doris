@@ -19,7 +19,7 @@ FileCacheFactory& FileCacheFactory::instance() {
 }
 
 Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
-                                           const FileCacheSettings& file_cache_settings) {
+                                           FileCacheSettings file_cache_settings) {
     if (config::clear_file_cache) {
         auto fs = global_local_filesystem();
         bool res = false;
@@ -30,10 +30,15 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
         }
     }
 
-    std::unique_ptr<IFileCache> cache =
-            std::make_unique<LRUFileCache>(cache_base_path, file_cache_settings);
-    RETURN_IF_ERROR(cache->initialize());
-    _caches.push_back(std::move(cache));
+    auto fs = global_local_filesystem();
+    bool res = false;
+    RETURN_IF_ERROR(fs->exists(cache_base_path, &res));
+    if (!res) {
+        fs->create_directory(cache_base_path);
+    } else if (config::clear_file_cache) {
+        fs->delete_directory(cache_base_path);
+        fs->create_directory(cache_base_path);
+    }
 
     struct statfs stat;
     if (statfs(cache_base_path.c_str(), &stat) < 0) {
@@ -42,10 +47,13 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
     }
     size_t disk_total_size = static_cast<size_t>(stat.f_blocks) * static_cast<size_t>(stat.f_bsize);
     if (disk_total_size < file_cache_settings.total_size) {
-        return Status::InternalError("the {} disk size from statfs {} is smaller than config {}",
-                                     cache_base_path, disk_total_size,
-                                     file_cache_settings.total_size);
+        file_cache_settings =
+                calc_settings(disk_total_size * 0.9, file_cache_settings.max_query_cache_size);
     }
+    std::unique_ptr<IFileCache> cache =
+            std::make_unique<LRUFileCache>(cache_base_path, file_cache_settings);
+    RETURN_IF_ERROR(cache->initialize());
+    _caches.push_back(std::move(cache));
 
     LOG(INFO) << "[FileCache] path: " << cache_base_path
               << " total_size: " << file_cache_settings.total_size;
