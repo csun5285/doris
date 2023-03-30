@@ -663,8 +663,6 @@ TEST(RecyclerTest, recycle_partitions) {
 }
 
 TEST(RecyclerTest, abort_timeout_txn) {
-    config::stream_load_default_timeout_second = 0;
-
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     ASSERT_NE(txn_kv.get(), nullptr);
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -684,6 +682,7 @@ TEST(RecyclerTest, abort_timeout_txn) {
         txn_info_pb.set_db_id(db_id);
         txn_info_pb.set_label("abort_timeout_txn");
         txn_info_pb.add_table_ids(table_id);
+        txn_info_pb.set_timeout_ms(1);
         req.mutable_txn_info()->CopyFrom(txn_info_pb);
         BeginTxnResponse res;
         meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
@@ -695,6 +694,7 @@ TEST(RecyclerTest, abort_timeout_txn) {
     InstanceInfoPB instance;
     instance.set_instance_id(mock_instance);
     InstanceRecycler recycler(txn_kv, instance);
+    sleep(1);
     recycler.abort_timeout_txn();
     TxnInfoPB txn_info_pb;
     get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb);
@@ -703,8 +703,6 @@ TEST(RecyclerTest, abort_timeout_txn) {
 
 TEST(RecyclerTest, recycle_expired_txn_label) {
     config::label_keep_max_second = 0;
-    config::stream_load_default_timeout_second = 0;
-
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     ASSERT_NE(txn_kv.get(), nullptr);
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -724,6 +722,7 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
         txn_info_pb.set_db_id(db_id);
         txn_info_pb.set_label("recycle_expired_txn_label");
         txn_info_pb.add_table_ids(table_id);
+        txn_info_pb.set_timeout_ms(1);
         req.mutable_txn_info()->CopyFrom(txn_info_pb);
         BeginTxnResponse res;
         meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
@@ -735,6 +734,7 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
     InstanceInfoPB instance;
     instance.set_instance_id(mock_instance);
     InstanceRecycler recycler(txn_kv, instance);
+    sleep(1);
     recycler.abort_timeout_txn();
     TxnInfoPB txn_info_pb;
     get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb);
@@ -749,6 +749,7 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
         txn_info_pb.set_db_id(db_id);
         txn_info_pb.set_label("recycle_expired_txn_label");
         txn_info_pb.add_table_ids(table_id);
+        txn_info_pb.set_timeout_ms(1);
         req.mutable_txn_info()->CopyFrom(txn_info_pb);
         BeginTxnResponse res;
         meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,

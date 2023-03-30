@@ -242,7 +242,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     std::string label = txn_info.has_label() ? txn_info.label() : "";
     int64_t db_id = txn_info.has_db_id() ? txn_info.db_id() : -1;
 
-    if (label.empty() || db_id < 0 || txn_info.table_ids().empty()) {
+    if (label.empty() || db_id < 0 || txn_info.table_ids().empty() || !txn_info.has_timeout_ms()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         ss << "invalid argument, label=" << label << " db_id=" << db_id;
         msg = ss.str();
@@ -433,7 +433,6 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     uint64_t prepare_time = duration_cast<milliseconds>(now_time.time_since_epoch()).count();
 
     txn_info.set_prepare_time(prepare_time);
-
     //4. put txn info and db_tbl
     std::string txn_inf_key;
     std::string txn_inf_val;
@@ -466,11 +465,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     txn_running_key(txn_run_key_info, &txn_run_key);
 
     TxnRunningPB running_val_pb;
-    uint64_t txn_timeout_ms = txn_info.has_timeout_ms()
-                                      ? txn_info.timeout_ms()
-                                      : config::stream_load_default_timeout_second * 1000;
-
-    running_val_pb.set_timeout_time(prepare_time + txn_timeout_ms);
+    running_val_pb.set_timeout_time(prepare_time + txn_info.timeout_ms());
     for (auto i : txn_info.table_ids()) {
         running_val_pb.add_table_ids(i);
     }
@@ -522,9 +517,9 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
     RPC_PREPROCESS(precommit_txn);
     int64_t txn_id = request->has_txn_id() ? request->txn_id() : -1;
     int64_t db_id = request->has_db_id() ? request->db_id() : -1;
-    if (txn_id < 0 && db_id < 0) {
+    if ((txn_id < 0 && db_id < 0) || !request->has_precommit_timeout_ms()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
-        ss << "invalid txn_id and db_id, "
+        ss << "invalid argument, "
            << "txn_id=" << txn_id << " db_id=" << db_id;
         msg = ss.str();
         return;
@@ -649,10 +644,7 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
     txn_running_key(txn_run_key_info, &txn_run_key);
 
     TxnRunningPB running_val_pb;
-    uint64_t txn_timeout_ms = request->has_precommit_timeout_ms()
-                                      ? txn_info.precommit_timeout_ms()
-                                      : config::stream_load_default_precommit_timeout_second * 1000;
-    running_val_pb.set_timeout_time(precommit_time + txn_timeout_ms);
+    running_val_pb.set_timeout_time(precommit_time + txn_info.precommit_timeout_ms());
     if (!running_val_pb.SerializeToString(&txn_run_val)) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
         ss << "failed to serialize running_val_pb, txn_id=" << txn_id;
@@ -1050,6 +1042,13 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     auto now_time = system_clock::now();
     uint64_t commit_time = duration_cast<milliseconds>(now_time.time_since_epoch()).count();
+    if ((txn_info.prepare_time() + txn_info.timeout_ms()) < commit_time) {
+        code = MetaServiceCode::UNDEFINED_ERR;
+        msg = fmt::format("txn is expired, not allow to commit txn_id={}", txn_id);
+        LOG(INFO) << msg << " prepapre_time=" << txn_info.prepare_time()
+                  << " timeout_ms=" << txn_info.timeout_ms() << " commit_time=" << commit_time;
+        return;
+    }
     txn_info.set_commit_time(commit_time);
     txn_info.set_finish_time(commit_time);
     if (request->has_commit_attachment()) {

@@ -67,8 +67,6 @@ CONF_String(test_s3_bucket, "bucket");
 // CONF_Bool(b, "true");
 
 // txn config
-CONF_Int32(stream_load_default_timeout_second, "600");
-CONF_Int32(stream_load_default_precommit_timeout_second, "3600");
 CONF_Int32(label_keep_max_second, "259200"); //3 * 24 * 3600 seconds
 CONF_Int32(expired_txn_scan_key_nums, "1000");
 
