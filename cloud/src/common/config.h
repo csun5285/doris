@@ -51,12 +51,13 @@ CONF_Int32(log_verbose_level, "5");
 CONF_mInt64(recycle_interval_seconds, "3600");
 CONF_mInt64(retention_seconds, "259200"); // 72h
 CONF_Int32(recycle_concurrency, "16");
-CONF_Bool(recycle_standalone_mode, "false");
 CONF_Int32(recycle_job_lease_expired_ms, "60000");
 // Which instance should be recycled. If empty, recycle all instances.
 CONF_String(recycle_whitelist, ""); // Comma seprated list
 // These instances will not be recycled, only effective when whitelist is empty.
 CONF_String(recycle_blacklist, ""); // Comma seprated list
+CONF_Bool(enable_checker, "false");
+CONF_mInt32(check_object_interval_seconds, "259200"); // 72h
 
 CONF_String(test_s3_ak, "ak");
 CONF_String(test_s3_sk, "sk");

@@ -83,11 +83,17 @@ public:
         return 0;
     }
 
+    int exist(const std::string& relative_path) override {
+        std::lock_guard lock(mtx_);
+        return !objects_.count(relative_path);
+    }
+
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
     int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override {
         return 0;
     }
+
 private:
     std::string path_;
 

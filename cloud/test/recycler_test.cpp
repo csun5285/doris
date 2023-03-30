@@ -978,7 +978,6 @@ TEST(RecyclerTest, recycle_stage) {
 }
 
 TEST(RecyclerTest, multi_recycler) {
-    config::recycle_standalone_mode = true;
     config::recycle_concurrency = 2;
     config::recycle_interval_seconds = 2;
     config::recycle_job_lease_expired_ms = 3;
@@ -1009,11 +1008,11 @@ TEST(RecyclerTest, multi_recycler) {
     Recycler r1;
     r1.txn_kv_ = mem_kv;
     r1.ip_port_ = "r1:p1";
-    r1.start();
+    r1.start(false);
     Recycler r2;
     r2.txn_kv_ = mem_kv;
     r2.ip_port_ = "r2:p2";
-    r2.start();
+    r2.start(false);
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
     r1.join();

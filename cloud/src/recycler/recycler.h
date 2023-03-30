@@ -14,14 +14,15 @@
 #include "recycler/s3_accessor.h"
 
 namespace selectdb {
+class Checker;
 
 class Recycler {
 public:
     Recycler();
-    ~Recycler() = default;
+    ~Recycler();
 
     // returns 0 for success otherwise error
-    int start();
+    int start(bool with_brpc);
 
     void join();
 
@@ -30,7 +31,6 @@ public:
 private:
     void recycle_callback();
 
-    // standalone mode
     std::vector<InstanceInfoPB> get_instances();
     void instance_scanner_callback();
 
@@ -43,18 +43,19 @@ private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::unique_ptr<brpc::Server> server_;
 
+    std::unique_ptr<Checker> checker_;
+
     std::vector<std::thread> workers_;
-    std::condition_variable pending_instance_queue_cond_;
-    std::mutex pending_instance_queue_mtx_;
 
+    // notify recycle workers
+    std::condition_variable pending_instance_cond_;
+    std::mutex pending_instance_mtx_;
     std::deque<InstanceInfoPB> pending_instance_queue_;
+    std::unordered_set<std::string> pending_instance_set_;
 
+    // for lease mechanism
     std::mutex recycling_instance_set_mtx_;
     std::unordered_set<std::string> recycling_instance_set_;
-
-    // standalone mode
-    std::mutex instance_scanner_mtx_;
-    std::condition_variable instance_scanner_cond_;
 
     std::string ip_port_;
 

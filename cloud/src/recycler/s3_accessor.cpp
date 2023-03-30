@@ -114,23 +114,27 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
     if (relative_paths.empty()) {
         return 0;
     }
-    std::vector<std::string> keys;
-    keys.reserve(relative_paths.size());
-    for (auto& path : relative_paths) {
-        keys.push_back(get_key(path));
-    }
     // `DeleteObjectsRequest` can only contain 1000 keys at most.
     constexpr size_t max_delete_batch = 1000;
-    auto key_iter = keys.begin();
+    auto path_iter = relative_paths.begin();
 
     Aws::S3::Model::DeleteObjectsRequest delete_request;
     delete_request.SetBucket(conf_.bucket);
     do {
         Aws::S3::Model::Delete del;
         Aws::Vector<Aws::S3::Model::ObjectIdentifier> objects;
-        auto key_begin = key_iter;
-        for (; key_iter != keys.end() && (key_iter - key_begin < max_delete_batch); ++key_iter) {
-            objects.emplace_back().SetKey(*key_iter);
+        auto path_begin = path_iter;
+        for (; path_iter != relative_paths.end() && (path_iter - path_begin < max_delete_batch);
+             ++path_iter) {
+            auto key = get_key(*path_iter);
+            LOG_INFO("delete object")
+                    .tag("endpoint", conf_.endpoint)
+                    .tag("bucket", conf_.bucket)
+                    .tag("key", key);
+            objects.emplace_back().SetKey(std::move(key));
+        }
+        if (objects.empty()) {
+            return 0;
         }
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
@@ -139,8 +143,9 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
             LOG_WARNING("failed to delete objects")
                     .tag("endpoint", conf_.endpoint)
                     .tag("bucket", conf_.bucket)
-                    .tag("key[0]", keys[0])
-                    .tag("responseCode", static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                    .tag("key[0]", delete_request.GetDelete().GetObjects().front().GetKey())
+                    .tag("responseCode",
+                         static_cast<int>(delete_outcome.GetError().GetResponseCode()))
                     .tag("error", delete_outcome.GetError().GetMessage());
             return -1;
         }
@@ -150,11 +155,12 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
                     .tag("endpoint", conf_.endpoint)
                     .tag("bucket", conf_.bucket)
                     .tag("key", e.GetKey())
-                    .tag("responseCode", static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                    .tag("responseCode",
+                         static_cast<int>(delete_outcome.GetError().GetResponseCode()))
                     .tag("error", e.GetMessage());
             return -2;
         }
-    } while (key_iter != keys.end());
+    } while (path_iter != relative_paths.end());
 
     return 0;
 }
@@ -210,6 +216,26 @@ int S3Accessor::list(const std::string& relative_path, std::vector<std::string>*
         request.SetContinuationToken(result.GetNextContinuationToken());
     } while (is_trucated);
     return 0;
+}
+
+int S3Accessor::exist(const std::string& relative_path) {
+    Aws::S3::Model::HeadObjectRequest request;
+    auto key = get_key(relative_path);
+    request.WithBucket(conf_.bucket).WithKey(key);
+    auto outcome = s3_client_->HeadObject(request);
+    if (outcome.IsSuccess()) {
+        return 0;
+    } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
+        return 1;
+    } else {
+        LOG_WARNING("failed to head object")
+                .tag("endpoint", conf_.endpoint)
+                .tag("bucket", conf_.bucket)
+                .tag("key", key)
+                .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
+                .tag("error", outcome.GetError().GetMessage());
+        return -1;
+    }
 }
 
 int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time) {

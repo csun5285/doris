@@ -127,7 +127,8 @@ int main(int argc, char** argv) {
     // FIXME(gavin): do we need to enable running both MS and recycler within
     //               single process
     if (!(args.get<bool>(ARG_META_SERVICE) ^ args.get<bool>(ARG_RECYCLER))) {
-        std::cerr << "only one of --meta-service and --recycler must be specified" << std::endl;
+        std::cerr << "only one of --meta-service and --recycler must be specified"
+                  << std::endl;
         return 1;
     }
 
@@ -155,7 +156,7 @@ int main(int argc, char** argv) {
         std::cerr << "failed to prepare extra conf file, err=" << ret << std::endl;
         return -1;
     }
-    
+
     if (!selectdb::init_glog(process_name.data())) {
         std::cerr << "failed to init glog" << std::endl;
         return -1;
@@ -181,7 +182,7 @@ int main(int argc, char** argv) {
         meta_server.join(); // Wait for signals
     } else if (args.get<bool>(ARG_RECYCLER)) {
         selectdb::Recycler recycler;
-        int ret = recycler.start();
+        int ret = recycler.start(true); // enable brpc server
         if (ret != 0) {
             msg = "failed to start recycler";
             LOG(ERROR) << msg;

@@ -3,23 +3,29 @@
 #include <butil/strings/string_split.h>
 #include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
+#include <signal.h>
 
 #include <atomic>
 #include <chrono>
 #include <string>
 #include <string_view>
 
+#ifdef UNIT_TEST
 #include "../test/mock_accessor.h"
+#endif
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/sync_point.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
+#include "recycler/checker.h"
 #include "recycler/recycler_service.h"
 
 namespace selectdb {
 
 static std::atomic_bool s_is_working = false;
+static std::mutex s_working_mtx;
+static std::condition_variable s_working_cond;
 
 static bool is_working() {
     return s_is_working.load(std::memory_order_acquire);
@@ -50,7 +56,42 @@ bool Recycler::InstanceFilter::filter_out(const std::string& instance_id) const 
     return !whitelist_.count(instance_id);
 }
 
-Recycler::Recycler() : server_(new brpc::Server()) {};
+static void signal_handler(int signal) {
+    LOG(INFO) << "signal_handler capture signal=" << signal;
+    if (signal == SIGINT || signal == SIGTERM) {
+        s_is_working = false;
+        s_working_cond.notify_all();
+    }
+}
+
+static int install_signal(int signo, void (*handler)(int)) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(struct sigaction));
+    sa.sa_handler = handler;
+    sigemptyset(&sa.sa_mask);
+    int ret = sigaction(signo, &sa, nullptr);
+    if (ret != 0) {
+        char buf[64];
+        LOG(ERROR) << "install signal failed, signo=" << signo << ", errno=" << errno
+                   << ", err=" << strerror_r(errno, buf, sizeof(buf));
+    }
+    return ret;
+}
+
+static void init_signals() {
+    int ret = install_signal(SIGINT, signal_handler);
+    if (ret < 0) {
+        exit(-1);
+    }
+    ret = install_signal(SIGTERM, signal_handler);
+    if (ret < 0) {
+        exit(-1);
+    }
+}
+
+Recycler::Recycler() = default;
+
+Recycler::~Recycler() = default;
 
 std::vector<InstanceInfoPB> Recycler::get_instances() {
     std::vector<InstanceInfoPB> instances;
@@ -80,11 +121,9 @@ std::vector<InstanceInfoPB> Recycler::get_instances() {
             auto [k, v] = it->next();
             if (!it->has_next()) key0 = k;
 
-            LOG(INFO) << "range get instance_key=" << hex(k);
-
             InstanceInfoPB instance_info;
             if (!instance_info.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("malformed instance info").tag("key", hex(k)).tag("val", hex(v));
+                LOG_WARNING("malformed instance info").tag("key", hex(k));
                 return instances;
             }
 
@@ -101,12 +140,16 @@ void Recycler::add_pending_instances(std::vector<InstanceInfoPB> instances) {
     if (instances.empty()) {
         return;
     }
-    std::lock_guard lock(pending_instance_queue_mtx_);
-    for (auto&& instance : instances) {
+    std::lock_guard lock(pending_instance_mtx_);
+    for (auto& instance : instances) {
         if (instance_filter_.filter_out(instance.instance_id())) continue;
-        pending_instance_queue_.push_back(std::move(instance));
+        auto [_, success] = pending_instance_set_.insert(instance.instance_id());
+        // skip instance already in pending queue
+        if (success) {
+            pending_instance_queue_.push_back(std::move(instance));
+        }
     }
-    pending_instance_queue_cond_.notify_all();
+    pending_instance_cond_.notify_all();
 }
 
 void Recycler::instance_scanner_callback() {
@@ -114,10 +157,9 @@ void Recycler::instance_scanner_callback() {
         auto instances = get_instances();
         add_pending_instances(std::move(instances));
         {
-            std::unique_lock lock(instance_scanner_mtx_);
-            instance_scanner_cond_.wait_for(lock,
-                                            std::chrono::seconds(config::recycle_interval_seconds),
-                                            [&]() { return !is_working(); });
+            std::unique_lock lock(s_working_mtx);
+            s_working_cond.wait_for(lock, std::chrono::seconds(config::recycle_interval_seconds),
+                                    []() { return !is_working(); });
         }
     }
 }
@@ -234,14 +276,15 @@ void Recycler::recycle_callback() {
     while (is_working()) {
         InstanceInfoPB instance;
         {
-            std::unique_lock lock(pending_instance_queue_mtx_);
-            pending_instance_queue_cond_.wait(
+            std::unique_lock lock(pending_instance_mtx_);
+            pending_instance_cond_.wait(
                     lock, [&]() { return !pending_instance_queue_.empty() || !is_working(); });
             if (!is_working()) {
                 return;
             }
             instance = std::move(pending_instance_queue_.front());
             pending_instance_queue_.pop_front();
+            pending_instance_set_.erase(instance.instance_id());
         }
         {
             std::lock_guard lock(recycling_instance_set_mtx_);
@@ -326,6 +369,7 @@ void Recycler::lease_instance_recycle_job(const std::string& instance_id) {
                      << instance_id;
     }
 }
+
 void Recycler::do_lease() {
     while (is_working()) {
         std::unordered_set<std::string> instance_set;
@@ -336,48 +380,62 @@ void Recycler::do_lease() {
         for (const auto& instance_id : instance_set) {
             lease_instance_recycle_job(instance_id);
         }
-        std::this_thread::sleep_for(
-                std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3));
+        {
+            std::unique_lock lock(s_working_mtx);
+            s_working_cond.wait_for(
+                    lock, std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3),
+                    []() { return !is_working(); });
+        }
     }
 }
 
-int Recycler::start() {
-    instance_filter_.reset(config::recycle_whitelist, config::recycle_blacklist);
+int Recycler::start(bool with_brpc) {
+    init_signals(); // for graceful exit
 
-#ifndef UNIT_TEST
+    instance_filter_.reset(config::recycle_whitelist, config::recycle_blacklist);
     int ret = 0;
     txn_kv_ = std::make_shared<FdbTxnKv>();
     LOG(INFO) << "begin to init txn kv";
     ret = txn_kv_->init();
     if (ret != 0) {
         LOG(WARNING) << "failed to init txnkv, ret=" << ret;
-        return 1;
+        return -1;
     }
     LOG(INFO) << "successfully init txn kv";
 
+    // Whether brpc server is enabled or not, still need `ip_port_` to identify a recycler process in lease mechanism
     ip_port_ = std::string(butil::my_ip_cstr()) + ":" + std::to_string(config::brpc_listen_port);
-    // Add service
-    auto recycler_service = new RecyclerServiceImpl(txn_kv_, this);
-    server_->AddService(recycler_service, brpc::SERVER_OWNS_SERVICE);
-    // start service
-    brpc::ServerOptions options;
-    if (config::brpc_num_threads != -1) {
-        options.num_threads = config::brpc_num_threads;
+    if (with_brpc) {
+        server_ = std::make_unique<brpc::Server>();
+        // Add service
+        auto recycler_service = new RecyclerServiceImpl(txn_kv_, this);
+        server_->AddService(recycler_service, brpc::SERVER_OWNS_SERVICE);
+        // start service
+        brpc::ServerOptions options;
+        if (config::brpc_num_threads != -1) {
+            options.num_threads = config::brpc_num_threads;
+        }
+        int port = selectdb::config::brpc_listen_port;
+        if (server_->Start(port, &options) != 0) {
+            char buf[64];
+            LOG(WARNING) << "failed to start brpc, errno=" << errno
+                         << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
+            return -1;
+        }
+        LOG(INFO) << "successfully started brpc listening on port=" << port;
     }
-    int port = selectdb::config::brpc_listen_port;
-    if (server_->Start(port, &options) != 0) {
-        char buf[64];
-        LOG(WARNING) << "failed to start brpc, errno=" << errno
-                     << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
-        return -1;
+    if (config::enable_checker) {
+        checker_ = std::make_unique<Checker>(txn_kv_);
+        ret = checker_->start();
+        if (ret != 0) {
+            LOG(WARNING) << "failed to init checker, ret=" << ret;
+            return -1;
+        }
+        LOG(INFO) << "successfully init checker";
     }
-    LOG(INFO) << "successfully started brpc listening on port=" << port;
-#endif
     s_is_working = true;
 
-    if (config::recycle_standalone_mode) {
-        workers_.push_back(std::thread(std::bind(&Recycler::instance_scanner_callback, this)));
-    }
+    workers_.push_back(std::thread(std::bind(&Recycler::instance_scanner_callback, this)));
     for (int i = 0; i < config::recycle_concurrency; ++i) {
         workers_.push_back(std::thread(std::bind(&Recycler::recycle_callback, this)));
     }
@@ -387,14 +445,18 @@ int Recycler::start() {
 }
 
 void Recycler::join() {
-#ifndef UNIT_TEST
-    server_->RunUntilAskedToQuit();
-    server_->ClearServices();
-#endif
-    s_is_working = false;
-
-    instance_scanner_cond_.notify_all();
-    pending_instance_queue_cond_.notify_all();
+    if (server_) { // with brpc
+        server_->RunUntilAskedToQuit();
+        server_->ClearServices();
+    }
+    {
+        std::unique_lock lock(s_working_mtx);
+        s_working_cond.wait(lock, []() { return !is_working(); });
+    }
+    if (checker_) { // enable checker
+        checker_->stop();
+    }
+    pending_instance_cond_.notify_all();
     for (auto& w : workers_) {
         w.join();
     }
@@ -403,7 +465,7 @@ void Recycler::join() {
 InstanceRecycler::InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance)
         : txn_kv_(std::move(txn_kv)),
           instance_id_(instance.instance_id()),
-          instance_info_(std::move(instance)) {
+          instance_info_(instance) {
     for (auto& obj_info : instance_info_.obj_info()) {
         S3Conf s3_conf;
         s3_conf.ak = obj_info.ak();

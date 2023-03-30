@@ -36,6 +36,9 @@ public:
     // returns 0 for success otherwise error
     virtual int list(const std::string& relative_path, std::vector<std::string>* keys) = 0;
 
+    // return 0 if object exists, 1 if object is not found, negative for error
+    virtual int exist(const std::string& relative_path) = 0;
+
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
     virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
@@ -75,6 +78,9 @@ public:
 
     // returns 0 for success otherwise error
     int list(const std::string& relative_path, std::vector<std::string>* keys) override;
+
+    // return 0 if object exists, 1 if object is not found, otherwise error
+    int exist(const std::string& relative_path) override;
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
