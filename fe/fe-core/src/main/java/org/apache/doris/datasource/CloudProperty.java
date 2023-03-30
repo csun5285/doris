@@ -54,11 +54,7 @@ public class CloudProperty {
             }
             String cloudStorageType = endpointStr[0].toUpperCase();
             PropertyType type = PropertyType.valueOf(cloudStorageType);
-            if (type == PropertyType.S3) {
-                return convertToS3Properties(props);
-            } else if (type == PropertyType.OBS) {
-                return convertToOBSProperties(props);
-            }
+            return type == PropertyType.OBS ? convertToOBSProperties(props) : convertToS3Properties(props);
         }
         return props;
     }
