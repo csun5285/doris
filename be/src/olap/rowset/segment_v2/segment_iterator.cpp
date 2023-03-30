@@ -568,13 +568,7 @@ bool SegmentIterator::_is_handle_predicate_by_fulltext(ColumnPredicate* predicat
 }
 
 bool SegmentIterator::_need_read_data(ColumnId cid) {
-    int32_t unique_id = _schema.unique_id(cid);
-    if (_need_read_data_indices.count(unique_id) > 0 && !_need_read_data_indices[unique_id] &&
-        _output_columns.count(unique_id) < 1) {
-        VLOG_DEBUG << "SegmentIterator no need read data for column: "
-                   << _opts.tablet_schema->column_by_uid(unique_id).name();
-        return false;
-    }
+    // TODO(xk) impl right logic
     return true;
 }
 
