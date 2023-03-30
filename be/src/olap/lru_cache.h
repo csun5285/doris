@@ -147,7 +147,7 @@ private:
 enum class CachePriority { NORMAL = 0, DURABLE = 1 };
 
 using CacheValuePredicate = std::function<bool(const void*)>;
-using CacheValueExtractor = std::function<int64_t(const void*)>;
+using CacheValueTimeExtractor = std::function<int64_t(const void*)>;
 
 class Cache {
 public:
@@ -291,6 +291,8 @@ public:
     // Return whether h is found and removed.
     bool remove(const LRUHandle* h);
 
+    uint32_t element_count() const;
+
 private:
     FRIEND_TEST(CacheTest, HandleTableTest);
 
@@ -308,9 +310,7 @@ private:
     void _resize();
 };
 
-typedef std::priority_queue<std::pair<int64_t, LRUHandle*>,
-            std::vector<std::pair<int64_t, LRUHandle*>>,
-            std::greater<std::pair<int64_t, LRUHandle*>>> LRUHandleHeap;
+using LRUHandleSortedSet = std::set<std::pair<int64_t, LRUHandle *>>;
 
 // A single shard of sharded cache.
 class LRUCache {
@@ -320,6 +320,9 @@ public:
 
     // Separate from constructor so caller can easily make an array of LRUCache
     void set_capacity(size_t capacity) { _capacity = capacity; }
+    void set_element_count_capacity(uint32_t element_count_capacity) {
+        _element_count_capacity = element_count_capacity;
+    }
 
     // Like Cache methods, but with an extra "hash" parameter.
     Cache::Handle* insert(const CacheKey& key, uint32_t hash, void* value, size_t charge,
@@ -332,7 +335,7 @@ public:
     int64_t prune();
     int64_t prune_if(CacheValuePredicate pred, bool lazy_mode = false);
 
-    void set_cache_value_extractor(CacheValueExtractor cache_value_extractor);
+    void set_cache_value_time_extractor(CacheValueTimeExtractor cache_value_time_extractor);
     void set_cache_value_check_timestamp(bool cache_value_check_timestamp);
 
     uint64_t get_lookup_count() const { return _lookup_count; }
@@ -347,6 +350,7 @@ private:
     void _evict_from_lru(size_t total_size, LRUHandle** to_remove_head);
     void _evict_from_lru_with_time(size_t total_size, LRUHandle** to_remove_head);
     void _evict_one_entry(LRUHandle* e);
+    bool _check_element_count_limit();
 
 private:
     LRUCacheType _type;
@@ -370,19 +374,22 @@ private:
     uint64_t _lookup_count = 0; // cache查找总次数
     uint64_t _hit_count = 0;    // 命中cache的总次数
 
-    CacheValueExtractor _cache_value_extractor;
+    CacheValueTimeExtractor _cache_value_time_extractor;
     bool _cache_value_check_timestamp = false;
-    LRUHandleHeap _sort_normal_entries_with_timestamp;
-    LRUHandleHeap _sort_durable_entries_with_timestamp;
+    LRUHandleSortedSet _sorted_normal_entries_with_timestamp;
+    LRUHandleSortedSet _sorted_durable_entries_with_timestamp;
+
+    uint32_t _element_count_capacity = 0;
 };
 
 class ShardedLRUCache : public Cache {
 public:
     explicit ShardedLRUCache(const std::string& name, size_t total_capacity, LRUCacheType type,
-                             uint32_t num_shards);
+                             uint32_t num_shards, uint32_t element_count_capacity = 0);
     explicit ShardedLRUCache(const std::string& name, size_t total_capacity, LRUCacheType type,
-                             uint32_t num_shards, CacheValueExtractor cache_value_extractor,
-                             bool cache_value_check_timestamp);
+                             uint32_t num_shards,
+                             CacheValueTimeExtractor cache_value_time_extractor,
+                             bool cache_value_check_timestamp, uint32_t element_count_capacity = 0);
     // TODO(fdy): 析构时清除所有cache元素
     virtual ~ShardedLRUCache();
     virtual Handle* insert(const CacheKey& key, void* value, size_t charge,

@@ -1004,8 +1004,9 @@ CONF_mInt32(index_cache_entry_stay_time_after_lookup_s, "3600");
 // inverted index searcher cache size
 CONF_String(inverted_index_searcher_cache_limit, "5%");
 // set `true` to enable insert searcher into cache when write inverted index data
-CONF_Bool(enable_write_index_searcher_cache, "false");
-CONF_Bool(enable_index_cache_check_timestamp, "true");
+CONF_Bool(enable_write_index_searcher_cache, "true");
+CONF_Bool(enable_inverted_index_cache_check_timestamp, "true");
+CONF_Int32(inverted_index_fd_number_limit_percent, "50"); // 50%
 
 // inverted index
 CONF_Int32(query_bkd_inverted_index_limit_percent, "5"); // 5%
