@@ -121,6 +121,10 @@ public class SystemInfoService {
         return clusterIdToBackend.get(clusterId);
     }
 
+    public List<Backend> getBackendsByClusterId(final String clusterId) {
+        return clusterIdToBackend.get(clusterId);
+    }
+
     public void updateClusterNameToId(final String newName,
                                       final String originalName, final String clusterId) {
         lock.lock();

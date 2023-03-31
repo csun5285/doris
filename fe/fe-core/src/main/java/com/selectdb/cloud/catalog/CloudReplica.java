@@ -73,7 +73,7 @@ public class CloudReplica extends Replica {
     }
 
     private long getColocatedBeId(String cluster) {
-        List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cluster);
+        List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterId(cluster);
         List<Backend> availableBes = new ArrayList<>();
         for (Backend be : bes) {
             if (be.isAlive()) {
@@ -81,7 +81,7 @@ public class CloudReplica extends Replica {
             }
         }
         if (availableBes == null || availableBes.size() == 0) {
-            LOG.warn("failed to get available be, clusterName: {}", cluster);
+            LOG.warn("failed to get available be, clusterId: {}", cluster);
             return -1;
         }
 
@@ -130,12 +130,14 @@ public class CloudReplica extends Replica {
             return -1;
         }
 
+        String clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cluster);
+
         if (isColocated()) {
-            return getColocatedBeId(cluster);
+            return getColocatedBeId(clusterId);
         }
 
-        if (clusterToBackends.containsKey(cluster)) {
-            long backendId = clusterToBackends.get(cluster).get(0);
+        if (clusterToBackends.containsKey(clusterId)) {
+            long backendId = clusterToBackends.get(clusterId).get(0);
             Backend be = Env.getCurrentSystemInfo().getBackend(backendId);
             if (be != null && be.isQueryAvailable()) {
                 LOG.debug("backendId={} ", backendId);
@@ -143,12 +145,12 @@ public class CloudReplica extends Replica {
             }
         }
 
-        return hashReplicaToBe(cluster);
+        return hashReplicaToBe(clusterId);
     }
 
-    public long hashReplicaToBe(String cluster) {
+    public long hashReplicaToBe(String clusterId) {
         // TODO(luwei) list shoule be sorted
-        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(cluster);
+        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterId(clusterId);
         // use alive be to exec sql
         List<Backend> availableBes = new ArrayList<>();
         for (Backend be : clusterBes) {
@@ -157,7 +159,7 @@ public class CloudReplica extends Replica {
             }
         }
         if (availableBes == null || availableBes.size() == 0) {
-            LOG.warn("failed to get available be, clusterName: {}", cluster);
+            LOG.warn("failed to get available be, clusterId: {}", clusterId);
             return -1;
         }
         LOG.debug("availableBes={}", availableBes);
@@ -181,7 +183,6 @@ public class CloudReplica extends Replica {
         // save to clusterToBackends map
         List<Long> bes = new ArrayList<Long>();
         bes.add(pickedBeId);
-        String clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cluster);
         clusterToBackends.put(clusterId, bes);
 
         return pickedBeId;

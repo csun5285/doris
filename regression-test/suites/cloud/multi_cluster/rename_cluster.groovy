@@ -62,6 +62,7 @@ suite("test_rename_cluster") {
     result  = sql "show clusters"
     assertTrue(result.size() == 1);
 
+    sql "use @regression_cluster_name0"
     sql """ drop table IF EXISTS table_p2 """
     sql """
          CREATE TABLE table_p2 ( k1 int(11) NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
