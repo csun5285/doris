@@ -304,10 +304,22 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowLoadWarningsStmt) {
             handleShowLoadWarnings();
         } else if (stmt instanceof ShowRoutineLoadStmt) {
+            if (Config.isCloudMode()) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleShowRoutineLoad();
         } else if (stmt instanceof ShowRoutineLoadTaskStmt) {
+            if (Config.isCloudMode()) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleShowRoutineLoadTask();
         } else if (stmt instanceof ShowCreateRoutineLoadStmt) {
+            if (Config.isCloudMode()) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleShowCreateRoutineLoad();
         } else if (stmt instanceof ShowDeleteStmt) {
             handleShowDelete();
@@ -359,21 +371,21 @@ public class ShowExecutor {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleAdminShowTabletStatus();
         } else if (stmt instanceof AdminShowReplicaDistributionStmt) {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleAdminShowTabletDistribution();
         } else if (stmt instanceof AdminShowConfigStmt) {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleAdminShowConfig();
         } else if (stmt instanceof ShowSmallFilesStmt) {
@@ -409,14 +421,14 @@ public class ShowExecutor {
         } else if (stmt instanceof AdminShowTabletStorageFormatStmt) {
             if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleAdminShowTabletStorageFormat();
         } else if (stmt instanceof AdminDiagnoseTabletStmt) {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(PaloAuth.ROOT_USER)) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleAdminDiagnoseTablet();
         } else if (stmt instanceof ShowCreateMaterializedViewStmt) {
@@ -432,7 +444,7 @@ public class ShowExecutor {
         } else if (stmt instanceof AdminCopyTabletStmt) {
             if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operaiton");
+                throw new AnalysisException("Unsupported operation");
             }
             handleCopyTablet();
         } else if (stmt instanceof ShowStageStmt) {

@@ -132,7 +132,7 @@ public abstract class BulkLoadJob extends LoadJob {
                 case SPARK:
                     if (Config.isCloudMode()) {
                         LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                        throw new DdlException("Unsupported operaiton");
+                        throw new DdlException("Unsupported operation");
                     }
                     bulkLoadJob = new SparkLoadJob(db.getId(), stmt.getLabel().getLabelName(), stmt.getResourceDesc(),
                             stmt.getOrigStmt(), stmt.getUserInfo());
