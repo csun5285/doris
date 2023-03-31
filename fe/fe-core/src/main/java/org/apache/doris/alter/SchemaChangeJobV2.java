@@ -687,10 +687,24 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             throw new AlterCancelException(e.getMessage());
         }
 
+        LOG.debug("jobId:{}, cloudClusterName:{}", cloudClusterName, jobId);
         if (!schemaChangeBatchTask.isFinished()) {
             LOG.info("schema change tasks not finished. job: {}", jobId);
             List<AgentTask> tasks = schemaChangeBatchTask.getUnfinishedTasks(2000);
-            LOG.debug("schema change tasks: {}", tasks);
+            if (Config.isCloudMode() && Env.getCurrentSystemInfo()
+                    .getCloudClusterIdByName(cloudClusterName) == null) {
+                for (AgentTask task : tasks) {
+                    task.setFinished(true);
+                    AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.ALTER, task.getSignature());
+                }
+                StringBuilder sb = new StringBuilder("cloud cluster(");
+                sb.append(cloudClusterName);
+                sb.append(") has been removed, jobId=");
+                sb.append(jobId);
+                String msg = sb.toString();
+                LOG.warn(msg);
+                throw new AlterCancelException(msg);
+            }
             for (AgentTask task : tasks) {
                 LOG.debug("schema change task: {}, {}", task, task.getFailedTimes());
                 if (task.getFailedTimes() >= 3) {

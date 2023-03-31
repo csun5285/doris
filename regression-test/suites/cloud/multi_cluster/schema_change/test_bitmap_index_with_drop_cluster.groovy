@@ -100,7 +100,7 @@ suite("test_bitmap_index_with_drop_cluster") {
         """
     
     sql "insert into ${tbName1} values(1,1,1,1,'1','1','2022-05-31','2022-05-31 10:00:00',1,1.0,1,'2022-05-31','2022-05-31 10:00:00.111111','2022-05-31 10:00:00.111111','2022-05-31 10:00:00.111111');"
-    
+
     sql """
             ALTER TABLE ${tbName1}
                 ADD INDEX index1 (k1) USING BITMAP,
@@ -135,7 +135,7 @@ suite("test_bitmap_index_with_drop_cluster") {
             Thread.sleep(1000)
             if (max_try_secs < 1) {
                 println "test timeout," + "state:" + res
-                assertEquals("CANCELLED", res)
+                assertEquals("FINISHED", res)
             }
         }
     }

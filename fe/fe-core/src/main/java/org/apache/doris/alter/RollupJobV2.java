@@ -538,9 +538,25 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         } catch (MetaNotFoundException e) {
             throw new AlterCancelException(e.getMessage());
         }
+
+        LOG.debug("jobId:{}, cloudClusterName:{}", cloudClusterName, jobId);
         if (!rollupBatchTask.isFinished()) {
             LOG.info("rollup tasks not finished. job: {}", jobId);
             List<AgentTask> tasks = rollupBatchTask.getUnfinishedTasks(2000);
+            if (Config.isCloudMode() && Env.getCurrentSystemInfo()
+                    .getCloudClusterIdByName(cloudClusterName) == null) {
+                for (AgentTask task : tasks) {
+                    task.setFinished(true);
+                    AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.ALTER, task.getSignature());
+                }
+                StringBuilder sb = new StringBuilder("cloud cluster(");
+                sb.append(cloudClusterName);
+                sb.append(") has been removed, jobId=");
+                sb.append(jobId);
+                String msg = sb.toString();
+                LOG.warn(msg);
+                throw new AlterCancelException(msg);
+            }
             for (AgentTask task : tasks) {
                 if (task.getFailedTimes() >= 3) {
                     task.setFinished(true);
