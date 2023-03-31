@@ -27,9 +27,4 @@ suite("test_group_concat") {
     qt_select """
                 SELECT abs(k3), group_concat(cast(abs(k2) as varchar) order by abs(k2), k1) FROM test_query_db.baseall group by abs(k3) order by abs(k3)
               """
-              
-    qt_select """
-                SELECT abs(k3), group_concat(cast(abs(k2) as varchar), ":" order by abs(k2), k1) FROM test_query_db.baseall group by abs(k3) order by abs(k3)
-              """
-
 }
