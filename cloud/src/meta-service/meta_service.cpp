@@ -3002,6 +3002,8 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
     auto token = uri.GetQuery("token");
     if (token == nullptr || *token != config::http_token) {
         msg = "incorrect token, token=" + (token == nullptr ? std::string("(not given)") : *token);
+        ret = MetaServiceCode::INVALID_ARGUMENT;
+        keep_raw_body = true;
         response_body = "incorrect token";
         status_code = 403;
         return;
