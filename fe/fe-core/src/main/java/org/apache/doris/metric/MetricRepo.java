@@ -71,9 +71,17 @@ public final class MetricRepo {
     public static LongCounterMetric COUNTER_REQUEST_ALL;
     public static LongCounterMetric COUNTER_QUERY_ALL;
     public static LongCounterMetric COUNTER_QUERY_ERR;
+    public static LongCounterMetric HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST;
+    public static LongCounterMetric HTTP_COUNTER_COPY_INFO_UPLOAD_ERR;
+
+    public static LongCounterMetric HTTP_COUNTER_COPY_INFO_QUERY_REQUEST;
+    public static LongCounterMetric HTTP_COUNTER_COPY_INFO_QUERY_ERR;
+
     public static LongCounterMetric COUNTER_QUERY_TABLE;
     public static LongCounterMetric COUNTER_QUERY_OLAP_TABLE;
     public static Histogram HISTO_QUERY_LATENCY;
+    public static Histogram HISTO_HTTP_COPY_INTO_UPLOAD_LATENCY;
+    public static Histogram HISTO_HTTP_COPY_INTO_QUERY_LATENCY;
     public static AutoMappedMetric<Histogram> DB_HISTO_QUERY_LATENCY;
     public static AutoMappedMetric<GaugeMetricImpl<Long>> USER_GAUGE_QUERY_INSTANCE_NUM;
     public static AutoMappedMetric<LongCounterMetric> USER_COUNTER_QUERY_INSTANCE_BEGIN;
@@ -134,6 +142,15 @@ public final class MetricRepo {
 
     public static ConcurrentHashMap<String, GaugeMetricImpl<Double>>
                     CLOUD_CLUSTER_GAUGE_QUERY_PER_SECOND = new ConcurrentHashMap<>();
+
+    public static GaugeMetricImpl<Double> GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND;
+
+    public static GaugeMetricImpl<Double> GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE;
+
+    public static GaugeMetricImpl<Double> GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND;
+
+    public static GaugeMetricImpl<Double> GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE;
+
     public static ConcurrentHashMap<String, GaugeMetricImpl<Double>>
                     CLOUD_CLUSTER_GAUGE_REQUEST_PER_SECOND = new ConcurrentHashMap<>();
     public static ConcurrentHashMap<String, GaugeMetricImpl<Double>>
@@ -361,12 +378,32 @@ public final class MetricRepo {
         GAUGE_QUERY_PER_SECOND = new GaugeMetricImpl<>("qps", MetricUnit.NOUNIT, "query per second");
         GAUGE_QUERY_PER_SECOND.setValue(0.0);
         DORIS_METRIC_REGISTER.addMetrics(GAUGE_QUERY_PER_SECOND);
+        // copy into upload
+        GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND = new GaugeMetricImpl<>("http_copy_into_upload_qps", MetricUnit.NOUNIT,
+                "http copy into upload per second");
+        GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND.setValue(0.0);
+        DORIS_METRIC_REGISTER.addMetrics(GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND);
+        // copy into query
+        GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND = new GaugeMetricImpl<>("http_copy_into_query_qps", MetricUnit.NOUNIT,
+            "http copy into query per second");
+        GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND.setValue(0.0);
+        DORIS_METRIC_REGISTER.addMetrics(GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND);
         GAUGE_REQUEST_PER_SECOND = new GaugeMetricImpl<>("rps", MetricUnit.NOUNIT, "request per second");
         GAUGE_REQUEST_PER_SECOND.setValue(0.0);
         DORIS_METRIC_REGISTER.addMetrics(GAUGE_REQUEST_PER_SECOND);
         GAUGE_QUERY_ERR_RATE = new GaugeMetricImpl<>("query_err_rate", MetricUnit.NOUNIT, "query error rate");
         DORIS_METRIC_REGISTER.addMetrics(GAUGE_QUERY_ERR_RATE);
         GAUGE_QUERY_ERR_RATE.setValue(0.0);
+        // copy into upload err
+        GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE = new GaugeMetricImpl<>("http_copy_into_upload_err_rate",
+                MetricUnit.NOUNIT, "http copy into update error rate");
+        DORIS_METRIC_REGISTER.addMetrics(GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE);
+        GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE.setValue(0.0);
+        // copy into query err
+        GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE = new GaugeMetricImpl<>("http_copy_into_query_err_rate", MetricUnit.NOUNIT,
+            "http copy into query error rate");
+        DORIS_METRIC_REGISTER.addMetrics(GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE);
+        GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE.setValue(0.0);
         GAUGE_MAX_TABLET_COMPACTION_SCORE = new GaugeMetricImpl<>("max_tablet_compaction_score", MetricUnit.NOUNIT,
                 "max tablet compaction score of all backends");
         DORIS_METRIC_REGISTER.addMetrics(GAUGE_MAX_TABLET_COMPACTION_SCORE);
@@ -386,6 +423,22 @@ public final class MetricRepo {
         DORIS_METRIC_REGISTER.addMetrics(COUNTER_QUERY_OLAP_TABLE);
         HISTO_QUERY_LATENCY = METRIC_REGISTER.histogram(
                 MetricRegistry.name("query", "latency", "ms"));
+        HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST = new LongCounterMetric("http_copy_into_upload_request_total",
+                MetricUnit.REQUESTS, "http copy into upload total request");
+        DORIS_METRIC_REGISTER.addMetrics(HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST);
+        HTTP_COUNTER_COPY_INFO_UPLOAD_ERR = new LongCounterMetric("http_copy_into_upload_err_total",
+                MetricUnit.REQUESTS, "http copy into upload err request");
+        DORIS_METRIC_REGISTER.addMetrics(HTTP_COUNTER_COPY_INFO_UPLOAD_ERR);
+        HTTP_COUNTER_COPY_INFO_QUERY_REQUEST = new LongCounterMetric("http_copy_into_query_request_total",
+                MetricUnit.REQUESTS, "http copy into total query request");
+        DORIS_METRIC_REGISTER.addMetrics(HTTP_COUNTER_COPY_INFO_QUERY_REQUEST);
+        HTTP_COUNTER_COPY_INFO_QUERY_ERR = new LongCounterMetric("http_copy_into_upload_err_total",
+                MetricUnit.REQUESTS, "http copy into err query request");
+        DORIS_METRIC_REGISTER.addMetrics(HTTP_COUNTER_COPY_INFO_QUERY_ERR);
+        HISTO_HTTP_COPY_INTO_UPLOAD_LATENCY = METRIC_REGISTER.histogram(
+            MetricRegistry.name("http_copy_into_upload", "latency", "ms"));
+        HISTO_HTTP_COPY_INTO_QUERY_LATENCY = METRIC_REGISTER.histogram(
+            MetricRegistry.name("http_copy_into_query", "latency", "ms"));
         DB_HISTO_QUERY_LATENCY = new AutoMappedMetric<>(name -> {
             String metricName = MetricRegistry.name("query", "latency", "ms", "db=" + name);
             return METRIC_REGISTER.histogram(metricName);

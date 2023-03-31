@@ -164,4 +164,12 @@ suite("test_internal_stage") {
         try_sql("DROP TABLE IF EXISTS ${tableName}")
         try_sql("DROP TABLE IF EXISTS ${tableName2}")
     }
+
+    def endpoint = context.config.feHttpAddress.split(':')
+    assertTrue(endpoint.size() == 2)
+    // get fe metrics
+    def upload_total = get_be_metric(endpoint[0], endpoint[1], "doris_fe_http_copy_into_upload_request_total")
+    logger.info("fe metrics, doris_fe_http_copy_into_upload_request_total: " + result)
+    // at least >= 1
+    assertTrue(upload_total > 0)
 }

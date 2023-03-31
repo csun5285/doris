@@ -22,6 +22,7 @@ import org.apache.doris.httpv2.rest.RestBaseController;
 import org.apache.doris.httpv2.util.ExecutionResultSet;
 import org.apache.doris.httpv2.util.HttpUtil;
 import org.apache.doris.httpv2.util.StatementSubmitter;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -117,9 +118,11 @@ public class CloudLoadAction extends RestBaseController {
     // curl  -u user:password -H "fileName: file" -T file -L http://127.0.0.1:12104/copy/upload
     @RequestMapping(path = "/upload", method = RequestMethod.PUT)
     public Object copy(HttpServletRequest request, HttpServletResponse response) {
+        MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST.increase(1L);
         LOG.info("upload request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
+            long startTime = System.currentTimeMillis();
             executeCheckPassword(request, response);
             String fileName = request.getHeader("fileName");
             if (Strings.isNullOrEmpty(fileName)) {
@@ -163,26 +166,36 @@ public class CloudLoadAction extends RestBaseController {
             RemoteBase rb = RemoteBase.newInstance(new ObjectInfo(objPb));
             String signedUrl = rb.getPresignedUrl(fileName);
             LOG.info("get internal stage remote info: {}, and signedUrl: {}", rb.toString(), signedUrl);
+            long elapseMs = System.currentTimeMillis() - startTime;
+            MetricRepo.HISTO_HTTP_COPY_INTO_UPLOAD_LATENCY.update(elapseMs);
             return redirectToObj(signedUrl);
         } catch (DorisHttpException e) {
             // status code  should conforms to HTTP semantic
+            MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.increase(1L);
             resultMap.put("code", e.getCode().code());
             resultMap.put("msg", e.getMessage());
         } catch (UnauthorizedException e) {
+            MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.increase(1L);
             return ResponseEntityBuilder.unauthorized(e.getMessage());
         } catch (Exception e) {
+            MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.increase(1L);
             resultMap.put("code", "1");
             resultMap.put("exception", e.getMessage());
         }
+
+        // should not come here
+        MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.increase(1L);
         return ResponseEntityBuilder.ok(resultMap);
     }
 
     @RequestMapping(path = "/query", method = RequestMethod.POST)
     public Object loadQuery(HttpServletRequest request, HttpServletResponse response) throws InterruptedException {
+        MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.increase(1L);
         LOG.info("query request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
         String postContent = HttpUtil.getBody(request);
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
+            long startTime = System.currentTimeMillis();
             ActionAuthorizationInfo authInfo = executeCheckPassword(request, response);
             if (Strings.isNullOrEmpty(postContent)) {
                 return ResponseEntityBuilder.badRequest("POST body must contain json object");
@@ -207,18 +220,19 @@ public class CloudLoadAction extends RestBaseController {
             LOG.info("copy into stmt: {}", copyIntoSql);
 
             ConnectContext.get().changeDefaultCatalog(InternalCatalog.INTERNAL_CATALOG_NAME);
-
-            return executeQuery(authInfo, copyIntoSql, response, clusterName);
+            return executeQuery(authInfo, copyIntoSql, response, clusterName, startTime);
         } catch (DorisHttpException e) {
             // status code  should conforms to HTTP semantic
             resultMap.put("code", e.getCode().code());
             resultMap.put("msg", e.getMessage());
         } catch (UnauthorizedException e) {
+            MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR.increase(1L);
             return ResponseEntityBuilder.unauthorized(e.getMessage());
         } catch (Exception e) {
             resultMap.put("code", "1");
             resultMap.put("exception", e.getMessage());
         }
+        MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR.increase(1L);
         return ResponseEntityBuilder.ok(resultMap);
     }
 
@@ -227,14 +241,16 @@ public class CloudLoadAction extends RestBaseController {
      * @param authInfo check user and password
      * @return response
      */
-    private ResponseEntity executeQuery(ActionAuthorizationInfo authInfo,
-                                        String copyIntoStmt, HttpServletResponse response, String clusterName) {
+    private ResponseEntity executeQuery(ActionAuthorizationInfo authInfo, String copyIntoStmt,
+                                        HttpServletResponse response, String clusterName, long startTime) {
         StatementSubmitter.StmtContext stmtCtx = new StatementSubmitter.StmtContext(copyIntoStmt,
                 authInfo.fullUserName, authInfo.password, 1000, false, response, clusterName);
         Future<ExecutionResultSet> future = stmtSubmitter.submitBlock(stmtCtx);
 
         try {
             ExecutionResultSet resultSet = future.get();
+            long elapseMs = System.currentTimeMillis() - startTime;
+            MetricRepo.HISTO_HTTP_COPY_INTO_QUERY_LATENCY.update(elapseMs);
             return ResponseEntityBuilder.ok(resultSet.getResult());
         } catch (InterruptedException e) {
             LOG.warn("failed to execute stmt {}, ", copyIntoStmt, e);

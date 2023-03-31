@@ -40,6 +40,12 @@ public class MetricCalculator extends TimerTask {
     private Map<String, Long> cloudClusterLastRequestCounter = new HashMap<>();
     private Map<String, Long> cloudClusterLastQueryErrCounter = new HashMap<>();
 
+    private long lastCopyIntoUploadCounter = -1;
+    private long lastCopyIntoUploadErrCounter = -1;
+
+    private long lastCopyIntoQueryCounter = -1;
+    private long lastCopyIntoQueryErrCounter = -1;
+
     @Override
     public void run() {
         update();
@@ -102,6 +108,22 @@ public class MetricCalculator extends TimerTask {
             }).setValue(clusterErrRate < 0 ? 0.0 : clusterErrRate);
             cloudClusterLastQueryErrCounter.replace(clusterName, clusterCurrentQueryErrCounter);
         });
+
+        lastCopyIntoUploadCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST,
+                MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND, lastCopyIntoUploadCounter, interval);
+        lastCopyIntoUploadErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE, lastCopyIntoUploadErrCounter, interval);
+        lastCopyIntoQueryCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND, lastCopyIntoQueryCounter, interval);
+        lastCopyIntoQueryErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE, lastCopyIntoQueryErrCounter, interval);
+    }
+
+    private long updateItem(LongCounterMetric m, GaugeMetricImpl<Double> g, long lastCounter, long interval) {
+        long currentUploadCounter = m.getValue();
+        double qps = (double) (currentUploadCounter - lastCounter) / interval;
+        g.setValue(qps < 0 ? 0.0 : qps);
+        return currentUploadCounter;
     }
 
     private void update() {
@@ -121,6 +143,10 @@ public class MetricCalculator extends TimerTask {
                 MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.forEach((clusterName, metric) -> {
                     cloudClusterLastQueryErrCounter.put(clusterName, metric.getValue());
                 });
+                lastCopyIntoUploadCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST.getValue();
+                lastCopyIntoUploadErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.getValue();
+                lastCopyIntoQueryCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.getValue();
+                lastCopyIntoQueryErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR.getValue();
             }
             return;
         }
