@@ -67,7 +67,46 @@ suite("test_external_stage") {
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals('CANCELLED'))
         assertTrue(result[0][3].contains('quality not good enough to cancel'))
+
+        // copy with large compress file
+        sql """ DROP TABLE IF EXISTS lineorder; """
+        sql """
+            CREATE TABLE IF NOT EXISTS `lineorder` (
+            `lo_orderkey` bigint(20) NOT NULL COMMENT "",
+            `lo_linenumber` bigint(20) NOT NULL COMMENT "",
+            `lo_custkey` int(11) NOT NULL COMMENT "",
+            `lo_partkey` int(11) NOT NULL COMMENT "",
+            `lo_suppkey` int(11) NOT NULL COMMENT "",
+            `lo_orderdate` int(11) NOT NULL COMMENT "",
+            `lo_orderpriority` varchar(16) NOT NULL COMMENT "",
+            `lo_shippriority` int(11) NOT NULL COMMENT "",
+            `lo_quantity` bigint(20) NOT NULL COMMENT "",
+            `lo_extendedprice` bigint(20) NOT NULL COMMENT "",
+            `lo_ordtotalprice` bigint(20) NOT NULL COMMENT "",
+            `lo_discount` bigint(20) NOT NULL COMMENT "",
+            `lo_revenue` bigint(20) NOT NULL COMMENT "",
+            `lo_supplycost` bigint(20) NOT NULL COMMENT "",
+            `lo_tax` bigint(20) NOT NULL COMMENT "",
+            `lo_commitdate` bigint(20) NOT NULL COMMENT "",
+            `lo_shipmode` varchar(11) NOT NULL COMMENT ""
+            )
+            PARTITION BY RANGE(`lo_orderdate`)
+            (PARTITION p1992 VALUES [("-2147483648"), ("19930101")),
+            PARTITION p1993 VALUES [("19930101"), ("19940101")),
+            PARTITION p1994 VALUES [("19940101"), ("19950101")),
+            PARTITION p1995 VALUES [("19950101"), ("19960101")),
+            PARTITION p1996 VALUES [("19960101"), ("19970101")),
+            PARTITION p1997 VALUES [("19970101"), ("19980101")),
+            PARTITION p1998 VALUES [("19980101"), ("19990101")))
+            DISTRIBUTED BY HASH(`lo_orderkey`) BUCKETS 8;
+        """
+        result = sql " copy into lineorder from @${externalStageName}('ssb/sf1/lineorder.tbl.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false', 'copy.force'='true', 'copy.load_parallelism'='2'); "
+        logger.info("copy result: " + result)
+        assertTrue(result.size() == 1)
+        assertTrue(result[0].size() == 8)
+        assertTrue(result[0][1].equals("FINISHED"))
     } finally {
+        try_sql("DROP TABLE IF EXISTS lineorder")
         try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 }

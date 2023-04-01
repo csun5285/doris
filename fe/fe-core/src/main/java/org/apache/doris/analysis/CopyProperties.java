@@ -168,7 +168,7 @@ public class CopyProperties {
     }
 
     public String getFileType() {
-        // See {@link BrokerScanNode#formatType}, if file format is null, can judge by the file name.
+        // Use ExternalFileScanNode instead of BrokerScanNode, see {@link LoadScanProvider#formatType}
         // if file format type is set on stage, and we want to override by copy into, can set null
         String type = properties.get(addKeyPrefix(TYPE));
         return isTypeEmpty(type) ? null : type;

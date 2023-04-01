@@ -601,7 +601,13 @@ Status VFileScanner::_get_next_reader() {
             init_status = ((CsvReader*)(_cur_reader.get()))->init_reader(_is_load);
             break;
         }
-        case TFileFormatType::FORMAT_JSON: {
+        case TFileFormatType::FORMAT_JSON:
+        case TFileFormatType::FORMAT_JSON_GZ:
+        case TFileFormatType::FORMAT_JSON_BZ2:
+        case TFileFormatType::FORMAT_JSON_LZ4FRAME:
+        case TFileFormatType::FORMAT_JSON_LZO:
+        case TFileFormatType::FORMAT_JSON_LZOP:
+        case TFileFormatType::FORMAT_JSON_DEFLATE: {
             _cur_reader.reset(new NewJsonReader(_state, _profile, &_counter, _params, range,
                                                 _file_slot_descs, &_scanner_eof, _is_dynamic_schema));
             init_status = ((NewJsonReader*)(_cur_reader.get()))->init_reader();
