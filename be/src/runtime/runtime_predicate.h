@@ -44,7 +44,7 @@ class RuntimePredicate {
 public:
     RuntimePredicate() = default;
 
-    Status init(const PrimitiveType type);
+    Status init(const PrimitiveType type, const bool nulls_first);
 
     bool inited() {
         std::unique_lock<std::shared_mutex> wlock(_rwlock);
@@ -70,6 +70,7 @@ private:
     TabletSchemaSPtr _tablet_schema;
     std::unique_ptr<MemPool> _predicate_mem_pool;
     std::function<std::string(const Field&)> _get_value_fn;
+    bool _nulls_first = true;
     bool _inited = false;
 
     static std::string get_bool_value(const Field& field) {

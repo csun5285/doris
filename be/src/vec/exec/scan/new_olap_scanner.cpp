@@ -325,8 +325,9 @@ Status NewOlapScanner::_init_tablet_reader_params(
 
     if (!_state->skip_storage_engine_merge()) {
         TOlapScanNode& olap_scan_node = ((NewOlapScanNode*)_parent)->_olap_scan_node;
-        if (olap_scan_node.__isset.sort_info &&
-            olap_scan_node.sort_info.is_asc_order.size() > 0) {
+        // order by table keys optimization for topn
+        // will only read head/tail of data file since it's already sorted by keys
+        if (olap_scan_node.__isset.sort_info && olap_scan_node.sort_info.is_asc_order.size() > 0) {
             _limit = _parent->_limit_per_scanner;
             _tablet_reader_params.read_orderby_key = true;
             if (!olap_scan_node.sort_info.is_asc_order[0]) {

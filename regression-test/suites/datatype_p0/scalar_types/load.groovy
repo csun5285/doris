@@ -47,8 +47,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         DUPLICATE KEY(`k1`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`k1`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`k1`) BUCKETS 10;
         """
 
     // load data
@@ -68,6 +67,11 @@ suite("test_scalar_types_load", "p0") {
         }
     }
 
+    // insert two NULL rows
+    sql """INSERT INTO ${testTable} VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                                            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"""
+    sql """INSERT INTO ${testTable} VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                                            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"""
 
     // define dup key table1 with 3 keys
     testTable = "tbl_scalar_types_dup_3keys"
@@ -94,8 +98,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         DUPLICATE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10;
         """
 
     // insert data into unique key table1 2 times
@@ -130,8 +133,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10;
         """
     // TODO change enable_unique_key_merge_on_write to true when supported in cloud
 
@@ -171,8 +173,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10;
         """
 
     // insert data into unique key table1 2 times
@@ -227,8 +228,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         DUPLICATE KEY(`k1`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`k1`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`k1`) BUCKETS 10;
         """
 
     // insert data into dup table with index
@@ -276,8 +276,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10;
         """
     // TODO change enable_unique_key_merge_on_write to true when supported in cloud
 
@@ -332,8 +331,7 @@ suite("test_scalar_types_load", "p0") {
         ) ENGINE=OLAP
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10;
         """
 
     // insert data into unique key table1 2 times
