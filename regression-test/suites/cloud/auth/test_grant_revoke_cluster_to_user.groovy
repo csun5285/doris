@@ -94,4 +94,7 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     order_qt_show_user4_grants4 """show grants for '${user1}'"""
 
     order_qt_show_user5_grants5 """show grants for '${user2}'"""
+
+    sql """drop user if exists ${user1}"""
+    sql """drop user if exists ${user2}"""
 }
