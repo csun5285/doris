@@ -40,6 +40,7 @@ suite ("test_rollup_uni_fail") {
 
     result = "null"
     rollupName = "rollup_cost"
+    def cnt = 0
     sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`age`, `sex`, cost);"
     while (!result.contains("CANCELLED")){
         result = sql "SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
@@ -48,6 +49,10 @@ suite ("test_rollup_uni_fail") {
         if(result.contains("FINISHED")){
             assertTrue(false);
         }
-        Thread.sleep(100)
+        if (++cnt > 60) {
+            // timeout
+            assertTrue(false)
+        }
+        Thread.sleep(1000)
     }
 }

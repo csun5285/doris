@@ -40,6 +40,7 @@ suite ("test_rollup_dup_fail") {
     //add rollup (failed)
     result = "null"
     rollupName = "rollup_cost"
+    def cnt = 0
     sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`city`,`age`,`sex`) DUPLICATE KEY (`user_id`,`date`,`city`,`age`,`sex`);"
     while (!result.contains("CANCELLED")){
         result = sql "SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
@@ -48,6 +49,10 @@ suite ("test_rollup_dup_fail") {
         if(result.contains("FINISHED")){
             assertTrue(false);
         }
-        Thread.sleep(100)
+        if (++cnt > 60) {
+            // timeout
+            assertTrue(false)
+        }
+        Thread.sleep(1000)
     }
 }

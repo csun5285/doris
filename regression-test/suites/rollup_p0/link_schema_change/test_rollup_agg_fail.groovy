@@ -41,6 +41,7 @@ suite ("test_rollup_add_fail") {
     // add materialized view (failed)
     def result = "null"
     def mvName = "mv1"
+    def cnt = 0
     sql "create materialized view ${mvName} as select user_id, date, city, age, sex, sum(cost) from ${tableName} group by user_id, date, city, age, sex;"
     while (!result.contains("CANCELLED")){
         result = sql "SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
@@ -49,7 +50,11 @@ suite ("test_rollup_add_fail") {
         if(result.contains("FINISHED")){
             assertTrue(false);
         }
-        Thread.sleep(100)
+        if (++cnt > 60) {
+            // timeout
+            assertTrue(false)
+        }
+        Thread.sleep(1000)
     }
 
     Thread.sleep(1000)
@@ -57,6 +62,7 @@ suite ("test_rollup_add_fail") {
     //add rollup (failed)
     result = "null"
     def rollupName = "rollup_cost"
+    cnt = 0
     sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`city`,`age`, `sex`, cost);"
     while (!result.contains("CANCELLED")){
         result = sql "SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
@@ -65,6 +71,10 @@ suite ("test_rollup_add_fail") {
         if(result.contains("FINISHED")){
             assertTrue(false);
         }
-        Thread.sleep(100)
+        if (++cnt > 60) {
+            // timeout
+            assertTrue(false)
+        }
+        Thread.sleep(1000)
     }
 }
