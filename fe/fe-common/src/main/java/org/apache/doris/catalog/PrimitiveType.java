@@ -1107,7 +1107,7 @@ public enum PrimitiveType {
     }
 
     public boolean isComplexType() {
-        return this == HLL || this == BITMAP;
+        return this == ARRAY || this == MAP || this == STRUCT;
     }
 
     public boolean isStringType() {

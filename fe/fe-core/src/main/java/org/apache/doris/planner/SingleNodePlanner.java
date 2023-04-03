@@ -484,6 +484,8 @@ public class SingleNodePlanner {
                         if (aggOp == TPushAggOp.MINMAX || aggOp == TPushAggOp.MIX) {
                             PrimitiveType colType = col.getDataType();
                             if (colType.isArrayType() || colType.isComplexType()
+                                    || colType == PrimitiveType.HLL
+                                    || colType == PrimitiveType.BITMAP
                                     || colType == PrimitiveType.STRING) {
                                 returnColumnValidate = false;
                                 break;
