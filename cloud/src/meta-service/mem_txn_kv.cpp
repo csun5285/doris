@@ -163,7 +163,7 @@ void Transaction::put(std::string_view key, std::string_view val) {
     op_list_.emplace_back(ModifyOpType::PUT, k, v);
 }
 
-int Transaction::get(std::string_view key, std::string* val) {
+int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
 
@@ -174,11 +174,11 @@ int Transaction::get(std::string_view key, std::string* val) {
         LOG(WARNING) << "read unreadable key, abort";
         return -2;
     }
-    return inner_get(k, val);
+    return inner_get(k, val, snapshot);
 }
 
 int Transaction::get(std::string_view begin, std::string_view end,
-                     std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit) { 
+                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) { 
     std::lock_guard<std::mutex> l(lock_);
     std::string begin_k(begin.data(), begin.size());
     std::string end_k(end.data(), end.size());
@@ -188,20 +188,20 @@ int Transaction::get(std::string_view begin, std::string_view end,
         LOG(WARNING) << "read unreadable key, abort";
         return -2;
     }
-    return inner_get(begin_k, end_k, iter, limit);
+    return inner_get(begin_k, end_k, iter, snapshot, limit);
 }
 
 
-int Transaction::inner_get(const std::string& key, std::string* val) {
+int Transaction::inner_get(const std::string& key, std::string* val, bool snapshot) {
     auto iter = inner_kv_.find(key);
-    read_set_.emplace(key);
+    if (!snapshot) read_set_.emplace(key);
     if (iter == inner_kv_.end()) { return 1;}
     *val = iter->second;
     return 0;
 }
 
-int Transaction::inner_get(const std::string& begin, const std::string& end,
-                        std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit) {
+int Transaction::inner_get(const std::string& begin, const std::string& end, 
+                        std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
     std::vector<std::pair<std::string, std::string>> kv_list;
     if (begin >= end) {
         std::unique_ptr<RangeGetIterator> ret(new memkv::RangeGetIterator(kv_list, false));
@@ -219,7 +219,7 @@ int Transaction::inner_get(const std::string& begin, const std::string& end,
     auto end_iter = inner_kv_.lower_bound(end);
     for (; begin_iter != inner_kv_.end() && begin_iter != end_iter; begin_iter++) {
         kv_list.push_back({begin_iter->first, begin_iter->second});
-        read_set_.emplace(begin_iter->first);
+        if (!snapshot) read_set_.emplace(begin_iter->first);
         if (use_limit) {
             limit--;
             if (limit == 0) { break;}

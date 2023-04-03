@@ -35,6 +35,7 @@ namespace selectdb {
 [[maybe_unused]] static const char* META_KEY_INFIX_ROWSET_TMP = "rowset_tmp";
 [[maybe_unused]] static const char* META_KEY_INFIX_TABLET     = "tablet";
 [[maybe_unused]] static const char* META_KEY_INFIX_TABLET_IDX = "tablet_index";
+[[maybe_unused]] static const char* META_KEY_INFIX_SCHEMA     = "schema";
 
 [[maybe_unused]] static const char* RECYCLE_KEY_INFIX_INDEX   = "index";
 [[maybe_unused]] static const char* RECYCLE_KEY_INFIX_PART    = "partition";
@@ -90,10 +91,12 @@ static void encode_prefix(const T& t, std::string* key) {
     static_assert(check_types_v<T,
         InstanceKeyInfo,
         TxnLabelKeyInfo, TxnInfoKeyInfo, TxnIndexKeyInfo, TxnRunningKeyInfo,
-        MetaRowsetKeyInfo, MetaRowsetTmpKeyInfo, MetaTabletKeyInfo, MetaTabletIdxKeyInfo,
+        MetaRowsetKeyInfo, MetaRowsetTmpKeyInfo, MetaTabletKeyInfo, MetaTabletIdxKeyInfo, MetaSchemaKeyInfo,
         VersionKeyInfo,
-        RecycleIndexKeyInfo, RecyclePartKeyInfo, RecycleRowsetKeyInfo, RecycleTxnKeyInfo,
-        StatsTabletKeyInfo, JobTabletKeyInfo, CopyJobKeyInfo, CopyFileKeyInfo, RecycleStageKeyInfo, JobRecycleKeyInfo>);
+        RecycleIndexKeyInfo, RecyclePartKeyInfo, RecycleRowsetKeyInfo, RecycleTxnKeyInfo, RecycleStageKeyInfo,
+        StatsTabletKeyInfo,
+        JobTabletKeyInfo, JobRecycleKeyInfo,
+        CopyJobKeyInfo, CopyFileKeyInfo>);
 
     key->push_back(CLOUD_USER_KEY_SPACE01);
     // Prefixes for key families
@@ -107,7 +110,8 @@ static void encode_prefix(const T& t, std::string* key) {
     } else if constexpr (std::is_same_v<T, MetaRowsetKeyInfo>
                       || std::is_same_v<T, MetaRowsetTmpKeyInfo>
                       || std::is_same_v<T, MetaTabletKeyInfo>
-                      || std::is_same_v<T, MetaTabletIdxKeyInfo>) {
+                      || std::is_same_v<T, MetaTabletIdxKeyInfo>
+                      || std::is_same_v<T, MetaSchemaKeyInfo>) {
         encode_bytes(META_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, VersionKeyInfo>) {
         encode_bytes(VERSION_KEY_PREFIX, key);
@@ -214,6 +218,13 @@ void meta_tablet_idx_key(const MetaTabletIdxKeyInfo& in, std::string* out) {
     encode_prefix(in, out);                       // 0x01 "meta" ${instance_id}
     encode_bytes(META_KEY_INFIX_TABLET_IDX, out); // "tablet_index"
     encode_int64(std::get<1>(in), out);           // tablet_id
+}
+
+void meta_schema_key(const MetaSchemaKeyInfo& in, std::string* out) {
+    encode_prefix(in, out);                       // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_TABLET_IDX, out); // "schema"
+    encode_int64(std::get<1>(in), out);           // index_id
+    encode_int64(std::get<2>(in), out);           // schema_version
 }
 
 //==============================================================================

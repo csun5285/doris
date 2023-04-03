@@ -24,6 +24,7 @@
 // 0x01 "meta" ${instance_id} "rowset_tmp" ${txn_id} ${tablet_id}                            -> RowsetMetaPB
 // 0x01 "meta" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id}  -> TabletMetaPB
 // 0x01 "meta" ${instance_id} "tablet_index" ${tablet_id}                                    -> TabletIndexPB
+// 0x01 "meta" ${instance_id} "schema" ${index_id} ${schema_version}                         -> TabletSchemaPB
 //
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} -> TabletStatsPB
 //
@@ -126,6 +127,9 @@ using RecycleStageKeyInfo  = BasicKeyInfo<19, std::tuple<std::string,  std::stri
 //                                                      0:instance_id
 using JobRecycleKeyInfo    = BasicKeyInfo<20 , std::tuple<std::string>>;
 
+//                                                      0:instance_id  1:index_id  2:schema_version
+using MetaSchemaKeyInfo    = BasicKeyInfo<21, std::tuple<std::string,  int64_t,    int64_t>>;
+
 void instance_key(const InstanceKeyInfo& in, std::string* out);
 
 void txn_label_key(const TxnLabelKeyInfo& in, std::string* out);
@@ -139,10 +143,12 @@ void meta_rowset_key(const MetaRowsetKeyInfo& in, std::string* out);
 void meta_rowset_tmp_key(const MetaRowsetTmpKeyInfo& in, std::string* out);
 void meta_tablet_idx_key(const MetaTabletIdxKeyInfo& in, std::string* out);
 void meta_tablet_key(const MetaTabletKeyInfo& in, std::string* out);
+void meta_schema_key(const MetaSchemaKeyInfo& in, std::string* out);
 static inline std::string meta_rowset_key(const MetaRowsetKeyInfo& in) { std::string s; meta_rowset_key(in, &s); return s; }
 static inline std::string meta_rowset_tmp_key(const MetaRowsetTmpKeyInfo& in) { std::string s; meta_rowset_tmp_key(in, &s); return s; }
 static inline std::string meta_tablet_idx_key(const MetaTabletIdxKeyInfo& in) { std::string s; meta_tablet_idx_key(in, &s); return s; }
 static inline std::string meta_tablet_key(const MetaTabletKeyInfo& in) { std::string s; meta_tablet_key(in, &s); return s; }
+static inline std::string meta_schema_key(const MetaSchemaKeyInfo& in) { std::string s; meta_schema_key(in, &s); return s; }
 
 void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out);
 void recycle_index_key(const RecycleIndexKeyInfo& in, std::string* out);

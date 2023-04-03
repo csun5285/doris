@@ -35,7 +35,7 @@ class DataDir;
 // storage engine evolves.
 class BaseTablet {
 public:
-    BaseTablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir);
+    BaseTablet(const TabletMetaSharedPtr& tablet_meta, DataDir* data_dir);
     virtual ~BaseTablet();
 
     DataDir* data_dir() const;

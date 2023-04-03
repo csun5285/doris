@@ -1,3 +1,5 @@
+#pragma once
+
 #include "meta-service/txn_kv.h"
 #include "resource-manager/resource_manager.h"
 

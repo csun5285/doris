@@ -30,9 +30,9 @@ extern MetricPrototype METRIC_query_scan_bytes;
 extern MetricPrototype METRIC_query_scan_rows;
 extern MetricPrototype METRIC_query_scan_count;
 
-BaseTablet::BaseTablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir)
+BaseTablet::BaseTablet(const TabletMetaSharedPtr& tablet_meta, DataDir* data_dir)
         : _state(tablet_meta->tablet_state()), _tablet_meta(tablet_meta), _data_dir(data_dir) {
-    _schema = TabletSchemaCache::instance()->insert(_tablet_meta->tablet_schema()->to_key());
+    _schema = TabletSchemaCache::instance()->insert(index_id(), _tablet_meta->tablet_schema());
     _gen_tablet_path();
 
     std::stringstream ss;
@@ -49,7 +49,8 @@ BaseTablet::BaseTablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir)
     INT_COUNTER_METRIC_REGISTER(_metric_entity, query_scan_count);
     std::lock_guard lock(s_mtx);
     if (s_table_id_to_table_name.find(_tablet_meta->table_id()) != s_table_id_to_table_name.end()) {
-        s_table_id_to_table_name.insert(std::make_pair(_tablet_meta->table_id(), _tablet_meta->table_name()));
+        s_table_id_to_table_name.insert(
+                std::make_pair(_tablet_meta->table_id(), _tablet_meta->table_name()));
     }
 }
 

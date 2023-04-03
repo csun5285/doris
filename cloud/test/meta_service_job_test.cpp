@@ -7,41 +7,24 @@
 #include <limits>
 #include <random>
 
-#include "common/config.h"
 #include "common/sync_point.h"
 #include "common/util.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
-#include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
-#include "mock_resource_manager.h"
-#include "rate-limiter/rate_limiter.h"
 
-int main(int argc, char** argv) {
-    selectdb::config::init(nullptr, true);
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+namespace selectdb {
+extern std::unique_ptr<MetaServiceImpl> get_meta_service();
 
-using namespace selectdb;
+static std::string instance_id = "MetaServiceJobTest";
 
-std::unique_ptr<MetaServiceImpl> get_meta_service() {
-    auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
-    [&] { ASSERT_NE(txn_kv.get(), nullptr); }();
-    auto rs = std::make_shared<MockResourceManager>(txn_kv);
-    auto rl = std::make_shared<RateLimiter>();
-    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
-    return meta_service;
-}
-
-TEST(MetaServiceTest, CompactionJobTest) {
+TEST(MetaServiceJobTest, CompactionJobTest) {
     auto meta_service = get_meta_service();
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
-    std::string instance_id = "tablet_job_test_instance_id";
-
-    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    auto sp = SyncPoint::get_instance();
+    sp->clear_all_call_backs();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -121,7 +104,7 @@ TEST(MetaServiceTest, CompactionJobTest) {
     };
 
     // Finish, this unit test relies on the previous (start_job)
-    start_compaction_job();
+    ASSERT_NO_FATAL_FAILURE(start_compaction_job());
     {
         FinishTabletJobRequest req;
         FinishTabletJobResponse res;
@@ -185,14 +168,6 @@ TEST(MetaServiceTest, CompactionJobTest) {
 
         std::mt19937 rng(std::chrono::system_clock::now().time_since_epoch().count());
         std::uniform_int_distribution<int> dist(1, 10000); // Positive numbers
-        tablet_stats_pb.set_cumulative_compaction_cnt(dist(rng));
-        tablet_stats_pb.set_base_compaction_cnt(dist(rng));
-        tablet_stats_pb.set_cumulative_point(tablet_meta_pb.cumulative_layer_point());
-        tablet_stats_pb.set_num_rows(dist(rng));
-        tablet_stats_pb.set_data_size(dist(rng));
-        tablet_stats_pb.set_num_rowsets(dist(rng));
-        tablet_stats_pb.set_num_segments(dist(rng));
-        tablet_stats_pb.set_last_compaction_time(dist(rng));
 
         compaction->set_output_cumulative_point(tablet_stats_pb.cumulative_point() + dist(rng));
         compaction->set_num_output_rows(dist(rng));
@@ -205,6 +180,16 @@ TEST(MetaServiceTest, CompactionJobTest) {
         compaction->set_size_output_rowsets(dist(rng));
         compaction->set_type((dist(rng) % 10) < 2 ? TabletCompactionJobPB::BASE
                                                   : TabletCompactionJobPB::CUMULATIVE);
+
+        tablet_stats_pb.set_cumulative_compaction_cnt(dist(rng));
+        tablet_stats_pb.set_base_compaction_cnt(dist(rng));
+        tablet_stats_pb.set_cumulative_point(tablet_meta_pb.cumulative_layer_point());
+        // MUST let data stats be larger than input data size
+        tablet_stats_pb.set_num_rows(dist(rng) + compaction->num_input_rows());
+        tablet_stats_pb.set_data_size(dist(rng) + compaction->size_input_rowsets());
+        tablet_stats_pb.set_num_rowsets(dist(rng) + compaction->num_input_rowsets());
+        tablet_stats_pb.set_num_segments(dist(rng) + compaction->num_input_segments());
+        tablet_stats_pb.set_last_compaction_time(dist(rng));
 
         std::string tablet_stats_val = tablet_stats_pb.SerializeAsString();
         ASSERT_FALSE(tablet_stats_val.empty());
@@ -318,7 +303,7 @@ TEST(MetaServiceTest, CompactionJobTest) {
         // clang-format off
         EXPECT_EQ(stats.base_compaction_cnt()      , tablet_stats_pb.base_compaction_cnt() + (req.job().compaction(0).type() == TabletCompactionJobPB::BASE));
         EXPECT_EQ(stats.cumulative_compaction_cnt(), tablet_stats_pb.cumulative_compaction_cnt() + (req.job().compaction(0).type() == TabletCompactionJobPB::CUMULATIVE));
-        EXPECT_EQ(stats.cumulative_point()         , req.job().compaction(0).output_cumulative_point());
+        EXPECT_EQ(stats.cumulative_point()         , req.job().compaction(0).type() == TabletCompactionJobPB::BASE ? 50 : req.job().compaction(0).output_cumulative_point());
         EXPECT_EQ(stats.num_rows()                 , tablet_stats_pb.num_rows() + (req.job().compaction(0).num_output_rows() - req.job().compaction(0).num_input_rows()));
         EXPECT_EQ(stats.data_size()                , tablet_stats_pb.data_size() + (req.job().compaction(0).size_output_rowsets() - req.job().compaction(0).size_input_rowsets()));
         EXPECT_EQ(stats.num_rowsets()              , tablet_stats_pb.num_rowsets() + (req.job().compaction(0).num_output_rowsets() - req.job().compaction(0).num_input_rowsets()));
@@ -362,7 +347,7 @@ TEST(MetaServiceTest, CompactionJobTest) {
     }
 
     // Test abort compaction
-    start_compaction_job();
+    ASSERT_NO_FATAL_FAILURE(start_compaction_job());
     {
         FinishTabletJobRequest req;
         FinishTabletJobResponse res;
@@ -387,13 +372,164 @@ TEST(MetaServiceTest, CompactionJobTest) {
     }
 }
 
-TEST(MetaServiceTest, SchemaChangeJobTest) {
+static std::string next_rowset_id() {
+    static int cnt = 0;
+    return std::to_string(++cnt);
+}
+
+static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+                          int64_t partition_id, int64_t tablet_id, bool not_ready = false) {
+    brpc::Controller cntl;
+    CreateTabletsRequest req;
+    CreateTabletsResponse res;
+    auto tablet = req.add_tablet_metas();
+    tablet->set_tablet_state(not_ready ? doris::TabletStatePB::PB_NOTREADY
+                                       : doris::TabletStatePB::PB_RUNNING);
+    tablet->set_table_id(table_id);
+    tablet->set_index_id(index_id);
+    tablet->set_partition_id(partition_id);
+    tablet->set_tablet_id(tablet_id);
+    auto schema = tablet->mutable_schema();
+    schema->set_schema_version(0);
+    auto first_rowset = tablet->add_rs_metas();
+    first_rowset->set_rowset_id(0); // required
+    first_rowset->set_rowset_id_v2(next_rowset_id());
+    first_rowset->set_start_version(0);
+    first_rowset->set_end_version(1);
+    first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
+    meta_service->create_tablets(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
+}
+
+static void start_schema_change_job(MetaServiceImpl* meta_service, int64_t table_id,
+                                    int64_t index_id, int64_t partition_id, int64_t tablet_id,
+                                    int64_t new_tablet_id, const std::string& job_id,
+                                    const std::string& initiator) {
+    brpc::Controller cntl;
+    StartTabletJobRequest req;
+    StartTabletJobResponse res;
+    req.mutable_job()->mutable_idx()->set_table_id(table_id);
+    req.mutable_job()->mutable_idx()->set_index_id(index_id);
+    req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
+    req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
+    auto sc = req.mutable_job()->mutable_schema_change();
+    sc->set_id(job_id);
+    sc->set_initiator(initiator);
+    sc->mutable_new_tablet_idx()->set_table_id(table_id);
+    sc->mutable_new_tablet_idx()->set_index_id(index_id);
+    sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
+    sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
+    meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << job_id << ' ' << initiator;
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0) << job_id << ' ' << initiator;
+    auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    std::string job_val;
+    ASSERT_EQ(txn->get(job_key, &job_val), 0) << job_id << ' ' << initiator;
+    TabletJobInfoPB job_pb;
+    ASSERT_TRUE(job_pb.ParseFromString(job_val)) << job_id << ' ' << initiator;
+    ASSERT_TRUE(job_pb.has_schema_change()) << job_id << ' ' << initiator;
+    EXPECT_EQ(job_pb.schema_change().id(), job_id) << ' ' << initiator;
+};
+
+static doris::RowsetMetaPB create_rowset(int64_t tablet_id, int64_t start_version,
+                                         int64_t end_version, int num_rows = 100) {
+    doris::RowsetMetaPB rowset;
+    rowset.set_rowset_id(0); // required
+    rowset.set_rowset_id_v2(next_rowset_id());
+    rowset.set_tablet_id(tablet_id);
+    rowset.set_txn_id(start_version << 32 | end_version);
+    rowset.set_start_version(start_version);
+    rowset.set_end_version(end_version);
+    rowset.set_num_segments(1);
+    rowset.set_num_rows(num_rows);
+    rowset.set_data_disk_size(num_rows * 100);
+    rowset.mutable_tablet_schema()->set_schema_version(0);
+    return rowset;
+}
+
+static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+                          CreateRowsetResponse& res) {
+    brpc::Controller cntl;
+    CreateRowsetRequest req;
+    req.set_temporary(true);
+    req.mutable_rowset_meta()->CopyFrom(rowset);
+    meta_service->commit_rowset(&cntl, &req, &res, nullptr);
+}
+
+static void finish_schema_change_job(MetaServiceImpl* meta_service, int64_t table_id,
+                                     int64_t index_id, int64_t partition_id, int64_t tablet_id,
+                                     int64_t new_tablet_id, const std::string& job_id,
+                                     const std::string& initiator,
+                                     const std::vector<doris::RowsetMetaPB>& output_rowsets,
+                                     FinishTabletJobResponse& res) {
+    brpc::Controller cntl;
+    FinishTabletJobRequest req;
+    req.set_action(FinishTabletJobRequest::COMMIT);
+    req.mutable_job()->mutable_idx()->set_table_id(table_id);
+    req.mutable_job()->mutable_idx()->set_index_id(index_id);
+    req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
+    req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
+    auto sc = req.mutable_job()->mutable_schema_change();
+    sc->mutable_new_tablet_idx()->set_table_id(table_id);
+    sc->mutable_new_tablet_idx()->set_index_id(index_id);
+    sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
+    sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
+    if (output_rowsets.empty()) {
+        sc->set_alter_version(0);
+    } else {
+        sc->set_alter_version(output_rowsets.back().end_version());
+        for (auto& rowset : output_rowsets) {
+            sc->add_txn_ids(rowset.txn_id());
+            sc->add_output_versions(rowset.end_version());
+            sc->set_num_output_rows(sc->num_output_rows() + rowset.num_rows());
+            sc->set_num_output_segments(sc->num_output_segments() + rowset.num_segments());
+            sc->set_size_output_rowsets(sc->size_output_rowsets() + rowset.data_disk_size());
+        }
+        sc->set_num_output_rowsets(output_rowsets.size());
+    }
+    sc->set_id(job_id);
+    sc->set_initiator(initiator);
+    meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+}
+
+static void insert_rowsets(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t partition_id,
+                           int64_t tablet_id, const std::vector<doris::RowsetMetaPB>& rowsets) {
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0) << tablet_id;
+    std::deque<std::string> buffer;
+    int data_size = 0, num_rows = 0, num_seg = 0;
+    for (auto& rowset : rowsets) {
+        data_size += rowset.data_disk_size();
+        num_rows += rowset.num_rows();
+        num_seg += rowset.num_segments();
+        auto& key = buffer.emplace_back();
+        auto& val = buffer.emplace_back();
+        meta_rowset_key({instance_id, tablet_id, rowset.end_version()}, &key);
+        ASSERT_TRUE(rowset.SerializeToString(&val)) << tablet_id;
+        txn->put(key, val);
+    }
+    auto tablet_stat_key =
+            stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    std::string tablet_stat_val;
+    ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0) << tablet_id;
+    TabletStatsPB tablet_stat;
+    ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val)) << tablet_id;
+    tablet_stat.set_num_rows(tablet_stat.num_rows() + num_rows);
+    tablet_stat.set_data_size(tablet_stat.data_size() + data_size);
+    tablet_stat.set_num_segments(tablet_stat.num_segments() + num_seg);
+    tablet_stat.set_num_rowsets(tablet_stat.num_rowsets() + rowsets.size());
+    ASSERT_TRUE(tablet_stat.SerializeToString(&tablet_stat_val)) << tablet_id;
+    txn->put(tablet_stat_key, tablet_stat_val);
+    ASSERT_EQ(txn->commit(), 0) << tablet_id;
+}
+
+TEST(MetaServiceJobTest, SchemaChangeJobTest) {
     auto meta_service = get_meta_service();
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
-    std::string instance_id = "tablet_job_test_instance_id";
-
-    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    auto sp = SyncPoint::get_instance();
+    sp->clear_all_call_backs();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -404,151 +540,64 @@ TEST(MetaServiceTest, SchemaChangeJobTest) {
     int64_t index_id = 2;
     int64_t partition_id = 3;
     int64_t tablet_id = 4;
-    int64_t new_tablet_id = 14;
-
-    auto create_new_tablet = [&] {
-        CreateTabletsRequest req;
-        CreateTabletsResponse res;
-        auto tablet_meta_pb = req.add_tablet_metas();
-        tablet_meta_pb->set_table_id(table_id);
-        tablet_meta_pb->set_index_id(index_id);
-        tablet_meta_pb->set_partition_id(partition_id);
-        tablet_meta_pb->set_tablet_id(new_tablet_id);
-        tablet_meta_pb->set_tablet_state(doris::TabletStatePB::PB_NOTREADY);
-        auto rs_meta_pb = tablet_meta_pb->add_rs_metas();
-        rs_meta_pb->set_tablet_id(new_tablet_id);
-        rs_meta_pb->set_rowset_id(0);
-        // rs_meta_pb->set_rowset_id_v2("xxx");
-        rs_meta_pb->set_start_version(0);
-        rs_meta_pb->set_end_version(1);
-        meta_service->create_tablets(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    };
-
-    auto start_schema_change_job = [&] {
-        StartTabletJobRequest req;
-        StartTabletJobResponse res;
-        std::string job_id = "job_id123";
-
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->set_id(job_id);
-        sc->set_initiator("ip1:port");
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-        std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
-        std::string job_val;
-        ASSERT_EQ(txn->get(job_key, &job_val), 0);
-        TabletJobInfoPB job_pb;
-        ASSERT_TRUE(job_pb.ParseFromString(job_val));
-        ASSERT_TRUE(job_pb.has_schema_change());
-    };
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
 
     // commit schema_change job with alter_version == 1
     {
-        create_new_tablet();
-        start_schema_change_job();
-
-        FinishTabletJobRequest req;
+        int64_t new_tablet_id = 14;
+        ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
+                                              new_tablet_id, true));
+        ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                        partition_id, tablet_id, new_tablet_id,
+                                                        "job1", "be1"));
         FinishTabletJobResponse res;
-        std::string job_id = "job_id123";
-
-        req.set_action(FinishTabletJobRequest::COMMIT);
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        sc->set_alter_version(1);
-
-        sc->set_id("job_id1234");
-        sc->set_initiator("ip1:port");
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job2", "be1", {}, res);
         ASSERT_NE(res.status().code(), MetaServiceCode::OK);
         ASSERT_NE(res.status().msg().find("unmatched job id or initiator"), std::string::npos);
-
-        sc->set_id(job_id);
-        sc->set_initiator("ip2:port");
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        res.Clear();
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job1", "be2", {}, res);
         ASSERT_NE(res.status().code(), MetaServiceCode::OK);
         ASSERT_NE(res.status().msg().find("unmatched job id or initiator"), std::string::npos);
-
-        sc->set_id(job_id);
-        sc->set_initiator("ip1:port");
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        res.Clear();
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job1", "be1", {}, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        res.Clear();
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job1", "be1", {}, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::JOB_ALREADY_SUCCESS);
     }
 
     // commit schema_change job with txn_ids
     {
-        new_tablet_id = 24;
-        create_new_tablet();
-        start_schema_change_job();
+        int64_t new_tablet_id = 24;
+        ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
+                                              new_tablet_id, true));
+        ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                        partition_id, tablet_id, new_tablet_id,
+                                                        "job2", "be1"));
 
-        FinishTabletJobRequest req;
-        FinishTabletJobResponse res;
-        std::string job_id = "job_id123";
-
-        req.set_action(FinishTabletJobRequest::COMMIT);
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        sc->set_id(job_id);
-        sc->set_initiator("ip1:port");
-
-        // provide converted tmp rowsets
-        std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        std::vector<std::string> tmp_rs_keys;
-        std::vector<std::string> tmp_rs_vals;
-        for (int64_t v = 2; v <= 6; ++v) {
-            auto tmp_rs_key = meta_rowset_tmp_key({instance_id, /* txn_id */ v, new_tablet_id});
-            doris::RowsetMetaPB rs_pb;
-            rs_pb.set_tablet_id(new_tablet_id);
-            rs_pb.set_rowset_id(0);
-            rs_pb.set_rowset_id_v2(hex(tmp_rs_key));
-            rs_pb.set_start_version(v);
-            rs_pb.set_end_version(v);
-            auto tmp_rs_val = rs_pb.SerializeAsString();
-            txn->put(tmp_rs_key, tmp_rs_val);
-            tmp_rs_keys.push_back(std::move(tmp_rs_key));
-            tmp_rs_vals.push_back(std::move(tmp_rs_val));
-
-            sc->add_txn_ids(v);
-            sc->add_output_versions(v);
+        std::vector<doris::RowsetMetaPB> output_rowsets;
+        int data_size = 0, num_rows = 0, num_seg = 0;
+        for (int64_t i = 0; i < 5; ++i) {
+            output_rowsets.push_back(create_rowset(new_tablet_id, i + 2, i + 2));
+            data_size += output_rowsets.back().data_disk_size();
+            num_rows += output_rowsets.back().num_rows();
+            num_seg += output_rowsets.back().num_segments();
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), output_rowsets.back(), res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << i;
         }
-        ASSERT_EQ(txn->commit(), 0);
 
-        sc->set_num_output_rows(1000);
-        sc->set_num_output_rowsets(5);
-        sc->set_num_output_segments(10);
-        sc->set_size_output_rowsets(10000);
-        sc->set_alter_version(6);
-
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        FinishTabletJobResponse res;
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job2", "be1", output_rowsets, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
+        std::unique_ptr<Transaction> txn;
         ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
         // check tablet state
         auto tablet_key =
@@ -558,6 +607,24 @@ TEST(MetaServiceTest, SchemaChangeJobTest) {
         doris::TabletMetaPB tablet_pb;
         ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
         ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
+        // check visible rowsets
+        std::unique_ptr<RangeGetIterator> it;
+        auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
+        auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
+        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+        ASSERT_EQ(it->size(), 6);
+        auto [k, v] = it->next();
+        doris::RowsetMetaPB saved_rowset;
+        ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+        EXPECT_EQ(saved_rowset.start_version(), 0);
+        EXPECT_EQ(saved_rowset.end_version(), 1);
+        for (auto& rs : output_rowsets) {
+            auto [k, v] = it->next();
+            ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+            EXPECT_EQ(saved_rowset.rowset_id_v2(), rs.rowset_id_v2());
+            EXPECT_EQ(saved_rowset.start_version(), rs.start_version());
+            EXPECT_EQ(saved_rowset.end_version(), rs.end_version());
+        }
 
         // check tablet stats
         auto tablet_stat_key =
@@ -566,124 +633,52 @@ TEST(MetaServiceTest, SchemaChangeJobTest) {
         ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0);
         TabletStatsPB tablet_stat;
         ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val));
-        ASSERT_EQ(tablet_stat.num_rows(), sc->num_output_rows());
-        ASSERT_EQ(tablet_stat.num_rowsets(), sc->num_output_rowsets() + 1);
-        ASSERT_EQ(tablet_stat.num_segments(), sc->num_output_segments());
-        ASSERT_EQ(tablet_stat.data_size(), sc->size_output_rowsets());
-
-        // check visible rowsets
-        std::unique_ptr<RangeGetIterator> it;
-        auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
-        auto rs_end =
-                meta_rowset_key({instance_id, new_tablet_id, std::numeric_limits<int64_t>::max()});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
-        ASSERT_EQ(it->size(), 6);
-        auto [k, v] = it->next();
-        doris::RowsetMetaPB rs_pb;
-        ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-        ASSERT_EQ(rs_pb.start_version(), 0);
-        ASSERT_EQ(rs_pb.end_version(), 1);
-        for (int64_t ver = 2; ver <= 6; ++ver) {
-            auto [k, v] = it->next();
-            ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-            ASSERT_EQ(rs_pb.start_version(), ver);
-            ASSERT_EQ(rs_pb.end_version(), ver);
-        }
+        ASSERT_EQ(tablet_stat.num_rows(), num_rows);
+        ASSERT_EQ(tablet_stat.num_rowsets(), 6);
+        ASSERT_EQ(tablet_stat.num_segments(), num_seg);
+        ASSERT_EQ(tablet_stat.data_size(), data_size);
     }
 
     // commit schema_change job with rowsets which overlapped with visible rowsets
     {
-        new_tablet_id = 34;
-        create_new_tablet();
-        start_schema_change_job();
-
-        std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-
-        // provide visible rowsets
-        std::vector<std::string> rs_keys;
-        std::vector<std::string> rs_vals;
-        for (int64_t v = 11; v <= 15; ++v) {
-            auto rs_key = meta_rowset_key({instance_id, new_tablet_id, v});
-            doris::RowsetMetaPB rs_pb;
-            rs_pb.set_tablet_id(new_tablet_id);
-            rs_pb.set_rowset_id(0);
-            rs_pb.set_rowset_id_v2(hex(rs_key));
-            rs_pb.set_start_version(v);
-            rs_pb.set_end_version(v);
-            rs_pb.set_num_rows(100);
-            rs_pb.set_data_disk_size(1000);
-            rs_pb.set_num_segments(2);
-            auto rs_val = rs_pb.SerializeAsString();
-            txn->put(rs_key, rs_val);
-            rs_keys.push_back(std::move(rs_key));
-            rs_vals.push_back(std::move(rs_val));
+        int64_t new_tablet_id = 34;
+        ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
+                                              new_tablet_id, true));
+        ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                        partition_id, tablet_id, new_tablet_id,
+                                                        "job3", "be1"));
+        // provide existed rowsets
+        std::vector<doris::RowsetMetaPB> existed_rowsets;
+        int data_size = 0, num_rows = 0, num_seg = 0;
+        for (int i = 0; i < 5; ++i) {
+            existed_rowsets.push_back(create_rowset(new_tablet_id, i + 11, i + 11));
+            data_size += existed_rowsets.back().data_disk_size();
+            num_rows += existed_rowsets.back().num_rows();
+            num_seg += existed_rowsets.back().num_segments();
         }
-        // update tablet stat
-        auto tablet_stat_key =
-                stats_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
-        std::string tablet_stat_val;
-        ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0);
-        TabletStatsPB tablet_stat;
-        ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val));
-        tablet_stat.set_num_rows(tablet_stat.num_rows() + 500);
-        tablet_stat.set_data_size(tablet_stat.data_size() + 5000);
-        tablet_stat.set_num_segments(tablet_stat.num_segments() + 10);
-        tablet_stat.set_num_rowsets(tablet_stat.num_rowsets() + 5);
-        ASSERT_TRUE(tablet_stat.SerializeToString(&tablet_stat_val));
-        txn->put(tablet_stat_key, tablet_stat_val);
+        ASSERT_NO_FATAL_FAILURE(insert_rowsets(meta_service->txn_kv_.get(), table_id, index_id,
+                                               partition_id, new_tablet_id, existed_rowsets));
 
-        ASSERT_EQ(txn->commit(), 0);
+        std::vector<doris::RowsetMetaPB> output_rowsets;
+        output_rowsets.push_back(create_rowset(new_tablet_id, 2, 8));
+        output_rowsets.push_back(create_rowset(new_tablet_id, 9, 12));
+        output_rowsets.push_back(create_rowset(new_tablet_id, 13, 13));
+        int output_data_size = 0, output_num_rows = 0, output_num_seg = 0;
+        for (auto& rs : output_rowsets) {
+            output_data_size += rs.data_disk_size();
+            output_num_rows += rs.num_rows();
+            output_num_seg += rs.num_segments();
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), rs, res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << rs.end_version();
+        }
 
-        FinishTabletJobRequest req;
         FinishTabletJobResponse res;
-        std::string job_id = "job_id123";
-
-        req.set_action(FinishTabletJobRequest::COMMIT);
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        sc->set_id(job_id);
-        sc->set_initiator("ip1:port");
-
-        // provide converted tmp rowsets
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        std::vector<std::string> tmp_rs_keys;
-        std::vector<std::string> tmp_rs_vals;
-        std::vector<std::pair<int64_t, int64_t>> versions = {{2, 8}, {9, 12}, {13, 13}};
-        for (auto [start_v, end_v] : versions) {
-            auto tmp_rs_key = meta_rowset_tmp_key({instance_id, /* txn_id */ end_v, new_tablet_id});
-            doris::RowsetMetaPB rs_pb;
-            rs_pb.set_tablet_id(new_tablet_id);
-            rs_pb.set_rowset_id(0);
-            rs_pb.set_rowset_id_v2(hex(tmp_rs_key));
-            rs_pb.set_start_version(start_v);
-            rs_pb.set_end_version(end_v);
-            auto tmp_rs_val = rs_pb.SerializeAsString();
-            txn->put(tmp_rs_key, tmp_rs_val);
-            tmp_rs_keys.push_back(std::move(tmp_rs_key));
-            tmp_rs_vals.push_back(std::move(tmp_rs_val));
-
-            sc->add_txn_ids(end_v);
-            sc->add_output_versions(end_v);
-        }
-        ASSERT_EQ(txn->commit(), 0);
-
-        sc->set_num_output_rows(1000);
-        sc->set_num_output_rowsets(3);
-        sc->set_num_output_segments(10);
-        sc->set_size_output_rowsets(10000);
-        sc->set_alter_version(13);
-
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
+        finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                                 new_tablet_id, "job3", "be1", output_rowsets, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
+        std::unique_ptr<Transaction> txn;
         ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
         // check tablet state
         auto tablet_key =
@@ -695,39 +690,43 @@ TEST(MetaServiceTest, SchemaChangeJobTest) {
         ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
 
         // check tablet stats
+        auto tablet_stat_key =
+                stats_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
+        std::string tablet_stat_val;
         ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0);
+        TabletStatsPB tablet_stat;
         ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val));
         // overwrite [11-13], retain [14-15]
-        EXPECT_EQ(tablet_stat.num_rows(), sc->num_output_rows() + 200);
-        EXPECT_EQ(tablet_stat.num_rowsets(), sc->num_output_rowsets() + 1 + 2);
-        EXPECT_EQ(tablet_stat.num_segments(), sc->num_output_segments() + 4);
-        EXPECT_EQ(tablet_stat.data_size(), sc->size_output_rowsets() + 2000);
+        EXPECT_EQ(tablet_stat.num_rows(), output_num_rows + num_rows - 300);
+        EXPECT_EQ(tablet_stat.num_rowsets(), 6);
+        EXPECT_EQ(tablet_stat.num_segments(), output_num_seg + num_seg - 3);
+        EXPECT_EQ(tablet_stat.data_size(), output_data_size + data_size - 30000);
 
         // check visible rowsets
         std::unique_ptr<RangeGetIterator> it;
         auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
-        auto rs_end =
-                meta_rowset_key({instance_id, new_tablet_id, std::numeric_limits<int64_t>::max()});
+        auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
         ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
         // [0-1][2-8][9-12][13-13][14-14][15-15]
         EXPECT_EQ(it->size(), 6);
         auto [k, v] = it->next();
-        doris::RowsetMetaPB rs_pb;
-        ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-        EXPECT_EQ(rs_pb.start_version(), 0);
-        EXPECT_EQ(rs_pb.end_version(), 1);
-        for (size_t i = 0; i < versions.size(); ++i) {
+        doris::RowsetMetaPB saved_rowset;
+        ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+        EXPECT_EQ(saved_rowset.start_version(), 0);
+        EXPECT_EQ(saved_rowset.end_version(), 1);
+        for (auto& rs : output_rowsets) {
             auto [k, v] = it->next();
-            ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-            EXPECT_EQ(rs_pb.start_version(), versions[i].first);
-            EXPECT_EQ(rs_pb.end_version(), versions[i].second);
-            EXPECT_EQ(rs_pb.rowset_id_v2(), hex(tmp_rs_keys[i]));
+            ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+            EXPECT_EQ(saved_rowset.start_version(), rs.start_version());
+            EXPECT_EQ(saved_rowset.end_version(), rs.end_version());
+            EXPECT_EQ(saved_rowset.rowset_id_v2(), rs.rowset_id_v2());
         }
-        for (int64_t ver = 14; ver <= 15; ++ver) {
+        for (int i = 3; i < 5; ++i) { // [14-14][15-15]
             auto [k, v] = it->next();
-            ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-            EXPECT_EQ(rs_pb.start_version(), ver);
-            EXPECT_EQ(rs_pb.end_version(), ver);
+            ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+            EXPECT_EQ(saved_rowset.start_version(), existed_rowsets[i].start_version());
+            EXPECT_EQ(saved_rowset.end_version(), existed_rowsets[i].end_version());
+            EXPECT_EQ(saved_rowset.rowset_id_v2(), existed_rowsets[i].rowset_id_v2());
         }
 
         // check recycled rowsets
@@ -735,17 +734,25 @@ TEST(MetaServiceTest, SchemaChangeJobTest) {
         auto recycl_rs_end = recycle_rowset_key({instance_id, new_tablet_id, "\xff"});
         ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
         // [11-11], [12-12], old[13-13]
-        EXPECT_EQ(it->size(), 3);
+        ASSERT_EQ(it->size(), 3);
+        for (int i = 0; i < 3; ++i) {
+            auto [k, v] = it->next();
+            k.remove_prefix(1);
+            std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> out;
+            decode_key(&k, &out);
+            // 0x01 "recycle" ${instance_id} "rowset" ${tablet_id} ${rowset_id} -> RecycleRowsetPB
+            const auto& rowset_id = std::get<std::string>(std::get<0>(out[4]));
+            EXPECT_EQ(rowset_id, existed_rowsets[i].rowset_id_v2());
+        }
     }
 }
 
-TEST(MetaServiceTest, RetrySchemaChangeJobTest) {
+TEST(MetaServiceJobTest, RetrySchemaChangeJobTest) {
     auto meta_service = get_meta_service();
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
-    std::string instance_id = "tablet_job_test_instance_id";
-
-    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    auto sp = SyncPoint::get_instance();
+    sp->clear_all_call_backs();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -756,283 +763,152 @@ TEST(MetaServiceTest, RetrySchemaChangeJobTest) {
     int64_t index_id = 2;
     int64_t partition_id = 3;
     int64_t tablet_id = 4;
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
     int64_t new_tablet_id = 14;
-
-    auto create_new_tablet = [&] {
-        CreateTabletsRequest req;
-        CreateTabletsResponse res;
-        auto tablet_meta_pb = req.add_tablet_metas();
-        tablet_meta_pb->set_table_id(table_id);
-        tablet_meta_pb->set_index_id(index_id);
-        tablet_meta_pb->set_partition_id(partition_id);
-        tablet_meta_pb->set_tablet_id(new_tablet_id);
-        tablet_meta_pb->set_tablet_state(doris::TabletStatePB::PB_NOTREADY);
-        auto rs_meta_pb = tablet_meta_pb->add_rs_metas();
-        rs_meta_pb->set_tablet_id(new_tablet_id);
-        rs_meta_pb->set_rowset_id(0);
-        // rs_meta_pb->set_rowset_id_v2("xxx");
-        rs_meta_pb->set_start_version(0);
-        rs_meta_pb->set_end_version(1);
-        meta_service->create_tablets(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    };
-
-    std::string job_id = "job1";
-    std::string initiator = "BE1";
-    auto start_schema_change_job = [&]() {
-        StartTabletJobRequest req;
-        StartTabletJobResponse res;
-
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->set_id(job_id);
-        sc->set_initiator(initiator);
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-        std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
-        std::string job_val;
-        ASSERT_EQ(txn->get(job_key, &job_val), 0);
-        TabletJobInfoPB job_pb;
-        ASSERT_TRUE(job_pb.ParseFromString(job_val));
-        ASSERT_TRUE(job_pb.has_schema_change());
-        ASSERT_EQ(job_pb.schema_change().id(), job_id);
-    };
-
     // start "job1" on BE1
-    create_new_tablet();
-    start_schema_change_job();
+    ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
+                                          new_tablet_id, true));
+    ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                    partition_id, tablet_id, new_tablet_id, "job1",
+                                                    "be1"));
+    // provide existed rowsets
+    std::vector<doris::RowsetMetaPB> existed_rowsets;
+    for (int i = 0; i < 5; ++i) {
+        existed_rowsets.push_back(create_rowset(new_tablet_id, i + 11, i + 11));
+    }
+    ASSERT_NO_FATAL_FAILURE(insert_rowsets(meta_service->txn_kv_.get(), table_id, index_id,
+                                           partition_id, new_tablet_id, existed_rowsets));
 
-    new_tablet_id = 24;
-    create_new_tablet();
+    // FE canceled "job1" and starts "job2" on BE1, should preempt previous "job1"
+    ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                    partition_id, tablet_id, new_tablet_id, "job2",
+                                                    "be1"));
+    // retry "job2" on BE1
+    ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                    partition_id, tablet_id, new_tablet_id, "job2",
+                                                    "be1"));
+    // BE1 output_versions=[2-8][9-9][10-10][11-11]
+    std::vector<doris::RowsetMetaPB> be1_output_rowsets;
+    be1_output_rowsets.push_back(create_rowset(new_tablet_id, 2, 8));
+    be1_output_rowsets.push_back(create_rowset(new_tablet_id, 9, 9));
+    be1_output_rowsets.push_back(create_rowset(new_tablet_id, 10, 10));
+    be1_output_rowsets.push_back(create_rowset(new_tablet_id, 11, 11));
+    for (auto& rs : be1_output_rowsets) {
+        CreateRowsetResponse res;
+        commit_rowset(meta_service.get(), rs, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << rs.end_version();
+    }
+
+    // FE thinks BE1 is not alive and retries "job2" on BE2, should preempt "job2" created by BE1
+    ASSERT_NO_FATAL_FAILURE(start_schema_change_job(meta_service.get(), table_id, index_id,
+                                                    partition_id, tablet_id, new_tablet_id, "job2",
+                                                    "be2"));
+    // BE2 output_versions=[2-8][9-12][13-13]
+    std::vector<doris::RowsetMetaPB> be2_output_rowsets;
+    {
+        CreateRowsetResponse res;
+        // [2-8] has committed by BE1
+        commit_rowset(meta_service.get(), create_rowset(new_tablet_id, 2, 8), res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
+        ASSERT_TRUE(res.has_existed_rowset_meta());
+        ASSERT_EQ(res.existed_rowset_meta().rowset_id_v2(), be1_output_rowsets[0].rowset_id_v2());
+        be2_output_rowsets.push_back(res.existed_rowset_meta());
+        res.Clear();
+        be2_output_rowsets.push_back(create_rowset(new_tablet_id, 9, 12));
+        commit_rowset(meta_service.get(), be2_output_rowsets.back(), res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        res.Clear();
+        be2_output_rowsets.push_back(create_rowset(new_tablet_id, 13, 13));
+        commit_rowset(meta_service.get(), be2_output_rowsets.back(), res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
+
+    // BE1 commit job, but check initiator failed
+    FinishTabletJobResponse res;
+    finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                             new_tablet_id, "job2", "be1", be1_output_rowsets, res);
+    ASSERT_NE(res.status().code(), MetaServiceCode::OK);
+    ASSERT_NE(res.status().msg().find("unmatched job id or initiator"), std::string::npos);
+    // BE2 commit job
+    res.Clear();
+    finish_schema_change_job(meta_service.get(), table_id, index_id, partition_id, tablet_id,
+                             new_tablet_id, "job2", "be2", be2_output_rowsets, res);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    // check tablet state
+    auto tablet_key =
+            meta_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
+    std::string tablet_val;
+    ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+    doris::TabletMetaPB tablet_pb;
+    ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
+    ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
 
-    // provide visible rowsets
-    std::vector<std::string> rs_keys;
-    std::vector<std::string> rs_vals;
-    for (int64_t v = 11; v <= 15; ++v) {
-        auto rs_key = meta_rowset_key({instance_id, new_tablet_id, v});
-        doris::RowsetMetaPB rs_pb;
-        rs_pb.set_tablet_id(new_tablet_id);
-        rs_pb.set_rowset_id(0);
-        rs_pb.set_rowset_id_v2(hex(rs_key));
-        rs_pb.set_start_version(v);
-        rs_pb.set_end_version(v);
-        rs_pb.set_num_rows(100);
-        rs_pb.set_data_disk_size(1000);
-        rs_pb.set_num_segments(2);
-        auto rs_val = rs_pb.SerializeAsString();
-        txn->put(rs_key, rs_val);
-        rs_keys.push_back(std::move(rs_key));
-        rs_vals.push_back(std::move(rs_val));
-    }
-    // update tablet stat
+    // check tablet stats
     auto tablet_stat_key =
             stats_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
     std::string tablet_stat_val;
     ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0);
     TabletStatsPB tablet_stat;
     ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val));
-    tablet_stat.set_num_rows(tablet_stat.num_rows() + 500);
-    tablet_stat.set_data_size(tablet_stat.data_size() + 5000);
-    tablet_stat.set_num_segments(tablet_stat.num_segments() + 10);
-    tablet_stat.set_num_rowsets(tablet_stat.num_rowsets() + 5);
-    ASSERT_TRUE(tablet_stat.SerializeToString(&tablet_stat_val));
-    txn->put(tablet_stat_key, tablet_stat_val);
+    // [0-1][2-8][9-12][13-13][14-14][15-15]
+    EXPECT_EQ(tablet_stat.num_rows(), 500);
+    EXPECT_EQ(tablet_stat.num_rowsets(), 6);
+    EXPECT_EQ(tablet_stat.num_segments(), 5);
+    EXPECT_EQ(tablet_stat.data_size(), 50000);
 
-    ASSERT_EQ(txn->commit(), 0);
-
-    // FE canceled "job1" and starts "job2" on BE1, should preempt previous "job1"
-    job_id = "job2";
-    start_schema_change_job();
-
-    // retry "job2" on BE1
-    start_schema_change_job();
-
-    auto txn_id_gen = [](int64_t start_v, int64_t end_v) { return start_v << 32 | end_v; };
-
-    // BE1 output_versions=[2-8][9-9][10-10][11-11]
-    std::vector<std::pair<int64_t, int64_t>> be1_versions = {{2, 8}, {9, 9}, {10, 10}, {11, 11}};
-    for (auto [start_v, end_v] : be1_versions) {
-        CreateRowsetRequest req;
-        CreateRowsetResponse res;
-        req.mutable_rowset_meta()->set_rowset_id(0);
-        int64_t txn_id = txn_id_gen(start_v, end_v);
-        req.mutable_rowset_meta()->set_tablet_id(new_tablet_id);
-        req.mutable_rowset_meta()->set_rowset_id_v2(fmt::format("BE1{}", txn_id));
-        req.mutable_rowset_meta()->set_start_version(start_v);
-        req.mutable_rowset_meta()->set_end_version(end_v);
-        req.mutable_rowset_meta()->set_txn_id(txn_id);
-        req.set_temporary(true);
-        meta_service->prepare_rowset(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-        meta_service->commit_rowset(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    }
-
-    // FE thinks BE1 is not alive and retries "job2" on BE2, should preempt "job2" created by BE1
-    initiator = "BE2";
-    start_schema_change_job();
-
-    // BE2 output_versions=[2-8][9-12][13-13]
-    std::vector<std::pair<int64_t, int64_t>> be2_versions = {{2, 8}, {9, 12}, {13, 13}};
-    for (auto [start_v, end_v] : be2_versions) {
-        CreateRowsetRequest req;
-        CreateRowsetResponse res;
-        req.mutable_rowset_meta()->set_tablet_id(new_tablet_id);
-        req.mutable_rowset_meta()->set_rowset_id(0);
-        int64_t txn_id = txn_id_gen(start_v, end_v);
-        req.mutable_rowset_meta()->set_rowset_id_v2(fmt::format("BE2{}", txn_id));
-        req.mutable_rowset_meta()->set_start_version(start_v);
-        req.mutable_rowset_meta()->set_end_version(end_v);
-        req.mutable_rowset_meta()->set_txn_id(txn_id);
-        req.set_temporary(true);
-        meta_service->prepare_rowset(&cntl, &req, &res, nullptr);
-        if (start_v == 2) { // [2-8] has committed by BE1
-            ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
-        } else {
-            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-            meta_service->commit_rowset(&cntl, &req, &res, nullptr);
-            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-        }
-    }
-
-    // BE1 commit job, but check initiator failed
-    {
-        FinishTabletJobRequest req;
-        FinishTabletJobResponse res;
-
-        req.set_action(FinishTabletJobRequest::COMMIT);
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        sc->set_id(job_id);
-        sc->set_initiator("BE1");
-        for (auto [start_v, end_v] : be1_versions) {
-            sc->add_txn_ids(txn_id_gen(start_v, end_v));
-            sc->add_output_versions(end_v);
-        }
-        sc->set_num_output_rows(1000);
-        sc->set_num_output_rowsets(4);
-        sc->set_num_output_segments(10);
-        sc->set_size_output_rowsets(10000);
-        sc->set_alter_version(11);
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
-        ASSERT_NE(res.status().code(), MetaServiceCode::OK);
-        ASSERT_NE(res.status().msg().find("unmatched job id or initiator"), std::string::npos);
-    }
-
-    // BE2 commit job
-    {
-        FinishTabletJobRequest req;
-        FinishTabletJobResponse res;
-
-        req.set_action(FinishTabletJobRequest::COMMIT);
-        req.mutable_job()->mutable_idx()->set_table_id(table_id);
-        req.mutable_job()->mutable_idx()->set_index_id(index_id);
-        req.mutable_job()->mutable_idx()->set_partition_id(partition_id);
-        req.mutable_job()->mutable_idx()->set_tablet_id(tablet_id);
-        auto sc = req.mutable_job()->mutable_schema_change();
-        sc->mutable_new_tablet_idx()->set_table_id(table_id);
-        sc->mutable_new_tablet_idx()->set_index_id(index_id);
-        sc->mutable_new_tablet_idx()->set_partition_id(partition_id);
-        sc->mutable_new_tablet_idx()->set_tablet_id(new_tablet_id);
-        sc->set_id(job_id);
-        sc->set_initiator("BE2");
-        for (auto [start_v, end_v] : be2_versions) {
-            sc->add_txn_ids(txn_id_gen(start_v, end_v));
-            sc->add_output_versions(end_v);
-        }
-        sc->set_num_output_rows(1000);
-        sc->set_num_output_rowsets(3);
-        sc->set_num_output_segments(10);
-        sc->set_size_output_rowsets(10000);
-        sc->set_alter_version(13);
-        meta_service->finish_tablet_job(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        // check tablet state
-        auto tablet_key =
-                meta_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
-        std::string tablet_val;
-        ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
-        doris::TabletMetaPB tablet_pb;
-        ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
-        ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
-
-        // check tablet stats
-        ASSERT_EQ(txn->get(tablet_stat_key, &tablet_stat_val), 0);
-        ASSERT_TRUE(tablet_stat.ParseFromString(tablet_stat_val));
-        // overwrite [11-13], retain [14-15]
-        EXPECT_EQ(tablet_stat.num_rows(), sc->num_output_rows() + 200);
-        EXPECT_EQ(tablet_stat.num_rowsets(), sc->num_output_rowsets() + 1 + 2);
-        EXPECT_EQ(tablet_stat.num_segments(), sc->num_output_segments() + 4);
-        EXPECT_EQ(tablet_stat.data_size(), sc->size_output_rowsets() + 2000);
-
-        // check visible rowsets
-        std::unique_ptr<RangeGetIterator> it;
-        auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
-        auto rs_end =
-                meta_rowset_key({instance_id, new_tablet_id, std::numeric_limits<int64_t>::max()});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
-        // [0-1][2-8][9-12][13-13][14-14][15-15]
-        EXPECT_EQ(it->size(), 6);
+    // check visible rowsets
+    std::unique_ptr<RangeGetIterator> it;
+    auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
+    auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
+    ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+    EXPECT_EQ(it->size(), 6);
+    auto [k, v] = it->next();
+    doris::RowsetMetaPB saved_rowset;
+    ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+    EXPECT_EQ(saved_rowset.start_version(), 0);
+    EXPECT_EQ(saved_rowset.end_version(), 1);
+    for (auto& rs : be2_output_rowsets) {
         auto [k, v] = it->next();
-        doris::RowsetMetaPB rs_pb;
-        ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-        EXPECT_EQ(rs_pb.start_version(), 0);
-        EXPECT_EQ(rs_pb.end_version(), 1);
-        for (auto [start_v, end_v] : be2_versions) {
-            auto [k, v] = it->next();
-            ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-            EXPECT_EQ(rs_pb.start_version(), start_v);
-            EXPECT_EQ(rs_pb.end_version(), end_v);
-            if (start_v == 2) { // [2-8] was committed by BE1
-                EXPECT_EQ(rs_pb.rowset_id_v2(), fmt::format("BE1{}", rs_pb.txn_id()));
-            } else {
-                EXPECT_EQ(rs_pb.rowset_id_v2(), fmt::format("BE2{}", rs_pb.txn_id()));
-            }
-        }
-        for (int64_t ver = 14; ver <= 15; ++ver) {
-            auto [k, v] = it->next();
-            ASSERT_TRUE(rs_pb.ParseFromArray(v.data(), v.size()));
-            EXPECT_EQ(rs_pb.start_version(), ver);
-            EXPECT_EQ(rs_pb.end_version(), ver);
-        }
+        ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+        EXPECT_EQ(saved_rowset.start_version(), rs.start_version());
+        EXPECT_EQ(saved_rowset.end_version(), rs.end_version());
+        EXPECT_EQ(saved_rowset.rowset_id_v2(), rs.rowset_id_v2());
+    }
+    for (int i = 3; i < 5; ++i) { // [14-14][15-15]
+        auto [k, v] = it->next();
+        ASSERT_TRUE(saved_rowset.ParseFromArray(v.data(), v.size()));
+        EXPECT_EQ(saved_rowset.start_version(), existed_rowsets[i].start_version());
+        EXPECT_EQ(saved_rowset.end_version(), existed_rowsets[i].end_version());
+        EXPECT_EQ(saved_rowset.rowset_id_v2(), existed_rowsets[i].rowset_id_v2());
+    }
 
-        // check recycled rowsets
-        auto recycl_rs_start = recycle_rowset_key({instance_id, new_tablet_id, ""});
-        auto recycl_rs_end = recycle_rowset_key({instance_id, new_tablet_id, "\xff"});
-        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
-        // [11-11], [12-12], old[13-13]
-        EXPECT_EQ(it->size(), 3);
+    // check recycled rowsets
+    auto recycl_rs_start = recycle_rowset_key({instance_id, new_tablet_id, ""});
+    auto recycl_rs_end = recycle_rowset_key({instance_id, new_tablet_id, "\xff"});
+    ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
+    // [11-11], [12-12], old[13-13]
+    ASSERT_EQ(it->size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        auto [k, v] = it->next();
+        k.remove_prefix(1);
+        std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> out;
+        decode_key(&k, &out);
+        // 0x01 "recycle" ${instance_id} "rowset" ${tablet_id} ${rowset_id} -> RecycleRowsetPB
+        const auto& rowset_id = std::get<std::string>(std::get<0>(out[4]));
+        EXPECT_EQ(rowset_id, existed_rowsets[i].rowset_id_v2());
     }
 }
 
-TEST(MetaServiceTest, ConcurrentCompactionTest) {
+TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
     auto meta_service = get_meta_service();
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
-    std::string instance_id = "tablet_job_test_instance_id";
-
-    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    auto sp = SyncPoint::get_instance();
+    sp->clear_all_call_backs();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -1043,26 +919,8 @@ TEST(MetaServiceTest, ConcurrentCompactionTest) {
     int64_t index_id = 2;
     int64_t partition_id = 3;
     int64_t tablet_id = 4;
-
-    // create tablet
-    {
-        CreateTabletsRequest req;
-        CreateTabletsResponse res;
-        auto tablet_meta_pb = req.add_tablet_metas();
-        tablet_meta_pb->set_table_id(table_id);
-        tablet_meta_pb->set_index_id(index_id);
-        tablet_meta_pb->set_partition_id(partition_id);
-        tablet_meta_pb->set_tablet_id(tablet_id);
-        tablet_meta_pb->set_tablet_state(doris::TabletStatePB::PB_RUNNING);
-        auto rs_meta_pb = tablet_meta_pb->add_rs_metas();
-        rs_meta_pb->set_tablet_id(tablet_id);
-        rs_meta_pb->set_rowset_id(0);
-        // rs_meta_pb->set_rowset_id_v2("xxx");
-        rs_meta_pb->set_start_version(0);
-        rs_meta_pb->set_end_version(1);
-        meta_service->create_tablets(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    };
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
 
     {
         StartTabletJobRequest req;
@@ -1176,3 +1034,5 @@ TEST(MetaServiceTest, ConcurrentCompactionTest) {
     ASSERT_EQ(job_pb.compaction(0).id(), "job4");
     ASSERT_EQ(job_pb.compaction(0).lease(), 12345);
 }
+
+} // namespace selectdb

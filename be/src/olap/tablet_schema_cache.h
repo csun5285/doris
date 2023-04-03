@@ -39,19 +39,26 @@ public:
 
     static TabletSchemaCache* instance() { return _s_instance; }
 
-    TabletSchemaSPtr insert(const std::string& key) {
+    TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaPB& schema) {
         DCHECK(_s_instance != nullptr);
+        DCHECK(index_id > 0);
         std::lock_guard guard(_mtx);
-        auto iter = _cache.find(key);
+        auto iter = _cache.find({index_id, schema.schema_version()});
         if (iter == _cache.end()) {
             TabletSchemaSPtr tablet_schema_ptr = std::make_shared<TabletSchema>();
-            TabletSchemaPB pb;
-            pb.ParseFromString(key);
-            tablet_schema_ptr->init_from_pb(pb);
-            _cache[key] = tablet_schema_ptr;
+            tablet_schema_ptr->init_from_pb(schema);
+            _cache.insert({{index_id, schema.schema_version()}, tablet_schema_ptr});
             return tablet_schema_ptr;
         }
         return iter->second;
+    }
+
+    TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaSPtr& schema) {
+        DCHECK(_s_instance != nullptr);
+        DCHECK(index_id > 0);
+        std::lock_guard guard(_mtx);
+        auto [it, _] = _cache.insert({{index_id, schema->schema_version()}, schema});
+        return it->second;
     }
 
 private:
@@ -76,7 +83,16 @@ private:
 private:
     static inline TabletSchemaCache* _s_instance = nullptr;
     std::mutex _mtx;
-    std::unordered_map<std::string, TabletSchemaSPtr> _cache;
+    using Key = std::pair<int64_t, int32_t>; // [index_id, schema_version]
+    struct HashOfKey {
+        size_t operator()(const Key& key) const {
+            size_t seed = 0;
+            seed = HashUtil::hash64(&key.first, sizeof(key.first), seed);
+            seed = HashUtil::hash64(&key.second, sizeof(key.second), seed);
+            return seed;
+        }
+    };
+    std::unordered_map<Key, TabletSchemaSPtr, HashOfKey> _cache;
 };
 
 } // namespace doris

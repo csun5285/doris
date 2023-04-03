@@ -162,6 +162,34 @@ TEST(KeysTest, KeysTest) {
         ASSERT_GT(encoded_rowset_key1, encoded_rowset_key0);
     }
 
+    // tablet schema key
+    // 0x01 "meta" ${instance_id} "schema" ${index_id} ${schema_version} -> TabletSchemaPB
+    {
+        int64_t index_id = 10000;
+        int32_t schema_version = 5;
+        auto key = meta_schema_key({instance_id, index_id, schema_version});
+
+        std::string dec_instance_id;
+        int64_t dec_index_id = 0;
+        int64_t dec_schema_version = 0;
+
+        std::string_view key_sv(key);
+        std::string dec_schema_prefix;
+        std::string dec_schema_infix;
+        key_sv.remove_prefix(1); // Remove CLOUD_USER_KEY_SPACE01
+        ASSERT_EQ(decode_bytes(&key_sv, &dec_schema_prefix), 0);
+        ASSERT_EQ(decode_bytes(&key_sv, &dec_instance_id), 0);
+        ASSERT_EQ(decode_bytes(&key_sv, &dec_schema_infix), 0);
+        ASSERT_EQ(decode_int64(&key_sv, &dec_index_id), 0);
+        ASSERT_EQ(decode_int64(&key_sv, &dec_schema_version), 0);
+
+        EXPECT_EQ(instance_id, dec_instance_id);
+        EXPECT_EQ(index_id, dec_index_id);
+        EXPECT_EQ(schema_version, dec_schema_version);
+        EXPECT_EQ(dec_schema_prefix, "meta");
+        EXPECT_EQ(dec_schema_infix, "schema");
+    }
+
     // 0x01 "version" ${instance_id} "version_id" ${db_id} ${tbl_id} ${partition_id} -> ${version}
     {
         int64_t db_id = 11111;

@@ -497,7 +497,7 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     _is_persistent = tablet_meta_pb.is_persistent();
 
     // init _schema
-    _schema->init_from_pb(tablet_meta_pb.schema());
+    _schema = TabletSchemaCache::instance()->insert(_index_id, tablet_meta_pb.schema());
 
 #ifndef CLOUD_MODE
     // init _rs_metas

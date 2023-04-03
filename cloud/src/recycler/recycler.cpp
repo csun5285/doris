@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <string>
 #include <string_view>
 
@@ -512,7 +513,8 @@ void InstanceRecycler::recycle_indexes() {
 
     int64_t current_time = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
 
-    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, current_time, this](
+    std::vector<int64_t> expired_index_ids;
+    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, current_time, &expired_index_ids, this](
                                 std::string_view k, std::string_view v) -> bool {
         ++num_scanned;
         RecycleIndexPB index_pb;
@@ -534,6 +536,7 @@ void InstanceRecycler::recycle_indexes() {
         decode_key(&k1, &out);
         // 0x01 "recycle" ${instance_id} "index" ${index_id} -> RecycleIndexPB
         auto index_id = std::get<int64_t>(std::get<0>(out[3]));
+        expired_index_ids.push_back(index_id);
         if (recycle_tablets(index_pb.table_id(), index_id) != 0) {
             LOG_WARNING("failed to recycle tablets under index")
                     .tag("table_id", index_pb.table_id())
@@ -546,6 +549,25 @@ void InstanceRecycler::recycle_indexes() {
     };
 
     scan_and_recycle(index_key0, index_key1, std::move(recycle_func));
+
+    // remove schema kv of expired indexes
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv_->create_txn(&txn) != 0) {
+        LOG(WARNING) << "failed to create txn";
+        return;
+    }
+    std::deque<std::string> buffer;
+    for (auto index_id : expired_index_ids) {
+        auto& begin_key = buffer.emplace_back();
+        auto& end_key = buffer.emplace_back();
+        meta_schema_key({instance_id_, index_id, 0}, &begin_key);
+        meta_schema_key({instance_id_, index_id + 1, 0}, &end_key);
+        txn->remove(begin_key, end_key);
+    }
+    int ret = txn->commit(); 
+    if (ret != 0) {
+        LOG(WARNING) << "failed to commit txn when remove schema kv, ret=" << ret;
+    }
 }
 
 void InstanceRecycler::recycle_partitions() {

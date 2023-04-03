@@ -159,9 +159,9 @@ void Transaction::put(std::string_view key, std::string_view val) {
     g_bvar_txn_kv_put << sw.elapsed_us();
 }
 
-int Transaction::get(std::string_view key, std::string* val) {
+int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     StopWatch sw;
-    auto fut = fdb_transaction_get(txn_, (uint8_t*)key.data(), key.size(), false /*snapshot read*/);
+    auto fut = fdb_transaction_get(txn_, (uint8_t*)key.data(), key.size(), snapshot);
 
     auto release_fut = [fut, &sw](int*) { fdb_future_destroy(fut); g_bvar_txn_kv_get << sw.elapsed_us(); };
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
@@ -199,7 +199,7 @@ int Transaction::get(std::string_view key, std::string* val) {
 }
 
 int Transaction::get(std::string_view begin, std::string_view end,
-                     std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit) {
+                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
     StopWatch sw;
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [&sw](int*) { g_bvar_txn_kv_range_get << sw.elapsed_us();});
@@ -209,7 +209,7 @@ int Transaction::get(std::string_view begin, std::string_view end,
             FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)end.data(), end.size()), limit,
             0 /*target_bytes, unlimited*/, FDBStreamingMode::FDB_STREAMING_MODE_WANT_ALL,
             //       FDBStreamingMode::FDB_STREAMING_MODE_ITERATOR,
-            0 /*iteration*/, false /*snapshot*/, false /*reverse*/);
+            0 /*iteration*/, snapshot, false /*reverse*/);
 
     auto err = fdb_future_block_until_ready(fut);
     if (err) {

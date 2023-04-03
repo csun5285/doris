@@ -120,6 +120,9 @@ message RowsetMetaPB {
 
     // cloud
     repeated int64 segment_file_size = 100;
+    // index_id, schema_version -> schema
+    optional int64 index_id = 101;
+    optional int32 schema_version = 102;
 }
 
 // unused remote rowsets garbage collection kv value
@@ -318,6 +321,7 @@ message TabletMetaPB {
     // Use for selectdb-cloud
     optional string table_name = 101;
     optional int64 ttl_seconds = 102;
+    optional int32 schema_version = 103; // index_id, schema_version -> schema
 }
 
 message OLAPRawDeltaHeaderMessage {

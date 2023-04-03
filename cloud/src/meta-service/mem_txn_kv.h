@@ -2,10 +2,10 @@
 
 #include <cstdint>
 #include <list>
-#include <memory>
 #include <map>
-#include <set>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,7 +19,7 @@ enum class ModifyOpType;
 } // namespace memkv
 
 class MemTxnKv : public TxnKv, public std::enable_shared_from_this<MemTxnKv> {
-friend class memkv::Transaction;
+    friend class memkv::Transaction;
 
 public:
     MemTxnKv() = default;
@@ -31,16 +31,15 @@ public:
 
 private:
     using OpTuple = std::tuple<memkv::ModifyOpType, std::string, std::string>;
-    int update(const std::set<std::string>& read_set, const std::vector<OpTuple> &op_list,
-                    int64_t read_version, int64_t* committed_version);
- 
-    int get_kv(std::map<std::string, std::string> *kv, int64_t* version);
+    int update(const std::set<std::string>& read_set, const std::vector<OpTuple>& op_list,
+               int64_t read_version, int64_t* committed_version);
+
+    int get_kv(std::map<std::string, std::string>* kv, int64_t* version);
 
     int64_t get_last_commited_version();
     int64_t get_last_read_version();
 
     int gen_version_timestamp(int64_t ver, int16_t seq, std::string* str);
-
 
 private:
     struct LogItem {
@@ -98,16 +97,19 @@ public:
 
     using selectdb::Transaction::get;
     /**
+     * @param snapshot if true, `key` will not be included in txn conflict detection this time
      * @return 0 for success get a key, 1 for key not found, negative for error
      */
-    int get(std::string_view key, std::string* val) override;
+    int get(std::string_view key, std::string* val, bool snapshot = false) override;
     /**
      * Closed-open range
+     * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
      * @return 0 for success, negative for error
      */
     int get(std::string_view begin, std::string_view end,
-            std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit = 10000) override;
+            std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
+            int limit = 10000) override;
 
     /**
      * Put a key-value pair in which key will in the form of
@@ -156,10 +158,10 @@ public:
     int abort() override;
 
 private:
-    int inner_get(const std::string& key, std::string* val);
+    int inner_get(const std::string& key, std::string* val, bool snapshot);
 
     int inner_get(const std::string& begin, const std::string& end,
-                     std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit);
+                  std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit);
 
 private:
     std::shared_ptr<MemTxnKv> kv_ {nullptr};
@@ -177,15 +179,12 @@ private:
 
 class RangeGetIterator : public selectdb::RangeGetIterator {
 public:
-    RangeGetIterator(std::vector<std::pair<std::string, std::string>> kvs,
-                        bool more): kvs_(std::move(kvs)), 
-                        kvs_size_(kvs_.size()), idx_(0), more_(more) {}
+    RangeGetIterator(std::vector<std::pair<std::string, std::string>> kvs, bool more)
+            : kvs_(std::move(kvs)), kvs_size_(kvs_.size()), idx_(0), more_(more) {}
 
-    ~RangeGetIterator() override{}
+    ~RangeGetIterator() override {}
 
-    bool has_next() override {
-        return idx_ < kvs_size_;
-    }
+    bool has_next() override { return idx_ < kvs_size_; }
 
     std::pair<std::string_view, std::string_view> next() override {
         if (idx_ < 0 || idx_ >= kvs_size_) return {};
@@ -196,13 +195,9 @@ public:
         return {kvs_[idx_].first, kvs_[idx_].second};
     }
 
-    bool more() override {
-        return more_;
-    }
+    bool more() override { return more_; }
 
-    int size() override {
-        return kvs_size_;
-    }
+    int size() override { return kvs_size_; }
     int reset() override {
         idx_ = 0;
         return 0;

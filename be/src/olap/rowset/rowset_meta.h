@@ -25,7 +25,6 @@
 #include "cloud/io/file_system.h"
 #include "cloud/io/file_system_map.h"
 #include "cloud/io/local_file_system.h"
-#include "common/logging.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "json2pb/json_to_pb.h"
@@ -43,7 +42,9 @@ class RowsetMeta {
 public:
     RowsetMeta() = default;
 
-    RowsetMeta(int64_t table_id, int64_t index_id) : _table_id(table_id), _index_id(index_id) {}
+    RowsetMeta(int64_t table_id, int64_t index_id) : _table_id(table_id) {
+        _rowset_meta_pb.set_index_id(index_id);
+    }
 
     virtual ~RowsetMeta() = default;
 
@@ -57,9 +58,11 @@ public:
     }
 
     virtual bool init_from_pb(const RowsetMetaPB& rowset_meta_pb) {
+        // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
+        DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
         if (rowset_meta_pb.has_tablet_schema()) {
-            _schema = TabletSchemaCache::instance()->insert(
-                    rowset_meta_pb.tablet_schema().SerializeAsString());
+            _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
+                                                            rowset_meta_pb.tablet_schema());
         }
         // Release ownership of TabletSchemaPB from `rowset_meta_pb` and then set it back to `rowset_meta_pb`,
         // this won't break const semantics of `rowset_meta_pb`, because `rowset_meta_pb` is not changed
@@ -116,7 +119,7 @@ public:
 
     int64_t table_id() const { return _table_id; }
 
-    int64_t index_id() const { return _index_id; }
+    int64_t index_id() const { return _rowset_meta_pb.index_id(); }
 
     RowsetId rowset_id() const { return _rowset_id; }
 
@@ -375,10 +378,11 @@ public:
     int64_t newest_write_timestamp() const { return _rowset_meta_pb.newest_write_timestamp(); }
 
     void set_tablet_schema(const TabletSchemaSPtr& tablet_schema) {
-        _schema = TabletSchemaCache::instance()->insert(tablet_schema->to_key());
+        DCHECK(index_id() > 0);
+        _schema = TabletSchemaCache::instance()->insert(index_id(), tablet_schema);
     }
 
-    TabletSchemaSPtr tablet_schema() { return _schema; }
+    const TabletSchemaSPtr& tablet_schema() { return _schema; }
 
     void add_segment_file_size(int64_t size) { _rowset_meta_pb.add_segment_file_size(size); }
 
@@ -396,9 +400,11 @@ private:
         if (!rowset_meta_pb.ParseFromString(value)) {
             return false;
         }
+        // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
+        DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
         if (rowset_meta_pb.has_tablet_schema()) {
-            _schema = TabletSchemaCache::instance()->insert(
-                    rowset_meta_pb.tablet_schema().SerializeAsString());
+            _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
+                                                            rowset_meta_pb.tablet_schema());
             rowset_meta_pb.clear_tablet_schema();
         }
         _rowset_meta_pb = rowset_meta_pb;
@@ -442,7 +448,6 @@ private:
 
     // these fields will be used in some statistics
     int64_t _table_id = 0;
-    int64_t _index_id = 0;
 
     io::FileSystemSPtr _fs;
     bool _is_removed_from_rowset_meta = false;

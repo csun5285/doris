@@ -97,4 +97,6 @@ CONF_String(arn_ak, "");
 CONF_String(arn_sk, "");
 CONF_Int64(internal_stage_objects_expire_time_second, "259200"); // 3 * 24 * 3600 seconds
 
+CONF_mBool(write_schema_kv, "false"); // temporary config for upgrade
+
 } // namespace selectdb::config

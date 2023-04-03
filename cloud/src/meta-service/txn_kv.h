@@ -50,18 +50,20 @@ public:
     virtual void put(std::string_view key, std::string_view val) = 0;
 
     /**
-     *
+     * @param snapshot if true, `key` will not be included in txn conflict detection this time
      * @return 0 for success get a key, 1 for key not found, negative for error
      */
-    virtual int get(std::string_view key, std::string* val) = 0;
+    virtual int get(std::string_view key, std::string* val, bool snapshot = false) = 0;
 
     /**
      * Closed-open range
+     * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
      * @return 0 for success, negative for error
      */
     virtual int get(std::string_view begin, std::string_view end,
-                    std::unique_ptr<RangeGetIterator>* iter, int limit = 10000) = 0;
+                    std::unique_ptr<RangeGetIterator>* iter, bool snapshot = false,
+                    int limit = 10000) = 0;
 
     /**
      * Put a key-value pair in which key will in the form of
@@ -346,16 +348,19 @@ public:
 
     using selectdb::Transaction::get;
     /**
+     * @param snapshot if true, `key` will not be included in txn conflict detection this time
      * @return 0 for success get a key, 1 for key not found, negative for error
      */
-    int get(std::string_view key, std::string* val) override;
+    int get(std::string_view key, std::string* val, bool snapshot = false) override;
     /**
      * Closed-open range
+     * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
      * @return 0 for success, negative for error
      */
     int get(std::string_view begin, std::string_view end,
-            std::unique_ptr<selectdb::RangeGetIterator>* iter, int limit = 10000) override;
+            std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
+            int limit = 10000) override;
 
     /**
      * Put a key-value pair in which key will in the form of

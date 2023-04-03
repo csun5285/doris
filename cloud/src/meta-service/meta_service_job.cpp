@@ -153,8 +153,6 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
     auto& job_val = *obj_pool.add(new std::string());
     TabletJobInfoPB job_pb;
     ret = txn->get(job_key, &job_val);
-    INSTANCE_LOG(INFO) << "get tablet job, tablet_id=" << tablet_id << " key=" << hex(job_key)
-                       << " ret=" << ret;
     if (ret < 0) {
         SS << "failed to get tablet job, instance_id=" << instance_id << " tablet_id=" << tablet_id
            << " key=" << hex(job_key) << " ret=" << ret;
@@ -303,8 +301,6 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
     auto& job_val = *obj_pool.add(new std::string());
     TabletJobInfoPB job_pb;
     ret = txn->get(job_key, &job_val);
-    INSTANCE_LOG(INFO) << "get tablet job, tablet_id=" << tablet_id << " key=" << hex(job_key)
-                       << " ret=" << ret;
     if (ret < 0) {
         SS << "failed to get tablet job, instance_id=" << instance_id << " tablet_id=" << tablet_id
            << " key=" << hex(job_key) << " ret=" << ret;
@@ -526,8 +522,6 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
             stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
     auto& stats_val = *obj_pool.add(new std::string());
     ret = txn->get(stats_key, &stats_val);
-    INSTANCE_LOG(INFO) << "get tablet stats, tablet_id=" << tablet_id << " key=" << hex(stats_key)
-                       << " ret=" << ret;
     if (ret != 0) {
         code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
         SS << (ret == 1 ? "not found" : "get kv error") << " tablet_id=" << tablet_id
@@ -957,8 +951,6 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
             {instance_id, new_table_id, new_index_id, new_partition_id, new_tablet_id})));
     auto& stats_val = *obj_pool.add(new std::string());
     ret = txn->get(stats_key, &stats_val);
-    INSTANCE_LOG(INFO) << "get tablet stats, tablet_id=" << new_tablet_id
-                       << " key=" << hex(stats_key) << " ret=" << ret;
     if (ret != 0) {
         code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
         SS << (ret == 1 ? "not found" : "get kv error") << " tablet_id=" << new_tablet_id
@@ -1073,8 +1065,6 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
             job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     std::string job_val;
     ret = txn->get(job_key, &job_val);
-    INSTANCE_LOG(INFO) << "get job tablet_id=" << tablet_id << " ret=" << ret
-                       << " key=" << hex(job_key);
     if (ret != 0) {
         SS << (ret == 1 ? "job not found," : "internal error,") << " instance_id=" << instance_id
            << " tablet_id=" << tablet_id << " job=" << proto_to_json(request->job());
