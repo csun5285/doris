@@ -689,7 +689,7 @@ public class ConnectContext {
         return cloudCluster;
     }
 
-    public void setCloudCluster() {
+    public void setCloudCluster() throws UserException {
         List<String> cloudClusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         // try set default cluster
         String defaultCloudCluster = Env.getCurrentEnv().getAuth().getDefaultCloudCluster(getQualifiedUser());
@@ -705,7 +705,7 @@ public class ConnectContext {
                 LOG.warn("default cluster {} current invalid, please change it", defaultCloudCluster);
                 getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
                         "default cluster " + defaultCloudCluster + "current invalid, please change it");
-                return;
+                throw new UserException("default cluster " + defaultCloudCluster + "current invalid, please change it");
             }
         }
 
@@ -723,7 +723,7 @@ public class ConnectContext {
             LOG.warn("cant get a valid cluster for user {} to use", getCurrentUserIdentity());
             getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
                     "Cant get a Valid cluster for you to use, plz connect admin");
-            return;
+            throw new UserException("Cant get a Valid cluster for you to use, plz connect admin");
         }
         LOG.info("finally set context cluster name {}", cloudCluster);
     }

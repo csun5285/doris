@@ -115,6 +115,14 @@ suite("test_stage_ddl") {
         sql """
         GRANT LOAD_PRIV ON *.*.* TO '${user}'@'%';
         """
+        List<List<Object>> clusterRes  = sql "show clusters"
+        assertTrue(clusterRes.size() >= 1);
+        String clusterName = clusterRes[0][0]
+
+        sql """
+            GRANT USAGE_PRIV ON CLUSTER ${clusterName} TO ${user}
+        """
+
         // copy into
         def result = connect(user=user, password='12345', url=context.config.jdbcUrl) {
             def result1 = sql """COPY INTO regression_test.test FROM @~('${remote}') properties('copy.async'='false')"""

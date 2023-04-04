@@ -302,7 +302,11 @@ public class ConnectProcessor {
     private void handleQuery() {
         MetricRepo.COUNTER_REQUEST_ALL.increase(1L);
         if (Config.isCloudMode() && Strings.isNullOrEmpty(ctx.cloudCluster)) {
-            ctx.setCloudCluster();
+            try {
+                ctx.setCloudCluster();
+            } catch (UserException e) {
+                return;
+            }
             LOG.debug("handle Query set ctx cloud cluster, get cluster: {}", ctx.getCloudCluster());
         }
         if (Config.isCloudMode() && ctx.cloudCluster != null) {
