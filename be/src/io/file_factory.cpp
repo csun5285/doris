@@ -16,6 +16,7 @@
 // under the License.
 
 #include "io/file_factory.h"
+#include <gen_cpp/Types_types.h>
 
 #include "io/broker_reader.h"
 #include "io/broker_writer.h"
@@ -131,7 +132,10 @@ doris::Status doris::FileFactory::create_file_reader(RuntimeProfile* profile,
     }
 
     // if the buffer size is 0, we would set it as the dafault whole remote buffer size
-    if (buffer_size >= 0) {
+    // local file reader is not thread safe, temporatily we don't support it
+    // temporarily hdfs reader is not thread safe
+    // TODO(AlexYue): remove FILE_HDFS type check when it's thread safe
+    if (buffer_size >= 0 && type != TFileType::FILE_LOCAL && type != TFileType::FILE_HDFS) {
         file_reader.reset(new BufferedReader(
                 profile, file_reader_ptr,
                 buffer_size == 0 ? config::remote_storage_read_buffer_mb * 1024 * 1024

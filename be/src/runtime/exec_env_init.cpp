@@ -24,6 +24,7 @@
 #include "gen_cpp/HeartbeatService_types.h"
 #include "gen_cpp/TPaloBrokerService.h"
 #include "olap/page_cache.h"
+#include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/segment_loader.h"
 #include "olap/storage_engine.h"
 #include "olap/storage_policy_mgr.h"
@@ -61,7 +62,6 @@
 #include "util/priority_work_stealing_thread_pool.hpp"
 #include "vec/exec/scan/scanner_scheduler.h"
 #include "vec/runtime/vdata_stream_mgr.h"
-#include "olap/rowset/segment_v2/inverted_index_cache.h"
 
 #if !defined(__SANITIZE_ADDRESS__) && !defined(ADDRESS_SANITIZER) && !defined(LEAK_SANITIZER) && \
         !defined(THREAD_SANITIZER) && !defined(USE_JEMALLOC)
@@ -131,9 +131,13 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .build(&_send_batch_thread_pool);
 
     init_download_cache_required_components();
-    
+
+    // Each thread has a download speed of approximately 9MB/s for object storage.
+    // In extreme cases, 1024 threads can fully utilize the bandwidth of a 10-gigabit network card.
+    // In normal circumstances, 4 threads are required to concurrently execute a buffered reader,
+    // and up to 32 buffered reader requirements can be handled with 128 threads
     ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
-            .set_min_threads(1024)
+            .set_min_threads(128)
             .set_max_threads(1024)
             .build(&_buffered_reader_prefetch_thread_pool);
 
@@ -288,8 +292,8 @@ Status ExecEnv::_init_mem_env() {
 
     // use memory limit
     int64_t inverted_index_cache_limit =
-            ParseUtil::parse_mem_spec(config::inverted_index_searcher_cache_limit, MemInfo::mem_limit(),
-                                      MemInfo::physical_mem(), &is_percent);
+            ParseUtil::parse_mem_spec(config::inverted_index_searcher_cache_limit,
+                                      MemInfo::mem_limit(), MemInfo::physical_mem(), &is_percent);
     while (!is_percent && inverted_index_cache_limit > MemInfo::mem_limit() / 2) {
         // Reason same as buffer_pool_limit
         inverted_index_cache_limit = inverted_index_cache_limit / 2;

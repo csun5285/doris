@@ -17,6 +17,9 @@
 
 #include "io/buffered_reader.h"
 
+#include <bvar/reducer.h>
+#include <bvar/window.h>
+
 #include <algorithm>
 #include <sstream>
 
@@ -28,6 +31,12 @@
 #include "util/bit_util.h"
 
 namespace doris {
+
+// add bvar to capture the download bytes per second by buffered reader
+bvar::Adder<uint64_t> g_bytes_downloaded("buffered_reader", "bytes_downloaded");
+bvar::PerSecond<bvar::Adder<uint64_t>> g_bytes_downloaded_per_second("buffered_reader",
+                                                                    "bytes_downloaded_per_second",
+                                                                    &g_bytes_downloaded, 60);
 
 // there exists occasions where the buffer is already closed but
 // some prior tasks are still queued in threadpool, so we have to check wheher
@@ -65,10 +74,13 @@ void PrefetchBuffer::prefetch_buffer() {
     }
     _len = 0;
     Status s;
+    DCHECK(_reader->size() - _offset >= 0);
+    size_t nbytes = std::min({_size, _reader->size() - _offset});
     {
         SCOPED_TIMER(_remote_read_timer);
-        s = _reader->readat(_offset, _size, &_len, _buf.data());
+        s = _reader->readat(_offset, nbytes, &_len, _buf.data());
     }
+    g_bytes_downloaded << _len;
     COUNTER_UPDATE(_remote_read_counter, 1);
     std::unique_lock lck {_lock};
     _prefetched.wait(lck, [this]() { return _buffer_status == BufferStatus::PENDING; });
@@ -162,8 +174,7 @@ Status BufferedReader::open() {
     _remote_read_bytes = ADD_COUNTER(_profile, "FileRemoteReadBytes", TUnit::BYTES);
     _remote_read_rate = _profile->add_derived_counter(
             "FileRemoteReadRate", TUnit::BYTES_PER_SECOND,
-            std::bind<int64_t>(&RuntimeProfile::units_per_second, _remote_read_bytes,
-                               _remote_read_timer),
+            std::bind<int64_t>(&RuntimeProfile::units_per_second, _remote_read_bytes, _read_timer),
             "");
 
     RETURN_IF_ERROR(_reader->open());
