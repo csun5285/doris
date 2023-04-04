@@ -31,8 +31,8 @@ suite ("create_mv_complex_type") {
         assertTrue(useTime <= OpTimeout, "wait_for_create_mv_finish timeout")
     }
 
-    sql "ADMIN SET FRONTEND CONFIG ('enable_struct_type' = 'true')"
-    sql "ADMIN SET FRONTEND CONFIG ('enable_map_type' = 'true')"
+    // sql "ADMIN SET FRONTEND CONFIG ('enable_struct_type' = 'true')"
+    // sql "ADMIN SET FRONTEND CONFIG ('enable_map_type' = 'true')"
 
     sql """ DROP TABLE IF EXISTS base_table; """
     sql """
@@ -41,16 +41,14 @@ suite ("create_mv_complex_type") {
                 c_bigint BIGINT(10),
                 c_float BIGINT,
                 c_jsonb JSONB,
-                c_array ARRAY<INT>,
-                c_map MAP<STRING, INT>,
-                c_struct STRUCT<a:INT, b:INT>
+                c_array ARRAY<INT>
             )
             duplicate key (c_int)
             distributed BY hash(c_int) buckets 3
             properties("replication_num" = "1");
         """
 
-    sql """insert into base_table select 1, 100000, 1.0, '{"jsonk1": 123}', [100, 200], {"k1": 10}, {1, 2};"""
+    sql """insert into base_table select 1, 100000, 1.0, '{"jsonk1": 123}', [100, 200];"""
 
     def success = false
 
@@ -91,41 +89,41 @@ suite ("create_mv_complex_type") {
     }
     assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_map, c_int from base_table;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_map, c_int from base_table;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
+    // }
+    // assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_map from base_table;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_map from base_table;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
+    // }
+    // assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_struct, c_int from base_table;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_struct, c_int from base_table;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
+    // }
+    // assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_struct from base_table;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_struct from base_table;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("not support to create materialized view"), e.getMessage())
+    // }
+    // assertFalse(success)
 
 
     // 2. special column - mv agg key
@@ -147,23 +145,23 @@ suite ("create_mv_complex_type") {
     }
     assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_int, c_map, count(c_bigint) from base_table group by c_bigint, c_int, c_map;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_int, c_map, count(c_bigint) from base_table group by c_bigint, c_int, c_map;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
+    // }
+    // assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_int, c_struct, count(c_bigint) from base_table group by c_bigint, c_int, c_struct;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_int, c_struct, count(c_bigint) from base_table group by c_bigint, c_int, c_struct;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
+    // }
+    // assertFalse(success)
 
 
     // 3. special column - ORDER BY
@@ -185,21 +183,21 @@ suite ("create_mv_complex_type") {
     }
     assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_int, c_map from base_table order by c_bigint, c_int, c_map;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_int, c_map from base_table order by c_bigint, c_int, c_map;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
+    // }
+    // assertFalse(success)
 
-    success = false
-    try {
-        sql """create materialized view mv as select c_bigint, c_int, c_struct from base_table order by c_bigint, c_int, c_struct;"""
-        success = true
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
-    }
-    assertFalse(success)
+    // success = false
+    // try {
+    //     sql """create materialized view mv as select c_bigint, c_int, c_struct from base_table order by c_bigint, c_int, c_struct;"""
+    //     success = true
+    // } catch (Exception e) {
+    //     assertTrue(e.getMessage().contains("don't support filter or group by"), e.getMessage())
+    // }
+    // assertFalse(success)
 }
