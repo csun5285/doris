@@ -216,7 +216,7 @@ suite("sync_load") {
             }
         }
     }
-    assertEquals(ipList.size(), bePortList.size());
+    assertEquals(bePortList.size(), 2);
 
     // q01
     sql """

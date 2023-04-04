@@ -111,6 +111,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                 String clusterName = context.getCloudCluster();
                 if (Strings.isNullOrEmpty(clusterName)) {
                     LOG.warn("cluster name is null");
+                    return;
                 }
 
                 this.clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterName);
@@ -248,6 +249,9 @@ public class BrokerLoadJob extends BulkLoadJob {
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
                             attachment.getFileNumByTable(aggKey), getUserInfo());
                 } else {
+                    if (Strings.isNullOrEmpty(clusterId)) {
+                        throw new UserException("can not get a valid cluster");
+                    }
                     task.init(loadId, attachment.getFileStatusByTable(aggKey),
                             attachment.getFileNumByTable(aggKey), getUserInfo(), clusterId, qualifiedUser);
                 }

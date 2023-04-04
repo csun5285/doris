@@ -67,7 +67,7 @@ suite("load") {
                      "regression_cluster_name0", "regression_cluster_id0");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name1", "regression_cluster_id1");
-    sleep(12000)
+    sleep(16000)
 
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
@@ -153,7 +153,7 @@ suite("load") {
     log.info("before_cluster1_query_scan_rows : ${before_cluster1_query_scan_rows}".toString())
 
     sql """
-        SELECT count(*) from supplier;
+        select count(*) from supplier where S_NATIONKEY = 11
         """
 
     def after_cluster0_query_scan_rows = get_be_metric(ipList[0], httpPortList[0], "query_scan_rows");
