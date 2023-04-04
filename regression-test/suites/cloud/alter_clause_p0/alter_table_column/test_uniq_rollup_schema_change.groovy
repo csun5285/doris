@@ -87,7 +87,7 @@ suite ("test_uniq_rollup_schema_change") {
 
     //add rollup
     def rollupName = "rollup_cost"
-    sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`city`,`age`,`sex`, cost);"
+    sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`city`,`sex`,`age`, cost);"
     int max_try_time = 600
     while(max_try_time--){
         String result = getRollupJobState(tableName)

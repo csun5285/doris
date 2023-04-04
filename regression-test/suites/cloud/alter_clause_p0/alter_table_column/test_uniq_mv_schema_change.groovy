@@ -87,7 +87,7 @@ suite ("test_uniq_mv_schema_change") {
 
     //add materialized view
     def mvName = "mv1"
-    sql "create materialized view ${mvName} as select user_id, date, city, age, sex from ${tableName} group by user_id, date, city, age, sex;"
+    sql "create materialized view ${mvName} as select user_id, date, city, age from ${tableName} group by user_id, date, city, age;"
     int max_try_time = 600
     while(max_try_time--){
         String result = getMvJobState(tableName)
