@@ -88,7 +88,8 @@ doris::Status doris::FileFactory::create_file_reader(
         FileReader* hdfs_reader = nullptr;
         RETURN_IF_ERROR(HdfsReaderWriter::create_reader(range.hdfs_params, range.path, start_offset,
                                                         &hdfs_reader));
-        file_reader_ptr = new BufferedReader(profile, hdfs_reader);
+        // temporarily hdfs reader is not thread safe, shouldn't use buffered reader
+        file_reader_ptr = hdfs_reader;
         break;
     }
     default:
