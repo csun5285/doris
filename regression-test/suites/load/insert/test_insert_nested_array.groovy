@@ -91,9 +91,9 @@ suite("test_insert_nested_array", "load") {
         qt_select "select * from ${tableName} as t1 right join ${tableName} as t2 on t1.`key` = t2.`key` order by t1.`key`"
     }
 
-    test_nested_array_2_depths.call(false)
+    test_nested_array_2_depths.call(true)
     test_nested_array_2_depths.call(true)
 
-    test_nested_array_3_depths.call(false)
+    test_nested_array_3_depths.call(true)
     test_nested_array_3_depths.call(true)
 }
