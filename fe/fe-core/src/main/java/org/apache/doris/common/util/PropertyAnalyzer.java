@@ -846,7 +846,12 @@ public class PropertyAnalyzer {
             return false;
         }
         if (Config.isCloudMode()) {
-            throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `false`");
+            if (Config.merge_on_write_forced_to_false) {
+                LOG.info("merge on write is forced to false in cloud mode, origin value {}", value);
+                return false;
+            } else {
+                throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `false`");
+            }
         }
         if (value.equals("true")) {
             return true;

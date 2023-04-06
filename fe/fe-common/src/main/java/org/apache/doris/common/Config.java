@@ -2112,5 +2112,8 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = false, masterOnly = false)
     public static String mysql_ssl_default_certificate_password = "doris";
+
+    @ConfField(mutable = true)
+    public static boolean merge_on_write_forced_to_false = false;
 }
 
