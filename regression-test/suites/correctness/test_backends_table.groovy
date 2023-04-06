@@ -17,7 +17,10 @@
 
 // This suit test the `backends` information_schema table
 suite("test_backends_table") {
+    // non cloud-mode
+    if (context.config.metaServiceHttpAddress.isEmpty()) {
     List<List<Object>> table =  sql """ select * from information_schema.backends; """
     assertTrue(table.size() > 0) // row should > 0
     assertTrue(table[0].size == 23) // column should be 23
+    }
 }
