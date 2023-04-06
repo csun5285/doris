@@ -307,9 +307,16 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
         abortTransaction(dbId, transactionId, reason, null, tableList);
     }
 
-    public void abortTransaction(long dbId, long transactionId, String reason, List<Table> tableList)
-            throws UserException {
-        abortTransaction(dbId, transactionId, reason, null, tableList);
+    public void abortTransaction(Long dbId, Long transactionId, String reason,
+            TxnCommitAttachment txnCommitAttachment) throws UserException {
+        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
+        TransactionState transactionState = getDatabaseTransactionMgr(dbId).getTransactionState(transactionId);
+        if (transactionState == null) {
+            LOG.info("try to cancel one txn which has no txn state. txn id: {}.", transactionId);
+            return;
+        }
+        List<Table> tableList = db.getTablesOnIdOrderIfExist(transactionState.getTableIdList());
+        abortTransaction(dbId, transactionId, reason, txnCommitAttachment, tableList);
     }
 
     public void abortTransaction(Long dbId, Long txnId, String reason,

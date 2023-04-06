@@ -88,9 +88,12 @@ public interface GlobalTransactionMgrInterface extends Writable {
     public void abortTransaction(Long dbId, Long txnId, String reason,
             TxnCommitAttachment txnCommitAttachment) throws UserException;
 
+    public void abortTransaction(Long dbId, Long txnId, String reason,
+            TxnCommitAttachment txnCommitAttachment, List<Table> tableList) throws UserException;
+
     public void abortTransaction(Long dbId, String label, String reason) throws UserException;
 
-    public void abortTransaction2PC(Long dbId, long transactionId) throws UserException;
+    public void abortTransaction2PC(Long dbId, long transactionId, List<Table> tableList) throws UserException;
 
     public List<TransactionState> getReadyToPublishTransactions();
 

@@ -343,6 +343,12 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
     @Override
     public void abortTransaction(Long dbId, Long transactionId, String reason,
+            TxnCommitAttachment txnCommitAttachment, List<Table> tableList) throws UserException {
+        abortTransaction(dbId, transactionId, reason, txnCommitAttachment);
+    }
+
+    @Override
+    public void abortTransaction(Long dbId, Long transactionId, String reason,
             TxnCommitAttachment txnCommitAttachment) throws UserException {
         LOG.info("try to abort transaction, dbId:{}, transactionId:{}", dbId, transactionId);
 
@@ -416,7 +422,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     @Override
-    public void abortTransaction2PC(Long dbId, long transactionId) throws UserException {
+    public void abortTransaction2PC(Long dbId, long transactionId, List<Table> tableList) throws UserException {
         LOG.info("try to abortTransaction2PC, dbId:{}, transactionId:{}", dbId, transactionId);
         abortTransaction(dbId, transactionId, "User Abort", null);
         LOG.info(" abortTransaction2PC successfully, dbId:{}, transactionId:{}", dbId, transactionId);
