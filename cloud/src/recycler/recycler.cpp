@@ -90,6 +90,23 @@ static void init_signals() {
     }
 }
 
+std::string segment_path(int64_t tablet_id, const std::string& rowset_id, int64_t segment_id) {
+    return fmt::format("data/{}/{}_{}.dat", tablet_id, rowset_id, segment_id);
+}
+
+std::string inverted_index_path(int64_t tablet_id, const std::string& rowset_id, int64_t segment_id,
+                                int64_t index_id) {
+    return fmt::format("data/{}/{}_{}_{}.idx", tablet_id, rowset_id, segment_id, index_id);
+}
+
+std::string rowset_path_prefix(int64_t tablet_id, const std::string& rowset_id) {
+    return fmt::format("data/{}/{}_", tablet_id, rowset_id);
+}
+
+std::string tablet_path_prefix(int64_t tablet_id) {
+    return fmt::format("data/{}/", tablet_id);
+}
+
 Recycler::Recycler() = default;
 
 Recycler::~Recycler() = default;
@@ -514,8 +531,8 @@ void InstanceRecycler::recycle_indexes() {
     int64_t current_time = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
 
     std::vector<int64_t> expired_index_ids;
-    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, current_time, &expired_index_ids, this](
-                                std::string_view k, std::string_view v) -> bool {
+    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, current_time,
+                         &expired_index_ids, this](std::string_view k, std::string_view v) -> bool {
         ++num_scanned;
         RecycleIndexPB index_pb;
         if (!index_pb.ParseFromArray(v.data(), v.size())) {
@@ -549,25 +566,6 @@ void InstanceRecycler::recycle_indexes() {
     };
 
     scan_and_recycle(index_key0, index_key1, std::move(recycle_func));
-
-    // remove schema kv of expired indexes
-    std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        LOG(WARNING) << "failed to create txn";
-        return;
-    }
-    std::deque<std::string> buffer;
-    for (auto index_id : expired_index_ids) {
-        auto& begin_key = buffer.emplace_back();
-        auto& end_key = buffer.emplace_back();
-        meta_schema_key({instance_id_, index_id, 0}, &begin_key);
-        meta_schema_key({instance_id_, index_id + 1, 0}, &end_key);
-        txn->remove(begin_key, end_key);
-    }
-    int ret = txn->commit(); 
-    if (ret != 0) {
-        LOG(WARNING) << "failed to commit txn when remove schema kv, ret=" << ret;
-    }
 }
 
 void InstanceRecycler::recycle_partitions() {
@@ -789,6 +787,15 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
     }
     txn->remove(stats_key0, stats_key1);
     txn->remove(job_key0, job_key1);
+    std::string schema_key_begin, schema_key_end;
+    if (partition_id <= 0) {
+        // Delete schema kv of this index
+        meta_schema_key({instance_id_, index_id, 0}, &schema_key_begin);
+        meta_schema_key({instance_id_, index_id + 1, 0}, &schema_key_end);
+        txn->remove(schema_key_begin, schema_key_end);
+        LOG(WARNING) << "remove schema kv, begin=" << hex(schema_key_begin)
+                     << " end=" << hex(schema_key_end);
+    }
     if (txn->commit() != 0) {
         LOG(WARNING) << "failed to commit txn";
         return -1;
@@ -798,6 +805,12 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
 }
 
 int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) {
+    int64_t num_segments = rs_meta_pb.num_segments();
+    if (num_segments <= 0) return 0;
+    if (!rs_meta_pb.has_tablet_schema()) {
+        return delete_rowset_data(rs_meta_pb.resource_id(), rs_meta_pb.tablet_id(),
+                                  rs_meta_pb.rowset_id_v2());
+    }
     auto it = accessor_map_.find(rs_meta_pb.resource_id());
     if (it == accessor_map_.end()) {
         LOG_WARNING("instance has no such resource id")
@@ -808,89 +821,34 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
     auto& accessor = it->second;
     const auto& rowset_id = rs_meta_pb.rowset_id_v2();
     int64_t tablet_id = rs_meta_pb.tablet_id();
-    int64_t num_segments = rs_meta_pb.num_segments();
-    std::vector<std::string> segment_paths;
-    segment_paths.reserve(num_segments);
+    // process inverted indexes
+    std::vector<int64_t> index_ids;
+    index_ids.reserve(rs_meta_pb.tablet_schema().index_size());
+    for (auto& i : rs_meta_pb.tablet_schema().index()) {
+        index_ids.push_back(i.index_id());
+    }
+    std::vector<std::string> file_paths;
+    file_paths.reserve(num_segments * (1 + index_ids.size()));
     for (int64_t i = 0; i < num_segments; ++i) {
-        segment_paths.push_back(fmt::format("data/{}/{}_{}.dat", tablet_id, rowset_id, i));
-    }
-    LOG_INFO("begin to delete rowset data")
-            .tag("s3_path", accessor->path())
-            .tag("tablet_id", tablet_id)
-            .tag("rowset_id", rowset_id)
-            .tag("num_segments", num_segments);
-    int ret = accessor->delete_objects(segment_paths);
-    if (ret != 0) {
-        LOG_INFO("failed to delete rowset data")
-                .tag("s3_path", accessor->path())
-                .tag("tablet_id", tablet_id)
-                .tag("rowset_id", rowset_id)
-                .tag("num_segments", num_segments);
-    }
-
-    // delete index data
-    doris::TabletSchemaPB tablet_schema_pb = rs_meta_pb.tablet_schema();
-    std::vector<int> index_ids;
-    for (auto& index_pb : tablet_schema_pb.index()) {
-        auto index_id = index_pb.index_id();
-        index_ids.push_back(index_id);
-    }
-
-    std::vector<std::string> index_paths;
-    for (auto& segment_path : segment_paths) {
-        auto pos_idx = segment_path.rfind(".");
-        if (pos_idx == std::string::npos) {
-            LOG(WARNING) << "Unformatted segment_path: " << segment_path;
-            continue;
-        }
-        std::string name = segment_path.substr(0, pos_idx);
-        for (auto index_id : index_ids) {
-            index_paths.push_back(fmt::format("{}_{}.idx", name, index_id));
+        file_paths.push_back(segment_path(tablet_id, rowset_id, i));
+        for (int64_t index_id : index_ids) {
+            file_paths.push_back(inverted_index_path(tablet_id, rowset_id, i, index_id));
         }
     }
-
-    LOG_INFO("begin to delete index data")
-            .tag("s3_path", accessor->path())
-            .tag("tablet_id", tablet_id)
-            .tag("rowset_id", rowset_id)
-            .tag("num_segments", num_segments)
-            .tag("index_size", index_ids.size());
-    ret = accessor->delete_objects(index_paths);
-    if (ret != 0) {
-        LOG_INFO("failed to delete index data")
-                .tag("s3_path", accessor->path())
-                .tag("tablet_id", tablet_id)
-                .tag("rowset_id", rowset_id)
-                .tag("num_segments", num_segments)
-                .tag("index_size", index_ids.size());
-    }
-
-    return ret;
+    return accessor->delete_objects(file_paths);
 }
 
-int InstanceRecycler::delete_rowset_data(const std::string& rowset_id,
-                                         const RecycleRowsetPB& recycl_rs_pb) {
-    auto it = accessor_map_.find(recycl_rs_pb.resource_id());
+int InstanceRecycler::delete_rowset_data(const std::string& resource_id, int64_t tablet_id,
+                                         const std::string& rowset_id) {
+    auto it = accessor_map_.find(resource_id);
     if (it == accessor_map_.end()) {
         LOG_WARNING("instance has no such resource id")
                 .tag("instance_id", instance_id_)
-                .tag("resource_id", recycl_rs_pb.resource_id());
+                .tag("resource_id", resource_id);
         return -1;
     }
     auto& accessor = it->second;
-    LOG_INFO("begin to delete rowset data")
-            .tag("s3_path", accessor->path())
-            .tag("tablet_id", recycl_rs_pb.tablet_id())
-            .tag("rowset_id", rowset_id);
-    int ret = accessor->delete_objects_by_prefix(
-            fmt::format("data/{}/{}", recycl_rs_pb.tablet_id(), rowset_id));
-    if (ret != 0) {
-        LOG_INFO("failed to delete rowset data")
-                .tag("s3_path", accessor->path())
-                .tag("tablet_id", recycl_rs_pb.tablet_id())
-                .tag("rowset_id", rowset_id);
-    }
-    return ret;
+    return accessor->delete_objects_by_prefix(rowset_path_prefix(tablet_id, rowset_id));
 }
 
 int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
@@ -982,7 +940,7 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
             ++num_recycled;
             return true;
         }
-        int ret = delete_rowset_data(rowset_id, recyc_rs_pb);
+        int ret = delete_rowset_data(recyc_rs_pb.resource_id(), recyc_rs_pb.tablet_id(), rowset_id);
         if (ret != 0) {
             return false;
         }
@@ -1054,7 +1012,7 @@ void InstanceRecycler::recycle_rowsets() {
             ++num_recycled;
             return true;
         }
-        int ret = delete_rowset_data(rowset_id, recyc_rs_pb);
+        int ret = delete_rowset_data(recyc_rs_pb.resource_id(), recyc_rs_pb.tablet_id(), rowset_id);
         if (ret != 0) {
             return false;
         }

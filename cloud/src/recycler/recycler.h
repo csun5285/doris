@@ -133,7 +133,10 @@ private:
 
     int delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb);
 
-    int delete_rowset_data(const std::string& rowset_id, const RecycleRowsetPB& recycl_rs_pb);
+    // return 0 for success otherwise error
+    // NOTE: this function ONLY be called when the file paths cannot be calculated
+    int delete_rowset_data(const std::string& resource_id, int64_t tablet_id,
+                           const std::string& rowset_id);
 
     /**
      * Get stage storage info from instance and init ObjStoreAccessor
