@@ -122,16 +122,24 @@ IFileCache::QueryContextPtr IFileCache::get_or_set_query_context(
 
 void IFileCache::QueryContext::remove(const Key& key, size_t offset,
                                       std::lock_guard<std::mutex>& cache_lock) {
-    auto record = records.find({key, offset});
+    // The key maybe comes from the 'lru_queue'
+    // and we need to erase the 'records' first.
+    // If not, it will cause heap-use-after-free
+    auto pair = std::make_pair(key, offset);
+    auto record = records.find(pair);
     DCHECK(record != records.end());
-    lru_queue.remove(record->second, cache_lock);
-    records.erase({key, offset});
+    auto iter = record->second;
+    records.erase(pair);
+    lru_queue.remove(iter, cache_lock);
 }
 
 void IFileCache::QueryContext::reserve(const Key& key, size_t offset, size_t size,
                                        std::lock_guard<std::mutex>& cache_lock) {
-    auto queue_iter = lru_queue.add(key, offset, size, cache_lock);
-    records.insert({{key, offset}, queue_iter});
+    auto pair = std::make_pair(key, offset);
+    if (records.find(pair) == records.end()) {
+        auto queue_iter = lru_queue.add(key, offset, size, cache_lock);
+        records.insert({pair, queue_iter});
+    }
 }
 
 } // namespace io

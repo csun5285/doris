@@ -453,7 +453,8 @@ const LRUFileCache::LRUQueue& LRUFileCache::get_queue(CacheType type) const {
 
 bool LRUFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<std::mutex>& cache_lock) {
     size_t removed_size = 0;
-    auto is_overflow = [&] { return _cur_cache_size + size - removed_size > _total_size; };
+    size_t cur_cache_size = _cur_cache_size;
+    auto is_overflow = [&] { return cur_cache_size + size - removed_size > _total_size; };
     auto remove_file_segment_if = [&](FileSegmentCell* cell) {
         FileSegmentSPtr file_segment = cell->file_segment;
         if (file_segment) {
@@ -555,20 +556,19 @@ bool LRUFileCache::try_reserve(const Key& key, const CacheContext& context, size
                                .count();
     auto& queue = get_queue(context.cache_type);
     size_t removed_size = 0;
-    size_t queue_element_size = queue.get_elements_num(cache_lock);
     size_t queue_size = queue.get_total_cache_size(cache_lock);
+    size_t cur_cache_size = _cur_cache_size;
+    size_t query_context_cache_size = query_context->get_cache_size(cache_lock);
 
     std::vector<IFileCache::LRUQueue::Iterator> ghost;
     std::vector<FileSegmentCell*> trash;
     std::vector<FileSegmentCell*> to_evict;
 
     size_t max_size = queue.get_max_size();
-    size_t max_element_size = queue.get_max_element_size();
     auto is_overflow = [&] {
-        return _cur_cache_size + size - removed_size > _total_size ||
+        return cur_cache_size + size - removed_size > _total_size ||
                (queue_size + size - removed_size > max_size) ||
-               queue_element_size >= max_element_size ||
-               (query_context->get_cache_size(cache_lock) + size - removed_size >
+               (query_context_cache_size + size - removed_size >
                 query_context->get_max_cache_size());
     };
 
@@ -604,7 +604,6 @@ bool LRUFileCache::try_reserve(const Key& key, const CacheContext& context, size
                 }
                 }
                 removed_size += cell_size;
-                --queue_element_size;
             }
         }
     }
@@ -742,7 +741,8 @@ bool LRUFileCache::try_reserve_from_other_queue(CacheType cur_cache_type, size_t
                                                 std::lock_guard<std::mutex>& cache_lock) {
     auto other_cache_types = get_other_cache_type(cur_cache_type);
     size_t removed_size = 0;
-    auto is_overflow = [&] { return _cur_cache_size + size - removed_size > _total_size; };
+    size_t cur_cache_size = _cur_cache_size;
+    auto is_overflow = [&] { return cur_cache_size + size - removed_size > _total_size; };
     std::vector<FileSegmentCell*> to_evict;
     std::vector<FileSegmentCell*> trash;
     for (CacheType cache_type : other_cache_types) {
@@ -811,11 +811,12 @@ bool LRUFileCache::try_reserve_for_lru(const Key& key, QueryContextPtr query_con
         size_t removed_size = 0;
         size_t queue_element_size = queue.get_elements_num(cache_lock);
         size_t queue_size = queue.get_total_cache_size(cache_lock);
+        size_t cur_cache_size = _cur_cache_size;
 
         size_t max_size = queue.get_max_size();
         size_t max_element_size = queue.get_max_element_size();
         auto is_overflow = [&] {
-            return _cur_cache_size + size - removed_size > _total_size ||
+            return cur_cache_size + size - removed_size > _total_size ||
                    (queue_size + size - removed_size > max_size) ||
                    queue_element_size >= max_element_size;
         };

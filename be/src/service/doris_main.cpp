@@ -40,6 +40,7 @@
 #include "agent/heartbeat_server.h"
 #include "agent/topic_subscriber.h"
 #include "cloud/io/cloud_file_cache_factory.h"
+#include "cloud/io/cloud_file_cache_profile.h"
 #include "cloud/io/cloud_file_cache_settings.h"
 #include "cloud/io/local_file_system.h"
 #include "cloud/io/s3_file_write_bufferpool.h"
@@ -404,8 +405,8 @@ int main(int argc, char** argv) {
         }
         for (auto& cache_path : cache_paths) {
             if (cache_path_set.find(cache_path.path) != cache_path_set.end()) {
-                LOG(FATAL) << fmt::format("cache path {} is duplicate", cache_path.path);
-                exit(-1);
+                LOG(WARNING) << fmt::format("cache path {} is duplicate", cache_path.path);
+                continue;
             }
             Status st = doris::io::FileCacheFactory::instance().create_file_cache(
                     cache_path.path, cache_path.init_settings());
@@ -414,6 +415,8 @@ int main(int argc, char** argv) {
                 exit(-1);
             }
         }
+        // use to init the 0 table profile for cloud mgr
+        doris::io::FileCacheProfile::instance();
         std::vector<std::string> rm_paths;
         olap_res = doris::parse_conf_rm_paths(doris::config::disposable_file_cache_path, rm_paths);
         if (!olap_res) {
@@ -421,8 +424,12 @@ int main(int argc, char** argv) {
                        << doris::config::disposable_file_cache_path;
             exit(-1);
         }
-        std::for_each(rm_paths.begin(), rm_paths.end(), [](const std::string& path) {
-            doris::io::global_local_filesystem()->delete_directory(path);
+        std::for_each(rm_paths.begin(), rm_paths.end(), [&cache_path_set](const std::string& path) {
+            if (cache_path_set.find(path) == cache_path_set.end()) {
+                doris::io::global_local_filesystem()->delete_directory(path);
+            } else {
+                LOG(WARNING) << fmt::format("disposable cache path {} is duplicate.", path);
+            }
         });
     }
 
