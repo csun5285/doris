@@ -1,4 +1,5 @@
 #include "cloud/cloud_tablet_mgr.h"
+
 #include <glog/logging.h>
 
 #include <algorithm>
@@ -293,15 +294,12 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
                : type == CompactionType::CUMULATIVE_COMPACTION ? t->last_cumu_compaction_success_time()
                : 0;
     };
-    auto skip = [&now, type = compaction_type, &last_compaction_time_ms](Tablet* t, int64_t score) {
+    auto skip = [&now, type = compaction_type, &last_compaction_time_ms](Tablet* t) {
         // We don't schedule tablets that are recently successfully scheduled
         int64_t interval = type == CompactionType::BASE_COMPACTION ? config::base_compaction_interval_seconds_since_last_operation * 1000
                            : type == CompactionType::CUMULATIVE_COMPACTION ? 1 * 1000
                            : 0;
-        int64_t threshold = type == CompactionType::BASE_COMPACTION ? config::base_compaction_num_cumulative_deltas
-                           : type == CompactionType::CUMULATIVE_COMPACTION ? config::min_cumulative_compaction_num_singleton_deltas
-                           : 0;
-        return  now - last_compaction_time_ms(t) < interval || score < threshold;
+        return  now - last_compaction_time_ms(t) < interval;
     };
     // We don't schedule tablets that are disabled for compaction
     auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };
@@ -320,7 +318,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
 
         if (filter_out(t.get())) { ++num_filtered; continue; }
         if (disable(t.get())) { ++num_disabled; continue; }
-        if (skip(t.get(), s)) { ++num_skipped; continue; }
+        if (skip(t.get())) { ++num_skipped; continue; }
 
         buf.push_back({std::move(t), s});
         std::sort(buf.begin(), buf.end(), [](auto& a, auto& b) { return a.second > b.second; });

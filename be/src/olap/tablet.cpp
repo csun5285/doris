@@ -726,7 +726,7 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
         return;
     }
     if (version_overlap) {
-        // filter existed rowset
+        // Filter out existed rowsets
         auto it = to_add.begin();
         size_t num_filtered = 0;
         while (it != to_add.end() - num_filtered) {
@@ -734,7 +734,9 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
             if (find_it != _rs_version_map.end()) {
                 if (find_it->second->rowset_id() != (*it)->rowset_id()) {
                     // If version of rowset in `to_add` is equal to rowset in tablet but rowset_id is not equal,
-                    // replace existed rowset with `to_add` rowset. This may occur during schema change.
+                    // replace existed rowset with `to_add` rowset. This may occur when:
+                    //  1. schema change converts rowsets which have been double written to new tablet
+                    //  2. cumu compaction picks single overlapping input rowset to perform compaction
                     _tablet_meta->delete_rs_meta_by_version((*it)->version(), nullptr);
                     _rs_version_map[(*it)->version()] = *it;
                     _tablet_meta->cloud_add_rs_metas({*it});

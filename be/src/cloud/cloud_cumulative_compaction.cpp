@@ -211,8 +211,14 @@ Status CloudCumulativeCompaction::update_tablet_meta(const Merger::Statistics* s
             // This could happen while calling `sync_tablet_rowsets` during `commit_tablet_job`
             return Status::OK();
         }
-        _tablet->cloud_delete_rowsets(_input_rowsets);
-        _tablet->cloud_add_rowsets({_output_rowset}, false);
+        if (_input_rowsets.size() == 1) {
+            DCHECK_EQ(_output_rowset->version(), _input_rowsets[0]->version());
+            // MUST NOT move input rowset to stale path
+            _tablet->cloud_add_rowsets({_output_rowset}, true);
+        } else {
+            _tablet->cloud_delete_rowsets(_input_rowsets);
+            _tablet->cloud_add_rowsets({_output_rowset}, false);
+        }
         _tablet->set_base_compaction_cnt(stats.base_compaction_cnt());
         _tablet->set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());
         _tablet->set_cumulative_layer_point(stats.cumulative_point());

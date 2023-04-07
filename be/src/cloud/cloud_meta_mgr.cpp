@@ -185,8 +185,11 @@ TRY_AGAIN:
         for (auto& meta_pb : resp.rowset_meta()) {
             VLOG_DEBUG << "get rowset meta, tablet_id=" << meta_pb.tablet_id() << ", version=["
                        << meta_pb.start_version() << '-' << meta_pb.end_version() << ']';
-            if (tablet->version_exists({meta_pb.start_version(), meta_pb.end_version()})) {
-                continue;
+            auto existed_rowset =
+                    tablet->get_rowset_by_version({meta_pb.start_version(), meta_pb.end_version()});
+            if (existed_rowset &&
+                existed_rowset->rowset_id().to_string() == meta_pb.rowset_id_v2()) {
+                continue; // Same rowset, skip it
             }
             auto rs_meta = std::make_shared<RowsetMeta>(table_id, index_id);
             rs_meta->init_from_pb(meta_pb);
