@@ -49,7 +49,12 @@ void PrefetchBuffer::reset_offset(int64_t offset) {
             _prefetched.notify_all();
             return;
         }
-        _buffer_status = BufferStatus::RESET;
+        // only prefetch if the offset is valid
+        if (offset < _reader->size()) {
+            _buffer_status = BufferStatus::RESET;
+        } else {
+            _buffer_status = BufferStatus::PREFETCHED;
+        }
         _offset = offset;
         _prefetched.notify_all();
     }
@@ -74,14 +79,15 @@ void PrefetchBuffer::prefetch_buffer() {
     }
     _len = 0;
     Status s;
-    DCHECK(_reader->size() - _offset >= 0);
-    size_t nbytes = std::min({_size, _reader->size() - _offset});
-    {
-        SCOPED_TIMER(_remote_read_timer);
-        s = _reader->readat(_offset, nbytes, &_len, _buf.data());
+    if (_reader->size() - _offset >= 0) {
+        size_t nbytes = std::min({_size, _reader->size() - _offset});
+        {
+            SCOPED_TIMER(_remote_read_timer);
+            s = _reader->readat(_offset, nbytes, &_len, _buf.data());
+        }
+        g_bytes_downloaded << _len;
+        COUNTER_UPDATE(_remote_read_counter, 1);
     }
-    g_bytes_downloaded << _len;
-    COUNTER_UPDATE(_remote_read_counter, 1);
     std::unique_lock lck {_lock};
     _prefetched.wait(lck, [this]() { return _buffer_status == BufferStatus::PENDING; });
     if (!s.ok()) {
@@ -105,6 +111,10 @@ Status PrefetchBuffer::read_buffer(int64_t off, uint8_t* out, int64_t buf_len,
         if (BufferStatus::CLOSED == _buffer_status) [[unlikely]] {
             return Status::OK();
         }
+    }
+    if (off >= _reader->size()) {
+        *bytes_read = 0;
+        return Status::OK();
     }
     RETURN_IF_ERROR(_prefetch_status);
     // there is only parquet would do not sequence read
