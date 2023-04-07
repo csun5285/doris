@@ -1771,6 +1771,11 @@ public class Config extends ConfigBase {
     //                    begin of cloud config
     //==========================================================================
 
+    @ConfField public static int info_sys_accumulated_file_size = 4;
+    @ConfField public static int warn_sys_accumulated_file_size = 2;
+    @ConfField public static int audit_sys_accumulated_file_size = 4;
+
+
     /**
      * MetaService endpoint, ip:port, such as meta_service_endpoint = "192.0.0.10:8866"
      */
