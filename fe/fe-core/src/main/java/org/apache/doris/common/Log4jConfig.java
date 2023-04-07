@@ -58,7 +58,9 @@ public class Log4jConfig extends XmlConfiguration {
             + "      <DefaultRolloverStrategy max=\"${sys_roll_num}\" fileIndex=\"min\">\n"
             + "        <Delete basePath=\"${sys_log_dir}/\" maxDepth=\"1\">\n"
             + "          <IfFileName glob=\"fe.log.*\" />\n"
-            + "          <IfLastModified age=\"${sys_log_delete_age}\" />\n"
+            + "          <IfAny>\n"
+            + "             <IfAccumulatedFileSize exceeds=\"${info_sys_accumulated_file_size}GB\"/>\n"
+            + "           </IfAny>\n"
             + "        </Delete>\n"
             + "      </DefaultRolloverStrategy>\n"
             + "    </RollingFile>\n"
@@ -73,7 +75,9 @@ public class Log4jConfig extends XmlConfiguration {
             + "      <DefaultRolloverStrategy max=\"${sys_roll_num}\" fileIndex=\"min\">\n"
             + "        <Delete basePath=\"${sys_log_dir}/\" maxDepth=\"1\">\n"
             + "          <IfFileName glob=\"fe.warn.log.*\" />\n"
-            + "          <IfLastModified age=\"${sys_log_delete_age}\" />\n"
+            + "          <IfAny>\n"
+            + "             <IfAccumulatedFileSize exceeds=\"${warn_sys_accumulated_file_size}GB\"/>\n"
+            + "          </IfAny>\n"
             + "        </Delete>\n"
             + "      </DefaultRolloverStrategy>\n"
             + "    </RollingFile>\n"
@@ -82,13 +86,14 @@ public class Log4jConfig extends XmlConfiguration {
             + "        <Pattern>%d{yyyy-MM-dd HH:mm:ss,SSS} [%c{1}] %m%n</Pattern>\n"
             + "      </PatternLayout>\n"
             + "      <Policies>\n"
-            + "        <TimeBasedTriggeringPolicy/>\n"
             + "        <SizeBasedTriggeringPolicy size=\"${audit_roll_maxsize}MB\"/>\n"
             + "      </Policies>\n"
             + "      <DefaultRolloverStrategy max=\"${sys_roll_num}\" fileIndex=\"min\">\n"
             + "        <Delete basePath=\"${audit_log_dir}/\" maxDepth=\"1\">\n"
             + "          <IfFileName glob=\"fe.audit.log.*\" />\n"
-            + "          <IfLastModified age=\"${audit_log_delete_age}\" />\n"
+            + "          <IfAny>\n"
+            + "             <IfAccumulatedFileSize exceeds=\"${audit_sys_accumulated_file_size}GB\"/>\n"
+            + "          </IfAny>\n"
             + "        </Delete>\n"
             + "      </DefaultRolloverStrategy>\n"
             + "    </RollingFile>\n"
@@ -195,6 +200,10 @@ public class Log4jConfig extends XmlConfiguration {
         properties.put("audit_roll_maxsize", auditRollMaxSize);
         properties.put("audit_roll_num", auditRollNum);
         properties.put("audit_log_delete_age", auditDeleteAge);
+
+        properties.put("info_sys_accumulated_file_size", String.valueOf(Config.info_sys_accumulated_file_size));
+        properties.put("warn_sys_accumulated_file_size", String.valueOf(Config.warn_sys_accumulated_file_size));
+        properties.put("audit_sys_accumulated_file_size", String.valueOf(Config.audit_sys_accumulated_file_size));
 
         strSub = new StrSubstitutor(new Interpolator(properties));
         newXmlConfTemplate = strSub.replace(newXmlConfTemplate);
