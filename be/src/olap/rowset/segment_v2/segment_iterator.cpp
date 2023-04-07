@@ -534,8 +534,7 @@ Status SegmentIterator::_apply_bitmap_index() {
     for (auto pred : _col_predicates) {
         int32_t unique_id = _schema.unique_id(pred->column_id());
         if (_bitmap_index_iterators.count(unique_id) < 1 ||
-            _bitmap_index_iterators[unique_id] == nullptr ||
-            pred->type() == PredicateType::BF) {
+            _bitmap_index_iterators[unique_id] == nullptr || pred->type() == PredicateType::BF) {
             // no bitmap index for this column
             remaining_predicates.push_back(pred);
         } else {
@@ -543,7 +542,7 @@ Status SegmentIterator::_apply_bitmap_index() {
                                            &_row_bitmap));
 
             if (_check_column_pred_all_push_down(pred) &&
-                    !pred->predicate_params()->marked_by_runtime_filter) {
+                !pred->predicate_params()->marked_by_runtime_filter) {
                 _need_read_data_indices[unique_id] = false;
             }
 
@@ -841,105 +840,62 @@ std::vector<ColumnPredicate*> SegmentIterator::_parse_range_predicate(
     return remaining_predicates;
 }
 
+template <typename T>
+void _push_origin_predicate(ColumnPredicate* col_pred, std::vector<ColumnPredicate*>& predicates) {
+    auto ori_pred = static_cast<RangePredicate<T>*>(col_pred)
+                            ->range_predicate_params()
+                            ->_upper_value._ori_pred;
+    if (ori_pred != nullptr) {
+        predicates.push_back(ori_pred);
+    }
+    ori_pred = static_cast<RangePredicate<T>*>(col_pred)
+                       ->range_predicate_params()
+                       ->_lower_value._ori_pred;
+    if (ori_pred != nullptr) {
+        predicates.push_back(ori_pred);
+    }
+}
+
 std::vector<ColumnPredicate*> SegmentIterator::_get_origin_predicate(ColumnPredicate* col_pred) {
     std::vector<ColumnPredicate*> predicates;
     auto field = _schema.column(col_pred->column_id());
+
     switch (field->type()) {
     case OLAP_FIELD_TYPE_TINYINT:
-        predicates.push_back(static_cast<RangePredicate<int8_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<int8_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<int8_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_SMALLINT:
-        predicates.push_back(static_cast<RangePredicate<int16_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<int16_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<int16_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_INT:
-        predicates.push_back(static_cast<RangePredicate<int32_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<int32_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<int32_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_UNSIGNED_INT:
-        predicates.push_back(static_cast<RangePredicate<uint32_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<uint32_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<uint32_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_BIGINT:
-        predicates.push_back(static_cast<RangePredicate<int64_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<int64_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<int64_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_LARGEINT:
-        predicates.push_back(static_cast<RangePredicate<int128_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<int128_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<int128_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_FLOAT:
-        predicates.push_back(static_cast<RangePredicate<float>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<float>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<float>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_DOUBLE:
-        predicates.push_back(static_cast<RangePredicate<double>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<double>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<double>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_DECIMAL:
-        predicates.push_back(static_cast<RangePredicate<decimal12_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<decimal12_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<decimal12_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_DATE:
-        predicates.push_back(static_cast<RangePredicate<uint24_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<uint24_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<uint24_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_DATETIME:
-        predicates.push_back(static_cast<RangePredicate<uint64_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<uint64_t>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<uint64_t>(col_pred, predicates);
         break;
     case OLAP_FIELD_TYPE_BOOL:
-        predicates.push_back(static_cast<RangePredicate<bool>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_upper_value._ori_pred);
-        predicates.push_back(static_cast<RangePredicate<bool>*>(col_pred)
-                                     ->range_predicate_params()
-                                     ->_lower_value._ori_pred);
+        _push_origin_predicate<bool>(col_pred, predicates);
         break;
     default:
         break;
@@ -1141,9 +1097,8 @@ Status SegmentIterator::_apply_index_in_compound() {
     }
 
     for (auto pred : _all_compound_col_predicates) {
-        if (_remaining_vconjunct_root != nullptr &&
-                _check_column_pred_all_push_down(pred, true) &&
-                !pred->predicate_params()->marked_by_runtime_filter) {
+        if (_remaining_vconjunct_root != nullptr && _check_column_pred_all_push_down(pred, true) &&
+            !pred->predicate_params()->marked_by_runtime_filter) {
             int32_t unique_id = _schema.unique_id(pred->column_id());
             _need_read_data_indices[unique_id] = false;
         }
