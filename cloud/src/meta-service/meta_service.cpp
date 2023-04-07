@@ -20,6 +20,7 @@
 #include "brpc/controller.h"
 #include "bthread/bthread.h"
 #include "google/protobuf/util/json_util.h"
+#include "meta-service/txn_kv.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/schema.h"
 #include "rate-limiter/rate_limiter.h"
@@ -875,8 +876,14 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     // Prepare rowset meta and new_versions
     std::vector<std::pair<std::string, std::string>> rowsets;
     std::map<std::string, uint64_t> new_versions;
-    std::map<std::string, TabletStatsPB> tablet_stats;
-    std::map<int64_t, TabletIndexPB> table_ids; // tablet_id -> {table/index/partition}_id
+    struct TabletStats {
+        int64_t data_size = 0;
+        int64_t num_rows = 0;
+        int64_t num_rowsets = 0;
+        int64_t num_segs = 0;
+    };
+    std::map<int64_t, TabletStats> tablet_stats; // tablet_id -> stats
+    std::map<int64_t, TabletIndexPB> table_ids;  // tablet_id -> {table/index/partition}_id
     rowsets.reserve(tmp_rowsets_meta.size());
     for (auto& [_, i] : tmp_rowsets_meta) {
         int64_t tablet_id = i.tablet_id();
@@ -907,7 +914,6 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         }
 
         int64_t table_id = table_ids[tablet_id].table_id();
-        int64_t index_id = table_ids[tablet_id].index_id();
         int64_t partition_id = i.partition_id();
 
         VersionKeyInfo ver_key_info {instance_id, db_id, table_id, partition_id};
@@ -963,50 +969,11 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         rowsets.emplace_back(std::move(key), std::move(val));
 
         // Accumulate affected rows
-        StatsTabletKeyInfo stat_key_info {instance_id, table_id, index_id, partition_id, tablet_id};
-        std::string stat_key, stat_val;
-        stats_tablet_key(stat_key_info, &stat_key);
-        while (tablet_stats.count(stat_key) == 0) {
-            ret = txn->get(stat_key, &stat_val); // May be perf. bottle-neck
-            if (ret != 1 && ret != 0) {
-                code = MetaServiceCode::KV_TXN_GET_ERR;
-                ss << "failed to get tablet stats, tablet_id=" << tablet_id
-                   << " key=" << hex(stat_key);
-                msg = ss.str();
-                LOG(INFO) << msg << " txn_id=" << txn_id;
-                return;
-            }
-            auto& stat = tablet_stats[stat_key];
-            if (ret == 1) { // First time stats, initialize it
-                stat.mutable_idx()->set_table_id(table_id);
-                stat.mutable_idx()->set_index_id(index_id);
-                stat.mutable_idx()->set_partition_id(partition_id);
-                stat.mutable_idx()->set_tablet_id(tablet_id);
-                break;
-            }
-            if (!stat.ParseFromString(stat_val)) {
-                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-                msg = "malformed tablet table value";
-                return;
-            }
-            CHECK_EQ(stat.mutable_idx()->table_id(), table_id);
-            CHECK_EQ(stat.mutable_idx()->index_id(), index_id);
-            CHECK_EQ(stat.mutable_idx()->partition_id(), partition_id);
-            CHECK_EQ(stat.mutable_idx()->tablet_id(), tablet_id);
-            if (stat.num_rowsets() > config::max_tablet_version_num) {
-                code = MetaServiceCode::UNDEFINED_ERR;
-                ss << "tablet exceeds max version num limit, txn_id=" << txn_id
-                   << " tablet_id=" << tablet_id << " limit=" << config::max_tablet_version_num;
-                msg = ss.str();
-                return;
-            }
-            break;
-        }
-        auto& stat = tablet_stats[stat_key];
-        stat.set_data_size(stat.data_size() + i.data_disk_size());
-        stat.set_num_rows(stat.num_rows() + i.num_rows());
-        stat.set_num_rowsets(stat.num_rowsets() + 1);
-        stat.set_num_segments(stat.num_segments() + i.num_segments());
+        auto& stats = tablet_stats[tablet_id];
+        stats.data_size += i.data_disk_size();
+        stats.num_rows += i.num_rows();
+        ++stats.num_rowsets;
+        stats.num_segs += i.num_segments();
     } // for tmp_rowsets_meta
 
     // Save rowset meta
@@ -1085,18 +1052,24 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     LOG(INFO) << "xxx put txn_inf_key=" << hex(txn_inf_key) << " txn_id=" << txn_id;
 
     // Update stats of affected tablet
-    for (auto& [k, v] : tablet_stats) {
-        std::string val = v.SerializeAsString();
-        if (val.empty()) {
-            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-            ss << "failed to serialize tablet stats when saving, key=" << hex(k)
-               << " txn_id=" << txn_id;
-            return;
-        }
-        txn->put(k, val);
-        LOG(INFO) << "xxx put tablet_stat_key key=" << hex(k) << " txn_id=" << txn_id;
-        VLOG_DEBUG << "xxx put tablet_stat_key key=" << hex(k) << " txn_id=" << txn_id
-                   << " stats=" << proto_to_json(v);
+    std::deque<std::string> kv_pool;
+    for (auto& [tablet_id, stats] : tablet_stats) {
+        DCHECK(table_ids.count(tablet_id));
+        auto& tablet_idx = table_ids[tablet_id];
+        StatsTabletKeyInfo info {instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                 tablet_idx.partition_id(), tablet_id};
+        auto& data_size_key = kv_pool.emplace_back();
+        stats_tablet_data_size_key(info, &data_size_key);
+        txn->atomic_add(data_size_key, stats.data_size);
+        auto& num_rows_key = kv_pool.emplace_back();
+        stats_tablet_num_rows_key(info, &num_rows_key);
+        txn->atomic_add(num_rows_key, stats.num_rows);
+        auto& num_rowsets_key = kv_pool.emplace_back();
+        stats_tablet_num_rowsets_key(info, &num_rowsets_key);
+        txn->atomic_add(num_rowsets_key, stats.num_rowsets);
+        auto& num_segs_key = kv_pool.emplace_back();
+        stats_tablet_num_segs_key(info, &num_segs_key);
+        txn->atomic_add(num_segs_key, stats.num_segs);
     }
 
     // Remove tmp rowset meta
@@ -2880,7 +2853,8 @@ int partition_exists(MetaServiceCode& code, std::string& msg,
 
 void put_recycle_partition_kv(MetaServiceCode& code, std::string& msg, int& ret,
                               const ::selectdb::PartitionRequest* request,
-                              const std::string& instance_id, Transaction* txn, RecyclePartitionPB::Type type) {
+                              const std::string& instance_id, Transaction* txn,
+                              RecyclePartitionPB::Type type) {
     const auto& partition_ids = request->partition_ids();
     const auto& index_ids = request->index_ids();
     if (partition_ids.empty() || index_ids.empty() || !request->has_table_id()) {
@@ -2981,7 +2955,8 @@ void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* contr
         msg = "index already existed";
         return;
     }
-    put_recycle_partition_kv(code, msg, ret, request, instance_id, txn.get(), RecyclePartitionPB::PREPARE);
+    put_recycle_partition_kv(code, msg, ret, request, instance_id, txn.get(),
+                             RecyclePartitionPB::PREPARE);
 }
 
 void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* controller,
@@ -3027,7 +3002,8 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
         msg = "failed to create txn";
         return;
     }
-    put_recycle_partition_kv(code, msg, ret, request, instance_id, txn.get(), RecyclePartitionPB::DROP);
+    put_recycle_partition_kv(code, msg, ret, request, instance_id, txn.get(),
+                             RecyclePartitionPB::DROP);
 }
 
 void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* controller,
@@ -3043,6 +3019,95 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
         return;
     }
     RPC_RATE_LIMIT(get_tablet_stats)
+
+    auto get_and_parse_tablet_stats = [&](const TabletIndexPB& idx, TabletStatsPB& tablet_stats) {
+        auto begin_key = stats_tablet_key(
+                {instance_id, idx.table_id(), idx.index_id(), idx.partition_id(), idx.tablet_id()});
+        auto end_key = stats_tablet_key({instance_id, idx.table_id(), idx.index_id(),
+                                         idx.partition_id(), idx.tablet_id() + 1});
+        std::unique_ptr<Transaction> txn;
+        ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            code = MetaServiceCode::KV_TXN_CREATE_ERR;
+            ss << " failed to create txn, tablet_id=" << idx.tablet_id();
+            return;
+        }
+        std::unique_ptr<RangeGetIterator> it;
+        ret = txn->get(begin_key, end_key, &it);
+        if (ret != 0) {
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            ss << "failed to get tablet stats, tablet_id=" << idx.tablet_id();
+            return;
+        }
+        if (!it->has_next()) {
+            code = MetaServiceCode::TABLET_NOT_FOUND;
+            ss << "tablet stats not found, tablet_id=" << idx.tablet_id();
+            return;
+        }
+        auto [k, v] = it->next();
+        // First key MUST be tablet stats key
+        DCHECK(k == begin_key);
+        if (!tablet_stats.ParseFromArray(v.data(), v.size())) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            ss << "marformed tablet stats value, key=" << hex(k);
+            return;
+        }
+        // Parse split tablet stats
+        do {
+            if (!it->has_next()) {
+                break;
+            }
+            while (it->has_next()) {
+                auto [k, v] = it->next();
+                if (!it->has_next() && it->more()) {
+                    begin_key = k;
+                }
+                // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "data_size"
+                auto k1 = k;
+                k1.remove_prefix(1);
+                std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> out;
+                if (decode_key(&k1, &out) != 0) [[unlikely]] {
+                    code = MetaServiceCode::UNDEFINED_ERR;
+                    ss << "failed to decode tablet stats key, key=" << hex(k);
+                    return;
+                }
+                if (out.size() != 8) [[unlikely]] {
+                    code = MetaServiceCode::UNDEFINED_ERR;
+                    ss << "failed to decode tablet stats key, key=" << hex(k);
+                    return;
+                }
+                auto suffix = std::get_if<std::string>(&std::get<0>(out.back()));
+                if (!suffix) [[unlikely]] {
+                    code = MetaServiceCode::UNDEFINED_ERR;
+                    ss << "failed to decode tablet stats key, key=" << hex(k);
+                    return;
+                }
+                int64_t val = *reinterpret_cast<const int64_t*>(v.data());
+                if (*suffix == STATS_KEY_SUFFIX_DATA_SIZE) {
+                    tablet_stats.set_data_size(tablet_stats.data_size() + val);
+                } else if (*suffix == STATS_KEY_SUFFIX_NUM_ROWS) {
+                    tablet_stats.set_num_rows(tablet_stats.num_rows() + val);
+                } else if (*suffix == STATS_KEY_SUFFIX_NUM_ROWSETS) {
+                    tablet_stats.set_num_rowsets(tablet_stats.num_rowsets() + val);
+                } else if (*suffix == STATS_KEY_SUFFIX_NUM_SEGS) {
+                    tablet_stats.set_num_segments(tablet_stats.num_segments() + val);
+                } else {
+                    VLOG_DEBUG << "unknown suffix=" << *suffix;
+                }
+            }
+            if (it->more()) {
+                begin_key.push_back('\x00'); // Update to next smallest key for iteration
+                ret = txn->get(begin_key, end_key, &it);
+                if (ret != 0) {
+                    code = MetaServiceCode::KV_TXN_GET_ERR;
+                    ss << "failed to get tablet stats, tablet_id=" << idx.tablet_id();
+                    return;
+                }
+            } else {
+                break;
+            }
+        } while (true);
+    };
     for (auto& i : request->tablet_idx()) {
         if (!(/* i.has_db_id() && */ i.has_table_id() && i.has_index_id() && i.has_partition_id() &&
               i.has_tablet_id())) {
@@ -3052,30 +3117,11 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
                          << i.ShortDebugString();
             continue;
         }
-        StatsTabletKeyInfo stat_key_info {instance_id, i.table_id(), i.index_id(), i.partition_id(),
-                                          i.tablet_id()};
-        std::string key, val;
-        stats_tablet_key(stat_key_info, &key);
-        // TODO(gavin): make the txn live longer
-        std::unique_ptr<Transaction> txn;
-        ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_CREATE_ERR;
-            ss << " failed_create_txn_tablet=" << i.tablet_id();
-            LOG(WARNING) << "failed to create txn"
-                         << " ret=" << ret << " key=" << hex(key);
-            continue;
-        }
-        ret = txn->get(key, &val);
-        if (ret != 0) { // Try the best to return as much info as it can
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            ss << (ret == 1 ? " not_found" : " failed") << "_tablet_id=" << i.tablet_id();
-            LOG(WARNING) << "failed to get tablet stats, tablet_id=" << i.tablet_id()
-                         << " ret=" << ret << " key=" << hex(key);
-            continue;
-        }
-        if (!response->add_tablet_stats()->ParseFromString(val)) {
-            LOG(WARNING) << "failed to parse tablet stats pb, tablet_id=" << i.tablet_id();
+        auto tablet_stats = response->add_tablet_stats();
+        get_and_parse_tablet_stats(i, *tablet_stats);
+        if (code != MetaServiceCode::OK) {
+            response->clear_tablet_stats();
+            break;
         }
     }
     msg = ss.str();

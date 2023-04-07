@@ -74,6 +74,119 @@ std::unique_ptr<MetaServiceImpl> get_meta_service() {
     return meta_service;
 }
 
+static std::string next_rowset_id() {
+    static int cnt = 0;
+    return std::to_string(++cnt);
+}
+
+static void add_tablet(CreateTabletsRequest& req, int64_t table_id, int64_t index_id,
+                       int64_t partition_id, int64_t tablet_id, const std::string& rowset_id) {
+    auto tablet = req.add_tablet_metas();
+    tablet->set_table_id(table_id);
+    tablet->set_index_id(index_id);
+    tablet->set_partition_id(partition_id);
+    tablet->set_tablet_id(tablet_id);
+    auto schema = tablet->mutable_schema();
+    schema->set_schema_version(0);
+    auto first_rowset = tablet->add_rs_metas();
+    first_rowset->set_rowset_id(0); // required
+    first_rowset->set_rowset_id_v2(rowset_id);
+    first_rowset->set_start_version(0);
+    first_rowset->set_end_version(1);
+    first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
+}
+
+static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+                          int64_t partition_id, int64_t tablet_id, const std::string& rowset_id) {
+    brpc::Controller cntl;
+    CreateTabletsRequest req;
+    CreateTabletsResponse res;
+    add_tablet(req, table_id, index_id, partition_id, tablet_id, rowset_id);
+    meta_service->create_tablets(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
+}
+
+static void begin_txn(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+                      int64_t table_id, int64_t& txn_id) {
+    brpc::Controller cntl;
+    BeginTxnRequest req;
+    BeginTxnResponse res;
+    auto txn_info = req.mutable_txn_info();
+    txn_info->set_db_id(db_id);
+    txn_info->set_label(label);
+    txn_info->add_table_ids(table_id);
+    txn_info->set_timeout_ms(36000);
+    meta_service->begin_txn(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+    ASSERT_TRUE(res.has_txn_id()) << label;
+    txn_id = res.txn_id();
+}
+
+static void commit_txn(MetaServiceImpl* meta_service, int64_t db_id, int64_t txn_id,
+                       const std::string& label) {
+    brpc::Controller cntl;
+    CommitTxnRequest req;
+    CommitTxnResponse res;
+    req.set_db_id(db_id);
+    req.set_txn_id(txn_id);
+    meta_service->commit_txn(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+}
+
+static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id,
+                                         const std::string& rowset_id, int64_t version = -1,
+                                         int num_rows = 100) {
+    doris::RowsetMetaPB rowset;
+    rowset.set_rowset_id(0); // required
+    rowset.set_rowset_id_v2(rowset_id);
+    rowset.set_tablet_id(tablet_id);
+    rowset.set_txn_id(txn_id);
+    if (version > 0) {
+        rowset.set_start_version(version);
+        rowset.set_end_version(version);
+    }
+    rowset.set_num_segments(1);
+    rowset.set_num_rows(num_rows);
+    rowset.set_data_disk_size(num_rows * 100);
+    rowset.mutable_tablet_schema()->set_schema_version(0);
+    return rowset;
+}
+
+static void prepare_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+                           CreateRowsetResponse& res) {
+    brpc::Controller cntl;
+    auto arena = res.GetArena();
+    auto req = google::protobuf::Arena::CreateMessage<CreateRowsetRequest>(arena);
+    req->set_temporary(true);
+    req->mutable_rowset_meta()->CopyFrom(rowset);
+    meta_service->prepare_rowset(&cntl, req, &res, nullptr);
+    if (!arena) delete req;
+}
+
+static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+                          CreateRowsetResponse& res) {
+    brpc::Controller cntl;
+    auto arena = res.GetArena();
+    auto req = google::protobuf::Arena::CreateMessage<CreateRowsetRequest>(arena);
+    req->set_temporary(true);
+    req->mutable_rowset_meta()->CopyFrom(rowset);
+    meta_service->commit_rowset(&cntl, req, &res, nullptr);
+    if (!arena) delete req;
+}
+
+static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+                          int64_t table_id, int64_t tablet_id) {
+    int64_t txn_id = 0;
+    ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service, db_id, label, table_id, txn_id));
+    CreateRowsetResponse res;
+    auto rowset = create_rowset(txn_id, tablet_id, next_rowset_id());
+    prepare_rowset(meta_service, rowset, res);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+    res.Clear();
+    ASSERT_NO_FATAL_FAILURE(commit_rowset(meta_service, rowset, res));
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+    commit_txn(meta_service, db_id, txn_id, label);
+}
 
 TEST(MetaServiceTest, GetInstanceIdTest) {
     extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
@@ -87,7 +200,8 @@ TEST(MetaServiceTest, GetInstanceIdTest) {
     });
     sp->enable_processing();
 
-    auto instance_id = get_instance_id(meta_service->resource_mgr_, "1:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
+    auto instance_id =
+            get_instance_id(meta_service->resource_mgr_, "1:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
     ASSERT_EQ(instance_id, "ALBJLH4Q");
 
     // version not support
@@ -99,11 +213,13 @@ TEST(MetaServiceTest, GetInstanceIdTest) {
     ASSERT_EQ(instance_id, "");
 
     // std::invalid_argument
-    instance_id = get_instance_id(meta_service->resource_mgr_, "invalid_version:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
+    instance_id = get_instance_id(meta_service->resource_mgr_,
+                                  "invalid_version:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
     ASSERT_EQ(instance_id, "");
 
     // std::out_of_range
-    instance_id = get_instance_id(meta_service->resource_mgr_, "12345678901:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
+    instance_id = get_instance_id(meta_service->resource_mgr_,
+                                  "12345678901:ALBJLH4Q:m-n3qdpyal27rh8iprxx");
     ASSERT_EQ(instance_id, "");
 
     sp->clear_all_call_backs();
@@ -132,9 +248,12 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         req.mutable_obj_info()->CopyFrom(obj);
 
         auto sp = SyncPoint::get_instance();
-        sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-        sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
-        sp->set_call_back("encrypt_ak_sk:get_encryption_key_id", [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+        sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                          [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+        sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                          [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+        sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                          [](void* p) { *reinterpret_cast<int*>(p) = 1; });
         sp->enable_processing();
         CreateInstanceResponse res;
         meta_service->create_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
@@ -162,7 +281,8 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         AlterInstanceResponse res;
         req.set_op(AlterInstanceRequest::DROP);
         req.set_instance_id("test_instance");
-        meta_service->alter_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
+        meta_service->alter_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                     &req, &res, nullptr);
         InstanceKeyInfo key_info {"test_instance"};
         std::string key;
         std::string val;
@@ -183,7 +303,8 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         AlterInstanceResponse res;
         req.set_op(AlterInstanceRequest::REFRESH);
         req.set_instance_id("test_instance");
-        meta_service->alter_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
+        meta_service->alter_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
 }
@@ -302,39 +423,6 @@ TEST(MetaServiceTest, GetClusterTest) {
         GetClusterResponse res;
         meta_service->get_cluster(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
                                   &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    }
-}
-
-TEST(MetaServiceTest, GetTabletStatsTest) {
-    auto meta_service = get_meta_service();
-
-    // add tablet first
-    StatsTabletKeyInfo stat_key_info {mock_instance, 1, 2, 3, 4};
-    std::string key, val;
-    stats_tablet_key(stat_key_info, &key);
-
-    TabletStatsPB stat;
-    stat.mutable_idx()->set_table_id(1);
-    stat.mutable_idx()->set_index_id(2);
-    stat.mutable_idx()->set_partition_id(3);
-    stat.mutable_idx()->set_tablet_id(4);
-    val = stat.SerializeAsString();
-
-    std::unique_ptr<Transaction> txn;
-    int ret = meta_service->txn_kv_->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
-
-    // case: normal get
-    {
-        brpc::Controller cntl;
-        GetTabletStatsRequest req;
-        req.add_tablet_idx()->CopyFrom(stat.idx());
-        GetTabletStatsResponse res;
-        meta_service->get_tablet_stats(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                                       &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
 }
@@ -756,8 +844,8 @@ TEST(MetaServiceTest, PreCommitTxnTest) {
         txn_info_pb.set_timeout_ms(36000);
         req.mutable_txn_info()->CopyFrom(txn_info_pb);
         BeginTxnResponse res;
-        meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
-                                nullptr);
+        meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
+                                &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         txn_id = res.txn_id();
     }
@@ -1287,11 +1375,11 @@ TEST(MetaServiceTest, CopyJobTest) {
     }
     // get copy job
     {
-       GetCopyJobResponse res;
-       meta_service->get_copy_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                                  &get_copy_job_request, &res, nullptr);
-       ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-       ASSERT_EQ(res.copy_job().object_files().size(), 20);
+        GetCopyJobResponse res;
+        meta_service->get_copy_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                   &get_copy_job_request, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.copy_job().object_files().size(), 20);
     }
     // begin copy with duplicate files
     {
@@ -1601,11 +1689,16 @@ TEST(MetaServiceTest, StageTest) {
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id", [](void* p) { *reinterpret_cast<int*>(p) = 1; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
     sp->enable_processing();
 
     ObjectStoreInfoPB obj;
@@ -1655,7 +1748,7 @@ TEST(MetaServiceTest, StageTest) {
         create_stage_request.mutable_stage()->CopyFrom(stage);
         CreateStageResponse create_stage_response;
         meta_service->create_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                                &create_stage_request, &create_stage_response, nullptr);
+                                   &create_stage_request, &create_stage_response, nullptr);
         ASSERT_EQ(create_stage_response.status().code(), MetaServiceCode::OK);
 
         // get existent internal stage
@@ -1812,11 +1905,16 @@ TEST(MetaServiceTest, GetIamTest) {
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id", [](void* p) { *reinterpret_cast<int*>(p) = 1; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
     sp->enable_processing();
 
     config::arn_id = "iam_arn";
@@ -1855,8 +1953,8 @@ TEST(MetaServiceTest, GetIamTest) {
     GetIamRequest request;
     request.set_cloud_unique_id(cloud_unique_id);
     GetIamResponse response;
-    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                          &request, &response, nullptr);
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &request,
+                          &response, nullptr);
     ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(response.ram_user().user_id(), "test_user_id");
     ASSERT_EQ(response.ram_user().ak(), "test_ak");
@@ -1880,11 +1978,16 @@ TEST(MetaServiceTest, AlterIamTest) {
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
-    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id", [](void* p) { *reinterpret_cast<int*>(p) = 1; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret", [](void* p) { *reinterpret_cast<int*>(p) = 0; });
-    sp->set_call_back("decrypt_ak_sk:get_encryption_key", [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
     sp->enable_processing();
 
     config::arn_id = "iam_arn";
@@ -1915,8 +2018,8 @@ TEST(MetaServiceTest, AlterIamTest) {
     GetIamRequest request;
     request.set_cloud_unique_id(cloud_unique_id);
     GetIamResponse response;
-    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                          &request, &response, nullptr);
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &request,
+                          &response, nullptr);
     ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(response.has_ram_user(), false);
     ASSERT_EQ(response.iam_user().user_id(), "iam_arn");
@@ -1936,8 +2039,8 @@ TEST(MetaServiceTest, AlterIamTest) {
                                  &alter_ram_user_request, &alter_ram_user_response, nullptr);
 
     // get iam and ram user
-    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
-                          &request, &response, nullptr);
+    meta_service->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &request,
+                          &response, nullptr);
     ASSERT_EQ(response.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(response.has_ram_user(), true);
     ASSERT_EQ(response.ram_user().user_id(), "test_user_id");
@@ -1954,7 +2057,7 @@ std::string to_raw_string(std::string_view v) {
     while (!v.empty()) {
         if (v[0] == '\\') {
             if (v[1] == 'x') {
-                ret.push_back(unhex(std::string_view{v.data() + 2, 2})[0]);
+                ret.push_back(unhex(std::string_view {v.data() + 2, 2})[0]);
                 v.remove_prefix(4);
             } else if (v[1] == '\\') {
                 ret.push_back('\\');
@@ -1972,17 +2075,27 @@ std::string to_raw_string(std::string_view v) {
 
 TEST(MetaServiceTest, DecodeTest) {
     // 504
-    std::string v1 = R"(\x08\x00\x10\xa0[\x18\xb3[ \xde\xc5\xa4\x8e\xbd\xf0\x97\xc62(\xf4\x96\xe6\xb0\x070\x018\x02@\x02H\x0bX\x05`\xa0\x07h\xa0\x07p\xa0\x01\x88\x01\x00\xa0\x01\x86\x8b\x9a\x9b\x06\xaa\x01\x16\x08\xe6\x9e\x91\xa3\xfb\xbe\xf5\xf0\xc4\x01\x10\xfe\x8b\x90\xa7\xb5\xec\xd5\xc8\xbf\x01\xb0\x01\x01\xba\x0100200000000000071fb4aabb58c570cbcadb10857d3131b97\xc2\x01\x011\xc8\x01\x84\x8b\x9a\x9b\x06\xd0\x01\x85\x8b\x9a\x9b\x06\xda\x01\x04\x0a\x00\x12\x00\xe2\x01\xcd\x02\x08\x02\x121\x08\x00\x12\x06datek1\x1a\x04DATE \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12>\x08\x01\x12\x06datek2\x1a\x08DATETIME \x01*\x04NONE0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x123\x08\x04\x12\x06datev3\x1a\x06DATEV2 \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x04X\x04\x80\x01\x01\x120\x08\x02\x12\x06datev1\x1a\x04DATE \x00*\x03MAX0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12=\x08\x03\x12\x06datev2\x1a\x08DATETIME \x00*\x03MAX0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x18\x03 \x80\x08(\x021\x00\x00\x00\x00\x00\x00\x00\x008\x00@\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01H\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01P\x00X\x02`\x05h\x00p\x00\xe8\x01\x85\xae\x9f\x9b\x06\x98\x03\x02)";
+    std::string v1 =
+            R"(\x08\x00\x10\xa0[\x18\xb3[ \xde\xc5\xa4\x8e\xbd\xf0\x97\xc62(\xf4\x96\xe6\xb0\x070\x018\x02@\x02H\x0bX\x05`\xa0\x07h\xa0\x07p\xa0\x01\x88\x01\x00\xa0\x01\x86\x8b\x9a\x9b\x06\xaa\x01\x16\x08\xe6\x9e\x91\xa3\xfb\xbe\xf5\xf0\xc4\x01\x10\xfe\x8b\x90\xa7\xb5\xec\xd5\xc8\xbf\x01\xb0\x01\x01\xba\x0100200000000000071fb4aabb58c570cbcadb10857d3131b97\xc2\x01\x011\xc8\x01\x84\x8b\x9a\x9b\x06\xd0\x01\x85\x8b\x9a\x9b\x06\xda\x01\x04\x0a\x00\x12\x00\xe2\x01\xcd\x02\x08\x02\x121\x08\x00\x12\x06datek1\x1a\x04DATE \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12>\x08\x01\x12\x06datek2\x1a\x08DATETIME \x01*\x04NONE0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x123\x08\x04\x12\x06datev3\x1a\x06DATEV2 \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x04X\x04\x80\x01\x01\x120\x08\x02\x12\x06datev1\x1a\x04DATE \x00*\x03MAX0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12=\x08\x03\x12\x06datev2\x1a\x08DATETIME \x00*\x03MAX0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x18\x03 \x80\x08(\x021\x00\x00\x00\x00\x00\x00\x00\x008\x00@\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01H\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01P\x00X\x02`\x05h\x00p\x00\xe8\x01\x85\xae\x9f\x9b\x06\x98\x03\x02)";
     std::string val1 = to_raw_string(v1);
     std::cout << "val1 size " << val1.size() << std::endl;
 
     // 525
-    std::string v2 = R"(\x08\x00\x10\xa0[\x18\xb3[ \x80\xb0\x85\xe3\xda\xcc\x8c\x0f(\xf4\x96\xe6\xb0\x070\x018\x01@\x0cH\x0cX\x00`\x00h\x00p\x00\x82\x01\x1e\x08\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x12\x11datev3=2022-01-01\x88\x01\x01\x92\x01\x04\x08\x00\x10\x00\xa0\x01\x87\x8b\x9a\x9b\x06\xaa\x01\x16\x08\xe6\x9e\x91\xa3\xfb\xbe\xf5\xf0\xc4\x01\x10\xfe\x8b\x90\xa7\xb5\xec\xd5\xc8\xbf\x01\xb0\x01\x00\xba\x0100200000000000072fb4aabb58c570cbcadb10857d3131b97\xc8\x01\x87\x8b\x9a\x9b\x06\xd0\x01\x87\x8b\x9a\x9b\x06\xe2\x01\xcd\x02\x08\x02\x121\x08\x00\x12\x06datek1\x1a\x04DATE \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12>\x08\x01\x12\x06datek2\x1a\x08DATETIME \x01*\x04NONE0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x123\x08\x04\x12\x06datev3\x1a\x06DATEV2 \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x04X\x04\x80\x01\x01\x120\x08\x02\x12\x06datev1\x1a\x04DATE \x00*\x03MAX0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12=\x08\x03\x12\x06datev2\x1a\x08DATETIME \x00*\x03MAX0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x18\x03 \x80\x08(\x021\x00\x00\x00\x00\x00\x00\x00\x008\x00@\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01H\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01P\x00X\x02`\x05h\x00p\x00\xe8\x01\x00\x98\x03\x02)";
+    std::string v2 =
+            R"(\x08\x00\x10\xa0[\x18\xb3[ \x80\xb0\x85\xe3\xda\xcc\x8c\x0f(\xf4\x96\xe6\xb0\x070\x018\x01@\x0cH\x0cX\x00`\x00h\x00p\x00\x82\x01\x1e\x08\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x12\x11datev3=2022-01-01\x88\x01\x01\x92\x01\x04\x08\x00\x10\x00\xa0\x01\x87\x8b\x9a\x9b\x06\xaa\x01\x16\x08\xe6\x9e\x91\xa3\xfb\xbe\xf5\xf0\xc4\x01\x10\xfe\x8b\x90\xa7\xb5\xec\xd5\xc8\xbf\x01\xb0\x01\x00\xba\x0100200000000000072fb4aabb58c570cbcadb10857d3131b97\xc8\x01\x87\x8b\x9a\x9b\x06\xd0\x01\x87\x8b\x9a\x9b\x06\xe2\x01\xcd\x02\x08\x02\x121\x08\x00\x12\x06datek1\x1a\x04DATE \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12>\x08\x01\x12\x06datek2\x1a\x08DATETIME \x01*\x04NONE0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x123\x08\x04\x12\x06datev3\x1a\x06DATEV2 \x01*\x04NONE0\x01:\x0a2022-01-01@\x00H\x00P\x04X\x04\x80\x01\x01\x120\x08\x02\x12\x06datev1\x1a\x04DATE \x00*\x03MAX0\x01:\x0a2022-01-01@\x00H\x00P\x03X\x03\x80\x01\x01\x12=\x08\x03\x12\x06datev2\x1a\x08DATETIME \x00*\x03MAX0\x01:\x132022-01-01 11:11:11@\x00H\x00P\x08X\x08\x80\x01\x01\x18\x03 \x80\x08(\x021\x00\x00\x00\x00\x00\x00\x00\x008\x00@\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01H\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01P\x00X\x02`\x05h\x00p\x00\xe8\x01\x00\x98\x03\x02)";
     std::string val2 = to_raw_string(v2);
     std::cout << "val2 size " << val2.size() << std::endl;
 
-    [[maybe_unused]] std::string key1("\x01\x10meta\x00\x01\x10selectdb-cloud-dev\x00\x01\x10rowset\x00\x01\x12\x00\x00\x00\x00\x00\x00-\xb3\x12\x00\x00\x00\x00\x00\x00\x00\x0b", 56);
-    [[maybe_unused]] std::string key2("\x01\x10meta\x00\x01\x10selectdb-cloud-dev\x00\x01\x10rowset\x00\x01\x12\x00\x00\x00\x00\x00\x00-\xb3\x12\x00\x00\x00\x00\x00\x00\x00\x0c", 56);
+    [[maybe_unused]] std::string key1(
+            "\x01\x10meta\x00\x01\x10selectdb-cloud-"
+            "dev\x00\x01\x10rowset\x00\x01\x12\x00\x00\x00\x00\x00\x00-"
+            "\xb3\x12\x00\x00\x00\x00\x00\x00\x00\x0b",
+            56);
+    [[maybe_unused]] std::string key2(
+            "\x01\x10meta\x00\x01\x10selectdb-cloud-"
+            "dev\x00\x01\x10rowset\x00\x01\x12\x00\x00\x00\x00\x00\x00-"
+            "\xb3\x12\x00\x00\x00\x00\x00\x00\x00\x0c",
+            56);
     std::cout << "key1 " << key1.size() << " " << hex(key1) << std::endl;
     std::cout << "key2 " << key2.size() << " " << hex(key2) << std::endl;
 
@@ -1993,6 +2106,67 @@ TEST(MetaServiceTest, DecodeTest) {
     rowset2.ParseFromString(val2);
     std::cout << "rowset1=" << proto_to_json(rowset1) << std::endl;
     std::cout << "rowset2=" << proto_to_json(rowset2) << std::endl;
+}
+
+static void get_tablet_stats(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+                             int64_t partition_id, int64_t tablet_id, GetTabletStatsResponse& res) {
+    brpc::Controller cntl;
+    GetTabletStatsRequest req;
+    auto idx = req.add_tablet_idx();
+    idx->set_table_id(table_id);
+    idx->set_index_id(index_id);
+    idx->set_partition_id(partition_id);
+    idx->set_tablet_id(tablet_id);
+    meta_service->get_tablet_stats(&cntl, &req, &res, nullptr);
+}
+
+TEST(MetaServiceTest, GetTabletStatsTest) {
+    auto meta_service = get_meta_service();
+
+    constexpr auto table_id = 10001, index_id = 10002, partition_id = 10003, tablet_id = 10004;
+    ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
+                                          tablet_id, next_rowset_id()));
+    GetTabletStatsResponse res;
+    get_tablet_stats(meta_service.get(), table_id, index_id, partition_id, tablet_id, res);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(res.tablet_stats_size(), 1);
+    EXPECT_EQ(res.tablet_stats(0).data_size(), 0);
+    EXPECT_EQ(res.tablet_stats(0).num_rows(), 0);
+    EXPECT_EQ(res.tablet_stats(0).num_rowsets(), 1);
+    EXPECT_EQ(res.tablet_stats(0).num_segments(), 0);
+    // Insert rowset
+    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label1", table_id, tablet_id));
+    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label2", table_id, tablet_id));
+    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label3", table_id, tablet_id));
+    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
+    // Check tablet stats kv
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    std::string data_size_key, data_size_val;
+    stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &data_size_key);
+    ASSERT_EQ(txn->get(data_size_key, &data_size_val), 0);
+    EXPECT_EQ(*(int64_t*)data_size_val.data(), 40000);
+    std::string num_rows_key, num_rows_val;
+    stats_tablet_num_rows_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_rows_key);
+    ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), 0);
+    EXPECT_EQ(*(int64_t*)num_rows_val.data(), 400);
+    std::string num_rowsets_key, num_rowsets_val;
+    stats_tablet_num_rowsets_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_rowsets_key);
+    ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), 0);
+    EXPECT_EQ(*(int64_t*)num_rowsets_val.data(), 4);
+    std::string num_segs_key, num_segs_val;
+    stats_tablet_num_segs_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_segs_key);
+    ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), 0);
+    EXPECT_EQ(*(int64_t*)num_segs_val.data(), 4);
+    // Get tablet stats
+    res.Clear();
+    get_tablet_stats(meta_service.get(), table_id, index_id, partition_id, tablet_id, res);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(res.tablet_stats_size(), 1);
+    EXPECT_EQ(res.tablet_stats(0).data_size(), 40000);
+    EXPECT_EQ(res.tablet_stats(0).num_rows(), 400);
+    EXPECT_EQ(res.tablet_stats(0).num_rowsets(), 5);
+    EXPECT_EQ(res.tablet_stats(0).num_segments(), 4);
 }
 
 } // namespace selectdb

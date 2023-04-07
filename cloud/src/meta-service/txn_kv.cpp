@@ -267,9 +267,9 @@ void Transaction::atomic_set_ver_value(std::string_view key, std::string_view va
 void Transaction::atomic_add(std::string_view key, int64_t to_add) {
     StopWatch sw;
     auto val = std::make_unique<std::string>(sizeof(to_add), '\0');
-    std::memcpy(val->data(), &to_add, val->size());
+    std::memcpy(val->data(), &to_add, sizeof(to_add));
     fdb_transaction_atomic_op(txn_, (uint8_t*)key.data(), key.size(), (uint8_t*)val->data(),
-                              val->size(), FDBMutationType::FDB_MUTATION_TYPE_ADD);
+                              sizeof(to_add), FDBMutationType::FDB_MUTATION_TYPE_ADD);
 
     kv_pool_.push_back(std::move(val));
     g_bvar_txn_kv_atomic_add << sw.elapsed_us();

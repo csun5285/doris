@@ -129,7 +129,7 @@ static void range_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn);
         ASSERT_EQ(ret, 0);
         std::unique_ptr<RangeGetIterator> iter;
-        ret = txn->get("key1", "key4", &iter, 1);
+        ret = txn->get("key1", "key4", &iter, true, 1);
         ASSERT_EQ(iter->size(), 1) << txn_kv_class;
         ASSERT_EQ(iter->more(), true) << txn_kv_class;
 
@@ -279,8 +279,26 @@ static void atomic_add_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     using namespace selectdb;
     std::unique_ptr<Transaction> txn;
     std::string txn_kv_class = dynamic_cast<MemTxnKv*>(txn_kv.get()) != nullptr ? " memkv" : " fdb";
+    // clear counter
     int ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    txn->remove("counter");
+    ret = txn->commit();
+    ASSERT_EQ(ret, 0);
+    // add to uninitialized kv
+    ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    txn->atomic_add("counter", 123);
+    ret = txn->commit();
+    ASSERT_EQ(ret, 0);
+
+    ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    std::string val;
+    txn->get("counter", &val);
+    ASSERT_EQ(ret, 0);
+    int64_t val_int = *reinterpret_cast<const int64_t*>(val.data());
+    ASSERT_EQ(val_int, 123) << txn_kv_class;
 
     txn->put("counter", "1");
     ret = txn->commit();
@@ -293,12 +311,11 @@ static void atomic_add_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     ret = txn->commit();
     ASSERT_EQ(ret, 0);
 
-    std::string val;
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
     ret = txn->get("counter", &val);
     ASSERT_EQ(ret, 0);
-    int64_t val_int = *reinterpret_cast<const int64_t*>(val.data());
+    val_int = *reinterpret_cast<const int64_t*>(val.data());
     std::cout << "atomic add: " << val_int << std::endl;
     ASSERT_EQ(val_int, 59) << txn_kv_class; // "1" + 10 = ASCII("1") + 10 = 49 + 10 = 59
 

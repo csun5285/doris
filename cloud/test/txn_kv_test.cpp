@@ -114,6 +114,66 @@ TEST(TxnKvTest, ConflictTest) {
     std::cout << "final val=" << val << std::endl;
 }
 
+TEST(TxnKvTest, AtomicAddTest) {
+    std::unique_ptr<Transaction> txn, txn1, txn2;
+    std::string key = "counter";
+    // clear counter
+    int ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    txn->remove(key);
+    ret = txn->commit();
+    ASSERT_EQ(ret, 0);
+    // txn1 atomic add
+    ret = txn_kv->create_txn(&txn1);
+    ASSERT_EQ(ret, 0);
+    txn1->atomic_add(key, 10);
+    // txn2 atomic add
+    ret = txn_kv->create_txn(&txn2);
+    ASSERT_EQ(ret, 0);
+    txn2->atomic_add(key, 20);
+    // txn1 commit success
+    ret = txn1->commit();
+    ASSERT_EQ(ret, 0);
+    // txn2 commit success
+    ret = txn2->commit();
+    ASSERT_EQ(ret, 0);
+    // Check counter val
+    ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    std::string val;
+    ret = txn->get(key, &val);
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(val.size(), 8);
+    ASSERT_EQ(*(int64_t*)val.data(), 30);
+
+    // txn1 atomic add
+    ret = txn_kv->create_txn(&txn1);
+    ASSERT_EQ(ret, 0);
+    txn1->atomic_add(key, 30);
+    // txn2 get and put
+    ret = txn_kv->create_txn(&txn2);
+    ASSERT_EQ(ret, 0);
+    ret = txn2->get(key, &val);
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(val.size(), 8);
+    ASSERT_EQ(*(int64_t*)val.data(), 30);
+    *(int64_t*)val.data() = 100;
+    txn2->put(key, val);
+    // txn1 commit success
+    ret = txn1->commit();
+    ASSERT_EQ(ret, 0);
+    // txn2 commit, intend to fail 
+    ret = txn2->commit();
+    ASSERT_EQ(ret, -1);
+    // Check counter val
+    ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    ret = txn->get(key, &val);
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(val.size(), 8);
+    ASSERT_EQ(*(int64_t*)val.data(), 60);
+}
+
 TEST(TxnKvTest, MoreThan100KTest) {
     {
         int64_t txn_id = 22343212453;

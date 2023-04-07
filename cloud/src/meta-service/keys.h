@@ -27,6 +27,10 @@
 // 0x01 "meta" ${instance_id} "schema" ${index_id} ${schema_version}                         -> TabletSchemaPB
 //
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} -> TabletStatsPB
+// 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "data_size"   -> int64
+// 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "num_rows"    -> int64
+// 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "num_rowsets" -> int64
+// 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "num_segs"    -> int64
 //
 // 0x01 "recycle" ${instance_id} "index" ${index_id}                                         -> RecycleIndexPB
 // 0x01 "recycle" ${instance_id} "partition" ${partition_id}                                 -> RecyclePartitionPB
@@ -50,6 +54,12 @@ namespace selectdb {
 static const constexpr unsigned char CLOUD_USER_KEY_SPACE01 = 0x01;
 static const constexpr unsigned char CLOUD_SYS_KEY_SPACE02 = 0x02;
 static constexpr uint32_t VERSION_STAMP_LEN = 10;
+
+// Suffix
+static constexpr std::string_view STATS_KEY_SUFFIX_DATA_SIZE = "data_size";
+static constexpr std::string_view STATS_KEY_SUFFIX_NUM_ROWS = "num_rows";
+static constexpr std::string_view STATS_KEY_SUFFIX_NUM_ROWSETS = "num_rowsets";
+static constexpr std::string_view STATS_KEY_SUFFIX_NUM_SEGS = "num_segs";
 
 // clang-format off
 /**
@@ -172,6 +182,10 @@ static inline std::string recycle_txn_key(const RecycleTxnKeyInfo& in) { std::st
 static inline std::string recycle_stage_key(const RecycleStageKeyInfo& in) { std::string s; recycle_stage_key(in, &s); return s; }
 
 void stats_tablet_key(const StatsTabletKeyInfo& in, std::string* out);
+void stats_tablet_data_size_key(const StatsTabletKeyInfo& in, std::string* out);
+void stats_tablet_num_rows_key(const StatsTabletKeyInfo& in, std::string* out);
+void stats_tablet_num_rowsets_key(const StatsTabletKeyInfo& in, std::string* out);
+void stats_tablet_num_segs_key(const StatsTabletKeyInfo& in, std::string* out);
 static inline std::string stats_tablet_key(const StatsTabletKeyInfo& in) { std::string s; stats_tablet_key(in, &s); return s; }
 
 void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out);

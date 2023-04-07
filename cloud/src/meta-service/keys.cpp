@@ -297,6 +297,23 @@ void stats_tablet_key(const StatsTabletKeyInfo& in, std::string* out) {
     encode_int64(std::get<4>(in), out);        // tablet_id
 }
 
+void stats_tablet_data_size_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_DATA_SIZE, out);
+}
+void stats_tablet_num_rows_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_ROWS, out);
+}
+void stats_tablet_num_rowsets_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_ROWSETS, out);
+}
+void stats_tablet_num_segs_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_SEGS, out);
+}
+
 //==============================================================================
 // Job keys
 //==============================================================================
@@ -352,7 +369,6 @@ std::string system_meta_service_registry_key() {
     encode_bytes("registry", &ret);
     return ret;
 }
-
 
 // 0x02 0:"system"  1:"meta-service"  2:"arn_info"
 std::string system_meta_service_arn_info_key() {
