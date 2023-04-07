@@ -56,14 +56,13 @@ public class CloudPartition extends Partition {
     }
 
     protected void setVisibleVersion(long visibleVersion) {
-        LOG.info("setVisibleVersion use CloudPartition {}", super.getName());
+        LOG.debug("setVisibleVersion use CloudPartition {}", super.getName());
         return;
     }
 
     @Override
     public long getVisibleVersion() {
-        //TODO(dx): this log just for debug, delete later.
-        LOG.info("getVisibleVersion use CloudPartition {}", super.getName());
+        LOG.debug("getVisibleVersion use CloudPartition {}", super.getName());
         long version = getVersionFromMeta(System.currentTimeMillis() + 3000);
         if (version != -1) {
             // get version from metaService success, set visible version
@@ -79,23 +78,20 @@ public class CloudPartition extends Partition {
     @Override
     public long getNextVersion() {
         // use meta service visibleVersion
-        //TODO(dx): this log just for debug, delete later.
-        LOG.info("getNextVersion use CloudPartition {}", super.getName());
+        LOG.debug("getNextVersion use CloudPartition {}", super.getName());
         return -1;
     }
 
     @Override
     public void setNextVersion(long nextVersion) {
         // use meta service visibleVersion
-        //TODO(dx): this log just for debug, delete later.
-        LOG.info("setNextVersion use CloudPartition {} Version {}", super.getName(), nextVersion);
+        LOG.debug("setNextVersion use CloudPartition {} Version {}", super.getName(), nextVersion);
         return;
     }
 
     @Override
     public void updateVersionForRestore(long visibleVersion) {
-        //TODO(dx): this log just for debug, delete later.
-        LOG.info("updateVersionForRestore use CloudPartition {} version for restore: visible: {}",
+        LOG.debug("updateVersionForRestore use CloudPartition {} version for restore: visible: {}",
                 super.getName(), visibleVersion);
         return;
     }
@@ -103,8 +99,7 @@ public class CloudPartition extends Partition {
     @Override
     public void updateVisibleVersion(long visibleVersion) {
         // use meta service visibleVersion
-        //TODO(dx): this log just for debug, delete later.
-        LOG.info("updateVisibleVersion use CloudPartition {} version for restore: visible: {}",
+        LOG.debug("updateVisibleVersion use CloudPartition {} version for restore: visible: {}",
                 super.getName(), visibleVersion);
 
         return;
@@ -112,7 +107,6 @@ public class CloudPartition extends Partition {
 
     @Override
     public void updateVisibleVersionAndTime(long visibleVersion, long visibleVersionTime) {
-        //TODO(dx): this log just for debug, delete later.
     }
 
     /**
@@ -164,10 +158,10 @@ public class CloudPartition extends Partition {
                 // java8 lambda syntax, Assignment function ref.
                 AtomicLong version = new AtomicLong(-1);
                 Optional.ofNullable(pResult.getVersion()).ifPresent(version::set);
-                LOG.info("get version {}", version);
+                LOG.debug("get version {}", version);
                 return version.get();
             } else if (code == SelectdbCloud.MetaServiceCode.VERSION_NOT_FOUND) {
-                LOG.info("partition {} has no data", getId());
+                LOG.debug("partition {} has no data", getId());
                 return 0;
             }
 
