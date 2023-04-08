@@ -24,6 +24,8 @@ import org.apache.doris.thrift.TAgentResult;
 import org.apache.doris.thrift.TAgentTaskRequest;
 import org.apache.doris.thrift.TCancelPlanFragmentParams;
 import org.apache.doris.thrift.TCancelPlanFragmentResult;
+import org.apache.doris.thrift.TCheckPreCacheRequest;
+import org.apache.doris.thrift.TCheckPreCacheResponse;
 import org.apache.doris.thrift.TCheckStorageFormatResult;
 import org.apache.doris.thrift.TDiskTrashInfo;
 import org.apache.doris.thrift.TExecPlanFragmentParams;
@@ -236,6 +238,11 @@ public class GenericPoolTest {
         @Override
         public TPreCacheAsyncResponse preCacheAsync(TPreCacheAsyncRequest request) throws TException {
             return new TPreCacheAsyncResponse();
+        }
+
+        @Override
+        public TCheckPreCacheResponse checkPreCache(TCheckPreCacheRequest request) throws TException {
+            return new TCheckPreCacheResponse();
         }
     }
 

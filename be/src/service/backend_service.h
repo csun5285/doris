@@ -141,6 +141,9 @@ public:
     void pre_cache_async(TPreCacheAsyncResponse& response,
                          const TPreCacheAsyncRequest& request) override;
 
+    void check_pre_cache(TCheckPreCacheResponse& response,
+                         const TCheckPreCacheRequest& request) override;
+
 private:
     Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);
     ExecEnv* _exec_env;

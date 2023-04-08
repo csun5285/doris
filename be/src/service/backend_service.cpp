@@ -386,7 +386,6 @@ void BackendService::check_storage_format(TCheckStorageFormatResult& result) {
 
 void BackendService::pre_cache_async(TPreCacheAsyncResponse& response,
                                      const TPreCacheAsyncRequest& request) {
-    LOG(INFO) << "lw test pre cache async begin";
     std::string brpc_addr = fmt::format("{}:{}", request.host, request.brpc_port);
     Status st = Status::OK();
     TStatus t_status;
@@ -402,23 +401,30 @@ void BackendService::pre_cache_async(TPreCacheAsyncResponse& response,
                   [&](int64_t tablet_id) { brpc_request.add_tablet_ids(tablet_id); });
     PGetFileCacheMetaResponse brpc_response;
     brpc_stub->get_file_cache_meta_by_tablet_id(&cntl, &brpc_request, &brpc_response, nullptr);
-    LOG(INFO) << "lw test pre cache async 1111";
     if (!cntl.Failed()) {
-        LOG(INFO) << "lw test pre cache async 2222";
         std::vector<FileCacheSegmentMeta> metas;
         std::transform(brpc_response.file_cache_segment_metas().cbegin(),
                        brpc_response.file_cache_segment_metas().cend(), std::back_inserter(metas),
                        [](const FileCacheSegmentMeta& meta) { return meta; });
-        LOG(INFO) << "lw test pre cache async 3333";
         io::DownloadTask download_task(std::move(metas));
         io::FileCacheSegmentDownloader::instance()->submit_download_task(download_task);
-        LOG(INFO) << "lw test pre cache async 4444";
     } else {
         st = Status::RpcError("{} isn't connected", brpc_addr);
     }
     st.to_thrift(&t_status);
     response.status = t_status;
-    LOG(INFO) << "lw test pre cache async end";
+}
+
+void BackendService::check_pre_cache(TCheckPreCacheResponse& response,
+                                     const TCheckPreCacheRequest& request) {
+    std::map<int64_t, bool> task_done;
+    io::FileCacheSegmentDownloader::instance()->check_download_task(request.tablets, &task_done);
+    response.__set_task_done(task_done);
+
+    Status st = Status::OK();
+    TStatus t_status;
+    st.to_thrift(&t_status);
+    response.status = t_status;
 }
 
 } // namespace doris

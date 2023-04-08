@@ -52,9 +52,13 @@ public:
 
     void polling_download_task();
 
+    virtual void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) = 0;
+
+protected:
+    std::mutex _mtx;
+
 private:
     std::thread _download_thread;
-    std::mutex _mtx;
     std::condition_variable _empty;
     std::deque<DownloadTask> _task_queue;
     std::atomic_bool _closed {false};
@@ -72,8 +76,11 @@ public:
 
     void download_segments(DownloadTask task) override;
 
+    void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) override;
+
 private:
     std::atomic<size_t> _cur_download_file {0};
+    std::unordered_set<int64_t> _inflight_tasks;
 };
 
 } // namespace doris::io
