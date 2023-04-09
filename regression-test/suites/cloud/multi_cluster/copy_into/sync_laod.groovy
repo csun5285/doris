@@ -766,7 +766,7 @@ suite("sync_load") {
           o_orderdate
         LIMIT 100
     """
-    checkProfile.call(set, 6);
+    checkProfile.call(set, 5);
 
     // q19
     sql """
