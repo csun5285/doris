@@ -8,6 +8,7 @@ import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 
 import com.google.common.base.Strings;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import org.apache.doris.analysis.CopyStmt;
 import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.catalog.Env;
@@ -157,6 +158,11 @@ public class CloudLoadAction extends RestBaseController {
                 LOG.debug("meta service msHasExternal: {}", hasExternal);
                 String endpoint = hasExternal
                         ? internalStage.getObjInfo().getExternalEndpoint() : internalStage.getObjInfo().getEndpoint();
+                if (Strings.isNullOrEmpty(endpoint)) {
+                    // fix 'java.net.URISyntaxException: Expected authority at index 7: http://'
+                    LOG.warn("use external endpoind but not set, plz check instance's obj info");
+                    throw new DorisHttpException(HttpResponseStatus.BAD_REQUEST, "use external endpoint but not set");
+                }
                 obj.setEndpoint(endpoint);
                 objPb = obj.build();
             }
