@@ -221,10 +221,10 @@ void meta_tablet_idx_key(const MetaTabletIdxKeyInfo& in, std::string* out) {
 }
 
 void meta_schema_key(const MetaSchemaKeyInfo& in, std::string* out) {
-    encode_prefix(in, out);                       // 0x01 "meta" ${instance_id}
-    encode_bytes(META_KEY_INFIX_TABLET_IDX, out); // "schema"
-    encode_int64(std::get<1>(in), out);           // index_id
-    encode_int64(std::get<2>(in), out);           // schema_version
+    encode_prefix(in, out);                   // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_SCHEMA, out); // "schema"
+    encode_int64(std::get<1>(in), out);       // index_id
+    encode_int64(std::get<2>(in), out);       // schema_version
 }
 
 //==============================================================================
@@ -314,8 +314,8 @@ std::string system_meta_service_registry_key() {
 //==============================================================================
 
 void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out) {
-    encode_prefix(in, out);                     // 0x01 "job" ${instance_id}
-    encode_bytes("recycle", out);               // "recycle"
+    encode_prefix(in, out);       // 0x01 "job" ${instance_id}
+    encode_bytes("recycle", out); // "recycle"
 }
 
 //==============================================================================
