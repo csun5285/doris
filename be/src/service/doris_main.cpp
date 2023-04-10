@@ -409,6 +409,7 @@ int main(int argc, char** argv) {
                 LOG(WARNING) << fmt::format("cache path {} is duplicate", cache_path.path);
                 continue;
             }
+            cache_path_set.emplace(cache_path.path);
             Status st = doris::io::FileCacheFactory::instance().create_file_cache(
                     cache_path.path, cache_path.init_settings());
             if (!st) {
