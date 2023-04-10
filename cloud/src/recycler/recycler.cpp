@@ -117,7 +117,7 @@ std::string tablet_path_prefix(int64_t tablet_id) {
     if (ret != 0) {
         return -1;
     }
-    return txn->get(key, &val);
+    return txn->get(key, &val, true);
 }
 
 // 0 for success, negative for error
@@ -128,7 +128,7 @@ static int txn_get(TxnKv* txn_kv, std::string_view begin, std::string_view end,
     if (ret != 0) {
         return -1;
     }
-    return txn->get(begin, end, &it);
+    return txn->get(begin, end, &it, true);
 }
 
 // return 0 for success otherwise error
@@ -577,10 +577,86 @@ static int decrypt_ak_sk_helper(const std::string& cipher_ak, const std::string&
     return 0;
 }
 
+class InstanceRecycler::InvertedIndexIdCache {
+public:
+    InvertedIndexIdCache(std::string instance_id, std::shared_ptr<TxnKv> txn_kv)
+            : instance_id_(std::move(instance_id)), txn_kv_(std::move(txn_kv)) {}
+
+    // Return 0 if success, 1 if schema kv not found, negative for error
+    int get(int64_t index_id, int32_t schema_version, std::vector<int64_t>& res) {
+        {
+            std::lock_guard lock(mtx_);
+            if (schemas_without_inverted_index_.count({index_id, schema_version})) {
+                return 0;
+            }
+            if (auto it = inverted_index_id_map_.find({index_id, schema_version});
+                it != inverted_index_id_map_.end()) {
+                res = it->second;
+                return 0;
+            }
+        }
+        // Get schema from kv
+        // TODO(plat1ko): Single flight
+        std::string schema_key, schema_val;
+        meta_schema_key({instance_id_, index_id, schema_version}, &schema_key);
+        int ret = txn_get(txn_kv_.get(), schema_key, schema_val);
+        if (ret != 0) {
+            LOG(WARNING) << "failed to get schema, ret=" << ret;
+            return ret;
+        }
+        doris::TabletSchemaPB schema;
+        if (!schema.ParseFromString(schema_val)) {
+            LOG(WARNING) << "malformed schema value, key=" << hex(schema_key);
+            return -1;
+        }
+        if (schema.index_size() > 0) {
+            res.reserve(schema.index_size());
+            for (auto& i : schema.index()) {
+                res.push_back(i.index_id());
+            }
+        }
+        insert(index_id, schema_version, res);
+        return 0;
+    }
+
+    // Empty `ids` means this schema has no inverted index
+    void insert(int64_t index_id, int32_t schema_version, const std::vector<int64_t>& ids) {
+        if (ids.empty()) {
+            TEST_SYNC_POINT_CALLBACK("InvertedIndexIdCache::insert1", nullptr);
+            std::lock_guard lock(mtx_);
+            schemas_without_inverted_index_.emplace(index_id, schema_version);
+        } else {
+            TEST_SYNC_POINT_CALLBACK("InvertedIndexIdCache::insert2", nullptr);
+            std::lock_guard lock(mtx_);
+            inverted_index_id_map_.try_emplace({index_id, schema_version}, ids);
+        }
+    }
+
+private:
+    std::string instance_id_;
+    std::shared_ptr<TxnKv> txn_kv_;
+
+    std::mutex mtx_;
+    using Key = std::pair<int64_t, int32_t>; // <index_id, schema_version>
+    struct HashOfKey {
+        size_t operator()(const Key& key) const {
+            size_t seed = 0;
+            seed = std::hash<int64_t> {}(key.first);
+            seed = std::hash<int32_t> {}(key.second);
+            return seed;
+        }
+    };
+    // <index_id, schema_version> -> inverted_index_ids
+    std::unordered_map<Key, std::vector<int64_t>, HashOfKey> inverted_index_id_map_;
+    // Store <index_id, schema_version> of schema which doesn't have inverted index
+    std::unordered_set<Key, HashOfKey> schemas_without_inverted_index_;
+};
+
 InstanceRecycler::InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance)
         : txn_kv_(std::move(txn_kv)),
           instance_id_(instance.instance_id()),
-          instance_info_(instance) {}
+          instance_info_(instance),
+          inverted_index_id_cache_(std::make_unique<InvertedIndexIdCache>(instance_id_, txn_kv_)) {}
 
 InstanceRecycler::~InstanceRecycler() = default;
 
@@ -980,6 +1056,13 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
     }
     txn->remove(stats_key_begin, stats_key_end);
     txn->remove(job_key_begin, job_key_end);
+    std::string schema_key_begin, schema_key_end;
+    if (partition_id <= 0) {
+        // Delete schema kv of this index
+        meta_schema_key({instance_id_, index_id, 0}, &schema_key_begin);
+        meta_schema_key({instance_id_, index_id + 1, 0}, &schema_key_end);
+        txn->remove(schema_key_begin, schema_key_end);
+    }
     if (txn->commit() != 0) {
         LOG(WARNING) << "failed to delete tablet job or stats key, instance_id=" << instance_id_;
         return -1;
@@ -991,6 +1074,10 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
 int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) {
     int64_t num_segments = rs_meta_pb.num_segments();
     if (num_segments <= 0) return 0;
+    if (!rs_meta_pb.has_tablet_schema()) {
+        return delete_rowset_data(rs_meta_pb.resource_id(), rs_meta_pb.tablet_id(),
+                                  rs_meta_pb.rowset_id_v2());
+    }
     auto it = accessor_map_.find(rs_meta_pb.resource_id());
     if (it == accessor_map_.end()) {
         LOG_WARNING("instance has no such resource id")
@@ -1007,7 +1094,6 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
     for (auto& index_pb : rs_meta_pb.tablet_schema().index()) {
         index_ids.push_back(index_pb.index_id());
     }
-
     std::vector<std::string> file_paths;
     file_paths.reserve(num_segments * (1 + index_ids.size()));
     for (int64_t i = 0; i < num_segments; ++i) {
@@ -1020,14 +1106,22 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
 }
 
 int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>& rowsets) {
+    int ret = 0;
     // resource_id -> file_paths
     std::map<std::string, std::vector<std::string>> resource_file_paths;
     for (auto& rs : rowsets) {
+        {
+            std::lock_guard lock(recycled_tablets_mtx_);
+            if (recycled_tablets_.count(rs.tablet_id())) {
+                continue; // Rowset data has already been deleted
+            }
+        }
         auto it = accessor_map_.find(rs.resource_id());
         if (it == accessor_map_.end()) [[unlikely]] { // impossible
             LOG_WARNING("instance has no such resource id")
                     .tag("instance_id", instance_id_)
                     .tag("resource_id", rs.resource_id());
+            ret = -1;
             continue;
         }
         auto& file_paths = resource_file_paths[rs.resource_id()];
@@ -1037,9 +1131,39 @@ int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>&
         if (num_segments <= 0) continue;
         // process inverted indexes
         std::vector<int64_t> index_ids;
-        index_ids.reserve(rs.tablet_schema().index().size());
-        for (auto& index_pb : rs.tablet_schema().index()) {
-            index_ids.push_back(index_pb.index_id());
+        if (rs.has_tablet_schema()) {
+            index_ids.reserve(rs.tablet_schema().index().size());
+            for (auto& index_pb : rs.tablet_schema().index()) {
+                index_ids.push_back(index_pb.index_id());
+            }
+        } else { // Detached schema
+            if (!rs.has_index_id() || !rs.has_schema_version()) {
+                LOG(WARNING) << "rowset must have either schema or schema_version and index_id, "
+                                "instance_id="
+                             << instance_id_ << " tablet_id=" << tablet_id
+                             << " rowset_id=" << rowset_id;
+                ret = -1;
+                continue;
+            }
+            int get_ret =
+                    inverted_index_id_cache_->get(rs.index_id(), rs.schema_version(), index_ids);
+            if (get_ret != 0) {
+                if (get_ret == 1) { // Schema kv not found
+                    // Check tablet existence
+                    std::string tablet_idx_key, tablet_idx_val;
+                    meta_tablet_idx_key({instance_id_, tablet_id}, &tablet_idx_key);
+                    if (txn_get(txn_kv_.get(), tablet_idx_key, tablet_idx_val) == 1) {
+                        // Tablet has been recycled, rowset data has already been deleted
+                        std::lock_guard lock(recycled_tablets_mtx_);
+                        recycled_tablets_.insert(tablet_id);
+                        continue;
+                    }
+                }
+                LOG(WARNING) << "failed to get schema kv for rowset, instance_id=" << instance_id_
+                             << " tablet_id=" << tablet_id << " rowset_id=" << rowset_id;
+                ret = -1;
+                continue;
+            }
         }
         for (int64_t i = 0; i < num_segments; ++i) {
             file_paths.push_back(segment_path(tablet_id, rowset_id, i));
@@ -1048,7 +1172,6 @@ int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>&
             }
         }
     }
-    int ret = 0;
     for (auto& [resource_id, file_paths] : resource_file_paths) {
         auto& accessor = accessor_map_[resource_id];
         DCHECK(accessor);
@@ -1112,6 +1235,9 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
             LOG(WARNING) << "failed to delete rowset data of tablet " << tablet_id
                          << " s3_path=" << accessor->path();
             ret = -1;
+        } else {
+            std::lock_guard lock(recycled_tablets_mtx_);
+            recycled_tablets_.insert(tablet_id);
         }
     }
     return ret;

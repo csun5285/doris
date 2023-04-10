@@ -2201,7 +2201,9 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     prepare_rowset.set_creation_time(now);
     prepare_rowset.set_expiration(request->rowset_meta().txn_expiration());
-    prepare_rowset.mutable_rowset_meta()->CopyFrom(request->rowset_meta());
+    // Schema is useless for PREPARE type recycle rowset, set it to null to reduce storage space
+    rowset_meta.set_allocated_tablet_schema(nullptr);
+    prepare_rowset.mutable_rowset_meta()->CopyFrom(rowset_meta);
     prepare_rowset.set_type(RecycleRowsetPB::PREPARE);
     prepare_rowset.SerializeToString(&prepare_val);
 

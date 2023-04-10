@@ -155,6 +155,13 @@ private:
     std::string instance_id_;
     InstanceInfoPB instance_info_;
     std::unordered_map<std::string, std::shared_ptr<ObjStoreAccessor>> accessor_map_;
+
+    class InvertedIndexIdCache;
+    std::unique_ptr<InvertedIndexIdCache> inverted_index_id_cache_;
+
+    std::mutex recycled_tablets_mtx_;
+    // Store recycled tablets, we can skip deleting rowset data of these tablets because these data has already been deleted.
+    std::unordered_set<int64_t> recycled_tablets_;
 };
 
 } // namespace selectdb
