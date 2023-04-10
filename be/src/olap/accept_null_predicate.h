@@ -65,7 +65,8 @@ public:
         const override {
         if (block->is_nullable()) {
             // copy original flags
-            bool* original_flags = new bool[size];
+            auto original_flags_buf = std::make_unique<bool[]>(size);
+            auto original_flags = original_flags_buf.get();
             memcpy(original_flags, flags, size * sizeof(bool));
 
             // call evaluate_and and restore true for NULL rows
@@ -101,7 +102,8 @@ public:
                       bool* flags) const override {
         if (column.has_null()) {
             // copy original flags
-            bool* original_flags = new bool[size];
+            auto original_flags_buf = std::make_unique<bool[]>(size);
+            auto original_flags = original_flags_buf.get();
             memcpy(original_flags, flags, size * sizeof(bool));
 
             // call evaluate_and and restore true for NULL rows
@@ -166,7 +168,8 @@ public:
                           bool* flags) const override {
         if (column.has_null()) {
             // copy original flags
-            bool* original_flags = new bool[size];
+            auto original_flags_buf = std::make_unique<bool[]>(size);
+            auto original_flags = original_flags_buf.get();
             memcpy(original_flags, flags, size * sizeof(bool));
 
             // call evaluate_and_vec and restore true for NULL rows
