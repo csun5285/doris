@@ -80,7 +80,7 @@ static std::string next_rowset_id() {
 }
 
 static void add_tablet(CreateTabletsRequest& req, int64_t table_id, int64_t index_id,
-                       int64_t partition_id, int64_t tablet_id, const std::string& rowset_id) {
+                       int64_t partition_id, int64_t tablet_id) {
     auto tablet = req.add_tablet_metas();
     tablet->set_table_id(table_id);
     tablet->set_index_id(index_id);
@@ -90,18 +90,18 @@ static void add_tablet(CreateTabletsRequest& req, int64_t table_id, int64_t inde
     schema->set_schema_version(0);
     auto first_rowset = tablet->add_rs_metas();
     first_rowset->set_rowset_id(0); // required
-    first_rowset->set_rowset_id_v2(rowset_id);
+    first_rowset->set_rowset_id_v2(next_rowset_id());
     first_rowset->set_start_version(0);
     first_rowset->set_end_version(1);
     first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
 }
 
 static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
-                          int64_t partition_id, int64_t tablet_id, const std::string& rowset_id) {
+                          int64_t partition_id, int64_t tablet_id) {
     brpc::Controller cntl;
     CreateTabletsRequest req;
     CreateTabletsResponse res;
-    add_tablet(req, table_id, index_id, partition_id, tablet_id, rowset_id);
+    add_tablet(req, table_id, index_id, partition_id, tablet_id);
     meta_service->create_tablets(&cntl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
@@ -133,12 +133,11 @@ static void commit_txn(MetaServiceImpl* meta_service, int64_t db_id, int64_t txn
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
 }
 
-static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id,
-                                         const std::string& rowset_id, int64_t version = -1,
+static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id, int64_t version = -1,
                                          int num_rows = 100) {
     doris::RowsetMetaPB rowset;
     rowset.set_rowset_id(0); // required
-    rowset.set_rowset_id_v2(rowset_id);
+    rowset.set_rowset_id_v2(next_rowset_id());
     rowset.set_tablet_id(tablet_id);
     rowset.set_txn_id(txn_id);
     if (version > 0) {
@@ -179,7 +178,7 @@ static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const st
     int64_t txn_id = 0;
     ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service, db_id, label, table_id, txn_id));
     CreateRowsetResponse res;
-    auto rowset = create_rowset(txn_id, tablet_id, next_rowset_id());
+    auto rowset = create_rowset(txn_id, tablet_id);
     prepare_rowset(meta_service, rowset, res);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
     res.Clear();
@@ -193,7 +192,8 @@ TEST(MetaServiceTest, GetInstanceIdTest) {
                                        const std::string& cloud_unique_id);
     auto meta_service = get_meta_service();
     auto sp = SyncPoint::get_instance();
-
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id_err", [&](void* args) {
         std::string* err = reinterpret_cast<std::string*>(args);
         *err = "can't find node from cache";
@@ -514,6 +514,8 @@ TEST(MetaServiceTest, BeginTxnTest) {
         std::condition_variable go_cv;
         bool go = false;
         auto sp = selectdb::SyncPoint::get_instance();
+        std::unique_ptr<int, std::function<void(int*)>> defer(
+                (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
 
         std::atomic<int32_t> count_txn1 = {0};
         std::atomic<int32_t> count_txn2 = {0};
@@ -659,6 +661,8 @@ TEST(MetaServiceTest, BeginTxnTest) {
         std::condition_variable go_cv;
         bool go = false;
         auto sp = selectdb::SyncPoint::get_instance();
+        std::unique_ptr<int, std::function<void(int*)>> defer(
+                (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
 
         std::atomic<int32_t> count_txn1 = {0};
         std::atomic<int32_t> count_txn2 = {0};
@@ -936,50 +940,6 @@ TEST(MetaServiceTest, PreCommitTxnTest) {
     }
 }
 
-static int64_t cnt = 0;
-static void create_tmp_rowset_and_meta_tablet(TxnKv* txn_kv, int64_t txn_id, int64_t tablet_id,
-                                              int table_id = 1,
-                                              std::string instance_id = mock_instance,
-                                              int num_segments = 1) {
-    ++cnt;
-
-    std::string key;
-    std::string val;
-
-    char rowset_id[50];
-    snprintf(rowset_id, sizeof(rowset_id), "%048ld", cnt);
-
-    MetaRowsetTmpKeyInfo key_info {instance_id, txn_id, tablet_id};
-    meta_rowset_tmp_key(key_info, &key);
-
-    doris::RowsetMetaPB rowset_pb;
-    rowset_pb.set_rowset_id(0); // useless but required
-    rowset_pb.set_rowset_id_v2(rowset_id);
-    rowset_pb.set_tablet_id(tablet_id);
-    rowset_pb.set_num_segments(num_segments);
-    rowset_pb.set_partition_id(897614);
-    rowset_pb.SerializeToString(&val);
-
-    std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
-
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    std::string key1;
-    std::string val1;
-    MetaTabletIdxKeyInfo key_info1 {instance_id, tablet_id};
-    meta_tablet_idx_key(key_info1, &key1);
-    TabletIndexPB tablet_table;
-    tablet_table.set_table_id(123456);
-    tablet_table.set_index_id(2);
-    tablet_table.set_partition_id(3241);
-    tablet_table.SerializeToString(&val1);
-
-    txn->put(key1, val1);
-    ASSERT_EQ(txn->commit(), 0);
-}
-
 TEST(MetaServiceTest, CommitTxnTest) {
     auto meta_service = get_meta_service();
 
@@ -1007,8 +967,11 @@ TEST(MetaServiceTest, CommitTxnTest) {
         // mock rowset and tablet
         int64_t tablet_id_base = 1103;
         for (int i = 0; i < 5; ++i) {
-            create_tmp_rowset_and_meta_tablet(meta_service->txn_kv_.get(), txn_id,
-                                              tablet_id_base + i);
+            create_tablet(meta_service.get(), 1234, 1235, 1236, tablet_id_base + i);
+            auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), tmp_rowset, res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
 
         // precommit txn
@@ -1068,8 +1031,11 @@ TEST(MetaServiceTest, CommitTxnExpiredTest) {
         // mock rowset and tablet
         int64_t tablet_id_base = 1103;
         for (int i = 0; i < 5; ++i) {
-            create_tmp_rowset_and_meta_tablet(meta_service->txn_kv_.get(), txn_id,
-                                              tablet_id_base + i);
+            create_tablet(meta_service.get(), 1234789234, 1235, 1236, tablet_id_base + i);
+            auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), tmp_rowset, res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
         // sleep 1 second for txn timeout
         sleep(1);
@@ -1121,8 +1087,11 @@ TEST(MetaServiceTest, AbortTxnTest) {
 
         // mock rowset and tablet
         for (int i = 0; i < 5; ++i) {
-            create_tmp_rowset_and_meta_tablet(meta_service->txn_kv_.get(), txn_id,
-                                              tablet_id_base + i);
+            create_tablet(meta_service.get(), 12345, 1235, 1236, tablet_id_base + i);
+            auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), tmp_rowset, res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
 
         // abort txn by txn_id
@@ -1168,8 +1137,11 @@ TEST(MetaServiceTest, AbortTxnTest) {
 
         // mock rowset and tablet
         for (int i = 0; i < 5; ++i) {
-            create_tmp_rowset_and_meta_tablet(meta_service->txn_kv_.get(), txn_id,
-                                              tablet_id_base + i);
+            create_tablet(meta_service.get(), table_id, 1235, 1236, tablet_id_base + i);
+            auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+            CreateRowsetResponse res;
+            commit_rowset(meta_service.get(), tmp_rowset, res);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
 
         // abort txn by db_id and label
@@ -1273,7 +1245,11 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
     // mock rowset and tablet
     int64_t tablet_id_base = 123456;
     for (int i = 0; i < 5; ++i) {
-        create_tmp_rowset_and_meta_tablet(meta_service->txn_kv_.get(), txn_id, tablet_id_base + i);
+        create_tablet(meta_service.get(), table_id, 1235, 1236, tablet_id_base + i);
+        auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+        CreateRowsetResponse res;
+        commit_rowset(meta_service.get(), tmp_rowset, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
 
     brpc::Controller commit_txn_cntl;
@@ -1303,7 +1279,10 @@ TEST(MetaServiceTest, CopyJobTest) {
     auto stage_id = "test_stage_id";
     int64_t table_id = 100;
     std::string instance_id = "copy_job_test_instance_id";
+
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -1687,6 +1666,8 @@ TEST(MetaServiceTest, StageTest) {
     auto cloud_unique_id = "test_cloud_unique_id";
     std::string instance_id = "stage_test_instance_id";
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
@@ -1903,6 +1884,8 @@ TEST(MetaServiceTest, GetIamTest) {
     auto cloud_unique_id = "test_cloud_unique_id";
     std::string instance_id = "get_iam_test_instance_id";
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
@@ -1976,6 +1959,8 @@ TEST(MetaServiceTest, AlterIamTest) {
     auto cloud_unique_id = "test_cloud_unique_id";
     std::string instance_id = "alter_iam_test_instance_id";
     [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
@@ -2124,8 +2109,8 @@ TEST(MetaServiceTest, GetTabletStatsTest) {
     auto meta_service = get_meta_service();
 
     constexpr auto table_id = 10001, index_id = 10002, partition_id = 10003, tablet_id = 10004;
-    ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
-                                          tablet_id, next_rowset_id()));
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
     GetTabletStatsResponse res;
     get_tablet_stats(meta_service.get(), table_id, index_id, partition_id, tablet_id, res);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
@@ -2135,29 +2120,39 @@ TEST(MetaServiceTest, GetTabletStatsTest) {
     EXPECT_EQ(res.tablet_stats(0).num_rowsets(), 1);
     EXPECT_EQ(res.tablet_stats(0).num_segments(), 0);
     // Insert rowset
-    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label1", table_id, tablet_id));
-    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label2", table_id, tablet_id));
-    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label3", table_id, tablet_id));
-    ASSERT_NO_FATAL_FAILURE(insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
+    config::split_tablet_stats = false;
+    ASSERT_NO_FATAL_FAILURE(
+            insert_rowset(meta_service.get(), 10000, "label1", table_id, tablet_id));
+    ASSERT_NO_FATAL_FAILURE(
+            insert_rowset(meta_service.get(), 10000, "label2", table_id, tablet_id));
+    config::split_tablet_stats = true;
+    ASSERT_NO_FATAL_FAILURE(
+            insert_rowset(meta_service.get(), 10000, "label3", table_id, tablet_id));
+    ASSERT_NO_FATAL_FAILURE(
+            insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
     // Check tablet stats kv
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
     std::string data_size_key, data_size_val;
-    stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &data_size_key);
+    stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id},
+                               &data_size_key);
     ASSERT_EQ(txn->get(data_size_key, &data_size_val), 0);
-    EXPECT_EQ(*(int64_t*)data_size_val.data(), 40000);
+    EXPECT_EQ(*(int64_t*)data_size_val.data(), 20000);
     std::string num_rows_key, num_rows_val;
-    stats_tablet_num_rows_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_rows_key);
+    stats_tablet_num_rows_key({mock_instance, table_id, index_id, partition_id, tablet_id},
+                              &num_rows_key);
     ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), 0);
-    EXPECT_EQ(*(int64_t*)num_rows_val.data(), 400);
+    EXPECT_EQ(*(int64_t*)num_rows_val.data(), 200);
     std::string num_rowsets_key, num_rowsets_val;
-    stats_tablet_num_rowsets_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_rowsets_key);
+    stats_tablet_num_rowsets_key({mock_instance, table_id, index_id, partition_id, tablet_id},
+                                 &num_rowsets_key);
     ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), 0);
-    EXPECT_EQ(*(int64_t*)num_rowsets_val.data(), 4);
+    EXPECT_EQ(*(int64_t*)num_rowsets_val.data(), 2);
     std::string num_segs_key, num_segs_val;
-    stats_tablet_num_segs_key({mock_instance, table_id, index_id, partition_id, tablet_id}, &num_segs_key);
+    stats_tablet_num_segs_key({mock_instance, table_id, index_id, partition_id, tablet_id},
+                              &num_segs_key);
     ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), 0);
-    EXPECT_EQ(*(int64_t*)num_segs_val.data(), 4);
+    EXPECT_EQ(*(int64_t*)num_segs_val.data(), 2);
     // Get tablet stats
     res.Clear();
     get_tablet_stats(meta_service.get(), table_id, index_id, partition_id, tablet_id, res);
