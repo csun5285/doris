@@ -129,7 +129,7 @@ static void range_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn);
         ASSERT_EQ(ret, 0);
         std::unique_ptr<RangeGetIterator> iter;
-        ret = txn->get("key1", "key4", &iter, 1);
+        ret = txn->get("key1", "key4", &iter, false, 1);
         ASSERT_EQ(iter->size(), 1) << txn_kv_class;
         ASSERT_EQ(iter->more(), true) << txn_kv_class;
 
@@ -598,7 +598,7 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
 
         txn_kv->create_txn(&txn_2);
         std::unique_ptr<RangeGetIterator> iter;
-        ret = txn_2->get("key1", "key5", &iter, 1);
+        ret = txn_2->get("key1", "key5", &iter, false, 1);
         ASSERT_EQ(iter->size(), 1) << txn_kv_class;
 
         txn_kv->create_txn(&txn_1);
