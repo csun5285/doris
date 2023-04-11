@@ -20,6 +20,7 @@ public:
         TEST_SYNC_POINT_CALLBACK("MockMetaMgr::get_tablet_meta", {});
         auto tablet_meta1 = std::make_shared<TabletMeta>();
         tablet_meta1->_tablet_id = tablet_id;
+        tablet_meta1->_index_id = 10001;
         *tablet_meta = std::move(tablet_meta1);
         return Status::OK();
     }
