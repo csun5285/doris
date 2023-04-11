@@ -3,6 +3,19 @@ suite("smoke_test_multi_cluster", "smoke") {
     def cluster1 = "smoke_test_cluster_01"
     def cluster2 = "smoke_test_cluster_02"
     List<List<Object>> result = sql "show clusters"
+
+    if (result.size() != 2) {
+        // if not smoke env, just return. such as regression case run daily doesn't have $cluster1 and $cluster2
+        logger.info("clusters size not eq 2, not smoke env")
+        return
+    }
+
+    if (!result.stream().map{it[0]}.toList().containsAll("$cluster1", "$cluster2")) {
+        // if not smoke env, just return. such as regression case run daily doesn't have $cluster1 and $cluster2
+        logger.info("clusters not have '$cluster1' and '$cluster2'")
+        return
+    }
+
     assertTrue(result.size() == 2)
 
     // 1. test switch cluster
