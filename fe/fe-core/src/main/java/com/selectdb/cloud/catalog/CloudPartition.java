@@ -8,6 +8,7 @@ import com.google.gson.annotations.SerializedName;
 import org.apache.doris.catalog.DistributionInfo;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.Partition;
+import org.apache.doris.common.Config;
 import org.apache.doris.rpc.RpcException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -63,14 +64,29 @@ public class CloudPartition extends Partition {
     @Override
     public long getVisibleVersion() {
         LOG.debug("getVisibleVersion use CloudPartition {}", super.getName());
-        long version = getVersionFromMeta(System.currentTimeMillis() + 3000);
-        if (version != -1) {
-            // get version from metaService success, set visible version
-            super.setVisibleVersion(version);
-        } else {
-            version = super.getVisibleVersion();
-            LOG.warn("failed to get version from metaService, use previous version, parition={} version={}",
-                    getName(), version);
+        int retryTime = 0;
+        long version = -1;
+        boolean succ = false;
+        while (retryTime++ < 3) {
+            version = getVersionFromMeta(System.currentTimeMillis()
+                    + Config.default_get_version_from_ms_timeout_second * 1000L);
+            LOG.debug("cloud get version from metaService, use previous version, parition={} version={} retryTime={}",
+                    getName(), version, retryTime);
+            if (version != -1) {
+                // get version from metaService success, set visible version
+                super.setVisibleVersion(version);
+                succ = true;
+                break;
+            } else {
+                version = super.getVisibleVersion();
+                LOG.warn("failed to get version from metaService, use previous version, "
+                        + "parition={} version={} retryTime={}", getName(), version, retryTime);
+            }
+        }
+        if (!succ) {
+            LOG.warn("failed to get version from metaService times={}, internal error parition={} version={}",
+                    retryTime, getName(), version);
+            throw new RuntimeException("internal error");
         }
         return version;
     }
