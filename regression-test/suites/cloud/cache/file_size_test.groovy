@@ -37,6 +37,27 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
 """
 
     long origin_count = 0;
+    String[][] backends = sql """ show backends """
+    assertTrue(backends.size() > 0)
+    String backendId;
+    def backendIdToBackendIP = [:]
+    def backendIdToBackendBrpcPort = [:]
+    for (String[] backend in backends) {
+        if (backend[9].equals("true")) {
+            backendIdToBackendIP.put(backend[0], backend[2])
+            backendIdToBackendBrpcPort.put(backend[0], backend[6])
+        }
+    }
+
+    backendId = backendIdToBackendIP.keySet()[0]
+    def getMetricsMethod = { check_func ->
+        httpTest {
+            endpoint backendIdToBackendIP.get(backendId) + ":" + backendIdToBackendBrpcPort.get(backendId)
+            uri "/brpc_metrics"
+            op "get"
+            check check_func
+        }
+    }
     getMetricsMethod.call() {
         respCode, body ->
             logger.info("test file size resp Code {}", "${respCode}".toString())
