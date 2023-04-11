@@ -1784,6 +1784,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static String cloud_unique_id = "";
 
+    @ConfField
+    public static int default_get_version_from_ms_timeout_second = 3;
+
     public static boolean isCloudMode() {
         return !cloud_unique_id.isEmpty();
     }
