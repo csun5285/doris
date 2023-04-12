@@ -272,6 +272,27 @@ void stats_tablet_key(const StatsTabletKeyInfo& in, std::string* out) {
     encode_int64(std::get<4>(in), out);        // tablet_id
 }
 
+void stats_tablet_data_size_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_DATA_SIZE, out);
+}
+void stats_tablet_num_rows_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_ROWS, out);
+}
+void stats_tablet_num_rowsets_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_ROWSETS, out);
+}
+void stats_tablet_num_segs_key(const StatsTabletKeyInfo& in, std::string* out) {
+    stats_tablet_key(in, out);
+    encode_bytes(STATS_KEY_SUFFIX_NUM_SEGS, out);
+}
+
+//==============================================================================
+// Job keys
+//==============================================================================
+
 void job_tablet_key(const JobTabletKeyInfo& in, std::string* out) {
     encode_prefix(in, out);                  // 0x01 "job" ${instance_id}
     encode_bytes(JOB_KEY_INFIX_TABLET, out); // "tablet"

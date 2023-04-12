@@ -5,6 +5,7 @@
 #include "meta_service.h"
 
 #include "meta-service/keys.h"
+#include "meta-service/meta_service_tablet_stats.h"
 #include "common/bvars.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -42,19 +43,19 @@
         }                                                                                   \
     });
 
-#define RPC_RATE_LIMIT(func_name)                                                           \
-    if (config::enable_rate_limit &&                                                        \
-            config::use_detailed_metrics && !instance_id.empty()) {                         \
-        auto rate_limiter = rate_limiter_->get_rpc_rate_limiter(#func_name);                \
-        assert(rate_limiter != nullptr);                                                    \
-        std::function<int()> get_bvar_qps = [&] {                                           \
-                    return g_bvar_ms_##func_name.get(instance_id)->qps(); };                \
-        if (!rate_limiter->get_qps_token(instance_id, get_bvar_qps)) {                      \
-            drop_request = true;                                                            \
-            code = MetaServiceCode::MAX_QPS_LIMIT;                                          \
-            msg = "reach max qps limit";                                                    \
-            return;                                                                         \
-        }                                                                                   \
+#define RPC_RATE_LIMIT(func_name)                                                            \
+    if (config::enable_rate_limit && config::use_detailed_metrics && !instance_id.empty()) { \
+        auto rate_limiter = rate_limiter_->get_rpc_rate_limiter(#func_name);                 \
+        assert(rate_limiter != nullptr);                                                     \
+        std::function<int()> get_bvar_qps = [&] {                                            \
+            return g_bvar_ms_##func_name.get(instance_id)->qps();                            \
+        };                                                                                   \
+        if (!rate_limiter->get_qps_token(instance_id, get_bvar_qps)) {                       \
+            drop_request = true;                                                             \
+            code = MetaServiceCode::MAX_QPS_LIMIT;                                           \
+            msg = "reach max qps limit";                                                     \
+            return;                                                                          \
+        }                                                                                    \
     }
 // Empty string not is not processed
 template <typename T, size_t S>
@@ -69,47 +70,14 @@ namespace selectdb {
 extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
                                    const std::string& cloud_unique_id);
 
-void get_tablet_idx(MetaServiceCode& code, std::string& msg, std::stringstream& ss, int& ret,
-                    std::unique_ptr<Transaction>& txn, std::string& instance_id, int64_t& table_id,
-                    int64_t& index_id, int64_t& partition_id, int64_t& tablet_id) {
-    // Get tablet id index from kv
-    if (table_id <= 0 || index_id <= 0 || partition_id <= 0) {
-        std::string idx_key = meta_tablet_idx_key({instance_id, tablet_id});
-        std::string idx_val;
-        ret = txn->get(idx_key, &idx_val);
-        INSTANCE_LOG(INFO) << "get tablet meta, tablet_id=" << tablet_id << " key=" << hex(idx_key);
-        if (ret != 0) {
-            SS << "failed to get table id with tablet_id from kv, err="
-               << (ret == 1 ? "not found" : "internal error");
-            code = ret == 1 ? MetaServiceCode::UNDEFINED_ERR : MetaServiceCode::KV_TXN_GET_ERR;
-            msg = ss.str();
-            return;
-        }
-        TabletIndexPB idx_pb;
-        if (!idx_pb.ParseFromString(idx_val)) {
-            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            msg = "malformed tablet table value";
-            return;
-        }
-        table_id = idx_pb.table_id();
-        index_id = idx_pb.index_id();
-        partition_id = idx_pb.partition_id();
-        if (tablet_id != idx_pb.tablet_id()) {
-            code = MetaServiceCode::UNDEFINED_ERR;
-            msg = "internal error";
-            INSTANCE_LOG(WARNING) << "unexpected error given_tablet_id=" << tablet_id
-                                  << " idx_pb_tablet_id=" << idx_pb.tablet_id();
-            return;
-        }
-    }
-}
+extern void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
+                           const std::string& instance_id, int64_t tablet_id,
+                           TabletIndexPB& tablet_idx);
 
 void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss, int& ret,
                           std::unique_ptr<Transaction>& txn,
                           const ::selectdb::StartTabletJobRequest* request,
-                          std::string& instance_id, int64_t& table_id, int64_t& index_id,
-                          int64_t& partition_id, int64_t& tablet_id, bool& need_commit,
-                          ObjectPool& obj_pool) {
+                          std::string& instance_id, bool& need_commit, ObjectPool& obj_pool) {
     auto& compaction = request->job().compaction(0);
     if (!compaction.has_id() || compaction.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -123,6 +91,10 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         msg = "no valid compaction_cnt given";
         return;
     }
+    int64_t table_id = request->job().idx().table_id();
+    int64_t index_id = request->job().idx().index_id();
+    int64_t partition_id = request->job().idx().partition_id();
+    int64_t tablet_id = request->job().idx().tablet_id();
     std::string stats_key =
             stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     std::string stats_val;
@@ -228,9 +200,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
 void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
                              int& ret, std::unique_ptr<Transaction>& txn,
                              const ::selectdb::StartTabletJobRequest* request,
-                             std::string& instance_id, int64_t& table_id, int64_t& index_id,
-                             int64_t& partition_id, int64_t& tablet_id, bool& need_commit,
-                             ObjectPool& obj_pool) {
+                             std::string& instance_id, bool& need_commit, ObjectPool& obj_pool) {
     auto& schema_change = request->job().schema_change();
     if (!schema_change.has_id() || schema_change.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -250,19 +220,24 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
         msg = "no valid new_tablet_id given";
         return;
     }
+    int64_t table_id = request->job().idx().table_id();
+    int64_t index_id = request->job().idx().index_id();
+    int64_t partition_id = request->job().idx().partition_id();
+    int64_t tablet_id = request->job().idx().tablet_id();
     if (new_tablet_id == tablet_id) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "not allow new_tablet_id same with base_tablet_id";
         return;
     }
-    int64_t new_table_id = schema_change.new_tablet_idx().table_id();
-    int64_t new_index_id = schema_change.new_tablet_idx().index_id();
-    int64_t new_partition_id = schema_change.new_tablet_idx().partition_id();
-    get_tablet_idx(code, msg, ss, ret, txn, instance_id, new_table_id, new_index_id,
-                   new_partition_id, new_tablet_id);
-    if (code != MetaServiceCode::OK) return;
-    MetaTabletKeyInfo new_tablet_key_info {instance_id, new_table_id, new_index_id,
-                                           new_partition_id, new_tablet_id};
+    auto& new_tablet_idx = const_cast<TabletIndexPB&>(schema_change.new_tablet_idx());
+    if (!new_tablet_idx.has_table_id() || !new_tablet_idx.has_index_id() ||
+        !new_tablet_idx.has_partition_id()) {
+        get_tablet_idx(code, msg, ret, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
+        if (code != MetaServiceCode::OK) return;
+    }
+    MetaTabletKeyInfo new_tablet_key_info {instance_id, new_tablet_idx.table_id(),
+                                           new_tablet_idx.index_id(), new_tablet_idx.partition_id(),
+                                           new_tablet_id};
     std::string new_tablet_key;
     std::string new_tablet_val;
     doris::TabletMetaPB new_tablet_meta;
@@ -282,18 +257,16 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
         return;
     }
 
-    if (!schema_change.is_inverted_index_change()) {
-        if (new_tablet_meta.tablet_state() == doris::TabletStatePB::PB_RUNNING) {
-            code = MetaServiceCode::JOB_ALREADY_SUCCESS;
-            msg = "schema_change job already success";
-            return;
-        }
-        if (!new_tablet_meta.has_tablet_state() ||
-            new_tablet_meta.tablet_state() != doris::TabletStatePB::PB_NOTREADY) {
-            code = MetaServiceCode::INVALID_ARGUMENT;
-            msg = "invalid new tablet state";
-            return;
-        }
+    if (new_tablet_meta.tablet_state() == doris::TabletStatePB::PB_RUNNING) {
+        code = MetaServiceCode::JOB_ALREADY_SUCCESS;
+        msg = "schema_change job already success";
+        return;
+    }
+    if (!new_tablet_meta.has_tablet_state() ||
+        new_tablet_meta.tablet_state() != doris::TabletStatePB::PB_NOTREADY) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "invalid new tablet state";
+        return;
     }
 
     auto& job_key = *obj_pool.add(new std::string(
@@ -359,12 +332,12 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
         msg = "no valid tablet_id given";
         return;
     }
-    int64_t table_id = request->job().idx().table_id();
-    int64_t index_id = request->job().idx().index_id();
-    int64_t partition_id = request->job().idx().partition_id();
-    get_tablet_idx(code, msg, ss, ret, txn, instance_id, table_id, index_id, partition_id,
-                   tablet_id);
-    if (code != MetaServiceCode::OK) return;
+    auto& tablet_idx = const_cast<TabletIndexPB&>(request->job().idx());
+    if (!tablet_idx.has_table_id() || !tablet_idx.has_index_id() ||
+        !tablet_idx.has_partition_id()) {
+        get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
+        if (code != MetaServiceCode::OK) return;
+    }
 
     ObjectPool obj_pool; // To save KVs that txn may use asynchronously
     bool need_commit = false;
@@ -382,14 +355,13 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
             });
 
     if (!request->job().compaction().empty()) {
-        start_compaction_job(code, msg, ss, ret, txn, request, instance_id, table_id, index_id,
-                             partition_id, tablet_id, need_commit, obj_pool);
+        start_compaction_job(code, msg, ss, ret, txn, request, instance_id, need_commit, obj_pool);
         return;
     }
 
     if (request->job().has_schema_change()) {
-        start_schema_change_job(code, msg, ss, ret, txn, request, instance_id, table_id, index_id,
-                                partition_id, tablet_id, need_commit, obj_pool);
+        start_schema_change_job(code, msg, ss, ret, txn, request, instance_id, need_commit,
+                                obj_pool);
         return;
     }
 }
@@ -399,12 +371,14 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                             const ::selectdb::FinishTabletJobRequest* request,
                             ::selectdb::FinishTabletJobResponse* response,
                             TabletJobInfoPB& recorded_job, std::string& instance_id,
-                            int64_t& table_id, int64_t& index_id, int64_t& partition_id,
-                            int64_t& tablet_id, std::string& job_key, bool& need_commit,
-                            ObjectPool& obj_pool) {
+                            std::string& job_key, bool& need_commit, ObjectPool& obj_pool) {
     //==========================================================================
     //                                check
     //==========================================================================
+    int64_t table_id = request->job().idx().table_id();
+    int64_t index_id = request->job().idx().index_id();
+    int64_t partition_id = request->job().idx().partition_id();
+    int64_t tablet_id = request->job().idx().tablet_id();
     if (recorded_job.compaction().empty()) {
         SS << "there is no running compaction, tablet_id=" << tablet_id;
         msg = ss.str();
@@ -487,97 +461,66 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     //                               Commit
     //==========================================================================
     //
-    // 1. update tablet meta
-    // 2. update tablet stats
-    // 3. move compaction input rowsets to recycle
-    // 4. change tmp rowset to formal rowset
-    // 5. remove compaction job
+    // 1. update tablet stats
+    // 2. move compaction input rowsets to recycle
+    // 3. change tmp rowset to formal rowset
+    // 4. remove compaction job
     //
-    //==========================================================================
-    //                          update talbet meta
-    //==========================================================================
-    auto& tablet_key = *obj_pool.add(new std::string(
-            meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
-    auto& tablet_val = *obj_pool.add(new std::string());
-    ret = txn->get(tablet_key, &tablet_val);
-    INSTANCE_LOG(INFO) << "get tablet meta, tablet_id=" << tablet_id << " key=" << hex(tablet_key);
-    if (ret != 0) {
-        SS << "failed to get tablet meta, tablet_id=" << tablet_id << " key=" << hex(tablet_key)
-           << " ret=" << ret;
-        code = ret == 1 ? MetaServiceCode::UNDEFINED_ERR : MetaServiceCode::KV_TXN_GET_ERR;
-        msg = ss.str();
-        return;
-    }
-    doris::TabletMetaPB tablet_meta;
-    tablet_meta.ParseFromString(tablet_val);
-    tablet_meta.set_cumulative_layer_point(compaction.output_cumulative_point());
-    tablet_val = tablet_meta.SerializeAsString();
-    DCHECK(!tablet_val.empty());
-    txn->put(tablet_key, tablet_val);
-    INSTANCE_LOG(INFO) << "update tablet meta, tablet_id=" << tablet_id
-                       << " cumulative_point=" << compaction.output_cumulative_point()
-                       << " key=" << hex(tablet_key);
-
-    auto& stats_key = *obj_pool.add(new std::string(
-            stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
-    auto& stats_val = *obj_pool.add(new std::string());
-    ret = txn->get(stats_key, &stats_val);
-    if (ret != 0) {
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
-        SS << (ret == 1 ? "not found" : "get kv error") << " tablet_id=" << tablet_id
-           << " key=" << hex(stats_key) << " ret=" << ret;
-        msg = ss.str();
-        return;
-    }
-
     //==========================================================================
     //                          Update tablet stats
     //==========================================================================
-    TabletStatsPB stats;
-    stats.ParseFromString(stats_val);
+    auto stats = response->mutable_stats();
+    TabletStats detached_stats;
+    internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, request->job().idx(), *stats,
+                              detached_stats, true);
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
-        stats.set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt() + 1);
-        stats.set_cumulative_point(compaction.output_cumulative_point());
+        stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
+        stats->set_cumulative_point(compaction.output_cumulative_point());
     } else if (compaction.type() == TabletCompactionJobPB::CUMULATIVE) {
         // clang-format off
-        stats.set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt() + 1);
-        stats.set_cumulative_point(compaction.output_cumulative_point());
-        stats.set_num_rows(stats.num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
-        stats.set_data_size(stats.data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
-        stats.set_num_rowsets(stats.num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
-        stats.set_num_segments(stats.num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
-        stats.set_last_compaction_time(now);
+        stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
+        stats->set_cumulative_point(compaction.output_cumulative_point());
+        stats->set_num_rows(stats->num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
+        stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
+        stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
+        stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
+        stats->set_last_compaction_time(now);
         // clang-format on
     } else if (compaction.type() == TabletCompactionJobPB::BASE) {
         // clang-format off
-        stats.set_base_compaction_cnt(stats.base_compaction_cnt() + 1);
-        stats.set_num_rows(stats.num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
-        stats.set_data_size(stats.data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
-        stats.set_num_rowsets(stats.num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
-        stats.set_num_segments(stats.num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
-        stats.set_last_compaction_time(now);
+        stats->set_base_compaction_cnt(stats->base_compaction_cnt() + 1);
+        stats->set_num_rows(stats->num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
+        stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
+        stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
+        stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
+        stats->set_last_compaction_time(now);
         // clang-format on
     } else {
         msg = "invalid compaction type";
         code = MetaServiceCode::INVALID_ARGUMENT;
         return;
     }
-    if (stats.data_size() < 0) {
-        INSTANCE_LOG(ERROR) << "buggy data size, tablet_id=" << tablet_id
-            << " stats.data_size=" << stats.data_size()
-            << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
-            << " compaction.size_input_rowsets= " << compaction.size_input_rowsets();
-    }
-    DCHECK(stats.data_size() >= 0) << "stats.data_size=" << stats.data_size()
-        << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
-        << " compaction.size_input_rowsets=" << compaction.size_input_rowsets();
-    response->mutable_stats()->CopyFrom(stats);
-
-    stats_val = stats.SerializeAsString();
-    DCHECK(!stats_val.empty());
+    auto& stats_key = *obj_pool.add(new std::string(
+            stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
+    auto& stats_val = *obj_pool.add(new std::string());
+    stats->SerializeToString(&stats_val);
     txn->put(stats_key, stats_val);
+    merge_tablet_stats(*stats, detached_stats);
+    if (stats->data_size() < 0 || stats->num_rowsets() < 0) [[unlikely]] {
+        INSTANCE_LOG(ERROR) << "buggy data size, tablet_id=" << tablet_id
+                            << " stats.data_size=" << stats->data_size()
+                            << " compaction.size_output_rowsets="
+                            << compaction.size_output_rowsets()
+                            << " compaction.size_input_rowsets= "
+                            << compaction.size_input_rowsets();
+    }
+    DCHECK(stats->data_size() >= 0 && stats->num_rowsets() > 0)
+            << "stats.data_size=" << stats->data_size()
+            << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
+            << " compaction.size_input_rowsets=" << compaction.size_input_rowsets();
+
     VLOG_DEBUG << "update tablet stats tablet_id=" << tablet_id << " key=" << hex(stats_key)
-               << " stats=" << proto_to_json(stats);
+               << " stats=" << proto_to_json(*stats);
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         recorded_job.mutable_compaction()->erase(recorded_compaction);
         auto& job_val = *obj_pool.add(new std::string());
@@ -749,12 +692,11 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
                                const ::selectdb::FinishTabletJobRequest* request,
                                ::selectdb::FinishTabletJobResponse* response,
                                TabletJobInfoPB& recorded_job, std::string& instance_id,
-                               int64_t& table_id, int64_t& index_id, int64_t& partition_id,
-                               int64_t& tablet_id, std::string& job_key, bool& need_commit,
-                               ObjectPool& obj_pool) {
+                               std::string& job_key, bool& need_commit, ObjectPool& obj_pool) {
     //==========================================================================
     //                                check
     //==========================================================================
+    int64_t tablet_id = request->job().idx().tablet_id();
     auto& schema_change = request->job().schema_change();
     int64_t new_tablet_id = schema_change.new_tablet_idx().tablet_id();
     if (new_tablet_id <= 0) {
@@ -767,12 +709,16 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
         msg = "not allow new_tablet_id same with base_tablet_id";
         return;
     }
-    int64_t new_table_id = schema_change.new_tablet_idx().table_id();
-    int64_t new_index_id = schema_change.new_tablet_idx().index_id();
-    int64_t new_partition_id = schema_change.new_tablet_idx().partition_id();
-    get_tablet_idx(code, msg, ss, ret, txn, instance_id, new_table_id, new_index_id,
-                   new_partition_id, new_tablet_id);
-    if (code != MetaServiceCode::OK) return;
+    auto& new_tablet_idx = const_cast<TabletIndexPB&>(schema_change.new_tablet_idx());
+    if (!new_tablet_idx.has_table_id() || !new_tablet_idx.has_index_id() ||
+        !new_tablet_idx.has_partition_id()) {
+        get_tablet_idx(code, msg, ret, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
+        if (code != MetaServiceCode::OK) return;
+    }
+    int64_t new_table_id = new_tablet_idx.table_id();
+    int64_t new_index_id = new_tablet_idx.index_id();
+    int64_t new_partition_id = new_tablet_idx.partition_id();
+
     MetaTabletKeyInfo new_tablet_key_info {instance_id, new_table_id, new_index_id,
                                            new_partition_id, new_tablet_id};
     auto& new_tablet_key = *obj_pool.add(new std::string());
@@ -794,18 +740,16 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
         return;
     }
 
-    if (!schema_change.is_inverted_index_change()) {
-        if (new_tablet_meta.tablet_state() == doris::TabletStatePB::PB_RUNNING) {
-            code = MetaServiceCode::JOB_ALREADY_SUCCESS;
-            msg = "schema_change job already success";
-            return;
-        }
-        if (!new_tablet_meta.has_tablet_state() ||
-            new_tablet_meta.tablet_state() != doris::TabletStatePB::PB_NOTREADY) {
-            code = MetaServiceCode::INVALID_ARGUMENT;
-            msg = "invalid new tablet state";
-            return;
-        }
+    if (new_tablet_meta.tablet_state() == doris::TabletStatePB::PB_RUNNING) {
+        code = MetaServiceCode::JOB_ALREADY_SUCCESS;
+        msg = "schema_change job already success";
+        return;
+    }
+    if (!new_tablet_meta.has_tablet_state() ||
+        new_tablet_meta.tablet_state() != doris::TabletStatePB::PB_NOTREADY) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "invalid new tablet state";
+        return;
     }
 
     if (!recorded_job.has_schema_change()) {
@@ -947,31 +891,25 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     //==========================================================================
     //                        update new_tablet stats
     //==========================================================================
+    auto stats = response->mutable_stats();
+    TabletStats detached_stats;
+    internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, new_tablet_idx, *stats,
+                              detached_stats, true);
+    // clang-format off
+    stats->set_cumulative_point(schema_change.output_cumulative_point());
+    stats->set_num_rows(stats->num_rows() + (schema_change.num_output_rows() - num_remove_rows));
+    stats->set_data_size(stats->data_size() + (schema_change.size_output_rowsets() - size_remove_rowsets));
+    stats->set_num_rowsets(stats->num_rowsets() + (schema_change.num_output_rowsets() - num_remove_rowsets));
+    stats->set_num_segments(stats->num_segments() + (schema_change.num_output_segments() - num_remove_segments));
+    // clang-format on
     auto& stats_key = *obj_pool.add(new std::string(stats_tablet_key(
             {instance_id, new_table_id, new_index_id, new_partition_id, new_tablet_id})));
     auto& stats_val = *obj_pool.add(new std::string());
-    ret = txn->get(stats_key, &stats_val);
-    if (ret != 0) {
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
-        SS << (ret == 1 ? "not found" : "get kv error") << " tablet_id=" << new_tablet_id
-           << " key=" << hex(stats_key) << " ret=" << ret;
-        msg = ss.str();
-        return;
-    }
-    TabletStatsPB stats;
-    stats.ParseFromString(stats_val);
-    // clang-format off
-    stats.set_cumulative_point(schema_change.output_cumulative_point());
-    stats.set_num_rows(stats.num_rows() + (schema_change.num_output_rows() - num_remove_rows));
-    stats.set_data_size(stats.data_size() + (schema_change.size_output_rowsets() - size_remove_rowsets));
-    stats.set_num_rowsets(stats.num_rowsets() + (schema_change.num_output_rowsets() - num_remove_rowsets));
-    stats.set_num_segments(stats.num_segments() + (schema_change.num_output_segments() - num_remove_segments));
-    // clang-format on
-    response->mutable_stats()->CopyFrom(stats);
-    stats.SerializeToString(&stats_val);
+    stats->SerializePartialToString(&stats_val);
     txn->put(stats_key, stats_val);
+    merge_tablet_stats(*stats, detached_stats);
     VLOG_DEBUG << "update tablet stats tablet_id=" << tablet_id << " key=" << hex(stats_key)
-               << " stats=" << proto_to_json(stats);
+               << " stats=" << proto_to_json(*stats);
     //==========================================================================
     //                  change tmp rowset to formal rowset
     //==========================================================================
@@ -1051,18 +989,17 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
         msg = "no valid tablet_id given";
         return;
     }
-    int64_t table_id = request->job().idx().table_id();
-    int64_t index_id = request->job().idx().index_id();
-    int64_t partition_id = request->job().idx().partition_id();
-    // Get tablet id index from kv
-    get_tablet_idx(code, msg, ss, ret, txn, instance_id, table_id, index_id, partition_id,
-                   tablet_id);
-    if (code != MetaServiceCode::OK) return;
+    auto& tablet_idx = const_cast<TabletIndexPB&>(request->job().idx());
+    if (!tablet_idx.has_table_id() || !tablet_idx.has_index_id() ||
+        !tablet_idx.has_partition_id()) {
+        get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
+        if (code != MetaServiceCode::OK) return;
+    }
 
     // TODO(gaivn): remove duplicated code with start_tablet_job()
     // Begin to process finish tablet job
-    std::string job_key =
-            job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    std::string job_key = job_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                          tablet_idx.partition_id(), tablet_id});
     std::string job_val;
     ret = txn->get(job_key, &job_val);
     if (ret != 0) {
@@ -1093,16 +1030,14 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     // Process compaction commit
     if (!request->job().compaction().empty()) {
         process_compaction_job(code, msg, ss, ret, txn, request, response, recorded_job,
-                               instance_id, table_id, index_id, partition_id, tablet_id, job_key,
-                               need_commit, obj_pool);
+                               instance_id, job_key, need_commit, obj_pool);
         return;
     }
 
     // Process schema change commit
     if (request->job().has_schema_change()) {
         process_schema_change_job(code, msg, ss, ret, txn, request, response, recorded_job,
-                                  instance_id, table_id, index_id, partition_id, tablet_id, job_key,
-                                  need_commit, obj_pool);
+                                  instance_id, job_key, need_commit, obj_pool);
         return;
     }
 }

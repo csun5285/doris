@@ -12,6 +12,7 @@ add_library(MetaService
     meta_server.cpp
     meta_service.cpp
     meta_service_job.cpp
+    meta_service_tablet_stats.cpp
     txn_kv.cpp
     codec.cpp
     keys.cpp

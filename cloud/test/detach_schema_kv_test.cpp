@@ -74,7 +74,8 @@ TEST(DetachSchemaKVTest, TabletTest) {
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
-    sp->clear_all_call_backs();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -182,6 +183,11 @@ TEST(DetachSchemaKVTest, TabletTest) {
         EXPECT_TRUE(get_rowset_res.rowset_meta(0).has_tablet_schema());
         EXPECT_EQ(get_rowset_res.rowset_meta(0).index_id(), index_id);
         EXPECT_EQ(get_rowset_res.rowset_meta(0).schema_version(), 1);
+        ASSERT_TRUE(get_rowset_res.has_stats());
+        EXPECT_EQ(get_rowset_res.stats().num_rows(), 0);
+        EXPECT_EQ(get_rowset_res.stats().num_rowsets(), 1);
+        EXPECT_EQ(get_rowset_res.stats().num_segments(), 0);
+        EXPECT_EQ(get_rowset_res.stats().data_size(), 0);
     }
 
     // new MS batch create tablets with write_schema_kv=true
@@ -261,6 +267,9 @@ static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id,
     rowset.set_rowset_id_v2(rowset_id);
     rowset.set_tablet_id(tablet_id);
     rowset.set_txn_id(txn_id);
+    rowset.set_num_rows(100);
+    rowset.set_num_segments(1);
+    rowset.set_data_disk_size(10000);
     if (version > 0) {
         rowset.set_start_version(version);
         rowset.set_end_version(version);
@@ -310,7 +319,8 @@ TEST(DetachSchemaKVTest, RowsetTest) {
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
-    sp->clear_all_call_backs();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();
@@ -400,6 +410,11 @@ TEST(DetachSchemaKVTest, RowsetTest) {
         EXPECT_EQ(get_rowset_res.rowset_meta(1).tablet_schema().schema_version(), 2);
         EXPECT_EQ(get_rowset_res.rowset_meta(1).index_id(), index_id);
         EXPECT_EQ(get_rowset_res.rowset_meta(1).schema_version(), 2);
+        ASSERT_TRUE(get_rowset_res.has_stats());
+        EXPECT_EQ(get_rowset_res.stats().num_rows(), 100);
+        EXPECT_EQ(get_rowset_res.stats().num_rowsets(), 2);
+        EXPECT_EQ(get_rowset_res.stats().num_segments(), 1);
+        EXPECT_EQ(get_rowset_res.stats().data_size(), 10000);
     }
 
     // new MS read rowsets committed by both old and new MS
@@ -443,6 +458,11 @@ TEST(DetachSchemaKVTest, RowsetTest) {
             EXPECT_EQ(rowset.index_id(), index_id);
             EXPECT_EQ(rowset.schema_version(), schema_versions[i]);
         }
+        ASSERT_TRUE(get_rowset_res->has_stats());
+        EXPECT_EQ(get_rowset_res->stats().num_rows(), 2500);
+        EXPECT_EQ(get_rowset_res->stats().num_rowsets(), 26);
+        EXPECT_EQ(get_rowset_res->stats().num_segments(), 25);
+        EXPECT_EQ(get_rowset_res->stats().data_size(), 250000);
     };
     insert_and_get_rowset(10031, 10032, 10033, 10034, 300);
     // use arena
@@ -455,7 +475,8 @@ TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
     meta_service->resource_mgr_.reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
-    sp->clear_all_call_backs();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
     sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
     sp->enable_processing();

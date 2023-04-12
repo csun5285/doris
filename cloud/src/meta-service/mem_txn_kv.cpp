@@ -42,7 +42,7 @@ int MemTxnKv::update(const std::set<std::string>& read_set,
     ++committed_version_;;
     int16_t seq = 0;
     for (const auto& vec: op_list) {
-        auto [op_type, k, v] = vec;
+        auto& [op_type, k, v] = vec;
         LogItem log_item{op_type, committed_version_, k, v};
         log_kv_[k].push_front(log_item);
         switch (op_type) {
@@ -63,18 +63,12 @@ int MemTxnKv::update(const std::set<std::string>& read_set,
                 break;
             }
             case memkv::ModifyOpType::ATOMIC_ADD: {
-                if (mem_kv_.count(k) == 0) {
-                    mem_kv_[k] = v;
-                } else {
-                    std::string org_val = mem_kv_[k];
-                    if (org_val.size() != 8) {
-                        org_val.resize(8, '\0');
-                    }
-                    int64_t res = *reinterpret_cast<const int64_t*>(org_val.data()) + std::stoll(v);
-                    std::string res_str = std::string(sizeof(res), '\0');
-                    std::memcpy(res_str.data(), &res, res_str.size());
-                    mem_kv_[k] = res_str;
+                auto& org_val = mem_kv_[k];
+                if (org_val.size() != 8) {
+                    org_val.resize(8, '\0');
                 }
+                int64_t res = *(int64_t*)org_val.data() + *(int64_t*)v.data();
+                std::memcpy(org_val.data(), &res, 8);
                 break;
             }
             case memkv::ModifyOpType::REMOVE: {
@@ -250,9 +244,11 @@ void Transaction::atomic_set_ver_value(std::string_view key, std::string_view va
 }
 
 void Transaction::atomic_add(std::string_view key, int64_t to_add) {
-    std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
-    op_list_.emplace_back(ModifyOpType::ATOMIC_ADD, k, std::to_string(to_add));
+    std::string v(sizeof(to_add), '\0');
+    memcpy(v.data(), &to_add, sizeof(to_add));
+    std::lock_guard<std::mutex> l(lock_);
+    op_list_.emplace_back(ModifyOpType::ATOMIC_ADD, std::move(k), std::move(v));
 }
 
 void Transaction::remove(std::string_view key) {
