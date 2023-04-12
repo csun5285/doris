@@ -218,7 +218,7 @@ Status S3FileSystem::open_file_impl(const Path& path, metrics_hook metrics, File
 
 Status S3FileSystem::open_file(const Path& path, metrics_hook metrics, FileReaderSPtr* reader,
                                size_t file_size) {
-    if (bthread_self() == 0) {
+    if (bthread_self() == 0 || file_size != 0) {
         return open_file_impl(path, metrics, reader, file_size);
     }
     Status s;
