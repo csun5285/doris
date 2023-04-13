@@ -1328,6 +1328,8 @@ void MetaServiceImpl::abort_txn(::google::protobuf::RpcController* controller,
                 prepare_txn_id = cur_txn_id;
                 txn_info = std::move(cur_txn_info);
                 txn_inf_key = std::move(cur_txn_inf_key);
+                DCHECK_EQ(prepare_txn_id, txn_info.txn_id())
+                        << "prepare_txn_id=" << prepare_txn_id << " txn_id=" << txn_info.txn_id();
                 break;
             }
         }
@@ -1367,7 +1369,7 @@ void MetaServiceImpl::abort_txn(::google::protobuf::RpcController* controller,
     LOG(INFO) << "xxx put txn_inf_key=" << hex(txn_inf_key) << " txn_id=" << txn_info.txn_id();
 
     std::string txn_run_key;
-    TxnRunningKeyInfo txn_run_key_info {instance_id, db_id, txn_id};
+    TxnRunningKeyInfo txn_run_key_info {instance_id, db_id, txn_info.txn_id()};
     txn_running_key(txn_run_key_info, &txn_run_key);
     txn->remove(txn_run_key);
     LOG(INFO) << "xxx remove txn_run_key=" << hex(txn_run_key) << " txn_id=" << txn_info.txn_id();
