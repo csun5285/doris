@@ -16,10 +16,10 @@
 // under the License.
 
 suite("test_create_table_with_partition") {
-    sql "drop table if exists lineorder"
+    sql "drop table if exists lineorder_create_table_with_partition"
 
     sql """
-        CREATE TABLE IF NOT EXISTS lineorder (
+        CREATE TABLE IF NOT EXISTS lineorder_create_table_with_partition (
             lo_orderdate int(11) NOT NULL COMMENT "",
             lo_orderkey bigint(20) NOT NULL COMMENT "",
             lo_linenumber bigint(20) NOT NULL COMMENT "",
@@ -52,7 +52,7 @@ suite("test_create_table_with_partition") {
         """
 
     sql """
-        insert into lineorder (lo_orderdate, lo_orderkey, lo_linenumber, lo_custkey,
+        insert into lineorder_create_table_with_partition (lo_orderdate, lo_orderkey, lo_linenumber, lo_custkey,
             lo_partkey, lo_suppkey, lo_orderpriority, lo_shippriority,
             lo_quantity, lo_extendedprice, lo_ordtotalprice, lo_discount,
             lo_revenue, lo_supplycost, lo_tax, lo_commitdate, lo_shipmode)
@@ -60,6 +60,6 @@ suite("test_create_table_with_partition") {
         """
 
     sql """
-        select * from lineorder;
+        select * from lineorder_create_table_with_partition;
         """
 }
