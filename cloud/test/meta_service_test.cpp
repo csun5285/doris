@@ -1247,9 +1247,8 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
     commit_txn_req.set_db_id(db_id);
     commit_txn_req.set_txn_id(txn_id);
     CommitTxnResponse commit_txn_res;
-    meta_service->commit_txn(
-            reinterpret_cast<::google::protobuf::RpcController*>(&check_txn_conflict_cntl),
-            &commit_txn_req, &commit_txn_res, nullptr);
+    meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&commit_txn_cntl),
+                             &commit_txn_req, &commit_txn_res, nullptr);
     ASSERT_EQ(commit_txn_res.status().code(), MetaServiceCode::OK);
 
     // second time to check txn conflict
@@ -1259,6 +1258,92 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
 
     ASSERT_EQ(check_txn_conflict_res.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(check_txn_conflict_res.finished(), true);
+}
+
+TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
+    int ret = 0;
+
+    auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
+    if (txn_kv != nullptr) {
+        ret = txn_kv->init();
+        [&] { ASSERT_EQ(ret, 0); }();
+    }
+    [&] { ASSERT_NE(txn_kv.get(), nullptr); }();
+
+    std::unique_ptr<Transaction> txn;
+    txn_kv->create_txn(&txn);
+    txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
+    txn->commit();
+
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
+
+    const int64_t db_id = 666;
+    const int64_t table_id = 777;
+    const std::string label = "test_label";
+    const std::string cloud_unique_id = "test_cloud_unique_id";
+    int64_t txn_id = -1;
+
+    brpc::Controller begin_txn_cntl;
+    BeginTxnRequest begin_txn_req;
+    BeginTxnResponse begin_txn_res;
+    TxnInfoPB txn_info_pb;
+
+    begin_txn_req.set_cloud_unique_id(cloud_unique_id);
+    txn_info_pb.set_db_id(db_id);
+    txn_info_pb.set_label(label);
+    txn_info_pb.add_table_ids(table_id);
+    txn_info_pb.set_timeout_ms(36000);
+    begin_txn_req.mutable_txn_info()->CopyFrom(txn_info_pb);
+
+    meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&begin_txn_cntl),
+                            &begin_txn_req, &begin_txn_res, nullptr);
+    ASSERT_EQ(begin_txn_res.status().code(), MetaServiceCode::OK);
+    txn_id = begin_txn_res.txn_id();
+    ASSERT_GT(txn_id, -1);
+
+    brpc::Controller check_txn_conflict_cntl;
+    CheckTxnConflictRequest check_txn_conflict_req;
+    CheckTxnConflictResponse check_txn_conflict_res;
+
+    check_txn_conflict_req.set_cloud_unique_id(cloud_unique_id);
+    check_txn_conflict_req.set_db_id(db_id);
+    check_txn_conflict_req.set_end_txn_id(txn_id + 1);
+    check_txn_conflict_req.add_table_ids(table_id);
+
+    // first time to check txn conflict
+    meta_service->check_txn_conflict(
+            reinterpret_cast<::google::protobuf::RpcController*>(&begin_txn_cntl),
+            &check_txn_conflict_req, &check_txn_conflict_res, nullptr);
+
+    ASSERT_EQ(check_txn_conflict_res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(check_txn_conflict_res.finished(), false);
+
+    brpc::Controller abort_txn_cntl;
+    AbortTxnRequest abort_txn_req;
+    abort_txn_req.set_cloud_unique_id(cloud_unique_id);
+    abort_txn_req.set_db_id(db_id);
+    abort_txn_req.set_label(label);
+    AbortTxnResponse abort_txn_res;
+    meta_service->abort_txn(reinterpret_cast<::google::protobuf::RpcController*>(&abort_txn_cntl),
+                            &abort_txn_req, &abort_txn_res, nullptr);
+    ASSERT_EQ(abort_txn_res.status().code(), MetaServiceCode::OK);
+
+    // second time to check txn conflict
+    meta_service->check_txn_conflict(
+            reinterpret_cast<::google::protobuf::RpcController*>(&check_txn_conflict_cntl),
+            &check_txn_conflict_req, &check_txn_conflict_res, nullptr);
+
+    ASSERT_EQ(check_txn_conflict_res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(check_txn_conflict_res.finished(), true);
+
+    std::string txn_run_key;
+    std::string txn_run_value;
+    TxnRunningKeyInfo txn_run_key_info {mock_instance, db_id, txn_id};
+    txn_running_key(txn_run_key_info, &txn_run_key);
+    ret = txn->get(txn_run_key, &txn_run_value);
+    ASSERT_EQ(ret, 1);
 }
 
 TEST(MetaServiceTest, CopyJobTest) {
