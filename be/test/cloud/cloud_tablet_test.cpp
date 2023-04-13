@@ -24,13 +24,6 @@ static RowsetSharedPtr create_rowset(Version version) {
     return rowset;
 }
 
-static TabletMetaSharedPtr create_tablet_meta(int64_t tablet_id) {
-    auto tablet_meta = std::make_shared<TabletMeta>();
-    tablet_meta->_tablet_id = tablet_id;
-    tablet_meta->_index_id = 10001;
-    return tablet_meta;
-}
-
 TEST(CloudTabletTest, calc_missed_versions) {
     {
         std::vector<RowsetSharedPtr> rowsets;
@@ -39,7 +32,7 @@ TEST(CloudTabletTest, calc_missed_versions) {
         rowsets.push_back(create_rowset({8, 8}));
         rowsets.push_back(create_rowset({9, 9}));
         rowsets.push_back(create_rowset({13, 13}));
-        auto tablet_meta = create_tablet_meta(10010);
+        auto tablet_meta = std::make_shared<TabletMeta>();
         Tablet tablet(std::move(tablet_meta), nullptr);
         tablet.cloud_add_rowsets(std::move(rowsets), false);
 
@@ -57,14 +50,14 @@ TEST(CloudTabletTest, calc_missed_versions) {
         ASSERT_EQ(tablet.cloud_calc_missed_versions(14), (Versions {{6, 7}, {10, 12}, {14, 14}}));
     }
     {
-        auto tablet_meta = create_tablet_meta(10010);
+        auto tablet_meta = std::make_shared<TabletMeta>();
         Tablet tablet(std::move(tablet_meta), nullptr);
         ASSERT_EQ(tablet.cloud_calc_missed_versions(6), (Versions {{0, 6}}));
     }
     {
         std::vector<RowsetSharedPtr> rowsets;
         rowsets.push_back(create_rowset({5, 5}));
-        auto tablet_meta = create_tablet_meta(10010);
+        auto tablet_meta = std::make_shared<TabletMeta>();
         Tablet tablet(std::move(tablet_meta), nullptr);
         tablet.cloud_add_rowsets(std::move(rowsets), false);
 
@@ -74,7 +67,7 @@ TEST(CloudTabletTest, calc_missed_versions) {
 }
 
 TEST(CloudTabletTest, add_rowsets) {
-    auto tablet_meta = create_tablet_meta(10010);
+    auto tablet_meta = std::make_shared<TabletMeta>();
     Tablet tablet(std::move(tablet_meta), nullptr);
     {
         std::vector<RowsetSharedPtr> rowsets;

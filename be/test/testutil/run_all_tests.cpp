@@ -17,16 +17,18 @@
 
 #include <gtest/gtest.h>
 
-#include "common/config.h"
+#include "common/sync_point.h"
 #include "olap/page_cache.h"
-#include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/segment_loader.h"
+#include "olap/tablet_schema.h"
 #include "runtime/exec_env.h"
 #include "runtime/memory/mem_tracker_limiter.h"
 #include "service/backend_options.h"
 #include "util/cpu_info.h"
 #include "util/disk_info.h"
 #include "util/mem_info.h"
+
+using namespace doris;
 
 int main(int argc, char** argv) {
     std::shared_ptr<doris::MemTrackerLimiter> orphan_mem_tracker =
@@ -48,5 +50,15 @@ int main(int argc, char** argv) {
     doris::DiskInfo::init();
     doris::MemInfo::init();
     doris::BackendOptions::init();
+    auto sp = SyncPoint::get_instance();
+    sp->set_call_back("TabletSchemaCache::insert1", [](auto&& args) {
+        auto pair = try_any_cast<std::pair<TabletSchemaSPtr, bool>*>(args.back());
+        pair->second = true;
+    });
+    sp->set_call_back("TabletSchemaCache::insert2", [](auto&& args) {
+        auto pair = try_any_cast<std::pair<TabletSchemaSPtr, bool>*>(args.back());
+        pair->second = true;
+    });
+    sp->enable_processing();
     return RUN_ALL_TESTS();
 }

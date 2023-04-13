@@ -20,7 +20,6 @@ public:
         TEST_SYNC_POINT_CALLBACK("MockMetaMgr::get_tablet_meta", {});
         auto tablet_meta1 = std::make_shared<TabletMeta>();
         tablet_meta1->_tablet_id = tablet_id;
-        tablet_meta1->_index_id = 10001;
         *tablet_meta = std::move(tablet_meta1);
         return Status::OK();
     }
@@ -30,7 +29,10 @@ public:
 
 TEST(CloudTabletMgrTest, normal) {
     auto sp = SyncPoint::get_instance();
-    sp->clear_all_call_backs();
+    Defer defer {[sp] {
+        sp->clear_call_back("CloudTabletMgr::get_tablet");
+        sp->clear_call_back("meta_mgr");
+    }};
     sp->enable_processing();
 
     MockMetaMgr mock_meta_mgr;
@@ -87,7 +89,10 @@ TEST(CloudTabletMgrTest, normal) {
 
 TEST(CloudTabletMgrTest, concurrent) {
     auto sp = SyncPoint::get_instance();
-    sp->clear_all_call_backs();
+    Defer defer {[sp] {
+        sp->clear_call_back("meta_mgr");
+        sp->clear_call_back("MockMetaMgr::get_tablet_meta");
+    }};
     sp->enable_processing();
 
     MockMetaMgr mock_meta_mgr;

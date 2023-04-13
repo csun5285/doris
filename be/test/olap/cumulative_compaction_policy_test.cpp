@@ -37,9 +37,7 @@ public:
         config::cumulative_size_based_promotion_min_size_mbytes = 64;
         config::cumulative_size_based_compaction_lower_size_mbytes = 64;
 
-        _tablet_meta = static_cast<TabletMetaSharedPtr>(new TabletMeta(
-                1, 2, 15673, 15674, 4, 5, TTabletSchema(), 6, {{7, 8}}, UniqueId(9, 10),
-                TTabletType::TABLET_TYPE_DISK, TCompressionType::LZ4F, false, false));
+        _tablet_meta =  std::make_shared<TabletMeta>();
 
         _json_rowset_meta = R"({
             "rowset_id": 540081,

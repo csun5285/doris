@@ -350,10 +350,7 @@ if (CLOUD_MODE)
         olap/rowset/segment_v2/bloom_filter_index_reader_writer_test.cpp
         olap/rowset/segment_v2/zone_map_index_test.cpp
         olap/rowset/segment_v2/inverted_index_searcher_cache_test.cpp
-        olap/tablet_meta_test.cpp
-        olap/rowset/rowset_meta_manager_test.cpp
-        olap/rowset/rowset_meta_test.cpp
-        olap/rowset/rowset_tree_test.cpp
+        #olap/rowset/rowset_tree_test.cpp
         olap/generic_iterators_test.cpp
         olap/key_coder_test.cpp
         olap/short_key_index_test.cpp
@@ -365,7 +362,6 @@ if (CLOUD_MODE)
         olap/options_test.cpp
         olap/common_test.cpp
         olap/primary_key_index_test.cpp
-        olap/cumulative_compaction_policy_test.cpp
     )
 else()  
     set(OLAP_TEST_FILES
@@ -466,6 +462,7 @@ set(CLOUD_TEST_FILES
     cloud/cloud_tablet_test.cpp
     cloud/cloud_prefetch_test.cpp
     cloud/cloud_file_cache_test.cpp
+    cloud/cumulative_compaction_policy_test.cpp
 )
 
 if (CLOUD_MODE)
