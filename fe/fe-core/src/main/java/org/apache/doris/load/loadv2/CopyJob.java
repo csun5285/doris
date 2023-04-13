@@ -281,6 +281,7 @@ public class CopyJob extends BrokerLoadJob {
 
     @Override
     protected void unprotectedExecuteRetry(FailMsg failMsg) {
+        LOG.info("CopyJob.unprotectedExecuteRetry(): forceCopy={}, abortedCopy={}", forceCopy, abortedCopy);
         super.unprotectedExecuteRetry(failMsg);
         if (forceCopy || abortedCopy) {
             return;

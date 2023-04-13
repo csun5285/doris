@@ -379,7 +379,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
     @Override
     public void abortTransaction(Long dbId, String label, String reason) throws UserException {
-        LOG.info("try to abort transaction, label:{}, transactionId:{}", dbId, label);
+        LOG.info("try to abort transaction, dbId:{}, label:{}", dbId, label);
 
         AbortTxnRequest.Builder builder = AbortTxnRequest.newBuilder();
         builder.setDbId(dbId);
