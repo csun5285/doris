@@ -508,32 +508,32 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     public List<List<Comparable>> getDbInfo() throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<String>> getDbTransStateInfo(long dbId) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<String>> getDbTransInfo(long dbId, boolean running, int limit) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<String>> getDbTransInfoByStatus(long dbId, TransactionStatus status) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<String>> getSingleTranInfo(long dbId, long txnId) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<Comparable>> getTableTransInfo(long dbId, long txnId) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     public List<List<Comparable>> getPartitionTransInfo(long dbId, long tid, long tableId)
             throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     @Override
@@ -571,12 +571,12 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
     @Override
     public TransactionStatus getLabelState(long dbId, String label) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     @Override
     public Long getTransactionId(long dbId, String label) throws AnalysisException {
-        throw new AnalysisException("Not suppoted");
+        throw new AnalysisException("Not supported");
     }
 
     @Override
