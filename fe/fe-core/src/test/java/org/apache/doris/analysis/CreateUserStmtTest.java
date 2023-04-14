@@ -57,20 +57,20 @@ public class CreateUserStmtTest {
             }
         };
 
-        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("user", "%"), "passwd", true));
+        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("user", "%"), "StrongPasswd123", true));
         stmt.analyze(analyzer);
 
         Assert.assertEquals("CREATE USER 'testCluster:user'@'%' IDENTIFIED BY '*XXX'", stmt.toString());
-        Assert.assertEquals(new String(stmt.getPassword()), "*59C70DA2F3E3A5BDF46B68F5C8B8F25762BCCEF0");
+        Assert.assertEquals(new String(stmt.getPassword()), "*C037C97AC88ACAD52452EBE383587B7897D1F93B");
 
         stmt = new CreateUserStmt(
-                new UserDesc(new UserIdentity("user", "%"), "*59c70da2f3e3a5bdf46b68f5c8b8f25762bccef0", false));
+                new UserDesc(new UserIdentity("user", "%"), "*C037C97AC88ACAD52452EBE383587B7897D1F93B", false));
         stmt.analyze(analyzer);
         Assert.assertEquals("testCluster:user", stmt.getUserIdent().getQualifiedUser());
 
-        Assert.assertEquals("CREATE USER 'testCluster:user'@'%' IDENTIFIED BY PASSWORD '*59c70da2f3e3a5bdf46b68f5c8b8f25762bccef0'",
+        Assert.assertEquals("CREATE USER 'testCluster:user'@'%' IDENTIFIED BY PASSWORD '*C037C97AC88ACAD52452EBE383587B7897D1F93B'",
                 stmt.toString());
-        Assert.assertEquals(new String(stmt.getPassword()), "*59C70DA2F3E3A5BDF46B68F5C8B8F25762BCCEF0");
+        Assert.assertEquals(new String(stmt.getPassword()), "*C037C97AC88ACAD52452EBE383587B7897D1F93B");
 
         stmt = new CreateUserStmt(new UserDesc(new UserIdentity("user", "%"), "", false));
         stmt.analyze(analyzer);
@@ -89,7 +89,7 @@ public class CreateUserStmtTest {
                 result = "userid";
             }
         };
-        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "passwd", true));
+        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "StrongPasswd123", true));
         stmt.analyze(analyzer);
         Assert.fail("No exception throws.");
     }
@@ -104,7 +104,7 @@ public class CreateUserStmtTest {
                 result = "userid";
             }
         };
-        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "passwd", false));
+        CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "StrongPasswd123", false));
         stmt.analyze(analyzer);
         Assert.fail("No exception throws.");
     }

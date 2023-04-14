@@ -91,7 +91,7 @@ public class CatalogMgrTest extends TestWithFeService {
         auth.grant(grantRole1WithCtl);
         // user1 can't switch to hive
         auth.createUser((CreateUserStmt) parseAndAnalyzeStmt(
-                "create user 'user1'@'%' identified by 'pwd1' default role 'role1';", rootCtx));
+                "create user 'user1'@'%' identified by 'Strongpwd1' default role 'role1';", rootCtx));
         user1 = new UserIdentity("user1", "%");
         user1.analyze(SystemInfoService.DEFAULT_CLUSTER);
         // user1 has the privileges of testc which is granted by ctl.db.tbl format.
@@ -146,7 +146,7 @@ public class CatalogMgrTest extends TestWithFeService {
                 rootCtx);
         auth.grant(grantRole2);
         auth.createUser((CreateUserStmt) parseAndAnalyzeStmt(
-                "create user 'user2'@'%' identified by 'pwd2' default role 'role2';", rootCtx));
+                "create user 'user2'@'%' identified by 'Strongpwd2' default role 'role2';", rootCtx));
         user2 = new UserIdentity("user2", "%");
         user2.analyze(SystemInfoService.DEFAULT_CLUSTER);
     }
