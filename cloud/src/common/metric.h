@@ -2,9 +2,12 @@
 
 #include "common/bvars.h"
 #include "meta-service/txn_kv.h"
-#include <rapidjson/document.h>
-#include <rapidjson/encodings.h>
+#include "rapidjson/document.h"
+#include "rapidjson/encodings.h"
+#include "rapidjson/error/en.h"
+
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,7 +29,7 @@ static std::string get_fdb_status(std::shared_ptr<TxnKv> txn_kv) {
     }
     std::string status_val;
     ret = txn->get(FDB_STATUS_KEY, &status_val);
-    if (ret < 0) {
+    if (ret != 0) {
         LOG(WARNING) << "failed to get FDB_STATUS_KEY, ret=" << ret;
         return "";
     }
@@ -77,10 +80,15 @@ static void export_fdb_status_details(const std::string& status_str) {
     Document document;
     try {
         document.Parse(status_str.c_str());
+        if (document.HasParseError())  {
+           LOG(WARNING) << "fail to parse status str, err: " << GetParseError_En(document.GetParseError());
+           return;
+        }
     } catch (std::exception &e) {
         LOG(WARNING) << "fail to parse status str, err: " << e.what();
         return;
     }
+
     if (!document.HasMember("cluster") || !document.HasMember("client")) {
         LOG(WARNING) << "err fdb status details";
         return;
@@ -148,26 +156,35 @@ static void export_fdb_status_details(const std::string& status_str) {
 class FdbMetricExporter {
 public:
     FdbMetricExporter(std::shared_ptr<TxnKv> txn_kv)
-        : txn_kv_(std::move(txn_kv)), running_(false) {
-        thread_.reset(new std::thread([this] {
-            while(running_.load()) {
-                std::string fdb_status = get_fdb_status(txn_kv_);
-                export_fdb_status_details(fdb_status);
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-            }
- 
-        }));
+        : txn_kv_(std::move(txn_kv)), running_(false) {}
+    ~FdbMetricExporter() {
+        bool expect = true;
+        if (running_.compare_exchange_strong(expect, false)) {
+            running_cond_.notify_all();
+            if (thread_ != nullptr) thread_->join();
+        }
     }
-    ~FdbMetricExporter() = default;
 
     int start() {
         if (txn_kv_ == nullptr) return -1;
         running_ = true;
+        thread_.reset(new std::thread([this] {
+            while(running_.load(std::memory_order_acquire)) {
+                std::string fdb_status = get_fdb_status(txn_kv_);
+                export_fdb_status_details(fdb_status);
+                std::unique_lock l(running_mtx_);
+                running_cond_.wait_for(l, std::chrono::milliseconds(sleep_interval_ms_),
+                                [this]() { return !running_.load(std::memory_order_acquire); });
+                LOG(INFO) << "finish to collect fdb metric";
+            }
+ 
+        }));
         return 0;
     }
 
     void stop() {
         running_ = false;
+        running_cond_.notify_all();
         if (thread_ != nullptr) {
             thread_->join();
         }
@@ -176,6 +193,9 @@ private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::unique_ptr<std::thread> thread_;
     std::atomic<bool> running_;
+    std::mutex running_mtx_;
+    std::condition_variable running_cond_;
+    int sleep_interval_ms_ = 5000;
 };
 
 } // namespace selectdb

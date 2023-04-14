@@ -43,7 +43,9 @@ add_executable(meta_service_test
 add_executable(rate_limiter_test
     rate_limiter_test.cpp
 )
-
+add_executable(metric_test
+    metric_test.cpp
+)
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -65,6 +67,9 @@ target_link_libraries(rate_limiter_test
     ${TEST_LINK_LIBS}
 )
 
+target_link_libraries(metric_test
+    ${TEST_LINK_LIBS}
+)
 # FDB related tests need to be linked with libfdb_c
 set(FDB_LINKER_FLAGS "-lfdb_c -L${THIRDPARTY_DIR}/lib")
 
@@ -92,6 +97,7 @@ install(FILES
     ${BASE_DIR}/script/run_all_tests.sh
     ${BASE_DIR}/conf/fdb.cluster
     ${BASE_DIR}/conf/selectdb_cloud.conf
+    ${BASE_DIR}/test/fdb_metric_example.json
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
     GROUP_READ GROUP_WRITE GROUP_EXECUTE
     WORLD_READ WORLD_EXECUTE
