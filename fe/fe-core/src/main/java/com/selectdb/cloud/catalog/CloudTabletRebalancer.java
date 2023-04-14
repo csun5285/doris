@@ -110,10 +110,6 @@ public class CloudTabletRebalancer extends MasterDaemon {
     @Override
     protected void runAfterCatalogReady() {
         LOG.info("cloud tablet rebalance begin");
-        beToTabletsGlobal = new HashMap<Long, List<Tablet>>();
-        partitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
-        futureBeToTabletsGlobal = new HashMap<Long, List<Tablet>>();
-        futurePartitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
 
         clusterToBes = new HashMap<String, List<Long>>();
         long start = System.currentTimeMillis();
@@ -139,6 +135,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
 
         // 4 migrate tablet for smooth upgrade
         Pair<Long, Long> pair;
+        statRouteInfo();
         while (!tabletsMigrateTasks.isEmpty()) {
             try {
                 pair = tabletsMigrateTasks.take();
@@ -357,6 +354,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
     }
 
     public void statRouteInfo() {
+        beToTabletsGlobal = new HashMap<Long, List<Tablet>>();
+        partitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
+        futureBeToTabletsGlobal = new HashMap<Long, List<Tablet>>();
+        futurePartitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
         loopCloudReplica((Database db, Table table, Partition partition, MaterializedIndex index, String cluster) -> {
             for (Tablet tablet : index.getTablets()) {
                 for (Replica replica : tablet.getReplicas()) {
@@ -642,11 +643,16 @@ public class CloudTabletRebalancer extends MasterDaemon {
      * replica location info will be updated in both master and follower FEs.
      */
     private void migrateTablets(Long srcBe, Long dstBe) {
-        // get tablets
-        List<Tablet> tablets = beToTabletsGlobal.get(srcBe);
         SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
+        // get tablets
+        if (!beToTabletsGlobal.containsKey(srcBe)) {
+            LOG.info("smooth upgrade srcBe={} does not have any tablets, set inactive", srcBe);
+            Env.getCurrentEnv().getCloudUpgradeMgr().setBeStateInactive(srcBe);
+            return;
+        }
+        List<Tablet> tablets = beToTabletsGlobal.get(srcBe);
         if (tablets.isEmpty()) {
-            // srcBe does not have any tablets, set inactive
+            LOG.info("smooth upgrade srcBe={} does not have any tablets, set inactive", srcBe);
             Env.getCurrentEnv().getCloudUpgradeMgr().setBeStateInactive(srcBe);
             return;
         }
