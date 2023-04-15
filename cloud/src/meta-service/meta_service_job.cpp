@@ -471,8 +471,11 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     //==========================================================================
     auto stats = response->mutable_stats();
     TabletStats detached_stats;
+    // ATTN: The condition that snapshot read can be used to get tablet stats is: all other transactions that put tablet stats
+    //  can make read write conflicts with this transaction on other keys. Currently, if all meta-service nodes are running
+    //  with `config::split_tablet_stats = true` can meet the condition.
     internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, request->job().idx(), *stats,
-                              detached_stats, true);
+                              detached_stats, config::snapshot_get_tablet_stats);
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
         stats->set_cumulative_point(compaction.output_cumulative_point());
@@ -893,8 +896,11 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     //==========================================================================
     auto stats = response->mutable_stats();
     TabletStats detached_stats;
+    // ATTN: The condition that snapshot read can be used to get tablet stats is: all other transactions that put tablet stats
+    //  can make read write conflicts with this transaction on other keys. Currently, if all meta-service nodes are running
+    //  with `config::split_tablet_stats = true` can meet the condition.
     internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, new_tablet_idx, *stats,
-                              detached_stats, true);
+                              detached_stats, config::snapshot_get_tablet_stats);
     // clang-format off
     stats->set_cumulative_point(schema_change.output_cumulative_point());
     stats->set_num_rows(stats->num_rows() + (schema_change.num_output_rows() - num_remove_rows));
