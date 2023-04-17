@@ -32,6 +32,7 @@
 #include "common/compiler_util.h"
 #include "common/status.h"
 #include "runtime/primitive_type.h"
+#include "vec/data_types/data_type_decimal.h"
 
 namespace doris {
 
@@ -617,6 +618,15 @@ inline T StringParser::string_to_decimal(const char* s, int len, int type_precis
             DCHECK(value >= 0); // For some reason //DCHECK_GE doesn't work with __int128.
             ++precision;
             scale += found_dot;
+            if (precision > type_precision) {
+                if constexpr (std::is_same_v<int32_t, T>) {
+                    value = vectorized::max_decimal_value<vectorized::Decimal32>();
+                } else if constexpr (std::is_same_v<int64_t, T>) {
+                    value = vectorized::max_decimal_value<vectorized::Decimal64>();
+                } else {
+                    value = vectorized::max_decimal_value<vectorized::Decimal128>();
+                }
+            }
         } else if (c == '.' && LIKELY(!found_dot)) {
             found_dot = 1;
         } else if ((c == 'e' || c == 'E') && LIKELY(!found_exponent)) {
@@ -646,7 +656,6 @@ inline T StringParser::string_to_decimal(const char* s, int len, int type_precis
     }
 
     // Find the number of truncated digits before adjusting the precision for an exponent.
-    int truncated_digit_count = precision - type_precision;
     if (exponent > scale) {
         // Ex: 0.1e3 (which at this point would have precision == 1 and scale == 1), the
         //     scale must be set to 0 and the value set to 100 which means a precision of 3.
@@ -678,9 +687,6 @@ inline T StringParser::string_to_decimal(const char* s, int len, int type_precis
     } else if (UNLIKELY(scale > type_scale)) {
         *result = StringParser::PARSE_UNDERFLOW;
         int shift = scale - type_scale;
-        if (UNLIKELY(truncated_digit_count > 0)) {
-            shift -= truncated_digit_count;
-        }
         if (shift > 0) {
             T divisor;
             if constexpr (std::is_same_v<T, vectorized::Int128I>) {
@@ -688,14 +694,14 @@ inline T StringParser::string_to_decimal(const char* s, int len, int type_precis
             } else {
                 divisor = get_scale_multiplier<T>(shift);
             }
-            if (LIKELY(divisor >= 0)) {
+            if (LIKELY(divisor > 0)) {
                 T remainder = value % divisor;
                 value /= divisor;
                 if ((remainder > 0 ? T(remainder) : T(-remainder)) >= (divisor >> 1)) {
                     value += 1;
                 }
             } else {
-                DCHECK(divisor == -1); // //DCHECK_EQ doesn't work with __int128.
+                DCHECK(divisor == -1 || divisor == 0); // //DCHECK_EQ doesn't work with __int128.
                 value = 0;
             }
         }
