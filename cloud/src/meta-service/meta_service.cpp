@@ -3,8 +3,6 @@
 #include "meta_service.h"
 #include <brpc/details/profiler_linker.h>
 #include <brpc/options.pb.h>
-#include <gen_cpp/selectdb_cloud.pb.h>
-#include <gen_cpp/types.pb.h>
 #include "meta-service/doris_txn.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_tablet_stats.h"
@@ -1696,6 +1694,40 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     code = MetaServiceCode::KV_TXN_GET_ERR;
 }
 
+void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
+                   const std::string& instance_id, int64_t index_id,
+                   const doris::TabletSchemaPB& schema, std::string& schema_key,
+                   std::string& schema_val) {
+    DCHECK(schema_key.empty());
+    DCHECK(schema_val.empty());
+    meta_schema_key({instance_id, index_id, schema.schema_version()}, &schema_key);
+    if (txn->get(schema_key, &schema_val) == 0) {
+        DCHECK([&] {
+            doris::TabletSchemaPB saved_schema;
+            if (!saved_schema.ParseFromString(schema_val)) return false;
+            if (saved_schema.column_size() != schema.column_size()) return false;
+            for (int i = 0; i < saved_schema.column_size(); ++i) {
+                if (saved_schema.column(i).type() != schema.column(i).type()) return false;
+            }
+            return true;
+        }()) << hex(schema_key)
+             << "\n existed: " <<
+                [&]() {
+                    doris::TabletSchemaPB saved_schema;
+                    saved_schema.ParseFromString(schema_val);
+                    return saved_schema.ShortDebugString();
+                }()
+             << "\n to_save: " << schema.ShortDebugString();
+        return; // schema has already been saved
+    }
+    if (!schema.SerializeToString(&schema_val)) [[unlikely]] {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "failed to serialize tablet schema value";
+        return;
+    }
+    txn->put(schema_key, schema_val);
+}
+
 void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
                             doris::TabletMetaPB& tablet_meta, std::shared_ptr<TxnKv> txn_kv,
                             const std::string& instance_id,
@@ -1746,24 +1778,16 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
     }
 
     std::string schema_key, schema_val;
-    while (config::write_schema_kv && tablet_meta.has_schema()) {
+    if (config::write_schema_kv && tablet_meta.has_schema()) {
         // detach TabletSchemaPB from TabletMetaPB
         tablet_meta.set_schema_version(tablet_meta.schema().schema_version());
         auto [_, success] = saved_schema.emplace(index_id, tablet_meta.schema_version());
         if (success) { // schema may not be saved
-            meta_schema_key({instance_id, index_id, tablet_meta.schema_version()}, &schema_key);
-            if (txn->get(schema_key, &schema_val, true) == 0) {
-                break; // schema has already been saved
-            }
-            if (!tablet_meta.schema().SerializeToString(&schema_val)) [[unlikely]] {
-                code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-                msg = "failed to serialize tablet schema value";
-                return;
-            }
-            txn->put(schema_key, schema_val);
+            put_schema_kv(code, msg, txn.get(), instance_id, index_id, tablet_meta.schema(),
+                          schema_key, schema_val);
+            if (code != MetaServiceCode::OK) return;
         }
         tablet_meta.set_allocated_schema(nullptr);
-        break;
     }
 
     MetaTabletKeyInfo key_info {instance_id, table_id, index_id, partition_id, tablet_id};
@@ -2061,32 +2085,6 @@ void MetaServiceImpl::get_tablet(::google::protobuf::RpcController* controller,
                         response->mutable_tablet_meta(), false);
 }
 
-static void detach_schema_from_rowset(MetaServiceCode& code, std::string& msg, int& ret,
-                                      Transaction* txn, const std::string& instance_id,
-                                      doris::RowsetMetaPB& rowset_meta, std::string& schema_key,
-                                      std::string& schema_val) {
-    if (!rowset_meta.has_index_id()) {
-        TabletIndexPB tablet_idx;
-        get_tablet_idx(code, msg, ret, txn, instance_id, rowset_meta.tablet_id(), tablet_idx);
-        if (code != MetaServiceCode::OK) return;
-        rowset_meta.set_index_id(tablet_idx.index_id());
-    }
-    rowset_meta.set_schema_version(rowset_meta.tablet_schema().schema_version());
-    meta_schema_key({instance_id, rowset_meta.index_id(), rowset_meta.schema_version()},
-                    &schema_key);
-    if (txn->get(schema_key, &schema_val, true) == 0) {
-        rowset_meta.set_allocated_tablet_schema(nullptr);
-        return; // schema has already been saved
-    }
-    if (!rowset_meta.tablet_schema().SerializeToString(&schema_val)) [[unlikely]] {
-        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-        msg = "failed to serialize tablet schema value";
-        return;
-    }
-    txn->put(schema_key, schema_val);
-    rowset_meta.set_allocated_tablet_schema(nullptr);
-}
-
 static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg, int& ret,
                                          Transaction* txn, const std::string& instance_id,
                                          doris::RowsetMetaPB& rowset_meta,
@@ -2349,7 +2347,6 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
                                tablet_idx);
                 if (code != MetaServiceCode::OK) return;
                 existed_rowset_meta->set_index_id(tablet_idx.index_id());
-                rowset_meta.set_index_id(tablet_idx.index_id());
             }
         }
         if (!existed_rowset_meta->has_tablet_schema()) {
@@ -2373,9 +2370,20 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     std::string schema_key;
     std::string schema_val;
     if (config::write_schema_kv && rowset_meta.has_tablet_schema()) {
-        detach_schema_from_rowset(code, msg, ret, txn.get(), instance_id, rowset_meta, schema_key,
-                                  schema_val);
+        if (!rowset_meta.has_index_id()) {
+            TabletIndexPB tablet_idx;
+            get_tablet_idx(code, msg, ret, txn.get(), instance_id, rowset_meta.tablet_id(),
+                           tablet_idx);
+            if (code != MetaServiceCode::OK) return;
+            rowset_meta.set_index_id(tablet_idx.index_id());
+        }
+        DCHECK(rowset_meta.tablet_schema().has_schema_version());
+        DCHECK_GE(rowset_meta.tablet_schema().schema_version(), 0);
+        rowset_meta.set_schema_version(rowset_meta.tablet_schema().schema_version());
+        put_schema_kv(code, msg, txn.get(), instance_id, rowset_meta.index_id(),
+                      rowset_meta.tablet_schema(), schema_key, schema_val);
         if (code != MetaServiceCode::OK) return;
+        rowset_meta.set_allocated_tablet_schema(nullptr);
     }
 
     std::string prepare_key;

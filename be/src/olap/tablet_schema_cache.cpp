@@ -35,7 +35,7 @@ TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaP
     TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert1",
                                       std::make_shared<TabletSchema>());
     DCHECK(_s_instance != nullptr);
-    DCHECK(index_id > 0 && schema.has_schema_version());
+    DCHECK(index_id > 0);
     std::lock_guard guard(_mtx);
     auto iter = _cache.find({index_id, schema.schema_version()});
     if (iter == _cache.end()) {
@@ -51,7 +51,7 @@ TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaS
     TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert2",
                                       std::make_shared<TabletSchema>());
     DCHECK(_s_instance != nullptr);
-    DCHECK(index_id > 0 && schema->schema_version() > 0);
+    DCHECK(index_id > 0);
     std::lock_guard guard(_mtx);
     auto [it, _] = _cache.insert({{index_id, schema->schema_version()}, schema});
     return it->second;
