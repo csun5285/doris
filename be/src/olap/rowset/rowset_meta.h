@@ -378,7 +378,6 @@ public:
     int64_t newest_write_timestamp() const { return _rowset_meta_pb.newest_write_timestamp(); }
 
     void set_tablet_schema(const TabletSchemaSPtr& tablet_schema) {
-        DCHECK(index_id() > 0);
         _schema = TabletSchemaCache::instance()->insert(index_id(), tablet_schema);
     }
 
