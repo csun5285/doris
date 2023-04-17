@@ -244,6 +244,7 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         obj.set_prefix("654");
         obj.set_endpoint("789");
         obj.set_region("987");
+        obj.set_external_endpoint("888");
         obj.set_provider(ObjectStoreInfoPB::BOS);
         req.mutable_obj_info()->CopyFrom(obj);
 
@@ -1774,6 +1775,7 @@ TEST(MetaServiceTest, StageTest) {
     obj.set_prefix("654");
     obj.set_endpoint("789");
     obj.set_region("987");
+    obj.set_external_endpoint("888");
     obj.set_provider(ObjectStoreInfoPB::BOS);
 
     // create instance
@@ -1998,6 +2000,7 @@ TEST(MetaServiceTest, GetIamTest) {
         obj.set_prefix("654");
         obj.set_endpoint("789");
         obj.set_region("987");
+        obj.set_external_endpoint("888");
         obj.set_provider(ObjectStoreInfoPB::BOS);
 
         RamUserPB ram_user;
@@ -2071,6 +2074,7 @@ TEST(MetaServiceTest, AlterIamTest) {
     obj.set_prefix("654");
     obj.set_endpoint("789");
     obj.set_region("987");
+    obj.set_external_endpoint("888");
     obj.set_provider(ObjectStoreInfoPB::BOS);
 
     // create instance without ram user

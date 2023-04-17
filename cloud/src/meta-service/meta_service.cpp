@@ -4285,7 +4285,7 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
 
     // ATTN: prefix may be empty
     if (plain_ak.empty() || plain_sk.empty() || bucket.empty() || endpoint.empty() ||
-        region.empty() || !obj.has_provider()) {
+        region.empty() || !obj.has_provider() || external_endpoint.empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "s3 conf info err, please check it";
         return;
