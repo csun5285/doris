@@ -25,10 +25,8 @@
 #include "cloud/io/cloud_file_segment.h"
 #include "common/config.h"
 #include "olap/olap_common.h"
-#include "util/async_io.h"
 #include "util/doris_metrics.h"
 #include "util/runtime_profile.h"
-#include "vec/common/sip_hash.h"
 
 namespace doris {
 namespace io {
@@ -67,17 +65,6 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
 
 Status CachedRemoteFileReader::read_at(size_t offset, Slice result, size_t* bytes_read,
                                        IOState* state) {
-    if (bthread_self() == 0) {
-        return read_at_impl(offset, result, bytes_read, state);
-    }
-    Status s;
-    auto task = [&] { s = read_at_impl(offset, result, bytes_read, state); };
-    AsyncIO::run_task(task, io::FileSystemType::S3, state);
-    return s;
-}
-
-Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
-                                            IOState* state) {
     DCHECK(!closed());
     DCHECK(state);
     if (offset > size()) {

@@ -12,6 +12,7 @@
 #include "olap/olap_common.h"
 #include "util/doris_metrics.h"
 #include "util/metrics.h"
+#include "util/lock.h"
 
 namespace doris {
 namespace io {
@@ -74,7 +75,7 @@ struct FileCacheProfile {
     void update(int64_t table_id, int64_t partition_id, OlapReaderStatistics* stats);
 
     void deregister_metric(int64_t table_id, int64_t partition_id);
-    std::mutex _mtx;
+    doris::Mutex _mtx;
     // use shared_ptr for concurrent
     std::unordered_map<int64_t, std::unordered_map<int64_t, std::shared_ptr<AtomicStatistics>>>
             _profile;

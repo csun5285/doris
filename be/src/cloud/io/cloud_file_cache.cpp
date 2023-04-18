@@ -112,7 +112,7 @@ CloudFileCache::QueryContextHolderPtr CloudFileCache::get_query_context_holder(
 }
 
 CloudFileCache::QueryContextPtr CloudFileCache::get_query_context(
-        const TUniqueId& query_id, std::lock_guard<std::mutex>& cache_lock [[maybe_unused]]) {
+        const TUniqueId& query_id, std::lock_guard<doris::Mutex>& cache_lock [[maybe_unused]]) {
     auto query_iter = _query_map.find(query_id);
     return (query_iter == _query_map.end()) ? nullptr : query_iter->second;
 }
@@ -127,7 +127,7 @@ void CloudFileCache::remove_query_context(const TUniqueId& query_id) {
 }
 
 CloudFileCache::QueryContextPtr CloudFileCache::get_or_set_query_context(
-        const TUniqueId& query_id, std::lock_guard<std::mutex>& cache_lock) {
+        const TUniqueId& query_id, std::lock_guard<doris::Mutex>& cache_lock) {
     if (query_id.lo == 0 && query_id.hi == 0) {
         return nullptr;
     }
@@ -143,7 +143,7 @@ CloudFileCache::QueryContextPtr CloudFileCache::get_or_set_query_context(
 }
 
 void CloudFileCache::QueryContext::remove(const Key& key, size_t offset,
-                                          std::lock_guard<std::mutex>& cache_lock) {
+                                          std::lock_guard<doris::Mutex>& cache_lock) {
     // The key maybe comes from the 'lru_queue'
     // and we need to erase the 'records' first.
     // If not, it will cause heap-use-after-free
@@ -156,7 +156,7 @@ void CloudFileCache::QueryContext::remove(const Key& key, size_t offset,
 }
 
 void CloudFileCache::QueryContext::reserve(const Key& key, size_t offset, size_t size,
-                                           std::lock_guard<std::mutex>& cache_lock) {
+                                           std::lock_guard<doris::Mutex>& cache_lock) {
     auto pair = std::make_pair(key, offset);
     if (records.find(pair) == records.end()) {
         auto queue_iter = lru_queue.add(key, offset, size, cache_lock);
@@ -169,7 +169,7 @@ Status CloudFileCache::initialize() {
     return initialize_unlocked(cache_lock);
 }
 
-Status CloudFileCache::initialize_unlocked(std::lock_guard<std::mutex>& cache_lock) {
+Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_is_initialized) {
         if (std::filesystem::exists(_cache_base_path)) {
             RETURN_IF_ERROR(load_cache_info_into_memory(cache_lock));
@@ -212,7 +212,7 @@ Status CloudFileCache::reinitialize() {
 }
 
 void CloudFileCache::use_cell(const FileSegmentCell& cell, FileSegments& result,
-                              bool move_iter_flag, std::lock_guard<std::mutex>& cache_lock) {
+                              bool move_iter_flag, std::lock_guard<doris::Mutex>& cache_lock) {
     auto file_segment = cell.file_segment;
     DCHECK(!(file_segment->is_downloaded() &&
              std::filesystem::file_size(
@@ -234,7 +234,7 @@ void CloudFileCache::use_cell(const FileSegmentCell& cell, FileSegments& result,
 }
 
 CloudFileCache::FileSegmentCell* CloudFileCache::get_cell(const Key& key, size_t offset,
-                                                          std::lock_guard<std::mutex>& cache_lock
+                                                          std::lock_guard<doris::Mutex>& cache_lock
                                                           [[maybe_unused]]) {
     auto it = _files.find(key);
     if (it == _files.end()) {
@@ -256,7 +256,7 @@ bool CloudFileCache::need_to_move(CacheType cell_type, CacheType query_type) con
 
 FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& context,
                                       const FileSegment::Range& range,
-                                      std::lock_guard<std::mutex>& cache_lock) {
+                                      std::lock_guard<doris::Mutex>& cache_lock) {
     /// Given range = [left, right] and non-overlapping ordered set of file segments,
     /// find list [segment1, ..., segmentN] of segments which intersect with given range.
     auto it = _files.find(key);
@@ -396,7 +396,7 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
 FileSegments CloudFileCache::split_range_into_cells(const Key& key, const CacheContext& context,
                                                     size_t offset, size_t size,
                                                     FileSegment::State state,
-                                                    std::lock_guard<std::mutex>& cache_lock) {
+                                                    std::lock_guard<doris::Mutex>& cache_lock) {
     DCHECK(size > 0);
 
     auto current_pos = offset;
@@ -439,7 +439,7 @@ void CloudFileCache::fill_holes_with_empty_file_segments(FileSegments& file_segm
                                                          const Key& key,
                                                          const CacheContext& context,
                                                          const FileSegment::Range& range,
-                                                         std::lock_guard<std::mutex>& cache_lock) {
+                                                         std::lock_guard<doris::Mutex>& cache_lock) {
     /// There are segments [segment1, ..., segmentN]
     /// (non-overlapping, non-empty, ascending-ordered) which (maybe partially)
     /// intersect with given range.
@@ -524,7 +524,7 @@ CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(const Key& key,
                                                           const CacheContext& context,
                                                           size_t offset, size_t size,
                                                           FileSegment::State state,
-                                                          std::lock_guard<std::mutex>& cache_lock) {
+                                                          std::lock_guard<doris::Mutex>& cache_lock) {
     /// Create a file segment cell and put it in `files` map by [key][offset].
     if (size == 0) {
         return nullptr; /// Empty files are not cached.
@@ -599,7 +599,7 @@ const CloudFileCache::LRUQueue& CloudFileCache::get_queue(CacheType type) const 
     return _normal_queue;
 }
 
-bool CloudFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<std::mutex>& cache_lock) {
+bool CloudFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
     auto is_overflow = [&] { return cur_cache_size + size - removed_size > _total_size; };
@@ -685,7 +685,7 @@ bool CloudFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<std::mutex
 //     b. evict from other queue
 
 bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, size_t offset,
-                                 size_t size, std::lock_guard<std::mutex>& cache_lock) {
+                                 size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     if (context.cache_type == CacheType::TTL) {
         return try_reserve_for_ttl(size, cache_lock);
     }
@@ -780,7 +780,7 @@ bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, si
     return true;
 }
 bool CloudFileCache::remove_if_ttl_file_unlock(const Key& file_key, bool remove_directly,
-                                               std::lock_guard<std::mutex>& cache_lock) {
+                                               std::lock_guard<doris::Mutex>& cache_lock) {
     if (auto iter = _key_to_time.find(file_key);
         _key_to_time.find(file_key) != _key_to_time.end()) {
         if (!remove_directly) {
@@ -885,7 +885,7 @@ void CloudFileCache::reset_range(const Key& key, size_t offset, size_t old_size,
 
 bool CloudFileCache::try_reserve_from_other_queue(CacheType cur_cache_type, size_t size,
                                                   int64_t cur_time,
-                                                  std::lock_guard<std::mutex>& cache_lock) {
+                                                  std::lock_guard<doris::Mutex>& cache_lock) {
     auto other_cache_types = get_other_cache_type(cur_cache_type);
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
@@ -949,7 +949,7 @@ bool CloudFileCache::try_reserve_from_other_queue(CacheType cur_cache_type, size
 
 bool CloudFileCache::try_reserve_for_lru(const Key& key, QueryContextPtr query_context,
                                          const CacheContext& context, size_t offset, size_t size,
-                                         std::lock_guard<std::mutex>& cache_lock) {
+                                         std::lock_guard<doris::Mutex>& cache_lock) {
     int64_t cur_time = std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count();
@@ -1033,8 +1033,8 @@ bool CloudFileCache::try_reserve_for_lru(const Key& key, QueryContextPtr query_c
     return true;
 }
 
-void CloudFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<std::mutex>& cache_lock,
-                            std::lock_guard<std::mutex>& segment_lock) {
+void CloudFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<doris::Mutex>& cache_lock,
+                            std::lock_guard<doris::Mutex>& segment_lock) {
     auto key = file_segment->key();
     auto offset = file_segment->offset();
     auto type = file_segment->cache_type();
@@ -1074,7 +1074,7 @@ void CloudFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<std::m
     }
 }
 
-Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<std::mutex>& cache_lock) {
+Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>& cache_lock) {
     Key key;
     uint64_t offset = 0;
     size_t size = 0;
@@ -1198,7 +1198,7 @@ size_t CloudFileCache::get_used_cache_size(CacheType cache_type) const {
 }
 
 size_t CloudFileCache::get_used_cache_size_unlocked(CacheType cache_type,
-                                                    std::lock_guard<std::mutex>& cache_lock) const {
+                                                    std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_total_cache_size(cache_lock);
 }
 
@@ -1208,7 +1208,7 @@ size_t CloudFileCache::get_available_cache_size(CacheType cache_type) const {
 }
 
 size_t CloudFileCache::get_available_cache_size_unlocked(
-        CacheType cache_type, std::lock_guard<std::mutex>& cache_lock) const {
+        CacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_max_element_size() -
            get_used_cache_size_unlocked(cache_type, cache_lock);
 }
@@ -1219,12 +1219,12 @@ size_t CloudFileCache::get_file_segments_num(CacheType cache_type) const {
 }
 
 size_t CloudFileCache::get_file_segments_num_unlocked(
-        CacheType cache_type, std::lock_guard<std::mutex>& cache_lock) const {
+        CacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_elements_num(cache_lock);
 }
 
 CloudFileCache::FileSegmentCell::FileSegmentCell(FileSegmentSPtr file_segment, CacheType cache_type,
-                                                 std::lock_guard<std::mutex>&)
+                                                 std::lock_guard<doris::Mutex>&)
         : file_segment(file_segment), cache_type(cache_type) {
     /**
      * Cell can be created with either DOWNLOADED or EMPTY file segment's state.
@@ -1245,7 +1245,7 @@ CloudFileCache::FileSegmentCell::FileSegmentCell(FileSegmentSPtr file_segment, C
 }
 
 CloudFileCache::LRUQueue::Iterator CloudFileCache::LRUQueue::add(
-        const Key& key, size_t offset, size_t size, std::lock_guard<std::mutex>& /* cache_lock */) {
+        const Key& key, size_t offset, size_t size, std::lock_guard<doris::Mutex>& /* cache_lock */) {
     cache_size += size;
     auto iter = queue.insert(queue.end(), FileKeyAndOffset(key, offset, size));
     map.insert(std::make_pair(std::make_pair(key, offset), iter));
@@ -1253,34 +1253,34 @@ CloudFileCache::LRUQueue::Iterator CloudFileCache::LRUQueue::add(
 }
 
 void CloudFileCache::LRUQueue::remove(Iterator queue_it,
-                                      std::lock_guard<std::mutex>& /* cache_lock */) {
+                                      std::lock_guard<doris::Mutex>& /* cache_lock */) {
     cache_size -= queue_it->size;
     map.erase(std::make_pair(queue_it->key, queue_it->offset));
     queue.erase(queue_it);
 }
 
-void CloudFileCache::LRUQueue::remove_all(std::lock_guard<std::mutex>& /* cache_lock */) {
+void CloudFileCache::LRUQueue::remove_all(std::lock_guard<doris::Mutex>& /* cache_lock */) {
     queue.clear();
     map.clear();
     cache_size = 0;
 }
 
 void CloudFileCache::LRUQueue::move_to_end(Iterator queue_it,
-                                           std::lock_guard<std::mutex>& /* cache_lock */) {
+                                           std::lock_guard<doris::Mutex>& /* cache_lock */) {
     queue.splice(queue.end(), queue, queue_it);
 }
 bool CloudFileCache::LRUQueue::contains(const Key& key, size_t offset,
-                                        std::lock_guard<std::mutex>& /* cache_lock */) const {
+                                        std::lock_guard<doris::Mutex>& /* cache_lock */) const {
     return map.find(std::make_pair(key, offset)) != map.end();
 }
 
 CloudFileCache::LRUQueue::Iterator CloudFileCache::LRUQueue::get(
-        const Key& key, size_t offset, std::lock_guard<std::mutex>& /* cache_lock */) const {
+        const Key& key, size_t offset, std::lock_guard<doris::Mutex>& /* cache_lock */) const {
     return map.find(std::make_pair(key, offset))->second;
 }
 
 std::string CloudFileCache::LRUQueue::to_string(
-        std::lock_guard<std::mutex>& /* cache_lock */) const {
+        std::lock_guard<doris::Mutex>& /* cache_lock */) const {
     std::string result;
     for (const auto& [key, offset, size] : queue) {
         if (!result.empty()) {
@@ -1296,7 +1296,7 @@ std::string CloudFileCache::dump_structure(const Key& key) {
     return dump_structure_unlocked(key, cache_lock);
 }
 
-std::string CloudFileCache::dump_structure_unlocked(const Key& key, std::lock_guard<std::mutex>&) {
+std::string CloudFileCache::dump_structure_unlocked(const Key& key, std::lock_guard<doris::Mutex>&) {
     std::stringstream result;
     const auto& cells_by_offset = _files[key];
 

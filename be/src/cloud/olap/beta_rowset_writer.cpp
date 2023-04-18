@@ -109,6 +109,7 @@ Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) 
     _rowset_meta->set_txn_expiration(_context.txn_expiration);
     _file_cache_ttl_seconds = _context.ttl_seconds;
     _file_cache_is_persistent = _context.is_persistent;
+    _is_hot_data = _context.is_hot_data;
     if (_context.rowset_state == PREPARED || _context.rowset_state == COMMITTED) {
         _is_pending = true;
         _rowset_meta->set_load_id(_context.load_id);

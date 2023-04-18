@@ -18,6 +18,7 @@
 #include "cloud/io/cloud_file_segment.h"
 #include "cloud/io/file_reader.h"
 #include "common/config.h"
+#include "util/lock.h"
 
 namespace doris {
 namespace io {
@@ -129,17 +130,17 @@ private:
 
     bool _is_initialized = false;
 
-    mutable std::mutex _mutex;
+    mutable doris::Mutex _mutex;
 
     // metrics
     std::shared_ptr<bvar::Status<size_t>> _cur_size_metrics;
     std::shared_ptr<bvar::Status<size_t>> _cur_ttl_cache_size_metrics;
 
     bool try_reserve(const Key& key, const CacheContext& context, size_t offset, size_t size,
-                     std::lock_guard<std::mutex>& cache_lock);
+                     std::lock_guard<doris::Mutex>& cache_lock);
 
-    void remove(FileSegmentSPtr file_segment, std::lock_guard<std::mutex>& cache_lock,
-                std::lock_guard<std::mutex>& segment_lock);
+    void remove(FileSegmentSPtr file_segment, std::lock_guard<doris::Mutex>& cache_lock,
+                std::lock_guard<doris::Mutex>& segment_lock);
 
     struct LRUQueue {
         LRUQueue() = default;
@@ -168,33 +169,34 @@ private:
         size_t get_max_size() const { return max_size; }
         size_t get_max_element_size() const { return max_element_size; }
 
-        size_t get_total_cache_size(std::lock_guard<std::mutex>& /* cache_lock */) const {
+        size_t get_total_cache_size(std::lock_guard<doris::Mutex>& /* cache_lock */) const {
             return cache_size;
         }
 
-        size_t get_elements_num(std::lock_guard<std::mutex>& /* cache_lock */) const {
+        size_t get_elements_num(std::lock_guard<doris::Mutex>& /* cache_lock */) const {
             return queue.size();
         }
 
         Iterator add(const Key& key, size_t offset, size_t size,
-                     std::lock_guard<std::mutex>& cache_lock);
+                     std::lock_guard<doris::Mutex>& cache_lock);
 
-        void remove(Iterator queue_it, std::lock_guard<std::mutex>& cache_lock);
+        void remove(Iterator queue_it, std::lock_guard<doris::Mutex>& cache_lock);
 
-        void move_to_end(Iterator queue_it, std::lock_guard<std::mutex>& cache_lock);
+        void move_to_end(Iterator queue_it, std::lock_guard<doris::Mutex>& cache_lock);
 
-        std::string to_string(std::lock_guard<std::mutex>& cache_lock) const;
+        std::string to_string(std::lock_guard<doris::Mutex>& cache_lock) const;
 
-        bool contains(const Key& key, size_t offset, std::lock_guard<std::mutex>& cache_lock) const;
+        bool contains(const Key& key, size_t offset,
+                      std::lock_guard<doris::Mutex>& cache_lock) const;
 
         Iterator begin() { return queue.begin(); }
 
         Iterator end() { return queue.end(); }
 
-        void remove_all(std::lock_guard<std::mutex>& cache_lock);
+        void remove_all(std::lock_guard<doris::Mutex>& cache_lock);
 
         Iterator get(const Key& key, size_t offset,
-                     std::lock_guard<std::mutex>& /* cache_lock */) const;
+                     std::lock_guard<doris::Mutex>& /* cache_lock */) const;
 
         int64_t get_hot_data_interval() const { return hot_data_interval; }
 
@@ -228,7 +230,7 @@ private:
         size_t size() const { return file_segment->_segment_range.size(); }
 
         FileSegmentCell(FileSegmentSPtr file_segment, CacheType cache_type,
-                        std::lock_guard<std::mutex>& cache_lock);
+                        std::lock_guard<doris::Mutex>& cache_lock);
 
         FileSegmentCell(FileSegmentCell&& other) noexcept
                 : file_segment(std::move(other.file_segment)),
@@ -258,14 +260,14 @@ private:
 
         QueryContext(size_t max_cache_size) : lru_queue(max_cache_size, 0, 0) {}
 
-        void remove(const Key& key, size_t offset, std::lock_guard<std::mutex>& cache_lock);
+        void remove(const Key& key, size_t offset, std::lock_guard<doris::Mutex>& cache_lock);
 
         void reserve(const Key& key, size_t offset, size_t size,
-                     std::lock_guard<std::mutex>& cache_lock);
+                     std::lock_guard<doris::Mutex>& cache_lock);
 
         size_t get_max_cache_size() const { return lru_queue.get_max_size(); }
 
-        size_t get_cache_size(std::lock_guard<std::mutex>& cache_lock) const {
+        size_t get_cache_size(std::lock_guard<doris::Mutex>& cache_lock) const {
             return lru_queue.get_total_cache_size(cache_lock);
         }
 
@@ -279,14 +281,14 @@ private:
 
     bool _enable_file_cache_query_limit = config::enable_file_cache_query_limit;
 
-    QueryContextPtr get_query_context(const TUniqueId& query_id, std::lock_guard<std::mutex>&);
+    QueryContextPtr get_query_context(const TUniqueId& query_id, std::lock_guard<doris::Mutex>&);
 
     void remove_query_context(const TUniqueId& query_id);
 
     QueryContextPtr get_or_set_query_context(const TUniqueId& query_id,
-                                             std::lock_guard<std::mutex>&);
+                                             std::lock_guard<doris::Mutex>&);
 
-    Status initialize_unlocked(std::lock_guard<std::mutex>&);
+    Status initialize_unlocked(std::lock_guard<doris::Mutex>&);
 
     using FileSegmentsByOffset = std::map<size_t, FileSegmentCell>;
     struct HashCachedFileKey {
@@ -306,59 +308,60 @@ private:
     const LRUQueue& get_queue(CacheType type) const;
 
     FileSegments get_impl(const Key& key, const CacheContext& context,
-                          const FileSegment::Range& range, std::lock_guard<std::mutex>& cache_lock);
+                          const FileSegment::Range& range,
+                          std::lock_guard<doris::Mutex>& cache_lock);
 
     FileSegmentCell* get_cell(const Key& key, size_t offset,
-                              std::lock_guard<std::mutex>& cache_lock);
+                              std::lock_guard<doris::Mutex>& cache_lock);
 
     FileSegmentCell* add_cell(const Key& key, const CacheContext& context, size_t offset,
                               size_t size, FileSegment::State state,
-                              std::lock_guard<std::mutex>& cache_lock);
+                              std::lock_guard<doris::Mutex>& cache_lock);
 
     void use_cell(const FileSegmentCell& cell, FileSegments& result, bool not_need_move,
-                  std::lock_guard<std::mutex>& cache_lock);
+                  std::lock_guard<doris::Mutex>& cache_lock);
 
     bool try_reserve_for_lru(const Key& key, QueryContextPtr query_context,
                              const CacheContext& context, size_t offset, size_t size,
-                             std::lock_guard<std::mutex>& cache_lock);
+                             std::lock_guard<doris::Mutex>& cache_lock);
 
     std::vector<CacheType> get_other_cache_type(CacheType cur_cache_type);
 
     bool try_reserve_from_other_queue(CacheType cur_cache_type, size_t offset, int64_t cur_time,
-                                      std::lock_guard<std::mutex>& cache_lock);
+                                      std::lock_guard<doris::Mutex>& cache_lock);
 
     CacheType get_dowgrade_cache_type(CacheType cur_cache_type) const;
 
-    bool try_reserve_for_ttl(size_t size, std::lock_guard<std::mutex>& cache_lock);
+    bool try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
 
     size_t get_available_cache_size(CacheType type) const;
 
-    Status load_cache_info_into_memory(std::lock_guard<std::mutex>& cache_lock);
+    Status load_cache_info_into_memory(std::lock_guard<doris::Mutex>& cache_lock);
 
     FileSegments split_range_into_cells(const Key& key, const CacheContext& context, size_t offset,
                                         size_t size, FileSegment::State state,
-                                        std::lock_guard<std::mutex>& cache_lock);
+                                        std::lock_guard<doris::Mutex>& cache_lock);
 
-    std::string dump_structure_unlocked(const Key& key, std::lock_guard<std::mutex>& cache_lock);
+    std::string dump_structure_unlocked(const Key& key, std::lock_guard<doris::Mutex>& cache_lock);
 
     void fill_holes_with_empty_file_segments(FileSegments& file_segments, const Key& key,
                                              const CacheContext& context,
                                              const FileSegment::Range& range,
-                                             std::lock_guard<std::mutex>& cache_lock);
+                                             std::lock_guard<doris::Mutex>& cache_lock);
 
     size_t get_used_cache_size_unlocked(CacheType type,
-                                        std::lock_guard<std::mutex>& cache_lock) const;
+                                        std::lock_guard<doris::Mutex>& cache_lock) const;
 
     size_t get_available_cache_size_unlocked(CacheType type,
-                                             std::lock_guard<std::mutex>& cache_lock) const;
+                                             std::lock_guard<doris::Mutex>& cache_lock) const;
 
     size_t get_file_segments_num_unlocked(CacheType type,
-                                          std::lock_guard<std::mutex>& cache_lock) const;
+                                          std::lock_guard<doris::Mutex>& cache_lock) const;
 
     bool need_to_move(CacheType cell_type, CacheType query_type) const;
 
     bool remove_if_ttl_file_unlock(const Key& file_key, bool remove_directly,
-                                   std::lock_guard<std::mutex>&);
+                                   std::lock_guard<doris::Mutex>&);
 
     void run_background_operation();
 
@@ -394,7 +397,7 @@ public:
 
 private:
     static inline std::deque<std::shared_ptr<FileReader>> s_file_reader_cache;
-    static inline std::mutex s_file_reader_cache_mtx;
+    static inline doris::Mutex s_file_reader_cache_mtx;
     static constexpr size_t s_max_file_reader_size = 1024 * 1024;
     static inline std::atomic_bool s_read_only {false};
 

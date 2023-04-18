@@ -275,8 +275,10 @@ public:
     bool is_hot() const {
         static constexpr int64_t hot_interval = 24 * 60 * 60;
         return std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count() - atime > hot_interval;
+                       std::chrono::steady_clock::now().time_since_epoch())
+                               .count() -
+                       atime >
+               hot_interval;
     }
 
 protected:
@@ -323,7 +325,10 @@ protected:
     std::atomic<uint64_t> _refs_by_reader;
     // rowset state machine
     RowsetStateMachine _rowset_state_machine;
-    int64_t atime {0};
+    // When inited, it is hot
+    int64_t atime = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
 };
 
 } // namespace doris

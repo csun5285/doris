@@ -62,7 +62,7 @@ size_t FileSegment::get_downloaded_size() const {
     return get_downloaded_size(segment_lock);
 }
 
-size_t FileSegment::get_downloaded_size(std::lock_guard<std::mutex>& /* segment_lock */) const {
+size_t FileSegment::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segment_lock */) const {
     if (_download_state == State::DOWNLOADED) {
         return _downloaded_size;
     }
@@ -93,7 +93,7 @@ std::string FileSegment::get_or_set_downloader() {
     return _downloader_id;
 }
 
-void FileSegment::reset_downloader(std::lock_guard<std::mutex>& segment_lock) {
+void FileSegment::reset_downloader(std::lock_guard<doris::Mutex>& segment_lock) {
     DCHECK(!_downloader_id.empty()) << "There is no downloader";
 
     DCHECK(get_caller_id() == _downloader_id) << "Downloader can be reset only by downloader";
@@ -101,7 +101,7 @@ void FileSegment::reset_downloader(std::lock_guard<std::mutex>& segment_lock) {
     reset_downloader_impl(segment_lock);
 }
 
-void FileSegment::reset_downloader_impl(std::lock_guard<std::mutex>& segment_lock) {
+void FileSegment::reset_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock) {
     if (_downloaded_size == range().size()) {
         set_downloaded(segment_lock);
     } else {
@@ -122,7 +122,7 @@ bool FileSegment::is_downloader() const {
     return get_caller_id() == _downloader_id;
 }
 
-bool FileSegment::is_downloader_impl(std::lock_guard<std::mutex>& /* segment_lock */) const {
+bool FileSegment::is_downloader_impl(std::lock_guard<doris::Mutex>& /* segment_lock */) const {
     return get_caller_id() == _downloader_id;
 }
 
@@ -153,7 +153,7 @@ std::string FileSegment::get_path_in_local_cache(bool is_tmp) const {
 Status FileSegment::read_at(Slice buffer, size_t offset) {
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
-        std::lock_guard<std::mutex> lock(_mutex);
+        std::lock_guard<doris::Mutex> lock(_mutex);
         if (!(reader = _cache_reader.lock())) {
             auto download_path = get_path_in_local_cache();
             RETURN_IF_ERROR(global_local_filesystem()->open_file(download_path, &reader));
@@ -237,14 +237,17 @@ FileSegment::State FileSegment::wait() {
     if (_download_state == State::DOWNLOADING) {
         DCHECK(!_downloader_id.empty());
         DCHECK(_downloader_id != get_caller_id());
-
+#if !defined(USE_BTHREAD_SCANNER)
         _cv.wait_for(segment_lock, std::chrono::seconds(1));
+#else 
+        _cv.wait_for(segment_lock, 1000000);
+#endif
     }
 
     return _download_state;
 }
 
-Status FileSegment::set_downloaded(std::lock_guard<std::mutex>& /* segment_lock */) {
+Status FileSegment::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock */) {
     Status status = Status::OK();
     if (_is_downloaded) {
         return status;
@@ -286,7 +289,7 @@ void FileSegment::reset_range() {
     }
 }
 
-void FileSegment::complete_unlocked(std::lock_guard<std::mutex>& segment_lock) {
+void FileSegment::complete_unlocked(std::lock_guard<doris::Mutex>& segment_lock) {
     if (is_downloader_impl(segment_lock)) {
         reset_downloader(segment_lock);
         _cv.notify_all();
@@ -298,7 +301,7 @@ std::string FileSegment::get_info_for_log() const {
     return get_info_for_log_impl(segment_lock);
 }
 
-std::string FileSegment::get_info_for_log_impl(std::lock_guard<std::mutex>& segment_lock) const {
+std::string FileSegment::get_info_for_log_impl(std::lock_guard<doris::Mutex>& segment_lock) const {
     std::stringstream info;
     info << "File segment: " << range().to_string() << ", ";
     info << "state: " << state_to_string(_download_state) << ", ";
@@ -326,7 +329,7 @@ bool FileSegment::has_finalized_state() const {
     return _download_state == State::DOWNLOADED;
 }
 
-FileSegment::State FileSegment::state_unlock(std::lock_guard<std::mutex>&) const {
+FileSegment::State FileSegment::state_unlock(std::lock_guard<doris::Mutex>&) const {
     return _download_state;
 }
 

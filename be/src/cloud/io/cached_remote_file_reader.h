@@ -36,8 +36,6 @@ public:
     Status read_at(size_t offset, Slice result, size_t* bytes_read,
                    IOState* state = nullptr) override;
 
-    Status read_at_impl(size_t offset, Slice result, size_t* bytes_read, IOState* state);
-
     const Path& path() const override { return _remote_file_reader->path(); }
 
     size_t size() const override { return _remote_file_reader->size(); }

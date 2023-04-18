@@ -9,6 +9,7 @@
 #include "cloud/io/file_writer.h"
 #include "cloud/io/cloud_file_cache_fwd.h"
 #include "common/status.h"
+#include "util/lock.h"
 
 namespace doris {
 namespace io {
@@ -93,7 +94,7 @@ public:
 
     int64_t expiration_time() const { return _expiration_time; }
 
-    void reset_downloader(std::lock_guard<std::mutex>& segment_lock);
+    void reset_downloader(std::lock_guard<doris::Mutex>& segment_lock);
 
     bool is_downloader() const;
 
@@ -121,22 +122,22 @@ public:
     // should guarantee that the fragment don't have concurrency problem
     void reset_range();
 
-    State state_unlock(std::lock_guard<std::mutex>&) const;
+    State state_unlock(std::lock_guard<doris::Mutex>&) const;
 
     FileSegment& operator=(const FileSegment&) = delete;
     FileSegment(const FileSegment&) = delete;
 
 private:
-    size_t get_downloaded_size(std::lock_guard<std::mutex>& segment_lock) const;
-    std::string get_info_for_log_impl(std::lock_guard<std::mutex>& segment_lock) const;
+    size_t get_downloaded_size(std::lock_guard<doris::Mutex>& segment_lock) const;
+    std::string get_info_for_log_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
     bool has_finalized_state() const;
 
-    Status set_downloaded(std::lock_guard<std::mutex>& segment_lock);
-    bool is_downloader_impl(std::lock_guard<std::mutex>& segment_lock) const;
+    Status set_downloaded(std::lock_guard<doris::Mutex>& segment_lock);
+    bool is_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
 
-    void complete_unlocked(std::lock_guard<std::mutex>& segment_lock);
+    void complete_unlocked(std::lock_guard<doris::Mutex>& segment_lock);
 
-    void reset_downloader_impl(std::lock_guard<std::mutex>& segment_lock);
+    void reset_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock);
 
     Range _segment_range;
 
@@ -153,8 +154,8 @@ private:
     /// 1. cache lock
     /// 2. segment lock
 
-    mutable std::mutex _mutex;
-    std::condition_variable _cv;
+    mutable doris::Mutex _mutex;
+    doris::ConditionVariable _cv;
 
     /// Protects downloaded_size access with actual write into fs.
     /// downloaded_size is not protected by download_mutex in methods which
@@ -162,7 +163,7 @@ private:
     /// as downloaded_size is updated only in FileSegment::write() method.
     /// Such methods are identified by isDownloader() check at their start,
     /// e.g. they are executed strictly by the same thread, sequentially.
-    mutable std::mutex _download_mutex;
+    mutable doris::Mutex _download_mutex;
 
     Key _file_key;
     CloudFileCache* _cache;
