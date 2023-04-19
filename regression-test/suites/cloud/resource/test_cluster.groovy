@@ -18,7 +18,8 @@ suite("cloud_cluster_test", "cloud_cluster") {
                 "prefix": "test-prefix",
                 "endpoint": "test-endpoint",
                 "region": "test-region",
-                "provider" : "BOS"
+                "provider" : "BOS",
+                "external-endpoint" : "endpoint"
             }
         }'
      */
@@ -30,7 +31,8 @@ suite("cloud_cluster_test", "cloud_cluster") {
               prefix: "test-prefix",
               endpoint: "test-endpoint",
               region: "test-region",
-              provider : "BOS"]
+              provider : "BOS",
+              external-endpoint: "test-external-endpoint"]
     def map = [instance_id: "${instance_id}", name: "${name}", user_id: "${user_id}", obj_info: s3]
     def js = jsonOutput.toJson(map)
 
