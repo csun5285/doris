@@ -21,6 +21,7 @@
 #include <sys/file.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -266,6 +267,7 @@ struct Checker {
         ;
 
 int main(int argc, char** argv) {
+    auto start = std::chrono::steady_clock::now();
     doris::signal::InstallFailureSignalHandler();
 
     // check if print version or help
@@ -396,6 +398,7 @@ int main(int argc, char** argv) {
     daemon.start();
 
     if (doris::config::enable_file_cache) {
+        auto start = std::chrono::steady_clock::now();
         std::unordered_set<std::string> cache_path_set;
         std::vector<doris::CachePath> cache_paths;
         olap_res = doris::parse_conf_cache_paths(doris::config::file_cache_path, cache_paths);
@@ -433,6 +436,10 @@ int main(int argc, char** argv) {
                 LOG(WARNING) << fmt::format("disposable cache path {} is duplicate.", path);
             }
         });
+        auto end = std::chrono::steady_clock::now();
+        LOG(INFO) << "loaded file cache, elapsed="
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+                  << "ms";
     }
 
     doris::ResourceTls::init();
@@ -558,6 +565,11 @@ int main(int argc, char** argv) {
         doris::shutdown_logging();
         exit(1);
     }
+
+    auto end = std::chrono::steady_clock::now();
+    LOG(INFO) << "started doris BE, elapsed="
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms"
+              << std::endl;
 
     while (!doris::k_doris_exit) {
 #if defined(LEAK_SANITIZER)
