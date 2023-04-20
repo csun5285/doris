@@ -161,7 +161,6 @@ Status FileSegment::read_at(Slice buffer, size_t offset) {
             _cache_reader = CloudFileCache::cache_file_reader(reader);
         }
     }
-    io::IOState state;
     size_t bytes_reads = buffer.size;
     RETURN_IF_ERROR(reader->read_at(offset, buffer, &bytes_reads));
     DCHECK(bytes_reads == buffer.size);
