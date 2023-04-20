@@ -36,7 +36,8 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
                 response->mutable_status()->set_code(code);
                 response->mutable_status()->set_msg(msg);
                 LOG(INFO) << (code == MetaServiceCode::OK ? "succ to " : "failed to ")
-                          << __PRETTY_FUNCTION__ << " " << ctrl->remote_side() << " " << msg;
+                          << "recycle_instance"
+                          << " " << ctrl->remote_side() << " " << msg;
             });
 
     std::vector<InstanceInfoPB> instances;
@@ -179,8 +180,8 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
     std::unique_ptr<int, std::function<void(int*)>> defer_status(
             (int*)0x01, [&code, &msg, &status_code, &response_body, &cntl, &req](int*) {
                 convert_ms_code_to_http_code(code, status_code);
-                LOG(INFO) << (code == MetaServiceCode::OK ? "succ to " : "failed to ")
-                          << __PRETTY_FUNCTION__ << " " << cntl->remote_side() << " request=\n"
+                LOG(INFO) << (code == MetaServiceCode::OK ? "succ to " : "failed to ") << "http"
+                          << " " << cntl->remote_side() << " request=\n"
                           << req << "\n ret=" << code << " msg=" << msg;
                 cntl->http_response().set_status_code(status_code);
                 cntl->response_attachment().append(response_body);

@@ -60,7 +60,7 @@ suite("test_recycler_with_internal_copy") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleInternalStage(token, instanceId, cloudUniqueId, fileName)) {
             success = true
             break
@@ -99,7 +99,7 @@ suite("test_recycler_with_internal_copy") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
             success = true
             break

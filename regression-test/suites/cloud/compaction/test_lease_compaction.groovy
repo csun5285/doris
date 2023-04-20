@@ -175,7 +175,6 @@ suite("test_lease_compaction") {
         // wait cluster1 compaction success
         waitForCompaction(ipList[1], httpPortList[1]);
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
         injectionPoint(ipList[0], httpPortList[0], "clear/all");
         injectionPoint(ipList[1], httpPortList[1], "clear/all");
         // FIXME(plat1ko): reset be conf to original value

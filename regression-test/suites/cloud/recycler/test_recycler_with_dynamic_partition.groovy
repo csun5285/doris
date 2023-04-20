@@ -54,7 +54,7 @@ suite("test_recycler_with_dynamic_partition") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
             success = true
             break

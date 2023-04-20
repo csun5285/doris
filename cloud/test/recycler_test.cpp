@@ -19,6 +19,7 @@
 #include "meta-service/meta_service.h"
 #include "mock_resource_manager.h"
 #include "rate-limiter/rate_limiter.h"
+#include "recycler/white_black_list.h"
 
 static const std::string instance_id = "instance_id_recycle_test";
 static constexpr int64_t table_id = 10086;
@@ -45,20 +46,19 @@ int main(int argc, char** argv) {
 
 namespace selectdb {
 
-TEST(RecyclerTest, whitelist) {
-    Recycler::InstanceFilter filter;
-    filter.reset("", "");
+TEST(RecyclerTest, WhiteBlackList) {
+    WhiteBlackList filter;
     EXPECT_FALSE(filter.filter_out("instance1"));
     EXPECT_FALSE(filter.filter_out("instance2"));
-    filter.reset("", "instance1,instance2");
+    filter.reset({}, {"instance1", "instance2"});
     EXPECT_TRUE(filter.filter_out("instance1"));
     EXPECT_TRUE(filter.filter_out("instance2"));
     EXPECT_FALSE(filter.filter_out("instance3"));
-    filter.reset("instance1,instance2", "");
+    filter.reset({"instance1", "instance2"}, {});
     EXPECT_FALSE(filter.filter_out("instance1"));
     EXPECT_FALSE(filter.filter_out("instance2"));
     EXPECT_TRUE(filter.filter_out("instance3"));
-    filter.reset("instance1", "instance1"); // whitelist overrides blacklist
+    filter.reset({"instance1"}, {"instance1"}); // whitelist overrides blacklist
     EXPECT_FALSE(filter.filter_out("instance1"));
     EXPECT_TRUE(filter.filter_out("instance2"));
 }

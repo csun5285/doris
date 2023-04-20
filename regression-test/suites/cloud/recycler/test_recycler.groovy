@@ -8,6 +8,8 @@ suite("test_recycler") {
     def cloudUniqueId = context.config.cloudUniqueId
     def tableName = 'test_recycler'
 
+    def start_time = System.currentTimeMillis()
+
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
         CREATE TABLE IF NOT EXISTS `${tableName}` (
@@ -102,11 +104,39 @@ suite("test_recycler") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
             success = true
             break
         }
     } while (retry--)
     assertTrue(success)
+
+    // Make sure to complete at least one round of recycling
+    def recycleJobInfo = { checkFunc ->
+        httpTest {
+            endpoint context.config.recycleServiceHttpAddress
+            uri "/RecyclerService/http/recycle_job_info?token=$token&instance_id=$instanceId"
+            op "get"
+            check checkFunc
+        }
+    }
+    do {
+        def last_finish_time_ms = -1
+        recycleJobInfo.call() {
+            respCode, body ->
+                logger.info("http cli result: ${body} ${respCode}")
+                recycleJobInfoResult = body
+                logger.info("recycleJobInfoResult:${recycleJobInfoResult}")
+                assertEquals(respCode, 200)
+                def info = parseJson(recycleJobInfoResult.trim())
+                last_finish_time_ms = Long.parseLong(info.last_finish_time_ms)
+        }
+        logger.info("last_finish_time=${last_finish_time_ms}, start_time=${start_time}")
+        if (last_finish_time_ms > start_time) {
+            break
+        }
+        triggerRecycle(token, instanceId)
+        Thread.sleep(10000) // 10s
+    } while (true)
 }

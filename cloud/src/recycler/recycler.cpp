@@ -32,31 +32,6 @@ static bool is_working() {
     return s_is_working.load(std::memory_order_acquire);
 }
 
-void Recycler::InstanceFilter::reset(const std::string& whitelist, const std::string& blacklist) {
-    blacklist_.clear();
-    whitelist_.clear();
-    if (!whitelist.empty()) {
-        std::vector<std::string> list;
-        butil::SplitString(whitelist, ',', &list);
-        for (auto& str : list) {
-            whitelist_.insert(std::move(str));
-        }
-    } else {
-        std::vector<std::string> list;
-        butil::SplitString(blacklist, ',', &list);
-        for (auto& str : list) {
-            blacklist_.insert(std::move(str));
-        }
-    }
-}
-
-bool Recycler::InstanceFilter::filter_out(const std::string& instance_id) const {
-    if (whitelist_.empty()) {
-        return blacklist_.count(instance_id);
-    }
-    return !whitelist_.count(instance_id);
-}
-
 static void signal_handler(int signal) {
     LOG(INFO) << "signal_handler capture signal=" << signal;
     if (signal == SIGINT || signal == SIGTERM) {

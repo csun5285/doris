@@ -15,6 +15,8 @@ namespace selectdb {
 namespace config {
 extern int32_t check_object_interval_seconds;
 extern int32_t recycle_concurrency;
+extern std::vector<std::string> recycle_whitelist;
+extern std::vector<std::string> recycle_blacklist;
 } // namespace config
 
 static std::atomic_bool s_is_working = false;
@@ -25,6 +27,7 @@ static bool is_working() {
 
 int Checker::start() {
     DCHECK(txn_kv_);
+    instance_filter_.reset(config::recycle_whitelist, config::recycle_blacklist);
 
     s_is_working = true;
     // launch instance scanner
@@ -35,6 +38,7 @@ int Checker::start() {
                 // enqueue instances
                 std::lock_guard lock(pending_instance_mtx_);
                 for (auto& instance : instances) {
+                    if (instance_filter_.filter_out(instance.instance_id())) continue;
                     auto [_, success] = pending_instance_set_.insert(instance.instance_id());
                     // skip instance already in pending queue
                     if (success) {
