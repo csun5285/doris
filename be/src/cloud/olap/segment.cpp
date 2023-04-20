@@ -34,9 +34,12 @@
 #include "olap/tablet_schema.h"
 #include "util/crc32c.h"
 #include "util/slice.h" // Slice
+#include "vec/data_types/data_type_factory.hpp"
 #include "vec/olap/vgeneric_iterators.h"
 
 namespace doris {
+using namespace ErrorCode;
+
 namespace segment_v2 {
 
 Status Segment::open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
@@ -57,11 +60,12 @@ Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr table
         : _segment_id(segment_id),
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
-          _meta_mem_usage(0) {}
+          _meta_mem_usage(0),
+          _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {}
 
 Segment::~Segment() {
 #ifndef BE_TEST
-    StorageEngine::instance()->segment_meta_mem_tracker()->release(_meta_mem_usage);
+    _segment_meta_mem_tracker->release(_meta_mem_usage);
 #endif
 }
 
@@ -153,8 +157,7 @@ Status Segment::_parse_footer() {
                                   _file_reader->path().native(), file_size, 12 + footer_length);
     }
     _meta_mem_usage += footer_length;
-    if (StorageEngine::instance())
-        StorageEngine::instance()->segment_meta_mem_tracker()->consume(footer_length);
+    _segment_meta_mem_tracker->consume(footer_length);
 
     std::string footer_buf;
     footer_buf.resize(footer_length);
@@ -175,6 +178,10 @@ Status Segment::_parse_footer() {
     if (!_footer.ParseFromString(footer_buf)) {
         return Status::Corruption("Bad segment file {}: failed to parse SegmentFooterPB",
                                   _file_reader->path().native());
+    }
+    if (_footer.num_rows() == 0) {
+        // this is a pad segment
+        return Status::Error<EMPTY_SEGMENT>();
     }
     return Status::OK();
 }
@@ -221,8 +228,7 @@ Status Segment::load_index() {
             DCHECK(footer.has_short_key_page_footer());
 
             _meta_mem_usage += body.get_size();
-            if (StorageEngine::instance())
-                StorageEngine::instance()->segment_meta_mem_tracker()->consume(body.get_size());
+            _segment_meta_mem_tracker->consume(body.get_size());
             _sk_index_decoder.reset(new ShortKeyIndexDecoder);
             return _sk_index_decoder->parse(body, footer.short_key_page_footer());
         }
@@ -354,6 +360,23 @@ Status Segment::lookup_row_key(const Slice& key, RowLocation* row_location) {
 
     return Status::OK();
 }
+
+Status Segment::read_key_by_rowid(uint32_t row_id, std::string* key) {
+    RETURN_IF_ERROR(load_pk_index_and_bf());
+    std::unique_ptr<segment_v2::IndexedColumnIterator> iter;
+    RETURN_IF_ERROR(_pk_index_reader->new_iterator(&iter));
+
+    auto index_type = vectorized::DataTypeFactory::instance().create_data_type(
+            _pk_index_reader->type_info()->type(), 1, 0);
+    auto index_column = index_type->create_column();
+    RETURN_IF_ERROR(iter->seek_to_ordinal(row_id));
+    size_t num_read = 1;
+    RETURN_IF_ERROR(iter->next_batch(&num_read, index_column));
+    CHECK(num_read == 1);
+    *key = index_column->get_data_at(0).to_string();
+    return Status::OK();
+}
+
 
 } // namespace segment_v2
 } // namespace doris

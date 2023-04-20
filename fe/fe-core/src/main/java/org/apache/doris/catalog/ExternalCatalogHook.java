@@ -36,8 +36,7 @@ public class ExternalCatalogHook {
     private IAMTokenMgr tokenManager;
 
     public ExternalCatalogHook() {
-        hookExecutor = ThreadPoolManager.newDaemonScheduledThreadPool(1,
-                "CatalogServiceHook", false);
+        hookExecutor = ThreadPoolManager.newDaemonScheduledThreadPool(1, "CatalogServiceHook", false);
     }
 
     public void removeCatalog(ExternalCatalog catalog) {

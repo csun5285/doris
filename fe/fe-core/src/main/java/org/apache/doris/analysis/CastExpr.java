@@ -27,6 +27,7 @@ import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarFunction;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.catalog.TypeUtils;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Pair;
 import org.apache.doris.qe.ConnectContext;
@@ -159,7 +160,7 @@ public class CastExpr extends Expr {
             return true;
         }
         // Disable no-op casting
-        return fromType.equals(toType) && !fromType.isDecimalV3();
+        return fromType.equals(toType) && !fromType.isDecimalV3() && !fromType.isDatetimeV2();
     }
 
     public static void initBuiltins(FunctionSet functionSet) {
@@ -397,8 +398,8 @@ public class CastExpr extends Expr {
     }
 
     @Override
-    public Expr getResultValue() throws AnalysisException {
-        recursiveResetChildrenResult();
+    public Expr getResultValue(boolean inView) throws AnalysisException {
+        recursiveResetChildrenResult(inView);
         final Expr value = children.get(0);
         if (!(value instanceof LiteralExpr)) {
             return this;
@@ -416,7 +417,11 @@ public class CastExpr extends Expr {
 
     private Expr castTo(LiteralExpr value) throws AnalysisException {
         if (value instanceof NullLiteral) {
-            return value;
+            if (targetTypeDef != null) {
+                return NullLiteral.create(targetTypeDef.getType());
+            } else {
+                return NullLiteral.create(type);
+            }
         } else if (type.isIntegerType()) {
             return new IntLiteral(value.getLongValue(), type);
         } else if (type.isLargeIntType()) {
@@ -445,7 +450,7 @@ public class CastExpr extends Expr {
         out.writeBoolean(isImplicit);
         if (targetTypeDef.getType() instanceof ScalarType) {
             ScalarType scalarType = (ScalarType) targetTypeDef.getType();
-            scalarType.write(out);
+            TypeUtils.writeScalaType(scalarType, out);
         } else {
             throw new IOException("Can not write type " + targetTypeDef.getType());
         }
@@ -464,7 +469,7 @@ public class CastExpr extends Expr {
     @Override
     public void readFields(DataInput in) throws IOException {
         isImplicit = in.readBoolean();
-        ScalarType scalarType = ScalarType.read(in);
+        ScalarType scalarType = TypeUtils.readScalaType(in);
         targetTypeDef = new TypeDef(scalarType);
         int counter = in.readInt();
         for (int i = 0; i < counter; i++) {

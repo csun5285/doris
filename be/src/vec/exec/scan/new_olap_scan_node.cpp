@@ -144,7 +144,6 @@ Status NewOlapScanNode::collect_query_statistics(QueryStatistics* statistics) {
 
 Status NewOlapScanNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(VScanNode::prepare(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
     return Status::OK();
 }
 
@@ -175,7 +174,14 @@ Status NewOlapScanNode::_init_profile() {
     _block_init_seek_counter = ADD_COUNTER(_segment_profile, "BlockInitSeekCount", TUnit::UNIT);
     _block_conditions_filtered_timer = ADD_TIMER(_segment_profile, "BlockConditionsFilteredTime");
 
-    _rows_vec_cond_counter = ADD_COUNTER(_segment_profile, "RowsVectorPredFiltered", TUnit::UNIT);
+    _rows_vec_cond_filtered_counter =
+            ADD_COUNTER(_segment_profile, "RowsVectorPredFiltered", TUnit::UNIT);
+    _rows_short_circuit_cond_filtered_counter =
+            ADD_COUNTER(_segment_profile, "RowsShortCircuitPredFiltered", TUnit::UNIT);
+    _rows_vec_cond_input_counter =
+            ADD_COUNTER(_segment_profile, "RowsVectorPredInput", TUnit::UNIT);
+    _rows_short_circuit_cond_input_counter =
+            ADD_COUNTER(_segment_profile, "RowsShortCircuitPredInput", TUnit::UNIT);
     _vec_cond_timer = ADD_TIMER(_segment_profile, "VectorPredEvalTime");
     _short_cond_timer = ADD_TIMER(_segment_profile, "ShortPredEvalTime");
     _first_read_timer = ADD_TIMER(_segment_profile, "FirstReadTime");
@@ -379,6 +385,12 @@ Status NewOlapScanNode::_build_key_ranges_and_filters() {
                             if (exact_range) {
                                 _colname_to_value_range.erase(iter->first);
                             }
+                        } else {
+                            // if exceed max_pushdown_conditions_per_column, use whole_value_rang instead
+                            // and will not erase from _colname_to_value_range, it must be not exact_range
+                            temp_range.set_whole_value_range();
+                            RETURN_IF_ERROR(_scan_keys.extend_scan_key(
+                                    temp_range, _max_scan_key_num, &exact_range, &eos));
                         }
                         return Status::OK();
                     },

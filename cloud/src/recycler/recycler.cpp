@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <string>
 #include <string_view>
 #ifdef UNIT_TEST
@@ -1062,6 +1063,8 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
         meta_schema_key({instance_id_, index_id, 0}, &schema_key_begin);
         meta_schema_key({instance_id_, index_id + 1, 0}, &schema_key_end);
         txn->remove(schema_key_begin, schema_key_end);
+        LOG(WARNING) << "remove schema kv, begin=" << hex(schema_key_begin)
+                     << " end=" << hex(schema_key_end);
     }
     if (txn->commit() != 0) {
         LOG(WARNING) << "failed to delete tablet job or stats key, instance_id=" << instance_id_;
@@ -1090,9 +1093,9 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
     int64_t tablet_id = rs_meta_pb.tablet_id();
     // process inverted indexes
     std::vector<int64_t> index_ids;
-    index_ids.reserve(rs_meta_pb.tablet_schema().index().size());
-    for (auto& index_pb : rs_meta_pb.tablet_schema().index()) {
-        index_ids.push_back(index_pb.index_id());
+    index_ids.reserve(rs_meta_pb.tablet_schema().index_size());
+    for (auto& i : rs_meta_pb.tablet_schema().index()) {
+        index_ids.push_back(i.index_id());
     }
     std::vector<std::string> file_paths;
     file_paths.reserve(num_segments * (1 + index_ids.size()));
@@ -2211,4 +2214,5 @@ void InstanceRecycler::recycle_expired_stage_objects() {
         }
     }
 }
+
 } // namespace selectdb

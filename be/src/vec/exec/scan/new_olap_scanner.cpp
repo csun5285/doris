@@ -28,11 +28,10 @@ namespace doris::vectorized {
 NewOlapScanner::NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit,
                                bool aggregation, bool need_agg_finalize,
                                const TPaloScanRange& scan_range, RuntimeProfile* profile)
-        : VScanner(state, static_cast<VScanNode*>(parent), limit),
+        : VScanner(state, static_cast<VScanNode*>(parent), limit, profile),
           _aggregation(aggregation),
           _need_agg_finalize(need_agg_finalize),
-          _version(-1),
-          _profile(profile) {
+          _version(-1) {
     _tablet_schema = std::make_shared<TabletSchema>();
 }
 
@@ -320,7 +319,7 @@ Status NewOlapScanner::_init_tablet_reader_params(
         _tablet_reader_params.use_page_cache = true;
     }
 
-    if (_tablet->enable_unique_key_merge_on_write()) {
+    if (_tablet->enable_unique_key_merge_on_write() && !_state->skip_delete_bitmap()) {
         _tablet_reader_params.delete_bitmap = &_tablet->tablet_meta()->delete_bitmap();
     }
 
@@ -466,7 +465,12 @@ void NewOlapScanner::_update_counters_before_close() {
     COUNTER_UPDATE(olap_parent->_lazy_read_seek_timer, stats.block_lazy_read_seek_ns);
     COUNTER_UPDATE(olap_parent->_lazy_read_seek_counter, stats.block_lazy_read_seek_num);
     COUNTER_UPDATE(olap_parent->_output_col_timer, stats.output_col_ns);
-    COUNTER_UPDATE(olap_parent->_rows_vec_cond_counter, stats.rows_vec_cond_filtered);
+    COUNTER_UPDATE(olap_parent->_rows_vec_cond_filtered_counter, stats.rows_vec_cond_filtered);
+    COUNTER_UPDATE(olap_parent->_rows_short_circuit_cond_filtered_counter,
+                   stats.rows_short_circuit_cond_filtered);
+    COUNTER_UPDATE(olap_parent->_rows_vec_cond_input_counter, stats.vec_cond_input_rows);
+    COUNTER_UPDATE(olap_parent->_rows_short_circuit_cond_input_counter,
+                   stats.short_circuit_cond_input_rows);
 
     COUNTER_UPDATE(olap_parent->_stats_filtered_counter, stats.rows_stats_filtered);
     COUNTER_UPDATE(olap_parent->_bf_filtered_counter, stats.rows_bf_filtered);

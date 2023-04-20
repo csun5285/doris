@@ -135,7 +135,7 @@ BUILD_BROKER=0
 BUILD_AUDIT=0
 BUILD_META_TOOL='OFF'
 BUILD_SPARK_DPP=0
-BUILD_JAVA_UDF=1
+BUILD_JAVA_UDF=0
 BUILD_HIVE_UDF=0
 CLEAN=0
 HELP=0
@@ -162,10 +162,12 @@ else
             BUILD_FE=1
             BUILD_SPARK_DPP=1
             BUILD_HIVE_UDF=1
+            BUILD_JAVA_UDF=1
             shift
             ;;
         --be)
             BUILD_BE=1
+            BUILD_JAVA_UDF=1
             shift
             ;;
         --cloud)
@@ -251,7 +253,12 @@ if [[ ! -f "${DORIS_THIRDPARTY}/installed/lib/libbacktrace.a" ]]; then
     echo "Thirdparty libraries need to be build ..."
     # need remove all installed pkgs because some lib like lz4 will throw error if its lib alreay exists
     rm -rf "${DORIS_THIRDPARTY}/installed"
-    "${DORIS_THIRDPARTY}/build-thirdparty.sh" -j "${PARALLEL}"
+
+    if [[ "${CLEAN}" -eq 0 ]]; then
+        "${DORIS_THIRDPARTY}/build-thirdparty.sh" -j "${PARALLEL}"
+    else
+        "${DORIS_THIRDPARTY}/build-thirdparty.sh" -j "${PARALLEL}" --clean
+    fi
 fi
 # For soft upgrade, to minimize complaints of build issues, enable it by default in the future
 if [[ -z "${ENABLE_INCREMENTAL_THIRD_PARTY_BUILD}" ]]; then
@@ -325,8 +332,12 @@ fi
 if [[ -z ${USE_BTHREAD_SCANNER} ]]; then
     USE_BTHREAD_SCANNER=ON
 fi
-if [[ -z ${STRICT_MEMORY_USE} ]]; then
-    STRICT_MEMORY_USE=OFF
+
+if [[ -z "${ENABLE_STACKTRACE}" ]]; then
+    ENABLE_STACKTRACE='ON'
+fi
+if [[ -z "${STRICT_MEMORY_USE}" ]]; then
+    STRICT_MEMORY_USE='OFF'
 fi
 if [[ -z "${USE_DWARF}" ]]; then
     USE_DWARF='OFF'
@@ -408,6 +419,7 @@ echo "Get params:
     USE_BTHREAD_SCANNER -- $USE_BTHREAD_SCANNER
     STRICT_MEMORY_USE   -- ${STRICT_MEMORY_USE}
     ENABLE_INJECTION_POINT -- ${ENABLE_INJECTION_POINT}
+    ENABLE_STACKTRACE   -- ${ENABLE_STACKTRACE}
     DENABLE_CLANG_COVERAGE -- ${DENABLE_CLANG_COVERAGE}
 "
 
@@ -482,6 +494,7 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
         -DUSE_JEMALLOC="${USE_JEMALLOC}" \
         -DSTRICT_MEMORY_USE="${STRICT_MEMORY_USE}" \
         -DUSE_BTHREAD_SCANNER=${USE_BTHREAD_SCANNER} \
+        -DENABLE_STACKTRACE="${ENABLE_STACKTRACE}" \
         -DUSE_AVX2="${USE_AVX2}" \
         -DGLIBC_COMPATIBILITY="${GLIBC_COMPATIBILITY}" \
         -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
@@ -595,6 +608,7 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     cp -r -p "${DORIS_HOME}/conf/fe.conf" "${DORIS_OUTPUT}/fe/conf"/
     cp -r -p "${DORIS_HOME}/conf/ldap.conf" "${DORIS_OUTPUT}/fe/conf"/
     cp -r -p "${DORIS_HOME}/conf"/*.xml "${DORIS_OUTPUT}/fe/conf"/
+    cp -r -p "${DORIS_HOME}/conf/mysql_ssl_default_certificate" "${DORIS_OUTPUT}/fe/"/
     rm -rf "${DORIS_OUTPUT}/fe/lib"/*
     cp -r -p "${DORIS_HOME}/fe/fe-core/target/lib"/* "${DORIS_OUTPUT}/fe/lib"/
     rm -f "${DORIS_OUTPUT}/fe/lib/palo-fe.jar"

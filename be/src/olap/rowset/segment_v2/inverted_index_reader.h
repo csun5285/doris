@@ -110,7 +110,7 @@ public:
     Status try_query(const std::string& column_name, const void* query_value,
                      InvertedIndexQueryType query_type, InvertedIndexParserType analyser_type,
                      uint32_t* count, const void* additional_value = nullptr) override {
-        return Status::OLAPInternalError(OLAP_ERR_FUNC_NOT_IMPLEMENTED);
+        return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
 
     InvertedIndexReaderType type() override;
@@ -134,7 +134,7 @@ public:
     Status try_query(const std::string& column_name, const void* query_value,
                      InvertedIndexQueryType query_type, InvertedIndexParserType analyser_type,
                      uint32_t* count, const void* additional_value = nullptr) override {
-        return Status::OLAPInternalError(OLAP_ERR_FUNC_NOT_IMPLEMENTED);
+        return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
     InvertedIndexReaderType type() override;
 

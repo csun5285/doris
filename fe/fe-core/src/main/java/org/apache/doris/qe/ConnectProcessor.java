@@ -280,7 +280,11 @@ public class ConnectProcessor {
 
         ctx.getAuditEventBuilder().setEventType(EventType.AFTER_QUERY)
                 .setDb(ClusterNamespace.getNameFromFullName(ctx.getDatabase()))
-                .setState(ctx.getState().toString()).setQueryTime(elapseMs)
+                .setState(ctx.getState().toString())
+                .setErrorCode(ctx.getState().getErrorCode() == null ? 0 : ctx.getState().getErrorCode().getCode())
+                .setErrorMessage((ctx.getState().getErrorMessage() == null ? "" :
+                        ctx.getState().getErrorMessage().replace("\n", " ").replace("\t", " ")))
+                .setQueryTime(elapseMs)
                 .setScanBytes(statistics == null ? 0 : statistics.getScanBytes())
                 .setScanRows(statistics == null ? 0 : statistics.getScanRows())
                 .setCpuTimeMs(statistics == null ? 0 : statistics.getCpuMs())
@@ -289,9 +293,9 @@ public class ConnectProcessor {
                 .setStmtId(ctx.getStmtId())
                 .setQueryId(ctx.queryId() == null ? "NaN" : DebugUtil.printId(ctx.queryId()))
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
+                .setFuzzyVariables(ctx.getSessionVariable().printFuzzyVariables())
                 .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
                             ? ctx.cloudCluster : "UNKNOWN");
-
 
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
@@ -337,18 +341,21 @@ public class ConnectProcessor {
                 }
                 // ok query
                 MetricRepo.HISTO_QUERY_LATENCY.update(elapseMs);
-                MetricRepo.DB_HISTO_QUERY_LATENCY.getOrAdd(ctx.getDatabase()).update(elapseMs);
+                // MetricRepo.DB_HISTO_QUERY_LATENCY.getOrAdd(ctx.getDatabase()).update(elapseMs);
                 if (elapseMs > Config.qe_slow_log_ms) {
                     String sqlDigest = DigestUtils.md5Hex(((Queriable) parsedStmt).toDigest());
                     ctx.getAuditEventBuilder().setSqlDigest(sqlDigest);
                 }
             }
             ctx.getAuditEventBuilder().setIsQuery(true);
-            ctx.getQueryDetail().setEventTime(endTime);
-            ctx.getQueryDetail().setEndTime(endTime);
-            ctx.getQueryDetail().setLatency(elapseMs);
-            ctx.getQueryDetail().setState(QueryDetail.QueryMemState.FINISHED);
-            QueryDetailQueue.addOrUpdateQueryDetail(ctx.getQueryDetail());
+            if (ctx.getQueryDetail() != null) {
+                ctx.getQueryDetail().setEventTime(endTime);
+                ctx.getQueryDetail().setEndTime(endTime);
+                ctx.getQueryDetail().setLatency(elapseMs);
+                ctx.getQueryDetail().setState(QueryDetail.QueryMemState.FINISHED);
+                QueryDetailQueue.addOrUpdateQueryDetail(ctx.getQueryDetail());
+                ctx.setQueryDetail(null);
+            }
         } else {
             ctx.getAuditEventBuilder().setIsQuery(false);
         }
@@ -476,7 +483,9 @@ public class ConnectProcessor {
                 executor.execute();
                 if (i != stmts.size() - 1) {
                     ctx.getState().serverStatus |= MysqlServerStatusFlag.SERVER_MORE_RESULTS_EXISTS;
-                    finalizeCommand();
+                    if (ctx.getState().getStateType() != MysqlStateType.ERR) {
+                        finalizeCommand();
+                    }
                 }
                 auditAfterExec(auditStmt, executor.getParsedStmt(), executor.getQueryStatisticsForAuditLog());
                 // execute failed, skip remaining stmts
@@ -571,8 +580,8 @@ public class ConnectProcessor {
 
         table.readLock();
         try {
-            MysqlSerializer serializer = ctx.getSerializer();
             MysqlChannel channel = ctx.getMysqlChannel();
+            MysqlSerializer serializer = channel.getSerializer();
 
             // Send fields
             // NOTE: Field list doesn't send number of fields
@@ -655,7 +664,7 @@ public class ConnectProcessor {
             return null;
         }
 
-        MysqlSerializer serializer = ctx.getSerializer();
+        MysqlSerializer serializer = ctx.getMysqlChannel().getSerializer();
         serializer.reset();
         packet.writeTo(serializer);
         return serializer.toByteBuffer();

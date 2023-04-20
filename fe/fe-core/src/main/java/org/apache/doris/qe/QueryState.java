@@ -58,6 +58,7 @@ public class QueryState {
         stateType = MysqlStateType.OK;
         errorCode = null;
         infoMessage = null;
+        errorMessage = "";
         serverStatus = 0;
         isQuery = false;
         affectedRows = 0;

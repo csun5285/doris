@@ -247,6 +247,7 @@ message TabletSchemaPB {
     optional int32 schema_version = 13;
     optional bool disable_auto_compaction = 14 [default=false];
     repeated TabletIndexPB index = 15;
+    optional int32 version_col_idx = 16 [default = -1];
 
     optional bool is_dynamic_schema = 100 [default=false];
 }

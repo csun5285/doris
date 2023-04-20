@@ -48,6 +48,5 @@ suite("test_disable_management_cluster", "cloud_auth") {
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
     }
-    
     sql """drop user if exists ${user1}"""
 }

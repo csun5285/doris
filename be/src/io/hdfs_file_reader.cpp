@@ -178,6 +178,10 @@ int64_t HdfsFileReader::size() {
     if (_file_size == -1) {
         if (_hdfs_fs != nullptr) {
             hdfsFileInfo* file_info = hdfsGetPathInfo(_hdfs_fs, _path.c_str());
+            if (file_info == nullptr) {
+                return Status::IOError("failed to get path info, path: {}, error: {}", _path,
+                                       hdfsGetLastError());
+            }
             _file_size = file_info->mSize;
             hdfsFreeFileInfo(file_info, 1);
         }
@@ -203,10 +207,8 @@ Status HdfsFileReader::tell(int64_t* position) {
 int HdfsFsCache::MAX_CACHE_HANDLE = 64;
 
 Status HdfsFsCache::_create_fs(THdfsParams& hdfs_params, hdfsFS* fs) {
-    HDFSCommonBuilder builder = createHDFSBuilder(hdfs_params);
-    if (builder.is_need_kinit()) {
-        RETURN_IF_ERROR(builder.run_kinit());
-    }
+    HDFSCommonBuilder builder;
+    RETURN_IF_ERROR(createHDFSBuilder(hdfs_params, &builder));
     hdfsFS hdfs_fs = hdfsBuilderConnect(builder.get());
     if (hdfs_fs == nullptr) {
         return Status::InternalError("connect to hdfs failed. error: {}", hdfsGetLastError());

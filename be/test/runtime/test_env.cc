@@ -36,7 +36,6 @@ TestEnv::TestEnv() {
     _exec_env->_thread_mgr = new ThreadResourceMgr(2);
     _exec_env->_disk_io_mgr = new DiskIoMgr(1, 1, 1, 10);
     _exec_env->disk_io_mgr()->init(-1);
-    _exec_env->_scan_thread_pool = new PriorityThreadPool(1, 16, "ut_scan");
     _exec_env->_result_queue_mgr = new ResultQueueMgr();
     // TODO may need rpc support, etc.
 }
@@ -48,7 +47,7 @@ void TestEnv::init_tmp_file_mgr(const std::vector<std::string>& tmp_dirs, bool o
     DiskInfo::init();
     // will use DiskInfo::num_disks(), DiskInfo should be initialized before
     auto st = _tmp_file_mgr->init_custom(tmp_dirs, one_dir_per_device);
-    DCHECK(st.ok()) << st.get_error_msg();
+    DCHECK(st.ok()) << st;
 }
 
 void TestEnv::init_buffer_pool(int64_t min_page_len, int64_t capacity, int64_t clean_pages_limit) {
@@ -58,7 +57,6 @@ void TestEnv::init_buffer_pool(int64_t min_page_len, int64_t capacity, int64_t c
 TestEnv::~TestEnv() {
     SAFE_DELETE(_exec_env->_result_queue_mgr);
     SAFE_DELETE(_exec_env->_buffer_pool);
-    SAFE_DELETE(_exec_env->_scan_thread_pool);
     SAFE_DELETE(_exec_env->_disk_io_mgr);
     SAFE_DELETE(_exec_env->_thread_mgr);
 
@@ -138,7 +136,7 @@ void TestEnv::init_storage_engine(bool need_open, const std::vector<std::string>
     } else {
         _engine = new StorageEngine(options);
     }
-    DCHECK(st.ok()) << st.get_error_msg();
+    DCHECK(st.ok()) << st;
     _exec_env->set_storage_engine(_engine);
 }
 

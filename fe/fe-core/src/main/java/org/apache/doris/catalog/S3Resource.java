@@ -50,6 +50,13 @@ import java.util.Optional;
  * "AWS_REQUEST_TIMEOUT_MS" = "3000",
  * "AWS_CONNECTION_TIMEOUT_MS" = "1000"
  * );
+ * <p>
+ * For AWS S3, BE need following properties:
+ * 1. AWS_ACCESS_KEY: ak
+ * 2. AWS_SECRET_KEY: sk
+ * 3. AWS_ENDPOINT: s3.us-east-1.amazonaws.com
+ * 4. AWS_REGION: us-east-1
+ * And file path: s3://bucket_name/csv/taxi.csv
  */
 public class S3Resource extends Resource {
     private static final Logger LOG = LogManager.getLogger(S3Resource.class);
@@ -59,6 +66,7 @@ public class S3Resource extends Resource {
     public static final String S3_REGION = "AWS_REGION";
     public static final String S3_ACCESS_KEY = "AWS_ACCESS_KEY";
     public static final String S3_SECRET_KEY = "AWS_SECRET_KEY";
+    private static final String S3_CREDENTIALS_PROVIDER = "AWS_CREDENTIALS_PROVIDER";
     public static final List<String> REQUIRED_FIELDS =
             Arrays.asList(S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY, S3_SECRET_KEY);
     // required by storage policy

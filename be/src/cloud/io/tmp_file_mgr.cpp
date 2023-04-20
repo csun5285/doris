@@ -12,23 +12,20 @@ static const char* MAX_UPLOAD_BYTES = "max_upload_bytes";
 
 Status TmpFileMgr::create_tmp_file_mgrs() {
     if (config::tmp_file_dirs.empty()) {
-        LOG(ERROR) << "The config tmp_file_dirs is empty";
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::InvalidArgument("The config tmp_file_dirs is empty");
     }
     using namespace rapidjson;
     Document document;
     document.Parse(config::tmp_file_dirs.c_str());
     if (!document.IsArray()) {
-        LOG(ERROR) << "The config tmp_file_dirs need to be array";
-        return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+        return Status::InvalidArgument("The config tmp_file_dirs need to be array");
     }
     std::vector<TmpFileDirConfig> configs;
     for (auto& config : document.GetArray()) {
         TmpFileDirConfig tmp_file_mgr_config;
         auto map = config.GetObject();
         if (!map.HasMember(TMP_FILE_DIR_PATH)) {
-            LOG(ERROR) << "The config doesn't have member 'path' ";
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::InvalidArgument("The config doesn't have member 'path' ");
         }
         tmp_file_mgr_config.path = map.FindMember(TMP_FILE_DIR_PATH)->value.GetString();
         if (map.HasMember(MAX_CACHE_BYTES)) {
@@ -36,8 +33,7 @@ Status TmpFileMgr::create_tmp_file_mgrs() {
             if (value.IsInt64()) {
                 tmp_file_mgr_config.max_cache_bytes = value.GetInt64();
             } else {
-                LOG(WARNING) << "max_cache_bytes should be int64";
-                return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+                return Status::InvalidArgument("max_cache_bytes should be int64");
             }
         }
         if (map.HasMember(MAX_UPLOAD_BYTES)) {
@@ -45,17 +41,14 @@ Status TmpFileMgr::create_tmp_file_mgrs() {
             if (value.IsInt64()) {
                 tmp_file_mgr_config.max_upload_bytes = value.GetInt64();
             } else {
-                LOG(WARNING) << "max_upload_bytes should be int64";
-                return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+                return Status::InvalidArgument("max_upload_bytes should be int64");
             }
         }
         if (tmp_file_mgr_config.max_upload_bytes <= 0) {
-            LOG(WARNING) << "max_upload_bytes should not less than or equal to zero";
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::InvalidArgument("max_upload_bytes should not less than or equal to zero");
         }
         if (tmp_file_mgr_config.max_cache_bytes < 0) {
-            LOG(WARNING) << "max_cache_bytes should not less than zero";
-            return Status::OLAPInternalError(OLAP_ERR_INPUT_PARAMETER_ERROR);
+            return Status::InvalidArgument("max_cache_bytes should not less than zero");
         }
         configs.push_back(tmp_file_mgr_config);
     }

@@ -22,7 +22,6 @@
 
 #include <vec/data_types/data_type_factory.hpp>
 
-#include "../format/table/iceberg_reader.h"
 #include "common/logging.h"
 #include "common/utils.h"
 #include "exec/arrow/orc_reader.h"
@@ -40,17 +39,19 @@
 #include "vec/functions/simple_function_factory.h"
 
 namespace doris::vectorized {
+using namespace ErrorCode;
 
 VFileScanner::VFileScanner(RuntimeState* state, NewFileScanNode* parent, int64_t limit,
-                           const TFileScanRange& scan_range, RuntimeProfile* profile)
-        : VScanner(state, static_cast<VScanNode*>(parent), limit),
+                           const TFileScanRange& scan_range, RuntimeProfile* profile,
+                           KVCache<std::string>& kv_cache)
+        : VScanner(state, static_cast<VScanNode*>(parent), limit, profile),
           _params(scan_range.params),
           _ranges(scan_range.ranges),
           _next_range(0),
           _cur_reader(nullptr),
           _cur_reader_eof(false),
           _mem_pool(std::make_unique<MemPool>()),
-          _profile(profile),
+          _kv_cache(kv_cache),
           _strict_mode(false) {
     if (scan_range.params.__isset.strict_mode) {
         _strict_mode = scan_range.params.strict_mode;
@@ -375,18 +376,39 @@ Status VFileScanner::_convert_to_output_block(Block* block) {
     auto filter_column = vectorized::ColumnUInt8::create(rows, 1);
     auto& filter_map = filter_column->get_data();
 
+    // Set block dynamic, block maybe merge or add_rows
+    // in in later process.
+    if (_is_dynamic_schema) {
+        block->set_block_type(BlockType::DYNAMIC);
+    }
+
     for (auto slot_desc : _output_tuple_desc->slots()) {
         if (!slot_desc->is_materialized()) {
             continue;
         }
         int dest_index = ctx_idx++;
         vectorized::ColumnPtr column_ptr;
-
-        auto* ctx = _dest_vexpr_ctx[dest_index];
-        int result_column_id = -1;
-        // PT1 => dest primitive type
-        RETURN_IF_ERROR(ctx->execute(&_src_block, &result_column_id));
-        column_ptr = _src_block.get_by_position(result_column_id).column;
+        if (_is_dynamic_schema) {
+            if (slot_desc->type().is_variant_type()) {
+                continue;
+            }
+             // cast column
+            auto& column_type_name = _src_block.get_by_position(dest_index);
+            auto dest_type = vectorized::DataTypeFactory::instance().create_data_type(
+                    slot_desc->type(), slot_desc->is_nullable());
+            if (!column_type_name.type->equals(*dest_type)) {
+                RETURN_IF_ERROR(vectorized::schema_util::cast_column(column_type_name, dest_type,
+                                                                     &column_ptr));
+            } else {
+                column_ptr = std::move(column_type_name.column);
+            }
+        } else {
+            auto* ctx = _dest_vexpr_ctx[dest_index];
+            int result_column_id = -1;
+            // PT1 => dest primitive type
+            RETURN_IF_ERROR(ctx->execute(&_src_block, &result_column_id));
+            column_ptr = _src_block.get_by_position(result_column_id).column;
+        }
         // column_ptr maybe a ColumnConst, convert it to a normal column
         column_ptr = column_ptr->convert_to_full_column_if_const();
         DCHECK(column_ptr != nullptr);
@@ -482,19 +504,24 @@ Status VFileScanner::_get_next_reader() {
             ParquetReader* parquet_reader =
                     new ParquetReader(_profile, _params, range, _state->query_options().batch_size,
                                       const_cast<cctz::time_zone*>(&_state->timezone_obj()));
+            RETURN_IF_ERROR(parquet_reader->open());
             if (!_is_load && _push_down_expr == nullptr && _vconjunct_ctx != nullptr) {
                 RETURN_IF_ERROR(_vconjunct_ctx->clone(_state, &_push_down_expr));
                 _discard_conjuncts();
             }
-            init_status = parquet_reader->init_reader(_file_col_names, _colname_to_value_range,
-                                                      _push_down_expr);
             if (range.__isset.table_format_params &&
                 range.table_format_params.table_format_type == "iceberg") {
-                IcebergTableReader* iceberg_reader = new IcebergTableReader(
-                        (GenericReader*)parquet_reader, _profile, _state, _params, range);
+                IcebergTableReader* iceberg_reader =
+                        new IcebergTableReader((GenericReader*)parquet_reader, _profile, _state,
+                                               _params, range, _kv_cache);
+                init_status = iceberg_reader->init_reader(_file_col_names, _col_id_name_map,
+                                                          _colname_to_value_range, _push_down_expr);
                 RETURN_IF_ERROR(iceberg_reader->init_row_filters(range));
                 _cur_reader.reset((GenericReader*)iceberg_reader);
             } else {
+                std::vector<std::string> place_holder;
+                init_status = parquet_reader->init_reader(_file_col_names, place_holder,
+                                                          _colname_to_value_range, _push_down_expr);
                 _cur_reader.reset((GenericReader*)parquet_reader);
             }
             break;
@@ -534,14 +561,14 @@ Status VFileScanner::_get_next_reader() {
             return Status::InternalError("Not supported file format: {}", _params.format_type);
         }
 
-        if (init_status.is_end_of_file()) {
+        if (init_status.is<END_OF_FILE>()) {
             continue;
         } else if (!init_status.ok()) {
-            if (init_status.is_not_found()) {
+            if (init_status.is<NOT_FOUND>()) {
                 return init_status;
             }
             return Status::InternalError("failed to init reader for file {}, err: {}", range.path,
-                                         init_status.get_error_msg());
+                                         init_status.to_string());
         }
 
         _name_to_col_type.clear();
@@ -642,10 +669,10 @@ Status VFileScanner::_init_expr_ctxes() {
         }
         if (slot_info.is_file_slot) {
             _file_slot_descs.emplace_back(it->second);
-            auto iti = full_src_index_map.find(slot_id);
-            _file_slot_index_map.emplace(slot_id, iti->second);
-            _file_slot_name_map.emplace(it->second->col_name(), iti->second);
             _file_col_names.push_back(it->second->col_name());
+            if (it->second->col_unique_id() > 0) {
+                _col_id_name_map.emplace(it->second->col_unique_id(), it->second->col_name());
+            }
         } else {
             _partition_slot_descs.emplace_back(it->second);
             if (_is_load) {
@@ -721,6 +748,13 @@ Status VFileScanner::_init_expr_ctxes() {
     // If last slot is_variant from stream plan which indicate table is dynamic schema
     _is_dynamic_schema =
             _output_tuple_desc && _output_tuple_desc->slots().back()->type().is_variant_type();
+    if (_is_dynamic_schema) {
+        // should not resuse Block since Block is variable
+        _full_base_schema_view.reset(new vectorized::schema_util::FullBaseSchemaView);
+        _full_base_schema_view->db_name = _output_tuple_desc->table_desc()->database();
+        _full_base_schema_view->table_name = _output_tuple_desc->table_desc()->name();
+        _full_base_schema_view->table_id = _output_tuple_desc->table_desc()->table_id();
+    }
     return Status::OK();
 }
 

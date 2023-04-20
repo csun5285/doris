@@ -34,6 +34,7 @@ using std::unordered_map;
 using std::vector;
 
 namespace doris {
+using namespace ErrorCode;
 
 Status TabletMeta::create(const TCreateTabletReq& request, const TabletUid& tablet_uid,
                           uint64_t shard_id, uint32_t next_unique_id,
@@ -302,13 +303,13 @@ Status TabletMeta::create_from_file(const string& file_path) {
 
     if (file_handler.open(file_path, O_RDONLY) != Status::OK()) {
         LOG(WARNING) << "fail to open ordinal file. file=" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_IO_ERROR);
+        return Status::Error<IO_ERROR>();
     }
 
     // In file_header.unserialize(), it validates file length, signature, checksum of protobuf.
     if (file_header.unserialize(&file_handler) != Status::OK()) {
         LOG(WARNING) << "fail to unserialize tablet_meta. file='" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_PARSE_PROTOBUF_ERROR);
+        return Status::Error<PARSE_PROTOBUF_ERROR>();
     }
 
     TabletMetaPB tablet_meta_pb;
@@ -316,7 +317,7 @@ Status TabletMeta::create_from_file(const string& file_path) {
         tablet_meta_pb.CopyFrom(file_header.message());
     } catch (...) {
         LOG(WARNING) << "fail to copy protocol buffer object. file='" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_PARSE_PROTOBUF_ERROR);
+        return Status::Error<PARSE_PROTOBUF_ERROR>();
     }
 
     init_from_pb(tablet_meta_pb);
@@ -378,20 +379,20 @@ Status TabletMeta::save(const string& file_path, const TabletMetaPB& tablet_meta
 
     if (!file_handler.open_with_mode(file_path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR)) {
         LOG(WARNING) << "fail to open header file. file='" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_IO_ERROR);
+        return Status::Error<IO_ERROR>();
     }
 
     try {
         file_header.mutable_message()->CopyFrom(tablet_meta_pb);
     } catch (...) {
         LOG(WARNING) << "fail to copy protocol buffer object. file='" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_OTHER_ERROR);
+        return Status::Error<ErrorCode::INTERNAL_ERROR>();
     }
 
     if (file_header.prepare(&file_handler) != Status::OK() ||
         file_header.serialize(&file_handler) != Status::OK()) {
         LOG(WARNING) << "fail to serialize to file header. file='" << file_path;
-        return Status::OLAPInternalError(OLAP_ERR_SERIALIZE_PROTOBUF_ERROR);
+        return Status::Error<SERIALIZE_PROTOBUF_ERROR>();
     }
 
     return Status::OK();
@@ -433,7 +434,7 @@ Status TabletMeta::deserialize(const string& meta_binary) {
     bool parsed = tablet_meta_pb.ParseFromString(meta_binary);
     if (!parsed) {
         LOG(WARNING) << "parse tablet meta failed";
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     init_from_pb(tablet_meta_pb);
     return Status::OK();
@@ -599,14 +600,14 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
     tablet_meta_pb->set_enable_unique_key_merge_on_write(_enable_unique_key_merge_on_write);
 
     if (_enable_unique_key_merge_on_write) {
-        std::set<RowsetId> rs_ids;
-        for (const auto& rowset : _rs_metas) {
-            rs_ids.insert(rowset->rowset_id());
+        std::set<RowsetId> stale_rs_ids;
+        for (const auto& rowset : _stale_rs_metas) {
+            stale_rs_ids.insert(rowset->rowset_id());
         }
         DeleteBitmapPB* delete_bitmap_pb = tablet_meta_pb->mutable_delete_bitmap();
         for (auto& [id, bitmap] : delete_bitmap().snapshot().delete_bitmap) {
             auto& [rowset_id, segment_id, ver] = id;
-            if (rs_ids.count(rowset_id) == 0) {
+            if (stale_rs_ids.count(rowset_id) != 0) {
                 continue;
             }
             delete_bitmap_pb->add_rowset_ids(rowset_id.to_string());
@@ -685,7 +686,7 @@ Status TabletMeta::add_rs_meta(const RowsetMetaSharedPtr& rs_meta) {
             if (rs->rowset_id() != rs_meta->rowset_id()) {
                 LOG(WARNING) << "version already exist. rowset_id=" << rs->rowset_id()
                              << " version=" << rs->version() << ", tablet=" << full_name();
-                return Status::OLAPInternalError(OLAP_ERR_PUSH_VERSION_ALREADY_EXIST);
+                return Status::Error<PUSH_VERSION_ALREADY_EXIST>();
             } else {
                 // rowsetid,version is equal, it is a duplicate req, skip it
                 return Status::OK();
@@ -703,6 +704,11 @@ void TabletMeta::delete_rs_meta_by_version(const Version& version,
         if ((*it)->version() == version) {
             if (deleted_rs_metas != nullptr) {
                 deleted_rs_metas->push_back(*it);
+            }
+            // delete delete_bitmap of to_delete's rowsets
+            if (_enable_unique_key_merge_on_write) {
+                delete_bitmap().remove({(*it)->rowset_id(), 0, 0},
+                                       {(*it)->rowset_id(), UINT32_MAX, 0});
             }
             _rs_metas.erase(it);
             return;
@@ -726,6 +732,11 @@ void TabletMeta::modify_rs_metas(const std::vector<RowsetMetaSharedPtr>& to_add,
             } else {
                 ++it;
             }
+        }
+        // delete delete_bitmap of to_delete's rowsets if not added to _stale_rs_metas.
+        if (same_version && _enable_unique_key_merge_on_write) {
+            delete_bitmap().remove({rs_to_del->rowset_id(), 0, 0},
+                                   {rs_to_del->rowset_id(), UINT32_MAX, 0});
         }
     }
     if (!same_version) {
@@ -838,44 +849,6 @@ Status TabletMeta::set_partition_id(int64_t partition_id) {
     }
     _partition_id = partition_id;
     return Status::OK();
-}
-
-// We take a delete bitmap's snapshot of origin rowset at the beginning of
-// compaction, some keys of origin rowsets might be deleted during compaction,
-// but exist in dest rowset. so we need to update the bitmap of dest rowset
-// after compaction.
-// ANNT: should take a tablet lock before calling the function
-void TabletMeta::update_delete_bitmap(const std::vector<RowsetSharedPtr>& input_rowsets,
-                                      const Version& version,
-                                      const RowIdConversion& rowid_conversion) {
-    RowLocation src;
-    RowLocation dst;
-    DeleteBitmap output_rowset_delete_bitmap(_tablet_id);
-    for (auto& rowset : input_rowsets) {
-        src.rowset_id = rowset->rowset_id();
-        for (uint32_t seg_id = 0; seg_id < rowset->num_segments(); ++seg_id) {
-            src.segment_id = seg_id;
-            DeleteBitmap upper_map(_tablet_id);
-            delete_bitmap().subset({rowset->rowset_id(), seg_id, version.second},
-                                   {rowset->rowset_id(), seg_id, INT64_MAX}, &upper_map);
-            // traverse all versions and convert rowid
-            for (auto iter = upper_map.delete_bitmap.begin(); iter != upper_map.delete_bitmap.end();
-                 ++iter) {
-                auto cur_version = std::get<2>(iter->first);
-                for (auto index = iter->second.begin(); index != iter->second.end(); ++index) {
-                    src.row_id = *index;
-                    if (rowid_conversion.get(src, &dst) != 0) {
-                        VLOG_CRITICAL << "Can't find rowid, may be deleted by the delete_handler.";
-                        continue;
-                    }
-                    output_rowset_delete_bitmap.add({dst.rowset_id, dst.segment_id, cur_version},
-                                                    dst.row_id);
-                }
-            }
-        }
-    }
-    // update output rowset delete bitmap
-    delete_bitmap().merge(output_rowset_delete_bitmap);
 }
 
 bool operator==(const TabletMeta& a, const TabletMeta& b) {
@@ -1021,12 +994,28 @@ void DeleteBitmap::subset(const BitmapKey& start, const BitmapKey& end,
     }
 }
 
+void DeleteBitmap::merge(const BitmapKey& bmk, const roaring::Roaring& segment_delete_bitmap) {
+    std::lock_guard l(lock);
+    auto [iter, succ] = delete_bitmap.emplace(bmk, segment_delete_bitmap);
+    if (!succ) {
+        iter->second |= segment_delete_bitmap;
+    }
+}
+
 void DeleteBitmap::merge(const DeleteBitmap& other) {
     std::lock_guard l(lock);
     for (auto& i : other.delete_bitmap) {
         auto [j, succ] = this->delete_bitmap.insert(i);
         if (!succ) j->second |= i.second;
     }
+}
+
+uint64_t DeleteBitmap::cardinality() {
+    uint64_t cardinality = 0;
+    for (auto entry : delete_bitmap) {
+        cardinality += entry.second.cardinality();
+    }
+    return cardinality;
 }
 
 // We cannot just copy the underlying memory to construct a string

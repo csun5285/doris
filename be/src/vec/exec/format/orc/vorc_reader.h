@@ -170,13 +170,19 @@ private:
     Status _decode_explicit_decimal_column(const std::string& col_name,
                                            const MutableColumnPtr& data_column,
                                            const DataTypePtr& data_type,
-                                           DecimalScaleParams& scale_params,
                                            orc::ColumnVectorBatch* cvb, size_t num_values) {
         OrcColumnType* data = dynamic_cast<OrcColumnType*>(cvb);
         if (data == nullptr) {
             return Status::InternalError("Wrong data type for colum '{}'", col_name);
         }
-        _init_decimal_converter<DecimalPrimitiveType>(data_type, scale_params, data->scale);
+        if (_decimal_scale_params_index >= _decimal_scale_params.size()) {
+            DecimalScaleParams temp_scale_params;
+            _init_decimal_converter<DecimalPrimitiveType>(data_type, temp_scale_params,
+                                                          data->scale);
+            _decimal_scale_params.emplace_back(std::move(temp_scale_params));
+        }
+        DecimalScaleParams& scale_params = _decimal_scale_params[_decimal_scale_params_index];
+        ++_decimal_scale_params_index;
 
         auto* cvb_data = data->values.data();
         auto& column_data =
@@ -206,16 +212,16 @@ private:
 
     template <typename DecimalPrimitiveType>
     Status _decode_decimal_column(const std::string& col_name, const MutableColumnPtr& data_column,
-                                  const DataTypePtr& data_type, DecimalScaleParams& scale_params,
-                                  orc::ColumnVectorBatch* cvb, size_t num_values) {
+                                  const DataTypePtr& data_type, orc::ColumnVectorBatch* cvb,
+                                  size_t num_values) {
         SCOPED_RAW_TIMER(&_statistics.decode_value_time);
         if (dynamic_cast<orc::Decimal64VectorBatch*>(cvb) != nullptr) {
             return _decode_explicit_decimal_column<DecimalPrimitiveType, orc::Decimal64VectorBatch>(
-                    col_name, data_column, data_type, scale_params, cvb, num_values);
+                    col_name, data_column, data_type, cvb, num_values);
         } else {
             return _decode_explicit_decimal_column<DecimalPrimitiveType,
                                                    orc::Decimal128VectorBatch>(
-                    col_name, data_column, data_type, scale_params, cvb, num_values);
+                    col_name, data_column, data_type, cvb, num_values);
         }
     }
 
@@ -258,6 +264,8 @@ private:
                                      const MutableColumnPtr& data_column, orc::ListVectorBatch* lvb,
                                      size_t num_values, size_t* element_size);
 
+    std::string _get_field_name_lower_case(const orc::Type* orc_type, int pos);
+
     RuntimeProfile* _profile;
     const TFileScanRangeParams& _scan_params;
     const TFileRangeDesc& _scan_range;
@@ -269,8 +277,15 @@ private:
     cctz::time_zone _time_zone;
 
     std::list<std::string> _read_cols;
+    std::list<std::string> _read_cols_lower_case;
     std::list<std::string> _missing_cols;
     std::unordered_map<std::string, int> _colname_to_idx;
+    // Column name in Orc file to column name to schema.
+    // This is used for Hive 1.x which use internal column name in Orc file.
+    // _col0, _col1...
+    std::unordered_map<std::string, std::string> _file_col_to_schema_col;
+    // Flag for hive engine. True if the external table engine is Hive.
+    bool _is_hive = false;
     std::vector<const orc::Type*> _col_orc_type;
     ORCFileInputStream* _file_reader = nullptr;
     Statistics _statistics;
@@ -284,7 +299,8 @@ private:
     orc::RowReaderOptions _row_reader_options;
 
     // only for decimal
-    DecimalScaleParams _decimal_scale_params;
+    std::vector<DecimalScaleParams> _decimal_scale_params;
+    size_t _decimal_scale_params_index;
 };
 
 } // namespace doris::vectorized

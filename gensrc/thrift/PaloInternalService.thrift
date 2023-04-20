@@ -184,8 +184,13 @@ struct TQueryOptions {
 
   54: optional bool enable_share_hash_table_for_broadcast_join
 
+  55: optional bool check_overflow_for_decimal = false
+
+  // For debug purpose, skip delete bitmap when reading data
+  56: optional bool skip_delete_bitmap = false
+
   // Indicate where useServerPrepStmts enabled
-  67: optional bool mysql_row_binary_format = false;
+  57: optional bool mysql_row_binary_format = false;
 }
 
 // A scan range plus the parameters needed to execute that scan.

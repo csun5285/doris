@@ -117,7 +117,7 @@ Status CsvReader::init_reader(bool is_load) {
     RETURN_IF_ERROR(real_reader->open());
     if (real_reader->size() == 0 && _params.file_type != TFileType::FILE_STREAM &&
         _params.file_type != TFileType::FILE_BROKER) {
-        return Status::EndOfFile("Empty File");
+        return Status::EndOfFile("init reader failed, empty csv file: " + _range.path);
     }
 
     // get column_separator and line_delimiter
@@ -190,7 +190,7 @@ Status CsvReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
         return Status::OK();
     }
 
-    const int batch_size = _state->batch_size();
+    const int batch_size = std::max(_state->batch_size(), (int)_MIN_BATCH_SIZE);
     size_t rows = 0;
     auto columns = block->mutate_columns();
     while (rows < batch_size && !_line_reader_eof) {
@@ -542,7 +542,7 @@ Status CsvReader::_prepare_parse(size_t* read_line, bool* is_parse_name) {
                                                     _range.file_size, 0, _file_reader));
     RETURN_IF_ERROR(_file_reader->open());
     if (_file_reader->size() == 0) {
-        return Status::EndOfFile("Empty File");
+        return Status::EndOfFile("get parsed schema failed, empty csv file: " + _range.path);
     }
 
     // get column_separator and line_delimiter

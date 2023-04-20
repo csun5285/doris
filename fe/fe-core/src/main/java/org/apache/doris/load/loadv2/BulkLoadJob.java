@@ -34,6 +34,7 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.io.Text;
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.LogBuilder;
 import org.apache.doris.common.util.LogKey;
 import org.apache.doris.common.util.SqlParserUtils;
@@ -77,6 +78,8 @@ public abstract class BulkLoadJob extends LoadJob {
 
     // input params
     protected BrokerDesc brokerDesc;
+    // queryId of OriginStatement
+    protected String queryId;
     // this param is used to persist the expr of columns
     // the origin stmt is persisted instead of columns expr
     // the expr of columns will be reanalyze when the log is replayed
@@ -127,12 +130,14 @@ public abstract class BulkLoadJob extends LoadJob {
             }
         }
         if (ConnectContext.get() != null) {
+            this.queryId = DebugUtil.printId(ConnectContext.get().queryId());
             SessionVariable var = ConnectContext.get().getSessionVariable();
             sessionVariables.put(SessionVariable.SQL_MODE, Long.toString(var.getSqlMode()));
             if (Config.isCloudMode()) {
                 sessionVariables.put(CLUSTER_ID, clusterId);
             }
         } else {
+            this.queryId = "N/A";
             sessionVariables.put(SessionVariable.SQL_MODE, String.valueOf(SqlModeHelper.MODE_DEFAULT));
         }
     }
@@ -342,6 +347,10 @@ public abstract class BulkLoadJob extends LoadJob {
             Text.writeString(out, entry.getKey());
             Text.writeString(out, entry.getValue());
         }
+    }
+
+    public OriginStatement getOriginStmt() {
+        return this.originStmt;
     }
 
     public void readFields(DataInput in) throws IOException {

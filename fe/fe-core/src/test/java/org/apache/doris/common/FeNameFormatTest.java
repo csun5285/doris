@@ -32,6 +32,8 @@ public class FeNameFormatTest {
         ExceptionChecker.expectThrowsNoException(() -> FeNameFormat.checkColumnName("timestamp*"));
         ExceptionChecker.expectThrowsNoException(() -> FeNameFormat.checkColumnName("timestamp.1"));
         ExceptionChecker.expectThrowsNoException(() -> FeNameFormat.checkColumnName("timestamp.#"));
+        ExceptionChecker.expectThrowsNoException(() -> FeNameFormat.checkColumnName("@@timestamp"));
+        ExceptionChecker.expectThrowsNoException(() -> FeNameFormat.checkColumnName("@timestamp@"));
         ExceptionChecker.expectThrows(AnalysisException.class, () -> FeNameFormat.checkColumnName("?id_"));
         ExceptionChecker.expectThrows(AnalysisException.class, () -> FeNameFormat.checkColumnName("#id_"));
         // length 64

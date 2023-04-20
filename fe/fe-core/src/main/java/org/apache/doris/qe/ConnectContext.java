@@ -24,16 +24,16 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
-import org.apache.doris.common.UserException;
 import org.apache.doris.common.telemetry.Telemetry;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.datasource.CatalogIf;
 import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.datasource.SessionContext;
+import org.apache.doris.mysql.DummyMysqlChannel;
 import org.apache.doris.mysql.MysqlCapability;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.MysqlCommand;
-import org.apache.doris.mysql.MysqlSerializer;
+import org.apache.doris.mysql.MysqlSslContext;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.plugin.AuditEvent.AuditEventBuilder;
@@ -50,8 +50,9 @@ import com.google.common.collect.Sets;
 import io.opentelemetry.api.trace.Tracer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.xnio.StreamConnection;
 
-import java.nio.channels.SocketChannel;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -63,7 +64,9 @@ import java.util.Set;
 // Use `volatile` to make the reference change atomic.
 public class ConnectContext {
     private static final Logger LOG = LogManager.getLogger(ConnectContext.class);
-    protected static ThreadLocal<ConnectContext> threadLocalInfo = new ThreadLocal<ConnectContext>();
+    protected static ThreadLocal<ConnectContext> threadLocalInfo = new ThreadLocal<>();
+
+    private static final String SSL_PROTOCOL = "TLS";
 
     // set this id before analyze
     protected volatile long stmtId;
@@ -101,8 +104,6 @@ public class ConnectContext {
     // In other word, currentUserIdentity is the entry that matched in Doris auth table.
     // This account determines user's access privileges.
     protected volatile UserIdentity currentUserIdentity;
-    // Serializer used to pack MySQL packet.
-    protected volatile MysqlSerializer serializer;
     // Variables belong to this session.
     protected volatile SessionVariable sessionVariable;
     // Scheduler this connection belongs to
@@ -131,7 +132,7 @@ public class ConnectContext {
     // This is used to statistic the current query details.
     // This property will only be set when the query starts to execute.
     // So in the query planning stage, do not use any value in this attribute.
-    protected QueryDetail queryDetail;
+    protected QueryDetail queryDetail = null;
 
     // cloud cluster name
     protected volatile String cloudCluster;
@@ -156,6 +157,9 @@ public class ConnectContext {
 
     private SessionContext sessionContext;
 
+    // This context is used for SSL connection between server and mysql client.
+    private final MysqlSslContext mysqlSslContext = new MysqlSslContext(SSL_PROTOCOL);
+
     private long userQueryTimeout;
 
     public void setUserQueryTimeout(long queryTimeout) {
@@ -167,6 +171,10 @@ public class ConnectContext {
 
     public SessionContext getSessionContext() {
         return sessionContext;
+    }
+
+    public MysqlSslContext getMysqlSslContext() {
+        return mysqlSslContext;
     }
 
     public void setOrUpdateInsertResult(long txnId, String label, String db, String tbl,
@@ -210,19 +218,18 @@ public class ConnectContext {
         this(null);
     }
 
-    public ConnectContext(SocketChannel channel) {
+    public ConnectContext(StreamConnection connection) {
         state = new QueryState();
         returnRows = 0;
         serverCapability = MysqlCapability.DEFAULT_CAPABILITY;
         isKilled = false;
-        mysqlChannel = new MysqlChannel(channel);
-        serializer = MysqlSerializer.newInstance();
+        if (connection != null) {
+            mysqlChannel = new MysqlChannel(connection);
+        } else {
+            mysqlChannel = new DummyMysqlChannel();
+        }
         sessionVariable = VariableMgr.newSessionVariable();
         command = MysqlCommand.COM_SLEEP;
-        if (channel != null) {
-            remoteIP = mysqlChannel.getRemoteIp();
-        }
-        queryDetail = null;
         if (Config.use_fuzzy_session_variable) {
             sessionVariable.initFuzzyModeVariables();
         }
@@ -252,9 +259,9 @@ public class ConnectContext {
         if (isTxnModel()) {
             if (isTxnBegin()) {
                 try {
-                    Env.getCurrentGlobalTransactionMgr().abortTransaction(
-                            currentDbId, txnEntry.getTxnConf().getTxnId(), "timeout");
-                } catch (UserException e) {
+                    InsertStreamTxnExecutor executor = new InsertStreamTxnExecutor(getTxnEntry());
+                    executor.abortTransaction();
+                } catch (Exception e) {
                     LOG.error("db: {}, txnId: {}, rollback error.", currentDb,
                             txnEntry.getTxnConf().getTxnId(), e);
                 }
@@ -398,10 +405,6 @@ public class ConnectContext {
         returnRows = 0;
     }
 
-    public MysqlSerializer getSerializer() {
-        return serializer;
-    }
-
     public int getConnectionId() {
         return connectionId;
     }
@@ -479,7 +482,9 @@ public class ConnectContext {
     }
 
     public void cleanup() {
-        mysqlChannel.close();
+        if (mysqlChannel != null) {
+            mysqlChannel.close();
+        }
         threadLocalInfo.remove();
         returnRows = 0;
     }
@@ -637,10 +642,6 @@ public class ConnectContext {
         return currentConnectedFEIp;
     }
 
-    public String getRemoteIp() {
-        return mysqlChannel == null ? "" : mysqlChannel.getRemoteIp();
-    }
-
     public class ThreadInfo {
         public boolean isFull;
 
@@ -667,6 +668,23 @@ public class ConnectContext {
             }
             return row;
         }
+    }
+
+
+    public void startAcceptQuery(ConnectProcessor connectProcessor) {
+        mysqlChannel.startAcceptQuery(this, connectProcessor);
+    }
+
+    public void suspendAcceptQuery() {
+        mysqlChannel.suspendAcceptQuery();
+    }
+
+    public void resumeAcceptQuery() {
+        mysqlChannel.resumeAcceptQuery();
+    }
+
+    public void stopAcceptQuery() throws IOException {
+        mysqlChannel.stopAcceptQuery();
     }
 
     public String getQueryIdentifier() {

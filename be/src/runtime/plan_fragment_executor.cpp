@@ -48,10 +48,12 @@
 #include "vec/exec/scan/new_jdbc_scan_node.h"
 #include "vec/exec/scan/new_odbc_scan_node.h"
 #include "vec/exec/scan/new_olap_scan_node.h"
+#include "vec/exec/scan/vmeta_scan_node.h"
 #include "vec/exec/vexchange_node.h"
 #include "vec/runtime/vdata_stream_mgr.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 PlanFragmentExecutor::PlanFragmentExecutor(ExecEnv* exec_env,
                                            const report_status_callback& report_status_cb)
@@ -65,7 +67,9 @@ PlanFragmentExecutor::PlanFragmentExecutor(ExecEnv* exec_env,
           _is_report_success(false),
           _is_report_on_cancel(true),
           _collect_query_statistics_with_every_batch(false),
-          _cancel_reason(PPlanFragmentCancelReason::INTERNAL_ERROR) {}
+          _cancel_reason(PPlanFragmentCancelReason::INTERNAL_ERROR) {
+    _report_thread_future = _report_thread_promise.get_future();
+}
 
 PlanFragmentExecutor::~PlanFragmentExecutor() {
     close();
@@ -95,11 +99,12 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request,
             fragments_ctx == nullptr ? request.query_globals : fragments_ctx->query_globals;
     _runtime_state.reset(new RuntimeState(params, request.query_options, query_globals, _exec_env));
     _runtime_state->set_query_fragments_ctx(fragments_ctx);
-    _runtime_state->set_query_mem_tracker(fragments_ctx->query_mem_tracker);
+    _runtime_state->set_query_mem_tracker(fragments_ctx == nullptr
+                                                  ? _exec_env->orphan_mem_tracker()
+                                                  : fragments_ctx->query_mem_tracker);
     _runtime_state->set_tracer(std::move(tracer));
 
     SCOPED_ATTACH_TASK(_runtime_state.get());
-    _runtime_state->init_scanner_mem_trackers();
     _runtime_state->runtime_filter_mgr()->init();
     _runtime_state->set_be_number(request.backend_num);
     if (request.__isset.backend_id) {
@@ -171,7 +176,8 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request,
             typeid(*node) == typeid(vectorized::NewFileScanNode) ||
             typeid(*node) == typeid(vectorized::NewOdbcScanNode) ||
             typeid(*node) == typeid(vectorized::NewEsScanNode) ||
-            typeid(*node) == typeid(vectorized::NewJdbcScanNode)) {
+            typeid(*node) == typeid(vectorized::NewJdbcScanNode) ||
+            typeid(*node) == typeid(vectorized::VMetaScanNode)) {
             vectorized::VScanNode* scan_node = static_cast<vectorized::VScanNode*>(scan_nodes[i]);
             const std::vector<TScanRangeParams>& scan_ranges =
                     find_with_default(params.per_node_scan_ranges, scan_node->id(), no_scan_ranges);
@@ -240,7 +246,10 @@ Status PlanFragmentExecutor::open() {
     // at end, otherwise the coordinator hangs in case we finish w/ an error
     if (_is_report_success && _report_status_cb && config::status_report_interval > 0) {
         std::unique_lock<std::mutex> l(_report_thread_lock);
-        _report_thread = std::thread(&PlanFragmentExecutor::report_profile, this);
+        _exec_env->send_report_thread_pool()->submit_func([this] {
+            Defer defer {[&]() { this->_report_thread_promise.set_value(true); }};
+            this->report_profile();
+        });
         // make sure the thread started up, otherwise report_profile() might get into a race
         // with stop_report_thread()
         _report_thread_started_cv.wait(l);
@@ -252,13 +261,13 @@ Status PlanFragmentExecutor::open() {
         status = open_internal();
     }
 
-    if (!status.ok() && !status.is_cancelled() && _runtime_state->log_has_space()) {
+    if (!status.ok() && !status.is<CANCELLED>() && _runtime_state->log_has_space()) {
         // Log error message in addition to returning in Status. Queries that do not
         // fetch results (e.g. insert) may not receive the message directly and can
         // only retrieve the log.
-        _runtime_state->log_error(status.get_error_msg());
+        _runtime_state->log_error(status.to_string());
     }
-    if (status.is_cancelled()) {
+    if (status.is<CANCELLED>()) {
         if (_cancel_reason == PPlanFragmentCancelReason::CALL_RPC_ERROR) {
             status = Status::RuntimeError(_cancel_msg);
         } else if (_cancel_reason == PPlanFragmentCancelReason::MEMORY_LIMIT_EXCEED) {
@@ -309,7 +318,7 @@ Status PlanFragmentExecutor::open_vectorized_internal() {
             }
 
             auto st = _sink->send(runtime_state(), block);
-            if (st.is_end_of_file()) {
+            if (st.is<END_OF_FILE>()) {
                 break;
             }
             RETURN_IF_ERROR(st);
@@ -407,7 +416,7 @@ Status PlanFragmentExecutor::open_internal() {
             _collect_query_statistics();
         }
         const Status& st = _sink->send(runtime_state(), batch);
-        if (st.is_end_of_file()) {
+        if (st.is<END_OF_FILE>()) {
             break;
         }
         RETURN_IF_ERROR(st);
@@ -557,7 +566,10 @@ void PlanFragmentExecutor::stop_report_thread() {
     _report_thread_active = false;
 
     _stop_report_thread_cv.notify_one();
-    _report_thread.join();
+    // Wait infinitly until the thread is stopped and the future is set.
+    // The reporting thread depends on the PlanFragmentExecutor object, if not wait infinitly here, the reporting
+    // thread may crashed because the PlanFragmentExecutor is destroyed.
+    _report_thread_future.wait();
 }
 
 Status PlanFragmentExecutor::get_next(RowBatch** batch) {
@@ -609,8 +621,8 @@ void PlanFragmentExecutor::update_status(const Status& new_status) {
         std::lock_guard<std::mutex> l(_status_lock);
         // if current `_status` is ok, set it to `new_status` to record the error.
         if (_status.ok()) {
-            if (new_status.is_mem_limit_exceeded()) {
-                _runtime_state->set_mem_limit_exceeded(new_status.get_error_msg());
+            if (new_status.is<MEM_LIMIT_EXCEEDED>()) {
+                _runtime_state->set_mem_limit_exceeded(new_status.to_string());
             }
             _status = new_status;
             if (_runtime_state->query_type() == TQueryType::EXTERNAL) {

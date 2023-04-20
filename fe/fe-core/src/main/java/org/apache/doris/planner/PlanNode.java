@@ -57,6 +57,7 @@ import org.apache.commons.collections.CollectionUtils;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -617,6 +618,17 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
      * Subclasses need to override this.
      */
     public void finalize(Analyzer analyzer) throws UserException {
+        for (Expr expr : conjuncts) {
+            Set<SlotRef> slotRefs = new HashSet<>();
+            expr.getSlotRefsBoundByTupleIds(tupleIds, slotRefs);
+            for (SlotRef slotRef : slotRefs) {
+                slotRef.getDesc().setIsMaterialized(true);
+            }
+            for (TupleId tupleId : tupleIds) {
+                analyzer.getTupleDesc(tupleId).computeMemLayout();
+            }
+        }
+
         for (PlanNode child : children) {
             child.finalize(analyzer);
         }
@@ -679,7 +691,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         return outputSmap;
     }
 
-    public void setOutputSmap(ExprSubstitutionMap smap) {
+    public void setOutputSmap(ExprSubstitutionMap smap, Analyzer analyzer) {
         outputSmap = smap;
     }
 
@@ -702,6 +714,10 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
      * Assign remaining unassigned conjuncts.
      */
     protected void assignConjuncts(Analyzer analyzer) {
+        // we cannot plan conjuncts on exchange node, so we just skip the node.
+        if (this instanceof ExchangeNode) {
+            return;
+        }
         List<Expr> unassigned = analyzer.getUnassignedConjuncts(this);
         for (Expr unassignedConjunct : unassigned) {
             addConjunct(unassignedConjunct);
@@ -952,6 +968,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     }
 
     public SlotRef findSrcSlotRef(SlotRef slotRef) {
+        if (slotRef.getSrcSlotRef() != null) {
+            slotRef = slotRef.getSrcSlotRef();
+        }
         if (slotRef.getTable() instanceof OlapTable) {
             return slotRef;
         }
@@ -1120,5 +1139,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
 
     public List<SlotId> getOutputSlotIds() {
         return outputSlotIds;
+    }
+
+    public void setVConjunct(Set<Expr> exprs) {
+        vconjunct = convertConjunctsToAndCompoundPredicate(new ArrayList<>(exprs));
     }
 }

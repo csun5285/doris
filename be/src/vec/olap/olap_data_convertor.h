@@ -48,6 +48,7 @@ class OlapBlockDataConvertor {
 public:
     OlapBlockDataConvertor() = default;
     OlapBlockDataConvertor(const TabletSchema* tablet_schema);
+    OlapBlockDataConvertor(const TabletSchema* tablet_schema, const std::vector<uint32_t>& col_ids);
     void set_source_content(const vectorized::Block* block, size_t row_pos, size_t num_rows);
     void clear_source_content();
     std::pair<Status, IOlapColumnDataAccessor*> convert_column_data(size_t cid);
@@ -183,8 +184,8 @@ private:
         const void* get_data() const override { return _values.data(); }
         const void* get_data_at(size_t offset) const override {
             UInt8 null_flag = 0;
-            if (_nullmap) {
-                null_flag = _nullmap[offset];
+            if (get_nullmap()) {
+                null_flag = get_nullmap()[offset];
             }
             return null_flag ? nullptr : _values.data() + offset;
         }
@@ -225,8 +226,8 @@ private:
         const void* get_data_at(size_t offset) const override {
             assert(offset < _num_rows);
             UInt8 null_flag = 0;
-            if (_nullmap) {
-                null_flag = _nullmap[offset];
+            if (get_nullmap()) {
+                null_flag = get_nullmap()[offset];
             }
             return null_flag ? nullptr : _values + offset;
         }
@@ -267,8 +268,8 @@ private:
         const void* get_data_at(size_t offset) const override {
             assert(offset < _num_rows);
             UInt8 null_flag = 0;
-            if (_nullmap) {
-                null_flag = _nullmap[offset];
+            if (get_nullmap()) {
+                null_flag = get_nullmap()[offset];
             }
             return null_flag ? nullptr : values_ + offset;
         }
@@ -309,8 +310,8 @@ private:
         const void* get_data_at(size_t offset) const override {
             assert(offset < _num_rows);
             UInt8 null_flag = 0;
-            if (_nullmap) {
-                null_flag = _nullmap[offset];
+            if (get_nullmap()) {
+                null_flag = get_nullmap()[offset];
             }
             return null_flag ? nullptr : values_ + offset;
         }

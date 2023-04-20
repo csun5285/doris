@@ -1575,6 +1575,8 @@ public class AuthTest {
         }
         Assert.assertFalse(auth.checkResourcePriv(userIdentity, resourceName, PrivPredicate.USAGE));
         Assert.assertFalse(auth.checkGlobalPriv(userIdentity, PrivPredicate.USAGE));
+        Assert.assertFalse(auth.checkGlobalPriv(userIdentity, PrivPredicate.SHOW_RESOURCES));
+        Assert.assertFalse(auth.checkGlobalPriv(userIdentity, PrivPredicate.SHOW));
 
         // 4. drop user
         dropUserStmt = new DropUserStmt(userIdentity);

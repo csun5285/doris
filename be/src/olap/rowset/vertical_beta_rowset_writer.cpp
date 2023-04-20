@@ -20,6 +20,7 @@
 #include "olap/rowset/beta_rowset.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 VerticalBetaRowsetWriter::~VerticalBetaRowsetWriter() {
     if (!_already_built) {
@@ -64,6 +65,10 @@ Status VerticalBetaRowsetWriter::add_columns(const vectorized::Block* block,
         if (_segment_writers[_cur_writer_idx]->num_rows_written() > max_rows_per_segment) {
             // segment is full, need flush columns and create new segment writer
             RETURN_IF_ERROR(_flush_columns(&_segment_writers[_cur_writer_idx], true));
+
+            _segment_num_rows.resize(_cur_writer_idx + 1);
+            _segment_num_rows[_cur_writer_idx] = _segment_writers[_cur_writer_idx]->row_count();
+
             std::unique_ptr<segment_v2::SegmentWriter> writer;
             RETURN_IF_ERROR(_create_segment_writer(col_ids, is_key, &writer));
             _segment_writers.emplace_back(std::move(writer));
@@ -114,13 +119,13 @@ Status VerticalBetaRowsetWriter::_flush_columns(
     return Status::OK();
 }
 
-Status VerticalBetaRowsetWriter::flush_columns() {
+Status VerticalBetaRowsetWriter::flush_columns(bool is_key) {
     if (_segment_writers.empty()) {
         return Status::OK();
     }
 
     DCHECK(_segment_writers[_cur_writer_idx]);
-    RETURN_IF_ERROR(_flush_columns(&_segment_writers[_cur_writer_idx]));
+    RETURN_IF_ERROR(_flush_columns(&_segment_writers[_cur_writer_idx], is_key));
     _cur_writer_idx = 0;
     return Status::OK();
 }
@@ -132,13 +137,12 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
             BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, _num_segment++);
     auto fs = _rowset_meta->fs();
     if (!fs) {
-        return Status::OLAPInternalError(OLAP_ERR_INIT_FAILED);
+        return Status::Error<INIT_FAILED>();
     }
     io::FileWriterPtr file_writer;
     Status st = fs->create_file(path, &file_writer);
     if (!st.ok()) {
-        LOG(WARNING) << "failed to create writable file. path=" << path
-                     << ", err: " << st.get_error_msg();
+        LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;
         return st;
     }
 

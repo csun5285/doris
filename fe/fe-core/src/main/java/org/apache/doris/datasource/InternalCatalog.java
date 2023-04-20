@@ -137,6 +137,7 @@ import org.apache.doris.common.util.QueryableReentrantLock;
 import org.apache.doris.common.util.SqlParserUtils;
 import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.common.util.Util;
+import org.apache.doris.datasource.hive.PooledHiveMetaStoreClient;
 import org.apache.doris.external.elasticsearch.EsRepository;
 import org.apache.doris.external.hudi.HudiProperty;
 import org.apache.doris.external.hudi.HudiTable;
@@ -205,7 +206,6 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-import org.mortbay.log.Log;
 
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -261,7 +261,6 @@ public class InternalCatalog implements CatalogIf<Database> {
         return INTERNAL_CATALOG_NAME;
     }
 
-
     @Override
     public List<String> getDbNames() {
         return Lists.newArrayList(fullNameToDb.keySet());
@@ -281,6 +280,11 @@ public class InternalCatalog implements CatalogIf<Database> {
             if (fullName.equalsIgnoreCase(InfoSchemaDb.DATABASE_NAME)) {
                 String clusterName = ClusterNamespace.getClusterNameFromFullName(dbName);
                 fullName = ClusterNamespace.getFullName(clusterName, fullName.toLowerCase());
+                // If the fullname is not valid, ClusterNamespace.getFullName may return null
+                // and fullNameToDb.get(fullName) may throw null pointer exception
+                if (fullName == null) {
+                    return null;
+                }
                 return fullNameToDb.get(fullName);
             }
         }
@@ -764,12 +768,12 @@ public class InternalCatalog implements CatalogIf<Database> {
             if (Strings.isNullOrEmpty(newPartitionName)) {
                 if (olapTable.getPartition(partitionName) != null) {
                     throw new DdlException("partition[" + partitionName + "] "
-                        + "already exist in table[" + tableName + "]");
+                            + "already exist in table[" + tableName + "]");
                 }
             } else {
                 if (olapTable.getPartition(newPartitionName) != null) {
                     throw new DdlException("partition[" + newPartitionName + "] "
-                        + "already exist in table[" + tableName + "]");
+                            + "already exist in table[" + tableName + "]");
                 }
             }
 
@@ -962,7 +966,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     public boolean unprotectDropTable(Database db, Table table, boolean isForceDrop, boolean isReplay,
-                                      long recycleTime) {
+            long recycleTime) {
         if (table.getType() == TableType.ELASTICSEARCH) {
             esRepository.deRegisterTable(table.getId());
         } else if (table.getType() == TableType.OLAP) {
@@ -987,14 +991,14 @@ public class InternalCatalog implements CatalogIf<Database> {
             List<Long> dropIds = Env.getCurrentEnv().getMTMVJobManager().showJobs(db.getFullName(), table.getName())
                     .stream().map(MTMVJob::getId).collect(Collectors.toList());
             Env.getCurrentEnv().getMTMVJobManager().dropJobs(dropIds, false);
-            Log.info("Drop related {} mv job.", dropIds.size());
+            LOG.info("Drop related {} mv job.", dropIds.size());
         }
         LOG.info("finished dropping table[{}] in db[{}]", table.getName(), db.getFullName());
         return true;
     }
 
     public void replayDropTable(Database db, long tableId, boolean isForceDrop,
-                                Long recycleTime) throws MetaNotFoundException {
+            Long recycleTime) throws MetaNotFoundException {
         Table table = db.getTableOrMetaException(tableId);
         db.writeLock();
         table.writeLock();
@@ -1032,10 +1036,10 @@ public class InternalCatalog implements CatalogIf<Database> {
             schemaHash = olapTable.getSchemaHashByIndexId(info.getIndexId());
         }
 
-        Replica replica =
-                new Replica(info.getReplicaId(), info.getBackendId(), info.getVersion(), schemaHash, info.getDataSize(),
-                        info.getRemoteDataSize(), info.getRowCount(), ReplicaState.NORMAL, info.getLastFailedVersion(),
-                        info.getLastSuccessVersion());
+        Replica replica = new Replica(info.getReplicaId(), info.getBackendId(), info.getVersion(), schemaHash,
+                info.getDataSize(),
+                info.getRemoteDataSize(), info.getRowCount(), ReplicaState.NORMAL, info.getLastFailedVersion(),
+                info.getLastSuccessVersion());
         tablet.addReplica(replica);
     }
 
@@ -1323,6 +1327,10 @@ public class InternalCatalog implements CatalogIf<Database> {
                 } else if (resultType.isDecimalV3()) {
                     typeDef = new TypeDef(ScalarType.createDecimalV3Type(resultType.getPrecision(),
                             ((ScalarType) resultType).getScalarScale()));
+                } else if (resultType.isNull()) {
+                    // if typeDef is NULL_TYPE, be will core when executing CTAS expression,
+                    // we change it to tinyint nullable.
+                    typeDef = TypeDef.create(PrimitiveType.TINYINT);
                 } else {
                     typeDef = new TypeDef(resultExpr.getType());
                 }
@@ -1482,8 +1490,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                 if (distributionInfo.getType() == DistributionInfoType.HASH) {
                     HashDistributionInfo hashDistributionInfo = (HashDistributionInfo) distributionInfo;
                     List<Column> newDistriCols = hashDistributionInfo.getDistributionColumns();
-                    List<Column> defaultDistriCols
-                            = ((HashDistributionInfo) defaultDistributionInfo).getDistributionColumns();
+                    List<Column> defaultDistriCols = ((HashDistributionInfo) defaultDistributionInfo)
+                            .getDistributionColumns();
                     if (!newDistriCols.equals(defaultDistriCols)) {
                         throw new DdlException(
                                 "Cannot assign hash distribution with different distribution cols. " + "default is: "
@@ -1762,7 +1770,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 olapTable.dropTempPartition(info.getPartitionName(), true);
             } else {
                 Partition partition = olapTable.dropPartition(info.getDbId(), info.getPartitionName(),
-                                info.isForceDrop());
+                        info.isForceDrop());
                 if (!info.isForceDrop() && partition != null && info.getRecycleTime() != 0) {
                     Env.getCurrentRecycleBin().setRecycleTimeByIdForReplay(partition.getId(), info.getRecycleTime());
                 }
@@ -2064,6 +2072,17 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         olapTable.setReplicationAllocation(replicaAlloc);
 
+        // set auto bucket
+        boolean isAutoBucket = PropertyAnalyzer.analyzeBooleanProp(properties, PropertyAnalyzer.PROPERTIES_AUTO_BUCKET,
+                false);
+        olapTable.setIsAutoBucket(isAutoBucket);
+
+        // set estimate partition size
+        if (isAutoBucket) {
+            String estimatePartitionSize = PropertyAnalyzer.analyzeEstimatePartitionSize(properties);
+            olapTable.setEstimatePartitionSize(estimatePartitionSize);
+        }
+
         // set in memory
         boolean isInMemory = PropertyAnalyzer.analyzeBooleanProp(properties, PropertyAnalyzer.PROPERTIES_INMEMORY,
                 false);
@@ -2232,6 +2251,10 @@ public class InternalCatalog implements CatalogIf<Database> {
         // create partition
         try {
             if (partitionInfo.getType() == PartitionType.UNPARTITIONED) {
+                if (storagePolicy.equals("") && properties != null && !properties.isEmpty()) {
+                    // here, all properties should be checked
+                    throw new DdlException("Unknown properties: " + properties);
+                }
                 // this is a 1-level partitioned table
                 // use table name as partition name
                 DistributionInfo partitionDistributionInfo = distributionDesc.toDistributionInfo(baseSchema);
@@ -2409,7 +2432,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             for (MTMVJob job : jobs) {
                 Env.getCurrentEnv().getMTMVJobManager().createJob(job, false);
             }
-            Log.info("Create related {} mv job.", jobs.size());
+            LOG.info("Create related {} mv job.", jobs.size());
         }
     }
 

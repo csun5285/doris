@@ -28,6 +28,7 @@
 #include <stack>
 
 namespace doris::vectorized {
+using namespace doris::ErrorCode;
 
 /** Pool for objects that cannot be used from different threads simultaneously.
   * Allows to create an object for each thread.
@@ -221,7 +222,7 @@ Status parse_json_to_variant(IColumn& column, const char* src, size_t length,
         }
         assert(subcolumn->size() == num_rows);
         Status st = subcolumn->insert(std::move(values[i]), std::move(field_info));
-        if (st.is_invalid_argument()) {
+        if (st.is<INVALID_ARGUMENT>()) {
             return Status::DataQualityError(
                     fmt::format("Failed to insert field {}", st.to_string()));
         }

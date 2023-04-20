@@ -200,6 +200,9 @@ void Block::erase_impl(size_t position) {
             ++it;
         }
     }
+    if (position < row_same_bit.size()) {
+        row_same_bit.erase(row_same_bit.begin() + position);
+    }
 }
 
 void Block::erase(const String& name) {
@@ -341,6 +344,9 @@ void Block::set_num_rows(size_t length) {
                 elem.column = elem.column->cut(0, length);
             }
         }
+        if (length < row_same_bit.size()) {
+            row_same_bit.resize(length);
+        }
     }
 }
 
@@ -354,6 +360,9 @@ void Block::skip_num_rows(int64_t& length) {
             if (elem.column) {
                 elem.column = elem.column->cut(length, origin_rows - length);
             }
+        }
+        if (length < row_same_bit.size()) {
+            row_same_bit.assign(row_same_bit.begin() + length, row_same_bit.end());
         }
     }
 }
@@ -593,6 +602,7 @@ DataTypes Block::get_data_types() const {
 void Block::clear() {
     data.clear();
     index_by_name.clear();
+    row_same_bit.clear();
 }
 
 void Block::clear_column_data(int column_size) noexcept {
@@ -607,17 +617,20 @@ void Block::clear_column_data(int column_size) noexcept {
         DCHECK(d.column->use_count() == 1);
         (*std::move(d.column)).assume_mutable()->clear();
     }
+    row_same_bit.clear();
 }
 
 void Block::swap(Block& other) noexcept {
     data.swap(other.data);
     index_by_name.swap(other.index_by_name);
+    row_same_bit.swap(other.row_same_bit);
 }
 
 void Block::swap(Block&& other) noexcept {
     clear();
     data = std::move(other.data);
     initialize_index_by_name();
+    row_same_bit = std::move(other.row_same_bit);
 }
 
 void Block::update_hash(SipHash& hash) const {
@@ -784,6 +797,9 @@ Status Block::serialize(int be_exec_version, PBlock* pblock,
 
         VLOG_ROW << "uncompressed size: " << content_uncompressed_size
                  << ", compressed size: " << compressed_size;
+    } else {
+        pblock->set_column_values(std::move(column_values));
+        *compressed_bytes = content_uncompressed_size;
     }
     if (!allow_transfer_large_data && *compressed_bytes >= std::numeric_limits<int32_t>::max()) {
         return Status::InternalError("The block is large than 2GB({}), can not send by Protobuf.",

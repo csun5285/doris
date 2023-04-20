@@ -54,12 +54,6 @@ public class JdbcScanNode extends ScanNode {
     private String tableName;
     private TOdbcTableType jdbcType;
 
-    public JdbcScanNode(PlanNodeId id, TupleDescriptor desc, JdbcTable tbl) {
-        super(id, desc, "SCAN JDBC", StatisticalType.JDBC_SCAN_NODE);
-        jdbcType = tbl.getJdbcTableType();
-        tableName = OdbcTable.databaseProperName(jdbcType, tbl.getJdbcTable());
-    }
-
     public JdbcScanNode(PlanNodeId id, TupleDescriptor desc, boolean isJdbcExternalTable) {
         super(id, desc, "JdbcScanNode", StatisticalType.JDBC_SCAN_NODE);
         JdbcTable tbl = null;
@@ -153,7 +147,8 @@ public class JdbcScanNode extends ScanNode {
                 && (jdbcType == TOdbcTableType.MYSQL
                 || jdbcType == TOdbcTableType.POSTGRESQL
                 || jdbcType == TOdbcTableType.MONGODB
-                || jdbcType == TOdbcTableType.CLICKHOUSE)) {
+                || jdbcType == TOdbcTableType.CLICKHOUSE
+                || jdbcType == TOdbcTableType.SAP_HANA)) {
             sql.append(" LIMIT ").append(limit);
         }
 

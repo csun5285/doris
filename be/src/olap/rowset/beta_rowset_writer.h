@@ -59,13 +59,15 @@ public:
     // Return the file size flushed to disk in "flush_size"
     // This method is thread-safe.
     Status flush_single_memtable(MemTable* memtable, int64_t* flush_size) override;
-    Status flush_single_memtable(const vectorized::Block* block) override;
+    Status flush_single_memtable(const vectorized::Block* block, int64_t* flush_size) override;
 
     RowsetSharedPtr build() override;
 
     // build a tmp rowset for load segment to calc delete_bitmap
     // for this segment
     RowsetSharedPtr build_tmp() override;
+
+    RowsetSharedPtr manual_build(const RowsetMetaSharedPtr& rowset_meta) override;
 
     Version version() override { return _context.version; }
 
@@ -95,6 +97,8 @@ public:
     vectorized::schema_util::LocalSchemaChangeRecorder* mutable_schema_change_recorder() {
         return _context.schema_change_recorder.get();
     }
+
+    uint64_t get_num_mow_keys() { return _num_mow_keys; }
 
 private:
     template <typename RowType>
@@ -139,6 +143,10 @@ private:
 
     Status _do_compact_segments(SegCompactionCandidatesSharedPtr segments);
 
+    void _build_rowset_meta_with_spec_field(RowsetMetaSharedPtr rowset_meta,
+                                            const RowsetMetaSharedPtr& spec_rowset_meta);
+    bool _is_segment_overlapping(const std::vector<KeyBoundsPB>& segments_encoded_key_bounds);
+
 protected:
     RowsetWriterContext _context;
     std::shared_ptr<RowsetMeta> _rowset_meta;
@@ -153,7 +161,8 @@ protected:
     std::unique_ptr<segment_v2::SegmentWriter> _segment_writer;
 
     mutable SpinLock _lock; // protect following vectors.
-    // record rows number of every segment
+    // record rows number of every segment already written, using for rowid
+    // conversion when compaction in unique key with MoW model
     std::vector<uint32_t> _segment_num_rows;
     std::vector<io::FileWriterPtr> _file_writers;
     // for unique key table with merge-on-write
@@ -175,9 +184,13 @@ protected:
         int64_t data_size;
         int64_t index_size;
         KeyBoundsPB key_bounds;
+        std::shared_ptr<std::unordered_set<std::string>> key_set;
     };
-    std::map<uint32_t, Statistics> _segid_statistics_map;
     std::mutex _segid_statistics_map_mutex;
+    std::map<uint32_t, Statistics> _segid_statistics_map;
+
+    // used for check correctness of unique key mow keys.
+    std::atomic<uint64_t> _num_mow_keys;
 
     bool _is_pending = false;
     bool _already_built = false;
@@ -190,7 +203,7 @@ protected:
     std::mutex _is_doing_segcompaction_lock;
     std::condition_variable _segcompacting_cond;
 
-    std::atomic<ErrorCode> _segcompaction_status;
+    std::atomic<int> _segcompaction_status;
 
     fmt::memory_buffer vlog_buffer;
 

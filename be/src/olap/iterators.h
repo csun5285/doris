@@ -38,6 +38,9 @@ class ColumnPredicate;
 struct IOContext {
     ReaderType reader_type;
 };
+namespace vectorized {
+struct IteratorRowRef;
+};
 
 namespace vectorized {
 struct IteratorRowRef;
@@ -118,6 +121,7 @@ public:
     vectorized::VExpr* remaining_vconjunct_root = nullptr;
     const std::set<int32_t>* output_columns = nullptr;
     IOContext io_ctx;
+    Version version;
 };
 
 // Used to read data in RowBlockV2 one by one

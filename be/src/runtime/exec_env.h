@@ -116,12 +116,10 @@ public:
         return nullptr;
     }
 
-    void set_orphan_mem_tracker(const std::shared_ptr<MemTrackerLimiter>& orphan_tracker) {
-        _orphan_mem_tracker = orphan_tracker;
-        _orphan_mem_tracker_raw = orphan_tracker.get();
-    }
+    void init_mem_tracker();
     std::shared_ptr<MemTrackerLimiter> orphan_mem_tracker() { return _orphan_mem_tracker; }
     MemTrackerLimiter* orphan_mem_tracker_raw() { return _orphan_mem_tracker_raw; }
+    MemTrackerLimiter* experimental_mem_tracker() { return _experimental_mem_tracker.get(); }
     ThreadResourceMgr* thread_mgr() { return _thread_mgr; }
     PriorityThreadPool* scan_thread_pool() { return _scan_thread_pool; }
     PriorityThreadPool* remote_scan_thread_pool() { return _remote_scan_thread_pool; }
@@ -129,6 +127,9 @@ public:
     ThreadPool* send_batch_thread_pool() { return _send_batch_thread_pool.get(); }
     ThreadPool* download_cache_thread_pool() { return _download_cache_thread_pool.get(); }
     ThreadPool* buffered_reader_prefetch_thread_pool() { return _buffered_reader_prefetch_thread_pool.get(); }
+    ThreadPool* send_report_thread_pool() { return _send_report_thread_pool.get(); }
+    ThreadPool* join_node_thread_pool() { return _join_node_thread_pool.get(); }
+
     void set_serial_download_cache_thread_token() {
         _serial_download_cache_thread_token =
                 download_cache_thread_pool()->new_token(ThreadPool::ExecutionMode::SERIAL, 1);
@@ -209,6 +210,7 @@ private:
     // and the consumption of the orphan mem tracker is close to 0, but greater than 0.
     std::shared_ptr<MemTrackerLimiter> _orphan_mem_tracker;
     MemTrackerLimiter* _orphan_mem_tracker_raw;
+    std::shared_ptr<MemTrackerLimiter> _experimental_mem_tracker;
 
     // The following two thread pools are used in different scenarios.
     // _scan_thread_pool is a priority thread pool.
@@ -234,6 +236,10 @@ private:
     std::unique_ptr<ThreadPool> _async_write_file_cache_thread_pool;
     // A token used to submit download cache task serially
     std::unique_ptr<ThreadPoolToken> _serial_download_cache_thread_token;
+    // Pool used by fragment manager to send profile or status to FE coordinator
+    std::unique_ptr<ThreadPool> _send_report_thread_pool;
+    // Pool used by join node to build hash table
+    std::unique_ptr<ThreadPool> _join_node_thread_pool;
     // ThreadPoolToken -> buffer
     std::unordered_map<ThreadPoolToken*, std::unique_ptr<char[]>> _download_cache_buf_map;
     CgroupsMgr* _cgroups_mgr = nullptr;

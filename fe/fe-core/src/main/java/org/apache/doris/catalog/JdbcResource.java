@@ -24,9 +24,9 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.proc.BaseProcResult;
 import org.apache.doris.common.util.Util;
-import org.apache.doris.external.jdbc.JdbcClientException;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.annotations.SerializedName;
@@ -61,10 +61,20 @@ import java.util.Map;
 public class JdbcResource extends Resource {
     private static final Logger LOG = LogManager.getLogger(JdbcResource.class);
 
+    public static final String JDBC_MYSQL = "jdbc:mysql";
+    public static final String JDBC_MARIADB = "jdbc:mariadb";
+    public static final String JDBC_POSTGRESQL = "jdbc:postgresql";
+    public static final String JDBC_ORACLE = "jdbc:oracle";
+    public static final String JDBC_SQLSERVER = "jdbc:sqlserver";
+    public static final String JDBC_CLICKHOUSE = "jdbc:clickhouse";
+    public static final String JDBC_SAP_HANA = "jdbc:sap";
+
     public static final String MYSQL = "MYSQL";
     public static final String POSTGRESQL = "POSTGRESQL";
-    // private static final String ORACLE = "ORACLE";
-    // private static final String SQLSERVER = "SQLSERVER";
+    public static final String ORACLE = "ORACLE";
+    public static final String SQLSERVER = "SQLSERVER";
+    public static final String CLICKHOUSE = "CLICKHOUSE";
+    public static final String SAP_HANA = "SAP_HANA";
 
     public static final String JDBC_PROPERTIES_PREFIX = "jdbc.";
     public static final String JDBC_URL = "jdbc_url";
@@ -73,7 +83,32 @@ public class JdbcResource extends Resource {
     public static final String DRIVER_CLASS = "driver_class";
     public static final String DRIVER_URL = "driver_url";
     public static final String TYPE = "type";
+    public static final String ONLY_SPECIFIED_DATABASE = "only_specified_database";
+    public static final String LOWER_CASE_TABLE_NAMES = "lower_case_table_names";
     public static final String CHECK_SUM = "checksum";
+    private static final ImmutableList<String> ALL_PROPERTIES = new ImmutableList.Builder<String>().add(
+            JDBC_URL,
+            USER,
+            PASSWORD,
+            DRIVER_CLASS,
+            DRIVER_URL,
+            TYPE,
+            ONLY_SPECIFIED_DATABASE,
+            LOWER_CASE_TABLE_NAMES
+    ).build();
+    private static final ImmutableList<String> OPTIONAL_PROPERTIES = new ImmutableList.Builder<String>().add(
+            ONLY_SPECIFIED_DATABASE,
+            LOWER_CASE_TABLE_NAMES
+    ).build();
+
+    // The default value of optional properties
+    // if one optional property is not specified, will use default value
+    private static final Map<String, String> OPTIONAL_PROPERTIES_DEFAULT_VALUE = Maps.newHashMap();
+
+    static {
+        OPTIONAL_PROPERTIES_DEFAULT_VALUE.put(ONLY_SPECIFIED_DATABASE, "false");
+        OPTIONAL_PROPERTIES_DEFAULT_VALUE.put(LOWER_CASE_TABLE_NAMES, "false");
+    }
 
     // timeout for both connection and read. 10 seconds is long enough.
     private static final int HTTP_TIMEOUT_MS = 10000;
@@ -93,27 +128,12 @@ public class JdbcResource extends Resource {
         this.configs = configs;
     }
 
-    public JdbcResource getCopiedResource() {
-        return new JdbcResource(name, Maps.newHashMap(configs));
-    }
-
-    private void checkProperties(String propertiesKey) throws DdlException {
-        // check the properties key
-        String value = configs.get(propertiesKey);
-        if (value == null) {
-            throw new DdlException("JdbcResource Missing " + propertiesKey + " in properties");
-        }
-    }
-
     @Override
     public void modifyProperties(Map<String, String> properties) throws DdlException {
         // modify properties
-        replaceIfEffectiveValue(this.configs, DRIVER_URL, properties.get(DRIVER_URL));
-        replaceIfEffectiveValue(this.configs, DRIVER_CLASS, properties.get(DRIVER_CLASS));
-        replaceIfEffectiveValue(this.configs, JDBC_URL, properties.get(JDBC_URL));
-        replaceIfEffectiveValue(this.configs, USER, properties.get(USER));
-        replaceIfEffectiveValue(this.configs, PASSWORD, properties.get(PASSWORD));
-        replaceIfEffectiveValue(this.configs, TYPE, properties.get(TYPE));
+        for (String propertyKey : ALL_PROPERTIES) {
+            replaceIfEffectiveValue(this.configs, propertyKey, properties.get(propertyKey));
+        }
         this.configs.put(JDBC_URL, handleJdbcUrl(getProperty(JDBC_URL)));
         super.modifyProperties(properties);
     }
@@ -122,12 +142,9 @@ public class JdbcResource extends Resource {
     public void checkProperties(Map<String, String> properties) throws AnalysisException {
         Map<String, String> copiedProperties = Maps.newHashMap(properties);
         // check properties
-        copiedProperties.remove(DRIVER_URL);
-        copiedProperties.remove(DRIVER_CLASS);
-        copiedProperties.remove(JDBC_URL);
-        copiedProperties.remove(USER);
-        copiedProperties.remove(PASSWORD);
-        copiedProperties.remove(TYPE);
+        for (String propertyKey : ALL_PROPERTIES) {
+            copiedProperties.remove(propertyKey);
+        }
         if (!copiedProperties.isEmpty()) {
             throw new AnalysisException("Unknown JDBC catalog resource properties: " + copiedProperties);
         }
@@ -137,20 +154,33 @@ public class JdbcResource extends Resource {
     protected void setProperties(Map<String, String> properties) throws DdlException {
         Preconditions.checkState(properties != null);
         for (String key : properties.keySet()) {
-            if (!DRIVER_URL.equals(key) && !JDBC_URL.equals(key) && !USER.equals(key) && !PASSWORD.equals(key)
-                    && !TYPE.equals(key) && !DRIVER_CLASS.equals(key)) {
+            if (!ALL_PROPERTIES.contains(key)) {
                 throw new DdlException("JDBC resource Property of " + key + " is unknown");
             }
         }
         configs = properties;
-        checkProperties(DRIVER_URL);
-        checkProperties(DRIVER_CLASS);
-        checkProperties(JDBC_URL);
-        checkProperties(USER);
-        checkProperties(PASSWORD);
-        checkProperties(TYPE);
+        handleOptionalArguments();
+        // check properties
+        for (String property : ALL_PROPERTIES) {
+            String value = configs.get(property);
+            if (value == null) {
+                throw new DdlException("JdbcResource Missing " + property + " in properties");
+            }
+        }
         this.configs.put(JDBC_URL, handleJdbcUrl(getProperty(JDBC_URL)));
         configs.put(CHECK_SUM, computeObjectChecksum(getProperty(DRIVER_URL)));
+    }
+
+    /**
+     * This function used to handle optional arguments
+     * eg: only_specified_database、lower_case_table_names
+     */
+    private void handleOptionalArguments() {
+        for (String s : OPTIONAL_PROPERTIES) {
+            if (!configs.containsKey(s)) {
+                configs.put(s, OPTIONAL_PROPERTIES_DEFAULT_VALUE.get(s));
+            }
+        }
     }
 
     @Override
@@ -182,10 +212,10 @@ public class JdbcResource extends Resource {
             // skip checking checksum when running ut
             return "";
         }
-        String fullDriverPath = getRealDriverPath(driverPath);
+        String fullDriverUrl = getFullDriverUrl(driverPath);
         InputStream inputStream = null;
         try {
-            inputStream = Util.getInputStreamFromUrl(fullDriverPath, null, HTTP_TIMEOUT_MS, HTTP_TIMEOUT_MS);
+            inputStream = Util.getInputStreamFromUrl(fullDriverUrl, null, HTTP_TIMEOUT_MS, HTTP_TIMEOUT_MS);
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] buf = new byte[4096];
             int bytesRead = 0;
@@ -206,7 +236,7 @@ public class JdbcResource extends Resource {
         }
     }
 
-    private static String getRealDriverPath(String driverUrl) {
+    public static String getFullDriverUrl(String driverUrl) {
         try {
             URI uri = new URI(driverUrl);
             String schema = uri.getScheme();
@@ -220,43 +250,89 @@ public class JdbcResource extends Resource {
         }
     }
 
-    public static String parseDbType(String url) {
-        if (url.startsWith("jdbc:mysql") || url.startsWith("jdbc:mariadb")) {
+    public static String parseDbType(String url) throws DdlException {
+        if (url.startsWith(JDBC_MYSQL) || url.startsWith(JDBC_MARIADB)) {
             return MYSQL;
-        } else if (url.startsWith("jdbc:postgresql")) {
+        } else if (url.startsWith(JDBC_POSTGRESQL)) {
             return POSTGRESQL;
+        } else if (url.startsWith(JDBC_ORACLE)) {
+            return ORACLE;
+        } else if (url.startsWith(JDBC_SQLSERVER)) {
+            return SQLSERVER;
+        } else if (url.startsWith(JDBC_CLICKHOUSE)) {
+            return CLICKHOUSE;
+        } else if (url.startsWith(JDBC_SAP_HANA)) {
+            return SAP_HANA;
         }
-        // else if (url.startsWith("jdbc:oracle")) {
-        //     return ORACLE;
-        // }
-        // else if (url.startsWith("jdbc:sqlserver")) {
-        //     return SQLSERVER;
-        throw new JdbcClientException("Unsupported jdbc database type, please check jdbcUrl: " + url);
+        throw new DdlException("Unsupported jdbc database type, please check jdbcUrl: " + url);
     }
 
-    public static String handleJdbcUrl(String jdbcUrl) {
+    public static String handleJdbcUrl(String jdbcUrl) throws DdlException {
         // delete all space in jdbcUrl
         String newJdbcUrl = jdbcUrl.replaceAll(" ", "");
         String dbType = parseDbType(newJdbcUrl);
         if (dbType.equals(MYSQL)) {
-            // 1. `yearIsDateType` is a parameter of JDBC, and the default is true.
+            // `yearIsDateType` is a parameter of JDBC, and the default is true.
             // We force the use of `yearIsDateType=false`
-            // 2. `tinyInt1isBit` is a parameter of JDBC, and the default is true.
+            newJdbcUrl = checkAndSetJdbcBoolParam(newJdbcUrl, "yearIsDateType", "true", "false");
+            // `tinyInt1isBit` is a parameter of JDBC, and the default is true.
             // We force the use of `tinyInt1isBit=false`, so that for mysql type tinyint,
             // it will convert to Doris tinyint, not bit.
-            newJdbcUrl = checkJdbcUrlParam(newJdbcUrl, "yearIsDateType", "true", "false");
-            newJdbcUrl = checkJdbcUrlParam(newJdbcUrl, "tinyInt1isBit", "true", "false");
+            newJdbcUrl = checkAndSetJdbcBoolParam(newJdbcUrl, "tinyInt1isBit", "true", "false");
+            // set useUnicode and characterEncoding to false and utf-8
+            newJdbcUrl = checkAndSetJdbcBoolParam(newJdbcUrl, "useUnicode", "false", "true");
+            newJdbcUrl = checkAndSetJdbcParam(newJdbcUrl, "characterEncoding", "utf-8");
+        }
+        if (dbType.equals(POSTGRESQL)) {
+            newJdbcUrl = checkAndSetJdbcBoolParam(newJdbcUrl, "useCursorFetch", "false", "true");
         }
         return newJdbcUrl;
     }
 
-    private static String checkJdbcUrlParam(String jdbcUrl, String params, String unexpectedVal, String expectedVal) {
+    /**
+     * Check jdbcUrl param, if the param is not set, set it to the expected value.
+     * If the param is set to an unexpected value, replace it with the expected value.
+     * If the param is set to the expected value, do nothing.
+     *
+     * @param jdbcUrl
+     * @param params
+     * @param unexpectedVal
+     * @param expectedVal
+     * @return
+     */
+    private static String checkAndSetJdbcBoolParam(String jdbcUrl, String params, String unexpectedVal,
+            String expectedVal) {
         String unexpectedParams = params + "=" + unexpectedVal;
         String expectedParams = params + "=" + expectedVal;
         if (jdbcUrl.contains(expectedParams)) {
             return jdbcUrl;
         } else if (jdbcUrl.contains(unexpectedParams)) {
             jdbcUrl = jdbcUrl.replaceAll(unexpectedParams, expectedParams);
+        } else {
+            if (jdbcUrl.contains("?")) {
+                if (jdbcUrl.charAt(jdbcUrl.length() - 1) != '?') {
+                    jdbcUrl += "&";
+                }
+            } else {
+                jdbcUrl += "?";
+            }
+            jdbcUrl += expectedParams;
+        }
+        return jdbcUrl;
+    }
+
+    /**
+     * Check jdbcUrl param, if the param is set, do thing.
+     * If the param is not set, set it to expected value.
+     *
+     * @param jdbcUrl
+     * @param params
+     * @return
+     */
+    private static String checkAndSetJdbcParam(String jdbcUrl, String params, String expectedVal) {
+        String expectedParams = params + "=" + expectedVal;
+        if (jdbcUrl.contains(expectedParams)) {
+            return jdbcUrl;
         } else {
             if (jdbcUrl.contains("?")) {
                 if (jdbcUrl.charAt(jdbcUrl.length() - 1) != '?') {

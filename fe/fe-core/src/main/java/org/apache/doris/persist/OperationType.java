@@ -239,6 +239,9 @@ public class OperationType {
     public static final short OP_ALTER_CATALOG_NAME = 322;
     public static final short OP_ALTER_CATALOG_PROPS = 323;
     public static final short OP_REFRESH_CATALOG = 324;
+    // set table persistent
+    public static final short OP_MODIFY_PERSISTENT = 325;
+
     // conflict with OP_MODIFY_PERSISTENT, add 10000 to it
     public static final short OP_INIT_CATALOG = 10325;
     public static final short OP_REFRESH_EXTERNAL_DB = 326;
@@ -256,8 +259,13 @@ public class OperationType {
     public static final short OP_DROP_MTMV_TASK = 341;
     public static final short OP_ALTER_MTMV_TASK = 342;
 
-    // set table persistent
-    public static final short OP_MODIFY_PERSISTENT = 325;
+    public static final short OP_DROP_EXTERNAL_TABLE = 350;
+    public static final short OP_DROP_EXTERNAL_DB = 351;
+    public static final short OP_CREATE_EXTERNAL_TABLE = 352;
+    public static final short OP_CREATE_EXTERNAL_DB = 353;
+    public static final short OP_ADD_EXTERNAL_PARTITIONS = 354;
+    public static final short OP_DROP_EXTERNAL_PARTITIONS = 355;
+    public static final short OP_REFRESH_EXTERNAL_PARTITIONS = 356;
 
     public static final short OP_ALTER_USER = 400;
 

@@ -2448,3 +2448,13 @@ hive partition 的最大缓存数量。
 是否为 Master FE 节点独有的配置项：true
 
 CloudUpradeMgr 查询be状态的时间间隔，单位:秒
+
+#### `max_error_tablet_of_broker_load`
+
+默认值：3;
+
+是否可以动态配置: true
+
+是否为 Master FE 节点独有的配置项：true
+
+broker load job 保存的失败tablet 信息的最大数量

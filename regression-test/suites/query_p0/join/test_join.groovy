@@ -920,7 +920,7 @@ suite("test_join", "query,p0") {
     // https://github.com/apache/doris/issues/4210
     qt_join_bug3"""select * from baseall t1 where k1 = (select min(k1) from test t2 where t2.k1 = t1.k1 and t2.k2=t1.k2)
            order by k1"""
-
+    qt_join_bug4"""select b.k1 from baseall b where b.k1 not in( select k1 from baseall where k1 is not null )"""
 
 
     // basic join
@@ -1219,7 +1219,15 @@ suite("test_join", "query,p0") {
     sql"""drop table ${table_3}"""
     sql"""drop table ${table_4}"""
 
+    qt_sql """select k1 from baseall left semi join test on true order by k1;"""
+    qt_sql """select k1 from baseall left semi join test on false order by k1;"""
+    qt_sql """select k1 from baseall left anti join test on true order by k1;"""
+    qt_sql """select k1 from baseall left anti join test on false order by k1;"""
 
+    qt_sql """select k1 from test right semi join baseall on true order by k1;"""
+    qt_sql """select k1 from test right semi join baseall on false order by k1;"""
+    qt_sql """select k1 from test right anti join baseall on true order by k1;"""
+    qt_sql """select k1 from test right anti join baseall on false order by k1;"""
 
     // test bucket shuffle join, github issue #6171
     sql"""create database if not exists test_issue_6171"""

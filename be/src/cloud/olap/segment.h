@@ -99,6 +99,8 @@ public:
 
     Status lookup_row_key(const Slice& key, RowLocation* row_location);
 
+    Status read_key_by_rowid(uint32_t row_id, std::string* key);
+
     // only used by UT
     const SegmentFooterPB& footer() const { return _footer; }
 
@@ -116,6 +118,8 @@ public:
     };
 
     io::FileReaderSPtr file_reader() { return _file_reader; }
+
+    int64_t meta_mem_usage() const { return _meta_mem_usage; }
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
@@ -158,6 +162,8 @@ private:
     std::unique_ptr<ShortKeyIndexDecoder> _sk_index_decoder;
     // primary key index reader
     std::unique_ptr<PrimaryKeyIndexReader> _pk_index_reader;
+    // Segment may be destructed after StorageEngine, in order to exit gracefully.
+    std::shared_ptr<MemTracker> _segment_meta_mem_tracker;
 };
 
 } // namespace segment_v2

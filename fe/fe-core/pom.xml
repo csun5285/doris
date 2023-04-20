@@ -111,17 +111,6 @@ under the License.
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>${project.groupId}</groupId>
-            <artifactId>spark-dpp</artifactId>
-            <version>${project.version}</version>
-            <exclusions>
-                <exclusion>
-                    <artifactId>netty-all</artifactId>
-                    <groupId>io.netty</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-web</artifactId>
             <version>${log4j2.version}</version>
@@ -226,22 +215,6 @@ under the License.
             <groupId>org.apache.doris</groupId>
             <artifactId>je</artifactId>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/org.mortbay.jetty/jetty -->
-        <dependency>
-            <groupId>org.mortbay.jetty</groupId>
-            <artifactId>jetty</artifactId>
-            <exclusions>
-                <exclusion>
-                    <artifactId>servlet-api-2.5</artifactId>
-                    <groupId>org.mortbay.jetty</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.mortbay.jetty/jetty-util -->
-        <dependency>
-            <groupId>org.mortbay.jetty</groupId>
-            <artifactId>jetty-util</artifactId>
-        </dependency>
         <!-- https://mvnrepository.com/artifact/de.jflex/jflex -->
         <dependency>
             <groupId>de.jflex</groupId>
@@ -304,7 +277,7 @@ under the License.
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-log4j12</artifactId>
-            <version>1.7.9</version>
+            <version>2.0.0</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/io.dropwizard.metrics/metrics-core -->
         <dependency>
@@ -522,6 +495,14 @@ under the License.
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-s3</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-glue</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-dynamodb</artifactId>
+        </dependency>
         <!-- https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-starter-web -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -648,12 +629,6 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/io.netty/netty-all -->
-        <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-all</artifactId>
-            <version>${netty.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.apache.hive</groupId>
             <artifactId>hive-exec</artifactId>
@@ -686,30 +661,6 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite.avatica/avatica -->
-        <dependency>
-            <groupId>org.apache.calcite.avatica</groupId>
-            <artifactId>avatica</artifactId>
-            <version>${avatica.version}</version>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite/calcite-core -->
-        <dependency>
-            <groupId>org.apache.calcite</groupId>
-            <artifactId>calcite-core</artifactId>
-            <version>${calcite.version}</version>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite/calcite-linq4j -->
-        <dependency>
-            <groupId>org.apache.calcite</groupId>
-            <artifactId>calcite-linq4j</artifactId>
-            <version>${calcite.version}</version>
-        </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.calcite/calcite-druid -->
-        <dependency>
-            <groupId>org.apache.calcite</groupId>
-            <artifactId>calcite-druid</artifactId>
-            <version>${calcite.version}</version>
-        </dependency>
         <dependency>
            <groupId>org.apache.httpcomponents</groupId>
            <artifactId>httpclient</artifactId>
@@ -733,7 +684,7 @@ under the License.
                  <exclusion>
                     <artifactId>jackson-databind</artifactId>
                     <groupId>com.fasterxml.jackson.core</groupId>
-                </exclusion>               
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -833,6 +784,7 @@ under the License.
             <version>3.10.1</version>
         </dependency>
 
+        <!-- https://mvnrepository.com/artifact/com.alibaba/druid -->
         <dependency>
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
@@ -842,16 +794,6 @@ under the License.
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-java-sdk-ec2</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-s3</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-dynamodb</artifactId>
         </dependency>
 
         <dependency>
@@ -918,11 +860,15 @@ under the License.
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid</artifactId>
+        </dependency>
 
         <!-- for aliyun dlf -->
         <dependency>
             <groupId>com.aliyun.datalake</groupId>
-            <artifactId>metastore-client-hive2</artifactId>
+            <artifactId>metastore-client-hive3</artifactId>
             <exclusions>
                 <exclusion>
                     <groupId>com.aliyun</groupId>

@@ -24,6 +24,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Index;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
@@ -31,6 +32,8 @@ import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.util.AutoBucketUtils;
+import org.apache.doris.common.util.ParseUtil;
 import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.common.util.Util;
@@ -52,6 +55,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -93,6 +97,32 @@ public class CreateTableStmt extends DdlStmt {
         engineNames.add("iceberg");
         engineNames.add("hudi");
         engineNames.add("jdbc");
+    }
+
+    // if auto bucket auto bucket enable, rewrite distribution bucket num &&
+    // set properties[PropertyAnalyzer.PROPERTIES_AUTO_BUCKET] = "true"
+    private static Map<String, String> maybeRewriteByAutoBucket(DistributionDesc distributionDesc,
+            Map<String, String> properties) throws AnalysisException {
+        if (distributionDesc == null || !distributionDesc.isAutoBucket()) {
+            return properties;
+        }
+
+        // auto bucket is enable
+        Map<String, String> newProperties = properties;
+        if (newProperties == null) {
+            newProperties = new HashMap<String, String>();
+        }
+        newProperties.put(PropertyAnalyzer.PROPERTIES_AUTO_BUCKET, "true");
+
+        if (!newProperties.containsKey(PropertyAnalyzer.PROPERTIES_ESTIMATE_PARTITION_SIZE)) {
+            distributionDesc.setBuckets(FeConstants.default_bucket_num);
+        } else {
+            long partitionSize = ParseUtil
+                    .analyzeDataVolumn(newProperties.get(PropertyAnalyzer.PROPERTIES_ESTIMATE_PARTITION_SIZE));
+            distributionDesc.setBuckets(AutoBucketUtils.getBucketsNum(partitionSize));
+        }
+
+        return newProperties;
     }
 
     public CreateTableStmt() {
@@ -268,7 +298,11 @@ public class CreateTableStmt extends DdlStmt {
     }
 
     @Override
-    public void analyze(Analyzer analyzer) throws UserException {
+    public void analyze(Analyzer analyzer) throws UserException, AnalysisException {
+        if (Strings.isNullOrEmpty(engineName) || engineName.equalsIgnoreCase("olap")) {
+            this.properties = maybeRewriteByAutoBucket(distributionDesc, properties);
+        }
+
         super.analyze(analyzer);
         tableName.analyze(analyzer);
         FeNameFormat.checkTableName(tableName.getTbl());
@@ -288,7 +322,12 @@ public class CreateTableStmt extends DdlStmt {
         if (properties != null) {
             enableUniqueKeyMergeOnWrite = PropertyAnalyzer.analyzeUniqueKeyMergeOnWrite(new HashMap<>(properties));
         }
-
+        //pre-block creation with column type ALL
+        for (ColumnDef columnDef : columnDefs) {
+            if (Objects.equals(columnDef.getType(), Type.ALL)) {
+                throw new AnalysisException("Disable to create table with `ALL` type columns.");
+            }
+        }
         // analyze key desc
         if (engineName.equalsIgnoreCase("olap")) {
             // olap table
@@ -390,6 +429,14 @@ public class CreateTableStmt extends DdlStmt {
                 columnDefs.add(ColumnDef.newDeleteSignColumnDef(AggregateType.NONE));
             } else {
                 columnDefs.add(ColumnDef.newDeleteSignColumnDef(AggregateType.REPLACE));
+            }
+        }
+        if (Config.enable_hidden_version_column_by_default && keysDesc != null
+                && keysDesc.getKeysType() == KeysType.UNIQUE_KEYS) {
+            if (enableUniqueKeyMergeOnWrite) {
+                columnDefs.add(ColumnDef.newVersionColumnDef(AggregateType.NONE));
+            } else {
+                columnDefs.add(ColumnDef.newVersionColumnDef(AggregateType.REPLACE));
             }
         }
         boolean hasObjectStored = false;
@@ -577,9 +624,7 @@ public class CreateTableStmt extends DdlStmt {
             }
         }
         sb.append("\n)");
-        if (engineName != null) {
-            sb.append(" ENGINE = ").append(engineName);
-        }
+        sb.append(" ENGINE = ").append(engineName);
 
         if (keysDesc != null) {
             sb.append("\n").append(keysDesc.toSql());

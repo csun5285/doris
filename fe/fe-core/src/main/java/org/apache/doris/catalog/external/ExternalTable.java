@@ -238,7 +238,7 @@ public class ExternalTable implements TableIf, Writable, GsonPostProcessable {
     public Column getColumn(String name) {
         List<Column> schema = getFullSchema();
         for (Column column : schema) {
-            if (name.equals(column.getName())) {
+            if (name.equalsIgnoreCase(column.getName())) {
                 return column;
             }
         }
@@ -302,6 +302,17 @@ public class ExternalTable implements TableIf, Writable, GsonPostProcessable {
     @Override
     public BaseAnalysisTask createAnalysisTask(AnalysisTaskScheduler scheduler, AnalysisTaskInfo info) {
         throw new NotImplementedException();
+    }
+
+    /**
+     * Should only be called in ExternalCatalog's getSchema(),
+     * which is called from schema cache.
+     * If you want to get schema of this table, use getFullSchema()
+     *
+     * @return
+     */
+    public List<Column> initSchema() {
+        throw new NotImplementedException("implement in sub class");
     }
 
     @Override

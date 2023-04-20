@@ -532,6 +532,10 @@ Translated with www.DeepL.com/Translator (free version)
 * `skip_delete_predicate`
   For debugging purpose. In vectorized execution engine, in case of problems of reading data, setting value to `true` will also read deleted data.
 
+* `skip_delete_bitmap`
+
+    For debugging purpose. In Unique Key MoW table, in case of problems of reading data, setting value to `true` will also read deleted data.
+
 * `default_password_lifetime`
 
 	Default password expiration time. The default value is 0, which means no expiration. The unit is days. This parameter is only enabled if the user's password expiration property has a value of DEFAULT. like:
@@ -558,6 +562,13 @@ Translated with www.DeepL.com/Translator (free version)
 
     For compatible purpose. This variable has no effect, just enable some BI tools can query or set this session variable sucessfully.
 
+*   `group_by_and_having_use_alias_first`
+
+    Specifies whether group by and having clauses use column aliases rather than searching for column name in From clause. The default value is false.
+
 * `topn_opt_limit_threshold`
 
     Set threshold for limit of topn query (eg. SELECT * FROM t ORDER BY k LIMIT n). If n <= threshold, topn optimizations(runtime predicate pushdown, two phase result fetch and read order by key) will enable automatically, otherwise disable. Default value is 1024.
+* `use_fix_replica`
+
+    Use a fixed replica to query. If use_fix_replica is 1, the smallest one is used, if use_fix_replica is 2, the second smallest one is used, and so on. The default value is -1, which means it is not enabled.

@@ -57,6 +57,7 @@
 #include "util/trace.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(agent_task_queue_size, MetricUnit::NOUNIT);
 
@@ -222,7 +223,7 @@ void TaskWorkerPool::start() {
 
     for (int i = 0; i < _worker_count; i++) {
         auto st = _thread_pool->submit_func(cb);
-        CHECK(st.ok()) << st.to_string();
+        CHECK(st.ok()) << st;
     }
 #endif
 }
@@ -269,16 +270,16 @@ void TaskWorkerPool::notify_thread() {
 }
 
 bool TaskWorkerPool::_register_task_info(const TTaskType::type task_type, int64_t signature) {
-    lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
-    set<int64_t>& signature_set = _s_task_signatures[task_type];
+    std::lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
+    std::set<int64_t>& signature_set = _s_task_signatures[task_type];
     return signature_set.insert(signature).second;
 }
 
 void TaskWorkerPool::_remove_task_info(const TTaskType::type task_type, int64_t signature) {
     size_t queue_size;
     {
-        lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
-        set<int64_t>& signature_set = _s_task_signatures[task_type];
+        std::lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
+        std::set<int64_t>& signature_set = _s_task_signatures[task_type];
         signature_set.erase(signature);
         queue_size = signature_set.size();
     }
@@ -318,7 +319,7 @@ uint32_t TaskWorkerPool::_get_next_task_index(int32_t thread_count,
                                               std::deque<TAgentTaskRequest>& tasks,
                                               TPriority::type priority) {
     int32_t index = -1;
-    deque<TAgentTaskRequest>::size_type task_count = tasks.size();
+    std::deque<TAgentTaskRequest>::size_type task_count = tasks.size();
     for (uint32_t i = 0; i < task_count; ++i) {
         TAgentTaskRequest task = tasks[i];
         if (priority == TPriority::HIGH) {
@@ -537,7 +538,7 @@ void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_invert
         EngineAlterInvertedIndexTask engine_task(alter_inverted_index_request.alter_inverted_index_req);
         Status sc_status = _env->storage_engine()->execute_task(&engine_task);
         if (!sc_status.ok()) {
-            if (sc_status.precise_code() == OLAP_ERR_DATA_QUALITY_ERR) {
+            if (sc_status.is<DATA_QUALITY_ERR>()) {
                 error_msgs.push_back("The data quality does not satisfy, please check your data. ");
             }
             status = Status::DataQualityError("The data quality does not satisfy");
@@ -580,9 +581,8 @@ void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_invert
         error_msgs.push_back(process_name + " failed");
         error_msgs.push_back("status: " + status.to_string());
     }
-    task_status.__set_status_code(status.code());
-    task_status.__set_error_msgs(error_msgs);
-    finish_task_request->__set_task_status(task_status);
+    finish_task_request->__set_task_status(status.to_thrift());
+    finish_task_request->task_status.__set_error_msgs(error_msgs);
 }
 
 void TaskWorkerPool::_alter_tablet_worker_thread_callback() {
@@ -664,7 +664,7 @@ void TaskWorkerPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, int6
     finish_task_request->__set_task_type(task_type);
     finish_task_request->__set_signature(signature);
 
-    if (!status.ok() && status.code() != TStatusCode::NOT_IMPLEMENTED_ERROR) {
+    if (!status.ok() && !status.is<NOT_IMPLEMENTED_ERROR>()) {
         LOG_WARNING("failed to {}", process_name)
                 .tag("signature", agent_task_req.signature)
                 .tag("base_tablet_id", agent_task_req.alter_tablet_req_v2.base_tablet_id)
@@ -674,8 +674,7 @@ void TaskWorkerPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, int6
         LOG_INFO("successfully {}", process_name)
                 .tag("signature", agent_task_req.signature)
                 .tag("base_tablet_id", agent_task_req.alter_tablet_req_v2.base_tablet_id)
-                .tag("job_id", agent_task_req.alter_tablet_req_v2.job_id)
-                .tag("status", status.get_error_msg());
+                .tag("job_id", agent_task_req.alter_tablet_req_v2.job_id);
     }
     finish_task_request->__set_task_status(status.to_thrift());
 }
@@ -845,7 +844,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
             status = _env->storage_engine()->execute_task(&engine_task);
             if (status.ok()) {
                 break;
-            } else if (status.precise_code() == OLAP_ERR_PUBLISH_VERSION_NOT_CONTINUOUS) {
+            } else if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>()) {
                 int64_t time_elapsed = time(nullptr) - agent_task_req.recv_time;
                 if (time_elapsed > PUBLISH_TIMEOUT_SEC) {
                     LOG(INFO) << "task elapsed " << time_elapsed
@@ -858,6 +857,8 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
                     _tasks.push_back(agent_task_req);
                     _worker_thread_condition_variable.notify_one();
                 }
+                LOG(INFO) << "wait for previous publish version task to be done"
+                          << "transaction_id: " << publish_version_req.transaction_id;
                 break;
             } else {
                 LOG_WARNING("failed to publish version")
@@ -869,7 +870,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }
-        if (status.precise_code() == OLAP_ERR_PUBLISH_VERSION_NOT_CONTINUOUS && !is_task_timeout) {
+        if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>() && !is_task_timeout) {
             continue;
         }
 
@@ -915,6 +916,7 @@ void TaskWorkerPool::_publish_version_worker_thread_callback() {
         finish_task_request.__set_task_type(agent_task_req.task_type);
         finish_task_request.__set_signature(agent_task_req.signature);
         finish_task_request.__set_report_version(_s_report_version);
+        finish_task_request.__set_error_tablet_ids(error_tablet_ids);
 
         _finish_task(finish_task_request);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
@@ -1268,7 +1270,7 @@ void TaskWorkerPool::_report_task_worker_thread_callback() {
         // See _random_sleep() comment in _report_disk_state_worker_thread_callback
         _random_sleep(5);
         {
-            lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
+            std::lock_guard<std::mutex> task_signatures_lock(_s_task_signatures_lock);
             request.__set_tasks(_s_task_signatures);
         }
         _handle_report(request, ReportType::TASK);
@@ -1312,7 +1314,7 @@ void TaskWorkerPool::_report_disk_state_worker_thread_callback() {
         std::vector<DataDirInfo> data_dir_infos;
         _env->storage_engine()->get_all_data_dir_info(&data_dir_infos, true /* update */);
 
-        map<string, TDisk> disks;
+        std::map<string, TDisk> disks;
         for (auto& root_path_info : data_dir_infos) {
             TDisk disk;
             disk.__set_root_path(root_path_info.path);
@@ -1793,7 +1795,7 @@ void TaskWorkerPool::_storage_refresh_storage_policy_worker_thread_callback() {
             // update storage policy mgr.
             StoragePolicyMgr* spm = ExecEnv::GetInstance()->storage_policy_mgr();
             for (const auto& iter : result.result_entrys) {
-                shared_ptr<StoragePolicy> policy_ptr = make_shared<StoragePolicy>();
+                auto policy_ptr = std::make_shared<StoragePolicy>();
                 policy_ptr->storage_policy_name = iter.policy_name;
                 policy_ptr->cooldown_datetime = iter.cooldown_datetime;
                 policy_ptr->cooldown_ttl = iter.cooldown_ttl;
@@ -1833,7 +1835,7 @@ void TaskWorkerPool::_storage_update_storage_policy_worker_thread_callback() {
         }
 
         StoragePolicyMgr* spm = ExecEnv::GetInstance()->storage_policy_mgr();
-        shared_ptr<StoragePolicy> policy_ptr = make_shared<StoragePolicy>();
+        auto policy_ptr = std::make_shared<StoragePolicy>();
         policy_ptr->storage_policy_name = get_storage_policy_req.policy_name;
         policy_ptr->cooldown_datetime = get_storage_policy_req.cooldown_datetime;
         policy_ptr->cooldown_ttl = get_storage_policy_req.cooldown_ttl;

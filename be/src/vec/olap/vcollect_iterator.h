@@ -39,7 +39,7 @@ public:
     // Hold reader point to get reader params
     ~VCollectIterator();
 
-    void init(TabletReader* reader, bool force_merge, bool is_reverse);
+    void init(TabletReader* reader, bool ori_data_overlapping, bool force_merge, bool is_reverse);
 
     Status add_child(RowsetReaderSharedPtr rs_reader);
 
@@ -49,8 +49,8 @@ public:
 
     // Read nest order row in Block.
     // Returns
-    //      OLAP_SUCCESS when read successfully.
-    //      Status::OLAPInternalError(OLAP_ERR_DATA_EOF) and set *row to nullptr when EOF is reached.
+    //      OK when read successfully.
+    //      Status::Error<END_OF_FILE>() and set *row to nullptr when EOF is reached.
     //      Others when error happens
     Status next(IteratorRowRef* ref);
 
@@ -107,6 +107,9 @@ private:
                   _compare_columns(reader->_reader_context.read_orderby_key_columns) {};
 
         virtual Status init(bool get_data_by_ref = false) = 0;
+        virtual Status init_for_union(bool is_first_child, bool get_data_by_ref = false) {
+            return Status::OK();
+        };
 
         virtual int64_t version() const = 0;
 
@@ -168,6 +171,7 @@ private:
         ~Level0Iterator() override = default;
 
         Status init(bool get_data_by_ref = false) override;
+        Status init_for_union(bool is_first_child, bool get_data_by_ref = false) override;
 
         int64_t version() const override;
 
@@ -263,6 +267,8 @@ private:
             }
             return false;
         }
+
+        Status init_level0_iterators_for_union();
 
     private:
         Status _merge_next(IteratorRowRef* ref);

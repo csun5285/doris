@@ -23,6 +23,7 @@
 #include "io/file_factory.h"
 #include "parquet_pred_cmp.h"
 #include "parquet_thrift_util.h"
+#include "rapidjson/document.h"
 #include "vec/exprs/vbloom_predicate.h"
 #include "vec/exprs/vin_predicate.h"
 #include "vec/exprs/vruntimefilter_wrapper.h"
@@ -35,7 +36,7 @@ ParquetReader::ParquetReader(RuntimeProfile* profile, const TFileScanRangeParams
         : _profile(profile),
           _scan_params(params),
           _scan_range(range),
-          _batch_size(batch_size),
+          _batch_size(std::max(batch_size, _MIN_BATCH_SIZE)),
           _range_start_offset(range.start_offset),
           _range_size(range.size),
           _ctz(ctz) {
@@ -66,6 +67,8 @@ void ParquetReader::_init_profile() {
                 ADD_CHILD_COUNTER(_profile, "FilteredRowsByLazyRead", TUnit::UNIT, parquet_profile);
         _parquet_profile.filtered_bytes =
                 ADD_CHILD_COUNTER(_profile, "FilteredBytes", TUnit::BYTES, parquet_profile);
+        _parquet_profile.raw_rows_read =
+                ADD_CHILD_COUNTER(_profile, "RawRowsRead", TUnit::UNIT, parquet_profile);
         _parquet_profile.to_read_bytes =
                 ADD_CHILD_COUNTER(_profile, "ReadBytes", TUnit::BYTES, parquet_profile);
         _parquet_profile.column_read_time =
@@ -107,6 +110,7 @@ void ParquetReader::close() {
             COUNTER_UPDATE(_parquet_profile.lazy_read_filtered_rows,
                            _statistics.lazy_read_filtered_rows);
             COUNTER_UPDATE(_parquet_profile.filtered_bytes, _statistics.filtered_bytes);
+            COUNTER_UPDATE(_parquet_profile.raw_rows_read, _statistics.read_rows);
             COUNTER_UPDATE(_parquet_profile.to_read_bytes, _statistics.read_bytes);
             COUNTER_UPDATE(_parquet_profile.column_read_time, _statistics.column_read_time);
             COUNTER_UPDATE(_parquet_profile.parse_meta_time, _statistics.parse_meta_time);
@@ -143,28 +147,58 @@ Status ParquetReader::_open_file() {
     if (_file_metadata == nullptr) {
         RETURN_IF_ERROR(_file_reader->open());
         if (_file_reader->size() == 0) {
-            return Status::EndOfFile("Empty Parquet File");
+            return Status::EndOfFile("open file failed, empty parquet file: " + _scan_range.path);
         }
         RETURN_IF_ERROR(parse_thrift_footer(_file_reader.get(), _file_metadata));
     }
     return Status::OK();
 }
 
-Status ParquetReader::init_reader(
-        const std::vector<std::string>& column_names,
-        std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range,
-        VExprContext* vconjunct_ctx, bool filter_groups) {
+// Get iceberg col id to col name map stored in parquet metadata key values.
+// This is for iceberg schema evolution.
+std::vector<tparquet::KeyValue> ParquetReader::get_metadata_key_values() {
+    return _t_metadata->key_value_metadata;
+}
+
+Status ParquetReader::open() {
     SCOPED_RAW_TIMER(&_statistics.parse_meta_time);
     RETURN_IF_ERROR(_open_file());
-    _column_names = &column_names;
     _t_metadata = &_file_metadata->to_thrift();
+    return Status::OK();
+}
+
+Status ParquetReader::init_reader(
+        const std::vector<std::string>& all_column_names,
+        const std::vector<std::string>& missing_column_names,
+        std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range,
+        VExprContext* vconjunct_ctx, bool filter_groups) {
+    if (_file_metadata == nullptr) {
+        return Status::InternalError("failed to init parquet reader, please open reader first");
+    }
+
+    SCOPED_RAW_TIMER(&_statistics.parse_meta_time);
     _total_groups = _t_metadata->row_groups.size();
     if (_total_groups == 0) {
-        return Status::EndOfFile("Empty Parquet File");
+        return Status::EndOfFile("init reader failed, empty parquet file: " + _scan_range.path);
     }
+    // all_column_names are all the columns required by user sql.
+    // missing_column_names are the columns required by user sql but not in the parquet file,
+    // e.g. table added a column after this parquet file was written.
+    _column_names = &all_column_names;
     auto schema_desc = _file_metadata->schema();
     for (int i = 0; i < schema_desc.size(); ++i) {
-        _map_column.emplace(schema_desc.get_column(i)->name, i);
+        auto name = schema_desc.get_column(i)->name;
+        // If the column in parquet file is included in all_column_names and not in missing_column_names,
+        // add it to _map_column, which means the reader should read the data of this column.
+        // Here to check against missing_column_names is for the 'Add a column back to the table
+        // with the same column name' case. (drop column a then add column a).
+        // Shouldn't read this column data in this case.
+        if (find(all_column_names.begin(), all_column_names.end(), name) !=
+                    all_column_names.end() &&
+            find(missing_column_names.begin(), missing_column_names.end(), name) ==
+                    missing_column_names.end()) {
+            _map_column.emplace(name, i);
+        }
     }
     _colname_to_value_range = colname_to_value_range;
     RETURN_IF_ERROR(_init_read_columns());
@@ -182,7 +216,12 @@ Status ParquetReader::set_fill_columns(
     std::unordered_map<std::string, uint32_t> predicate_columns;
     std::function<void(VExpr * expr)> visit_slot = [&](VExpr* expr) {
         if (VSlotRef* slot_ref = typeid_cast<VSlotRef*>(expr)) {
-            predicate_columns.emplace(slot_ref->expr_name(), slot_ref->column_id());
+            auto expr_name = slot_ref->expr_name();
+            auto iter = _table_col_to_file_col.find(expr_name);
+            if (iter != _table_col_to_file_col.end()) {
+                expr_name = iter->second;
+            }
+            predicate_columns.emplace(expr_name, slot_ref->column_id());
             if (slot_ref->column_id() == 0) {
                 _lazy_read_ctx.resize_first_column = false;
             }
@@ -311,10 +350,6 @@ Status ParquetReader::get_parsed_schema(std::vector<std::string>* col_names,
     _t_metadata = &_file_metadata->to_thrift();
 
     _total_groups = _t_metadata->row_groups.size();
-    if (_total_groups == 0) {
-        return Status::EndOfFile("Empty Parquet File");
-    }
-
     auto schema_desc = _file_metadata->schema();
     for (int i = 0; i < schema_desc.size(); ++i) {
         // Get the Column Reader for the boolean column
@@ -354,8 +389,12 @@ Status ParquetReader::get_next_block(Block* block, size_t* read_rows, bool* eof)
     DCHECK(_current_group_reader != nullptr);
     {
         SCOPED_RAW_TIMER(&_statistics.column_read_time);
-        RETURN_IF_ERROR(
-                _current_group_reader->next_batch(block, _batch_size, read_rows, &_row_group_eof));
+        Status batch_st =
+                _current_group_reader->next_batch(block, _batch_size, read_rows, &_row_group_eof);
+        if (!batch_st.ok()) {
+            return Status::InternalError("Read parquet file {} failed, reason = {}",
+                                         _scan_range.path, batch_st.to_string());
+        }
     }
     if (_row_group_eof) {
         auto column_st = _current_group_reader->statistics();

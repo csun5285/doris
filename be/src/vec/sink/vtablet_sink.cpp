@@ -38,6 +38,12 @@ VNodeChannel::VNodeChannel(OlapTableSink* parent, IndexChannel* index_channel, i
 }
 
 VNodeChannel::~VNodeChannel() {
+    if (_open_closure != nullptr) {
+        if (_open_closure->unref()) {
+            delete _open_closure;
+        }
+        _open_closure = nullptr;
+    }
     if (_add_block_closure != nullptr) {
         delete _add_block_closure;
         _add_block_closure = nullptr;
@@ -100,7 +106,7 @@ Status VNodeChannel::open_wait() {
                                        -1);
         Status st = _index_channel->check_intolerable_failure();
         if (!st.ok()) {
-            _cancel_with_msg(fmt::format("{}, err: {}", channel_info(), st.get_error_msg()));
+            _cancel_with_msg(fmt::format("{}, err: {}", channel_info(), st.to_string()));
         } else if (is_last_rpc) {
             // if this is last rpc, will must set _add_batches_finished. otherwise, node channel's close_wait
             // will be blocked.
@@ -127,7 +133,7 @@ Status VNodeChannel::open_wait() {
 
             Status st = _index_channel->check_intolerable_failure();
             if (!st.ok()) {
-                _cancel_with_msg(st.get_error_msg());
+                _cancel_with_msg(st.to_string());
             } else if (is_last_rpc) {
                 for (auto& tablet : result.tablet_vec()) {
                     TTabletCommitInfo commit_info;
@@ -166,7 +172,7 @@ Status VNodeChannel::open_wait() {
             }
         } else {
             _cancel_with_msg(fmt::format("{}, add batch req success but status isn't ok, err: {}",
-                                         channel_info(), status.get_error_msg()));
+                                         channel_info(), status.to_string()));
         }
 
         if (result.has_execution_time_us()) {
@@ -291,7 +297,7 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
                                     state->fragement_transmission_compression_type(),
                                     _parent->_transfer_large_data_by_brpc);
         if (!st.ok()) {
-            cancel(fmt::format("{}, err: {}", channel_info(), st.get_error_msg()));
+            cancel(fmt::format("{}, err: {}", channel_info(), st.to_string()));
             _add_block_closure->clear_in_flight();
             return;
         }
@@ -358,7 +364,7 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
                 PTabletWriterAddBlockRequest, ReusableClosure<PTabletWriterAddBlockResult>>(
                 &request, _add_block_closure);
         if (!st.ok()) {
-            cancel(fmt::format("{}, err: {}", channel_info(), st.get_error_msg()));
+            cancel(fmt::format("{}, err: {}", channel_info(), st.to_string()));
             _add_block_closure->clear_in_flight();
             return;
         }
@@ -607,7 +613,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
                 auto st = entry.first->add_block(&block, entry.second);
                 if (!st.ok()) {
                     _channels[i]->mark_as_failed(entry.first->node_id(), entry.first->host(),
-                                                 st.get_error_msg());
+                                                 st.to_string());
                 }
             }
         }

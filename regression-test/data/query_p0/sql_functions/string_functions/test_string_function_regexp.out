@@ -37,6 +37,9 @@ d
 ['abc','def','ghi']
 
 -- !sql --
+
+
+-- !sql --
 a-b-c
 
 -- !sql --
