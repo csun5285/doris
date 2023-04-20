@@ -25,6 +25,7 @@
 #include "common/status.h" // Status
 #include "gen_cpp/segment_v2.pb.h"
 #include "olap/tablet_schema.h"
+#include "util/faststring.h"
 #include "vec/core/block.h"
 #include "vec/olap/olap_data_convertor.h"
 
@@ -54,6 +55,8 @@ class ColumnWriter;
 
 extern const char* k_segment_magic;
 extern const uint32_t k_segment_magic_length;
+
+using KeySetPtr = std::shared_ptr<std::unordered_set<std::string>>;
 
 struct SegmentWriterOptions {
     uint32_t num_rows_per_block = 1024;
@@ -96,11 +99,12 @@ public:
 
     static void init_column_meta(ColumnMetaPB* meta, uint32_t column_id,
                                  const TabletColumn& column, TabletSchemaSPtr tablet_schema);
-
-    uint32_t get_segment_id() const { return _segment_id; }
+    uint32_t get_segment_id() { return _segment_id; }
 
     Slice min_encoded_key();
     Slice max_encoded_key();
+
+    KeySetPtr get_key_set() { return _key_set; }
 
     DataDir* get_data_dir() { return _data_dir; }
     bool is_unique_key() { return _tablet_schema->keys_type() == UNIQUE_KEYS; }
@@ -127,6 +131,17 @@ private:
                              size_t pos, bool null_first = true);
     bool _should_create_writers_with_dynamic_block(size_t num_columns_in_block);
     
+    // used for unique-key with merge on write and segment min_max key
+    std::string _full_encode_keys(
+            const std::vector<vectorized::IOlapColumnDataAccessor*>& key_columns, size_t pos,
+            bool null_first = true);
+    // used for unique-key with merge on write
+    void _encode_seq_column(const vectorized::IOlapColumnDataAccessor* seq_column, size_t pos,
+                            string* encoded_keys);
+    void set_min_max_key(const Slice& key);
+    void set_min_key(const Slice& key);
+    void set_max_key(const Slice& key);
+
 private:
     uint32_t _segment_id;
     TabletSchemaSPtr _tablet_schema;
@@ -139,6 +154,7 @@ private:
 
     SegmentFooterPB _footer;
     size_t _num_key_columns;
+    size_t _num_short_key_columns;
     std::unique_ptr<ShortKeyIndexBuilder> _short_key_index_builder;
     std::unique_ptr<PrimaryKeyIndexBuilder> _primary_key_index_builder;
     std::vector<std::unique_ptr<ColumnWriter>> _column_writers;
@@ -147,8 +163,11 @@ private:
     std::unique_ptr<vectorized::OlapBlockDataConvertor> _olap_data_convertor;
     // used for building short key index or primary key index during vectorized write.
     std::vector<const KeyCoder*> _key_coders;
+    const KeyCoder* _seq_coder = nullptr;
     std::vector<uint16_t> _key_index_size;
     size_t _short_key_row_pos = 0;
+    // used to check if there's duplicate key in aggregate key and unique key data model
+    KeySetPtr _key_set;
 
     std::vector<uint32_t> _column_ids;
     bool _has_key = true;
@@ -158,6 +177,10 @@ private:
     // In vertical compaction row count is recorded when key columns group finish
     // and _num_rows_written will be updated in value column group
     uint32_t _row_count = 0;
+
+    bool _is_first_row = true;
+    faststring _min_key;
+    faststring _max_key;
 };
 
 } // namespace segment_v2

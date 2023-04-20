@@ -72,11 +72,12 @@ OrcReader::OrcReader(RuntimeProfile* profile, const TFileScanRangeParams& params
         : _profile(profile),
           _scan_params(params),
           _scan_range(range),
-          _batch_size(batch_size),
+          _batch_size(std::max(batch_size, _MIN_BATCH_SIZE)),
           _range_start_offset(range.start_offset),
           _range_size(range.size),
           _ctz(ctz),
-          _column_names(column_names) {
+          _column_names(column_names),
+          _is_hive(params.__isset.slot_name_to_schema_pos) {
     TimezoneUtils::find_cctz_time_zone(ctz, _time_zone);
     _init_profile();
 }
@@ -87,7 +88,8 @@ OrcReader::OrcReader(const TFileScanRangeParams& params, const TFileRangeDesc& r
           _scan_params(params),
           _scan_range(range),
           _ctz(ctz),
-          _column_names(column_names) {}
+          _column_names(column_names),
+          _is_hive(params.__isset.slot_name_to_schema_pos) {}
 
 OrcReader::~OrcReader() {
     close();
@@ -140,7 +142,7 @@ Status OrcReader::init_reader(
         _file_reader = new ORCFileInputStream(_scan_range.path, inner_reader.release());
     }
     if (_file_reader->getLength() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("init reader failed, empty orc file: " + _scan_range.path);
     }
 
     // create orc reader
@@ -151,7 +153,8 @@ Status OrcReader::init_reader(
         return Status::InternalError("Init OrcReader failed. reason = {}", e.what());
     }
     if (_reader->getNumberOfRows() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("init reader failed, empty orc file with row num 0: " +
+                                 _scan_range.path);
     }
     // _init_bloom_filter(colname_to_value_range);
 
@@ -170,7 +173,15 @@ Status OrcReader::init_reader(
     auto& selected_type = _row_reader->getSelectedType();
     _col_orc_type.resize(selected_type.getSubtypeCount());
     for (int i = 0; i < selected_type.getSubtypeCount(); ++i) {
-        _colname_to_idx[selected_type.getFieldName(i)] = i;
+        std::string name;
+        // For hive engine, translate the column name in orc file to schema column name.
+        // This is for Hive 1.x which use internal column name _col0, _col1...
+        if (_is_hive) {
+            name = _file_col_to_schema_col[selected_type.getFieldName(i)];
+        } else {
+            name = _get_field_name_lower_case(&selected_type, i);
+        }
+        _colname_to_idx[name] = i;
         _col_orc_type[i] = selected_type.getSubtype(i);
     }
     return Status::OK();
@@ -187,7 +198,7 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
         _file_reader = new ORCFileInputStream(_scan_range.path, inner_reader.release());
     }
     if (_file_reader->getLength() == 0) {
-        return Status::EndOfFile("Empty orc file");
+        return Status::EndOfFile("get parsed schema fail, empty orc file: " + _scan_range.path);
     }
 
     // create orc reader
@@ -198,13 +209,9 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
         return Status::InternalError("Init OrcReader failed. reason = {}", e.what());
     }
 
-    if (_reader->getNumberOfRows() == 0) {
-        return Status::EndOfFile("Empty orc file");
-    }
-
     auto& root_type = _reader->getType();
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
-        col_names->emplace_back(root_type.getFieldName(i));
+        col_names->emplace_back(_get_field_name_lower_case(&root_type, i));
         col_types->emplace_back(_convert_to_doris_type(root_type.getSubtype(i)));
     }
     return Status::OK();
@@ -212,15 +219,31 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
 
 Status OrcReader::_init_read_columns() {
     auto& root_type = _reader->getType();
-    std::unordered_set<std::string> orc_cols;
+    std::vector<std::string> orc_cols;
+    std::vector<std::string> orc_cols_lower_case;
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
-        orc_cols.emplace(root_type.getFieldName(i));
+        orc_cols.emplace_back(root_type.getFieldName(i));
+        orc_cols_lower_case.emplace_back(_get_field_name_lower_case(&root_type, i));
     }
     for (auto& col_name : _column_names) {
-        if (orc_cols.find(col_name) == orc_cols.end()) {
+        if (_is_hive) {
+            auto iter = _scan_params.slot_name_to_schema_pos.find(col_name);
+            DCHECK(iter != _scan_params.slot_name_to_schema_pos.end());
+            int pos = iter->second;
+            orc_cols_lower_case[pos] = iter->first;
+        }
+        auto iter = std::find(orc_cols_lower_case.begin(), orc_cols_lower_case.end(), col_name);
+        if (iter == orc_cols_lower_case.end()) {
             _missing_cols.emplace_back(col_name);
         } else {
-            _read_cols.emplace_back(col_name);
+            int pos = std::distance(orc_cols_lower_case.begin(), iter);
+            _read_cols.emplace_back(orc_cols[pos]);
+            _read_cols_lower_case.emplace_back(col_name);
+            // For hive engine, store the orc column name to schema column name map.
+            // This is for Hive 1.x orc file with internal column name _col0, _col1...
+            if (_is_hive) {
+                _file_col_to_schema_col[orc_cols[pos]] = col_name;
+            }
         }
     }
     return Status::OK();
@@ -478,7 +501,7 @@ void OrcReader::_init_search_argument(
     auto& root_type = _reader->getType();
     std::unordered_map<std::string, const orc::Type*> type_map;
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
-        type_map.emplace(root_type.getFieldName(i), root_type.getSubtype(i));
+        type_map.emplace(_get_field_name_lower_case(&root_type, i), root_type.getSubtype(i));
     }
     for (auto it = colname_to_value_range->begin(); it != colname_to_value_range->end(); ++it) {
         auto type_it = type_map.find(it->first);
@@ -558,7 +581,7 @@ TypeDescriptor OrcReader::_convert_to_doris_type(const orc::Type* orc_type) {
         TypeDescriptor struct_type(PrimitiveType::TYPE_STRUCT);
         for (int i = 0; i < orc_type->getSubtypeCount(); ++i) {
             struct_type.children.emplace_back(_convert_to_doris_type(orc_type->getSubtype(i)));
-            struct_type.field_names.emplace_back(orc_type->getFieldName(i));
+            struct_type.field_names.emplace_back(_get_field_name_lower_case(orc_type, i));
         }
         return struct_type;
     }
@@ -571,7 +594,8 @@ std::unordered_map<std::string, TypeDescriptor> OrcReader::get_name_to_type() {
     std::unordered_map<std::string, TypeDescriptor> map;
     auto& root_type = _reader->getType();
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
-        map.emplace(root_type.getFieldName(i), _convert_to_doris_type(root_type.getSubtype(i)));
+        map.emplace(_get_field_name_lower_case(&root_type, i),
+                    _convert_to_doris_type(root_type.getSubtype(i)));
     }
     return map;
 }
@@ -580,7 +604,7 @@ Status OrcReader::get_columns(std::unordered_map<std::string, TypeDescriptor>* n
                               std::unordered_set<std::string>* missing_cols) {
     auto& root_type = _reader->getType();
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
-        name_to_type->emplace(root_type.getFieldName(i),
+        name_to_type->emplace(_get_field_name_lower_case(&root_type, i),
                               _convert_to_doris_type(root_type.getSubtype(i)));
     }
     for (auto& col : _missing_cols) {
@@ -685,17 +709,13 @@ Status OrcReader::_orc_column_to_doris_column(const std::string& col_name,
         FOR_FLAT_ORC_COLUMNS(DISPATCH)
 #undef DISPATCH
     case TypeIndex::Decimal32:
-        return _decode_decimal_column<Int32>(col_name, data_column, data_type,
-                                             _decimal_scale_params, cvb, num_values);
+        return _decode_decimal_column<Int32>(col_name, data_column, data_type, cvb, num_values);
     case TypeIndex::Decimal64:
-        return _decode_decimal_column<Int64>(col_name, data_column, data_type,
-                                             _decimal_scale_params, cvb, num_values);
+        return _decode_decimal_column<Int64>(col_name, data_column, data_type, cvb, num_values);
     case TypeIndex::Decimal128:
-        return _decode_decimal_column<Int128>(col_name, data_column, data_type,
-                                              _decimal_scale_params, cvb, num_values);
+        return _decode_decimal_column<Int128>(col_name, data_column, data_type, cvb, num_values);
     case TypeIndex::Decimal128I:
-        return _decode_decimal_column<Int128>(col_name, data_column, data_type,
-                                              _decimal_scale_params, cvb, num_values);
+        return _decode_decimal_column<Int128>(col_name, data_column, data_type, cvb, num_values);
     case TypeIndex::Date:
         return _decode_time_column<VecDateTimeValue, Int64, orc::LongVectorBatch>(
                 col_name, data_column, cvb, num_values);
@@ -735,10 +755,18 @@ Status OrcReader::_orc_column_to_doris_column(const std::string& col_name,
     return Status::InternalError("Unsupported type for column '{}'", col_name);
 }
 
+std::string OrcReader::_get_field_name_lower_case(const orc::Type* orc_type, int pos) {
+    std::string name = orc_type->getFieldName(pos);
+    transform(name.begin(), name.end(), name.begin(), ::tolower);
+    return name;
+}
+
 Status OrcReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
     SCOPED_RAW_TIMER(&_statistics.column_read_time);
     {
         SCOPED_RAW_TIMER(&_statistics.get_batch_time);
+        // reset decimal_scale_params_index
+        _decimal_scale_params_index = 0;
         if (!_row_reader->next(*_batch)) {
             *eof = true;
             *read_rows = 0;
@@ -746,7 +774,7 @@ Status OrcReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
         }
     }
     const auto& batch_vec = down_cast<orc::StructVectorBatch*>(_batch.get())->fields;
-    for (auto& col : _read_cols) {
+    for (auto& col : _read_cols_lower_case) {
         auto& column_with_type_and_name = block->get_by_name(col);
         auto& column_ptr = column_with_type_and_name.column;
         auto& column_type = column_with_type_and_name.type;

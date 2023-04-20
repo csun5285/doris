@@ -184,6 +184,7 @@ suite("test_alter_user", "account") {
         sql 'select 1'
     }
 
+    // 7. drop roles and users
     sql """drop role if exists test_auth_role1"""
     sql """drop role if exists test_auth_role2"""
     sql """drop user if exists test_auth_user1"""

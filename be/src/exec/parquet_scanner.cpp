@@ -24,6 +24,7 @@
 #include "runtime/stream_load/stream_load_pipe.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 ParquetScanner::ParquetScanner(RuntimeState* state, RuntimeProfile* profile,
                                const TBrokerScanRangeParams& params,
@@ -65,6 +66,7 @@ Status ParquetScanner::get_next(Tuple* tuple, MemPool* tuple_pool, bool* eof, bo
 
         COUNTER_UPDATE(_rows_read_counter, 1);
         SCOPED_TIMER(_materialize_timer);
+        // TODO(weixiang): check whether shallow copy is enough
         RETURN_IF_ERROR(fill_dest_tuple(tuple, tuple_pool, fill_tuple));
         break; // break always
     }
@@ -110,12 +112,11 @@ Status ParquetScanner::open_next_reader() {
         auto tuple_desc = _state->desc_tbl().get_tuple_descriptor(_tupleId);
         Status status =
                 _cur_file_reader->init_reader(tuple_desc, _conjunct_ctxs, _state->timezone());
-        if (status.is_end_of_file()) {
+        if (status.is<END_OF_FILE>()) {
             continue;
         } else {
             if (!status.ok()) {
-                return Status::InternalError("file: {}, error:{}", range.path,
-                                             status.get_error_msg());
+                return Status::InternalError("file: {}, error:{}", range.path, status.to_string());
             } else {
                 RETURN_IF_ERROR(_cur_file_reader->init_parquet_type());
                 return status;

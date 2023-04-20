@@ -25,6 +25,7 @@
 #include "vec/olap/vcollect_iterator.h"
 
 namespace doris::vectorized {
+using namespace ErrorCode;
 
 BlockReader::~BlockReader() {
     for (int i = 0; i < _agg_functions.size(); ++i) {
@@ -33,6 +34,31 @@ BlockReader::~BlockReader() {
     }
 }
 
+bool BlockReader::_rowsets_overlapping(const std::vector<RowsetReaderSharedPtr>& rs_readers) {
+    std::string cur_max_key;
+    for (const auto& rs_reader : rs_readers) {
+        // version 0-1 of every tablet is empty, just skip this rowset
+        if (rs_reader->rowset()->version().second == 1) {
+            continue;
+        }
+        if (rs_reader->rowset()->num_rows() == 0) {
+            continue;
+        }
+        if (rs_reader->rowset()->is_segments_overlapping()) {
+            return true;
+        }
+        std::string min_key;
+        bool has_min_key = rs_reader->rowset()->min_key(&min_key);
+        if (!has_min_key) {
+            return true;
+        }
+        if (min_key <= cur_max_key) {
+            return true;
+        }
+        CHECK(rs_reader->rowset()->max_key(&cur_max_key));
+    }
+    return false;
+}
 Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
                                        std::vector<RowsetReaderSharedPtr>* valid_rs_readers) {
     std::vector<RowsetReaderSharedPtr> rs_readers;
@@ -45,8 +71,10 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
                      << ", version:" << read_params.version;
         return res;
     }
-
-    _vcollect_iter.init(this, read_params.read_orderby_key, read_params.read_orderby_key_reverse);
+    // check if rowsets are noneoverlapping
+    _is_rowsets_overlapping = _rowsets_overlapping(rs_readers);
+    _vcollect_iter.init(this, _is_rowsets_overlapping, read_params.read_orderby_key,
+                        read_params.read_orderby_key_reverse);
 
     _reader_context.batch_size = _batch_size;
     _reader_context.is_vec = true;
@@ -57,7 +85,7 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
             RETURN_NOT_OK(rs_reader->init(&_reader_context));
         }
         Status res = _vcollect_iter.add_child(rs_reader);
-        if (!res.ok() && res.precise_code() != OLAP_ERR_DATA_EOF) {
+        if (!res.ok() && !res.is<END_OF_FILE>()) {
             LOG(WARNING) << "failed to add child to iterator, err=" << res;
             return res;
         }
@@ -70,8 +98,10 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
     // _vcollect_iter.topn_next() can not use current_row
     if (!_vcollect_iter.use_topn_next()) {
         auto status = _vcollect_iter.current_row(&_next_row);
-        _eof = status.precise_code() == OLAP_ERR_DATA_EOF;
+        _eof = status.is<END_OF_FILE>();
     }
+    auto status = _vcollect_iter.current_row(&_next_row);
+    _eof = status.is<END_OF_FILE>();
 
     return Status::OK();
 }
@@ -170,14 +200,14 @@ Status BlockReader::init(const ReaderParams& read_params) {
 Status BlockReader::_direct_next_block(Block* block, MemPool* mem_pool, ObjectPool* agg_pool,
                                        bool* eof) {
     auto res = _vcollect_iter.next(block);
-    if (UNLIKELY(!res.ok() && res.precise_code() != OLAP_ERR_DATA_EOF)) {
+    if (UNLIKELY(!res.ok() && !res.is<END_OF_FILE>())) {
         return res;
     }
-    *eof = res.precise_code() == OLAP_ERR_DATA_EOF;
+    *eof = res.is<END_OF_FILE>();
     _eof = *eof;
     if (UNLIKELY(_reader_context.record_rowids)) {
         res = _vcollect_iter.current_block_row_locations(&_block_row_locations);
-        if (UNLIKELY(!res.ok() && res != Status::OLAPInternalError(OLAP_ERR_DATA_EOF))) {
+        if (UNLIKELY(!res.ok() && res != Status::Error<END_OF_FILE>())) {
             return res;
         }
         DCHECK_EQ(_block_row_locations.size(), block->rows());
@@ -207,7 +237,7 @@ Status BlockReader::_agg_key_next_block(Block* block, MemPool* mem_pool, ObjectP
 
     while (true) {
         auto res = _vcollect_iter.next(&_next_row);
-        if (UNLIKELY(res.precise_code() == OLAP_ERR_DATA_EOF)) {
+        if (UNLIKELY(res.is<END_OF_FILE>())) {
             _eof = true;
             *eof = true;
             break;
@@ -217,7 +247,7 @@ Status BlockReader::_agg_key_next_block(Block* block, MemPool* mem_pool, ObjectP
             return res;
         }
 
-        if (!_next_row.is_same) {
+        if (!_get_next_row_same()) {
             if (target_block_row == _batch_size) {
                 break;
             }
@@ -265,7 +295,7 @@ Status BlockReader::_unique_key_next_block(Block* block, MemPool* mem_pool, Obje
         // in UNIQUE_KEY highest version is the final result, there is no need to
         // merge the lower versions
         auto res = _vcollect_iter.next(&_next_row);
-        if (UNLIKELY(res.precise_code() == OLAP_ERR_DATA_EOF)) {
+        if (UNLIKELY(res.is<END_OF_FILE>())) {
             _eof = true;
             *eof = true;
             if (UNLIKELY(_reader_context.record_rowids)) {
@@ -413,6 +443,15 @@ void BlockReader::_update_agg_value(MutableColumns& columns, int begin, int end,
             function->destroy(place);
             function->create(place);
         }
+    }
+}
+
+bool BlockReader::_get_next_row_same() {
+    if (_next_row.is_same) {
+        return true;
+    } else {
+        auto block = _next_row.block.get();
+        return block->get_same_bit(_next_row.row_pos);
     }
 }
 

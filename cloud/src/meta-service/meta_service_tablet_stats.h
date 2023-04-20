@@ -18,7 +18,8 @@ struct TabletStats {
 //  MUST call `merge_tablet_stats(stats, detached_stats)` to get the real tablet stats.
 void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
                                const std::string& instance_id, const TabletIndexPB& idx,
-                               TabletStatsPB& stats, TabletStats& detached_stats);
+                               TabletStatsPB& stats, TabletStats& detached_stats,
+                               bool snapshot = false);
 
 // Merge `detached_stats` `stats` to `stats`.
 void merge_tablet_stats(TabletStatsPB& stats, const TabletStats& detached_stats);
@@ -26,6 +27,6 @@ void merge_tablet_stats(TabletStatsPB& stats, const TabletStats& detached_stats)
 // Get merged tablet stats via `txn`. If an error occurs, `code` will be set to non OK.
 void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
                                const std::string& instance_id, const TabletIndexPB& idx,
-                               TabletStatsPB& stats);
+                               TabletStatsPB& stats, bool snapshot = false);
 
 } // namespace selectdb

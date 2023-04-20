@@ -191,6 +191,5 @@ suite("test_cloud_alter_user", "account") {
     sql """drop user if exists test_cloud_auth_user2"""
     sql """drop user if exists test_cloud_auth_user3"""
     sql """drop user if exists test_cloud_auth_user4"""
-
 }
 

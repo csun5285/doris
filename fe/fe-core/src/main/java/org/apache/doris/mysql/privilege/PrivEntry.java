@@ -18,9 +18,9 @@
 package org.apache.doris.mysql.privilege;
 
 import org.apache.doris.analysis.UserIdentity;
-import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.CaseSensibility;
 import org.apache.doris.common.PatternMatcher;
+import org.apache.doris.common.PatternMatcherException;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 
@@ -246,7 +246,7 @@ public abstract class PrivEntry implements Comparable<PrivEntry>, Writable {
         origHost = Text.readString(in);
         try {
             hostPattern = PatternMatcher.createMysqlPattern(origHost, CaseSensibility.HOST.getCaseSensibility());
-        } catch (AnalysisException e) {
+        } catch (PatternMatcherException e) {
             throw new IOException(e);
         }
         isAnyHost = origHost.equals(ANY_HOST);
@@ -255,7 +255,7 @@ public abstract class PrivEntry implements Comparable<PrivEntry>, Writable {
         origUserId = Text.readString(in);
         try {
             userPattern = PatternMatcher.createMysqlPattern(origUser, CaseSensibility.USER.getCaseSensibility());
-        } catch (AnalysisException e) {
+        } catch (PatternMatcherException e) {
             throw new IOException(e);
         }
         isAnyUser = origUser.equals(ANY_USER);

@@ -44,6 +44,7 @@
 #include "util/slice.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 static const uint32_t MAX_PATH_LEN = 1024;
 StorageEngine* l_engine = nullptr;
@@ -218,7 +219,7 @@ TEST_F(SegCompactionTest, SegCompactionThenRead) {
         create_rowset_writer_context(10047, tablet_schema, &writer_context);
 
         std::unique_ptr<RowsetWriter> rowset_writer;
-        s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_EQ(Status::OK(), s);
 
         RowCursor input_row;
@@ -295,7 +296,7 @@ TEST_F(SegCompactionTest, SegCompactionThenRead) {
                     num_rows_read++;
                 }
             }
-            EXPECT_EQ(Status::OLAPInternalError(OLAP_ERR_DATA_EOF), s);
+            EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
             EXPECT_TRUE(output_block == nullptr);
             EXPECT_EQ(rowset->rowset_meta()->num_rows(), num_rows_read);
             EXPECT_TRUE(rowset_reader->get_segment_num_rows(&segment_num_rows).ok());
@@ -325,7 +326,7 @@ TEST_F(SegCompactionTest, SegCompactionInterleaveWithBig_ooooOOoOooooooooO) {
         create_rowset_writer_context(10048, tablet_schema, &writer_context);
 
         std::unique_ptr<RowsetWriter> rowset_writer;
-        s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_EQ(Status::OK(), s);
 
         RowCursor input_row;
@@ -419,6 +420,7 @@ TEST_F(SegCompactionTest, SegCompactionInterleaveWithBig_ooooOOoOooooooooO) {
             }
             s = rowset_writer->flush();
             EXPECT_EQ(Status::OK(), s);
+            sleep(1);
         }
         num_segments = 1;
         rows_per_segment = 6400;
@@ -468,7 +470,7 @@ TEST_F(SegCompactionTest, SegCompactionInterleaveWithBig_OoOoO) {
         create_rowset_writer_context(10049, tablet_schema, &writer_context);
 
         std::unique_ptr<RowsetWriter> rowset_writer;
-        s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_EQ(Status::OK(), s);
 
         RowCursor input_row;

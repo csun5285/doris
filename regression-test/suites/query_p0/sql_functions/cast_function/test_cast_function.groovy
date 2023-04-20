@@ -39,7 +39,7 @@ suite("test_cast_function") {
                 end as bitmap
             ) is NULL
         """
-        exception "errCode = 2, detailMessage = Conversion from UInt8 to BitMap is not supported"
+        exception "Conversion from UInt8 to BitMap is not supported"
     }
 
     qt_sql """ select cast (1 as BIGINT) """

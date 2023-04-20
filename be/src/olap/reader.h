@@ -133,20 +133,20 @@ public:
     virtual Status init(const ReaderParams& read_params);
 
     // Read next row with aggregation.
-    // Return OLAP_SUCCESS and set `*eof` to false when next row is read into `row_cursor`.
-    // Return OLAP_SUCCESS and set `*eof` to true when no more rows can be read.
+    // Return OK and set `*eof` to false when next row is read into `row_cursor`.
+    // Return OK and set `*eof` to true when no more rows can be read.
     // Return others when unexpected error happens.
     virtual Status next_row_with_aggregation(RowCursor* row_cursor, MemPool* mem_pool,
                                              ObjectPool* agg_pool, bool* eof) = 0;
 
     // Read next block with aggregation.
-    // Return OLAP_SUCCESS and set `*eof` to false when next block is read
-    // Return OLAP_SUCCESS and set `*eof` to true when no more rows can be read.
+    // Return OK and set `*eof` to false when next block is read
+    // Return OK and set `*eof` to true when no more rows can be read.
     // Return others when unexpected error happens.
     // TODO: Rethink here we still need mem_pool and agg_pool?
     virtual Status next_block_with_aggregation(vectorized::Block* block, MemPool* mem_pool,
                                                ObjectPool* agg_pool, bool* eof) {
-        return Status::OLAPInternalError(OLAP_ERR_READER_INITIALIZE_ERROR);
+        return Status::Error<ErrorCode::READER_INITIALIZE_ERROR>();
     }
 
     virtual uint64_t merged_rows() const { return _merged_rows; }
@@ -154,7 +154,7 @@ public:
     uint64_t filtered_rows() const {
         return _stats.rows_del_filtered + _stats.rows_del_by_bitmap +
                _stats.rows_conditions_filtered + _stats.rows_vec_del_cond_filtered +
-               _stats.rows_vec_cond_filtered;
+               _stats.rows_vec_cond_filtered + _stats.rows_short_circuit_cond_filtered;
     }
 
     void set_batch_size(int batch_size) { _batch_size = batch_size; }
@@ -163,6 +163,10 @@ public:
     OlapReaderStatistics* mutable_stats() { return &_stats; }
 
     virtual bool update_profile(RuntimeProfile* profile) { return false; }
+    static Status init_reader_params_and_create_block(
+            TabletSharedPtr tablet, ReaderType reader_type,
+            const std::vector<RowsetSharedPtr>& input_rowsets,
+            TabletReader::ReaderParams* reader_params, vectorized::Block* block);
 
 protected:
     friend class CollectIterator;

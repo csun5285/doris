@@ -19,6 +19,7 @@
 
 #include "common/sync_point.h"
 #include "olap/page_cache.h"
+#include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/segment_loader.h"
 #include "olap/tablet_schema.h"
 #include "runtime/exec_env.h"
@@ -31,10 +32,7 @@
 using namespace doris;
 
 int main(int argc, char** argv) {
-    std::shared_ptr<doris::MemTrackerLimiter> orphan_mem_tracker =
-            std::make_shared<doris::MemTrackerLimiter>(doris::MemTrackerLimiter::Type::GLOBAL,
-                                                       "Orphan");
-    doris::ExecEnv::GetInstance()->set_orphan_mem_tracker(orphan_mem_tracker);
+    doris::ExecEnv::GetInstance()->init_mem_tracker();
     doris::thread_context()->thread_mem_tracker_mgr->init();
     doris::TabletSchemaCache::create_global_schema_cache();
     doris::StoragePageCache::create_global_cache(1 << 30, 10);

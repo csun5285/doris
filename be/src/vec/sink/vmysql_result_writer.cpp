@@ -259,10 +259,10 @@ Status VMysqlResultWriter<is_binary_format>::_add_one_column(
                 buf_ret = rows_buffer[i].push_vec_datetime(date_val);
             }
             if constexpr (type == TYPE_DATETIMEV2) {
-                char buf[64];
                 auto time_num = data[i];
-                doris::vectorized::DateV2Value<DateTimeV2ValueType> date_val;
-                memcpy(static_cast<void*>(&date_val), &time_num, sizeof(UInt64));
+                char buf[64];
+                DateV2Value<DateTimeV2ValueType> date_val =
+                        binary_cast<UInt64, DateV2Value<DateTimeV2ValueType>>(time_num);
                 char* pos = date_val.to_string(buf, scale);
                 buf_ret = rows_buffer[i].push_string(buf, pos - buf - 1);
             }
@@ -341,8 +341,7 @@ int VMysqlResultWriter<is_binary_format>::_add_one_cell(const ColumnPtr& column_
     } else if (which.is_date_or_datetime()) {
         auto& column_vector = assert_cast<const ColumnVector<Int64>&>(*column);
         auto value = column_vector[row_idx].get<Int64>();
-        VecDateTimeValue datetime;
-        memcpy(static_cast<void*>(&datetime), static_cast<void*>(&value), sizeof(value));
+        VecDateTimeValue datetime = binary_cast<Int64, VecDateTimeValue>(value);
         if (which.is_date()) {
             datetime.cast_to_date();
         }
@@ -352,10 +351,18 @@ int VMysqlResultWriter<is_binary_format>::_add_one_cell(const ColumnPtr& column_
     } else if (which.is_date_v2()) {
         auto& column_vector = assert_cast<const ColumnVector<UInt32>&>(*column);
         auto value = column_vector[row_idx].get<UInt32>();
-        DateV2Value<DateV2ValueType> datev2;
-        memcpy(static_cast<void*>(&datev2), static_cast<void*>(&value), sizeof(value));
+        DateV2Value<DateV2ValueType> datev2 =
+                binary_cast<UInt32, DateV2Value<DateV2ValueType>>(value);
         char buf[64];
         char* pos = datev2.to_string(buf);
+        return buffer.push_string(buf, pos - buf - 1);
+    } else if (which.is_date_time_v2()) {
+        auto& column_vector = assert_cast<const ColumnVector<UInt64>&>(*column);
+        auto value = column_vector[row_idx].get<UInt64>();
+        DateV2Value<DateTimeV2ValueType> datetimev2 =
+                binary_cast<UInt64, DateV2Value<DateTimeV2ValueType>>(value);
+        char buf[64];
+        char* pos = datetimev2.to_string(buf, scale);
         return buffer.push_string(buf, pos - buf - 1);
     } else if (which.is_decimal32()) {
         DataTypePtr nested_type = type;
@@ -675,6 +682,9 @@ Status VMysqlResultWriter<is_binary_format>::append_block(Block& input_block) {
             break;
         }
         case TYPE_ARRAY: {
+            // Currently all functions only support single-level nested arrays，
+            // so we use Array's child scale to represent the scale of nested type.
+            scale = _output_vexpr_ctxs[i]->root()->type().children[0].scale;
             if (type_ptr->is_nullable()) {
                 auto& nested_type =
                         assert_cast<const DataTypeNullable&>(*type_ptr).get_nested_type();

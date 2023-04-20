@@ -59,4 +59,5 @@ add_library(Webserver STATIC
   action/injection_point_action.cpp
   action/shrink_mem_action.cpp
   action/change_file_cache_state_action.cpp
+  action/jeprofile_actions.cpp
 )

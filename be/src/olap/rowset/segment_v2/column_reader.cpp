@@ -172,6 +172,10 @@ Status ColumnReader::read_page(const ColumnIteratorOptions& iter_opts, const Pag
     opts.use_disposable_cache = iter_opts.use_disposable_cache;
     opts.type = iter_opts.type;
     opts.encoding_info = _encoding_info;
+    // index page should not pre decode
+    if (iter_opts.type == INDEX_PAGE) {
+        opts.pre_decode = false;
+    }
 
     return PageIO::read_and_decompress_page(opts, handle, page_body, footer);
 }
@@ -575,27 +579,25 @@ Status ArrayFileColumnIterator::next_batch(size_t* n, ColumnBlockView* dst, bool
 
     // read item
     size_t item_size = ordinals[*n] - ordinals[0];
-    if (item_size >= 0) {
-        bool item_has_null = false;
-        ColumnVectorBatch* item_vector_batch = array_batch->elements();
+    bool item_has_null = false;
+    ColumnVectorBatch* item_vector_batch = array_batch->elements();
 
-        bool rebuild_array_from0 = false;
-        if (item_vector_batch->capacity() < array_batch->item_offset(dst->current_offset() + *n)) {
-            item_vector_batch->resize(array_batch->item_offset(dst->current_offset() + *n));
-            rebuild_array_from0 = true;
-        }
-
-        ColumnBlock item_block = ColumnBlock(item_vector_batch, dst->pool());
-        ColumnBlockView item_view =
-                ColumnBlockView(&item_block, array_batch->item_offset(dst->current_offset()));
-        size_t real_read = item_size;
-        RETURN_IF_ERROR(_item_iterator->next_batch(&real_read, &item_view, &item_has_null));
-        DCHECK(item_size == real_read);
-
-        size_t rebuild_start_offset = rebuild_array_from0 ? 0 : dst->current_offset();
-        size_t rebuild_size = rebuild_array_from0 ? dst->current_offset() + *n : *n;
-        array_batch->prepare_for_read(rebuild_start_offset, rebuild_size, item_has_null);
+    bool rebuild_array_from0 = false;
+    if (item_vector_batch->capacity() < array_batch->item_offset(dst->current_offset() + *n)) {
+        item_vector_batch->resize(array_batch->item_offset(dst->current_offset() + *n));
+        rebuild_array_from0 = true;
     }
+
+    ColumnBlock item_block = ColumnBlock(item_vector_batch, dst->pool());
+    ColumnBlockView item_view =
+            ColumnBlockView(&item_block, array_batch->item_offset(dst->current_offset()));
+    size_t real_read = item_size;
+    RETURN_IF_ERROR(_item_iterator->next_batch(&real_read, &item_view, &item_has_null));
+    DCHECK(item_size == real_read);
+
+    size_t rebuild_start_offset = rebuild_array_from0 ? 0 : dst->current_offset();
+    size_t rebuild_size = rebuild_array_from0 ? dst->current_offset() + *n : *n;
+    array_batch->prepare_for_read(rebuild_start_offset, rebuild_size, item_has_null);
 
     dst->advance(*n);
     return Status::OK();
@@ -1198,29 +1200,30 @@ Status DefaultValueColumnIterator::init(const ColumnIteratorOptions& opts) {
             _is_default_value_null = true;
         } else {
             _type_size = _type_info->size();
-            _mem_value = reinterpret_cast<void*>(_pool->allocate(_type_size));
+            _mem_value.resize(_type_size);
             Status s = Status::OK();
-            if (_type_info->type() == OLAP_FIELD_TYPE_CHAR) {
-                int32_t length = _schema_length;
-                char* string_buffer = reinterpret_cast<char*>(_pool->allocate(length));
-                memset(string_buffer, 0, length);
-                memory_copy(string_buffer, _default_value.c_str(), _default_value.length());
-                ((Slice*)_mem_value)->size = length;
-                ((Slice*)_mem_value)->data = string_buffer;
-            } else if (_type_info->type() == OLAP_FIELD_TYPE_VARCHAR ||
-                       _type_info->type() == OLAP_FIELD_TYPE_HLL ||
-                       _type_info->type() == OLAP_FIELD_TYPE_OBJECT ||
-                       _type_info->type() == OLAP_FIELD_TYPE_STRING) {
-                int32_t length = _default_value.length();
-                char* string_buffer = reinterpret_cast<char*>(_pool->allocate(length));
-                memory_copy(string_buffer, _default_value.c_str(), length);
-                ((Slice*)_mem_value)->size = length;
-                ((Slice*)_mem_value)->data = string_buffer;
+            // If char length is 10, but default value is 'a' , it's length is 1
+            // not fill 0 to the ending, because segment iterator will shrink the tail 0 char
+            if (_type_info->type() == OLAP_FIELD_TYPE_VARCHAR ||
+                _type_info->type() == OLAP_FIELD_TYPE_HLL ||
+                _type_info->type() == OLAP_FIELD_TYPE_OBJECT ||
+                _type_info->type() == OLAP_FIELD_TYPE_STRING ||
+                _type_info->type() == OLAP_FIELD_TYPE_CHAR) {
+                ((Slice*)_mem_value.data())->size = _default_value.length();
+                ((Slice*)_mem_value.data())->data = _default_value.data();
             } else if (_type_info->type() == OLAP_FIELD_TYPE_ARRAY) {
-                // empty array
-                new (_mem_value) CollectionValue(0); 
+                if (_default_value != "[]") {
+                    return Status::NotSupported("Array default {} is unsupported", _default_value);
+                } else {
+                    ((Slice*)_mem_value.data())->size = _default_value.length();
+                    ((Slice*)_mem_value.data())->data = _default_value.data();
+                }
+            } else if (_type_info->type() == OLAP_FIELD_TYPE_STRUCT) {
+                return Status::NotSupported("STRUCT default type is unsupported");
+            } else if (_type_info->type() == OLAP_FIELD_TYPE_MAP) {
+                return Status::NotSupported("MAP default type is unsupported");
             } else {
-                s = _type_info->from_string(_mem_value, _default_value, _precision, _scale);
+                s = _type_info->from_string(_mem_value.data(), _default_value, _precision, _scale);
             }
             if (!s.ok()) {
                 return s;
@@ -1247,7 +1250,7 @@ Status DefaultValueColumnIterator::next_batch(size_t* n, ColumnBlockView* dst, b
     } else {
         *has_null = false;
         for (int i = 0; i < *n; ++i) {
-            memcpy(dst->data(), _mem_value, _type_size);
+            memcpy(dst->data(), _mem_value.data(), _type_size);
             dst->advance(1);
         }
     }
@@ -1257,31 +1260,35 @@ Status DefaultValueColumnIterator::next_batch(size_t* n, ColumnBlockView* dst, b
 void DefaultValueColumnIterator::insert_default_data(const TypeInfo* type_info, size_t type_size,
                                                      void* mem_value,
                                                      vectorized::MutableColumnPtr& dst, size_t n) {
-    vectorized::Int128 int128;
-    char* data_ptr = (char*)&int128;
-    size_t data_len = sizeof(int128);
     dst = dst->convert_to_predicate_column_if_dictionary();
 
     switch (type_info->type()) {
     case OLAP_FIELD_TYPE_OBJECT:
-    case OLAP_FIELD_TYPE_ARRAY:
     case OLAP_FIELD_TYPE_HLL: {
         dst->insert_many_defaults(n);
         break;
     }
     case OLAP_FIELD_TYPE_DATE: {
+        vectorized::Int64 int64;
+        char* data_ptr = (char*)&int64;
+        size_t data_len = sizeof(int64);
+
         assert(type_size == sizeof(FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::CppType)); //uint24_t
         std::string str = FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::to_string(mem_value);
 
         vectorized::VecDateTimeValue value;
         value.from_date_str(str.c_str(), str.length());
         value.cast_to_date();
-        //TODO: here is int128 = int64, here rely on the logic of little endian
-        int128 = binary_cast<vectorized::VecDateTimeValue, vectorized::Int64>(value);
+
+        int64 = binary_cast<vectorized::VecDateTimeValue, vectorized::Int64>(value);
         dst->insert_many_data(data_ptr, data_len, n);
         break;
     }
     case OLAP_FIELD_TYPE_DATETIME: {
+        vectorized::Int64 int64;
+        char* data_ptr = (char*)&int64;
+        size_t data_len = sizeof(int64);
+
         assert(type_size == sizeof(FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::CppType)); //int64_t
         std::string str = FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::to_string(mem_value);
 
@@ -1289,11 +1296,15 @@ void DefaultValueColumnIterator::insert_default_data(const TypeInfo* type_info, 
         value.from_date_str(str.c_str(), str.length());
         value.to_datetime();
 
-        int128 = binary_cast<vectorized::VecDateTimeValue, vectorized::Int64>(value);
+        int64 = binary_cast<vectorized::VecDateTimeValue, vectorized::Int64>(value);
         dst->insert_many_data(data_ptr, data_len, n);
         break;
     }
     case OLAP_FIELD_TYPE_DECIMAL: {
+        vectorized::Int128 int128;
+        char* data_ptr = (char*)&int128;
+        size_t data_len = sizeof(int128);
+
         assert(type_size ==
                sizeof(FieldTypeTraits<OLAP_FIELD_TYPE_DECIMAL>::CppType)); //decimal12_t
         decimal12_t* d = (decimal12_t*)mem_value;
@@ -1305,14 +1316,22 @@ void DefaultValueColumnIterator::insert_default_data(const TypeInfo* type_info, 
     case OLAP_FIELD_TYPE_VARCHAR:
     case OLAP_FIELD_TYPE_CHAR:
     case OLAP_FIELD_TYPE_JSONB: {
-        data_ptr = ((Slice*)mem_value)->data;
-        data_len = ((Slice*)mem_value)->size;
+        char* data_ptr = ((Slice*)mem_value)->data;
+        size_t data_len = ((Slice*)mem_value)->size;
         dst->insert_many_data(data_ptr, data_len, n);
         break;
     }
+    case OLAP_FIELD_TYPE_ARRAY: {
+        if (dst->is_nullable()) {
+            static_cast<vectorized::ColumnNullable&>(*dst).insert_not_null_elements(n);
+        } else {
+            dst->insert_many_defaults(n);
+        }
+        break;
+    }
     default: {
-        data_ptr = (char*)mem_value;
-        data_len = type_size;
+        char* data_ptr = (char*)mem_value;
+        size_t data_len = type_size;
         dst->insert_many_data(data_ptr, data_len, n);
     }
     }
@@ -1335,7 +1354,7 @@ void DefaultValueColumnIterator::_insert_many_default(vectorized::MutableColumnP
     if (_is_default_value_null) {
         dst->insert_many_defaults(n);
     } else {
-        insert_default_data(_type_info.get(), _type_size, _mem_value, dst, n);
+        insert_default_data(_type_info.get(), _type_size, _mem_value.data(), dst, n);
     }
 }
 

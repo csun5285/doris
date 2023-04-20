@@ -33,6 +33,7 @@
 #include "vec/core/field.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 MemTable::MemTable(TabletSharedPtr tablet, Schema* schema, const TabletSchema* tablet_schema,
                    const std::vector<SlotDescriptor*>* slot_descs, TupleDescriptor* tuple_desc,
@@ -58,8 +59,8 @@ MemTable::MemTable(TabletSharedPtr tablet, Schema* schema, const TabletSchema* t
           _cur_max_version(cur_max_version) {
 #ifndef BE_TEST
     _insert_mem_tracker_use_hook = std::make_unique<MemTracker>(
-            fmt::format("MemTableHookInsert:TabletId={}", std::to_string(tablet_id())), nullptr,
-            ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker_set());
+            fmt::format("MemTableHookInsert:TabletId={}", std::to_string(tablet_id())),
+            ExecEnv::GetInstance()->load_channel_mgr()->mem_tracker());
 #else
     _insert_mem_tracker_use_hook = std::make_unique<MemTracker>(
             fmt::format("MemTableHookInsert:TabletId={}", std::to_string(tablet_id())));
@@ -201,6 +202,13 @@ void MemTable::insert(const vectorized::Block* input_block, const std::vector<in
         if (keys_type() != KeysType::DUP_KEYS) {
             _init_agg_functions(&target_block);
         }
+        if (_tablet_schema->is_dynamic_schema()) {
+            // Set _input_mutable_block to dynamic since
+            // input blocks may be structure-variable(dyanmic)
+            // this will align _input_mutable_block with
+            // input_block and auto extends columns
+            _input_mutable_block.set_block_type(vectorized::BlockType::DYNAMIC);
+        }
     }
     auto num_rows = row_idxs.size();
     size_t cursor_in_mutableblock = _input_mutable_block.rows();
@@ -328,12 +336,16 @@ void MemTable::_replace_row(const ContiguousRow& src_row, TableKey row_in_skipli
 void MemTable::_aggregate_two_row_in_block(RowInBlock* new_row, RowInBlock* row_in_skiplist) {
     if (_tablet_schema->has_sequence_col()) {
         auto sequence_idx = _tablet_schema->sequence_col_idx();
-        auto res = _input_mutable_block.compare_at(row_in_skiplist->_row_pos, new_row->_row_pos,
-                                                   sequence_idx, _input_mutable_block, -1);
+        DCHECK_LT(sequence_idx, _input_mutable_block.columns());
+        auto col_ptr = _input_mutable_block.mutable_columns()[sequence_idx].get();
+        auto res = col_ptr->compare_at(row_in_skiplist->_row_pos, new_row->_row_pos, *col_ptr, -1);
         // dst sequence column larger than src, don't need to update
         if (res > 0) {
             return;
         }
+        // need to update the row pos in skiplist to the new row pos when has
+        // sequence column
+        row_in_skiplist->_row_pos = new_row->_row_pos;
     }
     // dst is non-sequence row, or dst sequence is smaller
     for (uint32_t cid = _schema->num_key_columns(); cid < _schema->num_columns(); ++cid) {
@@ -450,7 +462,6 @@ Status MemTable::_generate_delete_bitmap(int64_t atomic_num_segments_before_flus
 }
 
 Status MemTable::flush() {
-    SCOPED_CONSUME_MEM_TRACKER(_flush_mem_tracker);
     VLOG_CRITICAL << "begin to flush memtable for tablet: " << tablet_id()
                   << ", memsize: " << memory_usage() << ", rows: " << _rows;
     int64_t duration_ns = 0;
@@ -472,10 +483,11 @@ Status MemTable::flush() {
 }
 
 Status MemTable::_do_flush(int64_t& duration_ns) {
+    SCOPED_CONSUME_MEM_TRACKER(_flush_mem_tracker);
     SCOPED_RAW_TIMER(&duration_ns);
     if (_skip_list) {
         Status st = _rowset_writer->flush_single_memtable(this, &_flush_size);
-        if (st.precise_code() == OLAP_ERR_FUNC_NOT_IMPLEMENTED) {
+        if (st.is<NOT_IMPLEMENTED_ERROR>()) {
             // For alpha rowset, we do not implement "flush_single_memtable".
             // Flush the memtable like the old way.
             Table::Iterator it(_skip_list.get());
@@ -496,7 +508,7 @@ Status MemTable::_do_flush(int64_t& duration_ns) {
             // Unfold variant column
             unfold_variant_column(block);
         }
-        RETURN_NOT_OK(_rowset_writer->flush_single_memtable(&block));
+        RETURN_NOT_OK(_rowset_writer->flush_single_memtable(&block, &_flush_size));
         _flush_size = block.allocated_bytes();
     }
     return Status::OK();

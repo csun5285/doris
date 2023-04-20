@@ -34,7 +34,7 @@ public class CreateUserStmtTest {
 
     @Before
     public void setUp() {
-        ConnectContext ctx = new ConnectContext(null);
+        ConnectContext ctx = new ConnectContext();
         ctx.setQualifiedUser("root");
         ctx.setRemoteIP("192.168.1.1");
         UserIdentity currentUserIdentity = new UserIdentity("root", "192.168.1.1");
@@ -89,6 +89,7 @@ public class CreateUserStmtTest {
                 result = "userid";
             }
         };
+
         CreateUserStmt stmt = new CreateUserStmt(new UserDesc(new UserIdentity("", "%"), "passwd", true));
         stmt.analyze(analyzer);
         Assert.fail("No exception throws.");

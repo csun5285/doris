@@ -130,6 +130,9 @@ public class CopyFromParam {
             }
         }
 
+        parseColumnNames(fileType, targetColumns);
+        parseColumnNames(fileType, fileColumns);
+
         if (exprList != null) {
             if (targetColumns.size() != exprList.size()) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_WRONG_VALUE_COUNT);
@@ -219,6 +222,19 @@ public class CopyFromParam {
             return Integer.parseInt(columnName.substring(1));
         } catch (NumberFormatException e) {
             throw new AnalysisException("column name: " + columnName + " can not parse to a number");
+        }
+    }
+
+    private void parseColumnNames(String fileType, List<String> columns) {
+        // In Be, parquet and orc column names are case-insensitive, but there is a bug for hidden columns,
+        // so handle it temporary.
+        if (columns != null && fileType != null && (fileType.equalsIgnoreCase("parquet") || fileType.equalsIgnoreCase(
+                "orc"))) {
+            for (int i = 0; i < columns.size(); i++) {
+                if (columns.get(i).equals(Column.DELETE_SIGN)) {
+                    columns.set(i, Column.DELETE_SIGN.toLowerCase());
+                }
+            }
         }
     }
 

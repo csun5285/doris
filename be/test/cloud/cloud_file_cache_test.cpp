@@ -492,6 +492,7 @@ void test_file_cache(io::CacheType cache_type) {
             assert_range(38, segments[2], io::FileSegment::Range(24, 26),
                          io::FileSegment::State::DOWNLOADED);
 
+
             bool lets_start_download = false;
             std::mutex mutex;
             std::condition_variable cv;

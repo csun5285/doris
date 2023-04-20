@@ -102,6 +102,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ConfigBase;
+import org.apache.doris.common.ConfigException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
@@ -129,6 +130,7 @@ import org.apache.doris.datasource.CatalogMgr;
 import org.apache.doris.datasource.EsExternalCatalog;
 import org.apache.doris.datasource.ExternalMetaCacheMgr;
 import org.apache.doris.datasource.InternalCatalog;
+import org.apache.doris.datasource.hive.event.MetastoreEventsProcessor;
 import org.apache.doris.deploy.DeployManager;
 import org.apache.doris.deploy.impl.AmbariDeployManager;
 import org.apache.doris.deploy.impl.K8sDeployManager;
@@ -275,7 +277,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
@@ -331,6 +332,7 @@ public class Env {
     private DeleteHandler deleteHandler;
     private DbUsedDataQuotaInfoCollector dbUsedDataQuotaInfoCollector;
     private PartitionInMemoryInfoCollector partitionInMemoryInfoCollector;
+    private MetastoreEventsProcessor metastoreEventsProcessor;
 
     private MasterDaemon labelCleaner; // To clean old LabelInfo, ExportJobInfos
     private MasterDaemon txnCleaner; // To clean aborted or timeout txns
@@ -576,6 +578,7 @@ public class Env {
         this.deleteHandler = new DeleteHandler();
         this.dbUsedDataQuotaInfoCollector = new DbUsedDataQuotaInfoCollector();
         this.partitionInMemoryInfoCollector = new PartitionInMemoryInfoCollector();
+        this.metastoreEventsProcessor = new MetastoreEventsProcessor();
 
         this.replayedJournalId = new AtomicLong(0L);
         this.stmtIdCounter = new AtomicLong(0L);
@@ -673,8 +676,10 @@ public class Env {
         this.refreshManager = new RefreshManager();
         this.policyMgr = new PolicyMgr();
         this.mtmvJobManager = new MTMVJobManager();
-        this.analysisManager = new AnalysisManager();
         this.extMetaCacheMgr = new ExternalMetaCacheMgr();
+        if (!isCheckpointCatalog) {
+            this.analysisManager = new AnalysisManager();
+        }
         if (Config.isCloudMode()) {
             this.upgradeMgr = new CloudUpgradeMgr();
         }
@@ -1441,6 +1446,7 @@ public class Env {
         this.masterHttpPort = Config.http_port;
         MasterInfo info = new MasterInfo(this.masterIp, this.masterHttpPort, this.masterRpcPort);
         editLog.logMasterInfo(info);
+        LOG.info("logMasterInfo:{}", info);
 
         // for master, the 'isReady' is set behind.
         // but we are sure that all metadata is replayed if we get here.
@@ -1566,6 +1572,10 @@ public class Env {
         this.statisticsJobScheduler.start();
         this.statisticsTaskScheduler.start();
         new InternalSchemaInitializer().start();
+        if (Config.enable_hms_events_incremental_sync) {
+            metastoreEventsProcessor.start();
+        }
+
     }
 
     // start threads that should running on all FE
@@ -2219,7 +2229,7 @@ public class Env {
         int jobSize = dbToLoadJob.size();
         checksum ^= jobSize;
         dos.writeInt(jobSize);
-        for (Entry<Long, List<LoadJob>> entry : dbToLoadJob.entrySet()) {
+        for (Map.Entry<Long, List<LoadJob>> entry : dbToLoadJob.entrySet()) {
             long dbId = entry.getKey();
             checksum ^= dbId;
             dos.writeLong(dbId);
@@ -2740,7 +2750,7 @@ public class Env {
                 haProtocol.removeElectableNode(fe.getNodeName());
                 helperNodes.remove(Pair.of(host, port));
                 BDBHA ha = (BDBHA) haProtocol;
-                ha.removeUnReadyElectableNode(nodeName, getFollowerCount());
+                ha.removeUnReadyElectableNode(fe.getNodeName(), getFollowerCount());
             }
             editLog.logRemoveFrontend(fe);
         } finally {
@@ -3136,6 +3146,12 @@ public class Env {
                 sb.append(olapTable.getCompressionType()).append("\"");
             }
 
+            // estimate_partition_size
+            if (!olapTable.getEstimatePartitionSize().equals("")) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_ESTIMATE_PARTITION_SIZE).append("\" = \"");
+                sb.append(olapTable.getEstimatePartitionSize()).append("\"");
+            }
+
             // unique key table with merge on write
             if (olapTable.getEnableUniqueKeyMergeOnWrite()) {
                 sb.append(",\n\"").append(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE).append("\" = \"");
@@ -3274,7 +3290,8 @@ public class Env {
             sb.append("\"max_docvalue_fields\" = \"").append(esTable.getMaxDocValueFields()).append("\",\n");
             sb.append("\"enable_keyword_sniff\" = \"").append(esTable.isEnableKeywordSniff()).append("\",\n");
             sb.append("\"nodes_discovery\" = \"").append(esTable.isNodesDiscovery()).append("\",\n");
-            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\"\n");
+            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\",\n");
+            sb.append("\"like_push_down\" = \"").append(esTable.isLikePushDown()).append("\"\n");
             sb.append(")");
         } else if (table.getType() == TableType.HIVE) {
             HiveTable hiveTable = (HiveTable) table;
@@ -4218,6 +4235,8 @@ public class Env {
         this.masterIp = info.getIp();
         this.masterHttpPort = info.getHttpPort();
         this.masterRpcPort = info.getRpcPort();
+        LOG.info("setMaster MasterInfo:{}", info);
+
     }
 
     public boolean canRead() {
@@ -5141,7 +5160,10 @@ public class Env {
 
         String currentDB = ctx.getDatabase();
         if (StringUtils.isNotEmpty(currentDB)) {
-            catalogMgr.addLastDBOfCatalog(ctx.getCurrentCatalog().getName(), currentDB);
+            // When dropped the current catalog in current context, the current catalog will be null.
+            if (ctx.getCurrentCatalog() != null) {
+                catalogMgr.addLastDBOfCatalog(ctx.getCurrentCatalog().getName(), currentDB);
+            }
         }
         ctx.changeDefaultCatalog(catalogName);
         String lastDb = catalogMgr.getLastDB(catalogName);
@@ -5156,7 +5178,7 @@ public class Env {
 
     // Change current database of this session.
     public void changeDb(ConnectContext ctx, String qualifiedDb) throws DdlException {
-        if (!auth.checkDbPriv(ctx, qualifiedDb, PrivPredicate.SHOW)) {
+        if (!auth.checkDbPriv(ctx, ctx.getDefaultCatalog(), qualifiedDb, PrivPredicate.SHOW)) {
             ErrorReport.reportDdlException(ErrorCode.ERR_DBACCESS_DENIED_ERROR, ctx.getQualifiedUser(), qualifiedDb);
         }
 
@@ -5502,7 +5524,11 @@ public class Env {
         Preconditions.checkState(configs.size() == 1);
 
         for (Map.Entry<String, String> entry : configs.entrySet()) {
-            ConfigBase.setMutableConfig(entry.getKey(), entry.getValue());
+            try {
+                ConfigBase.setMutableConfig(entry.getKey(), entry.getValue());
+            } catch (ConfigException e) {
+                throw new DdlException(e.getMessage());
+            }
         }
     }
 

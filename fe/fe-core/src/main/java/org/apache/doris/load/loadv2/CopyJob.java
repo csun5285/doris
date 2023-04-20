@@ -240,7 +240,6 @@ public class CopyJob extends BrokerLoadJob {
         this.sizeLimit = stmt.getSizeLimit();
         this.pattern = stmt.getPattern();
         this.objectInfo = stmt.getObjectInfo();
-        this.pattern = stmt.getPattern();
         this.forceCopy = stmt.isForce();
         this.isReplay = true;
     }

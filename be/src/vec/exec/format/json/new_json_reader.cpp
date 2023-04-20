@@ -35,6 +35,7 @@
 #include "vec/json/parse2column.h"
 
 namespace doris::vectorized {
+using namespace ErrorCode;
 
 NewJsonReader::NewJsonReader(RuntimeState* state, RuntimeProfile* profile, ScannerCounter* counter,
                              const TFileScanRangeParams& params, const TFileRangeDesc& range,
@@ -481,10 +482,10 @@ Status NewJsonReader::_parse_dynamic_json(bool* is_empty_row, bool* eof, Block& 
     }
     Status st = doris::vectorized::parse_json_to_variant(column_object, StringRef {json_str, size},
                                                          _json_parser.get());
-    if (st.is_data_quality_error()) {
+    if (st.is<DATA_QUALITY_ERROR>()) {
         fmt::memory_buffer error_msg;
         fmt::format_to(error_msg, "Parse json data for JsonDoc failed. error info: {}",
-                       st.get_error_msg());
+                       st.to_string());
         RETURN_IF_ERROR(_state->append_error_msg_to_file(
                 [&]() -> std::string { return std::string((char*)json_str, size); },
                 [&]() -> std::string { return fmt::to_string(error_msg); }, _scanner_eof));
@@ -508,7 +509,7 @@ Status NewJsonReader::_vhandle_dynamic_json(Block& block,
     bool valid = false;
     do {
         Status st = _parse_dynamic_json(is_empty_row, eof, block, slot_descs);
-        if (st.is_data_quality_error()) {
+        if (st.is<DATA_QUALITY_ERROR>()) {
             continue; // continue to read next
         }
         RETURN_IF_ERROR(st);
@@ -528,7 +529,7 @@ Status NewJsonReader::_vhandle_simple_json(Block& block,
         bool valid = false;
         if (_next_row >= _total_rows) { // parse json and generic document
             Status st = _parse_json(is_empty_row, eof);
-            if (st.is_data_quality_error()) {
+            if (st.is<DATA_QUALITY_ERROR>()) {
                 continue; // continue to read next
             }
             RETURN_IF_ERROR(st);
@@ -599,7 +600,7 @@ Status NewJsonReader::_vhandle_flat_array_complex_json(
     do {
         if (_next_row >= _total_rows) {
             Status st = _parse_json(is_empty_row, eof);
-            if (st.is_data_quality_error()) {
+            if (st.is<DATA_QUALITY_ERROR>()) {
                 continue; // continue to read next
             }
             RETURN_IF_ERROR(st);
@@ -629,7 +630,7 @@ Status NewJsonReader::_vhandle_nested_complex_json(Block& block,
                                                    bool* is_empty_row, bool* eof) {
     while (true) {
         Status st = _parse_json(is_empty_row, eof);
-        if (st.is_data_quality_error()) {
+        if (st.is<DATA_QUALITY_ERROR>()) {
             continue; // continue to read next
         }
         RETURN_IF_ERROR(st);
@@ -1097,7 +1098,7 @@ Status NewJsonReader::_simdjson_handle_simple_json(Block& block,
         try {
             if (_next_row >= _total_rows) { // parse json and generic document
                 Status st = _simdjson_parse_json(is_empty_row, eof);
-                if (st.is_data_quality_error()) {
+                if (st.is<DATA_QUALITY_ERROR>()) {
                     continue; // continue to read next
                 }
                 RETURN_IF_ERROR(st);
@@ -1203,7 +1204,7 @@ Status NewJsonReader::_simdjson_handle_flat_array_complex_json(
         try {
             if (_next_row >= _total_rows) {
                 Status st = _simdjson_parse_json(is_empty_row, eof);
-                if (st.is_data_quality_error()) {
+                if (st.is<DATA_QUALITY_ERROR>()) {
                     continue; // continue to read next
                 }
                 RETURN_IF_ERROR(st);
@@ -1226,7 +1227,7 @@ Status NewJsonReader::_simdjson_handle_flat_array_complex_json(
                 simdjson::ondemand::value val;
                 Status st = JsonFunctions::extract_from_object(cur, _parsed_json_root, &val);
                 if (UNLIKELY(!st.ok())) {
-                    if (st.is_not_found()) {
+                    if (st.is<NOT_FOUND>()) {
                         RETURN_IF_ERROR(
                                 _append_error_msg(nullptr, "JsonPath not found", "", nullptr));
                         ADVANCE_ROW();
@@ -1286,7 +1287,7 @@ Status NewJsonReader::_simdjson_handle_nested_complex_json(
         simdjson::ondemand::object cur;
         try {
             Status st = _simdjson_parse_json(is_empty_row, eof);
-            if (st.is_data_quality_error()) {
+            if (st.is<DATA_QUALITY_ERROR>()) {
                 continue; // continue to read next
             }
             RETURN_IF_ERROR(st);
@@ -1635,11 +1636,11 @@ Status NewJsonReader::_simdjson_write_columns_by_jsonpath(
         Status st;
         if (i < _parsed_jsonpaths.size()) {
             st = JsonFunctions::extract_from_object(*value, _parsed_jsonpaths[i], &json_value);
-            if (!st.ok() && !st.is_not_found()) {
+            if (!st.ok() && !st.is<NOT_FOUND>()) {
                 return st;
             }
         }
-        if (i >= _parsed_jsonpaths.size() || st.is_not_found()) {
+        if (i >= _parsed_jsonpaths.size() || st.is<NOT_FOUND>()) {
             // not match in jsondata.
             if (!slot_descs[i]->is_nullable()) {
                 RETURN_IF_ERROR(_append_error_msg(

@@ -1,8 +1,8 @@
 #include "meta-service/meta_service_tablet_stats.h"
 
 #include <fmt/format.h>
-#include <glog/logging.h>
 
+#include "common/logging.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
@@ -11,13 +11,13 @@ namespace selectdb {
 
 void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
                                const std::string& instance_id, const TabletIndexPB& idx,
-                               TabletStatsPB& stats, TabletStats& detached_stats) {
+                               TabletStatsPB& stats, TabletStats& detached_stats, bool snapshot) {
     auto begin_key = stats_tablet_key(
             {instance_id, idx.table_id(), idx.index_id(), idx.partition_id(), idx.tablet_id()});
     auto end_key = stats_tablet_key(
             {instance_id, idx.table_id(), idx.index_id(), idx.partition_id(), idx.tablet_id() + 1});
     std::unique_ptr<RangeGetIterator> it;
-    ret = txn->get(begin_key, end_key, &it);
+    ret = txn->get(begin_key, end_key, &it, snapshot);
     if (ret != 0) {
         code = MetaServiceCode::KV_TXN_GET_ERR;
         msg = fmt::format("failed to get tablet stats, ret={} tablet_id={}", ret, idx.tablet_id());
@@ -81,7 +81,7 @@ void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret
         }
         if (it->more()) {
             begin_key.push_back('\x00'); // Update to next smallest key for iteration
-            ret = txn->get(begin_key, end_key, &it);
+            ret = txn->get(begin_key, end_key, &it, snapshot);
             if (ret != 0) {
                 code = MetaServiceCode::KV_TXN_GET_ERR;
                 msg = fmt::format("failed to get tablet stats, ret={} tablet_id={}", ret,
@@ -103,9 +103,10 @@ void merge_tablet_stats(TabletStatsPB& stats, const TabletStats& detached_stats)
 
 void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
                                const std::string& instance_id, const TabletIndexPB& idx,
-                               TabletStatsPB& stats) {
+                               TabletStatsPB& stats, bool snapshot) {
     TabletStats detached_stats;
-    internal_get_tablet_stats(code, msg, ret, txn, instance_id, idx, stats, detached_stats);
+    internal_get_tablet_stats(code, msg, ret, txn, instance_id, idx, stats, detached_stats,
+                              snapshot);
     merge_tablet_stats(stats, detached_stats);
 }
 

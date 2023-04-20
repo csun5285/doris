@@ -18,6 +18,7 @@
 package org.apache.doris.transaction;
 
 import org.apache.doris.catalog.Database;
+import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Table;
@@ -314,14 +315,14 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     @Override
-    public boolean commitAndPublishTransaction(Database db, List<Table> tableList, long transactionId,
+    public boolean commitAndPublishTransaction(DatabaseIf db, List<Table> tableList, long transactionId,
                                                List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis)
             throws UserException {
         return commitAndPublishTransaction(db, tableList, transactionId, tabletCommitInfos, timeoutMillis, null);
     }
 
     @Override
-    public boolean commitAndPublishTransaction(Database db, List<Table> tableList, long transactionId,
+    public boolean commitAndPublishTransaction(DatabaseIf db, List<Table> tableList, long transactionId,
                                                List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis,
                                                TxnCommitAttachment txnCommitAttachment) throws UserException {
 
@@ -338,6 +339,12 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     @Override
     public void abortTransaction(long dbId, long transactionId, String reason) throws UserException {
         abortTransaction(dbId, transactionId, reason, null);
+    }
+
+    @Override
+    public void abortTransaction(Long dbId, Long transactionId, String reason,
+            TxnCommitAttachment txnCommitAttachment, List<Table> tableList) throws UserException {
+        abortTransaction(dbId, transactionId, reason, txnCommitAttachment);
     }
 
     @Override
@@ -415,7 +422,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     @Override
-    public void abortTransaction2PC(Long dbId, long transactionId) throws UserException {
+    public void abortTransaction2PC(Long dbId, long transactionId, List<Table> tableList) throws UserException {
         LOG.info("try to abortTransaction2PC, dbId:{}, transactionId:{}", dbId, transactionId);
         abortTransaction(dbId, transactionId, "User Abort", null);
         LOG.info(" abortTransaction2PC successfully, dbId:{}, transactionId:{}", dbId, transactionId);

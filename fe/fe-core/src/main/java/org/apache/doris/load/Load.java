@@ -73,6 +73,7 @@ import org.apache.doris.common.LoadException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.PatternMatcher;
+import org.apache.doris.common.PatternMatcherWrapper;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.ListComparator;
 import org.apache.doris.common.util.MetaLockUtils;
@@ -858,7 +859,12 @@ public class Load {
                 if (hasSequenceCol && column.isSequenceColumn()) {
                     continue;
                 }
-                ImportColumnDesc columnDesc = new ImportColumnDesc(column.getName());
+                ImportColumnDesc columnDesc = null;
+                if (formatType == TFileFormatType.FORMAT_JSON) {
+                    columnDesc = new ImportColumnDesc(column.getName());
+                } else {
+                    columnDesc = new ImportColumnDesc(column.getName().toLowerCase());
+                }
                 LOG.debug("add base column {} to stream load task", column.getName());
                 copiedColumnExprs.add(columnDesc);
             }
@@ -1775,7 +1781,8 @@ public class Load {
             LOG.debug("begin to get load job info, size: {}", loadJobs.size());
             PatternMatcher matcher = null;
             if (labelValue != null && !accurateMatch) {
-                matcher = PatternMatcher.createMysqlPattern(labelValue, CaseSensibility.LABEL.getCaseSensibility());
+                matcher = PatternMatcherWrapper.createMysqlPattern(labelValue,
+                        CaseSensibility.LABEL.getCaseSensibility());
             }
 
             for (LoadJob loadJob : loadJobs) {

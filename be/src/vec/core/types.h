@@ -540,14 +540,13 @@ inline const char* getTypeName(TypeIndex idx) {
 } // namespace doris
 
 /// Specialization of `std::hash` for the Decimal<T> types.
-namespace std {
 template <typename T>
-struct hash<doris::vectorized::Decimal<T>> {
+struct std::hash<doris::vectorized::Decimal<T>> {
     size_t operator()(const doris::vectorized::Decimal<T>& x) const { return hash<T>()(x.value); }
 };
 
 template <>
-struct hash<doris::vectorized::Decimal128> {
+struct std::hash<doris::vectorized::Decimal128> {
     size_t operator()(const doris::vectorized::Decimal128& x) const {
         return std::hash<doris::vectorized::Int64>()(x.value >> 64) ^
                std::hash<doris::vectorized::Int64>()(
@@ -555,7 +554,7 @@ struct hash<doris::vectorized::Decimal128> {
     }
 };
 
-constexpr bool is_integer(doris::vectorized::TypeIndex index) {
+constexpr bool typeindex_is_int(doris::vectorized::TypeIndex index) {
     using TypeIndex = doris::vectorized::TypeIndex;
     switch (index) {
     case TypeIndex::UInt8:
@@ -575,4 +574,3 @@ constexpr bool is_integer(doris::vectorized::TypeIndex index) {
     }
     }
 }
-} // namespace std

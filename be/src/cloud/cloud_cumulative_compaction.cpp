@@ -10,6 +10,7 @@
 #include "util/uuid_generator.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 static std::mutex s_cumu_compaction_mtx;
 static std::vector<std::shared_ptr<CloudCumulativeCompaction>> s_cumu_compactions;
@@ -45,7 +46,7 @@ Status CloudCumulativeCompaction::prepare_compact() {
     }
     std::unique_lock lock(_tablet->get_cumulative_compaction_lock(), std::try_to_lock);
     if (!lock.owns_lock()) {
-        return Status::OLAPInternalError(OLAP_ERR_BE_TRY_BE_LOCK_ERROR);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
     TRACE("got cumulative compaction lock");
 
@@ -119,10 +120,10 @@ Status CloudCumulativeCompaction::prepare_compact() {
     compaction_job->set_expiration(_expiration);
     compaction_job->set_lease(now + config::lease_compaction_interval_seconds * 4);
     st = cloud::meta_mgr()->prepare_tablet_job(job);
-    if (st.precise_code() == STALE_TABLET_CACHE) {
+    if (st.is<STALE_TABLET_CACHE>()) {
         // set last_sync_time to 0 to force sync tablet next time
         _tablet->set_last_sync_time(0);
-    } else if (st.is_not_found()) {
+    } else if (st.is<NOT_FOUND>()) {
         // tablet not found
         cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
     }
@@ -132,7 +133,7 @@ Status CloudCumulativeCompaction::prepare_compact() {
 Status CloudCumulativeCompaction::execute_compact_impl() {
     std::unique_lock lock(_tablet->get_cumulative_compaction_lock(), std::try_to_lock);
     if (!lock.owns_lock()) {
-        return Status::OLAPInternalError(OLAP_ERR_BE_TRY_BE_LOCK_ERROR);
+        return Status::Error<TRY_LOCK_FAILED>();
     }
     TRACE("got cumulative compaction lock");
 
@@ -167,7 +168,7 @@ Status CloudCumulativeCompaction::execute_compact_impl() {
     return Status::OK();
 }
 
-Status CloudCumulativeCompaction::update_tablet_meta() {
+Status CloudCumulativeCompaction::update_tablet_meta(const Merger::Statistics* stats_unused) {
     // calculate new cumulative point
     int64_t input_cumulative_point = _tablet->cumulative_layer_point();
     int64_t new_cumulative_point = _tablet->cumulative_compaction_policy()->new_cumulative_point(
@@ -254,7 +255,7 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
     _tablet->pick_candidate_rowsets_to_cumulative_compaction(&candidate_rowsets);
 
     if (candidate_rowsets.empty()) {
-        return Status::OLAPInternalError(OLAP_ERR_CUMULATIVE_NO_SUITABLE_VERSION);
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
     }
 
     // candidate_rowsets may not be continuous
@@ -277,12 +278,12 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
             &_last_delete_version, &compaction_score);
 
     if (_input_rowsets.empty()) {
-        return Status::OLAPInternalError(OLAP_ERR_CUMULATIVE_NO_SUITABLE_VERSION);
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
     } else if (_input_rowsets.size() == 1 &&
                !_input_rowsets.front()->rowset_meta()->is_segments_overlapping()) {
         VLOG_DEBUG << "there is only one rowset and not overlapping. tablet_id="
                    << _tablet->tablet_id() << ", version=" << _input_rowsets.front()->version();
-        return Status::OLAPInternalError(OLAP_ERR_CUMULATIVE_NO_SUITABLE_VERSION);
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
     }
     return Status::OK();
 }

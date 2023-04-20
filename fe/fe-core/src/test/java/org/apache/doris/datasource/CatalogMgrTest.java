@@ -32,23 +32,37 @@ import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.EsResource;
+import org.apache.doris.catalog.ListPartitionItem;
+import org.apache.doris.catalog.PartitionItem;
+import org.apache.doris.catalog.PartitionKey;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ResourceMgr;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.catalog.external.EsExternalDatabase;
 import org.apache.doris.catalog.external.EsExternalTable;
 import org.apache.doris.catalog.external.HMSExternalDatabase;
 import org.apache.doris.catalog.external.HMSExternalTable;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.ExceptionChecker;
 import org.apache.doris.common.FeConstants;
+import org.apache.doris.datasource.hive.HiveMetaStoreCache;
+import org.apache.doris.datasource.hive.HiveMetaStoreCache.HivePartitionValues;
+import org.apache.doris.datasource.hive.HiveMetaStoreCache.PartitionValueCacheKey;
 import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.planner.ColumnBound;
+import org.apache.doris.planner.ListPartitionPrunerV2;
+import org.apache.doris.planner.PartitionPrunerV2Base.UniqueId;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ShowResultSet;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.utframe.TestWithFeService;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeMap;
 import org.junit.Assert;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -58,6 +72,7 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -69,13 +84,14 @@ public class CatalogMgrTest extends TestWithFeService {
     private static UserIdentity user2;
     private CatalogMgr mgr;
     private ResourceMgr resourceMgr;
+    private ExternalMetaCacheMgr externalMetaCacheMgr;
 
     @Override
     protected void runBeforeAll() throws Exception {
         FeConstants.runningUnitTest = true;
         mgr = Env.getCurrentEnv().getCatalogMgr();
         resourceMgr = Env.getCurrentEnv().getResourceMgr();
-
+        externalMetaCacheMgr = Env.getCurrentEnv().getExtMetaCacheMgr();
         ConnectContext rootCtx = createDefaultCtx();
         env = Env.getCurrentEnv();
         auth = env.getAuth();
@@ -417,4 +433,176 @@ public class CatalogMgrTest extends TestWithFeService {
         }
     }
 
+    @Test
+    public void testAddMultiColumnPartitionsCache() {
+        HMSExternalCatalog hiveCatalog = (HMSExternalCatalog) mgr.getCatalog("hive");
+        HiveMetaStoreCache metaStoreCache = externalMetaCacheMgr.getMetaStoreCache(hiveCatalog);
+        PartitionValueCacheKey partitionValueCacheKey = new PartitionValueCacheKey("hiveDb", "hiveTable",
+                Lists.newArrayList(Type.INT, Type.SMALLINT));
+        HivePartitionValues hivePartitionValues = loadPartitionValues(partitionValueCacheKey,
+                Lists.newArrayList("y=2020/m=1", "y=2020/m=2"), metaStoreCache);
+        metaStoreCache.putPartitionValuesCacheForTest(partitionValueCacheKey, hivePartitionValues);
+        metaStoreCache.addPartitionsCache("hiveDb", "hiveTable", Lists.newArrayList("y=2020/m=3", "y=2020/m=4"),
+                partitionValueCacheKey.getTypes());
+        HivePartitionValues partitionValues = metaStoreCache.getPartitionValues(partitionValueCacheKey);
+        Assert.assertEquals(partitionValues.getPartitionNameToIdMap().size(), 4);
+    }
+
+    @Test
+    public void testDropMultiColumnPartitionsCache() {
+        HMSExternalCatalog hiveCatalog = (HMSExternalCatalog) mgr.getCatalog("hive");
+        HiveMetaStoreCache metaStoreCache = externalMetaCacheMgr.getMetaStoreCache(hiveCatalog);
+        PartitionValueCacheKey partitionValueCacheKey = new PartitionValueCacheKey("hiveDb", "hiveTable",
+                Lists.newArrayList(Type.INT, Type.SMALLINT));
+        HivePartitionValues hivePartitionValues = loadPartitionValues(partitionValueCacheKey,
+                Lists.newArrayList("y=2020/m=1", "y=2020/m=2"), metaStoreCache);
+        metaStoreCache.putPartitionValuesCacheForTest(partitionValueCacheKey, hivePartitionValues);
+        metaStoreCache.dropPartitionsCache("hiveDb", "hiveTable", Lists.newArrayList("y=2020/m=1", "y=2020/m=2"),
+                partitionValueCacheKey.getTypes(), false);
+        HivePartitionValues partitionValues = metaStoreCache.getPartitionValues(partitionValueCacheKey);
+        Assert.assertEquals(partitionValues.getPartitionNameToIdMap().size(), 0);
+    }
+
+    @Test
+    public void testAddSingleColumnPartitionsCache() {
+        HMSExternalCatalog hiveCatalog = (HMSExternalCatalog) mgr.getCatalog("hive");
+        HiveMetaStoreCache metaStoreCache = externalMetaCacheMgr.getMetaStoreCache(hiveCatalog);
+        PartitionValueCacheKey partitionValueCacheKey = new PartitionValueCacheKey("hiveDb", "hiveTable",
+                Lists.newArrayList(Type.SMALLINT));
+        HivePartitionValues hivePartitionValues = loadPartitionValues(partitionValueCacheKey,
+                Lists.newArrayList("m=1", "m=2"), metaStoreCache);
+        metaStoreCache.putPartitionValuesCacheForTest(partitionValueCacheKey, hivePartitionValues);
+        metaStoreCache.addPartitionsCache("hiveDb", "hiveTable", Lists.newArrayList("m=3", "m=4"),
+                partitionValueCacheKey.getTypes());
+        HivePartitionValues partitionValues = metaStoreCache.getPartitionValues(partitionValueCacheKey);
+        Assert.assertEquals(partitionValues.getPartitionNameToIdMap().size(), 4);
+    }
+
+    @Test
+    public void testDropSingleColumnPartitionsCache() {
+        HMSExternalCatalog hiveCatalog = (HMSExternalCatalog) mgr.getCatalog("hive");
+        HiveMetaStoreCache metaStoreCache = externalMetaCacheMgr.getMetaStoreCache(hiveCatalog);
+        PartitionValueCacheKey partitionValueCacheKey = new PartitionValueCacheKey("hiveDb", "hiveTable",
+                Lists.newArrayList(Type.SMALLINT));
+        HivePartitionValues hivePartitionValues = loadPartitionValues(partitionValueCacheKey,
+                Lists.newArrayList("m=1", "m=2"), metaStoreCache);
+        metaStoreCache.putPartitionValuesCacheForTest(partitionValueCacheKey, hivePartitionValues);
+        metaStoreCache.dropPartitionsCache("hiveDb", "hiveTable", Lists.newArrayList("m=1", "m=2"),
+                partitionValueCacheKey.getTypes(), false);
+        HivePartitionValues partitionValues = metaStoreCache.getPartitionValues(partitionValueCacheKey);
+        Assert.assertEquals(partitionValues.getPartitionNameToIdMap().size(), 0);
+    }
+
+    @Test
+    public void testAddPartitionsCacheToLargeTable() {
+        HMSExternalCatalog hiveCatalog = (HMSExternalCatalog) mgr.getCatalog("hive");
+        HiveMetaStoreCache metaStoreCache = externalMetaCacheMgr.getMetaStoreCache(hiveCatalog);
+        PartitionValueCacheKey partitionValueCacheKey = new PartitionValueCacheKey("hiveDb", "hiveTable",
+                Lists.newArrayList(Type.INT));
+        List<String> pNames = new ArrayList<>(100000);
+        for (int i = 1; i <= 100000; i++) {
+            pNames.add("m=" + i);
+        }
+        HivePartitionValues hivePartitionValues = loadPartitionValues(partitionValueCacheKey,
+                pNames, metaStoreCache);
+        metaStoreCache.putPartitionValuesCacheForTest(partitionValueCacheKey, hivePartitionValues);
+        long start = System.currentTimeMillis();
+        metaStoreCache.addPartitionsCache("hiveDb", "hiveTable", Lists.newArrayList("m=100001"),
+                partitionValueCacheKey.getTypes());
+        //387 in 4c16g
+        System.out.println("testAddPartitionsCacheToLargeTable use time mills:" + (System.currentTimeMillis() - start));
+        HivePartitionValues partitionValues = metaStoreCache.getPartitionValues(partitionValueCacheKey);
+        Assert.assertEquals(partitionValues.getPartitionNameToIdMap().size(), 100001);
+    }
+
+    private HivePartitionValues loadPartitionValues(PartitionValueCacheKey key, List<String> partitionNames,
+            HiveMetaStoreCache metaStoreCache) {
+        // partition name format: nation=cn/city=beijing
+        Map<Long, PartitionItem> idToPartitionItem = Maps.newHashMapWithExpectedSize(partitionNames.size());
+        Map<String, Long> partitionNameToIdMap = Maps.newHashMapWithExpectedSize(partitionNames.size());
+        Map<Long, List<UniqueId>> idToUniqueIdsMap = Maps.newHashMapWithExpectedSize(partitionNames.size());
+        long idx = 0;
+        for (String partitionName : partitionNames) {
+            long partitionId = idx++;
+            ListPartitionItem listPartitionItem = metaStoreCache.toListPartitionItem(partitionName, key.getTypes());
+            idToPartitionItem.put(partitionId, listPartitionItem);
+            partitionNameToIdMap.put(partitionName, partitionId);
+        }
+
+        Map<UniqueId, Range<PartitionKey>> uidToPartitionRange = null;
+        Map<Range<PartitionKey>, UniqueId> rangeToId = null;
+        RangeMap<ColumnBound, UniqueId> singleColumnRangeMap = null;
+        Map<UniqueId, Range<ColumnBound>> singleUidToColumnRangeMap = null;
+        if (key.getTypes().size() > 1) {
+            // uidToPartitionRange and rangeToId are only used for multi-column partition
+            uidToPartitionRange = ListPartitionPrunerV2.genUidToPartitionRange(idToPartitionItem, idToUniqueIdsMap);
+            rangeToId = ListPartitionPrunerV2.genRangeToId(uidToPartitionRange);
+        } else {
+            Preconditions.checkState(key.getTypes().size() == 1, key.getTypes());
+            // singleColumnRangeMap is only used for single-column partition
+            singleColumnRangeMap = ListPartitionPrunerV2.genSingleColumnRangeMap(idToPartitionItem, idToUniqueIdsMap);
+            singleUidToColumnRangeMap = ListPartitionPrunerV2.genSingleUidToColumnRange(singleColumnRangeMap);
+        }
+        Map<Long, List<String>> partitionValuesMap = ListPartitionPrunerV2.getPartitionValuesMap(idToPartitionItem);
+        return new HivePartitionValues(idToPartitionItem, uidToPartitionRange, rangeToId, singleColumnRangeMap, idx,
+                partitionNameToIdMap, idToUniqueIdsMap, singleUidToColumnRangeMap, partitionValuesMap);
+    }
+
+    @Test
+    public void testInvalidCreateCatalogProperties() throws Exception {
+        String createCatalogSql = "CREATE CATALOG bad_hive1 PROPERTIES (\n"
+                + "    'type'='hms',\n"
+                + "    'hive.metastore.uris' = 'thrift://172.21.0.1:7004',\n"
+                + "    'hadoop.username' = 'hive',\n"
+                + "    'dfs.nameservices'='your-nameservice',\n"
+                + "    'dfs.namenode.rpc-address.your-nameservice.nn1'='172.21.0.2:4007',\n"
+                + "    'dfs.namenode.rpc-address.your-nameservice.nn2'='172.21.0.3:4007',\n"
+                + "    'dfs.client.failover.proxy.provider.your-nameservice'"
+                + "='org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider'\n"
+                + ");";
+        CreateCatalogStmt createStmt1 = (CreateCatalogStmt) parseAndAnalyzeStmt(createCatalogSql);
+        ExceptionChecker.expectThrowsWithMsg(DdlException.class, "Missing dfs.ha.namenodes.your-nameservice property",
+                () -> mgr.createCatalog(createStmt1));
+
+        createCatalogSql = "CREATE CATALOG bad_hive2 PROPERTIES (\n"
+                + "    'type'='hms',\n"
+                + "    'hive.metastore.uris' = 'thrift://172.21.0.1:7004',\n"
+                + "    'hadoop.username' = 'hive',\n"
+                + "    'dfs.nameservices'='your-nameservice',\n"
+                + "    'dfs.ha.namenodes.your-nameservice'='nn1,nn2',\n"
+                + "    'dfs.namenode.rpc-address.your-nameservice.nn2'='172.21.0.3:4007',\n"
+                + "    'dfs.client.failover.proxy.provider.your-nameservice'"
+                + "='org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider'\n"
+                + ");";
+        CreateCatalogStmt createStmt2 = (CreateCatalogStmt) parseAndAnalyzeStmt(createCatalogSql);
+        ExceptionChecker.expectThrowsWithMsg(DdlException.class,
+                "Missing dfs.namenode.rpc-address.your-nameservice.nn1 property",
+                () -> mgr.createCatalog(createStmt2));
+
+        createCatalogSql = "CREATE CATALOG good_hive PROPERTIES (\n"
+                + "    'type'='hms',\n"
+                + "    'hive.metastore.uris' = 'thrift://172.21.0.1:7004',\n"
+                + "    'hadoop.username' = 'hive',\n"
+                + "    'dfs.nameservices'='your-nameservice',\n"
+                + "    'dfs.ha.namenodes.your-nameservice'='nn1,nn2',\n"
+                + "    'dfs.namenode.rpc-address.your-nameservice.nn1'='172.21.0.2:4007',\n"
+                + "    'dfs.namenode.rpc-address.your-nameservice.nn2'='172.21.0.3:4007'\n"
+                + ");";
+        CreateCatalogStmt createStmt3 = (CreateCatalogStmt) parseAndAnalyzeStmt(createCatalogSql);
+        ExceptionChecker.expectThrowsWithMsg(DdlException.class,
+                "Missing dfs.client.failover.proxy.provider.your-nameservice property",
+                () -> mgr.createCatalog(createStmt3));
+
+        createCatalogSql = "CREATE CATALOG bad_jdbc PROPERTIES (\n"
+                + "    \"type\"=\"jdbc\",\n"
+                + "    \"user\"=\"root\",\n"
+                + "    \"password\"=\"123456\",\n"
+                + "    \"jdbc_url\" = \"jdbc:mysql://127.0.0.1:3306/demo\",\n"
+                + "    \"driver_class\" = \"com.mysql.jdbc.Driver\"\n"
+                + ")";
+        CreateCatalogStmt createStmt4 = (CreateCatalogStmt) parseAndAnalyzeStmt(createCatalogSql);
+        ExceptionChecker.expectThrowsWithMsg(DdlException.class,
+                "Required property 'driver_url' is missing",
+                () -> mgr.createCatalog(createStmt4));
+    }
 }

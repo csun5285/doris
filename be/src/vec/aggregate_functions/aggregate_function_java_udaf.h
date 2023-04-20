@@ -250,9 +250,8 @@ private:
             func_id = env->GetMethodID(executor_cl, func_name, func_sign);
             Status s = JniUtil::GetJniExceptionMsg(env);
             if (!s.ok()) {
-                return Status::InternalError(
-                        strings::Substitute("Java-Udaf register_func_id meet error and error is $0",
-                                            s.get_error_msg()));
+                return Status::InternalError(strings::Substitute(
+                        "Java-Udaf register_func_id meet error and error is $0", s.to_string()));
             }
             return s;
         };
@@ -348,11 +347,11 @@ public:
                      << _fn.name.function_name;
     }
 
-    void add_batch(size_t batch_size, AggregateDataPtr* places, size_t /*place_offset*/,
+    void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
                    const IColumn** columns, Arena* /*arena*/, bool /*agg_many*/) const override {
         int64_t places_address[batch_size];
         for (size_t i = 0; i < batch_size; ++i) {
-            places_address[i] = reinterpret_cast<int64_t>(places[i]);
+            places_address[i] = reinterpret_cast<int64_t>(places[i] + place_offset);
         }
         this->data(_exec_place).add(places_address, false, columns, 0, batch_size, argument_types);
     }

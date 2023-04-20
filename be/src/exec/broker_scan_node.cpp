@@ -382,7 +382,6 @@ Status BrokerScanNode::scanner_scan(const TBrokerScanRange& scan_range,
 
 void BrokerScanNode::scanner_worker(int start_idx, int length) {
     SCOPED_ATTACH_TASK(_runtime_state);
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker_shared());
     // Clone expr context
     std::vector<ExprContext*> scanner_expr_ctxs;
     auto status = Expr::clone_if_not_exists(_conjunct_ctxs, _runtime_state, &scanner_expr_ctxs);
@@ -396,8 +395,7 @@ void BrokerScanNode::scanner_worker(int start_idx, int length) {
                 _scan_ranges[start_idx + i].scan_range.broker_scan_range;
         status = scanner_scan(scan_range, scanner_expr_ctxs, &counter);
         if (!status.ok()) {
-            LOG(WARNING) << "Scanner[" << start_idx + i
-                         << "] process failed. status=" << status.get_error_msg();
+            LOG(WARNING) << "Scanner[" << start_idx + i << "] process failed. status=" << status;
         }
     }
 

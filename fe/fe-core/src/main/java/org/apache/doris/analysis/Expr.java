@@ -20,6 +20,7 @@
 
 package org.apache.doris.analysis;
 
+import org.apache.doris.analysis.ArithmeticExpr.Operator;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.FunctionSet;
@@ -31,6 +32,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.TreeNode;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.VectorizedUtil;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.statistics.ExprStats;
 import org.apache.doris.thrift.TExpr;
 import org.apache.doris.thrift.TExprNode;
@@ -43,6 +45,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -1444,8 +1447,11 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     public void uncheckedCastChild(Type targetType, int childIndex)
             throws AnalysisException {
         Expr child = getChild(childIndex);
-        Expr newChild = child.uncheckedCastTo(targetType);
-        setChild(childIndex, newChild);
+        //avoid to generate Expr like cast (cast(... as date) as date)
+        if (!child.getType().equals(targetType)) {
+            Expr newChild = child.uncheckedCastTo(targetType);
+            setChild(childIndex, newChild);
+        }
     }
 
     /**
@@ -1904,10 +1910,10 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     }
 
 
-    protected void recursiveResetChildrenResult() throws AnalysisException {
+    protected void recursiveResetChildrenResult(boolean inView) throws AnalysisException {
         for (int i = 0; i < children.size(); i++) {
             final Expr child = children.get(i);
-            final Expr newChild = child.getResultValue();
+            final Expr newChild = child.getResultValue(inView);
             if (newChild != child) {
                 setChild(i, newChild);
             }
@@ -1919,8 +1925,8 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
      * @return value returned can't be null, if this and it's children are't constant expr, return this.
      * @throws AnalysisException
      */
-    public Expr getResultValue() throws AnalysisException {
-        recursiveResetChildrenResult();
+    public Expr getResultValue(boolean forPushDownPredicatesToView) throws AnalysisException {
+        recursiveResetChildrenResult(forPushDownPredicatesToView);
         final Expr newExpr = ExpressionFunctions.INSTANCE.evalExpr(this);
         return newExpr != null ? newExpr : this;
     }
@@ -2040,6 +2046,34 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
         if (fn.functionName().equalsIgnoreCase("concat_ws")) {
             return children.get(0).isNullable();
         }
+        if (fn.functionName().equalsIgnoreCase(Operator.MULTIPLY.getName())
+                && fn.getReturnType().isDecimalV3()) {
+            if (ConnectContext.get() != null
+                    && ConnectContext.get().getSessionVariable().checkOverflowForDecimal()) {
+                return true;
+            } else {
+                return hasNullableChild();
+            }
+        }
+        if ((fn.functionName().equalsIgnoreCase(Operator.ADD.getName())
+                || fn.functionName().equalsIgnoreCase(Operator.SUBTRACT.getName()))
+                && fn.getReturnType().isDecimalV3()) {
+            if (ConnectContext.get() != null
+                    && ConnectContext.get().getSessionVariable().checkOverflowForDecimal()) {
+                return true;
+            } else {
+                return hasNullableChild();
+            }
+        }
+        if (fn.functionName().equalsIgnoreCase("group_concat")) {
+            int size = Math.min(fn.getNumArgs(), children.size());
+            for (int i = 0; i < size; ++i) {
+                if (children.get(i).isNullable()) {
+                    return true;
+                }
+            }
+            return false;
+        }
         return true;
     }
 
@@ -2099,6 +2133,31 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
                     }
                     return type;
                 }).toArray(Type[]::new);
+    }
+
+    public boolean refToCountStar() {
+        if (this instanceof SlotRef) {
+            SlotRef slotRef = (SlotRef) this;
+            SlotDescriptor desc = slotRef.getDesc();
+            List<Expr> exprs = desc.getSourceExprs();
+            return CollectionUtils.isNotEmpty(exprs) && exprs.stream().anyMatch(e -> {
+                if (e instanceof FunctionCallExpr) {
+                    FunctionCallExpr funcExpr = (FunctionCallExpr) e;
+                    Function f = funcExpr.fn;
+                    if (f.getFunctionName().getFunction().equals("count")
+                            && funcExpr.children.stream().anyMatch(Expr::isConstant)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+        for (Expr expr : children) {
+            if (expr.refToCountStar()) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 

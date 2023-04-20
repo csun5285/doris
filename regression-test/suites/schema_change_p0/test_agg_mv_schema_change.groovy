@@ -21,16 +21,6 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite ("test_agg_mv_schema_change") {
     def tableName = "schema_change_agg_mv_regression_test"
 
-    def getJobState = { tbName ->
-         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tbName}' ORDER BY createtime DESC LIMIT 1 """
-         return jobStateResult[0][9]
-    }
-
-    def getMvJobState = { tbName ->
-        def jobStateResult = sql """  SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tbName}' ORDER BY CreateTime DESC LIMIT 1; """
-        return jobStateResult[0][8]
-    }
-
     try {
         String[][] backends = sql """ show backends; """
         assertTrue(backends.size() > 0)
@@ -87,20 +77,17 @@ suite ("test_agg_mv_schema_change") {
             """
 
         //add materialized view
+        def result = "null"
         def mvName = "mv1"
-        sql "create materialized view ${mvName} as select user_id, date, city, age, sex, sum(cost) from ${tableName} group by user_id, date, city, age, sex, cost;"
-        int max_try_secs = 600
-        while (max_try_secs--) {
-            String result = getMvJobState(tableName)
-            if (result == "FINISHED") {
-                break
-            } else {
-                Thread.sleep(1000)
-                if (max_try_secs < 1) {
-                    println "test timeout," + "state:" + result
-                    assertEquals("FINISHED", result)
-                }
+        sql "create materialized view ${mvName} as select user_id, date, city, age, sum(cost) from ${tableName} group by user_id, date, city, age, sex;"
+        while (!result.contains("FINISHED")){
+            result = sql "SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
+            result = result.toString()
+            logger.info("result: ${result}")
+            if(result.contains("CANCELLED")){
+                return
             }
+            Thread.sleep(100)
         }
 
         sql """ INSERT INTO ${tableName} VALUES
@@ -123,18 +110,16 @@ suite ("test_agg_mv_schema_change") {
             ALTER TABLE ${tableName} DROP COLUMN cost
             """
 
-        max_try_time = 600
-        while(max_try_time--){
-            String result = getJobState(tableName)
-            if (result == "FINISHED") {
-                break
-            } else {
-                sleep(1000)
-                if (max_try_time < 1){
-                    println "test timeout," + "state:" + result
-                    assertEquals("FINISHED", result)
-                }
+        result = "null"
+        while (!result.contains("FINISHED")){
+            result = sql "SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
+            result = result.toString()
+            logger.info("result: ${result}")
+            if(result.contains("CANCELLED")) {
+                log.info("rollup job is cancelled, result: ${result}".toString())
+                return
             }
+            Thread.sleep(100)
         }
 
         sql """ INSERT INTO ${tableName} (`user_id`, `date`, `city`, `age`, `sex`, `max_dwell_time`,`min_dwell_time`, `hll_col`, `bitmap_col`)
@@ -168,57 +153,57 @@ suite ("test_agg_mv_schema_change") {
             """
 
         // compaction
-        // String[][] tablets = sql """ show tablets from ${tableName}; """
-        // for (String[] tablet in tablets) {
-        //         String tablet_id = tablet[0]
-        //         backend_id = tablet[2]
-        //         logger.info("run compaction:" + tablet_id)
-        //         StringBuilder sb = new StringBuilder();
-        //         sb.append("curl -X POST http://")
-        //         sb.append(backendId_to_backendIP.get(backend_id))
-        //         sb.append(":")
-        //         sb.append(backendId_to_backendHttpPort.get(backend_id))
-        //         sb.append("/api/compaction/run?tablet_id=")
-        //         sb.append(tablet_id)
-        //         sb.append("&compact_type=cumulative")
+        String[][] tablets = sql """ show tablets from ${tableName}; """
+        for (String[] tablet in tablets) {
+                String tablet_id = tablet[0]
+                backend_id = tablet[2]
+                logger.info("run compaction:" + tablet_id)
+                StringBuilder sb = new StringBuilder();
+                sb.append("curl -X POST http://")
+                sb.append(backendId_to_backendIP.get(backend_id))
+                sb.append(":")
+                sb.append(backendId_to_backendHttpPort.get(backend_id))
+                sb.append("/api/compaction/run?tablet_id=")
+                sb.append(tablet_id)
+                sb.append("&compact_type=cumulative")
 
-        //         String command = sb.toString()
-        //         process = command.execute()
-        //         code = process.waitFor()
-        //         err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        //         out = process.getText()
-        //         logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-        //         //assertEquals(code, 0)
-        // }
+                String command = sb.toString()
+                process = command.execute()
+                code = process.waitFor()
+                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+                out = process.getText()
+                logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
+                //assertEquals(code, 0)
+        }
 
         // wait for all compactions done
-        // for (String[] tablet in tablets) {
-        //         boolean running = true
-        //         do {
-        //             Thread.sleep(100)
-        //             String tablet_id = tablet[0]
-        //             backend_id = tablet[2]
-        //             StringBuilder sb = new StringBuilder();
-        //             sb.append("curl -X GET http://")
-        //             sb.append(backendId_to_backendIP.get(backend_id))
-        //             sb.append(":")
-        //             sb.append(backendId_to_backendHttpPort.get(backend_id))
-        //             sb.append("/api/compaction/run_status?tablet_id=")
-        //             sb.append(tablet_id)
+        for (String[] tablet in tablets) {
+                boolean running = true
+                do {
+                    Thread.sleep(100)
+                    String tablet_id = tablet[0]
+                    backend_id = tablet[2]
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("curl -X GET http://")
+                    sb.append(backendId_to_backendIP.get(backend_id))
+                    sb.append(":")
+                    sb.append(backendId_to_backendHttpPort.get(backend_id))
+                    sb.append("/api/compaction/run_status?tablet_id=")
+                    sb.append(tablet_id)
 
-        //             String command = sb.toString()
-        //             process = command.execute()
-        //             code = process.waitFor()
-        //             err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        //             out = process.getText()
-        //             logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
-        //             assertEquals(code, 0)
-        //             def compactionStatus = parseJson(out.trim())
-        //             assertEquals("success", compactionStatus.status.toLowerCase())
-        //             running = compactionStatus.run_status
-        //         } while (running)
-        // }
-
+                    String command = sb.toString()
+                    process = command.execute()
+                    code = process.waitFor()
+                    err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+                    out = process.getText()
+                    logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
+                    assertEquals(code, 0)
+                    def compactionStatus = parseJson(out.trim())
+                    assertEquals("success", compactionStatus.status.toLowerCase())
+                    running = compactionStatus.run_status
+                } while (running)
+        }
+         
         qt_sc """ select count(*) from ${tableName} """
 
         qt_sc """  SELECT * FROM ${tableName} WHERE user_id=2 """

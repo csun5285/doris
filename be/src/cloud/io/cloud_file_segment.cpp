@@ -151,6 +151,7 @@ std::string FileSegment::get_path_in_local_cache(bool is_tmp) const {
 }
 
 Status FileSegment::read_at(Slice buffer, size_t offset) {
+    Status st = Status::OK();
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -160,10 +161,11 @@ Status FileSegment::read_at(Slice buffer, size_t offset) {
             _cache_reader = CloudFileCache::cache_file_reader(reader);
         }
     }
+    io::IOState state;
     size_t bytes_reads = buffer.size;
     RETURN_IF_ERROR(reader->read_at(offset, buffer, &bytes_reads));
     DCHECK(bytes_reads == buffer.size);
-    return Status::OK();
+    return st;
 }
 
 bool FileSegment::change_cache_type(CacheType new_type) {

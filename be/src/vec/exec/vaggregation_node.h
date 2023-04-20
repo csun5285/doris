@@ -106,12 +106,16 @@ struct AggregationMethodSerialized {
     static void insert_key_into_columns(const StringRef& key, MutableColumns& key_columns,
                                         const Sizes&) {
         auto pos = key.data;
-        for (auto& column : key_columns) pos = column->deserialize_and_insert_from_arena(pos);
+        for (auto& column : key_columns) {
+            pos = column->deserialize_and_insert_from_arena(pos);
+        }
     }
 
     static void insert_keys_into_columns(std::vector<StringRef>& keys, MutableColumns& key_columns,
                                          const size_t num_rows, const Sizes&) {
-        for (auto& column : key_columns) column->deserialize_vec(keys, num_rows);
+        for (auto& column : key_columns) {
+            column->deserialize_vec(keys, num_rows);
+        }
     }
 
     void init_once() {
@@ -260,7 +264,7 @@ struct AggregationMethodKeysFixed {
     Iterator iterator;
     bool inited = false;
 
-    AggregationMethodKeysFixed() {}
+    AggregationMethodKeysFixed() = default;
 
     template <typename Other>
     AggregationMethodKeysFixed(const Other& other) : data(other.data) {}
@@ -282,7 +286,9 @@ struct AggregationMethodKeysFixed {
             ColumnUInt8* null_map;
 
             bool column_nullable = false;
-            if constexpr (has_nullable_keys) column_nullable = is_column_nullable(*key_columns[i]);
+            if constexpr (has_nullable_keys) {
+                column_nullable = is_column_nullable(*key_columns[i]);
+            }
 
             /// If we have a nullable column, get its nested column and its null map.
             if (column_nullable) {
@@ -305,9 +311,9 @@ struct AggregationMethodKeysFixed {
                 is_null = val == 1;
             }
 
-            if (has_nullable_keys && is_null)
+            if (has_nullable_keys && is_null) {
                 observed_column->insert_default();
-            else {
+            } else {
                 size_t size = key_sizes[i];
                 observed_column->insert_data(reinterpret_cast<const char*>(&key) + pos, size);
                 pos += size;
@@ -822,6 +828,7 @@ private:
     bool _is_streaming_preagg;
     Block _preagg_block = Block();
     bool _should_expand_hash_table = true;
+    bool _child_eos = false;
 
     bool _should_limit_output = false;
     bool _reach_limit = false;
@@ -900,16 +907,17 @@ private:
             _find_in_hash_table(_places.data(), key_columns, rows);
 
             for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
-                _aggregate_evaluators[i]->execute_batch_add_selected(
+                RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add_selected(
                         block, _offsets_of_aggregate_states[i], _places.data(),
-                        _agg_arena_pool.get());
+                        _agg_arena_pool.get()));
             }
         } else {
             _emplace_into_hash_table(_places.data(), key_columns, rows);
 
             for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
-                _aggregate_evaluators[i]->execute_batch_add(block, _offsets_of_aggregate_states[i],
-                                                            _places.data(), _agg_arena_pool.get());
+                RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add(
+                        block, _offsets_of_aggregate_states[i], _places.data(),
+                        _agg_arena_pool.get()));
             }
 
             if (_should_limit_output) {
@@ -941,6 +949,7 @@ private:
         for (size_t i = 0; i < key_size; ++i) {
             int result_column_id = -1;
             RETURN_IF_ERROR(_probe_expr_ctxs[i]->execute(block, &result_column_id));
+            block->replace_by_position_if_const(result_column_id);
             key_columns[i] = block->get_by_position(result_column_id).column.get();
         }
 
@@ -984,9 +993,9 @@ private:
                                                                       rows);
 
                 } else {
-                    _aggregate_evaluators[i]->execute_batch_add_selected(
+                    RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add_selected(
                             block, _offsets_of_aggregate_states[i], _places.data(),
-                            _agg_arena_pool.get());
+                            _agg_arena_pool.get()));
                 }
             }
         } else {
@@ -1024,9 +1033,9 @@ private:
                                                                       rows);
 
                 } else {
-                    _aggregate_evaluators[i]->execute_batch_add(
+                    RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add(
                             block, _offsets_of_aggregate_states[i], _places.data(),
-                            _agg_arena_pool.get());
+                            _agg_arena_pool.get()));
                 }
             }
 

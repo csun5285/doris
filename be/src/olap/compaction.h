@@ -67,7 +67,7 @@ protected:
     Status do_compaction_impl(int64_t permits);
 
     // update and persistent tablet meta
-    virtual Status update_tablet_meta();
+    virtual Status update_tablet_meta(const Merger::Statistics* stats = nullptr);
     virtual void garbage_collection();
 
     Status construct_input_rowset_readers();
@@ -80,7 +80,13 @@ protected:
 
     bool should_vertical_compaction();
     int64_t get_avg_segment_rows();
+
+    bool handle_ordered_data_compaction();
+    Status do_compact_ordered_rowsets();
+    bool is_rowset_tidy(std::string& pre_max_key, const RowsetSharedPtr& rhs);
+    void build_basic_info();
     void file_cache_garbage_collection();
+
 protected:
     // the root tracker for this compaction
     std::shared_ptr<MemTrackerLimiter> _mem_tracker;
@@ -91,6 +97,8 @@ protected:
     std::vector<RowsetReaderSharedPtr> _input_rs_readers;
     int64_t _input_rowsets_size;
     int64_t _input_row_num;
+    int64_t _input_num_segments;
+    int64_t _input_index_size;
 
     RowsetSharedPtr _output_rowset;
     std::unique_ptr<RowsetWriter> _output_rs_writer;
@@ -103,6 +111,7 @@ protected:
     int64_t _oldest_write_timestamp;
     int64_t _newest_write_timestamp;
     RowIdConversion _rowid_conversion;
+    TabletSchemaSPtr _cur_tablet_schema;
 
     // CLOUD_MODE
     // expiration time of this compaction

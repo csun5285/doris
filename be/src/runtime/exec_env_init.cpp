@@ -141,6 +141,21 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_threads(1024)
             .build(&_buffered_reader_prefetch_thread_pool);
 
+    // min num equal to fragment pool's min num
+    // max num is useless because it will start as many as requested in the past
+    // queue size is useless because the max thread num is very large
+    ThreadPoolBuilder("SendReportThreadPool")
+            .set_min_threads(config::fragment_pool_thread_num_min)
+            .set_max_threads(std::numeric_limits<int>::max())
+            .set_max_queue_size(config::fragment_pool_queue_size)
+            .build(&_send_report_thread_pool);
+
+    ThreadPoolBuilder("JoinNodeThreadPool")
+            .set_min_threads(config::fragment_pool_thread_num_min)
+            .set_max_threads(std::numeric_limits<int>::max())
+            .set_max_queue_size(config::fragment_pool_queue_size)
+            .build(&_join_node_thread_pool);
+
     _scanner_scheduler = new doris::vectorized::ScannerScheduler();
 
     _cgroups_mgr = new CgroupsMgr(this, config::doris_cgroups);
@@ -173,7 +188,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _cgroups_mgr->init_cgroups();
     Status status = _load_path_mgr->init();
     if (!status.ok()) {
-        LOG(ERROR) << "load path mgr init failed." << status.get_error_msg();
+        LOG(ERROR) << "load path mgr init failed." << status;
         exit(-1);
     }
     _broker_mgr->init();
@@ -193,9 +208,7 @@ Status ExecEnv::_init_mem_env() {
     bool is_percent = false;
     std::stringstream ss;
     // 1. init mem tracker
-    _orphan_mem_tracker =
-            std::make_shared<MemTrackerLimiter>(MemTrackerLimiter::Type::GLOBAL, "Orphan");
-    _orphan_mem_tracker_raw = _orphan_mem_tracker.get();
+    init_mem_tracker();
     thread_context()->thread_mem_tracker_mgr->init();
 #if defined(USE_MEM_TRACKER) && !defined(__SANITIZE_ADDRESS__) && !defined(ADDRESS_SANITIZER) && \
         !defined(LEAK_SANITIZER) && !defined(THREAD_SANITIZER) && !defined(USE_JEMALLOC)
@@ -317,6 +330,14 @@ void ExecEnv::_init_buffer_pool(int64_t min_page_size, int64_t capacity,
                                 int64_t clean_pages_limit) {
     DCHECK(_buffer_pool == nullptr);
     _buffer_pool = new BufferPool(min_page_size, capacity, clean_pages_limit);
+}
+
+void ExecEnv::init_mem_tracker() {
+    _orphan_mem_tracker =
+            std::make_shared<MemTrackerLimiter>(MemTrackerLimiter::Type::GLOBAL, "Orphan");
+    _orphan_mem_tracker_raw = _orphan_mem_tracker.get();
+    _experimental_mem_tracker = std::make_shared<MemTrackerLimiter>(
+            MemTrackerLimiter::Type::EXPERIMENTAL, "ExperimentalSet");
 }
 
 void ExecEnv::init_download_cache_buf() {

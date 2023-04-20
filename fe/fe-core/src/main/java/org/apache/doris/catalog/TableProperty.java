@@ -125,7 +125,7 @@ public class TableProperty implements Writable {
      *
      * @return this for chained
      */
-    public TableProperty resetPropertiesForRestore(boolean reserveDynamicPartitionEnable,
+    public TableProperty resetPropertiesForRestore(boolean reserveDynamicPartitionEnable, boolean reserveReplica,
             ReplicaAllocation replicaAlloc) {
         // disable dynamic partition
         if (properties.containsKey(DynamicPartitionProperty.ENABLE)) {
@@ -134,7 +134,9 @@ public class TableProperty implements Writable {
             }
             executeBuildDynamicProperty();
         }
-        setReplicaAlloc(replicaAlloc);
+        if (!reserveReplica) {
+            setReplicaAlloc(replicaAlloc);
+        }
         return this;
     }
 
@@ -280,6 +282,14 @@ public class TableProperty implements Writable {
 
     public boolean isDynamicSchema() {
         return isDynamicSchema;
+    }
+
+    public boolean isAutoBucket() {
+        return Boolean.parseBoolean(properties.getOrDefault(PropertyAnalyzer.PROPERTIES_AUTO_BUCKET, "false"));
+    }
+
+    public String getEstimatePartitionSize() {
+        return properties.getOrDefault(PropertyAnalyzer.PROPERTIES_ESTIMATE_PARTITION_SIZE, "");
     }
 
     public TStorageFormat getStorageFormat() {

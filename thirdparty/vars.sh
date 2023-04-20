@@ -67,10 +67,10 @@ LIBEVENT_SOURCE=libevent-release-2.1.12-stable
 LIBEVENT_MD5SUM="0d5a27436bf7ff8253420c8cf09f47ca"
 
 # openssl
-OPENSSL_DOWNLOAD="https://github.com/openssl/openssl/archive/OpenSSL_1_1_1m.tar.gz"
-OPENSSL_NAME=openssl-OpenSSL_1_1_1m.tar.gz
-OPENSSL_SOURCE=openssl-OpenSSL_1_1_1m
-OPENSSL_MD5SUM="710c2368d28f1a25ab92e25b5b9b11ec"
+OPENSSL_DOWNLOAD="https://github.com/openssl/openssl/archive/OpenSSL_1_1_1s.tar.gz"
+OPENSSL_NAME=openssl-OpenSSL_1_1_1s.tar.gz
+OPENSSL_SOURCE=openssl-OpenSSL_1_1_1s
+OPENSSL_MD5SUM="7e79a7560dee77c0758baa33c61af4b4"
 
 # thrift
 THRIFT_DOWNLOAD="http://archive.apache.org/dist/thrift/0.13.0/thrift-0.13.0.tar.gz"
@@ -246,7 +246,7 @@ FLATBUFFERS_SOURCE=flatbuffers-2.0.0
 FLATBUFFERS_MD5SUM="a27992324c3cbf86dd888268a23d17bd"
 
 # arrow
-ARROW_DOWNLOAD="https://dlcdn.apache.org/arrow/arrow-7.0.0/apache-arrow-7.0.0.tar.gz"
+ARROW_DOWNLOAD="https://archive.apache.org/dist/arrow/arrow-7.0.0/apache-arrow-7.0.0.tar.gz"
 ARROW_NAME="apache-arrow-7.0.0.tar.gz"
 ARROW_SOURCE="apache-arrow-7.0.0"
 ARROW_MD5SUM="316ade159901646849b3b4760fa52816"
@@ -363,10 +363,10 @@ KRB5_SOURCE="krb5-1.19"
 KRB5_MD5SUM="aaf18447a5a014aa3b7e81814923f4c9"
 
 # hdfs3
-HDFS3_DOWNLOAD="https://github.com/apache/doris-thirdparty/archive/refs/tags/libhdfs3-v2.3.4.tar.gz"
-HDFS3_NAME="doris-thirdparty-libhdfs3-v2.3.4.tar.gz"
-HDFS3_SOURCE="doris-thirdparty-libhdfs3-v2.3.4"
-HDFS3_MD5SUM="5da1d32ec83b3732ccbe26346a7f5f9a"
+HDFS3_DOWNLOAD="https://github.com/apache/doris-thirdparty/archive/refs/tags/libhdfs3-v2.3.8.tar.gz"
+HDFS3_NAME="doris-thirdparty-libhdfs3-v2.3.8.tar.gz"
+HDFS3_SOURCE="doris-thirdparty-libhdfs3-v2.3.8"
+HDFS3_MD5SUM="3a9890bb43d0caee183ea7a49df2e4f3"
 
 #libdivide
 LIBDIVIDE_DOWNLOAD="https://github.com/ridiculousfish/libdivide/archive/5.0.tar.gz"
@@ -441,6 +441,12 @@ CONCURRENTQUEUE_NAME=concurrentqueue-1.0.3.tar.gz
 CONCURRENTQUEUE_SOURCE=concurrentqueue-1.0.3
 CONCURRENTQUEUE_MD5SUM="118e5bb661b567634647312991e10222"
 
+# fast_float
+FAST_FLOAT_DOWNLOAD="https://github.com/fastfloat/fast_float/archive/refs/tags/v3.9.0.tar.gz"
+FAST_FLOAT_NAME=fast_float-3.9.0.tar.gz
+FAST_FLOAT_SOURCE=fast_float-3.9.0
+FAST_FLOAT_MD5SUM="5656b0d8b150a3b157cfb092d214f6ea"
+
 # all thirdparties which need to be downloaded is set in array TP_ARCHIVES
 export TP_ARCHIVES=(
     'LIBEVENT'
@@ -504,6 +510,7 @@ export TP_ARCHIVES=(
     'SSE2NEON'
     'XXHASH'
     'CONCURRENTQUEUE'
+    'FAST_FLOAT'
     'CLUCENE'
 )
 

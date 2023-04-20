@@ -614,7 +614,7 @@ public:
 private:
     // Used to make sure sizeof DateTimeValue
     friend class UnusedClass;
-    friend void doris::vectorized::VecDateTimeValue::convert_vec_dt_to_dt(DateTimeValue* dt);
+    friend void doris::vectorized::VecDateTimeValue::convert_vec_dt_to_dt(DateTimeValue* dt) const;
     friend void doris::vectorized::VecDateTimeValue::convert_dt_to_vec_dt(DateTimeValue* dt);
 
     void from_packed_time(int64_t packed_time) {
@@ -719,9 +719,7 @@ std::size_t hash_value(DateTimeValue const& value);
 
 } // namespace doris
 
-namespace std {
 template <>
-struct hash<doris::DateTimeValue> {
+struct std::hash<doris::DateTimeValue> {
     size_t operator()(const doris::DateTimeValue& v) const { return doris::hash_value(v); }
 };
-} // namespace std

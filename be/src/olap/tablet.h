@@ -61,6 +61,8 @@ class CumulativeCompactionPolicy;
 class CumulativeCompaction;
 class BaseCompaction;
 class RowsetWriter;
+
+struct TabletTxnInfo;
 struct RowsetWriterContext;
 
 using TabletSharedPtr = std::shared_ptr<Tablet>;
@@ -86,7 +88,8 @@ public:
     void save_meta();
     // Used in clone task, to update local meta when finishing a clone job
     Status revise_tablet_meta(const std::vector<RowsetMetaSharedPtr>& rowsets_to_clone,
-                              const std::vector<Version>& versions_to_delete);
+                              const std::vector<Version>& versions_to_delete,
+                              bool is_incremental_clone);
     Status pick_quick_compaction_rowsets(std::vector<RowsetSharedPtr>* input_rowsets,
                                          int64_t* permits);
 
@@ -116,6 +119,7 @@ public:
 
     size_t num_rows();
     int version_count() const;
+    uint64_t segment_count() const;
     Version max_version() const;
     Version max_version_unlocked() const;
     CumulativeCompactionPolicy* cumulative_compaction_policy();
@@ -400,8 +404,18 @@ public:
                               bool check_pre_segments = false);
 
     Status update_delete_bitmap_without_lock(const RowsetSharedPtr& rowset);
-    Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
-                                const RowsetIdUnorderedSet& pre_rowset_ids);
+    Status update_delete_bitmap(const RowsetSharedPtr& rowset, const TabletTxnInfo* load_info);
+    void calc_compaction_output_rowset_delete_bitmap(
+            const std::vector<RowsetSharedPtr>& input_rowsets,
+            const RowIdConversion& rowid_conversion, uint64_t start_version, uint64_t end_version,
+            std::set<RowLocation>* missed_rows,
+            std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>* location_map,
+            DeleteBitmap* output_rowset_delete_bitmap);
+    void merge_delete_bitmap(const DeleteBitmap& delete_bitmap);
+    Status check_rowid_conversion(
+            RowsetSharedPtr dst_rowset,
+            const std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>&
+                    location_map);
     RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
 
     void remove_self_owned_remote_rowsets();
@@ -454,8 +468,8 @@ private:
 
     Status _check_pk_in_pre_segments(RowsetId rowset_id,
                                      const std::vector<segment_v2::SegmentSharedPtr>& pre_segments,
-                                     const Slice& key, const Version& version,
-                                     DeleteBitmapPtr delete_bitmap, RowLocation* loc);
+                                     const Slice& key, DeleteBitmapPtr delete_bitmap,
+                                     RowLocation* loc);
     void _rowset_ids_difference(const RowsetIdUnorderedSet& cur, const RowsetIdUnorderedSet& pre,
                                 RowsetIdUnorderedSet* to_add, RowsetIdUnorderedSet* to_del);
     Status _load_rowset_segments(const RowsetSharedPtr& rowset,
@@ -637,11 +651,21 @@ inline size_t Tablet::num_rows() {
 }
 
 inline int Tablet::version_count() const {
+    std::shared_lock rdlock(_meta_lock);
     return _tablet_meta->version_count();
 }
 
 inline Version Tablet::max_version() const {
     return _tablet_meta->max_version();
+}
+
+inline uint64_t Tablet::segment_count() const {
+    std::shared_lock rdlock(_meta_lock);
+    uint64_t segment_nums = 0;
+    for (auto& rs_meta : _tablet_meta->all_rs_metas()) {
+        segment_nums += rs_meta->num_segments();
+    }
+    return segment_nums;
 }
 
 inline Version Tablet::max_version_unlocked() const {

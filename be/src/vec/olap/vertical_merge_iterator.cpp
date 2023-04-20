@@ -18,6 +18,7 @@
 #include "vec/olap/vertical_merge_iterator.h"
 
 namespace doris {
+using namespace ErrorCode;
 
 namespace vectorized {
 
@@ -95,6 +96,21 @@ void RowSourcesBuffer::set_agg_flag(uint64_t index, bool agg) {
     RowSource ori(_buffer->get_data()[index]);
     ori.set_agg_flag(agg);
     _buffer->get_data()[index] = ori.data();
+}
+
+size_t RowSourcesBuffer::continuous_agg_count(uint64_t index) {
+    size_t result = 1;
+    int start = index + 1;
+    int end = _buffer->size();
+    while (index < end) {
+        RowSource next(_buffer->get_element(start++));
+        if (next.agg_flag()) {
+            ++result;
+        } else {
+            break;
+        }
+    }
+    return result;
 }
 
 size_t RowSourcesBuffer::same_source_count(uint16_t source, size_t limit) {
@@ -256,7 +272,6 @@ void VerticalMergeIteratorContext::copy_rows(Block* block, bool advanced) {
 
     // copy a row to dst block column by column
     size_t start = _index_in_block - _cur_batch_num + 1 - advanced;
-    DCHECK(start >= 0);
 
     for (size_t i = 0; i < _ori_return_cols; ++i) {
         auto& s_col = src.get_by_position(i);
@@ -318,7 +333,7 @@ Status VerticalMergeIteratorContext::_load_next_block() {
         Status st = _iter->next_batch(_block.get());
         if (!st.ok()) {
             _valid = false;
-            if (st.is_end_of_file()) {
+            if (st.is<END_OF_FILE>()) {
                 return Status::OK();
             } else {
                 return st;
@@ -463,19 +478,17 @@ Status VerticalMaskMergeIterator::next_row(vectorized::IteratorRowRef* ref) {
     DCHECK(_row_sources_buf);
     auto st = _row_sources_buf->has_remaining();
     if (!st.ok()) {
-        if (st.is_end_of_file()) {
+        if (st.is<END_OF_FILE>()) {
             RETURN_IF_ERROR(check_all_iter_finished());
         }
         return st;
     }
-
     auto row_source = _row_sources_buf->current();
     uint16_t order = row_source.get_source_num();
     auto& ctx = _origin_iter_ctx[order];
-        // init ctx and this ctx must be valid
+    // init ctx and this ctx must be valid
     RETURN_IF_ERROR(ctx->init(_opts));
     DCHECK(ctx->valid());
-
     if (UNLIKELY(ctx->is_first_row())) {
         // first row in block, don't call ctx->advance
         // Except first row, we call advance first and than get cur row
@@ -503,6 +516,10 @@ Status VerticalMaskMergeIterator::unique_key_next_row(vectorized::IteratorRowRef
         auto& ctx = _origin_iter_ctx[order];
         RETURN_IF_ERROR(ctx->init(_opts));
         DCHECK(ctx->valid());
+        if (!ctx->valid()) {
+            LOG(INFO) << "VerticalMergeIteratorContext not valid";
+            return Status::InternalError("VerticalMergeIteratorContext not valid");
+        }
 
         if (UNLIKELY(ctx->is_first_row()) && !row_source.agg_flag()) {
             // first row in block, don't call ctx->advance
@@ -520,8 +537,7 @@ Status VerticalMaskMergeIterator::unique_key_next_row(vectorized::IteratorRowRef
         }
         st = _row_sources_buf->has_remaining();
     }
-
-    if (st.is_end_of_file()) {
+    if (st.is<END_OF_FILE>()) {
         RETURN_IF_ERROR(check_all_iter_finished());
     }
     return st;
@@ -537,6 +553,10 @@ Status VerticalMaskMergeIterator::next_batch(Block* block) {
         auto& ctx = _origin_iter_ctx[order];
         RETURN_IF_ERROR(ctx->init(_opts));
         DCHECK(ctx->valid());
+        if (!ctx->valid()) {
+            LOG(INFO) << "VerticalMergeIteratorContext not valid";
+            return Status::InternalError("VerticalMergeIteratorContext not valid");
+        }
 
         // find max same source count in cur ctx
         size_t limit = std::min(ctx->remain_rows(), _block_row_max - rows);
@@ -548,7 +568,7 @@ Status VerticalMaskMergeIterator::next_batch(Block* block) {
         rows += same_source_cnt;
         st = _row_sources_buf->has_remaining();
     }
-    if (st.is_end_of_file()) {
+    if (st.is<END_OF_FILE>()) {
         RETURN_IF_ERROR(check_all_iter_finished());
     }
     return st;

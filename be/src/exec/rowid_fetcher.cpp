@@ -87,7 +87,7 @@ Status RowIDFetcher::fetch(const vectorized::ColumnPtr& row_ids, vectorized::Mut
         }
         Status st(mget_res.status());
         if (!st.ok()) {
-            LOG(WARNING) << "Failed to fetch " << st.get_error_msg();
+            LOG(WARNING) << "Failed to fetch " << st;
             return st;
         }
         vectorized::Block partial_block(mget_res.block());

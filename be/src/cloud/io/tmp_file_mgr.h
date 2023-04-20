@@ -13,8 +13,8 @@ namespace doris::io {
 
 struct TmpFileDirConfig {
     std::string path;
-    uint64_t max_cache_bytes = 0;
-    uint64_t max_upload_bytes = 0;
+    int64_t max_cache_bytes = 0;
+    int64_t max_upload_bytes = 0;
 };
 
 class TmpFileMgr {

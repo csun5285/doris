@@ -90,13 +90,13 @@ public class CloudProperty {
             s3Properties.put(Constants.SECRET_KEY, properties.get(CLOUD_SECRET_KEY));
         }
         if (properties.containsKey(CLOUD_REGION)) {
-            s3Properties.put("fs.s3a.endpoint.region", properties.get(CLOUD_REGION));
+            s3Properties.put(Constants.AWS_REGION, properties.get(CLOUD_REGION));
         }
         if (properties.containsKey(S3Resource.S3_MAX_CONNECTIONS)) {
             s3Properties.put(Constants.MAXIMUM_CONNECTIONS, properties.get(S3Resource.S3_MAX_CONNECTIONS));
         }
         if (properties.containsKey(S3Resource.S3_REQUEST_TIMEOUT_MS)) {
-            s3Properties.put("fs.s3a.connection.request.timeout", properties.get(S3Resource.S3_REQUEST_TIMEOUT_MS));
+            s3Properties.put(Constants.REQUEST_TIMEOUT, properties.get(S3Resource.S3_REQUEST_TIMEOUT_MS));
         }
         if (properties.containsKey(S3Resource.S3_CONNECTION_TIMEOUT_MS)) {
             s3Properties.put(Constants.SOCKET_TIMEOUT, properties.get(S3Resource.S3_CONNECTION_TIMEOUT_MS));

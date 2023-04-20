@@ -21,14 +21,16 @@
 #include "util/defer_op.h"
 
 namespace doris {
+using namespace ErrorCode;
+
 namespace vectorized {
 
-#define RETURN_IF_NOT_EOF_AND_OK(stmt)                                                  \
-    do {                                                                                \
-        const Status& _status_ = (stmt);                                                \
-        if (UNLIKELY(!_status_.ok() && _status_.precise_code() != OLAP_ERR_DATA_EOF)) { \
-            return _status_;                                                            \
-        }                                                                               \
+#define RETURN_IF_NOT_EOF_AND_OK(stmt)                                 \
+    do {                                                               \
+        const Status& _status_ = (stmt);                               \
+        if (UNLIKELY(!_status_.ok() && !_status_.is<END_OF_FILE>())) { \
+            return _status_;                                           \
+        }                                                              \
     } while (false)
 
 VCollectIterator::~VCollectIterator() {
@@ -37,7 +39,8 @@ VCollectIterator::~VCollectIterator() {
     }
 }
 
-void VCollectIterator::init(TabletReader* reader, bool force_merge, bool is_reverse) {
+void VCollectIterator::init(TabletReader* reader, bool ori_data_overlapping, bool force_merge,
+                            bool is_reverse) {
     _reader = reader;
     // when aggregate is enabled or key_type is DUP_KEYS, we don't merge
     // multiple data to aggregate for better performance
@@ -47,8 +50,10 @@ void VCollectIterator::init(TabletReader* reader, bool force_merge, bool is_reve
           _reader->_tablet->enable_unique_key_merge_on_write()))) {
         _merge = false;
     }
-
-    if (force_merge) {
+    // When data is none overlapping, no need to build heap to traverse data
+    if (!ori_data_overlapping) {
+        _merge = false;
+    } else if (force_merge) {
         _merge = true;
     }
     _is_reverse = is_reverse;
@@ -97,7 +102,7 @@ Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_reade
                 delete (*c_iter);
                 c_iter = _children.erase(c_iter);
                 r_iter = rs_readers.erase(r_iter);
-                if (s.precise_code() != OLAP_ERR_DATA_EOF) {
+                if (!s.is<END_OF_FILE>()) {
                     return s;
                 }
             } else {
@@ -145,7 +150,11 @@ Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_reade
                     new Level1Iterator(_children, _reader, _merge, _is_reverse, _skip_same));
         }
     } else {
-        _inner_iter.reset(new Level1Iterator(_children, _reader, _merge, _is_reverse, _skip_same));
+        auto level1_iter = std::make_unique<Level1Iterator>(_children, _reader, _merge, _is_reverse,
+                                                            _skip_same);
+        _children.clear();
+        RETURN_IF_ERROR(level1_iter->init_level0_iterators_for_union());
+        _inner_iter.reset(level1_iter.release());
     }
     RETURN_IF_NOT_EOF_AND_OK(_inner_iter->init());
     // Clear _children earlier to release any related references
@@ -184,19 +193,19 @@ Status VCollectIterator::current_row(IteratorRowRef* ref) const {
     if (LIKELY(_inner_iter)) {
         *ref = *_inner_iter->current_row_ref();
         if (ref->row_pos == -1) {
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+            return Status::Error<END_OF_FILE>();
         } else {
             return Status::OK();
         }
     }
-    return Status::OLAPInternalError(OLAP_ERR_DATA_ROW_BLOCK_ERROR);
+    return Status::Error<DATA_ROW_BLOCK_ERROR>();
 }
 
 Status VCollectIterator::next(IteratorRowRef* ref) {
     if (LIKELY(_inner_iter)) {
         return _inner_iter->next(ref);
     } else {
-        return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        return Status::Error<END_OF_FILE>();
     }
 }
 
@@ -208,13 +217,13 @@ Status VCollectIterator::next(Block* block) {
     if (LIKELY(_inner_iter)) {
         return _inner_iter->next(block);
     } else {
-        return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        return Status::Error<END_OF_FILE>();
     }
 }
 
 Status VCollectIterator::_topn_next(Block* block) {
     if (_topn_eof) {
-        return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        return Status::Error<END_OF_FILE>();
     }
 
     auto cloneBlock = block->clone_empty();
@@ -247,7 +256,7 @@ Status VCollectIterator::_topn_next(Block* block) {
             block->clear_column_data();
             auto res = rs_reader->next_block(block);
             if (!res.ok()) {
-                if (res.precise_code() == OLAP_ERR_DATA_EOF) {
+                if (res.is<END_OF_FILE>()) {
                     eof = true;
                     if (block->rows() == 0) {
                         break;
@@ -362,7 +371,7 @@ Status VCollectIterator::_topn_next(Block* block) {
     *block = mutable_block.to_block();
 
     _topn_eof = true;
-    return block->rows() > 0 ? Status::OK() : Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+    return block->rows() > 0 ? Status::OK() : Status::Error<END_OF_FILE>();
 }
 
 bool VCollectIterator::BlockRowPosComparator::operator()(const size_t& lpos,
@@ -393,6 +402,36 @@ Status VCollectIterator::Level0Iterator::init(bool get_data_by_ref) {
     return st;
 }
 
+// if is_first_child = true, return first row in block。Unique keys and agg keys will
+// read a line first and then start loop :
+// while (!eof) {
+//     collect_iter->next(&_next_row);
+// }
+// so first child load first row and other child row_pos = -1
+Status VCollectIterator::Level0Iterator::init_for_union(bool is_first_child, bool get_data_by_ref) {
+    _get_data_by_ref = get_data_by_ref && _rs_reader->support_return_data_by_ref() &&
+                       config::enable_storage_vectorization;
+    if (!_get_data_by_ref) {
+        _block = std::make_shared<Block>(_schema.create_block(
+                _reader->_return_columns, _reader->_tablet_columns_convert_to_null_set));
+    }
+    auto st = _refresh_current_row();
+    if (_get_data_by_ref && _block_view.size()) {
+        if (is_first_child) {
+            _ref = _block_view[0];
+        } else {
+            _ref = _block_view[-1];
+        }
+    } else {
+        if (is_first_child) {
+            _ref = {_block, 0, false};
+        } else {
+            _ref = {_block, -1, false};
+        }
+    }
+    return st;
+}
+
 int64_t VCollectIterator::Level0Iterator::version() const {
     return _rs_reader->version().second;
 }
@@ -404,10 +443,10 @@ Status VCollectIterator::Level0Iterator::_refresh_current_row() {
         } else {
             _reset();
             auto res = _refresh();
-            if (!res.ok() && res.precise_code() != OLAP_ERR_DATA_EOF) {
+            if (!res.ok() && !res.is<END_OF_FILE>()) {
                 return res;
             }
-            if (res.precise_code() == OLAP_ERR_DATA_EOF && _is_empty()) {
+            if (res.is<END_OF_FILE>() && _is_empty()) {
                 break;
             }
 
@@ -418,7 +457,7 @@ Status VCollectIterator::Level0Iterator::_refresh_current_row() {
     } while (!_is_empty());
     _ref.row_pos = -1;
     _current = -1;
-    return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+    return Status::Error<END_OF_FILE>();
 }
 
 Status VCollectIterator::Level0Iterator::next(IteratorRowRef* ref) {
@@ -440,17 +479,17 @@ Status VCollectIterator::Level0Iterator::next(IteratorRowRef* ref) {
 
 Status VCollectIterator::Level0Iterator::next(Block* block) {
     CHECK(!_get_data_by_ref);
-    if (_ref.row_pos == 0 && _ref.block != nullptr && UNLIKELY(_ref.block->rows() > 0)) {
+    if (_ref.row_pos <= 0 && _ref.block != nullptr && UNLIKELY(_ref.block->rows() > 0)) {
         block->swap(*_ref.block);
         _ref.reset();
         return Status::OK();
     } else {
         auto res = _rs_reader->next_block(block);
-        if (!res.ok() && res.precise_code() != OLAP_ERR_DATA_EOF) {
+        if (!res.ok() && !res.is<END_OF_FILE>()) {
             return res;
         }
-        if (res.precise_code() == OLAP_ERR_DATA_EOF && block->rows() == 0) {
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        if (res.is<END_OF_FILE>() && block->rows() == 0) {
+            return Status::Error<END_OF_FILE>();
         }
         if (UNLIKELY(_reader->_reader_context.record_rowids)) {
             RETURN_NOT_OK(_rs_reader->current_block_row_locations(&_block_row_locations));
@@ -487,6 +526,10 @@ VCollectIterator::Level1Iterator::Level1Iterator(
           _skip_same(skip_same) {
     _ref.reset();
     _batch_size = reader->_batch_size;
+    // !_merge means that data are in order, so we just reverse children to return data in reverse
+    if (!_merge && _is_reverse) {
+        _children.reverse();
+    }
 }
 
 VCollectIterator::Level1Iterator::~Level1Iterator() {
@@ -510,13 +553,13 @@ VCollectIterator::Level1Iterator::~Level1Iterator() {
 
 // Read next row into *row.
 // Returns
-//      OLAP_SUCCESS when read successfully.
-//      Status::OLAPInternalError(OLAP_ERR_DATA_EOF) and set *row to nullptr when EOF is reached.
+//      OK when read successfully.
+//      Status::Error<END_OF_FILE>() and set *row to nullptr when EOF is reached.
 //      Others when error happens
 Status VCollectIterator::Level1Iterator::next(IteratorRowRef* ref) {
     if (UNLIKELY(_cur_child == nullptr)) {
         _ref.reset();
-        return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        return Status::Error<END_OF_FILE>();
     }
     if (_merge) {
         return _merge_next(ref);
@@ -527,12 +570,12 @@ Status VCollectIterator::Level1Iterator::next(IteratorRowRef* ref) {
 
 // Read next block
 // Returns
-//      OLAP_SUCCESS when read successfully.
-//      Status::OLAPInternalError(OLAP_ERR_DATA_EOF) and set *row to nullptr when EOF is reached.
+//      OK when read successfully.
+//      Status::Error<END_OF_FILE>() and set *row to nullptr when EOF is reached.
 //      Others when error happens
 Status VCollectIterator::Level1Iterator::next(Block* block) {
     if (UNLIKELY(_cur_child == nullptr)) {
-        return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+        return Status::Error<END_OF_FILE>();
     }
     if (_merge) {
         return _merge_next(block);
@@ -580,13 +623,34 @@ Status VCollectIterator::Level1Iterator::init(bool get_data_by_ref) {
     return Status::OK();
 }
 
+Status VCollectIterator::Level1Iterator::init_level0_iterators_for_union() {
+    bool have_multiple_child = false;
+    bool is_first_child = true;
+    for (auto iter = _children.begin(); iter != _children.end();) {
+        auto s = (*iter)->init_for_union(is_first_child, have_multiple_child);
+        if (!s.ok()) {
+            delete (*iter);
+            iter = _children.erase(iter);
+            if (!s.is<END_OF_FILE>()) {
+                return s;
+            }
+        } else {
+            have_multiple_child = true;
+            is_first_child = false;
+            ++iter;
+        }
+    }
+
+    return Status::OK();
+}
+
 Status VCollectIterator::Level1Iterator::_merge_next(IteratorRowRef* ref) {
     _heap->pop();
     auto res = _cur_child->next(ref);
     if (LIKELY(res.ok())) {
         _heap->push(_cur_child);
         _cur_child = _heap->top();
-    } else if (res.precise_code() == OLAP_ERR_DATA_EOF) {
+    } else if (res.is<END_OF_FILE>()) {
         // current child has been read, to read next
         delete _cur_child;
         if (!_heap->empty()) {
@@ -594,7 +658,7 @@ Status VCollectIterator::Level1Iterator::_merge_next(IteratorRowRef* ref) {
         } else {
             _ref.reset();
             _cur_child = nullptr;
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+            return Status::Error<END_OF_FILE>();
         }
     } else {
         _ref.reset();
@@ -622,7 +686,7 @@ Status VCollectIterator::Level1Iterator::_normal_next(IteratorRowRef* ref) {
     if (LIKELY(res.ok())) {
         _ref = *ref;
         return Status::OK();
-    } else if (res.precise_code() == OLAP_ERR_DATA_EOF) {
+    } else if (res.is<END_OF_FILE>()) {
         // current child has been read, to read next
         delete _cur_child;
         _children.pop_front();
@@ -631,7 +695,7 @@ Status VCollectIterator::Level1Iterator::_normal_next(IteratorRowRef* ref) {
             return _normal_next(ref);
         } else {
             _cur_child = nullptr;
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+            return Status::Error<END_OF_FILE>();
         }
     } else {
         _cur_child = nullptr;
@@ -674,7 +738,7 @@ Status VCollectIterator::Level1Iterator::_merge_next(Block* block) {
             pre_row_ref.reset();
         }
         auto res = _merge_next(&cur_row);
-        if (UNLIKELY(res.precise_code() == OLAP_ERR_DATA_EOF)) {
+        if (UNLIKELY(res.is<END_OF_FILE>())) {
             if (UNLIKELY(_reader->_reader_context.record_rowids)) {
                 _block_row_locations.resize(target_block_row);
             }
@@ -719,7 +783,7 @@ Status VCollectIterator::Level1Iterator::_normal_next(Block* block) {
     auto res = _cur_child->next(block);
     if (LIKELY(res.ok())) {
         return Status::OK();
-    } else if (res.precise_code() == OLAP_ERR_DATA_EOF) {
+    } else if (res.is<END_OF_FILE>()) {
         // current child has been read, to read next
         delete _cur_child;
         _children.pop_front();
@@ -728,7 +792,7 @@ Status VCollectIterator::Level1Iterator::_normal_next(Block* block) {
             return _normal_next(block);
         } else {
             _cur_child = nullptr;
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+            return Status::Error<END_OF_FILE>();
         }
     } else {
         _cur_child = nullptr;
@@ -742,7 +806,7 @@ Status VCollectIterator::Level1Iterator::current_block_row_locations(
     if (!_merge) {
         if (UNLIKELY(_cur_child == nullptr)) {
             block_row_locations->clear();
-            return Status::OLAPInternalError(OLAP_ERR_DATA_EOF);
+            return Status::Error<END_OF_FILE>();
         }
         return _cur_child->current_block_row_locations(block_row_locations);
     } else {

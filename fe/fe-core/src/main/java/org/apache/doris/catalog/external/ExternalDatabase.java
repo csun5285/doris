@@ -110,7 +110,9 @@ public class ExternalDatabase<T extends ExternalTable> implements DatabaseIf<T>,
         if (!initialized) {
             if (!Env.getCurrentEnv().isMaster()) {
                 // Forward to master and wait the journal to replay.
-                MasterCatalogExecutor remoteExecutor = new MasterCatalogExecutor();
+                int waitTimeOut = ConnectContext.get() == null ? 300 : ConnectContext.get().getSessionVariable()
+                        .getQueryTimeoutS();
+                MasterCatalogExecutor remoteExecutor = new MasterCatalogExecutor(waitTimeOut * 1000);
                 try {
                     remoteExecutor.forward(extCatalog.getId(), id);
                 } catch (Exception e) {
@@ -258,4 +260,14 @@ public class ExternalDatabase<T extends ExternalTable> implements DatabaseIf<T>,
 
     @Override
     public void gsonPostProcess() throws IOException {}
+
+    @Override
+    public void dropTable(String tableName) {
+        throw new NotImplementedException();
+    }
+
+    public void createTable(String tableName, long tableId) {
+        throw new NotImplementedException();
+    }
 }
+

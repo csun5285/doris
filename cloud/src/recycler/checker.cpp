@@ -127,7 +127,7 @@ std::vector<InstanceInfoPB> Checker::get_instances() {
 
             InstanceInfoPB instance_info;
             if (!instance_info.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("malformed instance info").tag("key", hex(k));
+                LOG(WARNING) << "malformed instance info, key=" << hex(k);
                 return instances;
             }
 

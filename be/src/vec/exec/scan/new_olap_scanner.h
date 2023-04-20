@@ -51,6 +51,10 @@ public:
 
     void set_compound_filters(const std::vector<std::vector<TCondition>>& compound_filters);
 
+    doris::TabletStorageType get_storage_type() override {
+        return doris::TabletStorageType::STORAGE_TYPE_LOCAL;
+    }
+
 protected:
     Status _get_block_impl(RuntimeState* state, Block* block, bool* eos) override;
     void _update_counters_before_close() override;
@@ -82,7 +86,6 @@ private:
     // ========= profiles ==========
     int64_t _compressed_bytes_read = 0;
     int64_t _raw_rows_read = 0;
-    RuntimeProfile* _profile;
     bool _profile_updated = false;
 };
 } // namespace vectorized

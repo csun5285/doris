@@ -18,6 +18,7 @@
 package org.apache.doris.transaction;
 
 import org.apache.doris.catalog.Database;
+import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Table;
@@ -244,13 +245,13 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
         dbTransactionMgr.commitTransaction(null, transactionId, null, null, true);
     }
 
-    public boolean commitAndPublishTransaction(Database db, List<Table> tableList, long transactionId,
+    public boolean commitAndPublishTransaction(DatabaseIf db, List<Table> tableList, long transactionId,
             List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis)
             throws UserException {
         return commitAndPublishTransaction(db, tableList, transactionId, tabletCommitInfos, timeoutMillis, null);
     }
 
-    public boolean commitAndPublishTransaction(Database db, List<Table> tableList, long transactionId,
+    public boolean commitAndPublishTransaction(DatabaseIf db, List<Table> tableList, long transactionId,
             List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis,
             TxnCommitAttachment txnCommitAttachment)
             throws UserException {
@@ -296,13 +297,40 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
     }
 
     public void abortTransaction(long dbId, long transactionId, String reason) throws UserException {
-        abortTransaction(dbId, transactionId, reason, null);
+        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
+        TransactionState transactionState = getDatabaseTransactionMgr(dbId).getTransactionState(transactionId);
+        if (transactionState == null) {
+            LOG.info("try to cancel one txn which has no txn state. txn id: {}.", transactionId);
+            return;
+        }
+        List<Table> tableList = db.getTablesOnIdOrderIfExist(transactionState.getTableIdList());
+        abortTransaction(dbId, transactionId, reason, null, tableList);
+    }
+
+    public void abortTransaction(Long dbId, Long transactionId, String reason,
+            TxnCommitAttachment txnCommitAttachment) throws UserException {
+        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
+        TransactionState transactionState = getDatabaseTransactionMgr(dbId).getTransactionState(transactionId);
+        if (transactionState == null) {
+            LOG.info("try to cancel one txn which has no txn state. txn id: {}.", transactionId);
+            return;
+        }
+        List<Table> tableList = db.getTablesOnIdOrderIfExist(transactionState.getTableIdList());
+        abortTransaction(dbId, transactionId, reason, txnCommitAttachment, tableList);
     }
 
     public void abortTransaction(Long dbId, Long txnId, String reason,
-            TxnCommitAttachment txnCommitAttachment) throws UserException {
+            TxnCommitAttachment txnCommitAttachment, List<Table> tableList) throws UserException {
         DatabaseTransactionMgr dbTransactionMgr = getDatabaseTransactionMgr(dbId);
-        dbTransactionMgr.abortTransaction(txnId, reason, txnCommitAttachment);
+        if (!MetaLockUtils.tryWriteLockTablesOrMetaException(tableList, 5000, TimeUnit.MILLISECONDS)) {
+            throw new UserException("get tableList write lock timeout, tableList=("
+                    + StringUtils.join(tableList, ",") + ")");
+        }
+        try {
+            dbTransactionMgr.abortTransaction(txnId, reason, txnCommitAttachment);
+        } finally {
+            MetaLockUtils.writeUnlockTables(tableList);
+        }
     }
 
     // for http cancel stream load api
@@ -311,9 +339,17 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
         dbTransactionMgr.abortTransaction(label, reason);
     }
 
-    public void abortTransaction2PC(Long dbId, long transactionId) throws UserException {
+    public void abortTransaction2PC(Long dbId, long transactionId, List<Table> tableList) throws UserException {
         DatabaseTransactionMgr dbTransactionMgr = getDatabaseTransactionMgr(dbId);
-        dbTransactionMgr.abortTransaction2PC(transactionId);
+        if (!MetaLockUtils.tryWriteLockTablesOrMetaException(tableList, 5000, TimeUnit.MILLISECONDS)) {
+            throw new UserException("get tableList write lock timeout, tableList=("
+                    + StringUtils.join(tableList, ",") + ")");
+        }
+        try {
+            dbTransactionMgr.abortTransaction2PC(transactionId);
+        } finally {
+            MetaLockUtils.writeUnlockTables(tableList);
+        }
     }
 
     /*
@@ -334,11 +370,24 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
             return !dbTransactionMgr.getCommittedTxnList().isEmpty();
         }
 
-        for (TransactionState transactionState : dbTransactionMgr.getCommittedTxnList()) {
+        List<TransactionState> committedTxnList = dbTransactionMgr.getCommittedTxnList();
+        for (TransactionState transactionState : committedTxnList) {
             if (transactionState.getTableIdList().contains(tableId)) {
                 if (partitionId == null) {
                     return true;
-                } else if (transactionState.getTableCommitInfo(tableId).getPartitionCommitInfo(partitionId) != null) {
+                }
+                TableCommitInfo tableCommitInfo = transactionState.getTableCommitInfo(tableId);
+                if (tableCommitInfo == null) {
+                    // FIXME: this is a bug, should not happen
+                    // If table id is in transaction state's table list, and it is COMMITTED,
+                    // table commit info should not be null.
+                    // return true to avoid following process.
+                    LOG.warn("unexpected error. tableCommitInfo is null. dbId: {} tableId: {}, partitionId: {},"
+                                    + " transactionState: {}",
+                            dbId, tableId, partitionId, transactionState);
+                    return true;
+                }
+                if (tableCommitInfo.getPartitionCommitInfo(partitionId) != null) {
                     return true;
                 }
             }

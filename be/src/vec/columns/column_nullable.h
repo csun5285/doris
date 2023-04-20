@@ -153,6 +153,12 @@ public:
         _has_null = true;
     }
 
+    void insert_not_null_elements(size_t num) {
+        get_nested_column().insert_many_defaults(num);
+        _get_null_map_column().fill(0, num);
+        _has_null = false;
+    }
+
     void insert_null_elements(int num) {
         get_nested_column().insert_many_defaults(num);
         _get_null_map_column().fill(1, num);
@@ -315,8 +321,8 @@ public:
         get_nested_column().convert_dict_codes_if_necessary();
     }
 
-    void generate_hash_values_for_runtime_filter() override {
-        get_nested_column().generate_hash_values_for_runtime_filter();
+    void initialize_hash_values_for_runtime_filter() override {
+        get_nested_column().initialize_hash_values_for_runtime_filter();
     }
 
     void sort_column(const ColumnSorter* sorter, EqualFlags& flags, IColumn::Permutation& perms,

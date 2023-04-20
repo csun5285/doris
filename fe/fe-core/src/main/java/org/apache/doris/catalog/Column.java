@@ -62,8 +62,12 @@ public class Column implements Writable, GsonPostProcessable {
     public static final String SEQUENCE_COL = "__DORIS_SEQUENCE_COL__";
     public static final String DYNAMIC_COLUMN_NAME = "__DORIS_DYNAMIC_COL__";
     public static final String ROWID_COL = "__DORIS_ROWID_COL__";
+    public static final String VERSION_COL = "__DORIS_VERSION_COL__";
     private static final String COLUMN_ARRAY_CHILDREN = "item";
     public static final int COLUMN_UNIQUE_ID_INIT_VALUE = -1;
+
+    public static final Column UNSUPPORTED_COLUMN = new Column("unknown",
+            Type.UNSUPPORTED, true, null, true, null, "invalid", true, null, -1, null);
 
     @SerializedName(value = "name")
     private String name;
@@ -92,6 +96,16 @@ public class Column implements Writable, GsonPostProcessable {
     private ColumnStats stats;     // cardinality and selectivity etc.
     @SerializedName(value = "children")
     private List<Column> children;
+    /**
+     * This is similar as `defaultValue`. Differences are:
+     * 1. `realDefaultValue` indicates the **default underlying literal**.
+     * 2. Instead, `defaultValue` indicates the **original expression** which is specified by users.
+     *
+     * For example, if user create a table with (columnA, DATETIME, DEFAULT CURRENT_TIMESTAMP)
+     * `realDefaultValue` here is current date time while `defaultValue` is `CURRENT_TIMESTAMP`.
+     */
+    @SerializedName(value = "realDefaultValue")
+    private String realDefaultValue;
     // Define expr may exist in two forms, one is analyzed, and the other is not analyzed.
     // Currently, analyzed define expr is only used when creating materialized views,
     // so the define expr in RollupJob must be analyzed.
@@ -139,12 +153,18 @@ public class Column implements Writable, GsonPostProcessable {
     public Column(String name, Type type, boolean isKey, AggregateType aggregateType, boolean isAllowNull,
             String defaultValue, String comment) {
         this(name, type, isKey, aggregateType, isAllowNull, defaultValue, comment, true, null,
-                COLUMN_UNIQUE_ID_INIT_VALUE);
+                COLUMN_UNIQUE_ID_INIT_VALUE, defaultValue);
+    }
+
+    public Column(String name, Type type, boolean isKey, AggregateType aggregateType, boolean isAllowNull,
+            String comment, boolean visible, int colUniqueId) {
+        this(name, type, isKey, aggregateType, isAllowNull, null, comment, visible, null,
+                colUniqueId, null);
     }
 
     public Column(String name, Type type, boolean isKey, AggregateType aggregateType, boolean isAllowNull,
             String defaultValue, String comment, boolean visible, DefaultValueExprDef defaultValueExprDef,
-            int colUniqueId) {
+            int colUniqueId, String realDefaultValue) {
         this.name = name;
         if (this.name == null) {
             this.name = "";
@@ -160,6 +180,7 @@ public class Column implements Writable, GsonPostProcessable {
         this.isKey = isKey;
         this.isAllowNull = isAllowNull;
         this.defaultValue = defaultValue;
+        this.realDefaultValue = realDefaultValue;
         this.defaultValueExprDef = defaultValueExprDef;
         this.comment = comment;
         this.stats = new ColumnStats();
@@ -178,6 +199,7 @@ public class Column implements Writable, GsonPostProcessable {
         this.isCompoundKey = column.isCompoundKey();
         this.isAllowNull = column.isAllowNull();
         this.defaultValue = column.getDefaultValue();
+        this.realDefaultValue = column.realDefaultValue;
         this.defaultValueExprDef = column.defaultValueExprDef;
         this.comment = column.getComment();
         this.stats = column.getStats();
@@ -259,6 +281,12 @@ public class Column implements Writable, GsonPostProcessable {
         // aggregationType is NONE for unique table with merge on write.
         return !visible && (aggregationType == AggregateType.REPLACE
                 || aggregationType == AggregateType.NONE) && nameEquals(SEQUENCE_COL, true);
+    }
+
+    public boolean isVersionColumn() {
+        // aggregationType is NONE for unique table with merge on write.
+        return !visible && (aggregationType == AggregateType.REPLACE
+                || aggregationType == AggregateType.NONE) && nameEquals(VERSION_COL, true);
     }
 
     public PrimitiveType getDataType() {
@@ -386,7 +414,8 @@ public class Column implements Writable, GsonPostProcessable {
         }
         tColumn.setIsKey(this.isKey);
         tColumn.setIsAllowNull(this.isAllowNull);
-        tColumn.setDefaultValue(this.defaultValue);
+        // keep compatibility
+        tColumn.setDefaultValue(this.realDefaultValue == null ? this.defaultValue : this.realDefaultValue);
         tColumn.setVisible(visible);
         toChildrenThrift(this, tColumn);
 
@@ -550,11 +579,16 @@ public class Column implements Writable, GsonPostProcessable {
         }
 
         if (type.isNumericType() && other.type.isStringType()) {
-            Integer lSize = type.getColumnStringRepSize();
-            Integer rSize = other.type.getColumnStringRepSize();
-            if (rSize < lSize) {
-                throw new DdlException(
-                        "Can not change from wider type " + type.toSql() + " to narrower type " + other.type.toSql());
+            try {
+                Integer lSize = type.getColumnStringRepSize();
+                Integer rSize = other.type.getColumnStringRepSize();
+                if (rSize < lSize) {
+                    throw new DdlException(
+                            "Can not change from wider type " + type.toSql() + " to narrower type "
+                                    + other.type.toSql());
+                }
+            } catch (TypeException e) {
+                throw new DdlException(e.getMessage());
             }
         }
 
@@ -687,7 +721,8 @@ public class Column implements Writable, GsonPostProcessable {
     @Override
     public int hashCode() {
         return Objects.hash(name, getDataType(), getStrLen(), getPrecision(), getScale(), aggregationType,
-                isAggregationTypeImplicit, isKey, isAllowNull, defaultValue, comment, children, visible);
+                isAggregationTypeImplicit, isKey, isAllowNull, defaultValue, comment, children, visible,
+                realDefaultValue);
     }
 
     @Override
@@ -713,7 +748,8 @@ public class Column implements Writable, GsonPostProcessable {
                 && getScale() == other.getScale()
                 && Objects.equals(comment, other.comment)
                 && visible == other.visible
-                && Objects.equals(children, other.children);
+                && Objects.equals(children, other.children)
+                && Objects.equals(realDefaultValue, other.realDefaultValue);
     }
 
     @Override
@@ -736,6 +772,7 @@ public class Column implements Writable, GsonPostProcessable {
         notNull = in.readBoolean();
         if (notNull) {
             defaultValue = Text.readString(in);
+            realDefaultValue = defaultValue;
         }
         stats = ColumnStats.read(in);
 

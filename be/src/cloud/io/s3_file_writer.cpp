@@ -35,6 +35,7 @@
 #include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/io/cloud_file_segment.h"
 #include "cloud/io/s3_file_system.h"
+#include "common/logging.h"
 #include "common/status.h"
 #include "util/runtime_profile.h"
 
@@ -42,6 +43,7 @@ namespace doris {
 namespace io {
 using namespace Aws::S3::Model;
 using Aws::S3::S3Client;
+using namespace ErrorCode;
 
 S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
                            std::shared_ptr<S3Client> client, std::shared_ptr<S3FileSystem> fs,
@@ -151,7 +153,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                 _pending_buf->set_is_cancel([this]() { return _failed.load(); });
                 _pending_buf->set_on_failed([this, part_num = _cur_part_num](Status st) {
                     VLOG_NOTICE << "failed at key: " << _key << ", load part " << part_num
-                                << ", st " << st.get_error_msg();
+                                << ", st " << st;
                     std::unique_lock<std::mutex> _lck {_completed_lock};
                     _failed = true;
                     this->_st = std::move(st);
@@ -206,7 +208,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, S3FileBuffer& buf) {
                 "failed to upload part (bucket={}, key={}, part_num={}, up_load_id={}): {}",
                 _bucket, _path.native(), part_num, _upload_id,
                 upload_part_outcome.GetError().GetMessage());
-        LOG_WARNING(s.get_error_msg());
+        LOG(WARNING) << s;
         buf._on_failed(s);
         return;
     }
@@ -255,7 +257,7 @@ Status S3FileWriter::_complete() {
     if (!compute_outcome.IsSuccess()) {
         auto s = Status::IOError("failed to create multi part upload (bucket={}, key={}): {}",
                                  _bucket, _path.native(), compute_outcome.GetError().GetMessage());
-        LOG_WARNING(s.get_error_msg());
+        LOG(WARNING) << s;
         return s;
     }
     return Status::OK();

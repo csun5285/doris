@@ -97,14 +97,12 @@ Status VNestedLoopJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
     }
     RETURN_IF_ERROR(
             vectorized::VExpr::create_expr_trees(_pool, filter_src_exprs, &_filter_src_expr_ctxs));
-    DCHECK(!filter_src_exprs.empty() == _is_output_left_side_only);
     return Status::OK();
 }
 
 Status VNestedLoopJoinNode::prepare(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(VJoinNodeBase::prepare(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
 
     _build_timer = ADD_TIMER(runtime_profile(), "BuildTime");
     _build_rows_counter = ADD_COUNTER(runtime_profile(), "BuildRows", TUnit::UNIT);
@@ -182,6 +180,13 @@ Status VNestedLoopJoinNode::_materialize_build_side(RuntimeState* state) {
     RuntimeFilterBuild processRuntimeFilterBuild {this};
     processRuntimeFilterBuild(state);
 
+    // optimize `in bitmap`, see https://github.com/apache/doris/issues/14338
+    if (_is_output_left_side_only &&
+        ((_join_op == TJoinOp::type::LEFT_SEMI_JOIN && _build_blocks.empty()) ||
+         (_join_op == TJoinOp::type::LEFT_ANTI_JOIN && !_build_blocks.empty()))) {
+        _left_side_eos = true;
+    }
+
     return Status::OK();
 }
 
@@ -206,10 +211,11 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     SCOPED_TIMER(_probe_timer);
     RETURN_IF_CANCELLED(state);
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
 
     if (_is_output_left_side_only) {
-        RETURN_IF_ERROR(get_left_side(state, &_left_block));
+        if (!_left_side_eos) {
+            RETURN_IF_ERROR(get_left_side(state, &_left_block));
+        }
         RETURN_IF_ERROR(_build_output_block(&_left_block, block));
         *eos = _left_side_eos;
         reached_limit(block, eos);
@@ -694,6 +700,26 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 CLEAR_BLOCK
             }
         }
+    } else if (block->rows() > 0) {
+        if constexpr (SetBuildSideFlag) {
+            for (size_t i = 0; i < processed_blocks_num; i++) {
+                auto& build_side_flag =
+                        assert_cast<ColumnUInt8*>(_build_side_visited_flags[build_block_idx].get())
+                                ->get_data();
+                auto* __restrict build_side_flag_data = build_side_flag.data();
+                auto cur_sz = build_side_flag.size();
+                offset_stack.pop();
+                memset(reinterpret_cast<void*>(build_side_flag_data), 1, cur_sz);
+                build_block_idx =
+                        build_block_idx == 0 ? _build_blocks.size() - 1 : build_block_idx - 1;
+            }
+        }
+        if constexpr (SetProbeSideFlag) {
+            _cur_probe_row_visited_flags = true;
+        }
+        if (!materialize) {
+            CLEAR_BLOCK
+        }
     }
 #undef CLEAR_BLOCK
     Block::erase_useless_column(block, column_to_keep);
@@ -708,7 +734,6 @@ Status VNestedLoopJoinNode::open(RuntimeState* state) {
         RETURN_IF_ERROR((*_vjoin_conjunct_ptr)->open(state));
     }
     RETURN_IF_ERROR(VJoinNodeBase::open(state));
-    SCOPED_CONSUME_MEM_TRACKER(mem_tracker());
     RETURN_IF_CANCELLED(state);
     // We can close the right child to release its resources because its input has been
     // fully consumed.
