@@ -702,7 +702,7 @@ void Compaction::file_cache_garbage_collection() {
     if (_output_rs_writer) {
         auto* beta_rowset_writer = dynamic_cast<BetaRowsetWriter*>(_output_rs_writer.get());
         DCHECK(beta_rowset_writer);
-        for (auto& file_writer : beta_rowset_writer->get_file_writers()) {
+        for (auto& [_, file_writer] : beta_rowset_writer->get_file_writers()) {
             auto file_key = io::IFileCache::hash(file_writer->path().filename().native());
             auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
             file_cache->remove_if_cached(file_key);

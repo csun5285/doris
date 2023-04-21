@@ -119,10 +119,14 @@ message RowsetMetaPB {
     optional SegmentsOverlapPB segments_overlap_pb = 51 [default = OVERLAP_UNKNOWN];
 
     // cloud
-    repeated int64 segment_file_size = 100;
+    // the field is a vector, rename it
+    repeated int64 segments_file_size = 100;
     // index_id, schema_version -> schema
     optional int64 index_id = 101;
     optional int32 schema_version = 102;
+    // If enable_segments_file_size is false,
+    // the segments_file_size maybe is empty or error
+    optional bool enable_segments_file_size = 103;
 }
 
 // unused remote rowsets garbage collection kv value

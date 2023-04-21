@@ -133,8 +133,9 @@ Status VerticalBetaRowsetWriter::flush_columns(bool is_key) {
 Status VerticalBetaRowsetWriter::_create_segment_writer(
         const std::vector<uint32_t>& column_ids, bool is_key,
         std::unique_ptr<segment_v2::SegmentWriter>* writer) {
+    int segment_id = _num_segment.fetch_add(1);
     auto path =
-            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, _num_segment++);
+            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, segment_id);
     auto fs = _rowset_meta->fs();
     if (!fs) {
         return Status::Error<INIT_FAILED>();
@@ -149,12 +150,12 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     DCHECK(file_writer != nullptr);
     segment_v2::SegmentWriterOptions writer_options;
     writer_options.enable_unique_key_merge_on_write = _context.enable_unique_key_merge_on_write;
-    writer->reset(new segment_v2::SegmentWriter(file_writer.get(), _num_segment,
+    writer->reset(new segment_v2::SegmentWriter(file_writer.get(), segment_id,
                                                 _context.tablet_schema, _context.data_dir,
                                                 _context.max_rows_per_segment, writer_options));
     {
         std::lock_guard<SpinLock> l(_lock);
-        _file_writers.push_back(std::move(file_writer));
+        _file_writers.push_back(std::make_pair(segment_id, std::move(file_writer)));
     }
 
     auto s = (*writer)->init(column_ids, is_key);

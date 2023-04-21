@@ -747,7 +747,7 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
 RowsetSharedPtr BetaRowsetWriter::build() {
     Status status;
     // TODO(lingbin): move to more better place, or in a CreateBlockBatch?
-    for (auto& file_writer : _file_writers) {
+    for (auto& [_, file_writer] : _file_writers) {
         status = file_writer->close();
         if (!status.ok()) {
             LOG(WARNING) << "failed to close file writer, path=" << file_writer->path()
@@ -807,9 +807,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
-    for (auto& file_writer : _file_writers) {
-        _rowset_meta->add_segment_file_size(file_writer->bytes_appended());
-    }
+    _rowset_meta->add_segments_file_size(_file_writers);
     RowsetSharedPtr rowset;
     status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                           &rowset);
@@ -942,8 +940,7 @@ Status BetaRowsetWriter::_do_create_segment_writer(
     io_state.is_cold_data = !_is_hot_data;
     Status st = fs->create_file(path, &file_writer, &io_state);
     if (!st.ok()) {
-        LOG(WARNING) << "failed to create writable file. path=" << path
-                     << ", err: " << st;
+        LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;
         return st;
     }
 
@@ -967,7 +964,7 @@ Status BetaRowsetWriter::_do_create_segment_writer(
                                                     _context.max_rows_per_segment, writer_options));
         {
             std::lock_guard<SpinLock> l(_lock);
-            _file_writers.push_back(std::move(file_writer));
+            _file_writers.push_back(std::pair(segment_id, std::move(file_writer)));
         }
     }
 

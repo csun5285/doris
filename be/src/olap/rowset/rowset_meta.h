@@ -18,6 +18,9 @@
 #ifndef DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 #define DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 
+#include <glog/logging.h>
+
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -383,13 +386,51 @@ public:
 
     const TabletSchemaSPtr& tablet_schema() { return _schema; }
 
-    void add_segment_file_size(int64_t size) { _rowset_meta_pb.add_segment_file_size(size); }
+    void add_segments_file_size(
+            const std::vector<std::pair<int, io::FileWriterPtr>>& segment_file_writers) {
+        size_t size = segment_file_writers.size();
+        auto check = [&]() -> bool {
+            std::unordered_set<int> segment_ids;
+            for (const auto& [segment_id, _] : segment_file_writers) {
+                if (segment_id < 0 || segment_id >= size ||
+                    segment_ids.find(segment_id) != segment_ids.end()) {
+                    LOG(ERROR) << fmt::format("segments_file_size error {} {}", segment_id, size);
+                    return false;
+                }
+                segment_ids.insert(segment_id);
+            }
+            return true;
+        };
+        DCHECK(check());
+        if (!check()) {
+            return;
+        }
+        std::vector<size_t> segment_file_writers_size(size, 0);
+        for (auto& [segment_id, file_writer] : segment_file_writers) {
+            segment_file_writers_size[segment_id] = file_writer->bytes_appended();
+        }
+        for (size_t i = 0; i < size; i++) {
+            size_t file_size = segment_file_writers_size[i];
+            if (file_size == 0) {
+                DCHECK(false);
+                LOG(ERROR) << fmt::format("segments_file_size error {}", i);
+                _rowset_meta_pb.clear_segments_file_size();
+                return;
+            }
+            _rowset_meta_pb.add_segments_file_size(file_size);
+        }
+        _rowset_meta_pb.set_enable_segments_file_size(true);
+    }
 
     int64_t get_segment_file_size(int idx) const {
-        DCHECK(_rowset_meta_pb.segment_file_size_size() == 0 ||
-               _rowset_meta_pb.segment_file_size_size() > idx);
-        return _rowset_meta_pb.segment_file_size_size() != 0
-                       ? _rowset_meta_pb.segment_file_size(idx)
+        DCHECK(_rowset_meta_pb.segments_file_size_size() == 0 ||
+               _rowset_meta_pb.segments_file_size_size() > idx);
+        return _rowset_meta_pb.has_enable_segments_file_size()
+                       ? (_rowset_meta_pb.enable_segments_file_size()
+                                  ? (_rowset_meta_pb.segments_file_size_size() != 0
+                                             ? _rowset_meta_pb.segments_file_size(idx)
+                                             : 0)
+                                  : 0)
                        : 0;
     }
 
