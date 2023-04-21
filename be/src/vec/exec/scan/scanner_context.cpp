@@ -48,7 +48,12 @@ Status ScannerContext::init() {
                                       : std::min(static_cast<int64_t>(_state->batch_size()), limit);
     _block_per_scanner = (doris_scanner_row_num + (real_block_size - 1)) / real_block_size;
     auto pre_alloc_block_count = _max_thread_num * _block_per_scanner;
-
+    VLOG_DEBUG << "pre_alloc_block_count:" << pre_alloc_block_count
+            << ", _max_thread_num:" << _max_thread_num
+            << ", _block_per_scanner:" <<_block_per_scanner 
+            << ", real_block_size:" << real_block_size
+            << ", limit:" << limit 
+            << ", doris_scanner_row_num:" << doris_scanner_row_num;
     // The free blocks is used for final output block of scanners.
     // So use _output_tuple_desc;
     for (int i = 0; i < pre_alloc_block_count; ++i) {

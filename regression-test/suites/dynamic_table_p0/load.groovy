@@ -86,7 +86,7 @@ suite("regression_test_dynamic_table", "dynamic_table"){
             )
             UNIQUE KEY(`id`)
             DISTRIBUTED BY HASH(`id`) BUCKETS 5 
-            properties("replication_num" = "1", "enable_merge_on_write" = "true");
+            properties("replication_num" = "1", "enable_unique_key_merge_on_write" = "false");
         """
 
         //stream load src_json
@@ -100,10 +100,10 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         sql """
             CREATE TABLE IF NOT EXISTS ${table_name} (
                 qid bigint,
-		        creationDate datetime,
+		        creationdate datetime,
                 `answers.date` array<datetime>,
                 `title` string,
-		        INDEX creation_date_idx(`creationDate`) USING INVERTED COMMENT 'creationDate index',
+		        INDEX creation_date_idx(`creationdate`) USING INVERTED COMMENT 'creationdate index',
  		        INDEX title_idx(`title`) USING INVERTED PROPERTIES("parser"="english") COMMENT 'title index',
 		        ...
             )
@@ -123,7 +123,7 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         sql """
             CREATE TABLE IF NOT EXISTS ${table_name} (
                 qid bigint,
-                creationDate datetimev2,
+                creationdate datetimev2,
                 `answers` JSONB,
                 ...
             )
@@ -136,15 +136,18 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         load_json_data.call(table_name, 'true', 'json', 'true', src_json, 'true')
         sleep(1000)
     }
+    json_load_nested_with_jsonb("es_nested.json", "test_es_nested_json_jsonb")
     json_load("btc_transactions.json", "test_btc_json")
     json_load("ghdata_sample.json", "test_ghdata_json")
     json_load("nbagames_sample.json", "test_nbagames_json")
+    json_load("nbagames_sample.json", "test_nbagames_json_1")
+    json_load("ghdata_sample.json", "test_ghdata_json_1")
     json_load_nested("es_nested.json", "test_es_nested_json")
     json_load_unique("btc_transactions.json", "test_btc_json")
     json_load_unique("ghdata_sample.json", "test_ghdata_json")
     json_load_unique("nbagames_sample.json", "test_nbagames_json")
-    // sql """insert into test_ghdata_json_unique select * from test_ghdata_json_unique"""
-    // sql """insert into test_btc_json_unique select * from test_btc_json_unique"""
+    sql """insert into test_ghdata_json_1 select * from test_ghdata_json"""
+    sql """insert into test_nbagames_json_1 select * from test_nbagames_json"""
 
     // load more
     table_name = "gharchive";
@@ -196,5 +199,4 @@ suite("regression_test_dynamic_table", "dynamic_table"){
             }
         }
     }
-    json_load_nested_with_jsonb("es_nested.json", "test_es_nested_json_jsonb")
 }

@@ -163,9 +163,6 @@ Status VBrokerScanNode::get_next(RuntimeState* state, vectorized::Block* block, 
 
         if (UNLIKELY(!_mutable_block)) {
             _mutable_block.reset(new MutableBlock(scanner_block->clone_empty()));
-            if (_need_align_block) {
-                _mutable_block->set_block_type(BlockType::DYNAMIC);
-            }
         }
 
         if (_mutable_block->rows() + scanner_block->rows() < batch_size) {
@@ -220,10 +217,6 @@ Status VBrokerScanNode::scanner_scan(const TBrokerScanRange& scan_range, Scanner
     //create scanner object and open
     std::unique_ptr<BaseScanner> scanner = create_scanner(scan_range, counter);
     RETURN_IF_ERROR(scanner->open());
-    if (scanner->is_dynamic_schema()) {
-        // align blocks
-        _need_align_block = true;
-    }
     bool scanner_eof = false;
     while (!scanner_eof) {
         RETURN_IF_CANCELLED(_runtime_state);

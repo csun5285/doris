@@ -112,9 +112,6 @@ private:
 
     std::deque<std::shared_ptr<vectorized::Block>> _block_queue;
     std::unique_ptr<MutableBlock> _mutable_block;
-
-    // dynamic table's block is variant which column may change bettween blocks, so we need to align them
-    bool _need_align_block = false;
 };
 } // namespace vectorized
 } // namespace doris

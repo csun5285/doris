@@ -376,39 +376,18 @@ Status VFileScanner::_convert_to_output_block(Block* block) {
     auto filter_column = vectorized::ColumnUInt8::create(rows, 1);
     auto& filter_map = filter_column->get_data();
 
-    // Set block dynamic, block maybe merge or add_rows
-    // in in later process.
-    if (_is_dynamic_schema) {
-        block->set_block_type(BlockType::DYNAMIC);
-    }
-
     for (auto slot_desc : _output_tuple_desc->slots()) {
         if (!slot_desc->is_materialized()) {
             continue;
         }
         int dest_index = ctx_idx++;
         vectorized::ColumnPtr column_ptr;
-        if (_is_dynamic_schema) {
-            if (slot_desc->type().is_variant_type()) {
-                continue;
-            }
-             // cast column
-            auto& column_type_name = _src_block.get_by_position(dest_index);
-            auto dest_type = vectorized::DataTypeFactory::instance().create_data_type(
-                    slot_desc->type(), slot_desc->is_nullable());
-            if (!column_type_name.type->equals(*dest_type)) {
-                RETURN_IF_ERROR(vectorized::schema_util::cast_column(column_type_name, dest_type,
-                                                                     &column_ptr));
-            } else {
-                column_ptr = std::move(column_type_name.column);
-            }
-        } else {
-            auto* ctx = _dest_vexpr_ctx[dest_index];
-            int result_column_id = -1;
-            // PT1 => dest primitive type
-            RETURN_IF_ERROR(ctx->execute(&_src_block, &result_column_id));
-            column_ptr = _src_block.get_by_position(result_column_id).column;
-        }
+
+        auto* ctx = _dest_vexpr_ctx[dest_index];
+        int result_column_id = -1;
+        // PT1 => dest primitive type
+        RETURN_IF_ERROR(ctx->execute(&_src_block, &result_column_id));
+        column_ptr = _src_block.get_by_position(result_column_id).column;
         // column_ptr maybe a ColumnConst, convert it to a normal column
         column_ptr = column_ptr->convert_to_full_column_if_const();
         DCHECK(column_ptr != nullptr);
