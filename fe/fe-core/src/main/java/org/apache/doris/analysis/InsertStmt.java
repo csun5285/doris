@@ -784,6 +784,8 @@ public class InsertStmt extends DdlStmt {
     }
 
     @Override
+    // Do not set isTransactionBegin to false when reset this statement,
+    // we may call reset() multiple times when (re)analyze.
     public void reset() {
         super.reset();
         if (targetPartitionIds != null) {
@@ -795,7 +797,6 @@ public class InsertStmt extends DdlStmt {
         dataSink = null;
         dataPartition = null;
         targetColumns.clear();
-        isTransactionBegin = false;
     }
 
     @Override
