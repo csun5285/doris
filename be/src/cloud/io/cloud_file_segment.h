@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstdint>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -88,9 +89,9 @@ public:
     Status finalize_write();
 
     // set downloader if state == EMPTY
-    std::string get_or_set_downloader();
+    uint64_t get_or_set_downloader();
 
-    std::string get_downloader() const;
+    uint64_t get_downloader() const;
 
     int64_t expiration_time() const { return _expiration_time; }
 
@@ -102,7 +103,7 @@ public:
 
     CacheType cache_type() const { return _cache_type; }
 
-    static std::string get_caller_id();
+    static uint64_t get_caller_id();
 
     size_t get_download_offset() const;
 
@@ -143,7 +144,7 @@ private:
 
     State _download_state;
 
-    std::string _downloader_id;
+    uint64_t _downloader_id = 0;
 
     LocalWriterPtr _cache_writer;
     LocalReaderPtr _cache_reader;

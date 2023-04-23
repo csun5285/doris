@@ -1,4 +1,5 @@
 #include "cloud/io/cloud_file_segment.h"
+#include <bthread/bthread.h>
 
 #include <filesystem>
 #include <sstream>
@@ -71,16 +72,21 @@ size_t FileSegment::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segmen
     return _downloaded_size;
 }
 
-std::string FileSegment::get_caller_id() {
-    std::stringstream ss;
-    ss << std::this_thread::get_id();
-    return ss.str();
+uint64_t FileSegment::get_caller_id() {
+    uint64_t id = 0;
+#if !defined(USE_BTHREAD_SCANNER)
+    id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+#else
+    id = bthread_self();
+#endif
+    DCHECK(id != 0);
+    return id;
 }
 
-std::string FileSegment::get_or_set_downloader() {
+uint64_t FileSegment::get_or_set_downloader() {
     std::lock_guard segment_lock(_mutex);
 
-    if (_downloader_id.empty()) {
+    if (_downloader_id == 0) {
         DCHECK(_download_state != State::DOWNLOADING);
 
         _downloader_id = get_caller_id();
@@ -94,7 +100,7 @@ std::string FileSegment::get_or_set_downloader() {
 }
 
 void FileSegment::reset_downloader(std::lock_guard<doris::Mutex>& segment_lock) {
-    DCHECK(!_downloader_id.empty()) << "There is no downloader";
+    DCHECK(_downloader_id != 0) << "There is no downloader";
 
     DCHECK(get_caller_id() == _downloader_id) << "Downloader can be reset only by downloader";
 
@@ -107,12 +113,12 @@ void FileSegment::reset_downloader_impl(std::lock_guard<doris::Mutex>& segment_l
     } else {
         _downloaded_size = 0;
         _download_state = State::EMPTY;
-        _downloader_id.clear();
+        _downloader_id = 0;
         _cache_writer.reset();
     }
 }
 
-std::string FileSegment::get_downloader() const {
+uint64_t FileSegment::get_downloader() const {
     std::lock_guard segment_lock(_mutex);
     return _downloader_id;
 }
@@ -231,12 +237,12 @@ Status FileSegment::finalize_write() {
 FileSegment::State FileSegment::wait() {
     std::unique_lock segment_lock(_mutex);
 
-    if (_downloader_id.empty()) {
+    if (_downloader_id == 0) {
         return _download_state;
     }
 
     if (_download_state == State::DOWNLOADING) {
-        DCHECK(!_downloader_id.empty());
+        DCHECK(_downloader_id != 0);
         DCHECK(_downloader_id != get_caller_id());
 #if !defined(USE_BTHREAD_SCANNER)
         _cv.wait_for(segment_lock, std::chrono::seconds(1));
@@ -273,7 +279,7 @@ Status FileSegment::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_loc
     } else {
         _download_state = State::EMPTY;
     }
-    _downloader_id.clear();
+    _downloader_id = 0;
     return status;
 }
 
