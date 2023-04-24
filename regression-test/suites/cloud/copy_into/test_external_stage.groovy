@@ -106,7 +106,7 @@ suite("test_external_stage") {
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"))
     } finally {
-        try_sql("DROP TABLE IF EXISTS lineorder")
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
+        //try_sql("DROP TABLE IF EXISTS lineorder")
+        //try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 }

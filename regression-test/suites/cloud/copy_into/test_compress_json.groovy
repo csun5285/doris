@@ -52,6 +52,6 @@ suite("test_compress_json") {
             copy_into(remoteFileName, compressionType)
         }
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 }

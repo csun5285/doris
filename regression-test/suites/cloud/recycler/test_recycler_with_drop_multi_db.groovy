@@ -91,7 +91,7 @@ suite("test_recycler_with_drop_multi_db") {
         boolean success = false
         do {
             triggerRecycle(token, instanceId)
-            Thread.sleep(20000)  // 2min
+            Thread.sleep(20000)  // 20s
             if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, dbToTabletSets[dbName])) {
                 success = true
                 break
@@ -117,7 +117,7 @@ suite("test_recycler_with_drop_multi_db") {
         boolean success = false
         do {
             triggerRecycle(token, instanceId)
-            Thread.sleep(20000)  // 2min
+            Thread.sleep(20000)  // 20s
             if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, dbToTabletSets[dbName])) {
                 success = true
                 break

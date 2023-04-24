@@ -156,6 +156,7 @@ Status NewJsonReader::get_next_block(Block* block, size_t* read_rows, bool* eof)
             // Read empty row, just continue
             continue;
         }
+        ++(*read_rows);
     }
 
     return Status::OK();

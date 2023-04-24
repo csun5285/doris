@@ -167,7 +167,6 @@ suite("test_compaction") {
         sql """ use @regression_cluster_name0; """
         qt_select_default """ SELECT * FROM ${tableName}; """
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
         injectionPoint(ipList[0], httpPortList[0], "clear/all");
         injectionPoint(ipList[1], httpPortList[1], "clear/all");
         updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "false");

@@ -6,6 +6,7 @@
 
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/txn_kv.h"
+#include "recycler/white_black_list.h"
 
 namespace selectdb {
 
@@ -34,11 +35,13 @@ private:
     std::unordered_set<std::string> pending_instance_set_;
 
     std::mutex working_instance_set_mtx_;
-    std::unordered_set<std::string> working_instance_set_; 
+    std::unordered_set<std::string> working_instance_set_;
 
     // notify instance scanner
     std::condition_variable instance_scanner_cond_;
     std::mutex instance_scanner_mtx_;
+
+    WhiteBlackList instance_filter_;
 };
 
 } // namespace selectdb

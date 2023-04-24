@@ -208,5 +208,5 @@ suite("test_dup_keys_schema_change_datev2") {
     sql """delete from ${tbName} where `datev2` < '2022-01-06 11:11:11.111';"""
     qt_sql """select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName} ORDER BY `datek1`;"""
 
-    sql """ DROP TABLE  ${tbName} force"""
+    //sql """ DROP TABLE  ${tbName} force"""
 }

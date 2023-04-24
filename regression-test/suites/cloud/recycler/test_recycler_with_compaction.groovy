@@ -86,6 +86,8 @@ suite("test_recycler_with_compaction") {
     // do cloud compaction
     doCloudCompaction(tableName);
 
+    // FIXME(plat1ko): Check merged rowsets have been recycled
+
     qt_sql " select count(*) from ${tableName}"
 
     String[][] tabletInfoList = sql """ show tablets from ${tableName}; """
@@ -104,7 +106,7 @@ suite("test_recycler_with_compaction") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
             success = true
             break

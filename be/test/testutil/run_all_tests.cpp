@@ -19,7 +19,6 @@
 
 #include "common/sync_point.h"
 #include "olap/page_cache.h"
-#include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/segment_loader.h"
 #include "olap/tablet_schema.h"
 #include "runtime/exec_env.h"

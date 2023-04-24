@@ -137,7 +137,6 @@ suite("test_compaction_with_delete") {
         waitForCompaction(ipList[0], httpPortList[0])
         qt_select_default """ SELECT * FROM ${tableName}; """
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
         updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "false");
     }
 }

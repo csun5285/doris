@@ -59,5 +59,5 @@ suite("test_materialized_view_hll") {
         contains "(amt_count)"
     }
 
-    sql "DROP TABLE ${tbName1} FORCE;"
+    //sql "DROP TABLE ${tbName1} FORCE;"
 }

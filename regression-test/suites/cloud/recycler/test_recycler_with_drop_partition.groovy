@@ -118,7 +118,7 @@ suite("test_recycler_with_drop_partition") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet3)) {
             success = true
             break
@@ -136,7 +136,7 @@ suite("test_recycler_with_drop_partition") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 2min
+        Thread.sleep(20000) // 20s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet1)) {
             success = true
             break

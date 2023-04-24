@@ -53,9 +53,9 @@ CONF_mInt64(retention_seconds, "259200"); // 72h
 CONF_Int32(recycle_concurrency, "16");
 CONF_Int32(recycle_job_lease_expired_ms, "60000");
 // Which instance should be recycled. If empty, recycle all instances.
-CONF_String(recycle_whitelist, ""); // Comma seprated list
+CONF_Strings(recycle_whitelist, ""); // Comma seprated list
 // These instances will not be recycled, only effective when whitelist is empty.
-CONF_String(recycle_blacklist, ""); // Comma seprated list
+CONF_Strings(recycle_blacklist, ""); // Comma seprated list
 CONF_mInt32(instance_recycler_worker_pool_size, "10");
 CONF_Bool(enable_checker, "false");
 CONF_mInt32(check_object_interval_seconds, "259200"); // 72h
@@ -102,7 +102,9 @@ CONF_Int64(internal_stage_objects_expire_time_second, "259200"); // 3 * 24 * 360
 CONF_String(encryption_key, "c2VsZWN0ZGJzZWxlY3RkYnNlbGVjdGRic2VsZWN0ZGI=");
 CONF_String(encryption_method, "AES_256_ECB");
 
-CONF_mBool(write_schema_kv, "false");    // temporary config for upgrade
-CONF_mBool(split_tablet_stats, "false"); // temporary config for upgrade
+// Temporary configs for upgrade
+CONF_mBool(write_schema_kv, "false");
+CONF_mBool(split_tablet_stats, "false");
+CONF_mBool(snapshot_get_tablet_stats, "false");
 
 } // namespace selectdb::config

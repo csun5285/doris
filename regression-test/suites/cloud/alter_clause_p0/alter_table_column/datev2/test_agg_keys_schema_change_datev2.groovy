@@ -273,5 +273,5 @@ suite("test_agg_keys_schema_change_datev2") {
         }
     }
 
-    sql """ DROP TABLE  ${tbName} force"""
+    //sql """ DROP TABLE  ${tbName} force"""
 }

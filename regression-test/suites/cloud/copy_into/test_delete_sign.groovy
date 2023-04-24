@@ -89,7 +89,7 @@ suite("test_delete_sign") {
                 deleteSql = String.format(deleteSql, index)
                 copyInto(deleteSql)
             } finally {
-                try_sql("DROP TABLE IF EXISTS ${tableName}")
+                //try_sql("DROP TABLE IF EXISTS ${tableName}")
             }
         }
     }
@@ -106,7 +106,7 @@ suite("test_delete_sign") {
         assertTrue(result[0][1].equals("CANCELLED"), "Finish copy into, state=" + result[0][1] + ", expected state=CANCELLED")
         assertTrue(result[0][2].equals("ETL_QUALITY_UNSATISFIED"))
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 
     // copy from json, parquet, orc
@@ -174,7 +174,7 @@ suite("test_delete_sign") {
             sql = """copy into ${tableName} (id, name, score, __DORIS_DELETE_SIGN__) from (select id, name, score, __DORIS_DELETE_SIGN__ from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
             copyInto(sql)
         } finally {
-            try_sql("DROP TABLE IF EXISTS ${tableName}")
+            //try_sql("DROP TABLE IF EXISTS ${tableName}")
         }
     }
 }

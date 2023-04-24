@@ -92,7 +92,7 @@ public:
 
     int32_t get_atomic_num_segment() const override { return _num_segment.load(); }
 
-    const std::vector<io::FileWriterPtr>& get_file_writers() const { return _file_writers; }
+    const std::vector<std::pair<int, io::FileWriterPtr>>& get_file_writers() const { return _file_writers; }
     // Maybe modified by local schema change
     vectorized::schema_util::LocalSchemaChangeRecorder* mutable_schema_change_recorder() {
         return _context.schema_change_recorder.get();
@@ -164,7 +164,7 @@ protected:
     // record rows number of every segment already written, using for rowid
     // conversion when compaction in unique key with MoW model
     std::vector<uint32_t> _segment_num_rows;
-    std::vector<io::FileWriterPtr> _file_writers;
+    std::vector<std::pair<int, io::FileWriterPtr>> _file_writers;
     // for unique key table with merge-on-write
     std::vector<KeyBoundsPB> _segments_encoded_key_bounds;
 

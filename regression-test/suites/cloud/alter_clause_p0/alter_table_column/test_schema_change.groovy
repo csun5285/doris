@@ -52,7 +52,7 @@ suite("test_schema_change") {
           if (result == "FINISHED") {
                qt_desc_uniq_table """ desc ${tbName} """
                qt_sql """ SELECT * FROM ${tbName} order by event_day,citycode  """
-               sql """ DROP TABLE  ${tbName} """
+               //sql """ DROP TABLE  ${tbName} """
                break
           } else {
                sleep(2000)

@@ -60,7 +60,7 @@ suite("test_copy_with_select") {
             qt_sql "select * from ${tableName} order by C_CUSTKEY, C_NAME, C_ADDRESS, C_NATIONKEY, C_PHONE, C_ACCTBAL, C_MKTSEGMENT, C_COMMENT limit 20;"
 
         } finally {
-            try_sql("DROP TABLE IF EXISTS ${tableName}")
+            //try_sql("DROP TABLE IF EXISTS ${tableName}")
         }
     }
 }

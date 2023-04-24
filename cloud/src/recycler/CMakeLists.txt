@@ -12,4 +12,5 @@ add_library(Recycler
     recycler_service.cpp
     recycler.cpp
     s3_accessor.cpp
+    white_black_list.cpp
 )

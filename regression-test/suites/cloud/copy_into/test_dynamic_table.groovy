@@ -69,7 +69,7 @@ suite("test_dynamic_table") {
         qt_sql " SELECT COUNT(`payload.push_id`) FROM ${tableName2}; "
         qt_sql " SELECT COUNT(`payload.review.user.login`) FROM ${tableName2}; "
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName1}")
-        try_sql("DROP TABLE IF EXISTS ${tableName2}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName1}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName2}")
     }
 }

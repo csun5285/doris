@@ -34,7 +34,7 @@ suite("test_internal_stage") {
             'default.file.column_separator' = "|");
         """
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableNamExternal}")
+        //try_sql("DROP TABLE IF EXISTS ${tableNamExternal}")
     }
 
     def tableName = "customer_internal_stage"
@@ -161,8 +161,8 @@ suite("test_internal_stage") {
             }
         }
     } finally {
-        try_sql("DROP TABLE IF EXISTS ${tableName}")
-        try_sql("DROP TABLE IF EXISTS ${tableName2}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName}")
+        //try_sql("DROP TABLE IF EXISTS ${tableName2}")
     }
 
     def endpoint = context.config.feHttpAddress.split(':')

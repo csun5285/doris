@@ -51,6 +51,7 @@ Usage: $0 <options>
      --run              build and run all ut
      --coverage         coverage after run ut
      --run --filter=xx  build and run specified ut
+     --coverage         coverage after run ut
      -j                 build parallel
      -h                 print this help message
 
@@ -84,8 +85,8 @@ fi
 
 CLEAN=0
 RUN=0
-BUILD_BENCHMARK_TOOL=OFF
-DENABLE_CLANG_COVERAGE=OFF
+BUILD_BENCHMARK_TOOL='OFF'
+DENABLE_CLANG_COVERAGE='OFF'
 FILTER=""
 if [[ "$#" != 1 ]]; then
     while true; do
@@ -103,7 +104,7 @@ if [[ "$#" != 1 ]]; then
             shift
             ;;
         --coverage)
-            DENABLE_CLANG_COVERAGE=ON
+            DENABLE_CLANG_COVERAGE='ON'
             shift
             ;;
         -f | --filter)
@@ -141,6 +142,7 @@ echo "Build Backend UT"
 
 if [[ "_${DENABLE_CLANG_COVERAGE}" == "_ON" ]]; then
     sed -i "s/    DORIS_TOOLCHAIN=gcc/    DORIS_TOOLCHAIN=clang/g" env.sh
+    echo "export DORIS_TOOLCHAIN=clang" >>custom_env.sh
 fi
 
 . "${DORIS_HOME}/env.sh"
@@ -209,8 +211,8 @@ cd "${CMAKE_BUILD_DIR}"
     -DUSE_JEMALLOC=OFF \
     -DSTRICT_MEMORY_USE=OFF \
     -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
+    -DENABLE_CLANG_COVERAGE="${DENABLE_CLANG_COVERAGE}" \
     ${CMAKE_USE_CCACHE:+${CMAKE_USE_CCACHE}} \
-    -DENABLE_CLANG_COVERAGE=${DENABLE_CLANG_COVERAGE} \
     "${DORIS_HOME}/be"
 "${BUILD_SYSTEM}" -j "${PARALLEL}"
 

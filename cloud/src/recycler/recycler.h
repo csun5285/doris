@@ -12,6 +12,7 @@
 
 #include "meta-service/txn_kv.h"
 #include "recycler/s3_accessor.h"
+#include "recycler/white_black_list.h"
 
 namespace selectdb {
 class Checker;
@@ -59,16 +60,7 @@ private:
 
     std::string ip_port_;
 
-    class InstanceFilter {
-    public:
-        void reset(const std::string& whitelist, const std::string& blacklist);
-        bool filter_out(const std::string& instance_id) const;
-
-    private:
-        std::set<std::string> whitelist_;
-        std::set<std::string> blacklist_;
-    };
-    InstanceFilter instance_filter_;
+    WhiteBlackList instance_filter_;
 };
 
 class InstanceRecycler {
