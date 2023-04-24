@@ -468,6 +468,7 @@ set(CLOUD_TEST_FILES
     cloud/cloud_prefetch_test.cpp
     cloud/cloud_file_cache_test.cpp
     cloud/cumulative_compaction_policy_test.cpp
+    cloud/fork_and_join_test.cpp
 )
 
 if (CLOUD_MODE)

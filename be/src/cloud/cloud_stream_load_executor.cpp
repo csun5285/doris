@@ -1,5 +1,6 @@
 #include "cloud/cloud_stream_load_executor.h"
 
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/logging.h"
 #include "runtime/stream_load/stream_load_context.h"

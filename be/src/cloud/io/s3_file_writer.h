@@ -65,7 +65,6 @@ public:
     size_t bytes_appended() const override { return _bytes_appended; }
 
     FileSystemSPtr fs() const override { return _fs; }
-    int64_t upload_cost_ms() const { return *_upload_cost_ms; }
 
     const Path& path() const override { return _path; }
 
@@ -94,8 +93,6 @@ private:
     bool _sse_enabled = false;
     bool _closed = true;
     bool _opened = false;
-
-    std::shared_ptr<int64_t> _upload_cost_ms;
 
     std::shared_ptr<Aws::S3::S3Client> _client;
     std::string _upload_id;

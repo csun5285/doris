@@ -278,9 +278,8 @@ Status NodeChannel::open_wait() {
                         }
                     }
                     _add_batches_finished = true;
-                    _max_build_rowset_cost_ms = result.max_build_rowset_cost_ms();
-                    _avg_build_rowset_cost_ms = result.avg_build_rowset_cost_ms();
-                    _upload_speed_bytes_s = result.upload_speed_bytes_s();
+                    _build_rowset_latency_ms = result.build_rowset_latency_ms();
+                    _commit_rowset_latency_ms = result.commit_rowset_latency_ms();
                 }
             } else {
                 _cancel_with_msg(
@@ -988,8 +987,6 @@ Status OlapTableSink::prepare(RuntimeState* state) {
     _max_add_batch_exec_timer = ADD_TIMER(_profile, "MaxAddBatchExecTime");
     _add_batch_number = ADD_COUNTER(_profile, "NumberBatchAdded", TUnit::UNIT);
     _num_node_channels = ADD_COUNTER(_profile, "NumberNodeChannels", TUnit::UNIT);
-    _min_upload_speed_bytes_s = ADD_COUNTER(_profile, "MinUploadSpeedBytesPerSecond", TUnit::UNIT);
-    _max_upload_speed_bytes_s = ADD_COUNTER(_profile, "MaxUploadSpeedBytesPerSecond", TUnit::UNIT);
     _load_mem_limit = state->get_load_mem_limit();
 
     // open all channels
@@ -1173,14 +1170,12 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                         [](const std::shared_ptr<NodeChannel>& ch) { ch->mark_close(); });
                 num_node_channels += index_channel->num_node_channels();
             }
-            int64_t max_build_rowset_cost_ms = 0;
             for (auto index_channel : _channels) {
                 int64_t add_batch_exec_time = 0;
                 index_channel->for_each_node_channel(
                         [&index_channel, &state, &node_add_batch_counter_map, &serialize_batch_ns,
                          &mem_exceeded_block_ns, &queue_push_lock_ns, &actual_consume_ns,
                          &total_add_batch_exec_time_ns, &add_batch_exec_time, &total_add_batch_num,
-                         &max_build_rowset_cost_ms,
                          profile = _profile](const std::shared_ptr<NodeChannel>& ch) {
                             auto s = ch->close_wait(state);
                             if (!s.ok()) {
@@ -1196,15 +1191,11 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                                             &mem_exceeded_block_ns, &queue_push_lock_ns,
                                             &actual_consume_ns, &total_add_batch_exec_time_ns,
                                             &add_batch_exec_time, &total_add_batch_num);
-                            int64_t avg_build_rowset_cost_ms = 0;
-                            int64_t upload_speed_bytes_s = 0;
-                            ch->cloud_time_report(max_build_rowset_cost_ms,
-                                                  avg_build_rowset_cost_ms, upload_speed_bytes_s);
                             // clang-format off
-                            auto counter = profile->add_counter(fmt::format("AvgBuildRowsetTime_{}_{}", index_channel->index_id(), ch->node_id()), TUnit::TIME_MS);
-                            COUNTER_SET(counter, avg_build_rowset_cost_ms);
-                            counter = ADD_COUNTER(profile, fmt::format("UploadSpeed_{}_{}", index_channel->index_id(), ch->node_id()), TUnit::BYTES_PER_SECOND);
-                            COUNTER_SET(counter, upload_speed_bytes_s);
+                            auto counter = profile->add_counter(fmt::format("BuildRowsetTime_{}_{}", index_channel->index_id(), ch->node_id()), TUnit::TIME_MS);
+                            COUNTER_SET(counter, ch->_build_rowset_latency_ms);
+                            counter = profile->add_counter(fmt::format("CommitRowsetTime_{}_{}", index_channel->index_id(), ch->node_id()), TUnit::TIME_MS);
+                            COUNTER_SET(counter, ch->_commit_rowset_latency_ms);
                             // clang-format on
                         });
 
@@ -1221,8 +1212,6 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                     status = st;
                 }
             } // end for index channels
-            auto counter = ADD_COUNTER(_profile, "MaxBuildRowsetTime", TUnit::TIME_MS);
-            COUNTER_SET(counter, max_build_rowset_cost_ms);
         }
         // TODO need to be improved
         LOG(INFO) << "total mem_exceeded_block_ns=" << mem_exceeded_block_ns

@@ -37,7 +37,6 @@
 #include "cloud/io/s3_file_system.h"
 #include "common/logging.h"
 #include "common/status.h"
-#include "util/runtime_profile.h"
 
 namespace doris {
 namespace io {
@@ -53,7 +52,6 @@ S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
           _bucket(std::move(bucket)),
           _key(std::move(key)),
           _sse_enabled(sse_enabled),
-          _upload_cost_ms(std::make_shared<int64_t>(0)),
           _client(std::move(client)),
           _expiration_time(state ? state->expiration_time : 0),
           _is_cold_data(state ? state->is_cold_data : true) {}
@@ -131,7 +129,6 @@ Status S3FileWriter::append(const Slice& data) {
 Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     DCHECK(!_closed);
     size_t buffer_size = config::s3_write_buffer_size;
-    SCOPED_RAW_TIMER(_upload_cost_ms.get());
     for (size_t i = 0; i < data_cnt; i++) {
         size_t data_size = data[i].get_size();
         for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
@@ -234,7 +231,6 @@ FileSegmentsHolderPtr S3FileWriter::_allocate_file_segments(size_t offset) {
 }
 
 Status S3FileWriter::_complete() {
-    SCOPED_RAW_TIMER(_upload_cost_ms.get());
     if (_failed) {
         return _st;
     }

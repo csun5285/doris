@@ -85,7 +85,6 @@ public:
 
     const RowsetMetaSharedPtr& rowset_meta() const override { return _rowset_meta; }
 
-    int64_t upload_cost_ms() const override { return _upload_cost_ms; }
     int64_t total_data_size() const override { return _total_data_size.load(std::memory_order_relaxed); }
 
     void compact_segments(SegCompactionCandidatesSharedPtr segments);

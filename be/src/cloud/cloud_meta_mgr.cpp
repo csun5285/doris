@@ -222,7 +222,7 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMetaSharedPtr& rs_meta, bool is_
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
-    rs_meta->to_rowset_pb(req.mutable_rowset_meta());
+    rs_meta->to_rowset_pb(req.mutable_rowset_meta(), true);
     req.set_temporary(is_tmp);
     int retry_times = config::meta_service_rpc_retry_times;
     do {

@@ -17,9 +17,13 @@
 
 #include "runtime/tablets_channel.h"
 
+#include <chrono>
+
+#include "cloud/utils.h"
 #include "exec/tablet_info.h"
 #include "olap/delta_writer.h"
 #include "olap/memtable.h"
+#include "olap/rowset/rowset_meta.h"
 #include "olap/storage_engine.h"
 #include "runtime/load_channel.h"
 #include "runtime/row_batch.h"
@@ -58,7 +62,7 @@ TabletsChannel::~TabletsChannel() {
 }
 
 Status TabletsChannel::open(const PTabletWriterOpenRequest& request) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (_state == kOpened) {
         // Normal case, already open by other sender
         return Status::OK();
@@ -82,10 +86,127 @@ Status TabletsChannel::open(const PTabletWriterOpenRequest& request) {
     return Status::OK();
 }
 
+#ifdef CLOUD_MODE
 template <typename Request, typename Response>
 Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request& request,
                              Response* response) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
+    if (_state == kFinished) {
+        return _close_status;
+    }
+    auto sender_id = request.sender_id();
+    if (_closed_senders.Get(sender_id)) {
+        // Double close from one sender, just return OK
+        *finished = (_num_remaining_senders == 0);
+        return _close_status;
+    }
+    LOG(INFO) << "close tablets channel: " << _key << ", sender id: " << sender_id
+              << ", backend id: " << request.backend_id();
+    for (auto pid : request.partition_ids()) {
+        _partition_ids.emplace(pid);
+    }
+    _closed_senders.Set(sender_id, true);
+    _num_remaining_senders--;
+    *finished = (_num_remaining_senders == 0);
+    if (!*finished) return Status::OK();
+
+    auto tablet_errors = response->mutable_tablet_errors();
+    auto tablet_vec = response->mutable_tablet_vec();
+    _state = kFinished;
+    // All senders are closed
+    // 1. close all delta writers
+    std::vector<DeltaWriter*> need_wait_writers;
+    need_wait_writers.reserve(_tablet_writers.size());
+    bool success = true;
+    for (auto [tablet_id, writer] : _tablet_writers) {
+        if (_partition_ids.count(writer->partition_id()) > 0) {
+            if (!success) { // Already failed, cancel all remain writers
+                writer->cancel();
+                continue;
+            }
+            auto st = writer->close();
+            if (!st.ok()) {
+                LOG(WARNING) << "close tablet writer failed, tablet_id=" << tablet_id
+                             << ", txn_id=" << _txn_id << ", err=" << st;
+                PTabletError* tablet_error = tablet_errors->Add();
+                tablet_error->set_tablet_id(tablet_id);
+                tablet_error->set_msg(st.to_string());
+                success = false;
+                _close_status = std::move(st);
+                continue;
+            }
+            // to make sure tablet writer in `_broken_tablets` won't call `close_wait` method.
+            if (_broken_tablets.find(writer->tablet_id()) != _broken_tablets.end()) [[unlikely]] {
+                LOG(WARNING) << "SHOULD NOT HAPPEN, tablet writer is broken but not cancelled"
+                             << ", tablet_id=" << tablet_id << ", txn_id=" << _txn_id;
+                success = false;
+                _close_status = Status::InternalError(
+                        "tablet writer is broken but not cancelled, tablet_id={}", tablet_id);
+                continue;
+            }
+            need_wait_writers.push_back(writer);
+        } else {
+            auto st = writer->cancel();
+            if (!st.ok()) {
+                LOG(WARNING) << "cancel tablet writer failed, tablet_id=" << tablet_id
+                             << ", txn_id=" << _txn_id;
+                // just skip this tablet(writer) and continue to close others
+                continue;
+            }
+        }
+    }
+    if (!success) return _close_status;
+
+    // 2. wait delta writers
+    std::vector<RowsetSharedPtr> rowsets_to_commit;
+    rowsets_to_commit.reserve(need_wait_writers.size());
+    using namespace std::chrono;
+    auto build_start = steady_clock::now();
+    for (auto writer : need_wait_writers) {
+        RowsetSharedPtr rowset;
+        auto st = writer->close_wait(&rowset);
+        if (!st.ok()) {
+            LOG(WARNING) << "failed to close wait DeltaWriter. tablet_id=" << writer->tablet_id()
+                         << ", err=" << st;
+            PTabletError* tablet_error = tablet_errors->Add();
+            tablet_error->set_tablet_id(writer->tablet_id());
+            tablet_error->set_msg(st.to_string());
+            _close_status = std::move(st);
+            return _close_status;
+        }
+        rowsets_to_commit.push_back(std::move(rowset));
+    }
+    int64_t build_latency = duration_cast<milliseconds>(steady_clock::now() - build_start).count();
+    // 3. commit rowsets to meta-service
+    auto commit_start = steady_clock::now();
+    std::vector<std::function<Status()>> tasks;
+    tasks.reserve(rowsets_to_commit.size());
+    for (auto& rs : rowsets_to_commit) {
+        tasks.push_back([&rs_meta = rs->rowset_meta()] {
+            return cloud::meta_mgr()->commit_rowset(rs_meta, true);
+        });
+    }
+    _close_status = cloud::bthread_fork_and_join(tasks, 10);
+    if (!_close_status.ok()) {
+        return _close_status;
+    }
+    int64_t commit_latency =
+            duration_cast<milliseconds>(steady_clock::now() - commit_start).count();
+    tablet_vec->Reserve(need_wait_writers.size());
+    for (auto writer : need_wait_writers) {
+        PTabletInfo* tablet_info = tablet_vec->Add();
+        tablet_info->set_tablet_id(writer->tablet_id());
+        tablet_info->set_schema_hash(writer->schema_hash());
+    }
+    response->set_build_rowset_latency_ms(build_latency);
+    response->set_commit_rowset_latency_ms(commit_latency);
+    return Status::OK();
+}
+#else
+template <typename Request, typename Response>
+Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request& request,
+                             Response* response) {
+    std::lock_guard l(_lock);
     if (_state == kFinished) {
         return _close_status;
     }
@@ -138,11 +259,6 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
                 if (!st.ok()) {
                     LOG(WARNING) << "cancel tablet writer failed, tablet_id=" << tablet_id
                                  << ", transaction_id=" << _txn_id;
-#ifdef CLOUD_MODE
-                    PTabletError* tablet_error = tablet_errors->Add();
-                    tablet_error->set_tablet_id(tablet_id);
-                    tablet_error->set_msg(st.to_string());
-#endif
                     // just skip this tablet(writer) and continue to close others
                     continue;
                 }
@@ -153,12 +269,6 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
 
         _write_single_replica = request.write_single_replica();
 
-        // collect metrics
-        int64_t total_upload_size = 0;
-        int64_t total_upload_cost_ms = 0;
-        int64_t max_build_rowset_cost_ms = 0;
-        int64_t total_build_rowset_cost_ms = 0;
-        int64_t success_writers = 0;
         // 2. wait delta writers and build the tablet vector
         for (auto writer : need_wait_writers) {
             PSlaveTabletNodes slave_nodes;
@@ -168,22 +278,6 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
             // close may return failed, but no need to handle it here.
             // tablet_vec will only contains success tablet, and then let FE judge it.
             _close_wait(writer, tablet_vec, tablet_errors, slave_nodes, _write_single_replica);
-            auto build_rowset_cost_ms = writer->build_rowset_cost_ms();
-            if (LIKELY(build_rowset_cost_ms > 0)) {
-                // only successful delta writer are counted
-                ++success_writers;
-                total_build_rowset_cost_ms += build_rowset_cost_ms;
-                total_upload_cost_ms += writer->upload_cost_ms();
-                total_upload_size += writer->total_data_size();
-                max_build_rowset_cost_ms = std::max(max_build_rowset_cost_ms, build_rowset_cost_ms);
-            }
-        }
-        response->set_max_build_rowset_cost_ms(max_build_rowset_cost_ms);
-        if (LIKELY(success_writers > 0)) {
-            response->set_avg_build_rowset_cost_ms(total_build_rowset_cost_ms / success_writers);
-        }
-        if (LIKELY(total_upload_cost_ms > 0)) {
-            response->set_upload_speed_bytes_s(total_upload_size * 1000 / total_upload_cost_ms);
         }
 
         if (_write_single_replica) {
@@ -212,6 +306,7 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
     }
     return Status::OK();
 }
+#endif // !CLOUD_MODE
 
 template Status TabletsChannel::close<PTabletWriterAddBlockRequest, PTabletWriterAddBlockResult>(
         LoadChannel* parent, bool* finished, const PTabletWriterAddBlockRequest& request,
@@ -221,6 +316,7 @@ template Status TabletsChannel::close<PTabletWriterAddBatchRequest, PTabletWrite
         LoadChannel* parent, bool* finished, const PTabletWriterAddBatchRequest& request,
         PTabletWriterAddBatchResult* response);
 
+#ifndef CLOUD_MODE
 void TabletsChannel::_close_wait(DeltaWriter* writer,
                                  google::protobuf::RepeatedPtrField<PTabletInfo>* tablet_vec,
                                  google::protobuf::RepeatedPtrField<PTabletError>* tablet_errors,
@@ -243,6 +339,7 @@ void TabletsChannel::_close_wait(DeltaWriter* writer,
                       << _txn_id << "err msg " << st;
     }
 }
+#endif // !CLOUD_MODE
 
 int64_t TabletsChannel::mem_consumption() {
     int64_t mem_usage = 0;
@@ -266,7 +363,7 @@ void TabletsChannel::reduce_mem_usage() {
 
     std::vector<DeltaWriter*> writers_to_wait_flush;
     {
-        std::lock_guard<std::mutex> l(_lock);
+        std::lock_guard l(_lock);
         if (_state == kFinished) {
             // TabletsChannel is closed without LoadChannel's lock,
             // therefore it's possible for reduce_mem_usage() to be called right after close()
@@ -370,7 +467,7 @@ void TabletsChannel::reduce_mem_usage() {
     }
 
     {
-        std::lock_guard<std::mutex> l(_lock);
+        std::lock_guard l(_lock);
         _reducing_mem_usage = false;
         _reduce_memory_cond.notify_all();
     }
@@ -423,6 +520,15 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
             _tablet_writers.emplace(tablet.tablet_id(), writer);
         }
     }
+    // In CLOUD_MODE, init DeltaWriter will issue RPC, so it's necessary to init writers by batch.
+    // FIXME(plat1ko): DeltaWriter which has no loaded data may not need to be initialized in the future.
+    std::vector<DeltaWriter*> writers;
+    writers.reserve(_tablet_writers.size());
+    for (auto [_, writer] : _tablet_writers) {
+        writers.push_back(writer);
+    }
+    RETURN_IF_ERROR(DeltaWriter::init(writers));
+
     _s_tablet_writer_count += _tablet_writers.size();
     DCHECK_EQ(_tablet_writers.size(), request.tablets_size());
     return Status::OK();
@@ -430,7 +536,7 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
 
 bool TabletsChannel::_try_to_wait_flushing() {
     bool duplicate_work = false;
-    std::unique_lock<std::mutex> l(_lock);
+    std::unique_lock l(_lock);
     // NOTE: we call `reduce_mem_usage()` because we think it's necessary
     // to reduce it's memory and should not write more data into this
     // tablets channel. If there's already some other thead doing the
@@ -449,7 +555,7 @@ bool TabletsChannel::_try_to_wait_flushing() {
 }
 
 Status TabletsChannel::cancel() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (_state == kFinished) {
         return _close_status;
     }
@@ -498,12 +604,8 @@ Status TabletsChannel::add_batch(const TabletWriterAddRequest& request,
             VLOG_PROGRESS << "skip broken tablet tablet=" << tablet_id;
             continue;
         }
-        auto it = tablet_to_rowidxs.find(tablet_id);
-        if (it == tablet_to_rowidxs.end()) {
-            tablet_to_rowidxs.emplace(tablet_id, std::initializer_list<int> {i});
-        } else {
-            it->second.emplace_back(i);
-        }
+        auto& rowidxs = tablet_to_rowidxs[tablet_id];
+        rowidxs.push_back(i);
     }
 
     auto get_send_data = [&]() {
@@ -517,31 +619,30 @@ Status TabletsChannel::add_batch(const TabletWriterAddRequest& request,
     auto send_data = get_send_data();
     google::protobuf::RepeatedPtrField<PTabletError>* tablet_errors =
             response->mutable_tablet_errors();
-    for (const auto& tablet_to_rowidxs_it : tablet_to_rowidxs) {
-        auto tablet_writer_it = _tablet_writers.find(tablet_to_rowidxs_it.first);
+    for (auto& [tablet_id, rowidxs] : tablet_to_rowidxs) {
+        auto tablet_writer_it = _tablet_writers.find(tablet_id);
         if (tablet_writer_it == _tablet_writers.end()) {
-            return Status::InternalError("unknown tablet to append data, tablet={}",
-                                         tablet_to_rowidxs_it.first);
+            return Status::InternalError("unknown tablet to append data, tablet={}", tablet_id);
         }
 
-        Status st = tablet_writer_it->second->write(&send_data, tablet_to_rowidxs_it.second);
+        Status st = tablet_writer_it->second->write(&send_data, rowidxs);
         if (!st.ok()) {
             auto err_msg =
                     fmt::format("tablet writer write failed, tablet_id={}, txn_id={}, err={}",
-                                tablet_to_rowidxs_it.first, _txn_id, st.to_string());
+                                tablet_id, _txn_id, st.to_string());
             LOG(WARNING) << err_msg;
             PTabletError* error = tablet_errors->Add();
-            error->set_tablet_id(tablet_to_rowidxs_it.first);
+            error->set_tablet_id(tablet_id);
             error->set_msg(err_msg);
             tablet_writer_it->second->cancel_with_status(st);
-            _add_broken_tablet(tablet_to_rowidxs_it.first);
+            _add_broken_tablet(tablet_id);
             // continue write to other tablet.
             // the error will return back to sender.
         }
     }
 
     {
-        std::lock_guard<std::mutex> l(_lock);
+        std::lock_guard l(_lock);
         _next_seqs[request.sender_id()] = cur_seq + 1;
     }
     return Status::OK();

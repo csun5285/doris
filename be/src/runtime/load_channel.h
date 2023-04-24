@@ -92,10 +92,6 @@ protected:
         auto index_id = request.index_id();
         RETURN_IF_ERROR(channel->close(this, &finished, request, response));
         if (finished) {
-            LOG_INFO("load channel finished")
-                    .tag("max_build_rowset_cost_ms", response->max_build_rowset_cost_ms())
-                    .tag("avg_build_rowset_cost_ms", response->avg_build_rowset_cost_ms())
-                    .tag("upload_speed_bytes_s", response->upload_speed_bytes_s());
             std::lock_guard<std::mutex> l(_lock);
             {
                 std::lock_guard<SpinLock> l(_tablets_channels_lock);

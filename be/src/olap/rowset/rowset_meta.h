@@ -273,10 +273,13 @@ public:
 
     void set_num_segments(int64_t num_segments) { _rowset_meta_pb.set_num_segments(num_segments); }
 
-    void to_rowset_pb(RowsetMetaPB* rs_meta_pb) const {
+    void to_rowset_pb(RowsetMetaPB* rs_meta_pb, bool skip_schema = false) const {
         *rs_meta_pb = _rowset_meta_pb;
-        if (_schema) {
-            _schema->to_schema_pb(rs_meta_pb->mutable_tablet_schema());
+        if (_schema) [[likely]] {
+            rs_meta_pb->set_schema_version(_schema->schema_version());
+            if (!skip_schema) {
+                _schema->to_schema_pb(rs_meta_pb->mutable_tablet_schema());
+            }
         }
     }
 

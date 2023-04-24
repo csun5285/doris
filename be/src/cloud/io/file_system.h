@@ -23,13 +23,9 @@
 #include "cloud/io/file_writer.h"
 #include "cloud/io/path.h"
 #include "common/status.h"
-#include "gutil/macros.h"
 #include "olap/olap_common.h"
 namespace doris {
 namespace io {
-
-class FileWriter;
-class FileReader;
 
 // Currently, FE use resource name to identify a Resource.
 using ResourceId = std::string;

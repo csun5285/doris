@@ -1,6 +1,7 @@
 
 // clang-format off
 #include "meta_server.h"
+#include <glog/logging.h>
 
 #include "common/config.h"
 #include "common/metric.h"
@@ -23,7 +24,6 @@
 #include <random>
 #include <thread>
 // clang-format on
-
 
 namespace brpc {
 DECLARE_uint64(max_body_size);
@@ -173,14 +173,14 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
                 if (ret != 0 && ret != 1) break;
                 ServiceRegistryPB reg;
                 if (ret == 0 && !reg.ParseFromString(val)) break;
-                LOG(INFO) << "get server registry, key=" << hex(key)
-                          << " reg=" << proto_to_json(reg);
+                LOG_EVERY_N(INFO, 100)
+                        << "get server registry, key=" << hex(key) << " reg=" << proto_to_json(reg);
                 prepare_registry(&reg);
                 val = reg.SerializeAsString();
                 if (val.empty()) break;
                 txn->put(key, val);
-                LOG(INFO) << "put server registry, key=" << hex(key)
-                          << " reg=" << proto_to_json(reg);
+                LOG_EVERY_N(INFO, 100)
+                        << "put server registry, key=" << hex(key) << " reg=" << proto_to_json(reg);
                 ret = txn->commit();
                 if (ret != 0) {
                     LOG(WARNING) << "failed to commit registry, key=" << hex(key)

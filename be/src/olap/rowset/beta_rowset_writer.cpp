@@ -763,10 +763,6 @@ RowsetSharedPtr BetaRowsetWriter::build() {
                          << " res=" << status;
             return nullptr;
         }
-        auto s3_file_writer = dynamic_cast<io::S3FileWriter*>(file_writer.get());
-        if (s3_file_writer != nullptr) {
-            _upload_cost_ms = s3_file_writer->upload_cost_ms();
-        }
     }
     status = _wait_flying_segcompaction();
     if (!status.ok()) {

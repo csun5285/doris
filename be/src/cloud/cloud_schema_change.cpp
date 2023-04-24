@@ -1,5 +1,6 @@
 #include "cloud/cloud_schema_change.h"
 
+#include "cloud/cloud_tablet_mgr.h"
 #include "cloud/utils.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset_factory.h"
@@ -12,7 +13,8 @@ using namespace ErrorCode;
 
 static constexpr int ALTER_TABLE_BATCH_SIZE = 4096;
 
-static std::unique_ptr<SchemaChange> get_sc_procedure(const RowBlockChanger& rb_changer, bool sc_sorting) {
+static std::unique_ptr<SchemaChange> get_sc_procedure(const RowBlockChanger& rb_changer,
+                                                      bool sc_sorting) {
     if (sc_sorting) {
         return std::make_unique<VSchemaChangeWithSorting>(
                 rb_changer, config::memory_limitation_per_thread_for_schema_change_bytes);
@@ -59,8 +61,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     int64_t base_max_version = base_tablet->local_max_version();
     if (request.alter_version > 1) {
         // [0-1] is a placeholder rowset, no need to convert
-        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_max_version},
-                                                              &rs_readers));
+        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_max_version}, &rs_readers));
     }
     // FIXME(cyx): Should trigger compaction on base_tablet if there are too many rowsets to convert.
 
@@ -327,8 +328,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
 Status CloudSchemaChange::process_alter_inverted_index(const TAlterInvertedIndexReq& request) {
     LOG(INFO) << "begin to alter inverted index: tablet_id=" << request.tablet_id
               << ", schema_hash=" << request.schema_hash
-              << ", alter_version=" << request.alter_version
-              << ", job_id=" << _job_id;
+              << ", alter_version=" << request.alter_version << ", job_id=" << _job_id;
     TabletSharedPtr tablet;
     RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(request.tablet_id, &tablet));
 
@@ -351,7 +351,8 @@ Status CloudSchemaChange::process_alter_inverted_index(const TAlterInvertedIndex
     return res;
 }
 
-Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr tablet, const TAlterInvertedIndexReq& request) {
+Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr tablet,
+                                                           const TAlterInvertedIndexReq& request) {
     Status res = Status::OK();
     // MUST sync rowsets before capturing rowset readers and building DeleteHandler
     RETURN_IF_ERROR(tablet->cloud_sync_rowsets(request.alter_version));
@@ -360,8 +361,8 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     std::vector<RowsetReaderSharedPtr> rs_readers;
     if (request.alter_version > 1) {
         // [0-1] is a placeholder rowset, no need to convert
-        RETURN_IF_ERROR(tablet->cloud_capture_rs_readers({2, tablet->local_max_version()},
-                                                              &rs_readers));
+        RETURN_IF_ERROR(
+                tablet->cloud_capture_rs_readers({2, tablet->local_max_version()}, &rs_readers));
     }
 
     // Create a new tablet schema, should merge with dropped columns in light weight schema change
@@ -377,11 +378,9 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
             if (delete_pred->version().first > request.alter_version) {
                 continue;
             }
-            tablet_schema->merge_dropped_columns(
-                    tablet->tablet_schema(delete_pred->version()));
+            tablet_schema->merge_dropped_columns(tablet->tablet_schema(delete_pred->version()));
         }
-        RETURN_IF_ERROR(
-                delete_handler.init(tablet_schema, all_del_preds, request.alter_version));
+        RETURN_IF_ERROR(delete_handler.init(tablet_schema, all_del_preds, request.alter_version));
     }
 
     std::vector<ColumnId> return_columns;
@@ -495,26 +494,26 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     {
         std::lock_guard wlock(tablet->get_header_lock());
         tablet->set_cumulative_layer_point(_output_cumulative_point);
-        tablet->reset_approximate_stats(stats.num_rowsets(), stats.num_segments(),
-                                            stats.num_rows(), stats.data_size());
+        tablet->reset_approximate_stats(stats.num_rowsets(), stats.num_segments(), stats.num_rows(),
+                                        stats.data_size());
     }
 
     return Status::OK();
 }
 
-Status CloudSchemaChange::_add_inverted_index(
-            std::vector<RowsetReaderSharedPtr> rs_readers, 
-            DeleteHandler* delete_handler,
-            const TabletSchemaSPtr& tablet_schema,
-            TabletSharedPtr tablet, 
-            const TAlterInvertedIndexReq& request) {
+Status CloudSchemaChange::_add_inverted_index(std::vector<RowsetReaderSharedPtr> rs_readers,
+                                              DeleteHandler* delete_handler,
+                                              const TabletSchemaSPtr& tablet_schema,
+                                              TabletSharedPtr tablet,
+                                              const TAlterInvertedIndexReq& request) {
     LOG(INFO) << "begin to add inverted index, tablet=" << tablet->full_name();
     Status res = Status::OK();
     std::vector<TOlapTableIndex> alter_inverted_indexs;
     if (request.__isset.alter_inverted_indexes) {
         alter_inverted_indexs = request.alter_inverted_indexes;
     }
-    auto sc_procedure = std::make_unique<SchemaChangeForInvertedIndex>(alter_inverted_indexs, tablet_schema);
+    auto sc_procedure =
+            std::make_unique<SchemaChangeForInvertedIndex>(alter_inverted_indexs, tablet_schema);
     // read tablet data and write inverted index
     for (auto& rs_reader : rs_readers) {
         VLOG_TRACE << "begin to read a history rowset. version=" << rs_reader->version().first
@@ -535,17 +534,20 @@ Status CloudSchemaChange::_add_inverted_index(
             auto new_tablet_schema = std::make_shared<TabletSchema>();
             new_tablet_schema->update_tablet_columns(*tablet->tablet_schema(), request.columns);
             new_tablet_schema->update_indexes_from_thrift(request.indexes);
-            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) != Status::OK()) {
-                LOG(WARNING) << "failed to update tablet schema, tablet id: " << tablet->tablet_id();
+            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) !=
+                Status::OK()) {
+                LOG(WARNING) << "failed to update tablet schema, tablet id: "
+                             << tablet->tablet_id();
                 return res;
             }
             tablet->update_max_version_schema(new_tablet_schema, true);
-            
+
             // update rowset meta level schema
             std::lock_guard<std::mutex> rwlock(tablet->get_rowset_update_lock());
             std::shared_lock<std::shared_mutex> wlock(tablet->get_header_lock());
             auto new_rs_tablet_schema = std::make_shared<TabletSchema>();
-            new_rs_tablet_schema->update_tablet_columns(*rowset_meta->tablet_schema(), request.columns);
+            new_rs_tablet_schema->update_tablet_columns(*rowset_meta->tablet_schema(),
+                                                        request.columns);
             new_rs_tablet_schema->update_indexes_from_thrift(request.indexes);
             rowset_meta->set_tablet_schema(new_rs_tablet_schema);
         }
@@ -572,11 +574,10 @@ Status CloudSchemaChange::_add_inverted_index(
     return Status::OK();
 }
 
-Status CloudSchemaChange::_drop_inverted_index(
-        std::vector<RowsetReaderSharedPtr> rs_readers, 
-        const TabletSchemaSPtr& tablet_schema,
-        TabletSharedPtr tablet, 
-        const TAlterInvertedIndexReq& request) {
+Status CloudSchemaChange::_drop_inverted_index(std::vector<RowsetReaderSharedPtr> rs_readers,
+                                               const TabletSchemaSPtr& tablet_schema,
+                                               TabletSharedPtr tablet,
+                                               const TAlterInvertedIndexReq& request) {
     LOG(INFO) << "begin to drop inverted index";
     Status res = Status::OK();
 
@@ -590,28 +591,31 @@ Status CloudSchemaChange::_drop_inverted_index(
         auto rowset_meta = rowset->rowset_meta();
         auto fs = rowset_meta->fs();
         for (auto i = 0; i < rowset_meta->num_segments(); ++i) {
-            std::string segment_path = rowset_meta->is_local()
-                    ? BetaRowset::segment_file_path(tablet->tablet_path(), rowset_meta->rowset_id(), i)
-                    : BetaRowset::remote_segment_path(tablet->tablet_id(), rowset_meta->rowset_id(), i);
-            for (auto& inverted_index: alter_inverted_indexs) {
+            std::string segment_path =
+                    rowset_meta->is_local()
+                            ? BetaRowset::segment_file_path(tablet->tablet_path(),
+                                                            rowset_meta->rowset_id(), i)
+                            : BetaRowset::remote_segment_path(tablet->tablet_id(),
+                                                              rowset_meta->rowset_id(), i);
+            for (auto& inverted_index : alter_inverted_indexs) {
                 auto column_name = inverted_index.columns[0];
                 auto column = tablet_schema->column(column_name);
                 auto index_id = inverted_index.index_id;
 
-                std::string inverted_index_file = InvertedIndexDescriptor::get_index_file_name(segment_path, index_id);
+                std::string inverted_index_file =
+                        InvertedIndexDescriptor::get_index_file_name(segment_path, index_id);
                 bool file_exist = false;
                 fs->exists(inverted_index_file, &file_exist);
                 if (!file_exist) {
                     return Status::OK();
                 }
                 LOG(INFO) << "will drop inverted index, index id: " << index_id
-                        << ", cid: " << column.unique_id()
-                        << ", column_name: " << column_name
-                        << ", inverted_index_file: " << inverted_index_file;
+                          << ", cid: " << column.unique_id() << ", column_name: " << column_name
+                          << ", inverted_index_file: " << inverted_index_file;
                 res = fs->delete_file(inverted_index_file);
                 if (!res.ok()) {
-                    LOG(WARNING) << "failed to delete file: " << inverted_index_file 
-                            << ", res: " << res.to_string();
+                    LOG(WARNING) << "failed to delete file: " << inverted_index_file
+                                 << ", res: " << res.to_string();
                     return res;
                 }
             }
@@ -623,17 +627,20 @@ Status CloudSchemaChange::_drop_inverted_index(
             auto new_tablet_schema = std::make_shared<TabletSchema>();
             new_tablet_schema->update_tablet_columns(*tablet->tablet_schema(), request.columns);
             new_tablet_schema->update_indexes_from_thrift(request.indexes);
-            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) != Status::OK()) {
-                LOG(WARNING) << "failed to update tablet schema, tablet id: " << tablet->tablet_id();
+            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) !=
+                Status::OK()) {
+                LOG(WARNING) << "failed to update tablet schema, tablet id: "
+                             << tablet->tablet_id();
                 return res;
             }
             tablet->update_max_version_schema(new_tablet_schema, true);
-            
+
             // update rowset meta level schema
             std::lock_guard<std::mutex> rwlock(tablet->get_rowset_update_lock());
             std::shared_lock<std::shared_mutex> wlock(tablet->get_header_lock());
             auto new_rs_tablet_schema = std::make_shared<TabletSchema>();
-            new_rs_tablet_schema->update_tablet_columns(*rowset_meta->tablet_schema(), request.columns);
+            new_rs_tablet_schema->update_tablet_columns(*rowset_meta->tablet_schema(),
+                                                        request.columns);
             new_rs_tablet_schema->update_indexes_from_thrift(request.indexes);
             rowset_meta->set_tablet_schema(new_rs_tablet_schema);
         }

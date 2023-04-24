@@ -20,6 +20,7 @@
 #include "gen_cpp/internal_service.pb.h"
 #include "olap/rowset/rowset_writer.h"
 #include "olap/tablet.h"
+#include "util/lock.h"
 #include "util/spinlock.h"
 
 namespace doris {
@@ -60,6 +61,8 @@ public:
     static Status open(WriteRequest* req, DeltaWriter** writer,
                        const UniqueId& load_id = TUniqueId(), bool is_vec = false);
 
+    static Status init(const std::vector<DeltaWriter*>& writers);
+
     ~DeltaWriter();
 
     Status init();
@@ -70,9 +73,13 @@ public:
 
     // flush the last memtable to flush queue, must call it before close_wait()
     Status close();
+#ifdef CLOUD_MODE
     // wait for all memtables to be flushed.
     // mem_consumption() should be 0 after this function returns.
+    Status close_wait(RowsetSharedPtr* rowset = nullptr);
+#else
     Status close_wait(const PSlaveTabletNodes& slave_tablet_nodes, const bool write_single_replica);
+#endif
 
     bool check_slave_replicas_done(google::protobuf::Map<int64_t, PSuccessSlaveTabletNodeIds>*
                                            success_slave_tablet_node_ids);
@@ -112,9 +119,7 @@ public:
     void finish_slave_tablet_pull_rowset(int64_t node_id, bool is_succeed);
 
     // metrics
-    int64_t upload_cost_ms() const { return _rowset_writer->upload_cost_ms(); }
     int64_t total_data_size() const { return _rowset_writer->total_data_size(); }
-    int64_t build_rowset_cost_ms() const { return _build_rowset_cost_ms; }
     int64_t total_received_rows() const { return _total_received_rows; }
 
 private:
@@ -159,7 +164,7 @@ private:
     SpinLock _mem_table_tracker_lock;
     std::atomic<uint32_t> _mem_table_num = 1;
 
-    std::mutex _lock;
+    doris::Mutex _lock;
 
     // use in vectorized load
     bool _is_vec;
@@ -181,7 +186,6 @@ private:
     // current max version, used to calculate delete bitmap
     int64_t _cur_max_version;
 
-    int64_t _build_rowset_cost_ms = 0;
     // total rows num written by DeltaWriter
     int64_t _total_received_rows = 0;
     // rows num merged by memtable

@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 
+#include "cloud/cloud_tablet_mgr.h"
 #include "cloud/utils.h"
 #include "common/status.h"
 #include "env/env.h"
@@ -510,8 +511,9 @@ void TaskWorkerPool::_alter_inverted_index_worker_thread_callback() {
     }
 }
 
-void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_inverted_index_request, int64_t signature,
-                            const TTaskType::type task_type, TFinishTaskRequest* finish_task_request) {
+void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_inverted_index_request,
+                                           int64_t signature, const TTaskType::type task_type,
+                                           TFinishTaskRequest* finish_task_request) {
     Status status = Status::OK();
     TStatus task_status;
     std::vector<string> error_msgs;
@@ -535,7 +537,8 @@ void TaskWorkerPool::_alter_inverted_index(const TAgentTaskRequest& alter_invert
     if (status.ok()) {
         // tablet_id = alter_inverted_index_request.alter_inverted_index_req.tablet_id;
         // schema_hash = alter_inverted_index_request.alter_inverted_index_req.schema_hash;
-        EngineAlterInvertedIndexTask engine_task(alter_inverted_index_request.alter_inverted_index_req);
+        EngineAlterInvertedIndexTask engine_task(
+                alter_inverted_index_request.alter_inverted_index_req);
         Status sc_status = _env->storage_engine()->execute_task(&engine_task);
         if (!sc_status.ok()) {
             if (sc_status.is<DATA_QUALITY_ERR>()) {

@@ -17,6 +17,9 @@
 
 #include "olap/delta_writer.h"
 
+#include <functional>
+
+#include "cloud/cloud_tablet_mgr.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -81,11 +84,12 @@ DeltaWriter::~DeltaWriter() {
             _tablet->flush_finish_count->increment(stat.flush_finish_count);
         }
     }
-
+#ifndef CLOUD_MODE
     if (_tablet != nullptr) {
         _tablet->data_dir()->remove_pending_ids(ROWSET_ID_PREFIX +
                                                 _rowset_writer->rowset_id().to_string());
     }
+#endif
 
     _mem_table.reset();
 }
@@ -102,6 +106,20 @@ void DeltaWriter::_garbage_collection() {
     if (rollback_status.ok()) {
         _storage_engine->add_unused_rowset(_cur_rowset);
     }
+}
+
+Status DeltaWriter::init(const std::vector<DeltaWriter*>& writers) {
+    std::vector<std::function<Status()>> tasks;
+    tasks.reserve(writers.size());
+    for (auto writer : writers) {
+        if (writer->_is_init || writer->_is_cancelled) continue;
+        tasks.push_back([writer] {
+            std::lock_guard lock(writer->_lock);
+            if (writer->_is_init || writer->_is_cancelled) return Status::OK();
+            return writer->init();
+        });
+    }
+    return cloud::bthread_fork_and_join(tasks, 10);
 }
 
 Status DeltaWriter::init() {
@@ -149,7 +167,7 @@ Status DeltaWriter::init() {
         if (!base_migration_rlock.owns_lock()) {
             return Status::Error<TRY_LOCK_FAILED>();
         }
-        std::lock_guard<std::mutex> push_lock(_tablet->get_push_lock());
+        std::lock_guard push_lock(_tablet->get_push_lock());
         RETURN_NOT_OK(_storage_engine->txn_manager()->prepare_txn(_req.partition_id, _tablet,
                                                                   _req.txn_id, _req.load_id));
     }
@@ -169,8 +187,6 @@ Status DeltaWriter::init() {
     context.tablet_id = _tablet->table_id();
     context.is_direct_write = true;
     context.tablet = _tablet;
-    context.tablet_id = _tablet->table_id();
-    context.is_direct_write = true;
     RETURN_NOT_OK(_tablet->create_rowset_writer(context, &_rowset_writer));
     _schema.reset(new Schema(_tablet_schema));
 #ifdef CLOUD_MODE
@@ -190,7 +206,7 @@ Status DeltaWriter::init() {
 }
 
 Status DeltaWriter::write(Tuple* tuple) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init && !_is_cancelled) {
         RETURN_NOT_OK(init());
     }
@@ -222,7 +238,7 @@ Status DeltaWriter::write(Tuple* tuple) {
 }
 
 Status DeltaWriter::write(const RowBatch* row_batch, const std::vector<int>& row_idxs) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init && !_is_cancelled) {
         RETURN_NOT_OK(init());
     }
@@ -255,7 +271,7 @@ Status DeltaWriter::write(const vectorized::Block* block, const std::vector<int>
     if (UNLIKELY(row_idxs.empty())) {
         return Status::OK();
     }
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init && !_is_cancelled) {
         RETURN_NOT_OK(init());
     }
@@ -293,7 +309,7 @@ Status DeltaWriter::_flush_memtable_async() {
 }
 
 Status DeltaWriter::flush_memtable_and_wait(bool need_wait) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init) {
         // This writer is not initialized before flushing. Do nothing
         // But we return OK instead of Status::Error<ALREADY_CANCELLED>(),
@@ -323,7 +339,7 @@ Status DeltaWriter::flush_memtable_and_wait(bool need_wait) {
 }
 
 Status DeltaWriter::wait_flush() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init) {
         // return OK instead of Status::Error<ALREADY_CANCELLED>() for same reason
         // as described in flush_memtable_and_wait()
@@ -369,7 +385,7 @@ void DeltaWriter::_reset_mem_table() {
 }
 
 Status DeltaWriter::close() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (!_is_init && !_is_cancelled) {
         // if this delta writer is not initialized, but close() is called.
         // which means this tablet has no data loaded, but at least one tablet
@@ -399,9 +415,9 @@ Status DeltaWriter::close() {
     }
 }
 
-Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
-                               const bool write_single_replica) {
-    std::lock_guard<std::mutex> l(_lock);
+#ifdef CLOUD_MODE
+Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
+    std::lock_guard l(_lock);
     DCHECK(_is_init)
             << "delta writer is supposed be to initialized before close_wait() being called";
 
@@ -424,15 +440,10 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
         return Status::InternalError("rows number written by delta writer dosen't match");
     }
     // use rowset meta manager to save meta
-    using namespace std::chrono;
-    auto build_start = steady_clock::now();
     _cur_rowset = _rowset_writer->build();
     if (_cur_rowset == nullptr) {
-        LOG(WARNING) << "fail to build rowset";
-        return Status::Error<MEM_ALLOC_FAILED>();
+        return Status::InternalError("fail to build rowset");
     }
-    _build_rowset_cost_ms = duration_cast<milliseconds>(steady_clock::now() - build_start).count();
-#ifdef CLOUD_MODE
     RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_cur_rowset->rowset_meta(), true));
     // These stats may be larger than the actual value if the txn is aborted
     _tablet->fetch_add_approximate_num_rowsets(1);
@@ -441,7 +452,48 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
     _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
     _tablet->fetch_add_approximate_cumu_num_rowsets(1);
     _tablet->fetch_add_approximate_cumu_data_size(_cur_rowset->data_disk_size());
+
+    _delta_written_success = true;
+
+    const FlushStatistic& stat = _flush_token->get_stats();
+    VLOG_CRITICAL << "close delta writer for tablet: " << _tablet->tablet_id()
+                  << ", load id: " << print_id(_req.load_id) << ", stats: " << stat;
+    if (rowset != nullptr) {
+        *rowset = _cur_rowset;
+    }
+    return Status::OK();
+}
 #else
+Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
+                               const bool write_single_replica) {
+    std::lock_guard l(_lock);
+    DCHECK(_is_init)
+            << "delta writer is supposed be to initialized before close_wait() being called";
+
+    if (_is_cancelled) {
+        return _cancel_status;
+    }
+    // return error if previous flush failed
+    auto st = _flush_token->wait();
+    if (UNLIKELY(!st.ok())) {
+        LOG(WARNING) << "previous flush failed tablet " << _tablet->tablet_id();
+        return st;
+    }
+
+    _mem_table.reset();
+
+    if (_rowset_writer->num_rows() + _merged_rows != _total_received_rows) {
+        LOG(WARNING) << "the rows number written doesn't match, rowset num rows written to file: "
+                     << _rowset_writer->num_rows() << ", merged_rows: " << _merged_rows
+                     << ", total received rows: " << _total_received_rows;
+        return Status::InternalError("rows number written by delta writer dosen't match");
+    }
+    // use rowset meta manager to save meta
+    _cur_rowset = _rowset_writer->build();
+    if (_cur_rowset == nullptr) {
+        LOG(WARNING) << "fail to build rowset";
+        return Status::Error<MEM_ALLOC_FAILED>();
+    }
     Status res = _storage_engine->txn_manager()->commit_txn(_req.partition_id, _tablet, _req.txn_id,
                                                             _req.load_id, _cur_rowset, false);
     if (!res && !res.is<PUSH_TRANSACTION_ALREADY_EXIST>()) {
@@ -449,7 +501,6 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
                      << " for rowset: " << _cur_rowset->rowset_id();
         return res;
     }
-#endif
     if (_tablet->enable_unique_key_merge_on_write()) {
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
                 _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
@@ -470,6 +521,7 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
     }
     return Status::OK();
 }
+#endif // !CLOUD_MODE
 
 bool DeltaWriter::check_slave_replicas_done(
         google::protobuf::Map<int64_t, PSuccessSlaveTabletNodeIds>* success_slave_tablet_node_ids) {
@@ -492,7 +544,7 @@ Status DeltaWriter::cancel() {
 }
 
 Status DeltaWriter::cancel_with_status(const Status& st) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (_is_cancelled) {
         return Status::OK();
     }
@@ -507,7 +559,7 @@ Status DeltaWriter::cancel_with_status(const Status& st) {
 }
 
 void DeltaWriter::save_mem_consumption_snapshot() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     _mem_consumption_snapshot = mem_consumption();
     if (_mem_table == nullptr) {
         _memtable_consumption_snapshot = 0;

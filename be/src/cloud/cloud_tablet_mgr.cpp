@@ -8,6 +8,7 @@
 #include <sstream>
 #include <variant>
 
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/sync_point.h"

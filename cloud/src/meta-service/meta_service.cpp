@@ -826,6 +826,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     ret = txn_kv_->create_txn(&txn);
     int64_t put_size = 0;
     int64_t del_size = 0;
+    int num_put_keys = 0, num_del_keys = 0;
     if (ret != 0) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         ss << "filed to create txn, txn_id=" << txn_id;
@@ -978,13 +979,15 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     } // for tmp_rowsets_meta
 
     // Save rowset meta
+    num_put_keys += rowsets.size();
     for (auto& i : rowsets) {
         txn->put(i.first, i.second);
-        put_size += i.second.size();
+        put_size += i.first.size() + i.second.size();
         LOG(INFO) << "xxx put rowset_key=" << hex(i.first) << " txn_id=" << txn_id;
     }
 
     // Save versions
+    num_put_keys += new_versions.size();
     for (auto& i : new_versions) {
         std::string ver_val;
         VersionPB version_pb;
@@ -997,7 +1000,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         }
 
         txn->put(i.first, ver_val);
-        put_size += ver_val.size();
+        put_size += i.first.size() + ver_val.size();
         LOG(INFO) << "xxx put version_key=" << hex(i.first) << " version:" << i.second
                   << " txn_id=" << txn_id;
 
@@ -1052,7 +1055,8 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         return;
     }
     txn->put(txn_inf_key, txn_inf_val);
-    put_size += txn_inf_val.size();
+    put_size += txn_inf_key.size() + txn_inf_val.size();
+    ++num_put_keys;
     LOG(INFO) << "xxx put txn_inf_key=" << hex(txn_inf_key) << " txn_id=" << txn_id;
 
     // Update stats of affected tablet
@@ -1060,19 +1064,24 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     std::function<void(const StatsTabletKeyInfo&, const TabletStats&)> update_tablet_stats;
     if (config::split_tablet_stats) {
         update_tablet_stats = [&](const StatsTabletKeyInfo& info, const TabletStats& stats) {
-            auto& data_size_key = kv_pool.emplace_back();
-            stats_tablet_data_size_key(info, &data_size_key);
-            txn->atomic_add(data_size_key, stats.data_size);
-            auto& num_rows_key = kv_pool.emplace_back();
-            stats_tablet_num_rows_key(info, &num_rows_key);
-            txn->atomic_add(num_rows_key, stats.num_rows);
+            if (stats.num_segs > 0) {
+                auto& data_size_key = kv_pool.emplace_back();
+                stats_tablet_data_size_key(info, &data_size_key);
+                txn->atomic_add(data_size_key, stats.data_size);
+                auto& num_rows_key = kv_pool.emplace_back();
+                stats_tablet_num_rows_key(info, &num_rows_key);
+                txn->atomic_add(num_rows_key, stats.num_rows);
+                auto& num_segs_key = kv_pool.emplace_back();
+                stats_tablet_num_segs_key(info, &num_segs_key);
+                txn->atomic_add(num_segs_key, stats.num_segs);
+                put_size += data_size_key.size() + num_rows_key.size() + num_segs_key.size() + 24;
+                num_put_keys += 3;
+            }
             auto& num_rowsets_key = kv_pool.emplace_back();
             stats_tablet_num_rowsets_key(info, &num_rowsets_key);
             txn->atomic_add(num_rowsets_key, stats.num_rowsets);
-            auto& num_segs_key = kv_pool.emplace_back();
-            stats_tablet_num_segs_key(info, &num_segs_key);
-            txn->atomic_add(num_segs_key, stats.num_segs);
-            put_size += 8 * 4;
+            put_size += num_rowsets_key.size() + 8;
+            ++num_put_keys;
         };
     } else {
         update_tablet_stats = [&](const StatsTabletKeyInfo& info, const TabletStats& stats) {
@@ -1099,7 +1108,8 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
             stats_pb.set_num_segments(stats_pb.num_segments() + stats.num_segs);
             stats_pb.SerializeToString(&val);
             txn->put(key, val);
-            put_size += val.size();
+            put_size += key.size() + val.size();
+            ++num_put_keys;
         };
     }
     for (auto& [tablet_id, stats] : tablet_stats) {
@@ -1110,8 +1120,8 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         update_tablet_stats(info, stats);
         if (code != MetaServiceCode::OK) return;
     }
-
     // Remove tmp rowset meta
+    num_del_keys += tmp_rowsets_meta.size();
     for (auto& [k, _] : tmp_rowsets_meta) {
         txn->remove(k);
         del_size += k.size();
@@ -1124,6 +1134,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     LOG(INFO) << "xxx remove txn_run_key=" << hex(txn_run_key) << " txn_id=" << txn_id;
     txn->remove(txn_run_key);
     del_size += txn_run_key.size();
+    ++num_del_keys;
 
     std::string recycle_txn_key_;
     std::string recycle_txn_val;
@@ -1141,10 +1152,12 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         return;
     }
     txn->put(recycle_txn_key_, recycle_txn_val);
-    put_size += recycle_txn_val.size();
+    put_size += recycle_txn_key_.size() + recycle_txn_val.size();
+    ++num_put_keys;
     LOG(INFO) << "xxx commit_txn put recycle_txn_key key=" << hex(recycle_txn_key_)
               << " txn_id=" << txn_id;
     LOG(INFO) << "commit_txn put_size=" << put_size << " del_size=" << del_size
+              << " num_put_keys=" << num_put_keys << " num_del_keys=" << num_del_keys
               << " txn_id=" << txn_id;
 
     // Finally we are done...
@@ -2321,12 +2334,6 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         meta_rowset_key(key_info, &commit_key);
     }
 
-    if (!rowset_meta.SerializeToString(&commit_val)) {
-        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-        msg = "failed to serialize rowset meta";
-        return;
-    }
-
     std::unique_ptr<Transaction> txn;
     ret = txn_kv_->create_txn(&txn);
     if (ret != 0) {
@@ -2339,14 +2346,15 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     std::string existed_commit_val;
     ret = txn->get(commit_key, &existed_commit_val);
     if (ret == 0) {
-        if (existed_commit_val == commit_val) {
-            // Same request, return OK
-            return;
-        }
         auto existed_rowset_meta = response->mutable_existed_rowset_meta();
         if (!existed_rowset_meta->ParseFromString(existed_commit_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
             msg = fmt::format("malformed rowset meta value. key={}", hex(commit_key));
+            return;
+        }
+        if (existed_rowset_meta->rowset_id_v2() == rowset_meta.rowset_id_v2()) {
+            // Same request, return OK
+            response->set_allocated_existed_rowset_meta(nullptr);
             return;
         }
         if (!existed_rowset_meta->has_index_id()) {
@@ -2400,7 +2408,6 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     std::string prepare_key;
     RecycleRowsetKeyInfo prepare_key_info {instance_id, tablet_id, rowset_id};
     recycle_rowset_key(prepare_key_info, &prepare_key);
-
     if (!rowset_meta.SerializeToString(&commit_val)) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
         msg = "failed to serialize rowset meta";
@@ -4971,7 +4978,7 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
     if (get_all_cluster_info) {
         response->mutable_cluster()->CopyFrom(instance.clusters());
         msg = proto_to_json(*response);
-        LOG(INFO) << "get all cluster info, " << msg;
+        LOG_EVERY_N(INFO, 100) << "get all cluster info, " << msg;
     } else {
         for (int i = 0; i < instance.clusters_size(); ++i) {
             auto& c = instance.clusters(i);
@@ -4985,8 +4992,8 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
                 // just one cluster
                 response->add_cluster()->CopyFrom(c);
                 msg = proto_to_json(response->cluster().at(0));
-                LOG(INFO) << "found a cluster, instance_id=" << instance.instance_id()
-                          << " cluster=" << msg;
+                LOG_EVERY_N(INFO, 100) << "found a cluster, instance_id=" << instance.instance_id()
+                                       << " cluster=" << msg;
             }
         }
     }

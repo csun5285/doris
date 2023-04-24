@@ -31,6 +31,7 @@
 #include "runtime/thread_context.h"
 #include "util/bitmap.h"
 #include "util/countdown_latch.h"
+#include "util/lock.h"
 #include "util/priority_thread_pool.hpp"
 #include "util/uid_util.h"
 #include "vec/core/block.h"
@@ -99,11 +100,13 @@ private:
 
     bool _try_to_wait_flushing();
 
+#ifndef CLOUD_MODE
     // deal with DeltaWriter close_wait(), add tablet to list for return.
     void _close_wait(DeltaWriter* writer,
                      google::protobuf::RepeatedPtrField<PTabletInfo>* tablet_vec,
                      google::protobuf::RepeatedPtrField<PTabletError>* tablet_error,
                      PSlaveTabletNodes slave_tablet_nodes, const bool write_single_replica);
+#endif
 
     void _add_broken_tablet(int64_t tablet_id);
     bool _is_broken_tablet(int64_t tablet_id);
@@ -112,7 +115,7 @@ private:
     TabletsChannelKey _key;
 
     // make execute sequence
-    std::mutex _lock;
+    doris::Mutex _lock;
 
     SpinLock _tablet_writers_lock;
 
@@ -153,7 +156,7 @@ private:
     // only one thread can reduce memory for one TabletsChannel.
     // if some other thread call `reduce_memory_usage` at the same time,
     // it will wait on this condition variable.
-    std::condition_variable _reduce_memory_cond;
+    doris::ConditionVariable _reduce_memory_cond;
 
     std::shared_mutex _broken_tablets_lock;
 
@@ -170,7 +173,7 @@ private:
 
 template <typename Request>
 Status TabletsChannel::_get_current_seq(int64_t& cur_seq, const Request& request) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (_state != kOpened) {
         return _state == kFinished ? _close_status
                                    : Status::InternalError("TabletsChannel {} state: {}",

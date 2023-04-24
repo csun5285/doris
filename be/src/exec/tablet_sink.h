@@ -230,13 +230,6 @@ public:
         *total_add_batch_num += _add_batch_counter.add_batch_num;
     }
 
-    void cloud_time_report(int64_t& max_build_rowset_cost_ms, int64_t& avg_build_rowset_cost_ms,
-                           int64_t& upload_speed_bytes_s) const {
-        max_build_rowset_cost_ms = std::max(max_build_rowset_cost_ms, _max_build_rowset_cost_ms);
-        avg_build_rowset_cost_ms = _avg_build_rowset_cost_ms;
-        upload_speed_bytes_s = _upload_speed_bytes_s;
-    }
-
     int64_t node_id() const { return _node_id; }
     std::string host() const { return _node_info.host; }
     std::string name() const { return _name; }
@@ -332,9 +325,9 @@ protected:
     std::vector<std::pair<int64_t, int64_t>> _tablets_received_rows;
 
     // CLOUD_MODE upload metrics
-    int64_t _max_build_rowset_cost_ms = 0;
-    int64_t _avg_build_rowset_cost_ms = 0;
-    int64_t _upload_speed_bytes_s = 0;
+    friend class OlapTableSink;
+    int64_t _build_rowset_latency_ms = 0;
+    int64_t _commit_rowset_latency_ms = 0;
 
 private:
     std::unique_ptr<RowBatch> _cur_batch;
@@ -563,8 +556,6 @@ protected:
     RuntimeProfile::Counter* _max_add_batch_exec_timer = nullptr;
     RuntimeProfile::Counter* _add_batch_number = nullptr;
     RuntimeProfile::Counter* _num_node_channels = nullptr;
-    RuntimeProfile::Counter* _min_upload_speed_bytes_s = nullptr;
-    RuntimeProfile::Counter* _max_upload_speed_bytes_s = nullptr;
 
     // load mem limit is for remote load channel
     int64_t _load_mem_limit = -1;

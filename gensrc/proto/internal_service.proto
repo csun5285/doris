@@ -168,11 +168,12 @@ message PTabletWriterAddBatchResult {
     optional int64 wait_execution_time_us = 5;
     repeated PTabletError tablet_errors = 6;
     map<int64, PSuccessSlaveTabletNodeIds> success_slave_tablet_node_ids = 7;
-    optional int64 DEPRECATED_max_upload_speed = 8;
-    optional int64 DEPRECATED_min_upload_speed = 9;
-    optional int64 max_build_rowset_cost_ms = 10;
-    optional int64 avg_build_rowset_cost_ms = 11;
-    optional int64 upload_speed_bytes_s = 12;
+    //optional int64 DEPRECATED_max_upload_speed = 8;
+    //optional int64 DEPRECATED_min_upload_speed = 9;
+    optional int64 build_rowset_latency_ms = 10;
+    //optional int64 DEPRECATED_avg_build_rowset_cost_ms = 11;
+    //optional int64 DEPRECATED_upload_speed_bytes_s = 12;
+    optional int64 commit_rowset_latency_ms = 13;
 };
 
 message PTabletWriterAddBlockResult {
@@ -183,11 +184,12 @@ message PTabletWriterAddBlockResult {
     optional int64 wait_execution_time_us = 5;
     repeated PTabletError tablet_errors = 6;
     map<int64, PSuccessSlaveTabletNodeIds> success_slave_tablet_node_ids = 7;
-    optional int64 DEPRECATED_max_upload_speed = 8;
-    optional int64 DEPRECATED_min_upload_speed = 9;
-    optional int64 max_build_rowset_cost_ms = 10;
-    optional int64 avg_build_rowset_cost_ms = 11;
-    optional int64 upload_speed_bytes_s = 12;
+    //optional int64 DEPRECATED_max_upload_speed = 8;
+    //optional int64 DEPRECATED_min_upload_speed = 9;
+    optional int64 build_rowset_latency_ms = 10;
+    //optional int64 DEPRECATED_avg_build_rowset_cost_ms = 11;
+    //optional int64 DEPRECATED_upload_speed_bytes_s = 12;
+    optional int64 commit_rowset_latency_ms = 13;
 };
 
 // tablet writer cancel

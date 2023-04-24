@@ -98,7 +98,6 @@ public:
     virtual const RowsetMetaSharedPtr& rowset_meta() const = 0;
 
     // metrics 
-    virtual int64_t upload_cost_ms() const = 0;
     virtual int64_t total_data_size() const = 0;
     virtual int32_t get_atomic_num_segment() const = 0;
 
