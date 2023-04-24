@@ -444,7 +444,6 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
     if (_cur_rowset == nullptr) {
         return Status::InternalError("fail to build rowset");
     }
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_cur_rowset->rowset_meta(), true));
     // These stats may be larger than the actual value if the txn is aborted
     _tablet->fetch_add_approximate_num_rowsets(1);
     _tablet->fetch_add_approximate_num_segments(_cur_rowset->num_segments());
