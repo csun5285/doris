@@ -19,10 +19,22 @@ IFileCache::IFileCache(const std::string& cache_base_path, const FileCacheSettin
           _total_size(cache_settings.total_size),
           _max_file_segment_size(cache_settings.max_file_segment_size),
           _max_query_cache_size(cache_settings.max_query_cache_size) {
-    _cur_size_metrics =
-            std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(), "cur_size", 0);
-    _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
-                                                                         "cur_ttl_cache_size", 0);
+    _cur_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
+                                                               "file_cache_cur_cache_size", 0);
+    _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_ttl_cache_size", 0);
+    _cur_normal_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_normal_queue_element_count", 0);
+    _cur_normal_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_normal_queue_cache_size", 0);
+    _cur_index_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_index_queue_element_count", 0);
+    _cur_index_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_index_queue_cache_size", 0);
+    _cur_disposable_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_disposable_queue_element_count", 0);
+    _cur_disposable_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_cur_disposable_queue_cache_size", 0);
 }
 
 std::string IFileCache::Key::to_string() const {

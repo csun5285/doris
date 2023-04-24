@@ -1192,11 +1192,22 @@ void LRUFileCache::run_background_operation() {
         }
 
         // report
-        _cur_size_metrics->set_value(_cur_cache_size);
+        _cur_cache_size_metrics->set_value(_cur_cache_size);
         _cur_ttl_cache_size_metrics->set_value(_cur_cache_size -
                                                _index_queue.get_total_cache_size(cache_lock) -
                                                _normal_queue.get_total_cache_size(cache_lock) -
                                                _disposable_queue.get_total_cache_size(cache_lock));
+        _cur_normal_queue_cache_size_metrics->set_value(
+                _normal_queue.get_total_cache_size(cache_lock));
+        _cur_normal_queue_element_count_metrics->set_value(
+                _normal_queue.get_elements_num(cache_lock));
+        _cur_index_queue_cache_size_metrics->set_value(
+                _index_queue.get_total_cache_size(cache_lock));
+        _cur_index_queue_element_count_metrics->set_value(_index_queue.get_elements_num(cache_lock));
+        _cur_disposable_queue_cache_size_metrics->set_value(
+                _disposable_queue.get_total_cache_size(cache_lock));
+        _cur_disposable_queue_element_count_metrics->set_value(
+                _disposable_queue.get_elements_num(cache_lock));
     }
 }
 
