@@ -172,6 +172,10 @@ Status VExpr::create_expr(doris::ObjectPool* pool, const doris::TExprNode& texpr
             *expr = pool->add(new VTupleIsNullPredicate(texpr_node));
             break;
         }
+        case TExprNodeType::SCHEMA_CHANGE_EXPR: {
+            *expr = pool->add(new VSchemaChangeExpr(texpr_node));
+            break;
+        }
         default:
             return Status::InternalError("Unknown expr node type: {}", texpr_node.node_type);
         }
