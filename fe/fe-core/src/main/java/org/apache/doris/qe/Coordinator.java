@@ -99,10 +99,12 @@ import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 import io.opentelemetry.api.trace.Span;
@@ -193,7 +195,7 @@ public class Coordinator {
     private final List<BackendExecState> backendExecStates = Lists.newArrayList();
     // backend which state need to be checked when joining this coordinator.
     // It is supposed to be the subset of backendExecStates.
-    private final List<BackendExecState> needCheckBackendExecStates = Lists.newArrayList();
+    private final Multimap<TUniqueId, BackendExecState> needCheckBackendExecStates = HashMultimap.create();
     private ResultReceiver receiver;
     private final List<ScanNode> scanNodes;
     // number of instances of this query, equals to
@@ -682,7 +684,7 @@ public class Coordinator {
 
                     backendExecStates.add(execState);
                     if (needCheckBackendState) {
-                        needCheckBackendExecStates.add(execState);
+                        needCheckBackendExecStates.put(tParam.params.fragment_instance_id, execState);
                         if (LOG.isDebugEnabled()) {
                             LOG.debug("add need check backend {} for fragment, {} job: {}",
                                     execState.backend.getId(), fragment.getFragmentId().asInt(), jobId);
@@ -1876,10 +1878,12 @@ public class Coordinator {
      * return true if all of them are OK. Otherwise, return false.
      */
     private boolean checkBackendState() {
-        for (BackendExecState backendExecState : needCheckBackendExecStates) {
-            if (!backendExecState.isBackendStateHealthy()) {
+        Set<TUniqueId> uniqueIds = profileDoneSignal.getLeftMarks().stream().map(p -> p.getKey()).collect(
+                Collectors.toSet());
+        for (Entry<TUniqueId, BackendExecState> state : needCheckBackendExecStates.entries()) {
+            if (uniqueIds.contains(state.getKey()) && !state.getValue().isBackendStateHealthy()) {
                 queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend "
-                        + backendExecState.backend.getId() + " is down");
+                        + state.getValue().backend.getId() + " is down");
                 return false;
             }
         }
