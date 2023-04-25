@@ -699,6 +699,9 @@ int64_t Compaction::get_compaction_permits() {
 }
 
 void Compaction::file_cache_garbage_collection() {
+    if (!config::enable_file_cache) {
+        return;
+    }
     if (_output_rs_writer) {
         auto* beta_rowset_writer = dynamic_cast<BetaRowsetWriter*>(_output_rs_writer.get());
         DCHECK(beta_rowset_writer);

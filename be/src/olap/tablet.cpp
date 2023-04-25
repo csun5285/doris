@@ -628,6 +628,11 @@ Status Tablet::cloud_sync_meta() {
     if (_tablet_meta->table_name() != table_name) {
         _tablet_meta->set_table_name(table_name);
     }
+
+    if (!config::enable_file_cache) {
+        return Status::OK();
+    }
+
     auto new_ttl_seconds = tablet_meta->ttl_seconds();
     if (_tablet_meta->ttl_seconds() != new_ttl_seconds) {
         _tablet_meta->set_ttl_seconds(new_ttl_seconds);
@@ -826,13 +831,15 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
             }
         }
     }
-    for (auto& rs : expired_rowsets) {
-        for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
-            auto file_key = io::CloudFileCache::hash(
-                    io::Path(rs->segment_file_path(seg_id)).filename().native());
-            auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
-            file_cache->remove_if_cached(file_key);
-        }
+    if (config::enable_file_cache) {
+        for (auto& rs : expired_rowsets) {
+            for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+                auto file_key = io::CloudFileCache::hash(
+                        io::Path(rs->segment_file_path(seg_id)).filename().native());
+                auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+                file_cache->remove_if_cached(file_key);
+            }
+    }
     }
     return expired_rowsets.size();
 }

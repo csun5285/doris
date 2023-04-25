@@ -1242,6 +1242,10 @@ void PInternalServiceImpl::get_file_cache_meta_by_tablet_id(
         const PGetFileCacheMetaRequest* request, PGetFileCacheMetaResponse* response,
         google::protobuf::Closure* done) {
     brpc::ClosureGuard closure_guard(done);
+    if (!config::enable_file_cache) {
+        LOG_WARNING("try to access tablet file cache meta, but file cache not enabled");
+        return;
+    }
     std::for_each(
             request->tablet_ids().cbegin(), request->tablet_ids().cend(), [&](int64_t tablet_id) {
                 TabletSharedPtr tablet;
