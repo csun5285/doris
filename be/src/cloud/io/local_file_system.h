@@ -50,10 +50,10 @@ public:
 
     Status list(const Path& path, std::vector<Path>* files) override;
 
-    // TODO(chengyuxuan): fix it, private
-    LocalFileSystem(Path&& root_path, ResourceId&& resource_id);
-
     Path absolute_path(const Path& path) const;
+
+private:
+    LocalFileSystem(Path&& root_path, ResourceId&& resource_id);
 };
 
 const FileSystemSPtr& global_local_filesystem();

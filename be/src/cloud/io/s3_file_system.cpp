@@ -60,7 +60,8 @@ bvar::Adder<uint64_t> s3_file_size_counter("s3_file_system", "file_size");
 const std::string OSS_PRIVATE_ENDPOINT_SUFFIX = "-internal.aliyuncs.com";
 
 std::shared_ptr<S3FileSystem> S3FileSystem::create(S3Conf s3_conf, ResourceId resource_id) {
-    return std::make_shared<S3FileSystem>(std::move(s3_conf), std::move(resource_id));
+    std::shared_ptr<S3FileSystem> fs(new S3FileSystem(std::move(s3_conf), std::move(resource_id)));
+    return fs;
 }
 
 S3FileSystem::S3FileSystem(S3Conf&& s3_conf, ResourceId&& resource_id)
@@ -106,8 +107,10 @@ std::shared_ptr<Aws::Transfer::TransferManager> S3FileSystem::get_transfer_manag
                     handle->Callback();
                 };
         if (sse_enabled()) {
-            transfer_config.putObjectTemplate.WithServerSideEncryption(Aws::S3::Model::ServerSideEncryption::AES256);
-            transfer_config.createMultipartUploadTemplate.WithServerSideEncryption(Aws::S3::Model::ServerSideEncryption::AES256);
+            transfer_config.putObjectTemplate.WithServerSideEncryption(
+                    Aws::S3::Model::ServerSideEncryption::AES256);
+            transfer_config.createMultipartUploadTemplate.WithServerSideEncryption(
+                    Aws::S3::Model::ServerSideEncryption::AES256);
         }
         _transfer_manager = Aws::Transfer::TransferManager::Create(transfer_config);
     }

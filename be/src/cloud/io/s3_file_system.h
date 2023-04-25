@@ -47,7 +47,8 @@ public:
 
     Status open_file(const Path& path, FileReaderSPtr* reader) override;
 
-    Status open_file_impl(const Path& path, metrics_hook, FileReaderSPtr* reader, size_t file_size = 0);
+    Status open_file_impl(const Path& path, metrics_hook, FileReaderSPtr* reader,
+                          size_t file_size = 0);
 
     Status open_file(const Path& path, metrics_hook, FileReaderSPtr* reader,
                      size_t file_size = 0) override;
@@ -102,10 +103,8 @@ public:
 
     std::string get_key(const Path& path) const;
 
-    // TODO(chengyuxuan): fix it, private
-    S3FileSystem(S3Conf&& s3_conf, ResourceId&& resource_id);
-
 private:
+    S3FileSystem(S3Conf&& s3_conf, ResourceId&& resource_id);
     S3Conf _s3_conf;
 
     // FIXME(cyx): We can use std::atomic<std::shared_ptr> since c++20.

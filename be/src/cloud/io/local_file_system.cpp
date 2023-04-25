@@ -27,7 +27,8 @@ namespace doris {
 namespace io {
 
 std::shared_ptr<LocalFileSystem> LocalFileSystem::create(Path path, ResourceId resource_id) {
-    return std::make_shared<LocalFileSystem>(std::move(path), std::move(resource_id));
+    std::shared_ptr<LocalFileSystem> fs(new LocalFileSystem(std::move(path), std::move(resource_id)));
+    return fs;
 }
 
 LocalFileSystem::LocalFileSystem(Path&& root_path, ResourceId&& resource_id)

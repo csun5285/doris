@@ -133,7 +133,7 @@ public:
         _default_char_analyzer = _CLNEW lucene::analysis::SimpleAnalyzer<char>();
         _standard_analyzer = _CLNEW lucene::analysis::standard::StandardAnalyzer();
 #ifdef CLOUD_MODE
-        _lfs = std::make_shared<doris::io::LocalFileSystem>(
+        _lfs = doris::io::LocalFileSystem::create(
                 io::TmpFileMgr::instance()->get_tmp_file_dir(), "");
         auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                 io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
