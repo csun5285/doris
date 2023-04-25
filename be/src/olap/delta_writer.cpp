@@ -143,11 +143,17 @@ Status DeltaWriter::init() {
     }
 
 #ifdef CLOUD_MODE
-    if (_tablet->fetch_add_approximate_num_rowsets(0) > config::max_tablet_version_num) {
-        LOG_WARNING("tablet exceeds max version num limit")
-                .tag("limit", config::max_tablet_version_num)
-                .tag("tablet_id", _tablet->tablet_id());
-        return Status::Error<TOO_MANY_VERSION>();
+    auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
+    if (version_cnt > config::max_tablet_version_num - 100) {
+        // trigger compaction early to reduce -235
+        StorageEngine::instance()->submit_compaction_task(_tablet,
+                                                          CompactionType::CUMULATIVE_COMPACTION);
+        if (version_cnt > config::max_tablet_version_num) {
+            LOG_WARNING("tablet exceeds max version num limit")
+                    .tag("limit", config::max_tablet_version_num)
+                    .tag("tablet_id", _tablet->tablet_id());
+            return Status::Error<TOO_MANY_VERSION>();
+        }
     }
 #else
     // check tablet version number
