@@ -198,6 +198,7 @@ import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceResponseStatus;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectFilePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
+import com.selectdb.cloud.storage.ObjectFile;
 import doris.segment_v2.SegmentV2;
 import lombok.Getter;
 import org.apache.commons.collections.CollectionUtils;
@@ -4332,12 +4333,13 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     public List<ObjectFilePB> beginCopy(String stageId, SelectdbCloud.StagePB.StageType stageType, long tableId,
-            String copyJobId, int groupId, long startTime, long timeoutTime, List<ObjectFilePB> objectFiles)
-            throws DdlException {
+            String copyJobId, int groupId, long startTime, long timeoutTime, List<ObjectFilePB> objectFiles,
+            long sizeLimit, int fileNumLimit, int fileMetaSizeLimit) throws DdlException {
         SelectdbCloud.BeginCopyRequest request = SelectdbCloud.BeginCopyRequest.newBuilder()
                 .setCloudUniqueId(Config.cloud_unique_id).setStageId(stageId).setStageType(stageType)
                 .setTableId(tableId).setCopyId(copyJobId).setGroupId(groupId).setStartTimeMs(startTime)
-                .setTimeoutTimeMs(timeoutTime).addAllObjectFiles(objectFiles).build();
+                .setTimeoutTimeMs(timeoutTime).addAllObjectFiles(objectFiles).setFileNumLimit(fileNumLimit)
+                .setFileSizeLimit(sizeLimit).setFileMetaSizeLimit(fileMetaSizeLimit).build();
         SelectdbCloud.BeginCopyResponse response = null;
         try {
             int retry = 0;
@@ -4445,6 +4447,29 @@ public class InternalCatalog implements CatalogIf<Database> {
             return response.getObjectFilesList();
         } catch (RpcException e) {
             LOG.warn("getCopyFiles response: {} ", response);
+            throw new DdlException(e.getMessage());
+        }
+    }
+
+    public List<ObjectFilePB> filterCopyFiles(String stageId, long tableId, List<ObjectFile> objectFiles)
+            throws DdlException {
+        SelectdbCloud.FilterCopyFilesRequest.Builder builder = SelectdbCloud.FilterCopyFilesRequest.newBuilder()
+                .setCloudUniqueId(Config.cloud_unique_id).setStageId(stageId).setTableId(tableId);
+        for (ObjectFile objectFile : objectFiles) {
+            builder.addObjectFiles(
+                    ObjectFilePB.newBuilder().setRelativePath(objectFile.getRelativePath())
+                            .setEtag(objectFile.getEtag()).setSize(objectFile.getSize()).build());
+        }
+        SelectdbCloud.FilterCopyFilesResponse response = null;
+        try {
+            response = MetaServiceProxy.getInstance().filterCopyFiles(builder.build());
+            if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
+                LOG.warn("filterCopyFiles response: {} ", response);
+                throw new DdlException(response.getStatus().getMsg());
+            }
+            return response.getObjectFilesList();
+        } catch (RpcException e) {
+            LOG.warn("filterCopyFiles response: {} ", response);
             throw new DdlException(e.getMessage());
         }
     }

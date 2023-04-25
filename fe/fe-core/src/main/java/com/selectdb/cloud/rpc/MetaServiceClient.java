@@ -240,6 +240,10 @@ public class MetaServiceClient {
         return blockingStub.getCopyFiles(request);
     }
 
+    public SelectdbCloud.FilterCopyFilesResponse filterCopyFiles(SelectdbCloud.FilterCopyFilesRequest request) {
+        return blockingStub.filterCopyFiles(request);
+    }
+
     public SelectdbCloud.AlterClusterResponse alterCluster(SelectdbCloud.AlterClusterRequest request) {
         return blockingStub.alterCluster(request);
     }

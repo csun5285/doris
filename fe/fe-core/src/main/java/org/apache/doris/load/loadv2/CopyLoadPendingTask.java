@@ -52,7 +52,7 @@ import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -172,7 +172,8 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             List<ObjectFilePB> filteredObjectFiles = copyJob.isForceCopy() ? objectFiles
                     : Env.getCurrentInternalCatalog()
                             .beginCopy(copyJob.getStageId(), copyJob.getStageType(), fileGroupAggKey.getTableId(),
-                                    copyJob.getCopyId(), 0, startTime, timeoutTime, objectFiles);
+                                    copyJob.getCopyId(), 0, startTime, timeoutTime, objectFiles, copyJob.getSizeLimit(),
+                                    Config.max_file_num_per_copy_into_job, Config.max_meta_size_per_copy_into_job);
             if (filteredObjectFiles.isEmpty()) {
                 retryTime = 0;
                 copyJob.setAbortedCopy(true);
@@ -315,7 +316,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
     }
 
     protected void listAndFilterFilesV2(ObjectInfo objectInfo, String pattern, String copyId, String stageId,
-            long tableId, boolean force, long sizeLimit, int fileNum, int metaSize,
+            long tableId, boolean force, long sizeLimit, int fileNum, int metaSizeLimit,
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus) throws Exception {
         long startTimestamp = System.currentTimeMillis();
         long listFileNum = 0;
@@ -326,16 +327,10 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
 
         List<Pair<String, Boolean>> globs = analyzeGlob(copyId, pattern);
         LOG.info("Input copy into glob={}, analyzed={}", pattern, globs);
-        Set<String> loadedFileSet = new HashSet<>();
-        if (globs.stream().anyMatch(g -> g.second)) { // pattern with wildcard
-            List<ObjectFilePB> copyFiles = getCopyFiles(stageId, tableId, force);
-            loadedFileSet = copyFiles.stream().map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
-        }
         try {
-            long totalSize = 0;
-            long totalMetaSize = 0;
             PathMatcher matcher = getPathMatcher(pattern);
             boolean finish = false;
+            List<ObjectFile> matchPatternFiles = new ArrayList<>();
             for (int i = 0; i < globs.size() && !finish; i++) {
                 Pair<String, Boolean> glob = globs.get(i);
                 String continuationToken = null;
@@ -356,43 +351,24 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                                 + " objects for " + costSeconds + " seconds, please check if your pattern " + pattern
                                 + " is correct.");
                     }
+                    // 1. check if pattern is matched
                     for (ObjectFile objectFile : listObjectsResult.getObjectInfoList()) {
-                        // check:
-                        // 1. match pattern if it's set
-                        // 2. file is not copying or copied by other copy jobs
-                        // 3. not reach any limit of fileNum/fileSize/fileMetaSize if select more than 1 file
                         if (!matchPattern(objectFile.getRelativePath(), matcher)) {
                             continue;
                         }
-                        matchedFileNum++;
-                        if (loadedFileSet.contains(getFileInfoUniqueId(objectFile))) {
-                            loadedFileNum++;
-                            continue;
-                        }
-                        ObjectFilePB objectFilePB = ObjectFilePB.newBuilder()
-                                .setRelativePath(objectFile.getRelativePath()).setEtag(objectFile.getEtag()).build();
-                        if (fileStatus.size() > 0 && sizeLimit > 0 && totalSize + objectFile.getSize() >= sizeLimit) {
-                            finish = true;
-                            reachLimitStr = ", skip list because reach size limit: " + sizeLimit;
-                            break;
-                        }
-                        if (fileStatus.size() > 0 && metaSize > 0
-                                && totalMetaSize + objectFilePB.getSerializedSize() >= metaSize) {
-                            finish = true;
-                            reachLimitStr = ", skip list because reach meta size limit: " + metaSize;
-                            break;
-                        }
-                        // add file
-                        String objUrl = "s3://" + objectInfo.getBucket() + "/" + objectFile.getKey();
-                        fileStatus.add(Pair.of(new TBrokerFileStatus(objUrl, false, objectFile.getSize(), true),
-                                objectFilePB));
-
-                        totalSize += objectFile.getSize();
-                        totalMetaSize += objectFilePB.getSerializedSize();
-                        if (fileNum > 0 && fileStatus.size() >= fileNum) {
-                            finish = true;
-                            reachLimitStr = ", skip list because reach file num limit: " + fileNum;
-                            break;
+                        matchPatternFiles.add(objectFile);
+                        // 2. filter files which are not copying or copied by other copy jobs
+                        if (matchPatternFiles.size() >= Config.cloud_filter_copy_file_num_limit) {
+                            List<ObjectFilePB> filterCopyFiles = filterCopyFiles(stageId, tableId, force,
+                                    matchPatternFiles);
+                            fileStatus.addAll(
+                                    generateFiles(filterCopyFiles, matchPatternFiles, objectInfo.getBucket()));
+                            matchPatternFiles.clear();
+                            // 3. check if reach any limit of fileNum/fileSize/fileMetaSize if select more than 1 file
+                            if (reachLimit(fileStatus, sizeLimit, fileNum, metaSizeLimit)) {
+                                finish = true;
+                                break;
+                            }
                         }
                     }
                     if (!listObjectsResult.isTruncated()) {
@@ -400,6 +376,11 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                     }
                     continuationToken = listObjectsResult.getContinuationToken();
                 }
+            }
+            if (!matchPatternFiles.isEmpty()) {
+                List<ObjectFilePB> filterCopyFiles = filterCopyFiles(stageId, tableId, force, matchPatternFiles);
+                fileStatus.addAll(generateFiles(filterCopyFiles, matchPatternFiles, objectInfo.getBucket()));
+                matchPatternFiles.clear();
             }
         } finally {
             remote.close();
@@ -561,6 +542,55 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             }
         }
         return ret;
+    }
+
+    private List<ObjectFilePB> filterCopyFiles(String stageId, long tableId, boolean force,
+            List<ObjectFile> objectFiles) throws DdlException {
+        if (force) {
+            return objectFiles.stream()
+                    .map(f -> ObjectFilePB.newBuilder().setRelativePath(f.getRelativePath()).setEtag(f.getEtag())
+                            .setSize(f.getSize()).build()).collect(Collectors.toList());
+        }
+        return objectFiles.size() > 0 ? Env.getCurrentInternalCatalog().filterCopyFiles(stageId, tableId, objectFiles)
+                : new ArrayList<>();
+    }
+
+    private boolean reachLimit(List<Pair<TBrokerFileStatus, ObjectFilePB>> objectFiles, long sizeLimit,
+            int fileNum, int metaSizeLimit) {
+        if (objectFiles.size() == 0) {
+            return false;
+        }
+        if (fileNum > 0 && objectFiles.size() >= fileNum) {
+            reachLimitStr = ", reach num limit: " + fileNum;
+            return true;
+        }
+        if (sizeLimit > 0 && objectFiles.stream().mapToLong(f -> f.first.getSize()).sum() >= sizeLimit) {
+            reachLimitStr = ", reach size limit: " + sizeLimit;
+            return true;
+        }
+        if (metaSizeLimit > 0
+                && objectFiles.stream().mapToLong(f -> f.second.getSerializedSize()).sum() >= metaSizeLimit) {
+            reachLimitStr = ", reach meta size limit: " + metaSizeLimit;
+            return true;
+        }
+        return false;
+    }
+
+    private List<Pair<TBrokerFileStatus, ObjectFilePB>> generateFiles(List<ObjectFilePB> filterFiles,
+            List<ObjectFile> allFiles, String bucket) {
+        List<Pair<TBrokerFileStatus, ObjectFilePB>> files = new ArrayList<>();
+        Map<String, ObjectFilePB> fileMap = new HashMap<>();
+        for (ObjectFilePB filterFile : filterFiles) {
+            fileMap.put(getFileInfoUniqueId(filterFile), filterFile);
+        }
+        for (ObjectFile file : allFiles) {
+            if (fileMap.containsKey(getFileInfoUniqueId(file))) {
+                String objUrl = "s3://" + bucket + "/" + file.getKey();
+                files.add(Pair.of(new TBrokerFileStatus(objUrl, false, file.getSize(), true),
+                        fileMap.get(getFileInfoUniqueId(file))));
+            }
+        }
+        return files;
     }
 
     private List<Pair<TBrokerFileStatus, ObjectFilePB>> getCopyFilesWhenReplay(String stageId, long tableId,

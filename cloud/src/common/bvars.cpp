@@ -44,6 +44,7 @@ BvarLatencyRecorderWithTag g_bvar_ms_begin_copy("ms", "begin_copy");
 BvarLatencyRecorderWithTag g_bvar_ms_finish_copy("ms", "finish_copy");
 BvarLatencyRecorderWithTag g_bvar_ms_get_copy_job("ms", "get_copy_job");
 BvarLatencyRecorderWithTag g_bvar_ms_get_copy_files("ms", "get_copy_files");
+BvarLatencyRecorderWithTag g_bvar_ms_filter_copy_files("ms", "filter_copy_files");
 
 BvarLatencyRecorderWithTag g_bvar_ms_start_tablet_job("ms", "start_tablet_job");
 BvarLatencyRecorderWithTag g_bvar_ms_finish_tablet_job("ms", "finish_tablet_job");

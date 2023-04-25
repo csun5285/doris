@@ -1,7 +1,20 @@
 suite("test_external_stage") {
     def tableName = "customer_external_stage"
-    def externalStageName = "regression_test_tpch"
-    def prefix = "tpch/sf1"
+    def externalStageName = "regression_test_tpch0"
+    def prefix = "tpch"
+
+    def copyWithSizeLimit = { sizeLimit, expectFileNum ->
+        result = sql " copy into partsupp from @${externalStageName}('${prefix}/sf10/partsupp.tbl.*') properties ('file.type' = 'csv', 'copy.async' = 'false', 'copy.size_limit'='${sizeLimit}'); "
+        logger.info("copy result: " + result)
+        assertTrue(result.size() == 1)
+        assertTrue(result[0].size() == 8)
+        assertTrue(result[0][1].equals("FINISHED"))
+        // check file num
+        result = sql "show copy where id='${result[0][0]}'"
+        logger.info("show copy result: " + result)
+        assertTrue(result.size == 1)
+        assertTrue(result[0][19].split("s3://").length == (1 + expectFileNum), "expect load " + expectFileNum + " file")
+    }
 
     try {
         sql """ DROP TABLE IF EXISTS ${tableName}; """
@@ -33,14 +46,14 @@ suite("test_external_stage") {
             'default.file.column_separator' = "|");
         """
 
-        def result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/customer.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false'); "
+        def result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/sf1/customer.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
-        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/customer.csv.gz') properties ('copy.async' = 'false'); "
+        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/sf1/customer.csv.gz') properties ('copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
@@ -48,7 +61,7 @@ suite("test_external_stage") {
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
         // copy into with force
-        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/customer.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false', 'copy.force'='true'); "
+        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/sf1/customer.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false', 'copy.force'='true'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
@@ -56,18 +69,22 @@ suite("test_external_stage") {
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
         // show copy
-        result = sql "show copy where id='${result[0][0]}' and tablename ='${tableName}' and files like '${prefix}/customer.csv.gz' and state='finished'"
+        result = sql "show copy where id='${result[0][0]}' and tablename ='${tableName}' and files like '${prefix}/sf1/customer.csv.gz' and state='finished'"
         logger.info("show copy result: " + result)
         assertTrue(result.size == 1)
 
         // copy with invalid data
-        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/supplier.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false'); "
+        result = sql " copy into ${tableName} from @${externalStageName}('${prefix}/sf1/supplier.csv.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals('CANCELLED'))
         assertTrue(result[0][3].contains('quality not good enough to cancel'))
+    } finally {
+        try_sql("DROP TABLE IF EXISTS ${tableName}")
+    }
 
+    try {
         // copy with large compress file
         sql """ DROP TABLE IF EXISTS lineorder; """
         sql """
@@ -106,7 +123,43 @@ suite("test_external_stage") {
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"))
     } finally {
-        //try_sql("DROP TABLE IF EXISTS lineorder")
-        //try_sql("DROP TABLE IF EXISTS ${tableName}")
+        try_sql("DROP TABLE IF EXISTS lineorder")
+    }
+
+    try {
+        sql """
+            CREATE TABLE IF NOT EXISTS partsupp (
+            PS_PARTKEY     INTEGER NOT NULL,
+            PS_SUPPKEY     INTEGER NOT NULL,
+            PS_AVAILQTY    INTEGER NOT NULL,
+            PS_SUPPLYCOST  DECIMAL(15,2)  NOT NULL,
+            PS_COMMENT     VARCHAR(199) NOT NULL 
+        )
+        DUPLICATE KEY(PS_PARTKEY, PS_SUPPKEY)
+        DISTRIBUTED BY HASH(PS_PARTKEY) BUCKETS 32
+        """
+
+        // copy with size limit
+        //   regression/tpch/sf10/partsupp.tbl.1 | 114.24 MB
+        //   regression/tpch/sf10/partsupp.tbl.2 | 114.54 MB
+        //   regression/tpch/sf10/partsupp.tbl.3 | 114.59 MB
+        //   regression/tpch/sf10/partsupp.tbl.4 | 114.53 MB
+        //   regression/tpch/sf10/partsupp.tbl.5 | 114.57 MB
+        //   regression/tpch/sf10/partsupp.tbl.6 | 115.34 MB
+        //   regression/tpch/sf10/partsupp.tbl.7 | 115.36 MB
+        //   regression/tpch/sf10/partsupp.tbl.8 | 115.29 MB
+        //   regression/tpch/sf10/partsupp.tbl.9 | 115.26 MB
+        //  regression/tpch/sf10/partsupp.tbl.10 | 115.32 MB
+        copyWithSizeLimit(104857600, 1) // 100MB, 1 file
+        copyWithSizeLimit(314572800, 2) // 300MB, 2 file
+        copyWithSizeLimit(419430400, 3) // 400MB, 3 file
+        copyWithSizeLimit(838860800, 4) // 800MB, 4 file
+        result = sql " copy into partsupp from @${externalStageName}('${prefix}/sf10/partsupp.tbl.*') properties ('file.type' = 'csv', 'copy.async' = 'false'); "
+        logger.info("copy result: " + result)
+        assertTrue(result.size() == 1)
+        assertTrue(result[0].size() == 8)
+        assertTrue(result[0][1].equals("CANCELLED"))
+    } finally {
+        try_sql("DROP TABLE IF EXISTS partsupp")
     }
 }

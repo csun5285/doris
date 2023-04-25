@@ -1593,6 +1593,98 @@ TEST(MetaServiceTest, CopyJobTest) {
     }
 }
 
+TEST(MetaServiceTest, FilterCopyFilesTest) {
+    auto meta_service = get_meta_service();
+    brpc::Controller cntl;
+    auto cloud_unique_id = "test_cloud_unique_id";
+    std::string instance_id = "stage_test_instance_id";
+    auto stage_id = "test_stage_id";
+    int64_t table_id = 100;
+    [[maybe_unused]] auto sp = SyncPoint::get_instance();
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->enable_processing();
+
+    FilterCopyFilesRequest request;
+    request.set_cloud_unique_id(cloud_unique_id);
+    request.set_stage_id(stage_id);
+    request.set_table_id(table_id);
+    for (int i = 0; i < 10; ++i) {
+        ObjectFilePB object_file;
+        object_file.set_relative_path("file" + std::to_string(i));
+        object_file.set_etag("etag" + std::to_string(i));
+        request.add_object_files()->CopyFrom(object_file);
+    }
+
+    // all files are not loaded
+    {
+        FilterCopyFilesResponse res;
+        meta_service->filter_copy_files(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                        &request, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.object_files().size(), 10);
+    }
+
+    // some files are loaded
+    {
+        std::unique_ptr<Transaction> txn;
+        int ret = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(ret, 0);
+        for (int i = 0; i < 4; ++i) {
+            CopyFileKeyInfo key_info {instance_id, stage_id, table_id, "file" + std::to_string(i),
+                                      "etag" + std::to_string(i)};
+            std::string key;
+            copy_file_key(key_info, &key);
+            CopyFilePB copy_file;
+            copy_file.set_copy_id("test_copy_id");
+            std::string val;
+            copy_file.SerializeToString(&val);
+            txn->put(key, val);
+        }
+        ASSERT_EQ(txn->commit(), 0);
+        FilterCopyFilesResponse res;
+        meta_service->filter_copy_files(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                        &request, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.object_files().size(), 6);
+        ASSERT_EQ(res.object_files().at(0).relative_path(), "file4");
+    }
+
+    // all files are loaded
+    {
+        std::unique_ptr<Transaction> txn;
+        int ret = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(ret, 0);
+        for (int i = 4; i < 10; ++i) {
+            CopyFileKeyInfo key_info {instance_id, stage_id, table_id, "file" + std::to_string(i),
+                                      "etag" + std::to_string(i)};
+            std::string key;
+            copy_file_key(key_info, &key);
+            CopyFilePB copy_file;
+            copy_file.set_copy_id("test_copy_id");
+            std::string val;
+            copy_file.SerializeToString(&val);
+            txn->put(key, val);
+        }
+        ASSERT_EQ(txn->commit(), 0);
+        FilterCopyFilesResponse res;
+        meta_service->filter_copy_files(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                        &request, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.object_files().size(), 0);
+    }
+}
+
 extern std::vector<std::pair<int64_t, int64_t>> calc_sync_versions(
         int64_t req_bc_cnt, int64_t bc_cnt, int64_t req_cc_cnt, int64_t cc_cnt, int64_t req_cp,
         int64_t cp, int64_t req_start, int64_t req_end);

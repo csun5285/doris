@@ -223,6 +223,11 @@ public:
                         ::selectdb::GetCopyFilesResponse* response,
                         ::google::protobuf::Closure* done) override;
 
+    // filter files that are loading or loaded in the input files, return files that are not loaded
+    void filter_copy_files(google::protobuf::RpcController* controller,
+                           const ::selectdb::FilterCopyFilesRequest* request,
+                           ::selectdb::FilterCopyFilesResponse* response,
+                           ::google::protobuf::Closure* done) override;
 private:
     std::pair<MetaServiceCode, std::string> create_instance(
             const ::selectdb::AlterInstanceRequest* request);

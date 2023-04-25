@@ -5899,8 +5899,10 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
     copy_job.set_timeout_time_ms(request->timeout_time_ms());
 
     std::vector<std::pair<std::string, std::string>> copy_files;
-    auto object_files = request->object_files();
+    auto& object_files = request->object_files();
     int file_num = 0;
+    size_t file_size = 0;
+    size_t file_meta_size = 0;
     for (auto i = 0; i < object_files.size(); ++i) {
         auto& file = object_files.at(i);
         // 1. get copy file kv to check if file is loading or loaded
@@ -5918,8 +5920,18 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
             LOG(WARNING) << msg << " ret=" << ret;
             return;
         }
-        // 2. put copy file kv
+        // 2. check if reach any limit
         ++file_num;
+        file_size += file.size();
+        file_meta_size += file.ByteSizeLong();
+        if (file_num > 1 &&
+            ((request->file_num_limit() > 0 && file_num > request->file_num_limit()) ||
+             (request->file_size_limit() > 0 && file_size > request->file_size_limit()) ||
+             (request->file_meta_size_limit() > 0 &&
+              file_meta_size > request->file_meta_size_limit()))) {
+            break;
+        }
+        // 3. put copy file kv
         CopyFilePB copy_file;
         copy_file.set_copy_id(request->copy_id());
         copy_file.set_group_id(request->group_id());
@@ -6182,6 +6194,60 @@ void MetaServiceImpl::get_copy_files(google::protobuf::RpcController* controller
         }
         key0.push_back('\x00');
     } while (it->more());
+}
+
+void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* controller,
+                                        const ::selectdb::FilterCopyFilesRequest* request,
+                                        ::selectdb::FilterCopyFilesResponse* response,
+                                        ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(filter_copy_files);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
+        return;
+    }
+    RPC_RATE_LIMIT(filter_copy_files)
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        LOG(WARNING) << msg << " ret=" << ret;
+        return;
+    }
+
+    std::vector<ObjectFilePB> filter_files;
+    for (auto i = 0; i < request->object_files().size(); ++i) {
+        auto& file = request->object_files().at(i);
+        // 1. get copy file kv to check if file is loading or loaded
+        CopyFileKeyInfo file_key_info {instance_id, request->stage_id(), request->table_id(),
+                                       file.relative_path(), file.etag()};
+        std::string file_key;
+        copy_file_key(file_key_info, &file_key);
+        std::string file_val;
+        ret = txn->get(file_key, &file_val);
+        if (ret == 0) { // found key
+            continue;
+        } else if (ret < 0) { // error
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            msg = "failed to get copy file";
+            LOG(WARNING) << msg << " ret=" << ret;
+            return;
+        } else {
+            response->add_object_files()->CopyFrom(file);
+        }
+    }
+
 }
 
 void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id) {

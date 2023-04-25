@@ -2060,6 +2060,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int cloud_max_copy_job_per_table = 10000;
 
+    @ConfField(mutable = true)
+    public static int cloud_filter_copy_file_num_limit = 100;
+
     /**
      * Only for branch-1.2
      * Set to true to disable the session variable: enable_vectorized_engine.

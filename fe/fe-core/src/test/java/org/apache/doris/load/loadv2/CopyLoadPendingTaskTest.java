@@ -18,8 +18,10 @@
 package org.apache.doris.load.loadv2;
 
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Pair;
+import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.utframe.TestWithFeService;
@@ -46,6 +48,7 @@ import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class CopyLoadPendingTaskTest extends TestWithFeService {
 
@@ -56,6 +59,22 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
             "test_region", STORAGE_PREFIX);
     @Mocked
     RemoteBase remote;
+    MockInternalCatalog mockInternalCatalog = new MockInternalCatalog();
+
+    private class MockInternalCatalog extends InternalCatalog {
+        @Override
+        public List<ObjectFilePB> filterCopyFiles(String stageId, long tableId, List<ObjectFile> objectFiles)
+                throws DdlException {
+            if (tableId == 200) {
+                return objectFiles.stream().filter(f -> !f.getRelativePath().equals("dir1/file_1.csv"))
+                        .map(f -> ObjectFilePB.newBuilder().setRelativePath(f.getRelativePath()).setEtag(f.getEtag())
+                                .build()).collect(Collectors.toList());
+            }
+            return objectFiles.stream()
+                    .map(f -> ObjectFilePB.newBuilder().setRelativePath(f.getRelativePath()).setEtag(f.getEtag())
+                            .build()).collect(Collectors.toList());
+        }
+    }
 
     @Override
     protected void runBeforeAll() throws Exception {
@@ -110,19 +129,11 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
                                 + objectFile.getSize());
             }
         }
-        // loading or loaded files
-        List<SelectdbCloud.ObjectFilePB> files = new ArrayList<>();
-        List<SelectdbCloud.ObjectFilePB> files2 = Lists.newArrayList(
-                ObjectFilePB.newBuilder().setRelativePath("dir1/file_1.csv").setEtag("").build());
         new Expectations(ctx.getEnv(), ctx.getEnv().getInternalCatalog(), remote) {
             {
-                Env.getCurrentInternalCatalog().getCopyFiles(anyString, 100);
+                Env.getCurrentInternalCatalog();
                 minTimes = 0;
-                result = files;
-
-                Env.getCurrentInternalCatalog().getCopyFiles(anyString, 200);
-                minTimes = 0;
-                result = files2;
+                result = mockInternalCatalog;
 
                 RemoteBase.newInstance(objectInfo);
                 minTimes = 0;
@@ -161,7 +172,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus = new ArrayList<>();
             task.parseFileForCopyJob(stageId, tableId, "q1", pattern, 100, fileNumLimit, fileMetaSizeLimit, fileStatus,
                     objectInfo, false);
-            Assert.assertEquals(4, fileStatus.size());
+            Assert.assertEquals(10, fileStatus.size()); // 4, files limit are filtered in begin_copy
         } while (false);
         // test file num limit
         do {
@@ -169,7 +180,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus = new ArrayList<>();
             task.parseFileForCopyJob(stageId, tableId, "q1", pattern, sizeLimit, 6, fileMetaSizeLimit, fileStatus,
                     objectInfo, false);
-            Assert.assertEquals(6, fileStatus.size());
+            Assert.assertEquals(10, fileStatus.size()); // 6
         } while (false);
         // test file meta size limit
         do {
@@ -177,7 +188,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus = new ArrayList<>();
             task.parseFileForCopyJob(stageId, tableId, "q1", pattern, sizeLimit, fileNumLimit, 60, fileStatus,
                     objectInfo, false);
-            Assert.assertEquals(2, fileStatus.size());
+            Assert.assertEquals(10, fileStatus.size()); // 2
         } while (false);
         // test size and file num limit
         do {
@@ -185,7 +196,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
             List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus = new ArrayList<>();
             task.parseFileForCopyJob(stageId, tableId, "q1", pattern, 100, fileNumLimit, fileMetaSizeLimit, fileStatus,
                     objectInfo, false);
-            Assert.assertEquals(4, fileStatus.size());
+            Assert.assertEquals(10, fileStatus.size()); // 4
         } while (false);
     }
 
@@ -280,9 +291,9 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
 
         new Expectations(ctx.getEnv(), ctx.getEnv().getInternalCatalog(), remote) {
             {
-                Env.getCurrentInternalCatalog().getCopyFiles(anyString, 100);
+                Env.getCurrentInternalCatalog();
                 minTimes = 0;
-                result = new ArrayList<>();
+                result = mockInternalCatalog;
 
                 RemoteBase.newInstance(objectInfo);
                 minTimes = 0;
@@ -291,7 +302,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
         };
 
         String stageId = "1";
-        long tableId = 100;
+        long tableId = 300;
         long sizeLimit = 0;
         int fileNumLimit = 0;
         int fileMetaSizeLimit = 0;

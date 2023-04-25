@@ -96,6 +96,7 @@ extern BvarLatencyRecorderWithTag g_bvar_ms_begin_copy;
 extern BvarLatencyRecorderWithTag g_bvar_ms_finish_copy;
 extern BvarLatencyRecorderWithTag g_bvar_ms_get_copy_job;
 extern BvarLatencyRecorderWithTag g_bvar_ms_get_copy_files;
+extern BvarLatencyRecorderWithTag g_bvar_ms_filter_copy_files;
 extern BvarLatencyRecorderWithTag g_bvar_ms_start_tablet_job;
 extern BvarLatencyRecorderWithTag g_bvar_ms_finish_tablet_job;
 
