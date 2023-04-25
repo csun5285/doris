@@ -415,6 +415,17 @@ Status DeltaWriter::close() {
     }
 }
 
+void DeltaWriter::update_tablet_stats() {
+    DCHECK(_tablet);
+    DCHECK(_cur_rowset);
+    _tablet->fetch_add_approximate_num_rowsets(1);
+    _tablet->fetch_add_approximate_num_segments(_cur_rowset->num_segments());
+    _tablet->fetch_add_approximate_num_rows(_cur_rowset->num_rows());
+    _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
+    _tablet->fetch_add_approximate_cumu_num_rowsets(1);
+    _tablet->fetch_add_approximate_cumu_data_size(_cur_rowset->data_disk_size());
+}
+
 #ifdef CLOUD_MODE
 Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
     std::lock_guard l(_lock);
@@ -444,13 +455,6 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
     if (_cur_rowset == nullptr) {
         return Status::InternalError("fail to build rowset");
     }
-    // These stats may be larger than the actual value if the txn is aborted
-    _tablet->fetch_add_approximate_num_rowsets(1);
-    _tablet->fetch_add_approximate_num_segments(_cur_rowset->num_segments());
-    _tablet->fetch_add_approximate_num_rows(_cur_rowset->num_rows());
-    _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
-    _tablet->fetch_add_approximate_cumu_num_rowsets(1);
-    _tablet->fetch_add_approximate_cumu_data_size(_cur_rowset->data_disk_size());
 
     _delta_written_success = true;
 

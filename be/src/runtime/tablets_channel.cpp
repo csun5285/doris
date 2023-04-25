@@ -197,6 +197,8 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
         PTabletInfo* tablet_info = tablet_vec->Add();
         tablet_info->set_tablet_id(writer->tablet_id());
         tablet_info->set_schema_hash(writer->schema_hash());
+        // These stats may be larger than the actual value if the txn is aborted
+        writer->update_tablet_stats();
     }
     response->set_build_rowset_latency_ms(build_latency);
     response->set_commit_rowset_latency_ms(commit_latency);

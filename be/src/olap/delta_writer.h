@@ -110,6 +110,8 @@ public:
 
     int32_t schema_hash() { return _tablet->schema_hash(); }
 
+    void update_tablet_stats();
+
     void save_mem_consumption_snapshot();
 
     int64_t get_memtable_consumption_inflush() const;
