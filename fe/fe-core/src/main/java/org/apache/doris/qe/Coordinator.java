@@ -470,6 +470,7 @@ public class Coordinator {
 
             if (Strings.isNullOrEmpty(cluster)) {
                 LOG.warn("invalid clusterName: {}", cluster);
+                return;
             }
 
             this.idToBackend = Env.getCurrentSystemInfo().getCloudIdToBackend(cluster);
@@ -532,6 +533,14 @@ public class Coordinator {
 
         // prepare information
         prepare();
+
+        if (Config.isCloudMode()) {
+            if (idToBackend == null || idToBackend.isEmpty()) {
+                LOG.warn("no available backends, idToBackend {}", idToBackend);
+                throw new Exception("no available backends, the cluster maybe not be set");
+            }
+        }
+
         // compute Fragment Instance
         computeScanRangeAssignment();
 

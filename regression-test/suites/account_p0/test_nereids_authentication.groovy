@@ -44,6 +44,16 @@ suite("test_nereids_authentication", "query") {
     sql "CREATE USER ${user} IDENTIFIED BY 'Cloud123456'"
     sql "GRANT SELECT_PRIV ON internal.${dbName}.${tableName1} TO ${user}"
 
+    // for cloud mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+    List<List<Object>> clusterRes  = sql "show clusters"
+    assertTrue(clusterRes.size() >= 1);
+    String clusterName = clusterRes[0][0]
+    sql """
+        GRANT USAGE_PRIV ON CLUSTER ${clusterName} TO ${user}
+    """
+    }
+
     def tokens = context.config.jdbcUrl.split('/')
     def url=tokens[0] + "//" + tokens[2] + "/" + dbName + "?"
     def result = connect(user=user, password='Cloud123456', url=url) {
