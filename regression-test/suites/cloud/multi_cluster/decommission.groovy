@@ -126,7 +126,7 @@ suite("decommission") {
     resp = get_cluster.call(beUniqueIdList[1]);
     for (cluster : resp) {
         for (node : cluster.nodes) {
-            if (node.cloud_unique_id == beUniqueIdList[1]) {
+            if (node.ip == ipList[1] && node.heartbeat_port == hbPortList[1]) {
                 assertEquals(node.status, "NODE_STATUS_DECOMMISSIONED");
             }
         }
