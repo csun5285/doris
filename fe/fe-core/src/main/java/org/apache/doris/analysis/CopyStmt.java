@@ -90,6 +90,8 @@ public class CopyStmt extends DdlStmt {
     @Getter
     private StageType stageType;
     @Getter
+    private String stagePrefix;
+    @Getter
     private ObjectInfo objectInfo;
     private String userName;
 
@@ -213,6 +215,7 @@ public class CopyStmt extends DdlStmt {
         stageType = stagePB.getType();
         stageId = stagePB.getStageId();
         ObjectStoreInfoPB objInfo = stagePB.getObjInfo();
+        stagePrefix = objInfo.getPrefix();
         objectInfo = RemoteBase.analyzeStageObjectStoreInfo(stagePB);
         brokerProperties.put(S3Resource.S3_ENDPOINT, objInfo.getEndpoint());
         brokerProperties.put(S3Resource.S3_REGION, objInfo.getRegion());

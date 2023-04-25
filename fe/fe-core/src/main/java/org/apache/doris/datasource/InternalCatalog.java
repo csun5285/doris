@@ -4376,11 +4376,11 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     public void finishCopy(String stageId, SelectdbCloud.StagePB.StageType stageType, long tableId, String copyJobId,
-            int groupId, boolean success) throws DdlException {
+            int groupId, Action action) throws DdlException {
         SelectdbCloud.FinishCopyRequest request = SelectdbCloud.FinishCopyRequest.newBuilder()
                 .setCloudUniqueId(Config.cloud_unique_id).setStageId(stageId).setStageType(stageType)
                 .setTableId(tableId).setCopyId(copyJobId).setGroupId(groupId)
-                .setAction(success ? Action.COMMIT : Action.ABORT).setFinishTimeMs(System.currentTimeMillis()).build();
+                .setAction(action).setFinishTimeMs(System.currentTimeMillis()).build();
         SelectdbCloud.FinishCopyResponse response = null;
         try {
             int retry = 0;
@@ -4390,7 +4390,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     return;
                 }
                 if (response.getStatus().getCode() == MetaServiceCode.COPY_JOB_NOT_FOUND) {
-                    if (success) {
+                    if (action == Action.COMMIT) {
                         LOG.warn("finish copy error with copy job not found, tableId={}, stageId={}, queryId={}",
                                 tableId, stageId, copyJobId);
                         throw new DdlException(response.getStatus().getMsg());

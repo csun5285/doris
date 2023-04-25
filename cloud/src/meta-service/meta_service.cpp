@@ -6035,11 +6035,13 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
         }
         txn->put(key, val);
         LOG(INFO) << "put copy_job_key=" << hex(key);
-    } else if (request->action() == FinishCopyRequest::ABORT) {
+    } else if (request->action() == FinishCopyRequest::ABORT ||
+               request->action() == FinishCopyRequest::REMOVE) {
         // 1. remove copy job kv
         // 2. remove copy file kvs
         txn->remove(key);
-        LOG(INFO) << "remove aborted copy_job_key=" << hex(key);
+        LOG(INFO) << (request->action() == FinishCopyRequest::ABORT ? "abort" : "remove")
+                  << " copy_job_key=" << hex(key);
         for (const auto& file : copy_job.object_files()) {
             // copy file key
             CopyFileKeyInfo file_key_info {instance_id, request->stage_id(), request->table_id(),

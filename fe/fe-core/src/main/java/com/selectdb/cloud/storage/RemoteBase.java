@@ -15,6 +15,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.UnsupportedEncodingException;
 import java.util.Base64;
+import java.util.List;
 
 public abstract class RemoteBase {
     private static final Logger LOG = LogManager.getLogger(RemoteBase.class);
@@ -114,6 +115,8 @@ public abstract class RemoteBase {
 
     public abstract Triple<String, String, String> getStsToken() throws DdlException;
 
+    public abstract void deleteObjects(List<String> keys) throws DdlException;
+
     public void close() {}
 
     public static RemoteBase newInstance(ObjectInfo obj) throws Exception {
@@ -204,5 +207,26 @@ public abstract class RemoteBase {
 
     private static String encodeExternalId(String externalId) throws UnsupportedEncodingException {
         return Base64.getEncoder().encodeToString(externalId.getBytes("UTF-8"));
+    }
+
+    protected void checkDeleteKeys(List<String> keys) throws DdlException {
+        if (!checkStagePrefix(obj.getPrefix())) {
+            throw new DdlException("Stage prefix: " + obj.getPrefix() + " is invalid");
+        }
+        for (String key : keys) {
+            if (!key.startsWith(obj.getPrefix() + "/")) {
+                throw new DdlException(
+                        "Delete key:" + key + " is not start with stage prefix: " + obj.getPrefix() + "/");
+            }
+        }
+    }
+
+    public static boolean checkStagePrefix(String stagePrefix) {
+        // stage prefix is like: instance_prefix/stage/user_name/user_id
+        String[] split = stagePrefix.split("/");
+        if (split.length < 3) {
+            return false;
+        }
+        return split[split.length - 3].equals("stage");
     }
 }

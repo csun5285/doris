@@ -4,6 +4,9 @@ suite("test_internal_stage") {
     // Internal and external stage cross use
     def tableNamExternal = "customer_internal_stage"
     def externalStageName = "internal_external_stage_cross_use"
+    def token = "greedisgood9999"
+    def instanceId = context.config.instanceId
+    def cloudUniqueId = context.config.cloudUniqueId
     try {
         sql """ DROP TABLE IF EXISTS ${tableNamExternal}; """
         sql """
@@ -90,6 +93,32 @@ suite("test_internal_stage") {
         """
     }
 
+    def waitInternalStageFilesDeleted = { fileName ->
+        def retry = 10
+        do {
+            Thread.sleep(2000)
+            if (checkRecycleInternalStage(token, instanceId, cloudUniqueId, fileName)) {
+                Thread.sleep(2000) // wait for copy job kv is deleted
+                return
+            }
+        } while (retry--)
+        assertTrue(false, "Internal stage file is not deleted")
+    }
+
+    def getCloudConf = {
+        result = sql """ ADMIN SHOW FRONTEND CONFIG """
+        for (def r : result) {
+            assertTrue(r.size() > 2)
+            if (r[0] == "cloud_delete_loaded_internal_stage_files") {
+                return (r[1] == "true")
+            }
+        }
+        return false
+    }
+
+    boolean cloud_delete_loaded_internal_stage_files = getCloudConf()
+    logger.info("cloud_delete_loaded_internal_stage_files=" + cloud_delete_loaded_internal_stage_files)
+
     try {
         def fileName = "internal_customer.csv"
         def filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
@@ -110,6 +139,20 @@ suite("test_internal_stage") {
         assertTrue(result[0][1].equals("CANCELLED"), "Finish copy into, state=" + result[0][1] + ", expected state=CANCELLED")
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
+        if (cloud_delete_loaded_internal_stage_files) {
+            // check file is deleted
+            waitInternalStageFilesDeleted(fileName)
+            // check copy job and file keys are deleted
+            uploadFile(fileName, filePath)
+            result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+            logger.info("copy result: " + result)
+            assertTrue(result.size() == 1)
+            assertTrue(result[0].size() == 8)
+            assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
+            // check file is deleted
+            waitInternalStageFilesDeleted(fileName)
+        }
+
         // copy with invalid file
         // line 5: str cast to int, 'C_ACCTBAL' is NULL in ${tableName}, NOT NULL in ${tableName2}
         // line 6: empty str
@@ -117,7 +160,6 @@ suite("test_internal_stage") {
         // line 8: add two | in the end
         fileName = "internal_customer_partial_error.csv"
         filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
-        uploadFile(fileName, filePath)
 
         def sqls = [
                 " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); ",
@@ -145,6 +187,7 @@ suite("test_internal_stage") {
 
         createTable()
         for (int i = 0; i < sqls.size(); i++) {
+            uploadFile(fileName, filePath)
             result = sql "${sqls[i]}"
             logger.info("copy result: " + result)
             assertTrue(result.size() == 1)
@@ -158,6 +201,9 @@ suite("test_internal_stage") {
                 assertTrue(result[0][6].equals(rows[i][2]), "Finish copy into, unselected rows=" + result[0][6])
                 qt_sql "select * from ${tableName} order by C_CUSTKEY ASC"
                 qt_sql "select * from ${tableName2} order by C_CUSTKEY ASC"
+                if (cloud_delete_loaded_internal_stage_files) {
+                    waitInternalStageFilesDeleted(fileName)
+                }
             }
         }
     } finally {

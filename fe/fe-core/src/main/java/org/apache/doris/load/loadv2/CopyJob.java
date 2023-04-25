@@ -24,6 +24,7 @@ import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
@@ -41,7 +42,10 @@ import org.apache.doris.thrift.TUniqueId;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.selectdb.cloud.proto.SelectdbCloud.FinishCopyRequest.Action;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
+import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
+import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
@@ -67,6 +71,8 @@ public class CopyJob extends BrokerLoadJob {
     @Getter
     private StagePB.StageType stageType;
     @Getter
+    private String stagePrefix;
+    @Getter
     private long sizeLimit;
     @Getter
     private String pattern;
@@ -80,17 +86,19 @@ public class CopyJob extends BrokerLoadJob {
     private Map<String, String> properties = new HashMap<>();
     private volatile boolean abortedCopy = false;
     private boolean isReplay = false;
+    private List<String> loadFiles = null;
 
     public CopyJob() {
         super(EtlJobType.COPY);
     }
 
     public CopyJob(long dbId, String label, TUniqueId queryId, BrokerDesc brokerDesc, OriginStatement originStmt,
-            UserIdentity userInfo, String stageId, StagePB.StageType stageType, long sizeLimit, String pattern,
-            ObjectInfo objectInfo, boolean forceCopy, String user) throws MetaNotFoundException {
+            UserIdentity userInfo, String stageId, StagePB.StageType stageType, String stagePrefix, long sizeLimit,
+            String pattern, ObjectInfo objectInfo, boolean forceCopy, String user) throws MetaNotFoundException {
         super(EtlJobType.COPY, dbId, label, brokerDesc, originStmt, userInfo);
         this.stageId = stageId;
         this.stageType = stageType;
+        this.stagePrefix = stagePrefix;
         this.sizeLimit =  sizeLimit;
         this.pattern = pattern;
         this.objectInfo = objectInfo;
@@ -123,13 +131,21 @@ public class CopyJob extends BrokerLoadJob {
                 .entrySet()) {
             long tableId = entry.getKey().getTableId();
             LOG.debug("Start finish copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
-            Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, true);
+            Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, Action.COMMIT);
+            // delete internal stage files and copy job
+            if (Config.cloud_delete_loaded_internal_stage_files && loadFiles != null && stageType == StageType.INTERNAL
+                    && !isForceCopy()) {
+                CleanCopyJobTask copyJobCleanTask = new CleanCopyJobTask(objectInfo, stageId, stageType, tableId,
+                        copyId, loadFiles);
+                Env.getCurrentEnv().getLoadManager().createCleanCopyJobTask(copyJobCleanTask);
+            }
         }
     }
 
     @Override
     public void cancelJob(FailMsg failMsg) throws DdlException {
         super.cancelJob(failMsg);
+        loadFiles = null;
         if (forceCopy || abortedCopy) {
             return;
         }
@@ -137,7 +153,7 @@ public class CopyJob extends BrokerLoadJob {
                 .entrySet()) {
             long tableId = entry.getKey().getTableId();
             LOG.info("Cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
-            Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, false);
+            Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, Action.ABORT);
         }
         abortedCopy = true;
     }
@@ -145,6 +161,7 @@ public class CopyJob extends BrokerLoadJob {
     @Override
     public void cancelJobWithoutCheck(FailMsg failMsg, boolean abortTxn, boolean needLog) {
         super.cancelJobWithoutCheck(failMsg, abortTxn, needLog);
+        loadFiles = null;
         if (forceCopy || abortedCopy) {
             return;
         }
@@ -154,6 +171,7 @@ public class CopyJob extends BrokerLoadJob {
     @Override
     protected void unprotectedExecuteCancel(FailMsg failMsg, boolean abortTxn) {
         super.unprotectedExecuteCancel(failMsg, abortTxn);
+        loadFiles = null;
         if (forceCopy || abortedCopy) {
             return;
         }
@@ -166,7 +184,7 @@ public class CopyJob extends BrokerLoadJob {
             long tableId = entry.getKey().getTableId();
             try {
                 LOG.info("Cancel copy for stage={}, table={}, queryId={}", stageId, tableId, getCopyId());
-                Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, false);
+                Env.getCurrentInternalCatalog().finishCopy(stageId, stageType, tableId, getCopyId(), 0, Action.ABORT);
                 abortedCopy = true;
             } catch (DdlException e) {
                 // if cancel copy failed, kvs in fdb will be cleaned when expired
@@ -258,6 +276,9 @@ public class CopyJob extends BrokerLoadJob {
                 paths.addAll(fileStatuses.stream().map(e -> e.path).collect(Collectors.toList()));
             }
         }
+        if (stageType == StageType.INTERNAL) {
+            loadFiles = parseLoadFiles(paths, objectInfo.getBucket(), stagePrefix);
+        }
         Gson gson = new GsonBuilder().disableHtmlEscaping().create();
         return gson.toJson(paths);
     }
@@ -286,5 +307,27 @@ public class CopyJob extends BrokerLoadJob {
             return;
         }
         abortCopy();
+    }
+
+    protected static List<String> parseLoadFiles(List<String> loadFiles, String bucket, String stagePrefix) {
+        if (!Config.cloud_delete_loaded_internal_stage_files || loadFiles == null || !RemoteBase.checkStagePrefix(
+                stagePrefix)) {
+            return null;
+        }
+        String prefix = "s3://" + bucket + "/";
+        List<String> parsedFiles = new ArrayList<>();
+        for (String loadFile : loadFiles) {
+            if (!loadFile.startsWith(prefix)) {
+                LOG.warn("load file={} is not start with {}", loadFile, prefix);
+                return null;
+            }
+            String key = loadFile.substring(prefix.length());
+            if (!key.startsWith(stagePrefix)) {
+                LOG.warn("load file={} is not start with {}", loadFile, stagePrefix);
+                return null;
+            }
+            parsedFiles.add(key);
+        }
+        return parsedFiles;
     }
 }

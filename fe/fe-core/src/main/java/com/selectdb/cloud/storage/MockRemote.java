@@ -54,6 +54,11 @@ public class MockRemote extends RemoteBase {
         throw new DdlException("Get sts token for Mock is unsupported");
     }
 
+    @Override
+    public void deleteObjects(List<String> keys) throws DdlException {
+        throw new DdlException("Delete objects for Mock is unsupported");
+    }
+
     private ListObjectsResult listObjectsInner(String prefix, String continuationToken) throws DdlException {
         List<ObjectFile> objectFiles = new ArrayList<>();
         for (ObjectFile objectFile : objects.values()) {

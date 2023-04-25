@@ -159,6 +159,7 @@ public class OssRemote extends DefaultRemote {
 
     @Override
     public void close() {
+        super.close();
         if (ossClient != null) {
             ossClient.shutdown();
             ossClient = null;

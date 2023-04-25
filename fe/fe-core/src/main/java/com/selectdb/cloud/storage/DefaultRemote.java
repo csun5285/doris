@@ -13,11 +13,16 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.Delete;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
+import software.amazon.awssdk.services.s3.model.S3Error;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
 import java.net.URI;
@@ -117,6 +122,34 @@ public class DefaultRemote extends RemoteBase {
         if (s3Client != null) {
             s3Client.close();
             s3Client = null;
+        }
+    }
+
+    @Override
+    public void deleteObjects(List<String> keys) throws DdlException {
+        checkDeleteKeys(keys);
+        initClient();
+        try {
+            int maxDelete = 1000;
+            for (int i = 0; i < keys.size() / maxDelete + 1; i++) {
+                ArrayList<ObjectIdentifier> toDelete = new ArrayList<>();
+                for (int j = maxDelete * i; j < keys.size() && toDelete.size() < maxDelete; j++) {
+                    toDelete.add(ObjectIdentifier.builder().key(keys.get(j)).build());
+                }
+                DeleteObjectsRequest.Builder requestBuilder = DeleteObjectsRequest.builder().bucket(obj.getBucket())
+                        .delete(Delete.builder().objects(toDelete).build());
+                LOG.info("Delete objects for bucket={}, keys={}", obj.getBucket(), keys);
+                DeleteObjectsResponse response = s3Client.deleteObjects(requestBuilder.build());
+                if (!response.errors().isEmpty()) {
+                    S3Error error = response.errors().get(0);
+                    throw new DdlException(
+                            "Failed delete objects, bucket=" + obj.getBucket() + ", key=" + error.key() + ", error="
+                                    + error.message() + ", code=" + error.code());
+                }
+            }
+        } catch (SdkException e) {
+            LOG.warn("Failed to delete objects for S3", e);
+            throw new DdlException("Failed to delete objects for S3, Error message=" + e.getMessage());
         }
     }
 }

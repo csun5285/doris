@@ -156,6 +156,7 @@ import org.apache.doris.load.LoadChecker;
 import org.apache.doris.load.LoadErrorHub;
 import org.apache.doris.load.LoadJob;
 import org.apache.doris.load.StreamLoadRecordMgr;
+import org.apache.doris.load.loadv2.CleanCopyJobScheduler;
 import org.apache.doris.load.loadv2.LoadEtlChecker;
 import org.apache.doris.load.loadv2.LoadJobScheduler;
 import org.apache.doris.load.loadv2.LoadLoadingChecker;
@@ -435,6 +436,7 @@ public class Env {
     private MasterTaskExecutor loadingLoadTaskScheduler;
 
     private LoadJobScheduler loadJobScheduler;
+    private CleanCopyJobScheduler cleanCopyJobScheduler;
 
     private LoadEtlChecker loadEtlChecker;
     private LoadLoadingChecker loadLoadingChecker;
@@ -653,7 +655,8 @@ public class Env {
                 Config.async_loading_load_task_pool_size, Integer.MAX_VALUE, !isCheckpointCatalog);
 
         this.loadJobScheduler = new LoadJobScheduler();
-        this.loadManager = new LoadManager(loadJobScheduler);
+        this.cleanCopyJobScheduler = new CleanCopyJobScheduler();
+        this.loadManager = new LoadManager(loadJobScheduler, cleanCopyJobScheduler);
         this.streamLoadRecordMgr = new StreamLoadRecordMgr("stream_load_record_manager",
                 Config.fetch_stream_load_record_interval_second * 1000L);
         this.loadEtlChecker = new LoadEtlChecker(loadManager);
@@ -1515,6 +1518,7 @@ public class Env {
         loadingLoadTaskScheduler.start();
         loadManager.prepareJobs();
         loadJobScheduler.start();
+        cleanCopyJobScheduler.start();
         loadEtlChecker.start();
         loadLoadingChecker.start();
         // Export checker

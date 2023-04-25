@@ -918,6 +918,7 @@ message FinishCopyRequest {
         UNKNOWN = 0;
         COMMIT  = 1;
         ABORT   = 2;
+        REMOVE  = 3;
     }
     optional string cloud_unique_id = 1;
     optional string stage_id = 2;

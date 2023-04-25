@@ -92,11 +92,17 @@ public class LoadManager implements Writable {
     private Map<Long, LoadJob> idToLoadJob = Maps.newConcurrentMap();
     private Map<Long, Map<String, List<LoadJob>>> dbIdToLabelToLoadJobs = Maps.newConcurrentMap();
     private LoadJobScheduler loadJobScheduler;
+    private CleanCopyJobScheduler cleanCopyJobScheduler;
 
     private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
     public LoadManager(LoadJobScheduler loadJobScheduler) {
         this.loadJobScheduler = loadJobScheduler;
+    }
+
+    public LoadManager(LoadJobScheduler loadJobScheduler, CleanCopyJobScheduler cleanCopyJobScheduler) {
+        this(loadJobScheduler);
+        this.cleanCopyJobScheduler = cleanCopyJobScheduler;
     }
 
     /**
@@ -139,6 +145,10 @@ public class LoadManager implements Writable {
         return loadJob.getId();
     }
 
+    public void createCleanCopyJobTask(CleanCopyJobTask task) throws DdlException {
+        cleanCopyJobScheduler.submitJob(task);
+    }
+
     public LoadJob createLoadJobFromStmt(CopyStmt stmt) throws DdlException {
         Database database = checkDb(stmt.getDbName());
         long dbId = database.getId();
@@ -152,8 +162,8 @@ public class LoadManager implements Writable {
             }
             loadJob = new CopyJob(dbId, stmt.getLabel().getLabelName(), ConnectContext.get().queryId(),
                     stmt.getBrokerDesc(), stmt.getOrigStmt(), stmt.getUserInfo(), stmt.getStageId(),
-                    stmt.getStageType(), stmt.getSizeLimit(), stmt.getPattern(), stmt.getObjectInfo(), stmt.isForce(),
-                    stmt.getUserName());
+                    stmt.getStageType(), stmt.getStagePrefix(), stmt.getSizeLimit(), stmt.getPattern(),
+                    stmt.getObjectInfo(), stmt.isForce(), stmt.getUserName());
             loadJob.setJobProperties(stmt.getProperties());
             loadJob.checkAndSetDataSourceInfo(database, stmt.getDataDescriptions());
             createLoadJob(loadJob);

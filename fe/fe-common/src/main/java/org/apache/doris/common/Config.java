@@ -2050,6 +2050,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static int cloud_copy_list_objects_version = 2;
 
+    @ConfField(mutable = true, masterOnly = true)
+    public static boolean cloud_delete_loaded_internal_stage_files = false;
+
     @ConfField(mutable = true)
     public static int meta_service_rpc_retry_times = 200;
 
