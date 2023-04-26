@@ -3438,6 +3438,24 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
         response_body = msg;
         return;
     }
+    if (unresolved_path == "legacy_update_ak_sk") {
+        AlterObjStoreInfoRequest r;
+        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
+        if (!st.ok()) {
+            msg = "failed to SetObjStoreInfoRequest, error: " + st.message().ToString();
+            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            response_body = msg;
+            LOG(WARNING) << msg;
+            return;
+        }
+        r.set_op(AlterObjStoreInfoRequest::LEGACY_UPDATE_AK_SK);
+        AlterObjStoreInfoResponse res;
+        alter_obj_store_info(cntl, &r, &res, nullptr);
+        ret = res.status().code();
+        msg = res.status().msg();
+        response_body = msg;
+        return;
+    }
     if (unresolved_path == "decode_key") { // TODO: implement this in a separate src file
         if (uri.GetQuery("key") == nullptr || uri.GetQuery("key")->empty()) {
             msg = "no key to decode";
@@ -4003,6 +4021,33 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
             std::chrono::duration_cast<std::chrono::seconds>(now_time.time_since_epoch()).count();
 
     switch (request->op()) {
+    case AlterObjStoreInfoRequest::LEGACY_UPDATE_AK_SK: {
+        // get id
+        std::string id = request->obj().has_id() ? request->obj().id() : "0";
+        int idx = std::stoi(id);
+        if (idx < 1 || idx > instance.obj_info().size()) {
+            // err
+            code = MetaServiceCode::INVALID_ARGUMENT;
+            msg = "id invalid, please check it";
+            return;
+        }
+        auto& obj_info =
+                const_cast<std::decay_t<decltype(instance.obj_info())>&>(instance.obj_info());
+        for (auto& it : obj_info) {
+            if (std::stoi(it.id()) == idx) {
+                if (it.ak() == ak && it.sk() == sk) {
+                    // not change, just return ok
+                    code = MetaServiceCode::OK;
+                    msg = "";
+                    return;
+                }
+                it.set_mtime(time);
+                it.set_ak(ak);
+                it.set_sk(sk);
+                it.mutable_encryption_info()->CopyFrom(encryption_info);
+            }
+        }
+    } break;
     case AlterObjStoreInfoRequest::ADD_OBJ_INFO: {
         if (!obj.has_provider()) {
             code = MetaServiceCode::INVALID_ARGUMENT;

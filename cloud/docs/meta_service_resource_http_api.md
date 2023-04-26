@@ -56,7 +56,7 @@ Content-Type: text/plain
 | obj_info.region            | S3的region信息            | 是    |                                |
 | obj_info.external_endpoint | S3的external endpoint信息 | 否    | 兼容oss，oss有external、 internal区别 |
 | obj_info.provider          | S3的provider信息 | 是    |          |
-| obj_info.user_id           | bucket的user_id  | 是   |            |
+| obj_info.user_id           | bucket的user_id  | 否   |   轮转ak sk使用，用于标识哪些obj需更改ak sk        |
 | ram_user | ram_user信息，用于外部bucket授权         | 否    |           |
 | ram_user.user_id |         | 是    |  |
 | ram_user.ak |              | 是    |  |
@@ -1033,7 +1033,7 @@ Content-Type: text/plain
 
 ### 接口描述
 
-本接口用于更新instance配置的S3和RAM_USER的ak、sk信息，使用user_id去查询修改项，使用相同参数调用此接口会报错
+本接口用于更新instance配置的S3和RAM_USER的ak、sk信息，使用user_id去查询修改项，一般用于aksk轮转，使用相同参数调用此接口会报错
 
 ### 请求(Request)
 
@@ -1104,6 +1104,81 @@ Content-Type: text/plain
     	"user_id": "ram_user_id",
     	"ak": "xxxx",
     	"sk": "xxxx"
+    }
+}
+```
+
+* 返回参数
+
+| 参数名  | 描述    | 是否必须 | 备注                                                       |
+|------|-------|------|----------------------------------------------------------|
+| code | 返回状态码 | 是    | 枚举值，包括OK、INVALID_ARGUMENT、INTERNAL_ERROR、ALREADY_EXISTED |
+| msg  | 出错原因  | 是    | 若出错返回错误原因，未出错返回空字符串                                      |
+
+* 成功返回示例
+
+```
+{
+ "code": "OK",
+ "msg": ""
+}
+```
+
+* 失败返回示例
+```
+{
+ "code": "INVALID_ARGUMENT",
+ "msg": "ak sk eq original, please check it"
+}
+```
+
+## 更新instance的ak、sk信息(2.3版本之前的方法)
+
+### 接口描述
+
+本接口用于更新instance配置的S3的ak、sk信息，使用id去查询修改项，id可以用get_obj_store_info查询得到，多次相同参数调用此接口会报错
+
+### 请求(Request)
+
+* 请求语法
+
+```
+PUT /MetaService/http/legacy_update_ak_sk?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+
+{
+    "cloud_unique_id": string,
+    "obj": {
+        "id": string,
+        "ak": string,
+        "sk": string,
+    }
+}
+```
+* 请求参数
+
+| 参数名             | 描述                              | 是否必须 | 备注        |
+|-----------------|---------------------------------|------|-----------|
+| cloud_unique_id | 节点的cloud_unique_id              | 是    |           |
+| obj             | obj对象                           | 是    | S3信息对象    |
+| obj.id          | 将添加mysql user name的cluster name | 是    | id支持从1到10 |
+| obj.ak          | 将添加mysql user name的cluster id   | 是    |           |
+| obj.sk          | mysql user name                 | 是    | 字符串数组     |
+
+* 请求示例
+
+```
+PUT /MetaService/http/legacy_update_ak_sk?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+
+{
+    "cloud_unique_id": "cloud_unique_id_compute_node1",
+    "obj": {
+        "id": "1",
+        "ak": "test-ak",
+        "sk": "test-sk",
     }
 }
 ```
