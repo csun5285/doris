@@ -459,8 +459,8 @@ void PInternalServiceImpl::fetch_table_schema(google::protobuf::RpcController* c
     const TFileRangeDesc& range = file_scan_range.ranges.at(0);
     const TFileScanRangeParams& params = file_scan_range.params;
 
-    std::unique_ptr<vectorized::GenericReader> reader(nullptr);
     std::unique_ptr<RuntimeProfile> profile(new RuntimeProfile("FetchTableSchema"));
+    std::unique_ptr<vectorized::GenericReader> reader(nullptr);
     switch (params.format_type) {
     case TFileFormatType::FORMAT_CSV_PLAIN:
     case TFileFormatType::FORMAT_CSV_GZ:

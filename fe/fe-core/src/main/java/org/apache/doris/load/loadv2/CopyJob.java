@@ -45,7 +45,7 @@ import com.google.gson.reflect.TypeToken;
 import com.selectdb.cloud.proto.SelectdbCloud.FinishCopyRequest.Action;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
-import com.selectdb.cloud.storage.RemoteBase;
+import com.selectdb.cloud.stage.StageUtil;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
@@ -277,7 +277,7 @@ public class CopyJob extends BrokerLoadJob {
             }
         }
         if (stageType == StageType.INTERNAL) {
-            loadFiles = parseLoadFiles(paths, objectInfo.getBucket(), stagePrefix);
+            loadFiles = StageUtil.parseLoadFiles(paths, objectInfo.getBucket(), stagePrefix);
         }
         Gson gson = new GsonBuilder().disableHtmlEscaping().create();
         return gson.toJson(paths);
@@ -307,27 +307,5 @@ public class CopyJob extends BrokerLoadJob {
             return;
         }
         abortCopy();
-    }
-
-    protected static List<String> parseLoadFiles(List<String> loadFiles, String bucket, String stagePrefix) {
-        if (!Config.cloud_delete_loaded_internal_stage_files || loadFiles == null || !RemoteBase.checkStagePrefix(
-                stagePrefix)) {
-            return null;
-        }
-        String prefix = "s3://" + bucket + "/";
-        List<String> parsedFiles = new ArrayList<>();
-        for (String loadFile : loadFiles) {
-            if (!loadFile.startsWith(prefix)) {
-                LOG.warn("load file={} is not start with {}", loadFile, prefix);
-                return null;
-            }
-            String key = loadFile.substring(prefix.length());
-            if (!key.startsWith(stagePrefix)) {
-                LOG.warn("load file={} is not start with {}", loadFile, stagePrefix);
-                return null;
-            }
-            parsedFiles.add(key);
-        }
-        return parsedFiles;
     }
 }

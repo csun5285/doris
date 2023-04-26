@@ -136,7 +136,8 @@ doris::Status doris::FileFactory::create_file_reader(RuntimeProfile* profile,
     // local file reader is not thread safe, temporatily we don't support it
     // temporarily hdfs reader is not thread safe
     // TODO(AlexYue): remove FILE_HDFS type check when it's thread safe
-    if (buffer_size >= 0 && type != TFileType::FILE_LOCAL && type != TFileType::FILE_HDFS) {
+    if (buffer_size >= 0 && type != TFileType::FILE_LOCAL && type != TFileType::FILE_HDFS &&
+        profile != nullptr) {
         file_reader.reset(new BufferedReader(
                 profile, file_reader_ptr,
                 buffer_size == 0 ? config::remote_storage_read_buffer_mb * 1024 * 1024

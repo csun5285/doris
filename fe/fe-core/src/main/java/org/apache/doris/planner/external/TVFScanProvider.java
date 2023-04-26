@@ -32,6 +32,7 @@ import org.apache.doris.planner.external.ExternalFileScanNode.ParamCreateContext
 import org.apache.doris.tablefunction.ExternalFileTableValuedFunction;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TFileAttributes;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TFileScanSlotInfo;
@@ -73,6 +74,11 @@ public class TVFScanProvider extends QueryScanProvider {
     @Override
     public TFileFormatType getFileFormatType() throws DdlException, MetaNotFoundException {
         return tableValuedFunction.getTFileFormatType();
+    }
+
+    @Override
+    public TFileCompressType getFileCompressType() throws DdlException, MetaNotFoundException {
+        return tableValuedFunction.getTFileCompressType();
     }
 
     @Override

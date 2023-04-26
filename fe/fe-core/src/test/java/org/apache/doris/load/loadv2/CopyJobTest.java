@@ -21,6 +21,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 
 import com.google.common.collect.Lists;
+import com.selectdb.cloud.stage.StageUtil;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -38,16 +39,16 @@ public class CopyJobTest {
                 "org1/instance1/stage/bob/8f3b7371-c096-48ef-b81c-0eb951dd0f52", "stage/root/root");
         for (String stagePrefix : stagePrefixes) {
             Pair<List<String>, List<String>> files = generateLoadFiles(bucket, stagePrefix);
-            Assert.assertEquals(files.second, CopyJob.parseLoadFiles(files.first, bucket, stagePrefix));
+            Assert.assertEquals(files.second, StageUtil.parseLoadFiles(files.first, bucket, stagePrefix));
         }
 
-        Assert.assertNull(CopyJob.parseLoadFiles(null, bucket, stagePrefixes.get(0)));
+        Assert.assertNull(StageUtil.parseLoadFiles(null, bucket, stagePrefixes.get(0)));
 
-        Assert.assertNull(CopyJob.parseLoadFiles(new ArrayList<>(), bucket, "instance1/data/dbId"));
+        Assert.assertNull(StageUtil.parseLoadFiles(new ArrayList<>(), bucket, "instance1/data/dbId"));
 
         Config.cloud_delete_loaded_internal_stage_files = false;
         Pair<List<String>, List<String>> files = generateLoadFiles(bucket, stagePrefixes.get(0));
-        Assert.assertNull(CopyJob.parseLoadFiles(files.first, bucket, stagePrefixes.get(0)));
+        Assert.assertNull(StageUtil.parseLoadFiles(files.first, bucket, stagePrefixes.get(0)));
     }
 
     private Pair<List<String>, List<String>> generateLoadFiles(String bucket, String stagePrefix) {

@@ -40,6 +40,7 @@ import org.apache.doris.rpc.RpcException;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TFileAttributes;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TFileScanRange;
@@ -54,6 +55,7 @@ import org.apache.doris.thrift.TStatusCode;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
+import com.selectdb.cloud.stage.StageUtil;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 import org.apache.thrift.TException;
@@ -71,7 +73,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     public static final Logger LOG = LogManager.getLogger(ExternalFileTableValuedFunction.class);
     protected static final String DEFAULT_COLUMN_SEPARATOR = ",";
     protected static final String DEFAULT_LINE_DELIMITER = "\n";
-    protected static final String FORMAT = "format";
+    public static final String FORMAT = "format";
+    public static final String COMPRESS = "compress";
     protected static final String COLUMN_SEPARATOR = "column_separator";
     protected static final String LINE_DELIMITER = "line_delimiter";
     protected static final String JSON_ROOT = "json_root";
@@ -84,6 +87,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
 
     protected static final ImmutableSet<String> FILE_FORMAT_PROPERTIES = new ImmutableSet.Builder<String>()
             .add(FORMAT)
+            .add(COMPRESS)
             .add(JSON_ROOT)
             .add(JSON_PATHS)
             .add(STRIP_OUTER_ARRAY)
@@ -99,6 +103,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     protected Map<String, String> locationProperties;
 
     private TFileFormatType fileFormatType;
+    private TFileCompressType fileCompressType;
     private String headerType = "";
 
     private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
@@ -119,6 +124,10 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
 
     public TFileFormatType getTFileFormatType() {
         return fileFormatType;
+    }
+
+    public TFileCompressType getTFileCompressType() {
+        return fileCompressType;
     }
 
     public Map<String, String> getLocationProperties() {
@@ -171,6 +180,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             default:
                 throw new AnalysisException("format:" + formatString + " is not supported.");
         }
+        fileCompressType = StageUtil.parseCompressType(validParams.getOrDefault(COMPRESS, ""));
 
         columnSeparator = validParams.getOrDefault(COLUMN_SEPARATOR, DEFAULT_COLUMN_SEPARATOR);
         lineDelimiter = validParams.getOrDefault(LINE_DELIMITER, DEFAULT_LINE_DELIMITER);
@@ -282,6 +292,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         TFileScanRangeParams fileScanRangeParams = new TFileScanRangeParams();
         fileScanRangeParams.setFileType(getTFileType());
         fileScanRangeParams.setFormatType(fileFormatType);
+        fileScanRangeParams.setCompressType(fileCompressType);
         fileScanRangeParams.setProperties(locationProperties);
         fileScanRangeParams.setFileAttributes(getFileAttributes());
 

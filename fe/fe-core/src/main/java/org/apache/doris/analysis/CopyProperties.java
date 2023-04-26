@@ -32,7 +32,7 @@ public class CopyProperties {
     // properties for type, compression, column_separator
     public static final String TYPE = FILE_PREFIX + "type";
     public static final String COMPRESSION = FILE_PREFIX + "compression";
-    public static final String COLUMN_SEPARATOR = FILE_PREFIX + "column_separator";
+    public static final String COLUMN_SEPARATOR = FILE_PREFIX + LoadStmt.KEY_IN_PARAM_COLUMN_SEPARATOR;
     // properties for data desc
     public static final String LINE_DELIMITER = FILE_PREFIX + LoadStmt.KEY_IN_PARAM_LINE_DELIMITER;
     public static final String PARAM_STRIP_OUTER_ARRAY = FILE_PREFIX + LoadStmt.KEY_IN_PARAM_STRIP_OUTER_ARRAY;
@@ -41,7 +41,7 @@ public class CopyProperties {
     public static final String PARAM_JSONPATHS = FILE_PREFIX + LoadStmt.KEY_IN_PARAM_JSONPATHS;
     public static final String PARAM_JSONROOT = FILE_PREFIX + LoadStmt.KEY_IN_PARAM_JSONROOT;
 
-    private static final String COPY_PREFIX = "copy.";
+    public static final String COPY_PREFIX = "copy.";
     // property for size limit, async, on_error
     public static final String SIZE_LIMIT = COPY_PREFIX + "size_limit";
     public static final String ASYNC = COPY_PREFIX + "async";
@@ -217,5 +217,14 @@ public class CopyProperties {
 
     protected String addKeyPrefix(String key) {
         return prefix + key;
+    }
+
+    protected String removeFilePrefix(String key) {
+        if (key.startsWith(FILE_PREFIX)) {
+            return key.substring(FILE_PREFIX.length());
+        } else if (key.startsWith(COPY_PREFIX)) {
+            return key.substring(COPY_PREFIX.length());
+        }
+        return key;
     }
 }

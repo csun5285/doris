@@ -51,6 +51,8 @@ import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rewrite.ExprRewriter;
 import org.apache.doris.service.FrontendOptions;
+import org.apache.doris.tablefunction.StageTableValuedFunction;
+import org.apache.doris.tablefunction.TableValuedFunctionIf;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionState.LoadJobSourceType;
 import org.apache.doris.transaction.TransactionState.TxnCoordinator;
@@ -61,6 +63,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -87,6 +90,7 @@ import java.util.Set;
  */
 public class InsertStmt extends DdlStmt {
     private static final Logger LOG = LogManager.getLogger(InsertStmt.class);
+    private static final String SET_VAR_KEY = "set_var";
 
     public static final String SHUFFLE_HINT = "SHUFFLE";
     public static final String NOSHUFFLE_HINT = "NOSHUFFLE";
@@ -99,6 +103,7 @@ public class InsertStmt extends DdlStmt {
     private final List<String> targetColumnNames;
     private QueryStmt queryStmt;
     private final List<String> planHints;
+    private final Map<String, String> insertHints;
     private Boolean isRepartition;
     private boolean isStreaming = false;
     private String label = null;
@@ -132,6 +137,9 @@ public class InsertStmt extends DdlStmt {
 
     private boolean isValuesOrConstantSelect = false;
 
+    private boolean userSetLabel = false;
+    private boolean stageCopyBegan = false;
+
     public boolean isValuesOrConstantSelect() {
         return isValuesOrConstantSelect;
     }
@@ -144,16 +152,22 @@ public class InsertStmt extends DdlStmt {
         this.planHints = other.planHints;
         this.targetColumnNames = other.targetColumnNames;
         this.isValuesOrConstantSelect = other.isValuesOrConstantSelect;
+        this.insertHints = other.insertHints;
     }
 
     public InsertStmt(InsertTarget target, String label, List<String> cols, InsertSource source, List<String> hints) {
+        this(target, label, cols, source, hints, null);
+    }
+
+    public InsertStmt(InsertTarget target, String label, List<String> cols, InsertSource source, List<String> hints,
+            Map<String, Map<String, String>> insertHints) {
         this.tblName = target.getTblName();
         this.targetPartitionNames = target.getPartitionNames();
         this.label = label;
         this.queryStmt = source.getQueryStmt();
         this.planHints = hints;
         this.targetColumnNames = cols;
-
+        this.insertHints = insertHints == null ? null : insertHints.get(SET_VAR_KEY);
         this.isValuesOrConstantSelect = (queryStmt instanceof SelectStmt
                 && ((SelectStmt) queryStmt).getTableRefs().isEmpty());
     }
@@ -165,6 +179,7 @@ public class InsertStmt extends DdlStmt {
         this.targetColumnNames = null;
         this.queryStmt = queryStmt;
         this.planHints = null;
+        this.insertHints = null;
     }
 
     public TupleDescriptor getOlapTuple() {
@@ -324,6 +339,7 @@ public class InsertStmt extends DdlStmt {
                         Lists.newArrayList(targetTable.getId()), label,
                         new TxnCoordinator(TxnSourceType.FE, FrontendOptions.getLocalHostAddress()),
                         sourceType, timeoutSecond);
+                afterBeginTxn();
             }
             isTransactionBegin = true;
         }
@@ -500,6 +516,7 @@ public class InsertStmt extends DdlStmt {
 
         // parse query statement
         queryStmt.setFromInsert(true);
+        userSetLabel = !StringUtils.isEmpty(label);
         queryStmt.analyze(analyzer);
 
         // check if size of select item equal with columns mentioned in statement
@@ -807,4 +824,56 @@ public class InsertStmt extends DdlStmt {
             return RedirectStatus.FORWARD_WITH_SYNC;
         }
     }
+
+    public Map<String, String> getInsertHints() {
+        return insertHints;
+    }
+
+    public void afterBeginTxn() throws AnalysisException {
+        if (userSetLabel || queryStmt == null || !(queryStmt instanceof SelectStmt)) {
+            return;
+        }
+        SelectStmt selectStmt = (SelectStmt) queryStmt;
+        FromClause fromClause = selectStmt.fromClause;
+        List<TableRef> tableRefs = fromClause.getTableRefs();
+        if (tableRefs == null) {
+            return;
+        }
+        for (TableRef tableRef : tableRefs) {
+            if (tableRef instanceof TableValuedFunctionRef) {
+                TableValuedFunctionRef tableValuedFunctionRef = (TableValuedFunctionRef) tableRef;
+                TableValuedFunctionIf tableFunction = tableValuedFunctionRef.getTableFunction();
+                if (tableFunction instanceof StageTableValuedFunction) {
+                    StageTableValuedFunction stageTableValuedFunction
+                            = (StageTableValuedFunction) tableFunction;
+                    stageTableValuedFunction.parseFile(targetTable.getId());
+                    stageCopyBegan = true;
+                }
+            }
+        }
+    }
+
+    public void afterFinishTxn(boolean success) {
+        if (!stageCopyBegan || queryStmt == null || !(queryStmt instanceof SelectStmt)) {
+            return;
+        }
+        SelectStmt selectStmt = (SelectStmt) queryStmt;
+        FromClause fromClause = selectStmt.fromClause;
+        List<TableRef> tableRefs = fromClause.getTableRefs();
+        if (tableRefs == null) {
+            return;
+        }
+        for (TableRef tableRef : tableRefs) {
+            if (tableRef instanceof TableValuedFunctionRef) {
+                TableValuedFunctionRef tableValuedFunctionRef = (TableValuedFunctionRef) tableRef;
+                TableValuedFunctionIf tableFunction = tableValuedFunctionRef.getTableFunction();
+                if (tableFunction instanceof StageTableValuedFunction) {
+                    StageTableValuedFunction stageTableValuedFunction
+                            = (StageTableValuedFunction) tableFunction;
+                    stageTableValuedFunction.finishCopy(success);
+                }
+            }
+        }
+    }
+
 }

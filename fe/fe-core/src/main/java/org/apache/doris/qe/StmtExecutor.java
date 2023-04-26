@@ -633,6 +633,7 @@ public class StmtExecutor implements ProfileWriter {
                         Env.getCurrentGlobalTransactionMgr().abortTransaction(
                                 insertStmt.getDbObj().getId(), insertStmt.getTransactionId(),
                                 (errMsg == null ? "unknown reason" : errMsg));
+                        insertStmt.afterFinishTxn(false);
                     } catch (Exception abortTxnException) {
                         LOG.warn("errors when abort txn. {}", context.getQueryIdentifier(), abortTxnException);
                     }
@@ -648,9 +649,16 @@ public class StmtExecutor implements ProfileWriter {
      */
     private void analyzeVariablesInStmt() throws DdlException {
         SessionVariable sessionVariable = context.getSessionVariable();
-        if (parsedStmt != null && (parsedStmt instanceof SelectStmt || parsedStmt instanceof CopyStmt)) {
-            Map<String, String> optHints = parsedStmt instanceof SelectStmt ? ((SelectStmt) parsedStmt).getSelectList()
-                    .getOptHints() : ((CopyStmt) parsedStmt).getOptHints();
+        if (parsedStmt != null && (parsedStmt instanceof SelectStmt || parsedStmt instanceof CopyStmt
+                || parsedStmt instanceof InsertStmt)) {
+            Map<String, String> optHints;
+            if (parsedStmt instanceof SelectStmt) {
+                optHints = ((SelectStmt) parsedStmt).getSelectList().getOptHints();
+            } else if (parsedStmt instanceof InsertStmt) {
+                optHints = ((InsertStmt) parsedStmt).getInsertHints();
+            } else {
+                optHints = ((CopyStmt) parsedStmt).getOptHints();
+            }
             if (optHints != null) {
                 sessionVariable.setIsSingleSetVar(true);
                 for (String key : optHints.keySet()) {
@@ -1568,7 +1576,14 @@ public class StmtExecutor implements ProfileWriter {
                 }
 
                 // if in strict mode, insert will fail if there are filtered rows
-                if (context.getSessionVariable().getEnableInsertStrict()) {
+                if (context.getSessionVariable().getMaxFilterRatio() > 0
+                        && context.getSessionVariable().getMaxFilterRatio() < 1) {
+                    if (filteredRows > (filteredRows + loadedRows) * context.getSessionVariable().getMaxFilterRatio()) {
+                        context.getState().setError(ErrorCode.ERR_FAILED_WHEN_INSERT,
+                                "too many filtered rows, tracking_url=" + coord.getTrackingUrl());
+                        return;
+                    }
+                } else if (context.getSessionVariable().getEnableInsertStrict()) {
                     if (filteredRows > 0) {
                         context.getState().setError(ErrorCode.ERR_FAILED_WHEN_INSERT,
                                 "Insert has filtered data in strict mode, tracking_url=" + coord.getTrackingUrl());
@@ -1593,6 +1608,7 @@ public class StmtExecutor implements ProfileWriter {
                     txnStatus = TransactionStatus.COMMITTED;
                 }
 
+                insertStmt.afterFinishTxn(true);
             } catch (Throwable t) {
                 // if any throwable being thrown during insert operation, first we should abort this txn
                 LOG.warn("handle insert stmt fail: {}", label, t);
@@ -1600,6 +1616,7 @@ public class StmtExecutor implements ProfileWriter {
                     Env.getCurrentGlobalTransactionMgr().abortTransaction(
                             insertStmt.getDbObj().getId(), insertStmt.getTransactionId(),
                             t.getMessage() == null ? "unknown reason" : t.getMessage());
+                    insertStmt.afterFinishTxn(false);
                 } catch (Exception abortTxnException) {
                     // just print a log if abort txn failed. This failure do not need to pass to user.
                     // user only concern abort how txn failed.

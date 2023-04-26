@@ -31,6 +31,7 @@ import org.apache.doris.planner.external.ExternalFileScanNode;
 import org.apache.doris.planner.external.QueryScanProvider;
 import org.apache.doris.planner.external.TableFormatType;
 import org.apache.doris.thrift.TFileAttributes;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TFileType;
@@ -248,6 +249,11 @@ public class IcebergScanProvider extends QueryScanProvider {
             throw new DdlException(String.format("Unsupported format name: %s for iceberg table.", icebergFormat));
         }
         return type;
+    }
+
+    @Override
+    public TFileCompressType getFileCompressType() throws DdlException, MetaNotFoundException {
+        return null;
     }
 
     @Override

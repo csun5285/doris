@@ -43,6 +43,7 @@ import org.apache.doris.planner.ColumnRange;
 import org.apache.doris.planner.ListPartitionPrunerV2;
 import org.apache.doris.planner.external.ExternalFileScanNode.ParamCreateContext;
 import org.apache.doris.thrift.TFileAttributes;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TFileScanSlotInfo;
@@ -106,6 +107,11 @@ public class HiveScanProvider extends HMSTableScanProvider {
             type = TFileFormatType.FORMAT_CSV_PLAIN;
         }
         return type;
+    }
+
+    @Override
+    public TFileCompressType getFileCompressType() throws DdlException, MetaNotFoundException {
+        return null;
     }
 
     @Override

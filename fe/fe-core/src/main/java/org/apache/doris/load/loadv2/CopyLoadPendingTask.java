@@ -31,28 +31,20 @@ import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.BrokerFileGroupAggInfo.FileGroupAggKey;
 import org.apache.doris.thrift.TBrokerFileStatus;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.selectdb.cloud.proto.SelectdbCloud.CopyJobPB;
-import com.selectdb.cloud.proto.SelectdbCloud.CopyJobPB.JobStatus;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectFilePB;
+import com.selectdb.cloud.stage.StageUtil;
 import com.selectdb.cloud.storage.ListObjectsResult;
 import com.selectdb.cloud.storage.ObjectFile;
 import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
-import org.apache.hadoop.fs.GlobExpander;
-import org.apache.hadoop.fs.GlobFilter;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.IOException;
-import java.nio.file.FileSystems;
-import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -183,7 +175,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             }
             copyJob.setAbortedCopy(false);
             Set<String> filteredObjectSet = filteredObjectFiles.stream()
-                    .map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
+                    .map(f -> StageUtil.getFileInfoUniqueId(f)).collect(Collectors.toSet());
             LOG.debug("Begin copy for stage={}, table={}, queryId={}, before objectSize={}, filtered objectSize={}",
                     copyJob.getStageId(), fileGroupAggKey.getTableId(), copyJob.getCopyId(), objectFiles.size(),
                     filteredObjectSet.size());
@@ -199,7 +191,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                 for (Pair<TBrokerFileStatus, ObjectFilePB> pair : pairs) {
                     TBrokerFileStatus brokerFileStatus = pair.first;
                     ObjectFilePB objectFile = pair.second;
-                    if (!needFilter || filteredObjectSet.contains(getFileInfoUniqueId(objectFile))) {
+                    if (!needFilter || filteredObjectSet.contains(StageUtil.getFileInfoUniqueId(objectFile))) {
                         tableTotalFileSize += brokerFileStatus.getSize();
                         tableTotalFileNum++;
                         fileStatuses.add(brokerFileStatus);
@@ -228,8 +220,11 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                 listAndFilterFiles(objectInfo, pattern, copyId, sizeLimit, fileNumLimit, fileMetaSizeLimit,
                         getCopyFiles(stageId, tableId, forceCopy), fileStatus);
             } else { // version 2
-                listAndFilterFilesV2(objectInfo, pattern, copyId, stageId, tableId, forceCopy, sizeLimit, fileNumLimit,
-                        fileMetaSizeLimit, fileStatus);
+                Triple<Integer, Integer, String> triple = StageUtil.listAndFilterFilesV2(objectInfo, pattern, copyId,
+                        stageId, tableId, forceCopy, sizeLimit, fileNumLimit, fileMetaSizeLimit, fileStatus);
+                matchedFileNum = triple.getLeft();
+                loadedFileNum = triple.getMiddle();
+                reachLimitStr = triple.getRight();
             }
         } catch (Exception e) {
             LOG.warn("Failed to list copy files for queryId={}", copyId, e);
@@ -250,11 +245,12 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
         loadedFileNum = 0;
         reachLimitStr = "";
         RemoteBase remote = RemoteBase.newInstance(objectInfo);
-        Set<String> loadedFileSet = copiedFiles.stream().map(f -> getFileInfoUniqueId(f)).collect(Collectors.toSet());
+        Set<String> loadedFileSet = copiedFiles.stream().map(f -> StageUtil.getFileInfoUniqueId(f))
+                .collect(Collectors.toSet());
         try {
             long totalSize = 0;
             long totalMetaSize = 0;
-            PathMatcher matcher = getPathMatcher(pattern);
+            PathMatcher matcher = StageUtil.getPathMatcher(pattern);
             String continuationToken = null;
             boolean finish = false;
             while (!finish) {
@@ -271,11 +267,11 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                     // 1. match pattern if it's set
                     // 2. file is not copying or copied by other copy jobs
                     // 3. not reach any limit of fileNum/fileSize/fileMetaSize if select more than 1 file
-                    if (!matchPattern(objectFile.getRelativePath(), matcher)) {
+                    if (!StageUtil.matchPattern(objectFile.getRelativePath(), matcher)) {
                         continue;
                     }
                     matchedFileNum++;
-                    if (loadedFileSet.contains(getFileInfoUniqueId(objectFile))) {
+                    if (loadedFileSet.contains(StageUtil.getFileInfoUniqueId(objectFile))) {
                         loadedFileNum++;
                         continue;
                     }
@@ -310,323 +306,6 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                 }
                 continuationToken = listObjectsResult.getContinuationToken();
             }
-        } finally {
-            remote.close();
-        }
-    }
-
-    protected void listAndFilterFilesV2(ObjectInfo objectInfo, String pattern, String copyId, String stageId,
-            long tableId, boolean force, long sizeLimit, int fileNum, int metaSizeLimit,
-            List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatus) throws Exception {
-        long startTimestamp = System.currentTimeMillis();
-        long listFileNum = 0;
-        matchedFileNum = 0;
-        loadedFileNum = 0;
-        reachLimitStr = "";
-        RemoteBase remote = RemoteBase.newInstance(objectInfo);
-
-        List<Pair<String, Boolean>> globs = analyzeGlob(copyId, pattern);
-        LOG.info("Input copy into glob={}, analyzed={}", pattern, globs);
-        try {
-            PathMatcher matcher = getPathMatcher(pattern);
-            boolean finish = false;
-            List<ObjectFile> matchPatternFiles = new ArrayList<>();
-            for (int i = 0; i < globs.size() && !finish; i++) {
-                Pair<String, Boolean> glob = globs.get(i);
-                String continuationToken = null;
-                while (!finish) {
-                    ListObjectsResult listObjectsResult;
-                    if (glob.second) {
-                        // list objects with sub prefix
-                        listObjectsResult = remote.listObjects(glob.first, continuationToken);
-                    } else {
-                        // head object
-                        listObjectsResult = remote.headObject(glob.first);
-                    }
-                    listFileNum += listObjectsResult.getObjectInfoList().size();
-                    long costSeconds = (System.currentTimeMillis() - startTimestamp) / 1000;
-                    if (costSeconds >= 3600 || listFileNum >= 1000000) {
-                        throw new DdlException("Abort list object for copyId=" + copyId
-                                + ". We don't collect enough files to load, after listing " + listFileNum
-                                + " objects for " + costSeconds + " seconds, please check if your pattern " + pattern
-                                + " is correct.");
-                    }
-                    // 1. check if pattern is matched
-                    for (ObjectFile objectFile : listObjectsResult.getObjectInfoList()) {
-                        if (!matchPattern(objectFile.getRelativePath(), matcher)) {
-                            continue;
-                        }
-                        matchPatternFiles.add(objectFile);
-                        // 2. filter files which are not copying or copied by other copy jobs
-                        if (matchPatternFiles.size() >= Config.cloud_filter_copy_file_num_limit) {
-                            List<ObjectFilePB> filterCopyFiles = filterCopyFiles(stageId, tableId, force,
-                                    matchPatternFiles);
-                            fileStatus.addAll(
-                                    generateFiles(filterCopyFiles, matchPatternFiles, objectInfo.getBucket()));
-                            matchPatternFiles.clear();
-                            // 3. check if reach any limit of fileNum/fileSize/fileMetaSize if select more than 1 file
-                            if (reachLimit(fileStatus, sizeLimit, fileNum, metaSizeLimit)) {
-                                finish = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!listObjectsResult.isTruncated()) {
-                        break;
-                    }
-                    continuationToken = listObjectsResult.getContinuationToken();
-                }
-            }
-            if (!matchPatternFiles.isEmpty()) {
-                List<ObjectFilePB> filterCopyFiles = filterCopyFiles(stageId, tableId, force, matchPatternFiles);
-                fileStatus.addAll(generateFiles(filterCopyFiles, matchPatternFiles, objectInfo.getBucket()));
-                matchPatternFiles.clear();
-            }
-        } finally {
-            remote.close();
-        }
-    }
-
-    private PathMatcher getPathMatcher(String pattern) {
-        return pattern == null ? null : FileSystems.getDefault().getPathMatcher("glob:" + pattern);
-    }
-
-    private boolean matchPattern(String key, PathMatcher matcher) {
-        if (matcher == null) {
-            return true;
-        }
-        Path path = Paths.get(key);
-        return matcher.matches(path);
-    }
-
-    private String getFileInfoUniqueId(ObjectFile objectFile) {
-        return objectFile.getRelativePath() + "_" + objectFile.getEtag();
-    }
-
-    private String getFileInfoUniqueId(ObjectFilePB objectFile) {
-        return objectFile.getRelativePath() + "_" + objectFile.getEtag();
-    }
-
-    /**
-     * @return the list of analyzed sub glob which is a pair prefix and containsWildcard
-     */
-    @VisibleForTesting
-    protected List<Pair<String, Boolean>> analyzeGlob(String queryId, String glob) throws DdlException {
-        List<Pair<String, Boolean>> globs = new ArrayList<>();
-        if (glob == null) {
-            globs.add(Pair.of("", true));
-            return globs;
-        }
-        try {
-            List<String> flattenedPatterns = GlobExpander.expand(glob);
-            for (String flattenedPattern : flattenedPatterns) {
-                try {
-                    globs.addAll(analyzeFlattenedPattern(flattenedPattern));
-                } catch (Exception e) {
-                    LOG.warn("Failed to analyze flattenedPattern: {}, glob: {}, queryId: {}", flattenedPattern, glob,
-                            queryId, e);
-                    throw e;
-                }
-            }
-            return globs;
-        } catch (Exception e) {
-            LOG.warn("Failed to analyze glob: {}, queryId: {}", glob, queryId, e);
-            throw new DdlException("Failed to analyze glob: " + glob + ", queryId: " + queryId + ", " + e.getMessage());
-        }
-    }
-
-    private List<Pair<String, Boolean>> analyzeFlattenedPattern(String flattenedPattern) throws IOException {
-        List<String> components = getPathComponents(flattenedPattern);
-        LOG.debug("flattenedPattern={}, components={}", flattenedPattern, components);
-        String prefix = "";
-        boolean sawWildcard = false;
-        for (int componentIdx = 0; componentIdx < components.size(); componentIdx++) {
-            String component = components.get(componentIdx);
-            GlobFilter globFilter = new GlobFilter(component);
-            if (globFilter.hasPattern()) {
-                if (componentIdx == components.size() - 1) {
-                    List<Pair<String, Boolean>> pairs = analyzeLastComponent(component);
-                    if (pairs != null) {
-                        List<Pair<String, Boolean>> results = new ArrayList<>();
-                        for (Pair<String, Boolean> pair : pairs) {
-                            results.add(Pair.of((prefix.isEmpty() ? "" : prefix + "/") + pair.first, pair.second));
-                        }
-                        return results;
-                    }
-                }
-                sawWildcard = true;
-                String componentPrefix = getComponentPrefix(component);
-                prefix += (prefix.isEmpty() ? "" : "/") + componentPrefix;
-                break;
-            } else {
-                String unescapedComponent = unescapePathComponent(component);
-                prefix += (prefix.isEmpty() ? "" : "/") + unescapedComponent;
-            }
-        }
-        return Lists.newArrayList(Pair.of(prefix, sawWildcard));
-    }
-
-    private List<Pair<String, Boolean>> analyzeLastComponent(String component) throws IOException {
-        if (component.startsWith("{") && component.endsWith("}")) {
-            List<Pair<String, Boolean>> results = new ArrayList<>();
-            String sub = component.substring(1, component.length() - 1);
-            List<String> splits = splitByComma(sub);
-            for (String split : splits) {
-                GlobFilter globFilter = new GlobFilter(split);
-                if (globFilter.hasPattern()) {
-                    results.add(Pair.of(getComponentPrefix(split), true));
-                } else {
-                    results.add(Pair.of(unescapePathComponent(split), false));
-                }
-            }
-            return results;
-        }
-        return null;
-    }
-
-    private List<String> splitByComma(String str) {
-        List<String> values = new ArrayList<>();
-        int start = 0;
-        for (int i = 0; i < str.length(); i++) {
-            if (str.charAt(i) == ',') {
-                if (isBackslash(str, i - 1)) {
-                    continue;
-                } else {
-                    values.add(replaceBackslashComma(str.substring(start, i)));
-                    start = i + 1;
-                }
-            }
-        }
-        if (start != str.length() - 1) {
-            values.add(replaceBackslashComma(str.substring(start)));
-        }
-        return values;
-    }
-
-    private String replaceBackslashComma(String value) {
-        return value.replaceAll("\\\\,", ",");
-    }
-
-    private boolean isBackslash(String str, int index) {
-        if (index >= 0 && index < str.length()) {
-            return str.charAt(index) == '\\';
-        }
-        return false;
-    }
-
-    private String getComponentPrefix(String component) {
-        int index = 0;
-        // special characters: * ? [] {} ,(in {}) -(in [])
-        for (int i = 0; i < component.length(); i++) {
-            char ch = component.charAt(i);
-            if (ch == '*' || ch == '?' || ch == '[' || ch == '{' || ch == '\\') {
-                index = i;
-                break;
-            }
-        }
-        return component.substring(0, index);
-    }
-
-    /*
-     * Glob process method are referenced from {@link org.apache.hadoop.fs.Globber}
-     */
-    private static String unescapePathComponent(String name) {
-        return name.replaceAll("\\\\(.)", "$1");
-    }
-
-    private static List<String> getPathComponents(String path) {
-        ArrayList<String> ret = new ArrayList<>();
-        for (String component : path.split(org.apache.hadoop.fs.Path.SEPARATOR)) {
-            if (!component.isEmpty()) {
-                ret.add(component);
-            }
-        }
-        return ret;
-    }
-
-    private List<ObjectFilePB> filterCopyFiles(String stageId, long tableId, boolean force,
-            List<ObjectFile> objectFiles) throws DdlException {
-        if (force) {
-            return objectFiles.stream()
-                    .map(f -> ObjectFilePB.newBuilder().setRelativePath(f.getRelativePath()).setEtag(f.getEtag())
-                            .setSize(f.getSize()).build()).collect(Collectors.toList());
-        }
-        return objectFiles.size() > 0 ? Env.getCurrentInternalCatalog().filterCopyFiles(stageId, tableId, objectFiles)
-                : new ArrayList<>();
-    }
-
-    private boolean reachLimit(List<Pair<TBrokerFileStatus, ObjectFilePB>> objectFiles, long sizeLimit,
-            int fileNum, int metaSizeLimit) {
-        if (objectFiles.size() == 0) {
-            return false;
-        }
-        if (fileNum > 0 && objectFiles.size() >= fileNum) {
-            reachLimitStr = ", reach num limit: " + fileNum;
-            return true;
-        }
-        if (sizeLimit > 0 && objectFiles.stream().mapToLong(f -> f.first.getSize()).sum() >= sizeLimit) {
-            reachLimitStr = ", reach size limit: " + sizeLimit;
-            return true;
-        }
-        if (metaSizeLimit > 0
-                && objectFiles.stream().mapToLong(f -> f.second.getSerializedSize()).sum() >= metaSizeLimit) {
-            reachLimitStr = ", reach meta size limit: " + metaSizeLimit;
-            return true;
-        }
-        return false;
-    }
-
-    private List<Pair<TBrokerFileStatus, ObjectFilePB>> generateFiles(List<ObjectFilePB> filterFiles,
-            List<ObjectFile> allFiles, String bucket) {
-        List<Pair<TBrokerFileStatus, ObjectFilePB>> files = new ArrayList<>();
-        Map<String, ObjectFilePB> fileMap = new HashMap<>();
-        for (ObjectFilePB filterFile : filterFiles) {
-            fileMap.put(getFileInfoUniqueId(filterFile), filterFile);
-        }
-        for (ObjectFile file : allFiles) {
-            if (fileMap.containsKey(getFileInfoUniqueId(file))) {
-                String objUrl = "s3://" + bucket + "/" + file.getKey();
-                files.add(Pair.of(new TBrokerFileStatus(objUrl, false, file.getSize(), true),
-                        fileMap.get(getFileInfoUniqueId(file))));
-            }
-        }
-        return files;
-    }
-
-    private List<Pair<TBrokerFileStatus, ObjectFilePB>> getCopyFilesWhenReplay(String stageId, long tableId,
-            String copyId, ObjectInfo objectInfo) throws DdlException {
-        CopyJobPB copyJobPB = Env.getCurrentInternalCatalog().getCopyJob(stageId, tableId, copyId, 0);
-        // BeginCopy does not execute
-        if (copyJobPB == null) {
-            return new ArrayList<>();
-        }
-        if (copyJobPB.getJobStatus() != JobStatus.LOADING) {
-            throw new DdlException("Copy job is not in loading status, status=" + copyJobPB.getJobStatus());
-        }
-        isBeginCopyDone = true;
-        RemoteBase remote = null;
-        try {
-            remote = RemoteBase.newInstance(objectInfo);
-            List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatuses = Lists.newArrayList();
-            for (ObjectFilePB objectFile : copyJobPB.getObjectFilesList()) {
-                List<ObjectFile> files = remote.headObject(objectFile.getRelativePath()).getObjectInfoList();
-                TBrokerFileStatus brokerFileStatus = null;
-                for (ObjectFile file : files) {
-                    if (file.getRelativePath().equals(objectFile.getRelativePath()) && file.getEtag()
-                            .equals(objectFile.getEtag())) {
-                        String objUrl = "s3://" + objectInfo.getBucket() + "/" + file.getKey();
-                        brokerFileStatus = new TBrokerFileStatus(objUrl, false, file.getSize(), true);
-                        break;
-                    }
-                }
-                if (brokerFileStatus == null) {
-                    throw new Exception("Can not find object with relative path: " + objectFile.getRelativePath());
-                }
-                fileStatuses.add(Pair.of(brokerFileStatus, objectFile));
-            }
-            return fileStatuses;
-        } catch (Exception e) {
-            throw new DdlException(e.getMessage());
         } finally {
             remote.close();
         }

@@ -27,9 +27,11 @@ import org.apache.doris.common.util.BrokerUtil;
 import org.apache.doris.planner.external.ExternalFileScanNode.ParamCreateContext;
 import org.apache.doris.planner.external.iceberg.IcebergScanProvider;
 import org.apache.doris.planner.external.iceberg.IcebergSplit;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TExternalScanRange;
 import org.apache.doris.thrift.TFileAttributes;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TFileScanRange;
@@ -74,9 +76,14 @@ public abstract class QueryScanProvider implements FileScanProviderIf {
             context.params.setFileType(locationType);
             TFileFormatType fileFormatType = getFileFormatType();
             context.params.setFormatType(getFileFormatType());
+            TFileCompressType fileCompressType = getFileCompressType();
+            if (fileCompressType != null) {
+                context.params.setCompressType(fileCompressType);
+            }
             if (fileFormatType == TFileFormatType.FORMAT_CSV_PLAIN || fileFormatType == TFileFormatType.FORMAT_JSON) {
                 context.params.setFileAttributes(getFileAttributes());
             }
+            context.params.setStrictMode(ConnectContext.get().getSessionVariable().getStrictMode());
 
             // set hdfs params for hdfs file type.
             Map<String, String> locationProperties = getLocationProperties();

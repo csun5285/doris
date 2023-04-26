@@ -18,6 +18,7 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.tablefunction.ExternalFileTableValuedFunction;
 
 import com.google.common.collect.ImmutableSet;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
@@ -201,6 +202,23 @@ public class StageProperties extends CopyProperties {
         for (Entry<String, String> entry : properties.entrySet()) {
             if (!STORAGE_PROPERTIES.contains(entry.getKey())) {
                 otherProperties.put(removeKeyPrefix(entry.getKey()), entry.getValue());
+            }
+        }
+        return otherProperties;
+    }
+
+    public Map<String, String> getStageTvfProperties() {
+        Map<String, String> otherProperties = new HashMap<>();
+        for (Entry<String, String> entry : getDefaultPropertiesWithoutPrefix().entrySet()) {
+            if (entry.getKey().startsWith(COPY_PREFIX)) {
+                continue;
+            }
+            if (entry.getKey().equals(TYPE)) {
+                otherProperties.put(ExternalFileTableValuedFunction.FORMAT, entry.getValue());
+            } else if (entry.getKey().equals(COMPRESSION)) {
+                otherProperties.put(ExternalFileTableValuedFunction.COMPRESS, entry.getValue());
+            } else {
+                otherProperties.put(removeFilePrefix(entry.getKey()), entry.getValue());
             }
         }
         return otherProperties;

@@ -27,20 +27,18 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.load.loadv2.LoadTask.MergeType;
-import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.qe.ShowResultSetMetaData;
-import org.apache.doris.thrift.TFileCompressType;
 
 import com.google.common.collect.Lists;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
+import com.selectdb.cloud.stage.StageUtil;
 import com.selectdb.cloud.storage.RemoteBase;
 import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 import lombok.Getter;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -129,34 +127,7 @@ public class CopyStmt extends DdlStmt {
 
     private void analyze(String user, String db, boolean checkAuth) throws AnalysisException, DdlException {
         // get stage from meta service
-        StagePB stagePB;
-        if (stage.equals("~")) {
-            if (StringUtils.isEmpty(user)) {
-                throw new AnalysisException("User name can not be empty");
-            }
-            String userId = Env.getCurrentEnv().getAuth().getUserId(user);
-            List<StagePB> stagePBs = Env.getCurrentInternalCatalog().getStage(StageType.INTERNAL, user, null, userId);
-            if (stagePBs == null || stagePBs.isEmpty()) {
-                throw new AnalysisException("Failed to get internal stage for user: " + user);
-            }
-            stagePB = stagePBs.get(0);
-        } else {
-            // check stage permission
-            if (checkAuth) {
-                if (!Env.getCurrentEnv().getAuth()
-                        .checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(), stage, PrivPredicate.USAGE,
-                                ResourceTypeEnum.STAGE)) {
-                    throw new AnalysisException(
-                            "USAGE denied to user '" + ConnectContext.get().getQualifiedUser() + "'@'"
-                                    + ConnectContext.get().getRemoteIP() + "' for cloud stage '" + stage + "'");
-                }
-            }
-            List<StagePB> stagePBs = Env.getCurrentInternalCatalog().getStage(StageType.EXTERNAL, null, stage, null);
-            if (stagePBs.isEmpty()) {
-                throw new AnalysisException("Failed to get external stage with name: " + stage);
-            }
-            stagePB = stagePBs.get(0);
-        }
+        StagePB stagePB = StageUtil.getStage(stage, user, checkAuth);
         analyzeStagePB(stagePB);
 
         // generate broker desc
@@ -178,7 +149,7 @@ public class CopyStmt extends DdlStmt {
                 copyFromParam.getFileColumns(), separator, fileFormatStr, null, false,
                 copyFromParam.getColumnMappingList(), copyFromParam.getFileFilterExpr(), null, MergeType.APPEND, null,
                 null, dataDescProperties);
-        dataDescription.setCompressType(parseCompressType(copyIntoProperties.getCompression()));
+        dataDescription.setCompressType(StageUtil.parseCompressType(copyIntoProperties.getCompression()));
         // analyze data description
         if (checkAuth) {
             dataDescription.analyze(db);
@@ -288,22 +259,5 @@ public class CopyStmt extends DdlStmt {
 
     public Map<String, String> getOptHints() {
         return optHints;
-    }
-
-    private TFileCompressType parseCompressType(String compress) {
-        if (StringUtils.isEmpty(compress)) {
-            return TFileCompressType.PLAIN;
-        } else if (compress.equalsIgnoreCase("gz")) {
-            return TFileCompressType.GZ;
-        } else if (compress.equalsIgnoreCase("bz2")) {
-            return TFileCompressType.BZ2;
-        } else if (compress.equalsIgnoreCase("lz4")) {
-            return TFileCompressType.LZ4FRAME;
-        } else if (compress.equalsIgnoreCase("lzo")) {
-            return TFileCompressType.LZO;
-        } else if (compress.equalsIgnoreCase("deflate")) {
-            return TFileCompressType.DEFLATE;
-        }
-        return TFileCompressType.UNKNOWN;
     }
 }

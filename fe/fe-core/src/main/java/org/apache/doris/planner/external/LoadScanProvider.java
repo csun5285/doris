@@ -74,6 +74,11 @@ public class LoadScanProvider implements FileScanProviderIf {
     }
 
     @Override
+    public TFileCompressType getFileCompressType() throws DdlException, MetaNotFoundException {
+        return null;
+    }
+
+    @Override
     public TFileType getLocationType() throws DdlException, MetaNotFoundException {
         return null;
     }

@@ -1,0 +1,8 @@
+{"id":1,"name":"a","score":10,"__DORIS_DELETE_SIGN__":1}
+{"id":2,"name":"b","score":20,"__DORIS_DELETE_SIGN__":0}
+{"id":3,"name":"c","score":30,"__DORIS_DELETE_SIGN__":1}
+{"id":4,"name":"d","score":40,"__DORIS_DELETE_SIGN__":0}
+{"name":"e","score":50,"__DORIS_DELETE_SIGN__":0}
+{"id":6,"score":60,"__DORIS_DELETE_SIGN__":0}
+{"id":7,"name":"g","__DORIS_DELETE_SIGN__":0}
+{"id":8,"name":"h","score":80}

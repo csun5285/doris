@@ -31,6 +31,7 @@ import com.google.common.collect.Lists;
 import com.selectdb.cloud.proto.SelectdbCloud;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectFilePB;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB.Provider;
+import com.selectdb.cloud.stage.StageUtil;
 import com.selectdb.cloud.storage.ListObjectsResult;
 import com.selectdb.cloud.storage.MockRemote;
 import com.selectdb.cloud.storage.ObjectFile;
@@ -347,7 +348,7 @@ public class CopyLoadPendingTaskTest extends TestWithFeService {
 
         for (Pair<String, Integer> pair : patternAndMatchNum) {
             String pattern = pair.first;
-            List<Pair<String, Boolean>> globList = task.analyzeGlob("q1", pattern);
+            List<Pair<String, Boolean>> globList = StageUtil.analyzeGlob("q1", pattern);
             System.out.println("\nglob: " + pattern + ", size: " + globList.size());
             for (Pair<String, Boolean> glob1 : globList) {
                 System.out.println("----: " + glob1.first + ", " + glob1.second);

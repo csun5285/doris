@@ -24,6 +24,7 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.planner.external.ExternalFileScanNode.ParamCreateContext;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileType;
 import org.apache.doris.thrift.TScanRangeLocations;
@@ -37,6 +38,9 @@ import java.util.Map;
 public interface FileScanProviderIf {
     // Return parquet/orc/text, etc.
     TFileFormatType getFileFormatType() throws DdlException, MetaNotFoundException;
+
+    // Return gz/bz2, etc.
+    TFileCompressType getFileCompressType() throws DdlException, MetaNotFoundException;
 
     // Return S3/HDSF, etc.
     TFileType getLocationType() throws DdlException, MetaNotFoundException;

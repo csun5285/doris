@@ -92,13 +92,4 @@ public class CopyIntoProperties extends CopyProperties {
             }
         }
     }
-
-    private String removeFilePrefix(String key) {
-        if (key.startsWith("file.")) {
-            return key.substring("file.".length());
-        } else if (key.startsWith("copy.")) {
-            return key.substring("copy.".length());
-        }
-        return key;
-    }
 }
