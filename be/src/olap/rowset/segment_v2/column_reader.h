@@ -66,6 +66,7 @@ class BloomFilterIndexReader;
 struct ColumnReaderOptions {
     // whether verify checksum when read page
     bool verify_checksum = true;
+    bool no_need_to_read_index = false;
 };
 
 struct ColumnIteratorOptions {

@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory> // for unique_ptr
@@ -67,7 +68,7 @@ class Segment : public std::enable_shared_from_this<Segment> {
 public:
     static Status open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
                        const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
-                       std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr);
+                       std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr, bool is_lazy_open = false);
 
     ~Segment();
 
@@ -80,7 +81,7 @@ public:
 
     uint32_t num_rows() const { return _footer.num_rows(); }
 
-    Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter);
+    Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter, bool without_index = false);
 
     Status new_bitmap_index_iterator(const TabletColumn& tablet_column, BitmapIndexIterator** iter);
 
@@ -107,6 +108,8 @@ public:
     Status load_index();
 
     Status load_pk_index_and_bf();
+
+    Status lazy_open(StorageReadOptions& opts);
 
     std::string min_key() {
         DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta());
@@ -152,6 +155,8 @@ private:
     // after this segment is generated.
     std::map<int32_t, std::unique_ptr<ColumnReader>> _column_readers;
 
+    std::map<int32_t, std::unique_ptr<ColumnReader>> _column_without_index_readers;
+
     // used to guarantee that short key index will be loaded at most once in a thread-safe way
     DorisCallOnce<Status> _load_index_once;
     // used to guarantee that primary key bloom filter will be loaded at most once in a thread-safe way
@@ -164,6 +169,10 @@ private:
     std::unique_ptr<PrimaryKeyIndexReader> _pk_index_reader;
     // Segment may be destructed after StorageEngine, in order to exit gracefully.
     std::shared_ptr<MemTracker> _segment_meta_mem_tracker;
+
+    DorisCallOnce<Status> _lazy_open_once;
+    std::atomic<bool> _is_lazy_open = false;
+ 
 };
 
 } // namespace segment_v2

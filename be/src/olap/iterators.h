@@ -122,6 +122,10 @@ public:
     const std::set<int32_t>* output_columns = nullptr;
     IOContext io_ctx;
     Version version;
+
+    bool is_lazy_open = false;
+    bool no_need_to_read_index = false;
+    vectorized::ScannerContext* ctx = nullptr;
 };
 
 // Used to read data in RowBlockV2 one by one
@@ -184,6 +188,8 @@ public:
 
     // return rows merged count by iterator
     virtual uint64_t merged_rows() const { return 0; }
+
+    virtual void set_ctx(vectorized::ScannerContext* ctx) { }
 };
 
 } // namespace doris

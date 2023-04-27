@@ -37,6 +37,9 @@ Status ScannerContext::init() {
     _max_thread_num = _max_thread_num == 0 ? 1 : _max_thread_num;
     DCHECK(_max_thread_num > 0);
 
+    if (_parent->_enable_limit_optimize && _parent->_hint_max_scanner_concurrency > 0) {
+        _max_thread_num = std::min(static_cast<int64_t>(_max_thread_num), _parent->_hint_max_scanner_concurrency);
+    }
     // 2. Calculate how many blocks need to be preallocated.
     // The calculation logic is as follows:
     //  1. Assuming that at most M rows can be scanned in one scan(config::doris_scanner_row_num),

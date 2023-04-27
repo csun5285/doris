@@ -118,12 +118,15 @@ Status ColumnReader::init() {
             _ordinal_index_meta = &index_meta.ordinal_index();
             break;
         case ZONE_MAP_INDEX:
+            if (_opts.no_need_to_read_index) { continue; }
             _zone_map_index_meta = &index_meta.zone_map_index();
             break;
         case BITMAP_INDEX:
+            if (_opts.no_need_to_read_index) { continue; }
             _bitmap_index_meta = &index_meta.bitmap_index();
             break;
         case BLOOM_FILTER_INDEX:
+            if (_opts.no_need_to_read_index) { continue; }
             _bf_index_meta = &index_meta.bloom_filter_index();
             break;
         default:

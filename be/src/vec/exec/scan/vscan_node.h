@@ -45,7 +45,14 @@ struct FilterPredicates {
 class VScanNode : public ExecNode {
 public:
     VScanNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
-            : ExecNode(pool, tnode, descs), _runtime_filter_descs(tnode.runtime_filters) {}
+            : ExecNode(pool, tnode, descs), _runtime_filter_descs(tnode.runtime_filters) {
+
+        if (!tnode.__isset.conjuncts || tnode.conjuncts.empty()) {
+            if (tnode.limit > 0) {
+                _limit_query_without_conjuncts = true;
+            }
+        }
+    }
     friend class VScanner;
     friend class NewOlapScanner;
     friend class VFileScanner;
@@ -238,6 +245,11 @@ protected:
 
     // column uniq ids of conjucts
     std::set<int32_t> _conjuct_column_unique_ids;
+
+    // Optimization of the limit query for dup-keys table
+    int64_t _hint_max_scanner_concurrency = -1;
+    bool _limit_query_without_conjuncts = false;
+    bool _enable_limit_optimize = false;
 
 protected:
     std::unique_ptr<RuntimeProfile> _scanner_profile;

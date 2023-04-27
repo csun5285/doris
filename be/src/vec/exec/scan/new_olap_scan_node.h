@@ -185,6 +185,9 @@ private:
     RuntimeProfile::Counter* _async_local_task_total = nullptr;
     RuntimeProfile::Counter* _async_local_wait_for_putting_queue = nullptr;
 
+    RuntimeProfile::Counter* _lazy_open_segment_timer = nullptr;
+    RuntimeProfile::Counter* _lazy_open_segment_counter = nullptr;
+
 };
 
 } // namespace doris::vectorized

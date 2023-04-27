@@ -20,6 +20,7 @@
 #include <bthread/bthread.h>
 
 #include "cloud/utils.h"
+#include "common/config.h"
 #include "common/status.h"
 #include "olap/storage_engine.h"
 #include "olap/tablet.h"
@@ -252,6 +253,9 @@ Status NewOlapScanNode::_init_profile() {
     _async_local_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskExecTimer");
     _async_local_task_total = ADD_COUNTER(_segment_profile, "AsyncLocalTaskTotal", TUnit::UNIT);
     _async_local_wait_for_putting_queue = ADD_TIMER(_segment_profile, "AsyncLocalWaitPuttingQueue");
+
+    _lazy_open_segment_timer = ADD_TIMER(_segment_profile, "LazyOpenSegmentTime");
+    _lazy_open_segment_counter = ADD_COUNTER(_segment_profile, "LazyOpenSegmentCounter", TUnit::UNIT);
 
     // for the purpose of debugging or profiling
     for (int i = 0; i < GENERAL_DEBUG_COUNT; ++i) {
@@ -588,6 +592,12 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
     }
 #endif
     for (auto& [tablet, version] : tablets_to_scan) {
+        if (config::enable_limit_optimize && _limit_query_without_conjuncts && !_enable_limit_optimize) {
+            // just for dup tables
+            if (tablet->keys_type() == DUP_KEYS) {
+                _enable_limit_optimize = true;
+            }
+        }
         std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &cond_ranges;
         int size_based_scanners_per_tablet = 1;
 
@@ -633,7 +643,39 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
     COUNTER_SET(_num_disks_accessed_counter, static_cast<int64_t>(disk_set.size()));
     // telemetry::set_span_attribute(span, _num_disks_accessed_counter);
     // telemetry::set_span_attribute(span, _num_scanners);
+    if (_enable_limit_optimize) {
+        // // Sort by rows and whether it contains delete_predicates.
+        // // Scanner with more rows and no delete_predicates should be ranked higher.
+        // scanners->sort([](const VScanner* vs1, const VScanner* vs2) {
+        //     auto s1 = dynamic_cast<const NewOlapScanner*>(vs1);
+        //     auto s2 = dynamic_cast<const NewOlapScanner*>(vs2);
 
+        //     bool s1_has_delete_predicates = !s1->get_tablet()->delete_predicates().empty();
+        //     bool s2_has_delete_predicates = !s2->get_tablet()->delete_predicates().empty();
+        //     if (!s1_has_delete_predicates && s2_has_delete_predicates) {
+        //         return true;
+        //     }
+        //     if (s1_has_delete_predicates && !s2_has_delete_predicates) {
+        //         return false;
+        //     }
+        //     if (!s1_has_delete_predicates && !s2_has_delete_predicates) {
+        //         return s1->get_tablet()->num_rows() > s2->get_tablet()->num_rows();
+        //     }
+        //     return true;
+        // });
+
+        size_t reached_limit_rows = 0;
+        _hint_max_scanner_concurrency = 0;
+        for (const auto s: *scanners) {
+            _hint_max_scanner_concurrency += 1;
+            if (dynamic_cast<const NewOlapScanner*>(s)->get_tablet()->delete_predicates().empty()) {
+                reached_limit_rows += dynamic_cast<const NewOlapScanner*>(s)->get_tablet()->num_rows();
+            }
+            if (reached_limit_rows >= limit()) {
+                break;
+            }
+        }
+    }
     return Status::OK();
 }
 

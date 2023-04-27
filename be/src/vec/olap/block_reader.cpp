@@ -79,7 +79,15 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
     _reader_context.batch_size = _batch_size;
     _reader_context.is_vec = true;
     _reader_context.push_down_agg_type_opt = read_params.push_down_agg_type_opt;
+    _reader_context.lazy_open_segment = read_params.lazy_open_segment;
+    _reader_context.no_need_to_read_index = read_params.no_need_to_read_index;
+    size_t reach_limt_row_num = 0;
+    bool delete_pred_rowset_empty = tablet()->delete_predicates().empty();
+    _reader_context.ctx = _ctx;
     for (auto& rs_reader : rs_readers) {
+        if (_ctx && _ctx->done()) [[unlikely]] {
+            return Status::Error<ALREADY_CANCELLED>();
+        }
         // _vcollect_iter.topn_next() will init rs_reader by itself
         if (!_vcollect_iter.use_topn_next()) {
             RETURN_NOT_OK(rs_reader->init(&_reader_context));
@@ -92,9 +100,16 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
         if (res.ok()) {
             valid_rs_readers->push_back(rs_reader);
         }
+        if (read_params.enable_limit_optimize && delete_pred_rowset_empty && read_params.limit_row_nums > 0 ) {
+            // Not all rowsets are required to build heap
+            reach_limt_row_num += rs_reader->rowset()->num_rows();
+            if (reach_limt_row_num >= read_params.limit_row_nums) {
+                break;
+            }
+        }
     }
 
-    RETURN_IF_ERROR(_vcollect_iter.build_heap(*valid_rs_readers));
+    RETURN_IF_ERROR(_vcollect_iter.build_heap(*valid_rs_readers, _ctx));
     // _vcollect_iter.topn_next() can not use current_row
     if (!_vcollect_iter.use_topn_next()) {
         auto status = _vcollect_iter.current_row(&_next_row);

@@ -84,6 +84,10 @@ struct RowsetReaderContext {
     bool is_persistent {false};
 
     const std::set<int32_t>* output_columns = nullptr;
+    bool lazy_open_segment = false;
+    bool no_need_to_read_index = false;
+
+    vectorized::ScannerContext* ctx = nullptr;
 };
 
 } // namespace doris

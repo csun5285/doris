@@ -82,7 +82,7 @@ Status VCollectIterator::add_child(RowsetReaderSharedPtr rs_reader) {
 // Build a merge heap. If _merge is true, a rowset with the max rownum
 // status will be used as the base rowset, and the other rowsets will be merged first and
 // then merged with the base rowset.
-Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers) {
+Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers, vectorized::ScannerContext* ctx) {
     if (use_topn_next()) {
         return Status::OK();
     }
@@ -97,6 +97,9 @@ Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_reade
         bool have_multiple_child = false;
         for (auto [c_iter, r_iter] = std::pair {_children.begin(), rs_readers.begin()};
              c_iter != _children.end();) {
+            if (ctx && ctx->done()) [[unlikely]] {
+                return Status::Error<ALREADY_CANCELLED>();
+            }
             auto s = (*c_iter)->init(have_multiple_child);
             if (!s.ok()) {
                 delete (*c_iter);
@@ -153,7 +156,7 @@ Status VCollectIterator::build_heap(std::vector<RowsetReaderSharedPtr>& rs_reade
         auto level1_iter = std::make_unique<Level1Iterator>(_children, _reader, _merge, _is_reverse,
                                                             _skip_same);
         _children.clear();
-        RETURN_IF_ERROR(level1_iter->init_level0_iterators_for_union());
+        RETURN_IF_ERROR(level1_iter->init_level0_iterators_for_union(ctx));
         _inner_iter.reset(level1_iter.release());
     }
     RETURN_IF_NOT_EOF_AND_OK(_inner_iter->init());
@@ -623,10 +626,13 @@ Status VCollectIterator::Level1Iterator::init(bool get_data_by_ref) {
     return Status::OK();
 }
 
-Status VCollectIterator::Level1Iterator::init_level0_iterators_for_union() {
+Status VCollectIterator::Level1Iterator::init_level0_iterators_for_union(vectorized::ScannerContext* ctx) {
     bool have_multiple_child = false;
     bool is_first_child = true;
     for (auto iter = _children.begin(); iter != _children.end();) {
+        if (ctx && ctx->done()) [[unlikely]] {
+            return Status::Error<ALREADY_CANCELLED>();
+        }
         auto s = (*iter)->init_for_union(is_first_child, have_multiple_child);
         if (!s.ok()) {
             delete (*iter);

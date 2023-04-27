@@ -143,6 +143,7 @@ Status Segment::new_iterator(const Schema& schema, const StorageReadOptions& rea
         iter->reset(vectorized::new_vstatistics_iterator(this->shared_from_this(), schema));
     } else {
         iter->reset(new SegmentIterator(this->shared_from_this(), schema));
+        iter->get()->set_ctx(read_options.ctx);
     }
     iter->get()->init(read_options);
     return Status::OK();

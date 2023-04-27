@@ -412,6 +412,9 @@ struct OlapReaderStatistics {
     FileCacheStatistics file_cache_stats;
     int64_t load_segments_timer = 0;
     AsyncIOStatistics async_io_stat;
+
+    int64_t lazy_open_segment_number = 0;
+    int64_t lazy_open_segment_timer = 0;
 };
 
 using metrics_hook = std::function<void(OlapReaderStatistics*)>;

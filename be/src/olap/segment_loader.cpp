@@ -64,7 +64,7 @@ void SegmentLoader::_insert(const SegmentLoader::CacheKey& key, SegmentLoader::C
 }
 
 Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
-                                    SegmentCacheHandle* cache_handle, bool use_cache) {
+                                    SegmentCacheHandle* cache_handle, bool use_cache, bool is_lazy_open) {
     SegmentLoader::CacheKey cache_key(rowset->rowset_id());
     if (_lookup(cache_key, cache_handle)) {
         cache_handle->owned = false;
@@ -73,7 +73,8 @@ Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
     cache_handle->owned = !use_cache;
 
     std::vector<segment_v2::SegmentSharedPtr> segments;
-    RETURN_NOT_OK(rowset->load_segments(&segments));
+    // Todo: How to handle the space size of lazy open segments in cache
+    RETURN_NOT_OK(rowset->load_segments(&segments, is_lazy_open));
 
     if (use_cache) {
         // memory of SegmentLoader::CacheValue will be handled by SegmentLoader

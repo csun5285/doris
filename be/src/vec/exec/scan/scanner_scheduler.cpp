@@ -16,6 +16,7 @@
 // under the License.
 
 #include "scanner_scheduler.h"
+#include <glog/logging.h>
 #include <cstddef>
 
 #include "common/config.h"

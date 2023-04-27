@@ -117,6 +117,14 @@ public:
         // for vertical compaction
         bool is_key_column_group = false; 
 
+        bool lazy_open_segment = false;
+
+        bool no_need_to_read_index = false;
+
+        bool enable_limit_optimize = false;
+
+        size_t limit_row_nums = 0;
+
         void check_validation() const;
 
         std::string to_string() const;
@@ -167,6 +175,8 @@ public:
             TabletSharedPtr tablet, ReaderType reader_type,
             const std::vector<RowsetSharedPtr>& input_rowsets,
             TabletReader::ReaderParams* reader_params, vectorized::Block* block);
+
+    void set_ctx(vectorized::ScannerContext* ctx) { _ctx = ctx; }
 
 protected:
     friend class CollectIterator;
@@ -241,6 +251,8 @@ protected:
 
     uint64_t _merged_rows = 0;
     OlapReaderStatistics _stats;
+
+    vectorized::ScannerContext* _ctx = nullptr;
 };
 
 } // namespace doris

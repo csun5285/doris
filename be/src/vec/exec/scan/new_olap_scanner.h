@@ -55,6 +55,8 @@ public:
         return doris::TabletStorageType::STORAGE_TYPE_LOCAL;
     }
 
+    const TabletSharedPtr& get_tablet() const { return _tablet; }
+
 protected:
     Status _get_block_impl(RuntimeState* state, Block* block, bool* eos) override;
     void _update_counters_before_close() override;

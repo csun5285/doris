@@ -44,13 +44,18 @@ namespace segment_v2 {
 
 Status Segment::open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
                      const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
-                     std::shared_ptr<Segment>* output, metrics_hook metrics) {
+                     std::shared_ptr<Segment>* output, metrics_hook metrics, bool is_lazy_open) {
     std::shared_ptr<Segment> segment(
             new Segment(segment_id, rowset_meta->rowset_id(), tablet_schema));
     io::FileReaderSPtr file_reader;
     RETURN_IF_ERROR(fs->open_file(path, metrics, &file_reader,
                                   rowset_meta->get_segment_file_size(segment_id)));
     segment->_file_reader = std::move(file_reader);
+    if (is_lazy_open) {
+        segment->_is_lazy_open = true;
+        *output = std::move(segment);
+        return Status::OK();
+    }
     RETURN_IF_ERROR(segment->_open());
     *output = std::move(segment);
     return Status::OK();
@@ -117,7 +122,9 @@ Status Segment::new_iterator(const Schema& schema, const StorageReadOptions& rea
         }
     }
 
-    RETURN_IF_ERROR(load_index());
+    if (!read_options.is_lazy_open) {
+        RETURN_IF_ERROR(load_index());
+    }
     if (read_options.delete_condition_predicates->num_of_column_predicate() == 0 &&
         read_options.push_down_agg_type_opt != TPushAggOp::NONE) {
         iter->reset(vectorized::new_vstatistics_iterator(this->shared_from_this(), schema));
@@ -235,6 +242,17 @@ Status Segment::load_index() {
     });
 }
 
+Status Segment::lazy_open(StorageReadOptions& opts) {
+    return _lazy_open_once.call([this, opts= opts] {
+        opts.stats->lazy_open_segment_number++;
+        SCOPED_RAW_TIMER(&opts.stats->lazy_open_segment_timer);
+        RETURN_IF_ERROR(_open());
+        RETURN_IF_ERROR(load_index());
+        _is_lazy_open = false;
+        return Status::OK();
+    });
+}
+
 Status Segment::_create_column_readers() {
     for (uint32_t ordinal = 0; ordinal < _footer.columns().size(); ++ordinal) {
         auto& column_pb = _footer.columns(ordinal);
@@ -253,6 +271,12 @@ Status Segment::_create_column_readers() {
         RETURN_IF_ERROR(ColumnReader::create(opts, _footer.columns(iter->second),
                                              _footer.num_rows(), _file_reader, &reader));
         _column_readers.emplace(column.unique_id(), std::move(reader));
+
+        opts.no_need_to_read_index = true;
+        std::unique_ptr<ColumnReader> without_index_reader;
+        RETURN_IF_ERROR(ColumnReader::create(opts, _footer.columns(iter->second),
+                                             _footer.num_rows(), _file_reader, &without_index_reader));
+        _column_without_index_readers.emplace(column.unique_id(), std::move(without_index_reader));
     }
     return Status::OK();
 }
@@ -264,7 +288,7 @@ Status Segment::_create_column_readers() {
 // in the new schema column c's cid == 2
 // but in the old schema column b's cid == 2
 // but they are not the same column
-Status Segment::new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter) {
+Status Segment::new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter, bool without_index) {
     if (_column_readers.count(tablet_column.unique_id()) < 1) {
         if (!tablet_column.has_default_value() && !tablet_column.is_nullable()) {
             return Status::InternalError("invalid nonexistent column without default value.");
@@ -280,6 +304,9 @@ Status Segment::new_column_iterator(const TabletColumn& tablet_column, ColumnIte
         RETURN_IF_ERROR(default_value_iter->init(iter_opts));
         *iter = default_value_iter.release();
         return Status::OK();
+    }
+    if (without_index) {
+        return _column_without_index_readers.at(tablet_column.unique_id())->new_iterator(iter);
     }
     return _column_readers.at(tablet_column.unique_id())->new_iterator(iter);
 }

@@ -43,7 +43,7 @@ public:
 
     Status add_child(RowsetReaderSharedPtr rs_reader);
 
-    Status build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers);
+    Status build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers, vectorized::ScannerContext* ctx = nullptr);
     // Get top row of the heap, nullptr if reach end.
     Status current_row(IteratorRowRef* ref) const;
 
@@ -268,7 +268,7 @@ private:
             return false;
         }
 
-        Status init_level0_iterators_for_union();
+        Status init_level0_iterators_for_union(vectorized::ScannerContext* ctx = nullptr);
 
     private:
         Status _merge_next(IteratorRowRef* ref);

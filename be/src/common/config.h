@@ -1024,6 +1024,9 @@ CONF_Validator(s3_client_http_scheme, [](const std::string& config) -> bool {
 // enable injection point in regression-test
 CONF_mBool(enable_injection_point, "false");
 
+CONF_Bool(enable_limit_optimize, "true");
+CONF_Bool(enable_scanner_early_cancel, "true");
+
 } // namespace config
 
 } // namespace doris

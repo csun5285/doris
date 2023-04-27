@@ -130,8 +130,12 @@ Status NewOlapScanner::prepare(const std::vector<OlapScanRange*>& key_ranges,
 Status NewOlapScanner::open(RuntimeState* state) {
     RETURN_IF_ERROR(VScanner::open(state));
 
+    if (config::enable_scanner_early_cancel) { _tablet_reader->set_ctx(_parent->_scanner_ctx.get()); }
     auto res = _tablet_reader->init(_tablet_reader_params);
     if (!res.ok()) {
+        if (res.is<ErrorCode::ALREADY_CANCELLED>()) {
+            return res;
+        }
         std::stringstream ss;
         ss << "failed to initialize storage reader. tablet="
            << _tablet_reader_params.tablet->full_name() << ", res=" << res
@@ -330,6 +334,13 @@ Status NewOlapScanner::_init_tablet_reader_params(
     // runtime predicate push down optimization for topn
     _tablet_reader_params.use_topn_opt = ((NewOlapScanNode*)_parent)->_olap_scan_node.use_topn_opt;
 
+
+    if (_parent->_enable_limit_optimize) {
+        _tablet_reader_params.enable_limit_optimize = true;
+        _tablet_reader_params.limit_row_nums = _parent->limit();
+        _tablet_reader_params.lazy_open_segment = true; 
+        _tablet_reader_params.no_need_to_read_index = true;
+    }
     return Status::OK();
 }
 
@@ -514,6 +525,9 @@ void NewOlapScanner::_update_counters_before_close() {
     COUNTER_UPDATE(olap_parent->_async_local_task_wake_up_timer_ns, stats.async_io_stat.local_task_wake_up_timer_ns);
     COUNTER_UPDATE(olap_parent->_async_local_task_total, stats.async_io_stat.local_task_total);
     COUNTER_UPDATE(olap_parent->_async_local_wait_for_putting_queue, stats.async_io_stat.local_wait_for_putting_queue);
+
+    COUNTER_UPDATE(olap_parent->_lazy_open_segment_counter, stats.lazy_open_segment_number);
+    COUNTER_UPDATE(olap_parent->_lazy_open_segment_timer, stats.lazy_open_segment_timer);
  
     // Update metrics
     DorisMetrics::instance()->query_scan_bytes->increment(_compressed_bytes_read);

@@ -114,6 +114,8 @@ public:
         return updated;
     }
 
+    void set_ctx(vectorized::ScannerContext* ctx) override { _ctx = ctx; }
+
 private:
     template <typename Container>
     bool _update_profile(RuntimeProfile* profile, const Container& predicates,
@@ -199,7 +201,7 @@ private:
                                    std::vector<rowid_t>& rowid_vector, uint16_t* sel_rowid_idx,
                                    size_t select_size, vectorized::MutableColumns* mutable_columns);
 
-    void _vec_init_prefetch_column_pages();
+    Status _vec_init_prefetch_column_pages();
     void _init_prefetch_column_pages();
 
     template <class Container>
@@ -370,6 +372,8 @@ private:
     vector<uint16_t> _sel_rowid_idx;
 
     std::unique_ptr<ObjectPool> _pool;
+
+    vectorized::ScannerContext* _ctx = nullptr;
 };
 
 } // namespace segment_v2

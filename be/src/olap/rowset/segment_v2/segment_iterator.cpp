@@ -274,15 +274,17 @@ Status SegmentIterator::_init(bool is_vec) {
 
     _row_bitmap.addRange(0, _segment->num_rows());
     RETURN_IF_ERROR(_init_return_column_iterators());
-    RETURN_IF_ERROR(_init_bitmap_index_iterators());
-    if (is_vec) {
-        RETURN_IF_ERROR(_init_inverted_index_iterators());
+    if (!_opts.no_need_to_read_index) {
+        RETURN_IF_ERROR(_init_bitmap_index_iterators());
+        if (is_vec) {
+            RETURN_IF_ERROR(_init_inverted_index_iterators());
+        }
+        // z-order can not use prefix index
+        if (_segment->_tablet_schema->sort_type() != SortType::ZORDER) {
+            RETURN_IF_ERROR(_get_row_ranges_by_keys());
+        }
+        RETURN_IF_ERROR(_get_row_ranges_by_column_conditions());
     }
-    // z-order can not use prefix index
-    if (_segment->_tablet_schema->sort_type() != SortType::ZORDER) {
-        RETURN_IF_ERROR(_get_row_ranges_by_keys());
-    }
-    RETURN_IF_ERROR(_get_row_ranges_by_column_conditions());
     // Remove rows that have been marked deleted
     if (_opts.delete_bitmap.count(segment_id()) > 0 &&
         _opts.delete_bitmap[segment_id()] != nullptr) {
@@ -307,7 +309,7 @@ Status SegmentIterator::_init(bool is_vec) {
     if (is_vec) {
         _vec_init_lazy_materialization();
         _vec_init_char_column_id();
-        _vec_init_prefetch_column_pages();
+        RETURN_IF_ERROR(_vec_init_prefetch_column_pages());
     } else {
         _init_lazy_materialization();
         _init_prefetch_column_pages();
@@ -315,19 +317,26 @@ Status SegmentIterator::_init(bool is_vec) {
     return Status::OK();
 }
 
-void SegmentIterator::_vec_init_prefetch_column_pages() {
+Status SegmentIterator::_vec_init_prefetch_column_pages() {
     if (config::max_column_reader_prefetch_size == 0 || _opts.read_orderby_key_reverse ||
         _file_reader->fs()->type() == io::FileSystemType::LOCAL) {
-        return;
+        return Status::OK();
     }
     for (auto cid : _first_read_column_ids) {
+        if (_ctx && _ctx->done()) [[unlikely]] {
+            return Status::Error<ALREADY_CANCELLED>();
+        }
         _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
     }
     if (_lazy_materialization_read && (_is_need_vec_eval || _is_need_short_eval)) {
         for (auto cid : _non_predicate_columns) {
+            if (_ctx && _ctx->done()) [[unlikely]] {
+                return Status::Error<ALREADY_CANCELLED>();
+            }
             _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
         }
     }
+    return Status::OK();
 }
 
 void SegmentIterator::_init_prefetch_column_pages() {
@@ -350,6 +359,9 @@ Status SegmentIterator::_get_row_ranges_by_keys() {
 
     RowRanges result_ranges;
     for (auto& key_range : _opts.key_ranges) {
+        if (_ctx && _ctx->done()) [[unlikely]] {
+            return Status::Error<ALREADY_CANCELLED>();;
+        }
         rowid_t lower_rowid = 0;
         rowid_t upper_rowid = num_rows();
         RETURN_IF_ERROR(_prepare_seek(key_range));
@@ -1141,7 +1153,7 @@ Status SegmentIterator::_init_return_column_iterators() {
 
         if (_column_iterators.count(unique_id) < 1) {
             RETURN_IF_ERROR(_segment->new_column_iterator(_opts.tablet_schema->column(cid),
-                                                          &_column_iterators[unique_id]));
+                                                          &_column_iterators[unique_id], _opts.no_need_to_read_index));
             ColumnIteratorOptions iter_opts;
             iter_opts.stats = _opts.stats;
             iter_opts.use_page_cache = _opts.use_page_cache;
@@ -1955,6 +1967,10 @@ Status SegmentIterator::_read_columns_by_rowids(std::vector<ColumnId>& read_colu
 Status SegmentIterator::next_batch(vectorized::Block* block) {
     bool is_mem_reuse = block->mem_reuse();
     DCHECK(is_mem_reuse);
+
+    if (_segment->_is_lazy_open) {
+        RETURN_IF_ERROR(_segment->lazy_open(_opts));
+    }
 
     SCOPED_RAW_TIMER(&_opts.stats->block_load_ns);
     if (UNLIKELY(!_inited)) {

@@ -16,6 +16,7 @@
 // under the License.
 
 #include "beta_rowset_reader.h"
+#include <gen_cpp/PlanNodes_types.h>
 
 #include <utility>
 
@@ -195,14 +196,22 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
         _read_options.expiration_time = 0;
     }
 
+    if (read_context->lazy_open_segment && _read_options.col_id_to_predicates.empty()
+            && !_read_options.use_topn_opt && _read_options.push_down_agg_type_opt == TPushAggOp::NONE) {
+        _read_options.is_lazy_open = read_context->lazy_open_segment;
+    }
+    _read_options.no_need_to_read_index = read_context->no_need_to_read_index;
+
     {
         SCOPED_RAW_TIMER(&_stats->load_segments_timer);
         // load segments
         // use cache is true when do vertica compaction
         bool should_use_cache = use_cache || read_context->reader_type == ReaderType::READER_QUERY;
         RETURN_NOT_OK(SegmentLoader::instance()->load_segments(_rowset, &_segment_cache_handle,
-                                                               should_use_cache));
+                                                               should_use_cache, _read_options.is_lazy_open));
     }
+
+    _read_options.ctx = read_context->ctx;
     // create iterator for each segment
     std::vector<std::unique_ptr<RowwiseIterator>> seg_iterators;
     for (auto& seg_ptr : _segment_cache_handle.get_segments()) {
