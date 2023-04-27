@@ -1,6 +1,6 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_internal_stage") {
+suite("test_internal_stage_copy_into") {
     // Internal and external stage cross use
     def tableNamExternal = "customer_internal_stage"
     def externalStageName = "internal_external_stage_cross_use"
@@ -122,17 +122,18 @@ suite("test_internal_stage") {
     try {
         def fileName = "internal_customer.csv"
         def filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
-        uploadFile(fileName, filePath)
+        def remoteFileName = fileName + "test_internal_stage"
+        uploadFile(remoteFileName, filePath)
 
         createTable()
-        def result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        def result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
-        result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
@@ -160,13 +161,15 @@ suite("test_internal_stage") {
         // line 8: add two | in the end
         fileName = "internal_customer_partial_error.csv"
         filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
+        remoteFileName = fileName + "test_internal_stage"
+        uploadFile(remoteFileName, filePath)
 
         def sqls = [
-                " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); ",
-                " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
-                " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.1'); ",
-                " copy into ${tableName2} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
-                " copy into ${tableName2} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); ",
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.1'); ",
+                " copy into ${tableName2} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
+                " copy into ${tableName2} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         ]
 
         def state = [

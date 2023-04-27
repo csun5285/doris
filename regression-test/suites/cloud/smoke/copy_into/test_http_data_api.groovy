@@ -4,10 +4,11 @@ suite("test_internal_stage_http_data_api", "smoke") {
     def tableName = "customer_internal_stage_http_data_api"
     def fileName = "internal_customer.csv"
     def filePath = "${context.config.dataPath}/copy_into/" + fileName
+    def remoteFileName = fileName + "test_http_data_api"
 
     StringBuilder strBuilder = new StringBuilder()
     strBuilder.append("""curl -u """ + context.config.feCloudHttpUser + ":" + context.config.feCloudHttpPassword)
-    strBuilder.append(""" -H fileName:""" + fileName)
+    strBuilder.append(""" -H fileName:""" + remoteFileName)
     strBuilder.append(""" -T """ + filePath)
     strBuilder.append(""" -L http://""" + context.config.feCloudHttpAddress + """/copy/upload""")
 
@@ -96,14 +97,14 @@ suite("test_internal_stage_http_data_api", "smoke") {
             DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 1
         """
 
-        def result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        def result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
-        result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)

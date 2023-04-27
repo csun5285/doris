@@ -1,13 +1,14 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_internal_stage", "smoke") {
+suite("test_internal_stage_smoke", "smoke") {
     def tableName = "customer_internal_stage"
     def fileName = "internal_customer.csv"
     def filePath = "${context.config.dataPath}/copy_into/" + fileName
+    def remoteFileName = fileName + "test_internal_stage_smoke"
 
     StringBuilder strBuilder = new StringBuilder()
     strBuilder.append("""curl -u """ + context.config.feCloudHttpUser + ":" + context.config.feCloudHttpPassword)
-    strBuilder.append(""" -H fileName:""" + fileName)
+    strBuilder.append(""" -H fileName:""" + remoteFileName)
     strBuilder.append(""" -T """ + filePath)
     strBuilder.append(""" -L http://""" + context.config.feCloudHttpAddress + """/copy/upload""")
 
@@ -37,14 +38,14 @@ suite("test_internal_stage", "smoke") {
             DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 1
         """
 
-        def result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        def result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)
         assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
-        result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+        result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)

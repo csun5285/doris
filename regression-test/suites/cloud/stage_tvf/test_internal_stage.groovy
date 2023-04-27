@@ -25,14 +25,14 @@ suite("test_internal_stage") {
         """
 
         sql """
-            create stage if not exists ${externalStageName} 
+            create stage if not exists ${externalStageName}
             properties ('endpoint' = '${getS3Endpoint()}' ,
             'region' = '${getS3Region()}' ,
             'bucket' = '${getS3BucketName()}' ,
             'prefix' = 'regression' ,
             'ak' = '${getS3AK()}' ,
             'sk' = '${getS3SK()}' ,
-            'provider' = '${getProvider()}', 
+            'provider' = '${getProvider()}',
             'access_type' = 'aksk',
             'default.file.column_separator' = "|");
         """
@@ -122,23 +122,24 @@ suite("test_internal_stage") {
 
     try {
         def fileName = "internal_customer.csv"
+        def remoteFileName = fileName + "test_internal_stage_stage_tvf"
         def filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
-        uploadFile(fileName, filePath)
+        uploadFile(remoteFileName, filePath)
 
         createTable()
-        def result = sql " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); "
+        def result = sql " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); "
         logger.info("insert result: " + result)
         qt_sql " SELECT COUNT(*) FROM ${tableName}; "
 
         if (cloud_delete_loaded_internal_stage_files) {
             // check file is deleted
-            waitInternalStageFilesDeleted(fileName)
+            waitInternalStageFilesDeleted(remoteFileName)
             // check copy job and file keys are deleted
-            uploadFile(fileName, filePath)
-            result = sql " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); "
+            uploadFile(remoteFileName, filePath)
+            result = sql " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); "
             logger.info("insert result: " + result)
             // check file is deleted
-            waitInternalStageFilesDeleted(fileName)
+            waitInternalStageFilesDeleted(remoteFileName)
         }
 
         // insert with invalid file
@@ -148,18 +149,19 @@ suite("test_internal_stage") {
         // line 8: add two | in the end
         fileName = "internal_customer_partial_error.csv"
         filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
-        uploadFile(fileName, filePath)
+        remoteFileName = fileName + "test_internal_stage_stage_tvf"
+        uploadFile(remoteFileName, filePath)
 
         def sqls = [
-                " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); ",
+                " insert into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); ",
                 // force, strict_mode
-                " insert /*+ set_var('strict_mode'='true') */ into ${tableName} with label test_internal_stage_" + System.currentTimeMillis() + " select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); ",
+                " insert /*+ set_var('strict_mode'='true') */ into ${tableName} with label test_internal_stage_" + System.currentTimeMillis() + " select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); ",
                 // 'max_filter_ratio'='0.1'
-                " insert /*+ set_var('max_filter_ratio'='0.1') */ into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); ",
+                " insert /*+ set_var('max_filter_ratio'='0.1') */ into ${tableName} select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); ",
                 // force, strict_mode
                 // TODO expected fail
                 // " insert /*+ set_var('strict_mode'='true') */ into ${tableName2} with label test_internal_stage_" + (System.currentTimeMillis() + 10) + " select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); ",
-                " insert into ${tableName2} select * from stage('stage_name'='~', 'file_pattern'='${fileName}', 'format' = 'csv', 'column_separator' = '|'); "
+                " insert into ${tableName2} select * from stage('stage_name'='~', 'file_pattern'='${remoteFileName}', 'format' = 'csv', 'column_separator' = '|'); "
         ]
 
         def state = [
@@ -199,8 +201,8 @@ suite("test_internal_stage") {
                 assertTrue(result[0].size() == 1, "result0 size=" + result[0].size())
                 assertTrue(rows[i][0].equals(result[0][0]))
                 if (cloud_delete_loaded_internal_stage_files) {
-                    waitInternalStageFilesDeleted(fileName)
-                    uploadFile(fileName, filePath)
+                    waitInternalStageFilesDeleted(remoteFileName)
+                    uploadFile(remoteFileName, filePath)
                 }
             } catch (Exception e) {
                 assertTrue(state[i].equals("CANCELLED"), "i=" + i + ", real exception: " + e.getMessage())
@@ -210,7 +212,7 @@ suite("test_internal_stage") {
 
         // test size limit
         try_sql("DROP TABLE IF EXISTS ${sizeLimitTable}")
-        sql """ 
+        sql """
         CREATE TABLE ${sizeLimitTable} (
         id INT,
         name varchar(50),
@@ -231,6 +233,17 @@ suite("test_internal_stage") {
             assertTrue(result.size() == 1, "size=" + result.size() )
             assertTrue(result[0].size() == 1, "result0 size=" + result[0].size())
             assertTrue(rows[i].equals(result[0][0]))
+            if (cloud_delete_loaded_internal_stage_files) {
+                if (i == 0) {
+                    waitInternalStageFilesDeleted(prefix + "0.csv")
+                    waitInternalStageFilesDeleted(prefix + "1.csv")
+                } else if (i == 1) {
+                    waitInternalStageFilesDeleted(prefix + "2.csv")
+                    waitInternalStageFilesDeleted(prefix + "3.csv")
+                } else {
+                    waitInternalStageFilesDeleted(prefix + "4.csv")
+                }
+            }
         }
     } finally {
         try_sql("DROP TABLE IF EXISTS ${tableName}")
