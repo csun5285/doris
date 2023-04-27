@@ -233,7 +233,7 @@ public:
         std::shared_lock rlock(_meta_lock);
         return _is_persistent;
     }
-    const std::string& table_name() const {
+    std::string table_name() const {
         std::shared_lock rlock(_meta_lock);
         return _table_name;
     }

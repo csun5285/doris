@@ -34,15 +34,16 @@ struct FilterPredicates;
 
 class NewOlapScanner : public VScanner {
 public:
-    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   bool need_agg_finalize, RuntimeProfile* profile);
+    NewOlapScanner(const TabletSharedPtr& tablet, int64_t version, RuntimeState* state,
+                   NewOlapScanNode* parent, int64_t limit, bool aggregation, bool need_agg_finalize,
+                   RuntimeProfile* profile);
 
     Status open(RuntimeState* state) override;
 
     Status close(RuntimeState* state) override;
 
-    Status prepare(const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
-                   VExprContext** vconjunct_ctx_ptr, const std::vector<TCondition>& filters,
+    Status prepare(const std::vector<OlapScanRange*>& key_ranges, VExprContext** vconjunct_ctx_ptr,
+                   const std::vector<TCondition>& filters,
                    const FilterPredicates& filter_predicates,
                    const std::vector<FunctionFilter>& function_filters);
 

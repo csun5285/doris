@@ -17,6 +17,8 @@
 namespace doris::cloud {
 using namespace ErrorCode;
 
+bvar::LatencyRecorder g_get_rowset_latency("doris_CloudMetaMgr", "get_rowset");
+
 static constexpr int BRPC_RETRY_TIMES = 3;
 
 #define RETRY_RPC(rpc_name)                                                                      \
@@ -119,10 +121,10 @@ TRY_AGAIN:
     req.set_end_version(-1);
     VLOG_DEBUG << "send GetRowsetRequest: " << req.ShortDebugString();
 
-    using namespace std::chrono;
-    auto start_time = steady_clock::now();
-
-    _stub->get_rowset(&cntl, &req, &resp, nullptr);
+    _stub->get_rowset(&cntl, &req, &resp, brpc::DoNothing());
+    brpc::Join(cntl.call_id()); // to get more accurate latency
+    int64_t latency = cntl.latency_us();
+    g_get_rowset_latency << latency;
     if (cntl.Failed()) {
         return Status::RpcError("failed to get rowset meta: {}", cntl.ErrorText());
     }
@@ -132,16 +134,15 @@ TRY_AGAIN:
     if (resp.status().code() != selectdb::MetaServiceCode::OK) {
         return Status::InternalError("failed to get rowset meta: {}", resp.status().msg());
     }
-
-    int64_t cost = duration_cast<milliseconds>(steady_clock::now() - start_time).count();
-    if (cost > 10) {
+    if (latency > 100 * 1000) { // 100ms
         LOG(INFO) << "finish get_rowset rpc. rowset_meta.size()=" << resp.rowset_meta().size()
-                  << ", cost=" << cost << "ms";
+                  << ", latency=" << latency << "us";
     } else {
         LOG_EVERY_N(INFO, 100) << "finish get_rowset rpc. rowset_meta.size()="
-                               << resp.rowset_meta().size() << ", cost=" << cost << "ms";
+                               << resp.rowset_meta().size() << ", latency=" << latency << "us";
     }
 
+    using namespace std::chrono;
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     tablet->set_last_sync_time(now);
 

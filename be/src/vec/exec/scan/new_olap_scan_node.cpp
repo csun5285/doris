@@ -17,6 +17,8 @@
 
 #include "vec/exec/scan/new_olap_scan_node.h"
 
+#include <bthread/bthread.h>
+
 #include "cloud/utils.h"
 #include "common/status.h"
 #include "olap/storage_engine.h"
@@ -228,17 +230,21 @@ Status NewOlapScanNode::_init_profile() {
     _write_cache_io_timer = ADD_TIMER(_segment_profile, "WriteCacheIOUseTimer");
     _bytes_write_into_cache = ADD_COUNTER(_segment_profile, "BytesWriteIntoCache", TUnit::BYTES);
     _num_skip_cache_io_total = ADD_COUNTER(_segment_profile, "NumSkipCacheIOTotal", TUnit::UNIT);
-    _bytes_scanned_from_cache = ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::BYTES);
-    _bytes_scanned_from_remote = ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::BYTES);
+    _bytes_scanned_from_cache =
+            ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::BYTES);
+    _bytes_scanned_from_remote =
+            ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::BYTES);
     _load_segments_timer = ADD_TIMER(_segment_profile, "LoadSegmentUseTimer");
     _cloud_get_rowset_version_timer = ADD_TIMER(_scanner_profile, "CloudGetVersionTime");
 
     _async_remote_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTotalUseTimer");
-    _async_remote_task_wait_worker_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskWaitTimer");
+    _async_remote_task_wait_worker_timer_ns =
+            ADD_TIMER(_segment_profile, "AsyncRemoteTaskWaitTimer");
     _async_remote_task_wake_up_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskWakeUpTimer");
     _async_remote_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskExecTimer");
     _async_remote_task_total = ADD_COUNTER(_segment_profile, "AsyncRemoteTaskTotal", TUnit::UNIT);
-    _async_remote_wait_for_putting_queue = ADD_TIMER(_segment_profile, "AsyncRemoteWaitPuttingQueue");
+    _async_remote_wait_for_putting_queue =
+            ADD_TIMER(_segment_profile, "AsyncRemoteWaitPuttingQueue");
 
     _async_local_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTotalUseTimer");
     _async_local_task_wait_worker_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskWaitTimer");
@@ -550,12 +556,24 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
     int scanners_per_tablet = std::max(1, 64 / (int)_scan_ranges.size());
 
     std::unordered_set<std::string> disk_set;
-    for (auto& scan_range : _scan_ranges) {
-        auto tablet_id = scan_range->tablet_id;
+
+    std::deque<std::pair<TabletSharedPtr, int64_t /* version */>> tablets_to_scan;
 #ifdef CLOUD_MODE
-        TabletSharedPtr tablet;
-        RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &tablet));
+    std::vector<std::function<Status()>> tasks;
+    tasks.reserve(_scan_ranges.size());
+    for (auto& scan_range : _scan_ranges) {
+        tablets_to_scan.emplace_back();
+        tasks.push_back([range = scan_range.get(), &tablet = tablets_to_scan.back()]{
+            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(range->tablet_id, &tablet.first));
+            tablet.second = std::atol(range->version.c_str());
+            // Try to warm up rowset metas with version
+            tablet.first->cloud_sync_rowsets(tablet.second);
+            return Status::OK();
+        });
+    }
+    RETURN_IF_ERROR(cloud::bthread_fork_and_join(tasks, 10));
 #else
+    for (auto& scan_range : _scan_ranges) {
         std::string err;
         TabletSharedPtr tablet =
                 StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, true, &err);
@@ -565,8 +583,11 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
             LOG(WARNING) << ss.str();
             return Status::InternalError(ss.str());
         }
+        int64_t version = std::atol(scan_range->version.c_str());
+        tablets_to_scan.emplace_back(std::move(tablet), version);
+    }
 #endif
-
+    for (auto& [tablet, version] : tablets_to_scan) {
         std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &cond_ranges;
         int size_based_scanners_per_tablet = 1;
 
@@ -590,14 +611,15 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
             }
 
             NewOlapScanner* scanner = new NewOlapScanner(
-                    _state, this, _limit_per_scanner, _olap_scan_node.is_preaggregation,
-                    _need_agg_finalize, _scanner_profile.get());
+                    tablet, version, _state, this, _limit_per_scanner,
+                    _olap_scan_node.is_preaggregation, _need_agg_finalize, _scanner_profile.get());
+
             scanner->set_compound_filters(_compound_filters);
             // add scanner to pool before doing prepare.
             // so that scanner can be automatically deconstructed if prepare failed.
             _scanner_pool.add(scanner);
-            Status st = scanner->prepare(*scan_range, scanner_ranges, _vconjunct_ctx_ptr.get(),
-                                         _olap_filters, _filter_predicates, _push_down_functions);
+            auto st = scanner->prepare(scanner_ranges, _vconjunct_ctx_ptr.get(), _olap_filters,
+                                       _filter_predicates, _push_down_functions);
             if (!st.ok()) {
                 // during prepare, scanner already cloned vexpr_context, should call close to release it.
                 scanner->close(_state);

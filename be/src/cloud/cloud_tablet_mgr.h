@@ -24,10 +24,10 @@ public:
 
     // Return weak ptr of all cached tablets.
     // We return weak ptr to avoid extend lifetime of tablets that are no longer cached.
-    static std::vector<std::weak_ptr<Tablet>> get_weak_tablets();
+    std::vector<std::weak_ptr<Tablet>> get_weak_tablets();
 
-    static uint64_t get_rowset_nums();
-    static uint64_t get_segment_nums();
+    uint64_t get_rowset_nums();
+    uint64_t get_segment_nums();
 
     void sync_tablets();
 
@@ -47,6 +47,9 @@ public:
 
 private:
     std::unique_ptr<Cache> _cache;
+
+    class TabletMap;
+    std::shared_ptr<TabletMap> _tablet_map;
 
     std::mutex _vacuum_set_mtx;
     // record the id of tablets with stale rowsets,

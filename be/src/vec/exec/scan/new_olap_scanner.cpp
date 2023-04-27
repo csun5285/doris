@@ -25,17 +25,18 @@
 
 namespace doris::vectorized {
 
-NewOlapScanner::NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit,
-                               bool aggregation, bool need_agg_finalize, RuntimeProfile* profile)
+NewOlapScanner::NewOlapScanner(const TabletSharedPtr& tablet, int64_t version, RuntimeState* state,
+                               NewOlapScanNode* parent, int64_t limit, bool aggregation,
+                               bool need_agg_finalize, RuntimeProfile* profile)
         : VScanner(state, static_cast<VScanNode*>(parent), limit, profile),
           _aggregation(aggregation),
           _need_agg_finalize(need_agg_finalize),
-          _version(-1) {
+          _tablet(tablet),
+          _version(version) {
     _tablet_schema = std::make_shared<TabletSchema>();
 }
 
-Status NewOlapScanner::prepare(const TPaloScanRange& scan_range,
-                               const std::vector<OlapScanRange*>& key_ranges,
+Status NewOlapScanner::prepare(const std::vector<OlapScanRange*>& key_ranges,
                                VExprContext** vconjunct_ctx_ptr,
                                const std::vector<TCondition>& filters,
                                const FilterPredicates& filter_predicates,
@@ -52,29 +53,16 @@ Status NewOlapScanner::prepare(const TPaloScanRange& scan_range,
                     ? _state->batch_size()
                     : std::min(static_cast<int64_t>(_state->batch_size()), _parent->limit()));
 
-    // Get olap table
-    TTabletId tablet_id = scan_range.tablet_id;
-    _version = strtoul(scan_range.version.c_str(), nullptr, 10);
     {
 #ifdef CLOUD_MODE
         {
             NewOlapScanNode* olap_parent = (NewOlapScanNode*)_parent;
             SCOPED_TIMER(olap_parent->_cloud_get_rowset_version_timer);
-            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &_tablet));
             RETURN_IF_ERROR(_tablet->cloud_sync_rowsets(_version));
         }
         RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers({0, _version},
                                                           &_tablet_reader_params.rs_readers));
 #else
-        std::string err;
-        _tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, true, &err);
-        if (_tablet.get() == nullptr) {
-            std::stringstream ss;
-            ss << "failed to get tablet. tablet_id=" << tablet_id << ", reason=" << err;
-            LOG(WARNING) << ss.str();
-            return Status::InternalError(ss.str());
-        }
-
         {
             std::shared_lock rdlock(_tablet->get_header_lock());
             const RowsetSharedPtr rowset = _tablet->rowset_with_max_version();
@@ -247,7 +235,7 @@ Status NewOlapScanner::_init_tablet_reader_params(
         for (auto& rs_reader : _tablet_reader_params.rs_readers) {
             auto& rs_meta = rs_reader->rowset()->rowset_meta();
             if (rs_meta->has_delete_predicate()) {
-                _tablet_reader_params.delete_predicates.push_back(rs_meta); 
+                _tablet_reader_params.delete_predicates.push_back(rs_meta);
             }
         }
     }
@@ -340,8 +328,7 @@ Status NewOlapScanner::_init_tablet_reader_params(
     }
 
     // runtime predicate push down optimization for topn
-    _tablet_reader_params.use_topn_opt =
-                ((NewOlapScanNode*)_parent)->_olap_scan_node.use_topn_opt;
+    _tablet_reader_params.use_topn_opt = ((NewOlapScanNode*)_parent)->_olap_scan_node.use_topn_opt;
 
     return Status::OK();
 }

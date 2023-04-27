@@ -22,6 +22,7 @@
 #include <signal.h>
 
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "exprs/array_functions.h"
@@ -365,9 +366,9 @@ void Daemon::calculate_metrics_thread() {
 
 #ifdef CLOUD_MODE
             DorisMetrics::instance()->all_rowsets_num->set_value(
-                    cloud::CloudTabletMgr::get_rowset_nums());
+                    cloud::tablet_mgr()->get_rowset_nums());
             DorisMetrics::instance()->all_segments_num->set_value(
-                    cloud::CloudTabletMgr::get_segment_nums());
+                    cloud::tablet_mgr()->get_segment_nums());
 #else
             DorisMetrics::instance()->all_rowsets_num->set_value(
                     StorageEngine::instance()->tablet_manager()->get_rowset_nums());

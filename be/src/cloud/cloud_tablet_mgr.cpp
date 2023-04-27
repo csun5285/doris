@@ -1,10 +1,9 @@
 #include "cloud/cloud_tablet_mgr.h"
 
+#include <bthread/countdown_event.h>
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <condition_variable>
-#include <mutex>
 #include <sstream>
 #include <variant>
 
@@ -39,9 +38,10 @@ public:
         if (it != _call_map.end()) {
             auto call = it->second;
             lock.unlock();
-
-            std::unique_lock call_lock(call->mtx);
-            call->condv.wait(call_lock, [&call]() { return call->done; });
+            if (int ec = call->event.wait(); ec != 0) {
+                throw std::system_error(std::error_code(ec, std::system_category()),
+                                        "CountdownEvent wait failed");
+            }
             return call->val;
         }
         auto call = std::make_shared<Call>();
@@ -49,11 +49,7 @@ public:
         lock.unlock();
 
         call->val = loader(key);
-        {
-            std::lock_guard call_lock(call->mtx);
-            call->done = true;
-            call->condv.notify_all();
-        }
+        call->event.signal();
 
         lock.lock();
         _call_map.erase(key);
@@ -65,9 +61,7 @@ public:
 private:
     // `Call` is an in-flight or completed `Do` call
     struct Call {
-        std::mutex mtx;
-        std::condition_variable condv;
-        bool done = false;
+        bthread::CountdownEvent event;
         std::shared_ptr<Val> val;
     };
 
@@ -77,16 +71,51 @@ private:
 
 static SingleFlight<int64_t, std::variant<Status, TabletSharedPtr>> s_singleflight_load_tablet;
 
-// TODO(cyx): multi shard to increase concurrency
-static std::mutex s_tablet_map_mtx;
 // tablet_id -> cached tablet
 // This map owns all cached tablets. The lifetime of tablet can be longer than the LRU handle.
 // It's also used for scenarios where users want to access the tablet by `tablet_id` without changing the LRU order.
-static std::unordered_map<int64_t, TabletSharedPtr> s_tablet_map;
+// TODO(cyx): multi shard to increase concurrency
+class CloudTabletMgr::TabletMap {
+public:
+    void put(TabletSharedPtr tablet) {
+        std::lock_guard lock(_mtx);
+        _map[tablet->tablet_id()] = std::move(tablet);
+    }
+
+    void erase(Tablet* tablet) {
+        std::lock_guard lock(_mtx);
+        auto it = _map.find(tablet->tablet_id());
+        if (it != _map.end() && it->second.get() == tablet) {
+            _map.erase(it);
+        }
+    }
+
+    TabletSharedPtr get(int64_t tablet_id) {
+        std::lock_guard lock(_mtx);
+        if (auto it = _map.find(tablet_id); it != _map.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    size_t size() { return _map.size(); }
+
+    void traverse(std::function<void(const TabletSharedPtr&)> visitor) {
+        std::lock_guard lock(_mtx);
+        for (auto& [_, tablet] : _map) {
+            visitor(tablet);
+        }
+    }
+
+private:
+    std::mutex _mtx;
+    std::unordered_map<int64_t, TabletSharedPtr> _map;
+};
 
 CloudTabletMgr::CloudTabletMgr()
         : _cache(new_lru_cache("TabletCache", config::tablet_cache_capacity, LRUCacheType::NUMBER,
-                               config::tablet_cache_shards)) {}
+                               config::tablet_cache_shards)),
+          _tablet_map(std::make_shared<TabletMap>()) {}
 
 CloudTabletMgr::~CloudTabletMgr() = default;
 
@@ -94,6 +123,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
     // LRU value type
     struct Value {
         TabletSharedPtr tablet;
+        std::shared_ptr<TabletMap> tablet_map;
     };
 
     auto tablet_id_str = std::to_string(tablet_id);
@@ -115,6 +145,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
             auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir());
             auto value = new Value();
             value->tablet = tablet;
+            value->tablet_map = _tablet_map;
             st = meta_mgr()->sync_tablet_rowsets(tablet.get());
             // ignore failure here because we will sync this tablet before query
             if (!st.ok()) {
@@ -122,22 +153,13 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
             }
             static auto deleter = [](const CacheKey& key, void* value) {
                 auto value1 = reinterpret_cast<Value*>(value);
-                {
-                    // tablet has been evicted, release it from `s_tablet_map`
-                    std::lock_guard lock(s_tablet_map_mtx);
-                    auto it = s_tablet_map.find(value1->tablet->tablet_id());
-                    if (it != s_tablet_map.end() && it->second == value1->tablet) {
-                        s_tablet_map.erase(it);
-                    }
-                }
+                // tablet has been evicted, release it from `tablet_map`
+                value1->tablet_map->erase(value1->tablet.get());
                 delete value1;
             };
 
             auto handle = _cache->insert(key, value, 1, deleter);
-            {
-                std::lock_guard lock(s_tablet_map_mtx);
-                s_tablet_map[tablet_id] = std::move(tablet);
-            }
+            _tablet_map->put(std::move(tablet));
             *res = std::shared_ptr<Tablet>(value->tablet.get(),
                                            [this, handle](...) { _cache->release(handle); });
             return res;
@@ -171,15 +193,8 @@ void CloudTabletMgr::vacuum_stale_rowsets() {
     }
     int num_vacuumed = 0;
     for (int64_t tablet_id : tablets_to_vacuum) {
-        TabletSharedPtr tablet;
-        {
-            std::lock_guard lock(s_tablet_map_mtx);
-            auto it = s_tablet_map.find(tablet_id);
-            if (it == s_tablet_map.end()) {
-                continue;
-            }
-            tablet = it->second;
-        }
+        auto tablet = _tablet_map->get(tablet_id);
+        if (!tablet) continue;
         num_vacuumed += tablet->cloud_delete_expired_stale_rowsets();
         {
             std::shared_lock tablet_rlock(tablet->get_header_lock());
@@ -199,11 +214,8 @@ void CloudTabletMgr::add_to_vacuum_set(int64_t tablet_id) {
 
 std::vector<std::weak_ptr<Tablet>> CloudTabletMgr::get_weak_tablets() {
     std::vector<std::weak_ptr<Tablet>> weak_tablets;
-    weak_tablets.reserve(s_tablet_map.size());
-    std::lock_guard lock(s_tablet_map_mtx);
-    for (auto& [_, tablet] : s_tablet_map) {
-        weak_tablets.push_back(tablet);
-    }
+    weak_tablets.reserve(_tablet_map->size());
+    _tablet_map->traverse([&weak_tablets](auto& t) { weak_tablets.push_back(t); });
     return weak_tablets;
 }
 
