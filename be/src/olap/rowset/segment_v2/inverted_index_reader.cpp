@@ -4,6 +4,7 @@
 #include <CLucene/search/PhraseQuery.h>
 #include <CLucene/util/FutureArrays.h>
 #include <CLucene/util/NumericUtils.h>
+#include <CLucene/analysis/LanguageBasedAnalyzer.h>
 
 #include <filesystem>
 #include <regex>
@@ -32,29 +33,38 @@ bool InvertedIndexReader::_is_match_query(InvertedIndexQueryType query_type) {
             query_type == InvertedIndexQueryType::MATCH_PHRASE_QUERY);
 }
 
-std::vector<std::string> FullTextIndexReader::get_analyse_result(
-        const std::wstring& field_name, const std::wstring& value,
+std::vector<std::wstring> FullTextIndexReader::get_analyse_result(
+        const std::wstring& field_name, const std::string& value,
         InvertedIndexQueryType query_type, InvertedIndexParserType analyser_type) {
-    std::vector<std::string> analyse_result;
+    std::vector<std::wstring> analyse_result;
     std::shared_ptr<lucene::analysis::Analyzer> analyzer;
+    std::unique_ptr<lucene::util::Reader> reader;
     if (analyser_type == InvertedIndexParserType::PARSER_STANDARD) {
         analyzer = std::make_shared<lucene::analysis::standard::StandardAnalyzer>();
+        reader.reset(
+                (new lucene::util::StringReader(std::wstring(value.begin(), value.end()).c_str())));
+    } else if (analyser_type == InvertedIndexParserType::PARSER_CHINESE) {
+        analyzer = std::make_shared<lucene::analysis::LanguageBasedAnalyzer>(L"chinese", false);
+        reader.reset(new lucene::util::SimpleInputStreamReader(
+                new lucene::util::AStringReader(value.c_str()),
+                lucene::util::SimpleInputStreamReader::UTF8));
+
     } else {
         // default
         analyzer = std::make_shared<lucene::analysis::SimpleAnalyzer<TCHAR>>();
+        reader.reset((new lucene::util::StringReader(std::wstring(value.begin(), value.end()).c_str())));
     }
 
-    std::unique_ptr<lucene::util::StringReader> reader(
-            new lucene::util::StringReader(value.c_str()));
     std::unique_ptr<lucene::analysis::TokenStream> token_stream(
             analyzer->tokenStream(field_name.c_str(), reader.get()));
 
     lucene::analysis::Token token;
 
     while (token_stream->next(&token)) {
-        std::string tk =
-                lucene::util::Misc::toString(token.termBuffer<TCHAR>(), token.termLength<TCHAR>());
-        analyse_result.emplace_back(tk);
+        if(token.termLength<TCHAR>() != 0) {
+            analyse_result.emplace_back(
+                    std::wstring(token.termBuffer<TCHAR>(), token.termLength<TCHAR>()));
+        }
     }
 
     if (token_stream != nullptr) {
@@ -63,7 +73,7 @@ std::vector<std::string> FullTextIndexReader::get_analyse_result(
 
     if (query_type == InvertedIndexQueryType::MATCH_ANY_QUERY ||
         query_type == InvertedIndexQueryType::MATCH_ALL_QUERY) {
-        std::set<std::string> unrepeated_result(analyse_result.begin(), analyse_result.end());
+        std::set<std::wstring> unrepeated_result(analyse_result.begin(), analyse_result.end());
         analyse_result.assign(unrepeated_result.begin(), unrepeated_result.end());
     }
 
@@ -91,10 +101,9 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
                << " begin to load the fulltext index from clucene, query_str=" << search_str;
     std::unique_ptr<lucene::search::Query> query;
     std::wstring field_ws = std::wstring(column_name.begin(), column_name.end());
-    std::wstring search_str_ws = std::wstring(search_str.begin(), search_str.end());
     try {
-        std::vector<std::string> analyse_result =
-                get_analyse_result(field_ws, search_str_ws, query_type, analyser_type);
+        std::vector<std::wstring> analyse_result =
+                get_analyse_result(field_ws, search_str, query_type, analyser_type);
 
         if (analyse_result.empty()) {
             LOG(WARNING) << "invalid input query_str: " << search_str
@@ -107,9 +116,8 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
         case InvertedIndexQueryType::MATCH_ANY_QUERY: {
             query.reset(_CLNEW lucene::search::BooleanQuery());
             for (auto token : analyse_result) {
-                std::wstring token_ws = std::wstring(token.begin(), token.end());
                 lucene::index::Term* term =
-                        _CLNEW lucene::index::Term(field_ws.c_str(), token_ws.c_str());
+                        _CLNEW lucene::index::Term(field_ws.c_str(), token.c_str());
                 static_cast<lucene::search::BooleanQuery*>(query.get())
                         ->add(_CLNEW lucene::search::TermQuery(term), true,
                               lucene::search::BooleanClause::SHOULD);
@@ -120,9 +128,8 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
         case InvertedIndexQueryType::MATCH_ALL_QUERY: {
             query.reset(_CLNEW lucene::search::BooleanQuery());
             for (auto token : analyse_result) {
-                std::wstring token_ws = std::wstring(token.begin(), token.end());
                 lucene::index::Term* term =
-                        _CLNEW lucene::index::Term(field_ws.c_str(), token_ws.c_str());
+                        _CLNEW lucene::index::Term(field_ws.c_str(), token.c_str());
                 static_cast<lucene::search::BooleanQuery*>(query.get())
                         ->add(_CLNEW lucene::search::TermQuery(term), true,
                               lucene::search::BooleanClause::MUST);
@@ -132,13 +139,6 @@ Status FullTextIndexReader::query(const std::string& column_name, const void* qu
         }
         case InvertedIndexQueryType::MATCH_PHRASE_QUERY: {
             return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>("match phrase of fulltext is not supported");
-            // query.reset(_CLNEW lucene::search::PhraseQuery());
-            // for(auto token : analyse_result) {
-            //     std::wstring token_ws = std::wstring(token.begin(), token.end());
-            //     lucene::index::Term* term = _CLNEW lucene::index::Term(field_ws.c_str(), token_ws.c_str());
-            //     static_cast<lucene::search::PhraseQuery*>(query.get())->add(term);
-            //     _CLDECDELETE(term);
-            // }
             break;
         }
         default:
@@ -203,7 +203,6 @@ Status StringTypeInvertedIndexReader::query(const std::string& column_name, cons
     const StringValue* search_query = reinterpret_cast<const StringValue*>(query_value);
     auto act_len = strnlen(search_query->ptr, search_query->len);
     std::string search_str(search_query->ptr, act_len);
-    // std::string search_str = reinterpret_cast<const StringValue*>(query_value)->to_string();
     LOG(INFO) << "begin to query the inverted index from clucene"
               << ", column_name: " << column_name << ", search_str: " << search_str;
     std::wstring column_name_ws = std::wstring(column_name.begin(), column_name.end());
@@ -322,8 +321,6 @@ Status BkdIndexReader::bkd_query(const std::string& column_name, const void* que
         return status;
     }
     r.reset(tmp_reader);
-    //std::string min; //("",r->bytes_per_dim_);
-    //std::string max; //("",r->bytes_per_dim_);
     char tmp[r->bytes_per_dim_];
     switch (query_type) {
     case InvertedIndexQueryType::EQUAL_QUERY: {
@@ -358,8 +355,6 @@ Status BkdIndexReader::bkd_query(const std::string& column_name, const void* que
         LOG(ERROR) << "invalid query type when query bkd index";
         return Status::Error<INVERTED_INDEX_NOT_SUPPORTED>("invalid query type when query bkd index");
     }
-    //visitor->set_min((uint8_t*)min.data());
-    //visitor->set_max((uint8_t*)max.data());
     visitor->set_reader(r.get());
     return Status::OK();
 }

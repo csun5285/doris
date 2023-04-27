@@ -381,45 +381,47 @@ build_libbacktrace() {
 
 #clucene
 build_clucene() {
-    #if [ ! -d $TP_DIR/clucene ] || [ ! -f $TP_DIR/clucene/CMakeLists ];then
-    #    echo "clucene does not exist, try to pull from git"
-    #    git submodule update --remote --init $TP_DIR/clucene
-    #fi
-    if [[ -z ${USE_AVX2} ]]; then
-        USE_AVX2=1
+    if [[ "$(uname -m)" == 'x86_64' ]]; then
+        USE_AVX2="${USE_AVX2:-1}"
+    else
+        USE_AVX2="${USE_AVX2:-0}"
     fi
-    if [[ -z ${BUILD_TYPE} ]]; then
-        BUILD_TYPE=Release
-    fi
-    if [[ -z ${USE_BTHREAD_SCANNER} ]]; then
-        USE_BTHREAD_SCANNER=ON
+    if [[ -z "${USE_BTHREAD_SCANNER}" ]]; then
+        USE_BTHREAD_SCANNER='ON'
     fi
     if [[ ${USE_BTHREAD_SCANNER} == "ON" ]]; then
         USE_BTHREAD=1
     else
         USE_BTHREAD=0
     fi
-    check_if_source_exist $CLUCENE_SOURCE
-    cd $TP_SOURCE_DIR/$CLUCENE_SOURCE
-    mkdir -p $BUILD_DIR && cd $BUILD_DIR
+
+    check_if_source_exist "${CLUCENE_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${CLUCENE_SOURCE}"
+
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
     rm -rf CMakeCache.txt CMakeFiles/
 
-    CPPFLAGS="-fno-omit-frame-pointer"
-    if [[ "$CC" == *gcc ]]; then
-        CPPFLAGS="${CPPFLAGS} -Wno-narrowing"
-    elif [[ "$CC" == *clang ]]; then
-        CPPFLAGS="${CPPFLAGS} -Wno-c++11-narrowing"
+    ${CMAKE_CMD} -G "${GENERATOR}" \
+        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DBUILD_STATIC_LIBRARIES=ON \
+        -DBUILD_SHARED_LIBRARIES=OFF \
+        -DBOOST_ROOT="${TP_INSTALL_DIR}" \
+        -DZLIB_ROOT="${TP_INSTALL_DIR}" \
+        -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer ${warning_narrowing}" \
+        -DUSE_STAT64=0 \
+        -DUSE_AVX2="${USE_AVX2}" \
+        -DUSE_BTHREAD="${USE_BTHREAD}" \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DBUILD_CONTRIBS_LIB=ON ..
+    ${BUILD_SYSTEM} -j "${PARALLEL}"
+    ${BUILD_SYSTEM} install
+
+    cd "${TP_SOURCE_DIR}/${CLUCENE_SOURCE}"
+    if [[ ! -d "${TP_INSTALL_DIR}"/share ]]; then
+        mkdir -p "${TP_INSTALL_DIR}"/share
     fi
-    CXXFLAGS="${CPPFLAGS}"
-    ${CMAKE_CMD} -G "${GENERATOR}"                         \
-        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON                 \
-        -DCMAKE_PREFIX_PATH=$TP_INSTALL_DIR                \
-        -DCMAKE_INSTALL_PREFIX=$TP_INSTALL_DIR             \
-        -DBUILD_STATIC_LIBRARIES=ON -DUSE_AVX2=${USE_AVX2} \
-        -DCMAKE_BUILD_TYPE=${BUILD_TYPE}                   \
-        -DUSE_BTHREAD=${USE_BTHREAD}                       \
-        ..
-    ${BUILD_SYSTEM} -j $PARALLEL && ${BUILD_SYSTEM} install
+    cp -rf src/contribs-lib/CLucene/analysis/jieba/dict "${TP_INSTALL_DIR}"/share/
 }
 
 # libevent

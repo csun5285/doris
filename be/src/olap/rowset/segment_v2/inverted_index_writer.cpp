@@ -1,6 +1,7 @@
 #include "olap/rowset/segment_v2/inverted_index_writer.h"
 
 #include <CLucene.h>
+#include <CLucene/analysis/LanguageBasedAnalyzer.h>
 #include <CLucene/util/bkd/bkd_writer.h>
 
 #include <memory>
@@ -16,8 +17,16 @@
 #include "olap/tablet_schema.h"
 #include "util/string_util.h"
 
-#define FINALIZE_OUTPUT(x) if (x != nullptr){x->close(); _CLDELETE(x);}
-#define FINALLY_FINALIZE_OUTPUT(x) try{FINALIZE_OUTPUT(x)}catch(...){}
+#define FINALIZE_OUTPUT(x) \
+    if (x != nullptr) {    \
+        x->close();        \
+        _CLDELETE(x);      \
+    }
+#define FINALLY_FINALIZE_OUTPUT(x) \
+    try {                          \
+        FINALIZE_OUTPUT(x)         \
+    } catch (...) {                \
+    }
 
 namespace doris::segment_v2 {
 const int32_t MAX_FIELD_LEN = 0x7FFFFFFFL;
@@ -31,8 +40,7 @@ class InvertedIndexColumnWriterImpl : public InvertedIndexColumnWriter {
 public:
     using CppType = typename CppTypeTraits<field_type>::CppType;
 
-public:
-    explicit InvertedIndexColumnWriterImpl(const std::string& field_name, uint32_t uuid,
+    explicit InvertedIndexColumnWriterImpl(const std::string& field_name, uint32_t /*uuid*/,
                                            const std::string& segment_file_name,
                                            const std::string& dir, io::FileSystemSPtr fs,
                                            const TabletIndex* index_meta)
@@ -46,7 +54,7 @@ public:
         _field_name = std::wstring(field_name.begin(), field_name.end());
     };
 
-    ~InvertedIndexColumnWriterImpl() override {}
+    ~InvertedIndexColumnWriterImpl() override = default;
 
     Status init() override {
         try {
@@ -94,6 +102,12 @@ public:
             _CLLDELETE(_standard_analyzer);
             _standard_analyzer = nullptr;
         }
+
+        if (_chinese_analyzer) {
+            _CLLDELETE(_chinese_analyzer);
+            _chinese_analyzer = nullptr;
+        }
+
         if (_char_string_reader) {
             _CLDELETE(_char_string_reader);
             _char_string_reader = nullptr;
@@ -132,14 +146,16 @@ public:
         _default_analyzer = _CLNEW lucene::analysis::SimpleAnalyzer<TCHAR>();
         _default_char_analyzer = _CLNEW lucene::analysis::SimpleAnalyzer<char>();
         _standard_analyzer = _CLNEW lucene::analysis::standard::StandardAnalyzer();
+        _chinese_analyzer = _CLNEW lucene::analysis::LanguageBasedAnalyzer();
+        _chinese_analyzer->setLanguage(L"chinese");
 #ifdef CLOUD_MODE
         _lfs = doris::io::LocalFileSystem::create(
                 io::TmpFileMgr::instance()->get_tmp_file_dir(), "");
         auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                 io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
                 _index_meta->index_id());
-        _dir.reset(DorisCompoundDirectory::getDirectory(_lfs, lfs_index_path.c_str(),
-                                                        true, _fs, index_path.c_str()));
+        _dir.reset(DorisCompoundDirectory::getDirectory(_lfs, lfs_index_path.c_str(), true, _fs,
+                                                        index_path.c_str()));
 
 #else
         _dir.reset(DorisCompoundDirectory::getDirectory(_fs, index_path.c_str(), true));
@@ -151,6 +167,9 @@ public:
         } else if (_parser_type == InvertedIndexParserType::PARSER_ENGLISH) {
             _index_writer = _CLNEW lucene::index::IndexWriter(_dir.get(), _default_char_analyzer,
                                                               create, true);
+        } else if (_parser_type == InvertedIndexParserType::PARSER_CHINESE) {
+            _index_writer =
+                    _CLNEW lucene::index::IndexWriter(_dir.get(), _chinese_analyzer, create, true);
         } else {
             // ANALYSER_NOT_SET, ANALYSER_NONE use default SimpleAnalyzer
             _index_writer =
@@ -171,15 +190,9 @@ public:
         } else {
             field_config |= lucene::document::Field::INDEX_TOKENIZED;
         }
-        //auto name = lucene::util::Misc::_charToWide(fn.c_str());
-        //field_name = std::wstring(fn.begin(), fn.end());
 
         _field = _CLNEW lucene::document::Field(_field_name.c_str(), field_config);
         _doc->add(*_field);
-        // NOTE: need to ref_cnt-- for dir,
-        // when index_writer is destroyed, if closeDir is set, dir will be close
-        // _CLDECDELETE(dir) will try to ref_cnt--, when it decreases to 1, dir will be destroyed.
-        //_CLLDECDELETE(dir)
 
         return Status::OK();
     }
@@ -204,8 +217,11 @@ public:
     void new_fulltext_field(const char* field_value_data, size_t field_value_size) {
         if (_parser_type == InvertedIndexParserType::PARSER_ENGLISH) {
             new_char_token_stream(field_value_data, field_value_size, _field);
-        } else if (_parser_type == InvertedIndexParserType::PARSER_STANDARD) {
-            new_field_value(field_value_data, field_value_size, _field);
+        } else if (_parser_type == InvertedIndexParserType::PARSER_CHINESE) {
+            auto stringReader = _CLNEW lucene::util::SimpleInputStreamReader(
+                    new lucene::util::AStringReader(field_value_data, field_value_size),
+                    lucene::util::SimpleInputStreamReader::UTF8);
+            _field->setValue(stringReader);
         } else {
             new_field_value(field_value_data, field_value_size, _field);
         }
@@ -232,8 +248,6 @@ public:
     void new_field_value(const char* s, size_t len, lucene::document::Field* field) {
         auto field_value = lucene::util::Misc::_charToWide(s, len);
         field->setValue(field_value, false);
-        // setValue did not duplicate value, so we don't have to delete
-        //_CLDELETE_ARRAY(field_value)
     }
 
     Status add_values(const std::string fn, const void* values, size_t count) override {
@@ -335,36 +349,36 @@ public:
 
     Status finish() override {
         lucene::store::Directory* dir = nullptr;
-        lucene::store::IndexOutput* data_out= nullptr;
-        lucene::store::IndexOutput* index_out= nullptr;
-        lucene::store::IndexOutput* meta_out= nullptr;
+        lucene::store::IndexOutput* data_out = nullptr;
+        lucene::store::IndexOutput* index_out = nullptr;
+        lucene::store::IndexOutput* meta_out = nullptr;
         try {
             if constexpr (field_is_numeric_type(field_type)) {
                 auto index_path = InvertedIndexDescriptor::get_temporary_index_path(
                         _directory + "/" + _segment_file_name, _index_meta->index_id());
 #ifdef CLOUD_MODE
                 if (_lfs == nullptr) {
-                    _lfs = io::LocalFileSystem::create(io::TmpFileMgr::instance()->get_tmp_file_dir());
+                    _lfs = io::LocalFileSystem::create(
+                            io::TmpFileMgr::instance()->get_tmp_file_dir());
                 }
                 auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                         io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
                         _index_meta->index_id());
-                dir = DorisCompoundDirectory::getDirectory(
-                        _lfs, lfs_index_path.c_str(), true, _fs, index_path.c_str());
+                dir = DorisCompoundDirectory::getDirectory(_lfs, lfs_index_path.c_str(), true, _fs,
+                                                           index_path.c_str());
 #else
                 dir = DorisCompoundDirectory::getDirectory(_fs, index_path.c_str(), true);
 #endif
                 _bkd_writer->max_doc_ = _rid;
                 _bkd_writer->docs_seen_ = _row_ids_seen_for_bkd;
-		data_out = dir->createOutput(
+                data_out = dir->createOutput(
                         InvertedIndexDescriptor::get_temporary_bkd_index_data_file_name().c_str());
                 meta_out = dir->createOutput(
                         InvertedIndexDescriptor::get_temporary_bkd_index_meta_file_name().c_str());
                 index_out = dir->createOutput(
                         InvertedIndexDescriptor::get_temporary_bkd_index_file_name().c_str());
-		if (data_out != nullptr && meta_out != nullptr && index_out != nullptr){
-                    _bkd_writer->meta_finish(meta_out,
-                                             _bkd_writer->finish(data_out, index_out),
+                if (data_out != nullptr && meta_out != nullptr && index_out != nullptr) {
+                    _bkd_writer->meta_finish(meta_out, _bkd_writer->finish(data_out, index_out),
                                              field_type);
                 }
                 FINALIZE_OUTPUT(meta_out)
@@ -375,7 +389,7 @@ public:
                 close();
             }
         } catch (CLuceneError& e) {
-	    LOG(WARNING) << "InvertedIndexColumnWriter finish catch exception: " << e.what()
+            LOG(WARNING) << "InvertedIndexColumnWriter finish catch exception: " << e.what()
                          << ", meta_out: " << meta_out << ", data_out: " << data_out
                          << ", index_out: " << index_out;
             FINALLY_FINALIZE_OUTPUT(meta_out)
@@ -390,21 +404,19 @@ public:
     }
 
 private:
-    //std::shared_ptr<MemTracker> _tracker;
-    //MemPool _pool;
-    //const TypeInfo* _typeinfo;
     rowid_t _rid = 0;
     uint32_t _row_ids_seen_for_bkd = 0;
     roaring::Roaring _null_bitmap;
     uint64_t _reverted_index_size;
 
-    lucene::document::Document* _doc{};
-    lucene::document::Field* _field{};
-    lucene::index::IndexWriter* _index_writer{};
-    lucene::util::SStringReader<char>* _char_string_reader{};
-    lucene::analysis::SimpleAnalyzer<TCHAR>* _default_analyzer{};
-    lucene::analysis::SimpleAnalyzer<char>* _default_char_analyzer{};
-    lucene::analysis::standard::StandardAnalyzer* _standard_analyzer{};
+    lucene::document::Document* _doc {};
+    lucene::document::Field* _field {};
+    lucene::index::IndexWriter* _index_writer {};
+    lucene::util::SStringReader<char>* _char_string_reader {};
+    lucene::analysis::SimpleAnalyzer<TCHAR>* _default_analyzer {};
+    lucene::analysis::SimpleAnalyzer<char>* _default_char_analyzer {};
+    lucene::analysis::standard::StandardAnalyzer* _standard_analyzer {};
+    lucene::analysis::LanguageBasedAnalyzer* _chinese_analyzer {};
     std::shared_ptr<lucene::util::bkd::bkd_writer> _bkd_writer;
     std::string _segment_file_name;
     std::string _directory;
@@ -424,8 +436,6 @@ Status InvertedIndexColumnWriter::create(const Field* field,
                                          uint32_t uuid, const std::string& segment_file_name,
                                          const std::string& dir, const TabletIndex* index_meta,
                                          io::FileSystemSPtr fs) {
-    //RETURN_IF_ERROR(InvertedIndexDescriptor::init_index_directory(path));
-
     auto typeinfo = field->type_info();
     FieldType type = typeinfo->type();
     std::string field_name = field->name();
