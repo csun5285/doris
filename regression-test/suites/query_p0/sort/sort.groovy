@@ -56,5 +56,9 @@ suite("sort") {
     """
 
     qt_sql_orderby_non_overlap_desc """ select * from sort_non_overlap order by time_period desc limit 4; """
+
+    qt_sql """
+        select b.k1, a.k1, b.k4, a.k4 from test_query_db.baseall a left join test_query_db.test b on a.k2 = b.k4  order by 1, 2, 3, 4;
+    """
 }
 
