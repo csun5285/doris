@@ -21,7 +21,6 @@
 #include "util/brpc_client_cache.h"
 #include "util/debug/sanitizer_scopes.h"
 #include "util/doris_metrics.h"
-#include "util/path_util.h"
 #include "util/proto_util.h"
 #include "util/time.h"
 #include "vec/columns/column_array.h"
@@ -449,15 +448,6 @@ VOlapTableSink::~VOlapTableSink() {
 
 Status VOlapTableSink::init(const TDataSink& sink) {
     RETURN_IF_ERROR(OlapTableSink::init(sink));
-    DCHECK(sink.__isset.olap_table_sink);
-    auto& table_sink = sink.olap_table_sink;
-    std::string wal_path = "./wal/" + std::to_string(table_sink.db_id) + "/" +
-                           std::to_string(table_sink.table_id) + "/" +
-                           std::to_string(table_sink.txn_id);
-    _wal_writer = std::make_shared<WalWriter>(wal_path);
-    RETURN_IF_ERROR(_wal_writer->init());
-    _wal_reader = std::make_shared<WalReader>(wal_path);
-    RETURN_IF_ERROR(_wal_reader->init());
     _vpartition = _pool->add(new VOlapTablePartitionParam(_schema, sink.olap_table_sink.partition));
     return _vpartition->init();
 }
@@ -571,18 +561,6 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
         _convert_to_dest_desc_block(&block);
     }
 
-    PBlock pblock;
-    size_t uncompressed_bytes = 0, compressed_bytes = 0;
-    RETURN_IF_ERROR(block.serialize(state->be_exec_version(), &pblock, &uncompressed_bytes,
-                                    &compressed_bytes, segment_v2::CompressionTypePB::SNAPPY));
-    RETURN_IF_ERROR(_wal_writer->append_blocks(std::vector<PBlock> {pblock}));
-
-    PBlock new_pblock;
-    RETURN_IF_ERROR(_wal_reader->read_block(new_pblock));
-    vectorized::Block new_block(new_pblock);
-    //    std::shared_ptr<vectorized::Block> new_block(new vectorized::Block(new_pblock));
-
-
     SCOPED_RAW_TIMER(&_send_data_ns);
     // This is just for passing compilation.
     bool stop_processing = false;
@@ -604,7 +582,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
             const VOlapTablePartition* partition = nullptr;
             uint32_t tablet_index = 0;
             bool is_continue = false;
-            RETURN_IF_ERROR(find_tablet(state, &new_block, i, &partition, tablet_index, stop_processing,
+            RETURN_IF_ERROR(find_tablet(state, &block, i, &partition, tablet_index, stop_processing,
                                         is_continue));
             if (is_continue) {
                 continue;
@@ -633,7 +611,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
         for (size_t i = 0; i < _channels.size(); i++) {
             for (const auto& entry : channel_to_payload[i]) {
                 // if this node channel is already failed, this add_row will be skipped
-                auto st = entry.first->add_block(&new_block, entry.second);
+                auto st = entry.first->add_block(&block, entry.second);
                 if (!st.ok()) {
                     _channels[i]->mark_as_failed(entry.first->node_id(), entry.first->host(),
                                                  st.to_string());
@@ -653,9 +631,9 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
             const VOlapTablePartition* partition = nullptr;
             uint32_t tablet_index = 0;
             BlockRow block_row;
-            block_row = {&new_block, i};
+            block_row = {&block, i};
             bool is_continue = false;
-            RETURN_IF_ERROR(find_tablet(state, &new_block, i, &partition, tablet_index, stop_processing,
+            RETURN_IF_ERROR(find_tablet(state, &block, i, &partition, tablet_index, stop_processing,
                                         is_continue));
             if (is_continue) {
                 continue;

@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include "olap/wal_writer.h"
-#include "olap/wal_reader.h"
 #include "exec/tablet_sink.h"
 #include "runtime/row_batch.h"
 #include "vec/columns/column.h"
@@ -128,8 +126,6 @@ private:
     std::map<int, int128_t> _min_decimal128_val;
 
     VOlapTablePartitionParam* _vpartition = nullptr;
-    std::shared_ptr<WalWriter> _wal_writer = nullptr;
-    std::shared_ptr<WalReader> _wal_reader = nullptr;
     std::vector<vectorized::VExprContext*> _output_vexpr_ctxs;
 };
 
