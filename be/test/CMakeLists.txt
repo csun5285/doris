@@ -365,6 +365,7 @@ if (CLOUD_MODE)
         olap/common_test.cpp
         #olap/segcompaction_test.cpp
         #olap/ordered_data_compaction_test.cpp
+        olap/wal_reader_writer_test.cpp
     )
 else()  
     set(OLAP_TEST_FILES
@@ -437,6 +438,7 @@ else()
         olap/remote_rowset_gc_test.cpp
         #olap/segcompaction_test.cpp
         #olap/ordered_data_compaction_test.cpp
+        olap/wal_reader_writer_test.cpp
     )   
 endif()
 

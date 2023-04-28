@@ -123,6 +123,8 @@ add_library(Olap STATIC
     column_vector.cpp
     segment_loader.cpp
     storage_policy_mgr.cpp
+    wal_writer.cpp
+    wal_reader.cpp
 )
 
 if (NOT USE_MEM_TRACKER)
