@@ -190,7 +190,7 @@ void txn_running_key(const TxnRunningKeyInfo& in, std::string* out) {
 
 void version_key(const VersionKeyInfo& in, std::string* out) {
     encode_prefix(in, out);               // 0x01 "version" ${instance_id}
-    encode_bytes(VERSION_KEY_INFIX, out); // "version_id"
+    encode_bytes(VERSION_KEY_INFIX, out); // "partition"
     encode_int64(std::get<1>(in), out);   // db_id
     encode_int64(std::get<2>(in), out);   // tbl_id
     encode_int64(std::get<3>(in), out);   // partition_id

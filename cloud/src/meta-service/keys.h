@@ -46,7 +46,7 @@
 // 0x02 "system" "meta-service" "encryption_key_info"                                        -> EncryptionKeyInfoPB
 //
 // 0x01 "copy" ${instance_id} "job" ${stage_id} ${table_id} ${copy_id} ${group_id}           -> CopyJobPB
-// 0x01 "copy" ${instance_id} "loading_files" ${stage_id} ${table_id} ${obj_name} ${etag}    -> CopyFilePB
+// 0x01 "copy" ${instance_id} "loading_file" ${stage_id} ${table_id} ${obj_name} ${etag}    -> CopyFilePB
 // clang-format on
 
 namespace selectdb {

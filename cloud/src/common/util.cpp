@@ -164,7 +164,7 @@ static std::string explain_fields(std::string_view text, const std::vector<std::
 }
 
 std::string prettify_key(std::string_view key_hex, bool unicode) {
-    // Decoded result containner
+    // Decoded result container
     //                                    val                  tag  pos
     //                     .---------------^----------------.  .^.  .^.
     std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> fields;
