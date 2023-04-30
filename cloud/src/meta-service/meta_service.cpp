@@ -5324,9 +5324,12 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
         }
 
         for (auto s : stage) {
-            if (s.type() != StagePB::INTERNAL || s.mysql_user_name().size() == 0 ||
-                s.mysql_user_id().size() == 0) {
-                LOG(WARNING) << "impossible here, internal stage must have at least one user";
+            if (s.type() != StagePB::INTERNAL) {
+                continue;
+            }
+            if (s.mysql_user_name().size() == 0 || s.mysql_user_id().size() == 0) {
+                LOG(WARNING) << "impossible here, internal stage must have at least one user, invalid stage="
+                             << proto_to_json(s);
                 continue;
             }
             if (s.mysql_user_name(0) == mysql_user_name) {
