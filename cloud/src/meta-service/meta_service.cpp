@@ -1731,7 +1731,12 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
             if (!saved_schema.ParseFromString(schema_val)) return false;
             if (saved_schema.column_size() != schema.column_size()) return false;
             for (int i = 0; i < saved_schema.column_size(); ++i) {
-                if (saved_schema.column(i).type() != schema.column(i).type()) return false;
+                if (saved_schema.column(i).type() != schema.column(i).type()) {
+                    if (!(saved_schema.column(i).type() == "DECIMALV2" &&
+                          schema.column(i).type() == "DECIMAL")) {
+                        return false;
+                    }
+                }
             }
             return true;
         }()) << hex(schema_key)
@@ -5328,7 +5333,8 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
                 continue;
             }
             if (s.mysql_user_name().size() == 0 || s.mysql_user_id().size() == 0) {
-                LOG(WARNING) << "impossible here, internal stage must have at least one user, invalid stage="
+                LOG(WARNING) << "impossible here, internal stage must have at least one user, "
+                                "invalid stage="
                              << proto_to_json(s);
                 continue;
             }
@@ -6295,7 +6301,6 @@ void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* control
             response->add_object_files()->CopyFrom(file);
         }
     }
-
 }
 
 void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id) {
