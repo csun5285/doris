@@ -142,16 +142,16 @@ suite("test_internal_stage_copy_into") {
 
         if (cloud_delete_loaded_internal_stage_files) {
             // check file is deleted
-            waitInternalStageFilesDeleted(fileName)
+            waitInternalStageFilesDeleted(remoteFileName)
             // check copy job and file keys are deleted
-            uploadFile(fileName, filePath)
-            result = sql " copy into ${tableName} from @~('${fileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+            uploadFile(remoteFileName, filePath)
+            result = sql " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
             logger.info("copy result: " + result)
             assertTrue(result.size() == 1)
             assertTrue(result[0].size() == 8)
             assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
             // check file is deleted
-            waitInternalStageFilesDeleted(fileName)
+            waitInternalStageFilesDeleted(remoteFileName)
         }
 
         // copy with invalid file
@@ -190,7 +190,7 @@ suite("test_internal_stage_copy_into") {
 
         createTable()
         for (int i = 0; i < sqls.size(); i++) {
-            uploadFile(fileName, filePath)
+            uploadFile(remoteFileName, filePath)
             result = sql "${sqls[i]}"
             logger.info("copy result: " + result)
             assertTrue(result.size() == 1)
@@ -205,7 +205,7 @@ suite("test_internal_stage_copy_into") {
                 qt_sql "select * from ${tableName} order by C_CUSTKEY ASC"
                 qt_sql "select * from ${tableName2} order by C_CUSTKEY ASC"
                 if (cloud_delete_loaded_internal_stage_files) {
-                    waitInternalStageFilesDeleted(fileName)
+                    waitInternalStageFilesDeleted(remoteFileName)
                 }
             }
         }
