@@ -1398,7 +1398,7 @@ void MetaServiceImpl::abort_txn(::google::protobuf::RpcController* controller,
 
     std::string recycle_txn_key_;
     std::string recycle_txn_val;
-    RecycleTxnKeyInfo recycle_txn_key_info {instance_id, db_id, txn_id};
+    RecycleTxnKeyInfo recycle_txn_key_info {instance_id, db_id, txn_info.txn_id()};
     recycle_txn_key(recycle_txn_key_info, &recycle_txn_key_);
     RecycleTxnPB recycle_txn_pb;
     recycle_txn_pb.set_creation_time(finish_time);

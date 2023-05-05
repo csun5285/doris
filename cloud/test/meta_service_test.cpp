@@ -1158,6 +1158,16 @@ TEST(MetaServiceTest, AbortTxnTest) {
                                     &req, &res, nullptr);
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
             ASSERT_EQ(res.txn_info().status(), TxnStatusPB::TXN_STATUS_ABORTED);
+
+            std::string recycle_txn_key_;
+            std::string recycle_txn_val;
+            RecycleTxnKeyInfo recycle_txn_key_info {mock_instance, db_id, txn_id};
+            recycle_txn_key(recycle_txn_key_info, &recycle_txn_key_);
+            std::unique_ptr<Transaction> txn;
+            meta_service->txn_kv_->create_txn(&txn);
+            int ret = txn->get(recycle_txn_key_, &recycle_txn_val);
+            ASSERT_NE(txn_id, -1);
+            ASSERT_EQ(ret, 0);
         }
     }
 }
@@ -1270,6 +1280,16 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
 
     ASSERT_EQ(check_txn_conflict_res.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(check_txn_conflict_res.finished(), true);
+
+    std::string txn_run_key;
+    std::string txn_run_value;
+    TxnRunningKeyInfo txn_run_key_info {mock_instance, db_id, txn_id};
+    txn_running_key(txn_run_key_info, &txn_run_key);
+    std::unique_ptr<Transaction> txn;
+    int ret = meta_service->txn_kv_->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    ret = txn->get(txn_run_key, &txn_run_value);
+    ASSERT_EQ(ret, 1);
 }
 
 TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {

@@ -43,14 +43,11 @@ add_executable(meta_service_test
 add_executable(rate_limiter_test
     rate_limiter_test.cpp
 )
-<<<<<<< HEAD
 
 add_executable(encryption_test
    encryption_test.cpp
 )
 
-=======
->>>>>>> selectdb/selectdb-cloud-2.2
 add_executable(metric_test
     metric_test.cpp
 )
