@@ -97,6 +97,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
         public boolean isGlobal;
         public String clusterId;
         public Map<Long, List<Tablet>> beToTablets;
+        public long startTimestamp;
     }
 
     // 1 build cluster to backends info
@@ -234,8 +235,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             Map<Long, Boolean> taskDone = sendCheckPreCacheRpc(entry.getValue(), entry.getKey());
 
             for (Map.Entry<Long, Boolean> result : taskDone.entrySet()) {
-                if (result.getValue()) {
-                    InfightTask task = tabletToInfightTask.get(result.getKey());
+                InfightTask task = tabletToInfightTask.get(result.getKey());
+                if (result.getValue()
+                        || System.currentTimeMillis() / 1000 - task.startTimestamp
+                            > Config.pre_heating_time_limit_sec) {
                     updateClusterToBeMap(task.pickedTablet, task.destBe, task.clusterId);
                     tabletToInfightTask.remove(result.getKey());
                 }
@@ -607,6 +610,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 task.isGlobal = isGlobal;
                 task.clusterId = clusterId;
                 task.beToTablets = beToTablets;
+                task.startTimestamp = System.currentTimeMillis() / 1000;
                 tabletToInfightTask.put(pickedTablet.getId(), task);
 
                 LOG.info("pre cache {} from {} to {}, cluster {} minNum {} maxNum {} beNum {} tabletsNum {}, part {}",

@@ -117,8 +117,8 @@ public abstract class BulkLoadJob extends LoadJob {
             if (context != null) {
                 String clusterName = context.getCloudCluster();
                 if (Strings.isNullOrEmpty(clusterName)) {
-                    LOG.warn("cluster name is null");
-                    return;
+                    LOG.warn("cluster name is empty");
+                    throw new MetaNotFoundException("cluster name is empty");
                 }
 
                 this.clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterName);
@@ -126,6 +126,10 @@ public abstract class BulkLoadJob extends LoadJob {
                     clusterName = context.getSessionVariable().getCloudCluster();
                     this.clusterId =
                             Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterName);
+                }
+                if (Strings.isNullOrEmpty(this.clusterId)) {
+                    LOG.warn("cluster id is empty, cluster name {}", clusterName);
+                    throw new MetaNotFoundException("cluster id is empty, cluster name: " + clusterName);
                 }
             }
         }
