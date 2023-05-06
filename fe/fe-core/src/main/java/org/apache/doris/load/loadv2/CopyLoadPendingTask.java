@@ -33,6 +33,8 @@ import org.apache.doris.thrift.TBrokerFileStatus;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.selectdb.cloud.proto.SelectdbCloud.CopyJobPB;
+import com.selectdb.cloud.proto.SelectdbCloud.CopyJobPB.JobStatus;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectFilePB;
 import com.selectdb.cloud.stage.StageUtil;
 import com.selectdb.cloud.storage.ListObjectsResult;
@@ -93,6 +95,13 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             for (BrokerFileGroup fileGroup : fileGroups) {
                 long groupFileSize = 0;
                 List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatuses = Lists.newArrayList();
+                if (copyJob.isReplay()) {
+                    fileStatuses = getCopyFilesWhenReplay(copyJob.getStageId(), fileGroup.getTableId(),
+                            copyJob.getCopyId(), copyJob.getObjectInfo());
+                    LOG.info("Get copy files when replay, stageId={}, tableId={}, copyId={}, files={}",
+                            copyJob.getStageId(), fileGroup.getTableId(), copyJob.getCopyId(),
+                            fileStatuses.stream().map(p -> p.second.getRelativePath()).collect(Collectors.toList()));
+                }
                 if (!isBeginCopyDone) {
                     for (String path : fileGroup.getFilePaths()) {
                         LOG.debug("input path = {}", path);
@@ -306,6 +315,45 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
                 }
                 continuationToken = listObjectsResult.getContinuationToken();
             }
+        } finally {
+            remote.close();
+        }
+    }
+
+    private List<Pair<TBrokerFileStatus, ObjectFilePB>> getCopyFilesWhenReplay(String stageId, long tableId,
+            String copyId, ObjectInfo objectInfo) throws DdlException {
+        CopyJobPB copyJobPB = Env.getCurrentInternalCatalog().getCopyJob(stageId, tableId, copyId, 0);
+        // BeginCopy does not execute
+        if (copyJobPB == null) {
+            return new ArrayList<>();
+        }
+        if (copyJobPB.getJobStatus() != JobStatus.LOADING) {
+            throw new DdlException("Copy job is not in loading status, status=" + copyJobPB.getJobStatus());
+        }
+        isBeginCopyDone = true;
+        RemoteBase remote = null;
+        try {
+            remote = RemoteBase.newInstance(objectInfo);
+            List<Pair<TBrokerFileStatus, ObjectFilePB>> fileStatuses = Lists.newArrayList();
+            for (ObjectFilePB objectFile : copyJobPB.getObjectFilesList()) {
+                List<ObjectFile> files = remote.headObject(objectFile.getRelativePath()).getObjectInfoList();
+                TBrokerFileStatus brokerFileStatus = null;
+                for (ObjectFile file : files) {
+                    if (file.getRelativePath().equals(objectFile.getRelativePath()) && file.getEtag()
+                            .equals(objectFile.getEtag())) {
+                        String objUrl = "s3://" + objectInfo.getBucket() + "/" + file.getKey();
+                        brokerFileStatus = new TBrokerFileStatus(objUrl, false, file.getSize(), true);
+                        break;
+                    }
+                }
+                if (brokerFileStatus == null) {
+                    throw new Exception("Can not find object with relative path: " + objectFile.getRelativePath());
+                }
+                fileStatuses.add(Pair.of(brokerFileStatus, objectFile));
+            }
+            return fileStatuses;
+        } catch (Exception e) {
+            throw new DdlException(e.getMessage());
         } finally {
             remote.close();
         }
