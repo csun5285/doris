@@ -512,6 +512,7 @@ if [ ${BUILD_CLOUD} -eq 1 ] ; then
     fi
     MAKE_PROGRAM="$(which "${BUILD_SYSTEM}")"
     echo "-- Make program: ${MAKE_PROGRAM}"
+    echo "-- Extra cxx flags: ${EXTRA_CXX_FLAGS:-}"
     mkdir -p ${CMAKE_BUILD_DIR}
     cd ${CMAKE_BUILD_DIR}
     ${CMAKE_CMD} -G "${GENERATOR}"  \
@@ -526,6 +527,7 @@ if [ ${BUILD_CLOUD} -eq 1 ] ; then
             -DUSE_JEMALLOC=${USE_JEMALLOC} \
             -DSTRICT_MEMORY_USE=${STRICT_MEMORY_USE} \
             -DUSE_AVX2=${USE_AVX2} \
+            -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
             -DGLIBC_COMPATIBILITY=${GLIBC_COMPATIBILITY} ${DORIS_HOME}/cloud/
     ${BUILD_SYSTEM} -j ${PARALLEL}
     ${BUILD_SYSTEM} install

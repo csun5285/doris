@@ -1727,13 +1727,18 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
     meta_schema_key({instance_id, index_id, schema.schema_version()}, &schema_key);
     if (txn->get(schema_key, &schema_val) == 0) {
         DCHECK([&] {
+            auto transform = [](std::string_view type) -> std::string_view {
+                if (type == "DECIMALV2") return "DECIMAL";
+                if (type == "BITMAP") return "OBJECT";
+                return type;
+            };
             doris::TabletSchemaPB saved_schema;
             if (!saved_schema.ParseFromString(schema_val)) return false;
             if (saved_schema.column_size() != schema.column_size()) return false;
             for (int i = 0; i < saved_schema.column_size(); ++i) {
                 if (saved_schema.column(i).type() != schema.column(i).type()) {
-                    if (!(saved_schema.column(i).type() == "DECIMALV2" &&
-                          schema.column(i).type() == "DECIMAL")) {
+                    if (transform(saved_schema.column(i).type()) !=
+                        transform(schema.column(i).type())) {
                         return false;
                     }
                 }
