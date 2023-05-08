@@ -222,7 +222,12 @@ fi
 build_hash=${revision}
 build_short_hash=${short_revision}
 build_time=$(date +"%Y-%m-%d %H:%M:%S %z")
-build_revision_time=$(git log -1 --pretty=format:"%ad")
+if [[ -d '.git' ]]; then
+    build_revision_time=$(git log -1 --pretty=format:"%ad")
+else
+    build_revision_time=${build_time}
+fi
+
 build_initiator="${user}@${hostname}"
 
 GEN_CPP_DIR="${DORIS_HOME}/gensrc/build/gen_cpp"
