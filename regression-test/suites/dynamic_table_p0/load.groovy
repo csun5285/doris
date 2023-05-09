@@ -148,6 +148,16 @@ suite("regression_test_dynamic_table", "dynamic_table"){
     json_load_unique("nbagames_sample.json", "test_nbagames_json")
     sql """insert into test_ghdata_json_1 select * from test_ghdata_json"""
     sql """insert into test_nbagames_json_1 select * from test_nbagames_json"""
+    sql 'sync'
+    // def meta = sql_meta 'select * from test_ghdata_json limit 1'
+    // for (List<String> col_meta in meta) {
+    //     test {
+    //         qt_sql "select count(`${col_meta[0]}`) from test_ghdata_json"
+    //         // check exception message contains
+    //         exception "errCode = 2,"
+    //     }
+    // }
+
 
     // load more
     table_name = "gharchive";
@@ -199,4 +209,13 @@ suite("regression_test_dynamic_table", "dynamic_table"){
             }
         }
     }
+    sql 'sync'
+    meta = sql_meta 'select * from gharchive limit 1'
+    for (List<String> col_meta in meta) {
+        try {
+            qt_sql "select count(`${col_meta[0]}`) from gharchive"
+        } catch (Throwable t) {
+            assertTrue(t.toString().contains("errCode = 2,"))
+        }
+    } 
 }
