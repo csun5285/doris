@@ -254,4 +254,26 @@ class SuiteContext implements Closeable {
         long elapsed = finishTime - startTime
         scriptContext.eventListeners.each { it.onSuiteFinished(this, throwable == null, elapsed) }
     }
+
+    void resetConnection() {
+        def originConn = threadLocalConn.get()
+        if (originConn != null) {
+            try {
+                threadLocalConn.remove()
+                originConn.close()
+            } catch (Throwable t) {
+                log.warn("ignore close connection failed", t)
+            }
+        }
+        int tryTimes = 5
+        while(tryTimes-- > 0)
+        try {
+            def newConn = config.resetConnectionByDbName(dbName)
+            threadLocalConn.set(newConn)
+            return;
+        } catch (Exception e) {
+            log.info("resetConnection tryTimes={} exception:{}", tryTimes, e.getMessage())
+            sleep(10000)
+        }
+    }
 }

@@ -112,6 +112,8 @@ class Config {
     public String stageIamSk
     public String stageIamUserId
 
+    public String clusterDir
+
     Config() {}
 
     Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
@@ -123,7 +125,8 @@ class Config {
            String pluginPath, String multiClusterBes, String metaServiceToken, String multiClusterInstance,
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
-           String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId) {
+           String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId,
+           String clusterDir) {
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -166,6 +169,7 @@ class Config {
         this.stageIamAk = stageIamAk
         this.stageIamSk = stageIamSk
         this.stageIamUserId = stageIamUserId
+        this.clusterDir = clusterDir
     }
 
     static Config fromCommandLine(CommandLine cmd) {
@@ -341,6 +345,9 @@ class Config {
         log.info("withOutLoadData is ${config.withOutLoadData}".toString())
         log.info("dryRun is ${config.dryRun}".toString())
 
+        config.clusterDir = cmd.getOptionValue(clusterDirOpt, config.clusterDir)
+        log.info("clusterDir is ${config.clusterDir}".toString())
+
         Properties props = cmd.getOptionProperties("conf")
         config.otherConfigs.putAll(props)
 
@@ -394,6 +401,7 @@ class Config {
             configToString(obj.stageIamAk),
             configToString(obj.stageIamSk),
             configToString(obj.stageIamUserId),
+            configToString(obj.clusterDir),
         )
 
         def declareFileNames = config.getClass()
@@ -637,6 +645,12 @@ class Config {
     Connection getConnectionByDbName(String dbName) {
         String dbUrl = buildUrl(dbName)
         tryCreateDbIfNotExist(dbName)
+        log.info("connect to ${dbUrl}".toString())
+        return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
+    }
+
+    Connection resetConnectionByDbName(String dbName) {
+        String dbUrl = buildUrl(dbName)
         log.info("connect to ${dbUrl}".toString())
         return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
     }

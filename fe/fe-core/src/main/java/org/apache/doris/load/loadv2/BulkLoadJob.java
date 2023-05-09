@@ -98,8 +98,8 @@ public abstract class BulkLoadJob extends LoadJob {
     private static final String CLUSTER_ID = "clusterId";
     protected String clusterId;
 
-    // retry 2 times is enough
-    protected int retryTimes = 2;
+    // retry 3 times is enough
+    protected int retryTimes = 3;
 
     public BulkLoadJob(EtlJobType jobType) {
         super(jobType);

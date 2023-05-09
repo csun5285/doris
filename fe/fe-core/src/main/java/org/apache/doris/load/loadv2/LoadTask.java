@@ -49,6 +49,7 @@ public abstract class LoadTask extends MasterTask {
     protected FailMsg failMsg = new FailMsg();
     protected int retryTime = 1;
     private volatile boolean done = false;
+    protected long startTimeMs = 0;
 
     public LoadTask(LoadTaskCallback callback, TaskType taskType) {
         this.taskType = taskType;
@@ -60,6 +61,13 @@ public abstract class LoadTask extends MasterTask {
     protected void exec() {
         boolean isFinished = false;
         try {
+            if (startTimeMs > System.currentTimeMillis()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    LOG.info("ignore InterruptedException: ", e);
+                }
+            }
             // execute pending task
             executeTask();
             // callback on pending task finished
@@ -112,5 +120,9 @@ public abstract class LoadTask extends MasterTask {
 
     public boolean isDone() {
         return done;
+    }
+
+    public void setStartTimeMs(long startTimeMs) {
+        this.startTimeMs = startTimeMs;
     }
 }

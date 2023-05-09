@@ -766,6 +766,10 @@ class Suite implements GroovyInterceptable {
                 assertTrue(json.code.equalsIgnoreCase("OK"))
         }
     }
+
+    public void resetConnection() {
+        context.resetConnection()
+    }
 }
 
 

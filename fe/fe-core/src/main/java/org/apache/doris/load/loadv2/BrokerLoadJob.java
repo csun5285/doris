@@ -494,6 +494,8 @@ public class BrokerLoadJob extends BulkLoadJob {
             this.finishedTaskIds.clear();
             Env.getCurrentGlobalTransactionMgr().getCallbackFactory().addCallback(this);
             LoadTask task = createPendingTask();
+            // retry default backoff 60 seconds, because `be restart` is slow
+            task.setStartTimeMs(System.currentTimeMillis() + 60 * 1000);
             idToTasks.put(task.getSignature(), task);
             Env.getCurrentEnv().getPendingLoadTaskScheduler().submit(task);
         } finally {

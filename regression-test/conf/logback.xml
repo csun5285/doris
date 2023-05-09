@@ -57,4 +57,5 @@ under the License.
         <appender-ref ref="stdoutAppender" />
         <appender-ref ref="rollingFileAppender" />
     </root>
+    <logger name="net.schmizz.sshj" level="error"/>
 </configuration>
