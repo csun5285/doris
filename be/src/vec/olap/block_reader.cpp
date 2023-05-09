@@ -82,8 +82,14 @@ Status BlockReader::_init_collect_iter(const ReaderParams& read_params,
     _reader_context.lazy_open_segment = read_params.lazy_open_segment;
     _reader_context.no_need_to_read_index = read_params.no_need_to_read_index;
     size_t reach_limt_row_num = 0;
-    bool delete_pred_rowset_empty = tablet()->delete_predicates().empty();
     _reader_context.ctx = _ctx;
+    bool delete_pred_rowset_empty = true;
+    for (const auto& rs_reader: rs_readers) {
+        if (rs_reader->rowset()->has_delete_predicate()) {
+            delete_pred_rowset_empty = false;
+            break;
+        }
+    }
     for (auto& rs_reader : rs_readers) {
         if (_ctx && _ctx->done()) [[unlikely]] {
             return Status::Error<ALREADY_CANCELLED>();

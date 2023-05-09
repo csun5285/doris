@@ -57,6 +57,12 @@ public:
 
     const TabletSharedPtr& get_tablet() const { return _tablet; }
 
+    bool has_delete_predicate() const {
+        for (const auto& rs: _tablet_reader_params.rs_readers) {
+            if (rs->rowset()->has_delete_predicate()) { return true; }
+        }
+        return false;
+    }
 protected:
     Status _get_block_impl(RuntimeState* state, Block* block, bool* eos) override;
     void _update_counters_before_close() override;

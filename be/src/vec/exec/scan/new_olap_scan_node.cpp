@@ -668,8 +668,9 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
         _hint_max_scanner_concurrency = 0;
         for (const auto s: *scanners) {
             _hint_max_scanner_concurrency += 1;
-            if (dynamic_cast<const NewOlapScanner*>(s)->get_tablet()->delete_predicates().empty()) {
-                reached_limit_rows += dynamic_cast<const NewOlapScanner*>(s)->get_tablet()->num_rows();
+            auto olap_scanner = dynamic_cast<const NewOlapScanner*>(s);
+            if (!olap_scanner->has_delete_predicate()) {
+                reached_limit_rows += olap_scanner->get_tablet()->num_rows();
             }
             if (reached_limit_rows >= limit()) {
                 break;
