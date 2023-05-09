@@ -976,7 +976,7 @@ bool CloudFileCache::try_reserve_for_lru(const Key& key, QueryContextPtr query_c
                          << ", offset: " << entry_offset;
 
             size_t cell_size = cell->size();
-            DCHECK(entry_size == cell_size);
+            DCHECK(entry_size == cell_size) << " entry_size=" << entry_size << " cell_size=" << cell_size;
 
             // If is_cold_data is true and the cell is hot, the cell cannot be evicted.
             if (context.is_cold_data && cell->atime != 0 &&

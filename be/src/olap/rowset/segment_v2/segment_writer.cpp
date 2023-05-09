@@ -233,8 +233,16 @@ Status SegmentWriter::_create_writers_with_dynamic_block(
         const auto& tcolumn = schema_view.column_name_to_column[column_type_name.name];
         TabletColumn new_column(tcolumn);
         RETURN_IF_ERROR(create_column_writer(i, new_column));
-        _opts.rowset_ctx->schema_change_recorder->add_extended_columns(new_column,
-                                                                       schema_view.schema_version);
+    }
+
+    // finally ensure all columns at schema_version is in either _tablet_schema or schema_change_recorder
+    for (const auto& [name, column] : schema_view.column_name_to_column) {
+        if (_tablet_schema->field_index(name) == -1) {
+            const auto& tcolumn = schema_view.column_name_to_column[name];
+            TabletColumn new_column(tcolumn);
+            _opts.rowset_ctx->schema_change_recorder->add_extended_columns(new_column,
+                                                                           schema_view.schema_version);
+        }
     }
     return Status::OK();
 }
