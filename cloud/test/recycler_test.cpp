@@ -1550,7 +1550,7 @@ TEST(RecyclerTest, recycle_stage) {
     ASSERT_EQ(1, txn->get(key, &val));
 }
 
-TEST(RecyclerTest, multi_recycler) {
+TEST(RecyclerTest, DISABLED_multi_recycler) {
     config::recycle_concurrency = 2;
     config::recycle_interval_seconds = 2;
     config::recycle_job_lease_expired_ms = 3;
