@@ -121,7 +121,6 @@ void S3FileBuffer::read_from_cache() {
         if (pos == _size) {
             break;
         }
-        segment->reset_range();
         segment->finalize_write();
         size_t segment_size = segment->range().size();
         Slice s(_buf->data() + pos, segment_size);
@@ -175,7 +174,6 @@ void S3FileBuffer::upload_to_local_file_cache() {
             DCHECK(segment->is_downloader());
             Slice s(_buf->data() + pos, append_size);
             segment->append(s);
-            segment->reset_range();
             segment->finalize_write();
         }
         data_remain_size -= append_size;

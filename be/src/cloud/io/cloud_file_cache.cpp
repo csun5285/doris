@@ -865,8 +865,8 @@ std::vector<CacheType> CloudFileCache::get_other_cache_type(CacheType cur_cache_
     return {};
 }
 
-void CloudFileCache::reset_range(const Key& key, size_t offset, size_t old_size, size_t new_size) {
-    std::lock_guard cache_lock(_mutex);
+void CloudFileCache::reset_range(const Key& key, size_t offset, size_t old_size, size_t new_size,
+                                 std::lock_guard<doris::Mutex>& cache_lock) {
     DCHECK(_files.find(key) != _files.end() &&
            _files.find(key)->second.find(offset) != _files.find(key)->second.end());
     FileSegmentCell* cell = get_cell(key, offset, cache_lock);
@@ -1308,8 +1308,8 @@ std::string CloudFileCache::dump_structure_unlocked(const Key& key, std::lock_gu
     return result.str();
 }
 
-void CloudFileCache::change_cache_type(const Key& key, size_t offset, CacheType new_type) {
-    std::lock_guard cache_lock(_mutex);
+void CloudFileCache::change_cache_type(const Key& key, size_t offset, CacheType new_type,
+                                       std::lock_guard<doris::Mutex>& cache_lock) {
     if (auto iter = _files.find(key); iter != _files.end()) {
         auto& file_segments = iter->second;
         if (auto cell_it = file_segments.find(offset); cell_it != file_segments.end()) {

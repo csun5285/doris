@@ -119,10 +119,6 @@ public:
 
     void update_expiration_time(int64_t expiration_time) { _expiration_time = expiration_time; }
 
-    // only used for s3 file writer
-    // should guarantee that the fragment don't have concurrency problem
-    void reset_range();
-
     State state_unlock(std::lock_guard<doris::Mutex>&) const;
 
     FileSegment& operator=(const FileSegment&) = delete;

@@ -103,7 +103,8 @@ public:
 
     size_t get_file_segments_num(CacheType type) const;
 
-    void change_cache_type(const Key& key, size_t offset, CacheType new_type);
+    void change_cache_type(const Key& key, size_t offset, CacheType new_type,
+                           std::lock_guard<doris::Mutex>& cache_lock);
 
     static std::string cache_type_to_string(CacheType type);
     static CacheType string_to_cache_type(const std::string& str);
@@ -111,7 +112,8 @@ public:
     void remove_if_cached(const Key&);
     void modify_expiration_time(const Key&, int64_t new_expiration_time);
 
-    void reset_range(const Key&, size_t offset, size_t old_size, size_t new_size);
+    void reset_range(const Key&, size_t offset, size_t old_size, size_t new_size,
+                     std::lock_guard<doris::Mutex>& cache_lock);
 
     std::vector<std::tuple<size_t, size_t, CacheType, int64_t>> get_hot_segments_meta(
             const Key& key) const;

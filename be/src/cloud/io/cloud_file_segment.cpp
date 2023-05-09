@@ -175,12 +175,12 @@ bool FileSegment::change_cache_type(CacheType new_type) {
     if (new_type == _cache_type) {
         return true;
     }
-    if (_download_state == State::DOWNLOADED) {
+    if (_download_state == State::DOWNLOADING) {
         segment_lock.unlock();
         int retry_time = 10;
-        while (retry_time-- && wait() == State::DOWNLOADING) {
+        while (--retry_time && wait() == State::DOWNLOADING) {
         }
-        if (retry_time == 10) {
+        if (retry_time == 0) {
             LOG(WARNING) << fmt::format("Segment change type too long, {} to {}", _cache_type,
                                         new_type);
             return false;
@@ -207,25 +207,22 @@ Status FileSegment::change_cache_type_self(CacheType new_type) {
     if (_cache_type == CacheType::TTL || new_type == _cache_type) {
         return st;
     }
-    if (_cache_writer) {
-        std::error_code ec;
-        std::filesystem::rename(
-                get_path_in_local_cache(),
-                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
-            st = Status::IOError(ec.message());
-            return st;
-        }
-    }
+    std::lock_guard cache_lock(_cache->_mutex);
     _cache_type = new_type;
-    _cache->change_cache_type(_file_key, _segment_range.left, new_type);
+    _cache->change_cache_type(_file_key, _segment_range.left, new_type, cache_lock);
     return st;
 }
 
 Status FileSegment::finalize_write() {
     std::lock_guard segment_lock(_mutex);
-
+    if (_downloaded_size != _segment_range.size()) {
+        std::lock_guard cache_lock(_cache->_mutex);
+        size_t old_size = _segment_range.size();
+        _segment_range.right = _segment_range.left + _downloaded_size - 1;
+        size_t new_size = _segment_range.size();
+        DCHECK(new_size < old_size);
+        _cache->reset_range(_file_key, _segment_range.left, old_size, new_size, cache_lock);
+    }
     RETURN_IF_ERROR(set_downloaded(segment_lock));
     _cv.notify_all();
     return Status::OK();
@@ -278,19 +275,6 @@ Status FileSegment::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_loc
     }
     _downloader_id = 0;
     return status;
-}
-
-void FileSegment::reset_range() {
-    size_t old_size = _segment_range.size();
-    _segment_range.right = _downloaded_size == _segment_range.size()
-                                   ? _segment_range.right
-                                   : _segment_range.left + _downloaded_size - 1;
-    // new size must be smaller than old size or equal
-    size_t new_size = _segment_range.size();
-    DCHECK(new_size <= old_size);
-    if (new_size < old_size) {
-        _cache->reset_range(_file_key, _segment_range.left, old_size, new_size);
-    }
 }
 
 void FileSegment::complete_unlocked(std::lock_guard<doris::Mutex>& segment_lock) {
