@@ -47,7 +47,7 @@ public:
     FileSegment(size_t offset, size_t size, const Key& key, CloudFileCache* cache, State download_state,
                 CacheType cache_type, int64_t expiration_time);
 
-    ~FileSegment() = default;
+    ~FileSegment();
 
     State state() const;
 

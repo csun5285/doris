@@ -987,6 +987,7 @@ CONF_mInt32(meta_service_rpc_retry_times, "200");
 // it must be larger than or equal to 5MB
 CONF_mInt32(s3_write_buffer_size, "5242880");
 CONF_mInt32(s3_write_buffer_whole_size, "524288000");
+CONF_mInt64(file_cache_max_file_reader_cache_size, "1000000");
 
 // semi-structure configs
 CONF_Bool(enable_parse_multi_dimession_array, "true");

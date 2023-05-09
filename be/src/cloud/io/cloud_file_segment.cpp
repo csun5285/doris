@@ -1,4 +1,5 @@
 #include "cloud/io/cloud_file_segment.h"
+
 #include <bthread/bthread.h>
 
 #include <filesystem>
@@ -74,8 +75,8 @@ size_t FileSegment::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segmen
 
 uint64_t FileSegment::get_caller_id() {
     uint64_t id = 0;
-    id = bthread_self() == 0 ? 
-            std::hash<std::thread::id>{}(std::this_thread::get_id()) : bthread_self(); 
+    id = bthread_self() == 0 ? std::hash<std::thread::id> {}(std::this_thread::get_id())
+                             : bthread_self();
     DCHECK(id != 0);
     return id;
 }
@@ -153,7 +154,7 @@ std::string FileSegment::get_path_in_local_cache(bool is_tmp) const {
     return _cache->get_path_in_local_cache(key(), _expiration_time, offset(), _cache_type, is_tmp);
 }
 
-Status FileSegment::read_at(Slice buffer, size_t offset) {
+Status FileSegment::read_at(Slice buffer, size_t read_offset) {
     Status st = Status::OK();
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
@@ -161,11 +162,12 @@ Status FileSegment::read_at(Slice buffer, size_t offset) {
         if (!(reader = _cache_reader.lock())) {
             auto download_path = get_path_in_local_cache();
             RETURN_IF_ERROR(global_local_filesystem()->open_file(download_path, &reader));
-            _cache_reader = CloudFileCache::cache_file_reader(reader);
+            _cache_reader =
+                    CloudFileCache::cache_file_reader(std::make_pair(_file_key, offset()), reader);
         }
     }
     size_t bytes_reads = buffer.size;
-    RETURN_IF_ERROR(reader->read_at(offset, buffer, &bytes_reads));
+    RETURN_IF_ERROR(reader->read_at(read_offset, buffer, &bytes_reads));
     DCHECK(bytes_reads == buffer.size);
     return st;
 }
@@ -213,6 +215,13 @@ Status FileSegment::change_cache_type_self(CacheType new_type) {
     return st;
 }
 
+FileSegment::~FileSegment() {
+    std::shared_ptr<FileReader> reader;
+    if ((reader = _cache_reader.lock())) {
+        CloudFileCache::remove_file_reader(std::make_pair(_file_key, offset()));
+    }
+}
+
 Status FileSegment::finalize_write() {
     std::lock_guard segment_lock(_mutex);
     if (_downloaded_size != _segment_range.size()) {
@@ -240,7 +249,7 @@ FileSegment::State FileSegment::wait() {
         DCHECK(_downloader_id != get_caller_id());
 #if !defined(USE_BTHREAD_SCANNER)
         _cv.wait_for(segment_lock, std::chrono::seconds(1));
-#else 
+#else
         _cv.wait_for(segment_lock, 1000000);
 #endif
     }

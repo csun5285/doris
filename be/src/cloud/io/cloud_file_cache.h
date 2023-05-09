@@ -244,7 +244,7 @@ private:
         FileSegmentCell(const FileSegmentCell&) = delete;
     };
 
-    using AccessKeyAndOffset = std::tuple<Key, size_t>;
+    using AccessKeyAndOffset = std::pair<Key, size_t>;
     struct KeyAndOffsetHash {
         std::size_t operator()(const AccessKeyAndOffset& key) const {
             return UInt128Hash()(std::get<0>(key).key) ^ std::hash<uint64_t>()(std::get<1>(key));
@@ -398,34 +398,27 @@ public:
     QueryContextHolderPtr get_query_context_holder(const TUniqueId& query_id);
 
 private:
-    static inline std::deque<std::shared_ptr<FileReader>> s_file_reader_cache;
+    static inline std::list<std::pair<AccessKeyAndOffset, std::shared_ptr<FileReader>>>
+            s_file_reader_cache;
+    static inline std::unordered_map<AccessKeyAndOffset, decltype(s_file_reader_cache.begin()),
+                                     KeyAndOffsetHash>
+            s_file_name_to_reader;
     static inline doris::Mutex s_file_reader_cache_mtx;
-    static constexpr size_t s_max_file_reader_size = 1024 * 1024;
     static inline std::atomic_bool s_read_only {false};
 
 public:
-    static void set_read_only(bool read_only) {
-        s_read_only = read_only;
-        if (read_only) {
-            std::lock_guard lock(s_file_reader_cache_mtx);
-            s_file_reader_cache.clear();
-        }
-    }
+    static void set_read_only(bool read_only);
 
     static bool read_only() { return s_read_only; }
 
-    static std::weak_ptr<FileReader> cache_file_reader(std::shared_ptr<FileReader> file_reader) {
-        std::weak_ptr<FileReader> wp;
-        if (!s_read_only) [[likely]] {
-            std::lock_guard lock(s_file_reader_cache_mtx);
-            if (s_max_file_reader_size == s_file_reader_cache.size()) {
-                s_file_reader_cache.pop_back();
-            }
-            wp = file_reader;
-            s_file_reader_cache.emplace_front(std::move(file_reader));
-        }
-        return wp;
-    }
+    static std::weak_ptr<FileReader> cache_file_reader(const AccessKeyAndOffset& key,
+                                                       std::shared_ptr<FileReader> file_reader);
+
+    static void remove_file_reader(const AccessKeyAndOffset& key);
+
+    // use for test
+    static bool contains_file_reader(const AccessKeyAndOffset& key);
+    static size_t file_reader_cache_size();
 };
 
 using CloudFileCachePtr = CloudFileCache*;

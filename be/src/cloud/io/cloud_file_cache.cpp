@@ -435,11 +435,9 @@ FileSegments CloudFileCache::split_range_into_cells(const Key& key, const CacheC
     return file_segments;
 }
 
-void CloudFileCache::fill_holes_with_empty_file_segments(FileSegments& file_segments,
-                                                         const Key& key,
-                                                         const CacheContext& context,
-                                                         const FileSegment::Range& range,
-                                                         std::lock_guard<doris::Mutex>& cache_lock) {
+void CloudFileCache::fill_holes_with_empty_file_segments(
+        FileSegments& file_segments, const Key& key, const CacheContext& context,
+        const FileSegment::Range& range, std::lock_guard<doris::Mutex>& cache_lock) {
     /// There are segments [segment1, ..., segmentN]
     /// (non-overlapping, non-empty, ascending-ordered) which (maybe partially)
     /// intersect with given range.
@@ -520,11 +518,9 @@ FileSegmentsHolder CloudFileCache::get_or_set(const Key& key, size_t offset, siz
     return FileSegmentsHolder(std::move(file_segments));
 }
 
-CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(const Key& key,
-                                                          const CacheContext& context,
-                                                          size_t offset, size_t size,
-                                                          FileSegment::State state,
-                                                          std::lock_guard<doris::Mutex>& cache_lock) {
+CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(
+        const Key& key, const CacheContext& context, size_t offset, size_t size,
+        FileSegment::State state, std::lock_guard<doris::Mutex>& cache_lock) {
     /// Create a file segment cell and put it in `files` map by [key][offset].
     if (size == 0) {
         return nullptr; /// Empty files are not cached.
@@ -1197,8 +1193,8 @@ size_t CloudFileCache::get_used_cache_size(CacheType cache_type) const {
     return get_used_cache_size_unlocked(cache_type, cache_lock);
 }
 
-size_t CloudFileCache::get_used_cache_size_unlocked(CacheType cache_type,
-                                                    std::lock_guard<doris::Mutex>& cache_lock) const {
+size_t CloudFileCache::get_used_cache_size_unlocked(
+        CacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_total_cache_size(cache_lock);
 }
 
@@ -1245,7 +1241,8 @@ CloudFileCache::FileSegmentCell::FileSegmentCell(FileSegmentSPtr file_segment, C
 }
 
 CloudFileCache::LRUQueue::Iterator CloudFileCache::LRUQueue::add(
-        const Key& key, size_t offset, size_t size, std::lock_guard<doris::Mutex>& /* cache_lock */) {
+        const Key& key, size_t offset, size_t size,
+        std::lock_guard<doris::Mutex>& /* cache_lock */) {
     cache_size += size;
     auto iter = queue.insert(queue.end(), FileKeyAndOffset(key, offset, size));
     map.insert(std::make_pair(std::make_pair(key, offset), iter));
@@ -1296,7 +1293,8 @@ std::string CloudFileCache::dump_structure(const Key& key) {
     return dump_structure_unlocked(key, cache_lock);
 }
 
-std::string CloudFileCache::dump_structure_unlocked(const Key& key, std::lock_guard<doris::Mutex>&) {
+std::string CloudFileCache::dump_structure_unlocked(const Key& key,
+                                                    std::lock_guard<doris::Mutex>&) {
     std::stringstream result;
     const auto& cells_by_offset = _files[key];
 
@@ -1426,6 +1424,46 @@ std::vector<std::tuple<size_t, size_t, CacheType, int64_t>> CloudFileCache::get_
         }
     }
     return segments_meta;
+}
+
+void CloudFileCache::set_read_only(bool read_only) {
+    s_read_only = read_only;
+    if (read_only) {
+        std::lock_guard lock(s_file_reader_cache_mtx);
+        s_file_reader_cache.clear();
+        s_file_name_to_reader.clear();
+    }
+}
+
+std::weak_ptr<FileReader> CloudFileCache::cache_file_reader(
+        const AccessKeyAndOffset& key, std::shared_ptr<FileReader> file_reader) {
+    std::weak_ptr<FileReader> wp;
+    if (!s_read_only) [[likely]] {
+        std::lock_guard lock(s_file_reader_cache_mtx);
+        if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
+            s_file_name_to_reader.erase(s_file_reader_cache.back().first);
+            s_file_reader_cache.pop_back();
+        }
+        wp = file_reader;
+        s_file_reader_cache.emplace_front(key, std::move(file_reader));
+        s_file_name_to_reader.insert(std::make_pair(key, s_file_reader_cache.begin()));
+    }
+    return wp;
+}
+
+void CloudFileCache::remove_file_reader(const AccessKeyAndOffset& key) {
+    if (auto iter = s_file_name_to_reader.find(key); iter != s_file_name_to_reader.end()) {
+        s_file_reader_cache.erase(iter->second);
+        s_file_name_to_reader.erase(key);
+    }
+}
+
+bool CloudFileCache::contains_file_reader(const AccessKeyAndOffset& key) {
+    return s_file_name_to_reader.find(key) != s_file_name_to_reader.end();
+}
+
+size_t CloudFileCache::file_reader_cache_size() {
+    return s_file_name_to_reader.size();
 }
 
 } // namespace io
