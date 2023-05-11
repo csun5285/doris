@@ -4,7 +4,7 @@ set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/test")
 # where to put generated libraries
 set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/test")
 
-set(TEST_LINK_LIBS ${TEST_LINK_LIBS} ResourceManager)
+set(TEST_LINK_LIBS ResourceManager ${TEST_LINK_LIBS})
 
 add_executable(sync_point_test
    sync_point_test.cpp
@@ -83,23 +83,23 @@ target_link_libraries(metric_test
 set(FDB_LINKER_FLAGS "-lfdb_c -L${THIRDPARTY_DIR}/lib")
 
 target_link_libraries(doris_txn_test
-    ${TEST_LINK_LIBS} 
     ${FDB_LINKER_FLAGS}
+    ${TEST_LINK_LIBS}
 )
 
 target_link_libraries(txn_kv_test
-    ${TEST_LINK_LIBS} 
     ${FDB_LINKER_FLAGS}
+    ${TEST_LINK_LIBS}
 )
 
 target_link_libraries(mem_txn_kv_test
-    ${TEST_LINK_LIBS}
     ${FDB_LINKER_FLAGS}
+    ${TEST_LINK_LIBS}
 )
 
 target_link_libraries(recycler_test
-    ${TEST_LINK_LIBS} 
     ${FDB_LINKER_FLAGS}
+    ${TEST_LINK_LIBS}
 )
 
 install(FILES

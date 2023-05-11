@@ -431,13 +431,15 @@ message(STATUS "DORIS_DEPENDENCIES is ${DORIS_DEPENDENCIES}")
 # Add all external dependencies. They should come after the project's libs.
 # static link gcc's lib
 set(DORIS_LINK_LIBS ${DORIS_LINK_LIBS}
-    ${DORIS_DEPENDENCIES}
+    ${WL_START_GROUP}
     SelectdbGen
     Common
     MetaService
     ResourceManager
     Recycler
     RateLimiter
+    ${WL_END_GROUP}
+    ${DORIS_DEPENDENCIES}
     -static-libstdc++
     -static-libgcc
     -lstdc++fs
