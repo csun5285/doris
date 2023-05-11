@@ -40,6 +40,7 @@ if [[ "${fdb_conf}" != "" ]]; then
   echo "${fdb_conf}" > fdb.cluster
 fi
 
+export LSAN_OPTIONS=suppressions=./lsan_suppression.conf
 for i in `ls *_test`; do
   if [ "${test}" != "" ]; then
     if [ "${test}" != "${i}" ]; then

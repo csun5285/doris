@@ -196,11 +196,11 @@ TEST(TxnKvTest, MoreThan100KTest) {
 
         std::string value = ipb.SerializeAsString();
         std::cout << "before put value.size=" << value.size() << std::endl;
-        selectdb::put(encoded_txn_index_key0, txn.release(), ipb, 100);
+        selectdb::put(encoded_txn_index_key0, txn.get(), ipb, 100);
 
         txn_kv->create_txn(&txn);
         InstanceInfoPB ipb1;
-        selectdb::get(encoded_txn_index_key0, txn.release(), &ipb1);
+        selectdb::get(encoded_txn_index_key0, txn.get(), &ipb1);
         std::string value1 = ipb1.SerializeAsString();
         std::cout << "after get value.size=" << value1.size() << std::endl;
         ASSERT_EQ(value.size(), value1.size());
@@ -209,26 +209,26 @@ TEST(TxnKvTest, MoreThan100KTest) {
 
         // test remove and get
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
 
         txn_kv->create_txn(&txn);
         InstanceInfoPB ipb3;
         // not found
-        ASSERT_EQ(selectdb::get(encoded_txn_index_key0, txn.release(), &ipb3), 1);
+        ASSERT_EQ(selectdb::get(encoded_txn_index_key0, txn.get(), &ipb3), 1);
 
         txn_kv->create_txn(&txn);
         std::cout << "before put default value.size=" << value.size() << std::endl;
-        selectdb::put(encoded_txn_index_key0, txn.release(), ipb);
+        selectdb::put(encoded_txn_index_key0, txn.get(), ipb);
         txn_kv->create_txn(&txn);
         InstanceInfoPB ipb5;
-        ASSERT_EQ(selectdb::get(encoded_txn_index_key0, txn.release(), &ipb5), 0);
+        ASSERT_EQ(selectdb::get(encoded_txn_index_key0, txn.get(), &ipb5), 0);
         std::string value2 = ipb5.SerializeAsString();
         std::cout << "after get default value.size=" << value2.size() << std::endl;
         ASSERT_EQ(value.size(), value2.size());
         ASSERT_EQ(ipb5.clusters(0).mysql_user_name(0), "test-more-than-100k-value0");
 
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
     }
 
     // performance
@@ -260,30 +260,30 @@ TEST(TxnKvTest, MoreThan100KTest) {
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             // 72150 / 100 = 722 pages
-            selectdb::put(encoded_txn_index_key0, txn.release(), ipb, 100);
+            selectdb::put(encoded_txn_index_key0, txn.get(), ipb, 100);
 
             txn_kv->create_txn(&txn);
             InstanceInfoPB ipb1;
-            selectdb::get(encoded_txn_index_key0, txn.release(), &ipb1);
+            selectdb::get(encoded_txn_index_key0, txn.get(), &ipb1);
         }
         std::cout << "multi page run " << run_times << " times put and get use="
                   << sw.elapsed_us() / 1000  << " ms" << std::endl;
 
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
         sw.reset();
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             // 72150 / 90*1000 = 1 pages
-            selectdb::put(encoded_txn_index_key0, txn.release(), ipb);
+            selectdb::put(encoded_txn_index_key0, txn.get(), ipb);
             txn_kv->create_txn(&txn);
             InstanceInfoPB ipb3;
-            selectdb::get(encoded_txn_index_key0, txn.release(), &ipb3);
+            selectdb::get(encoded_txn_index_key0, txn.get(), &ipb3);
         }
         std::cout << "one page run " << run_times <<  " times put and get use="
                   << sw.elapsed_us() / 1000 << " ms" << std::endl;
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
     }
 
     // performance put
@@ -315,23 +315,23 @@ TEST(TxnKvTest, MoreThan100KTest) {
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             // 72150 / 100 = 722 pages
-            selectdb::put(encoded_txn_index_key0, txn.release(), ipb, 100);
+            selectdb::put(encoded_txn_index_key0, txn.get(), ipb, 100);
         }
         std::cout << "multi page run " << run_times << " times put use="
                   << sw.elapsed_us() / 1000  << " ms" << std::endl;
 
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
         sw.reset();
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             // 72150 / 90*1000 = 1 pages
-            selectdb::put(encoded_txn_index_key0, txn.release(), ipb);
+            selectdb::put(encoded_txn_index_key0, txn.get(), ipb);
         }
         std::cout << "one page run " << run_times <<  " times put use="
                   << sw.elapsed_us() / 1000 << " ms" << std::endl;
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
     }
 
     // performance get
@@ -360,32 +360,32 @@ TEST(TxnKvTest, MoreThan100KTest) {
         std::unique_ptr<Transaction> txn;
         txn_kv->create_txn(&txn);
         // 72150 / 100 = 722 pages
-        selectdb::put(encoded_txn_index_key0, txn.release(), ipb, 100);
+        selectdb::put(encoded_txn_index_key0, txn.get(), ipb, 100);
         StopWatch sw;
         const int run_times = 100;
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             InstanceInfoPB ipb1;
-            selectdb::get(encoded_txn_index_key0, txn.release(), &ipb1);
+            selectdb::get(encoded_txn_index_key0, txn.get(), &ipb1);
         }
         std::cout << "multi page run " << run_times << " times get use="
                   << sw.elapsed_us() / 1000  << " ms" << std::endl;
 
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
         txn_kv->create_txn(&txn);
         // 72150 / 90*1000 = 1 pages
-        selectdb::put(encoded_txn_index_key0, txn.release(), ipb);
+        selectdb::put(encoded_txn_index_key0, txn.get(), ipb);
         sw.reset();
         for (int i=0; i < run_times; i++) {
             txn_kv->create_txn(&txn);
             InstanceInfoPB ipb3;
-            selectdb::get(encoded_txn_index_key0, txn.release(), &ipb3);
+            selectdb::get(encoded_txn_index_key0, txn.get(), &ipb3);
         }
         std::cout << "one page run " << run_times <<  " times get use="
                   << sw.elapsed_us() / 1000 << " ms" << std::endl;
         txn_kv->create_txn(&txn);
-        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.release()), 0);
+        ASSERT_EQ(selectdb::remove(encoded_txn_index_key0, txn.get()), 0);
     }
 
 }
