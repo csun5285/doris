@@ -19,6 +19,8 @@
 
 #include <gen_cpp/olap_file.pb.h>
 
+#include <chrono>
+
 #include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/utils.h"
 #include "common/status.h"
@@ -28,9 +30,7 @@
 #include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
-#include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/segment_v2/inverted_index_compaction.h"
-#include "olap/task/engine_checksum_task.h"
 #include "olap/tablet.h"
 #include "olap/task/engine_checksum_task.h"
 #include "util/time.h"
@@ -146,14 +146,13 @@ Status Compaction::do_compaction(int64_t permits) {
 }
 
 bool Compaction::should_vertical_compaction() {
+    using namespace std::chrono;
     // some conditions that not use vertical compaction
-    if (!config::enable_vertical_compaction) {
-        return false;
-    }
-    if (_tablet->enable_unique_key_merge_on_write()) {
-        return false;
-    }
-    return true;
+    return config::enable_vertical_compaction && !_tablet->enable_unique_key_merge_on_write() &&
+           (config::fuzzy_vertical_compaction
+                    ? (duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count() &
+                       1)
+                    : true);
 }
 
 int64_t Compaction::get_avg_segment_rows() {
@@ -343,9 +342,10 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     bool vertical_compaction = should_vertical_compaction();
     // construct output rowset writer
     RowsetWriterContext context;
-    std::for_each(_input_rowsets.cbegin(), _input_rowsets.cend(), [&](const RowsetSharedPtr& rowset) {
-        context.is_hot_data = context.is_hot_data || rowset->is_hot();
-    });
+    std::for_each(_input_rowsets.cbegin(), _input_rowsets.cend(),
+                  [&](const RowsetSharedPtr& rowset) {
+                      context.is_hot_data = context.is_hot_data || rowset->is_hot();
+                  });
     context.is_persistent = _tablet->is_persistent();
     context.ttl_seconds = _tablet->ttl_seconds();
     context.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &

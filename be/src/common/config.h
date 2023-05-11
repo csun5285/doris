@@ -273,6 +273,8 @@ CONF_Bool(enable_vectorized_compaction, "true");
 CONF_Bool(enable_vectorized_alter_table, "true");
 // whether enable vertical compaction
 CONF_mBool(enable_vertical_compaction, "false");
+// whether to randomly use vertical/horizontal compaction if `enable_vertical_compaction`
+CONF_mBool(fuzzy_vertical_compaction, "false");
 // whether enable ordered data compaction
 CONF_mBool(enable_ordered_data_compaction, "false");
 // In vertical compaction, column number for every group
