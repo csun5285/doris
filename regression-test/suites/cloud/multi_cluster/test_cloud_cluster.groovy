@@ -16,6 +16,7 @@
 // under the License.
 
 import groovy.json.JsonOutput
+import java.sql.*;
 
 suite("test_cloud_cluster") {
     def token = context.config.metaServiceToken
@@ -81,4 +82,122 @@ suite("test_cloud_cluster") {
             assertTrue(row[1].toString().toLowerCase() == "true")
         }
     }
+
+    sql "use @regression_cluster_name1"
+    sql "create database if not exists test_jdbc_url_db"
+    sql "use test_jdbc_url_db"
+    sql """
+        drop table if exists test_table
+    """
+    sql """
+        CREATE TABLE test_table (
+            class INT,
+            id INT,
+            score INT SUM
+        )
+        AGGREGATE KEY(class, id)
+        DISTRIBUTED BY HASH(class) BUCKETS 16
+    """
+
+    sql """
+        insert into test_table values (666888, 2333333, 10010);
+    """
+
+    String jdbcUrl = context.config.jdbcUrl
+    String[] urlElems = jdbcUrl.split("/");
+    String feEndPoint = urlElems[2]
+    String newUrl = "jdbc:mysql://" + feEndPoint + "/" + "test_jdbc_url_db@regression_cluster_name0";
+    println("newurl " + newUrl);
+
+    String user = "root";
+    String password = "";
+
+    try {
+        Connection myCon = DriverManager.getConnection(newUrl, user, password);
+        Statement stmt = myCon.createStatement();
+        ResultSet rs =  stmt.executeQuery("select * from test_table");
+        while (rs.next()) {
+            assertEquals(666888, rs.getInt(1));
+            assertEquals(2333333, rs.getInt(2));
+            assertEquals(10010, rs.getInt(3));
+        }
+    } catch (SQLException e) {
+        System.out.println(e);
+        e.printStackTrace()
+        assertTrue(false);
+    }
+
+    newUrl = "jdbc:mysql://" + feEndPoint + "/" + "@regression_cluster_name0";
+    println("newurl " + newUrl);
+
+    try {
+        Connection myCon = DriverManager.getConnection(newUrl, user, password);
+        Statement stmt = myCon.createStatement();
+        ResultSet rs =  stmt.executeQuery("show clusters");
+        while (rs.next()) {
+            println rs.getString(1)
+            if (rs.getString(1) == "regression_cluster_name0") {
+                assertEquals(rs.getString(2).toLowerCase(), "true");
+            }
+        }
+    } catch (SQLException e) {
+        System.out.println(e);
+        e.printStackTrace()
+        assertTrue(false);
+    }
+
+    newUrl = "jdbc:mysql://" + feEndPoint + "/" + "test_jdbc_url_db";
+    println("newurl " + newUrl);
+
+    try {
+        Connection myCon = DriverManager.getConnection(newUrl, user, password);
+        Statement stmt = myCon.createStatement();
+        ResultSet rs =  stmt.executeQuery("select * from test_table");
+        while (rs.next()) {
+            assertEquals(666888, rs.getInt(1));
+            assertEquals(2333333, rs.getInt(2));
+            assertEquals(10010, rs.getInt(3));
+        }
+    } catch (SQLException e) {
+        System.out.println(e);
+        e.printStackTrace()
+        assertTrue(false);
+    }
+
+    def executeMySQLCommand = { String command ->
+        try {
+            String line;
+            StringBuilder errMsg = new StringBuilder();
+            StringBuilder msg = new StringBuilder();
+            Process p = Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", command});
+
+            BufferedReader errInput = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+            while ((line = errInput.readLine()) != null) {
+                errMsg.append(line);
+            }
+            assert errMsg.length() == 0: "error occurred!" + errMsg.toString();
+            errInput.close();
+
+            BufferedReader input = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            while ((line = input.readLine()) != null) {
+                msg.append(line);
+            }
+            println "msg: " + msg.toString()
+            assert msg.toString().contains("666888"): "error occurred!" + errMsg.toString();
+            input.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    String jdbcUrlConfig = context.config.jdbcUrl;
+    String tempString = jdbcUrlConfig.substring(jdbcUrlConfig.indexOf("jdbc:mysql://") + 13);
+    String mysqlHost = tempString.substring(0, tempString.indexOf(":"));
+    String mysqlPort = tempString.substring(tempString.indexOf(":") + 1, tempString.indexOf("/"));
+    String cmd1 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -Dtest_jdbc_url_db@regression_cluster_name0 " + " -e \" select * from test_table \"";
+    executeMySQLCommand(cmd1);
+    String cmd2 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -D@regression_cluster_name0 " + " -e \" use test_jdbc_url_db; select * from test_table \"";
+    executeMySQLCommand(cmd2);
+    String cmd3 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -Dtest_jdbc_url_db" + " -e \" select * from test_table \"";
+    executeMySQLCommand(cmd3);
 }
