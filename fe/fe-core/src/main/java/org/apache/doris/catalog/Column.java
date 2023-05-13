@@ -431,7 +431,7 @@ public class Column implements Writable, GsonPostProcessable {
     }
 
     // SELECTDB_CODE_BEGIN
-    public int get_field_length_by_type(TPrimitiveType type, int stringLength) {
+    public int getFieldLengthByType(TPrimitiveType type, int stringLength) throws DdlException {
         switch (type) {
             case TINYINT:
             case BOOLEAN:
@@ -449,6 +449,8 @@ public class Column implements Writable, GsonPostProcessable {
             case DATEV2:
                 return 4;
             case DATETIME:
+                return 8;
+            case DATETIMEV2:
                 return 8;
             case FLOAT:
                 return 4;
@@ -476,11 +478,11 @@ public class Column implements Writable, GsonPostProcessable {
                 return 12; // use 12 bytes in olap engine.
             default:
                 LOG.warn("unknown field type. [type= << {} << ]", type);
-                return 0;
+                throw new DdlException("unknown field type. type: " + type);
         }
     }
 
-    public OlapFile.ColumnPB toPb(Set<String> bfColumns, List<Index> indexes) {
+    public OlapFile.ColumnPB toPb(Set<String> bfColumns, List<Index> indexes) throws DdlException {
         OlapFile.ColumnPB.Builder builder = OlapFile.ColumnPB.newBuilder();
 
         // when doing schema change, some modified column has a prefix in name.
@@ -503,7 +505,7 @@ public class Column implements Writable, GsonPostProcessable {
         builder.setPrecision(this.getPrecision());
         builder.setFrac(this.getScale());
 
-        int length = get_field_length_by_type(this.getDataType().toThrift(), this.getStrLen());
+        int length = getFieldLengthByType(this.getDataType().toThrift(), this.getStrLen());
 
         builder.setLength(length);
         builder.setIndexLength(length);
