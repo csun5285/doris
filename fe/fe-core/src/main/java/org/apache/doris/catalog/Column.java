@@ -466,6 +466,8 @@ public class Column implements Writable, GsonPostProcessable {
                 return stringLength + 2; // sizeof(OLAP_VARCHAR_MAX_LENGTH)
             case STRING:
                 return stringLength + 4; // sizeof(OLAP_STRING_MAX_LENGTH)
+            case JSONB:
+                return stringLength + 4; // sizeof(OLAP_JSONB_MAX_LENGTH)
             case ARRAY:
                 return 65535; // OLAP_ARRAY_MAX_LENGTH
             case DECIMAL32:
