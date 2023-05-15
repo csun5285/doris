@@ -110,7 +110,10 @@ void FileCacheSegmentS3Downloader::download_segments(DownloadTask task) {
                                 return; // not finish
                             }
                             if (handle->GetStatus() == Aws::Transfer::TransferStatus::COMPLETED) {
-                                file_segment->finalize_write();
+                                Status st = file_segment->finalize_write(true);
+                                if (!st) {
+                                    LOG(WARNING) << "s3 download error " << st;
+                                }
                                 file_cache_downloader_counter << file_segment->range().size();
                             } else {
                                 LOG(WARNING) << "s3 download error " << handle->GetStatus();
@@ -121,7 +124,7 @@ void FileCacheSegmentS3Downloader::download_segments(DownloadTask task) {
                                 _inflight_tasks.erase(meta.tablet_id());
                             }
                         };
-                std::string download_file = file_segment->get_path_in_local_cache();
+                std::string download_file = file_segment->get_path_in_local_cache(true);
                 auto createFileFn = [=]() {
                     return Aws::New<Aws::FStream>(meta.file_name().c_str(), download_file.c_str(),
                                                   std::ios_base::out | std::ios_base::in |

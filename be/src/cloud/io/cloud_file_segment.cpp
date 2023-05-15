@@ -222,8 +222,14 @@ FileSegment::~FileSegment() {
     }
 }
 
-Status FileSegment::finalize_write() {
+Status FileSegment::finalize_write(bool need_to_get_file_size) {
+    size_t downloaded_size = 0;
+    if (need_to_get_file_size) {
+        std::string file_path = get_path_in_local_cache(true);
+        RETURN_IF_ERROR(global_local_filesystem()->file_size(file_path, &downloaded_size));
+    }
     std::lock_guard segment_lock(_mutex);
+    _downloaded_size = downloaded_size;
     if (_downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
@@ -265,15 +271,15 @@ Status FileSegment::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_loc
 
     if (_cache_writer) {
         RETURN_IF_ERROR(_cache_writer->close(false));
-        std::error_code ec;
-        std::filesystem::rename(_cache_writer->path(), get_path_in_local_cache(), ec);
-        if (ec) {
-            LOG(ERROR) << fmt::format("failed to rename {} to {} : {}",
-                                      _cache_writer->path().string(), get_path_in_local_cache(),
-                                      ec.message());
-            status = Status::IOError(ec.message());
-        }
         _cache_writer.reset();
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(get_path_in_local_cache(true), get_path_in_local_cache(), ec);
+    if (ec) {
+        LOG(ERROR) << fmt::format("failed to rename {} to {} : {}", get_path_in_local_cache(true),
+                                  get_path_in_local_cache(), ec.message());
+        status = Status::IOError(ec.message());
     }
 
     if (status) [[likely]] {

@@ -86,7 +86,7 @@ public:
     Status read_at(Slice buffer, size_t offset);
 
     // finish write, release the file writer
-    Status finalize_write();
+    Status finalize_write(bool need_to_get_file_size = false);
 
     // set downloader if state == EMPTY
     uint64_t get_or_set_downloader();
