@@ -229,7 +229,7 @@ Status FileSegment::finalize_write(bool need_to_get_file_size) {
         RETURN_IF_ERROR(global_local_filesystem()->file_size(file_path, &downloaded_size));
     }
     std::lock_guard segment_lock(_mutex);
-    _downloaded_size = downloaded_size;
+    _downloaded_size = need_to_get_file_size ? downloaded_size : _downloaded_size;
     if (_downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
