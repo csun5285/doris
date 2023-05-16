@@ -141,7 +141,7 @@ echo "Get params:
 echo "Build Backend UT"
 
 if [[ "_${DENABLE_CLANG_COVERAGE}" == "_ON" ]]; then
-    sed -i "s/    DORIS_TOOLCHAIN=gcc/    DORIS_TOOLCHAIN=clang/g" env.sh
+    sed -i "s/DORIS_TOOLCHAIN=gcc/DORIS_TOOLCHAIN=clang/g" env.sh
     echo "export DORIS_TOOLCHAIN=clang" >>custom_env.sh
 fi
 
@@ -302,11 +302,18 @@ if [ "${CLOUD_MODE}" == "ON" ]; then
 else
     test=${DORIS_TEST_BINARY_DIR}/doris_be_test
 fi
+
 profraw=${DORIS_TEST_BINARY_DIR}/doris_be_test.profraw
+profdata=${DORIS_TEST_BINARY_DIR}/doris_be_test.profdata
+
 file_name="${test##*/}"
 if [[ -f "${test}" ]]; then
     if [[ "_${DENABLE_CLANG_COVERAGE}" == "_ON" ]];then
         LLVM_PROFILE_FILE="${profraw}" "${test}" --gtest_output="xml:${GTEST_OUTPUT_DIR}/${file_name}.xml"  --gtest_print_time=true "${FILTER}"
+        llvm-profdata merge -o ${profdata} ${profraw}
+        llvm-cov show -output-dir=${DORIS_TEST_BINARY_DIR}/report -format=html \
+            -instr-profile=${profdata} \
+            -object=${test}
     else
         "${test}" --gtest_output="xml:${GTEST_OUTPUT_DIR}/${file_name}.xml"  --gtest_print_time=true "${FILTER}"
     fi

@@ -44,6 +44,7 @@ Usage: $0 <options>
   Optional options:
      --clean            clean and build ut
      --run              build and run all ut
+     --coverage         coverage after run ut
      --run --filter=xx  build and run specified ut
      -j                 build parallel
      -h                 print this help message
@@ -63,7 +64,7 @@ Usage: $0 <options>
   exit 1
 }
 
-OPTS=$(getopt  -n $0 -o vhj:f: -l run,clean,filter:,fdb: -- "$@")
+OPTS=$(getopt  -n $0 -o vhj:f: -l run,clean,filter:,fdb:,coverage -- "$@")
 if [ "$?" != "0" ]; then
   usage
 fi
@@ -79,12 +80,14 @@ RUN=0
 BUILD_BENCHMARK_TOOL=OFF
 FILTER=""
 FDB=""
+ENABLE_CLANG_COVERAGE=OFF
 echo "===================== filter: ${FILTER}"
 if [ $# != 1 ] ; then
     while true; do 
         case "$1" in
             --clean) CLEAN=1 ; shift ;;
             --run) RUN=1 ; shift ;;
+            --coverage) ENABLE_CLANG_COVERAGE="ON"; shift ;;
             --fdb) FDB="$2"; shift 2;;
             -f | --filter) FILTER="$2"; shift 2;;
             -j) PARALLEL=$2; shift 2 ;;
@@ -104,6 +107,11 @@ echo "Get params:
     CLEAN               -- $CLEAN
 "
 echo "Build SelectDB Cloud UT"
+
+if [[ "_${ENABLE_CLANG_COVERAGE}" == "_ON" ]]; then
+    sed -i "s/DORIS_TOOLCHAIN=gcc/DORIS_TOOLCHAIN=clang/g" env.sh
+    echo "export DORIS_TOOLCHAIN=clang" >>custom_env.sh
+fi
 
 . ${DORIS_HOME}/env.sh
 
@@ -139,6 +147,7 @@ ${CMAKE_CMD} -G "${GENERATOR}" \
     -DUSE_MEM_TRACKER=ON \
     -DUSE_JEMALLOC=OFF \
     -DSTRICT_MEMORY_USE=OFF \
+    -DENABLE_CLANG_COVERAGE="${ENABLE_CLANG_COVERAGE}" \
     ${CMAKE_USE_CCACHE} ${DORIS_HOME}/cloud/
 ${BUILD_SYSTEM} -j ${PARALLEL}
 ${BUILD_SYSTEM} install
@@ -159,4 +168,8 @@ cd test
 # FILTER: binary_name:gtest_filter
 # FILTER: meta_service_test:DetachSchemaKVTest.*
 # ./run_all_tests.sh --test "\"$(echo "${FILTER}" | awk -F: '{print $1}')\"" --filter "\"$(echo "${FILTER}" | awk -F: '{print $2}')\"" --fdb "\"${FDB}\""
-./run_all_tests.sh --test "$(echo "${FILTER}" | awk -F: '{print $1}')" --filter "$(echo "${FILTER}" | awk -F: '{print $2}')" --fdb "${FDB}"
+if [[ "_${ENABLE_CLANG_COVERAGE}" == "_ON" ]]; then
+    bash -x ./run_all_tests.sh --coverage --test "$(echo "${FILTER}" | awk -F: '{print $1}')" --filter "$(echo "${FILTER}" | awk -F: '{print $2}')" --fdb "${FDB}"
+else
+    bash ./run_all_tests.sh --test "$(echo "${FILTER}" | awk -F: '{print $1}')" --filter "$(echo "${FILTER}" | awk -F: '{print $2}')" --fdb "${FDB}"
+fi
