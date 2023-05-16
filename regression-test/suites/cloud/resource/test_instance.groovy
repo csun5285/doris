@@ -17,7 +17,7 @@ suite("cloud_instance_test", "cloud_instance") {
                 "endpoint": "test-endpoint",
                 "region": "test-region",
 		        "provider" : "BOS",
-                "external-endpoint" : "endpoint"
+                "external_endpoint" : "endpoint"
             }
         }'
      */
@@ -26,7 +26,7 @@ suite("cloud_instance_test", "cloud_instance") {
     def s3 = [ak: "test-ak1",
               sk : "test-sk1"
               ,bucket : "test-bucket", prefix: "test-prefix", endpoint: "test-endpoint"
-              ,region: "test-region", provider : "BOS", external-endpoint: "test-external-endpoint"]
+              ,region: "test-region", provider : "BOS", 'external_endpoint': "test-external-endpoint"]
     def map = [instance_id: "${instance_id}", name: "${name}", user_id: "${user_id}", obj_info: s3]
     def js = jsonOutput.toJson(map)
 
