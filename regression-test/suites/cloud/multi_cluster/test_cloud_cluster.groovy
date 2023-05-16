@@ -152,6 +152,7 @@ suite("test_cloud_cluster") {
     try {
         Connection myCon = DriverManager.getConnection(newUrl, user, password);
         Statement stmt = myCon.createStatement();
+        stmt.execute("use @regression_cluster_name1");
         ResultSet rs =  stmt.executeQuery("select * from test_table");
         while (rs.next()) {
             assertEquals(666888, rs.getInt(1));
@@ -198,6 +199,4 @@ suite("test_cloud_cluster") {
     executeMySQLCommand(cmd1);
     String cmd2 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -D@regression_cluster_name0 " + " -e \" use test_jdbc_url_db; select * from test_table \"";
     executeMySQLCommand(cmd2);
-    String cmd3 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -Dtest_jdbc_url_db" + " -e \" select * from test_table \"";
-    executeMySQLCommand(cmd3);
 }

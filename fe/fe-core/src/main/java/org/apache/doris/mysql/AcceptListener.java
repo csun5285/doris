@@ -81,7 +81,8 @@ public class AcceptListener implements ChannelListener<AcceptingChannel<StreamCo
                     if (Config.isCloudMode()) {
                         String defaultCloudCluster = Env.getCurrentEnv().getAuth()
                                 .getDefaultCloudCluster(context.getQualifiedUser());
-                        if (!Strings.isNullOrEmpty(defaultCloudCluster)) {
+                        if (!Strings.isNullOrEmpty(defaultCloudCluster)
+                                && Strings.isNullOrEmpty(context.getCloudCluster())) {
                             context.setCloudCluster(defaultCloudCluster);
                         }
                     }
