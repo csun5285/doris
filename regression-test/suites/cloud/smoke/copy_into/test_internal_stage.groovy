@@ -4,7 +4,7 @@ suite("test_internal_stage_smoke", "smoke") {
     def tableName = "customer_internal_stage"
     def fileName = "internal_customer.csv"
     def filePath = "${context.config.dataPath}/copy_into/" + fileName
-    def remoteFileName = fileName + "test_internal_stage_smoke"
+    def remoteFileName = fileName + "smoke_test_internal_stage"
 
     StringBuilder strBuilder = new StringBuilder()
     strBuilder.append("""curl -u """ + context.config.feCloudHttpUser + ":" + context.config.feCloudHttpPassword)

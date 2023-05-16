@@ -122,7 +122,7 @@ suite("test_internal_stage") {
 
     try {
         def fileName = "internal_customer.csv"
-        def remoteFileName = fileName + "test_internal_stage_stage_tvf"
+        def remoteFileName = fileName + "stage_tvf_test_internal_stage"
         def filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
         uploadFile(remoteFileName, filePath)
 
@@ -149,7 +149,7 @@ suite("test_internal_stage") {
         // line 8: add two | in the end
         fileName = "internal_customer_partial_error.csv"
         filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
-        remoteFileName = fileName + "test_internal_stage_stage_tvf"
+        remoteFileName = fileName + "stage_tvf_test_internal_stage"
         uploadFile(remoteFileName, filePath)
 
         def sqls = [
