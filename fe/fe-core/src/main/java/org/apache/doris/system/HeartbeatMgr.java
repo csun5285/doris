@@ -152,7 +152,6 @@ public class HeartbeatMgr extends MasterDaemon {
                 }
             } catch (InterruptedException | ExecutionException e) {
                 LOG.warn("got exception when doing heartbeat", e);
-                continue;
             }
         } // end for all results
 
@@ -301,7 +300,7 @@ public class HeartbeatMgr extends MasterDaemon {
 
         @Override
         public HeartbeatResponse call() {
-            if (fe.getHost().equals(Env.getCurrentEnv().getSelfNode().first)) {
+            if (fe.getHost().equals(Env.getCurrentEnv().getSelfNode().getHost())) {
                 // heartbeat to self
                 if (Env.getCurrentEnv().isReady()) {
                     return new FrontendHbResponse(fe.getNodeName(), Config.query_port, Config.rpc_port,

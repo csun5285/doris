@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+#include "gen_cpp/Types_types.h"
+
 namespace doris {
 
 class CIDR;
@@ -30,12 +32,15 @@ class BackendOptions {
 public:
     static bool init();
     static std::string get_localhost();
+    static TBackend get_local_backend();
+    static void set_localhost(const std::string& host);
 
 private:
     static bool analyze_priority_cidrs();
     static bool is_in_prior_network(const std::string& ip);
 
     static std::string _s_localhost;
+    static TBackend _backend;
     static std::vector<CIDR> _s_priority_cidrs;
 
     DISALLOW_COPY_AND_ASSIGN(BackendOptions);

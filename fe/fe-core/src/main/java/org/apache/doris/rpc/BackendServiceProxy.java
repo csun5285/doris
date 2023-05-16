@@ -18,6 +18,7 @@
 package org.apache.doris.rpc;
 
 import org.apache.doris.common.Config;
+import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentStartRequest;
@@ -35,6 +36,7 @@ import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TCompactProtocol;
 
+import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -46,7 +48,7 @@ public class BackendServiceProxy {
     // use exclusive lock to make sure only one thread can add or remove client from serviceMap.
     // use concurrent map to allow access serviceMap in multi thread.
     private ReentrantLock lock = new ReentrantLock();
-    private final Map<TNetworkAddress, BackendServiceClient> serviceMap;
+    private final Map<TNetworkAddress, BackendServiceClientExtIp> serviceMap;
 
     public BackendServiceProxy() {
         serviceMap = Maps.newConcurrentMap();
@@ -72,36 +74,52 @@ public class BackendServiceProxy {
         return Holder.get();
     }
 
+    private class BackendServiceClientExtIp {
+        private String realIp;
+        private BackendServiceClient client;
+
+        public BackendServiceClientExtIp(String realIp, BackendServiceClient client) {
+            this.realIp = realIp;
+            this.client = client;
+        }
+
+    }
+
     public void removeProxy(TNetworkAddress address) {
         LOG.warn("begin to remove proxy: {}", address);
-        BackendServiceClient service;
+        BackendServiceClientExtIp serviceClientExtIp;
         lock.lock();
         try {
-            service = serviceMap.remove(address);
+            serviceClientExtIp = serviceMap.remove(address);
         } finally {
             lock.unlock();
         }
 
-        if (service != null) {
-            service.shutdown();
+        if (serviceClientExtIp != null) {
+            serviceClientExtIp.client.shutdown();
         }
     }
 
-    private BackendServiceClient getProxy(TNetworkAddress address) {
-        BackendServiceClient service = serviceMap.get(address);
-        if (service != null) {
-            return service;
+    private BackendServiceClient getProxy(TNetworkAddress address) throws UnknownHostException {
+        String realIp = NetUtils.getIpByHost(address.getHostname());
+        BackendServiceClientExtIp serviceClientExtIp = serviceMap.get(address);
+        if (serviceClientExtIp != null && serviceClientExtIp.realIp.equals(realIp)) {
+            return serviceClientExtIp.client;
         }
-
         // not exist, create one and return.
         lock.lock();
         try {
-            service = serviceMap.get(address);
-            if (service == null) {
-                service = new BackendServiceClient(address);
-                serviceMap.put(address, service);
+            serviceClientExtIp = serviceMap.get(address);
+            if (serviceClientExtIp != null && !serviceClientExtIp.realIp.equals(realIp)) {
+                LOG.warn("Cached ip changed ,before ip: {}, curIp: {}", serviceClientExtIp.realIp, realIp);
+                serviceMap.remove(address);
             }
-            return service;
+            serviceClientExtIp = serviceMap.get(address);
+            if (serviceClientExtIp == null) {
+                BackendServiceClient client = new BackendServiceClient(address);
+                serviceMap.put(address, new BackendServiceClientExtIp(realIp, client));
+            }
+            return serviceMap.get(address).client;
         } finally {
             lock.unlock();
         }

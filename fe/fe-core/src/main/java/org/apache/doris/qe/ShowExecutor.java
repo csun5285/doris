@@ -1839,10 +1839,6 @@ public class ShowExecutor {
         List<List<String>> infos = Lists.newArrayList();
         FrontendsProcNode.getFrontendsInfo(Env.getCurrentEnv(), infos);
 
-        for (List<String> row : infos) {
-            row.remove(FrontendsProcNode.HOSTNAME_INDEX);
-        }
-
         resultSet = new ShowResultSet(showStmt.getMetaData(), infos);
     }
 

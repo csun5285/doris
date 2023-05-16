@@ -119,7 +119,7 @@ public class RestBaseController extends BaseController {
         if (env.isMaster()) {
             return null;
         }
-        return redirectTo(request, new TNetworkAddress(env.getMasterIp(), env.getMasterHttpPort()));
+        return redirectTo(request, new TNetworkAddress(env.getMasterHost(), env.getMasterHttpPort()));
     }
 
     public void getFile(HttpServletRequest request, HttpServletResponse response, Object obj, String fileName)

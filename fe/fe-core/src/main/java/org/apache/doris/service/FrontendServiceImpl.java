@@ -699,20 +699,17 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
     @Override
     public TMasterOpResult forward(TMasterOpRequest params) throws TException {
-        TNetworkAddress clientAddr = getClientAddr();
-        if (clientAddr != null) {
-            Frontend fe = Env.getCurrentEnv().getFeByHost(clientAddr.getHostname());
-            if (fe == null) {
-                LOG.warn("reject request from invalid host. client: {}", clientAddr);
-                throw new TException("request from invalid host was rejected.");
-            }
+        Frontend fe = Env.getCurrentEnv().checkFeExist(params.getClientNodeHost(), params.getClientNodePort());
+        if (fe == null) {
+            LOG.warn("reject request from invalid host. client: {}", params.getClientNodeHost());
+            throw new TException("request from invalid host was rejected.");
         }
 
         // add this log so that we can track this stmt
-        LOG.debug("receive forwarded stmt {} from FE: {}", params.getStmtId(), clientAddr.getHostname());
+        LOG.debug("receive forwarded stmt {} from FE: {}", params.getStmtId(), params.getClientNodeHost());
         ConnectContext context = new ConnectContext();
         // Set current connected FE to the client address, so that we can know where this request come from.
-        context.setCurrentConnectedFEIp(clientAddr.getHostname());
+        context.setCurrentConnectedFEIp(params.getClientNodeHost());
         if (Config.isCloudMode() && !Strings.isNullOrEmpty(params.getCloudCluster())) {
             context.setCloudCluster(params.getCloudCluster());
         }

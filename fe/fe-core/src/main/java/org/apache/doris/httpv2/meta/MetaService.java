@@ -58,8 +58,17 @@ public class MetaService extends RestBaseController {
     private File imageDir = MetaHelper.getMasterImageDir();
 
     private boolean isFromValidFe(HttpServletRequest request) {
-        String clientHost = request.getRemoteHost();
-        Frontend fe = Env.getCurrentEnv().getFeByHost(clientHost);
+        String clientHost = request.getHeader(Env.CLIENT_NODE_HOST_KEY);
+        String clientPortStr = request.getHeader(Env.CLIENT_NODE_PORT_KEY);
+        Integer clientPort;
+        try {
+            clientPort = Integer.valueOf(clientPortStr);
+        } catch (Exception e) {
+            LOG.warn("get clientPort error. clientPortStr: {}", clientPortStr, e.getMessage());
+            return false;
+        }
+
+        Frontend fe = Env.getCurrentEnv().checkFeExist(clientHost, clientPort);
         if (fe == null) {
             LOG.warn("request is not from valid FE. client: {}", clientHost);
             return false;

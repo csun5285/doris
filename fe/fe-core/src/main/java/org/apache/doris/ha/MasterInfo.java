@@ -26,28 +26,28 @@ import java.io.IOException;
 
 public class MasterInfo implements Writable {
 
-    private String ip;
+    private String host;
     private int httpPort;
     private int rpcPort;
 
     public MasterInfo() {
-        this.ip = "";
+        this.host = "";
         this.httpPort = 0;
         this.rpcPort = 0;
     }
 
-    public MasterInfo(String ip, int httpPort, int rpcPort) {
-        this.ip = ip;
+    public MasterInfo(String host, int httpPort, int rpcPort) {
+        this.host = host;
         this.httpPort = httpPort;
         this.rpcPort = rpcPort;
     }
 
-    public String getIp() {
-        return this.ip;
+    public String getHost() {
+        return this.host;
     }
 
-    public void setIp(String ip) {
-        this.ip = ip;
+    public void setHost(String host) {
+        this.host = host;
     }
 
     public int getHttpPort() {
@@ -69,7 +69,7 @@ public class MasterInfo implements Writable {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append("MasterInfo: ip=").append(ip)
+        sb.append("MasterInfo: ip=").append(host)
                 .append(" httpPort=").append(httpPort)
                 .append(" rpcPort=").append(rpcPort);
         return sb.toString();
@@ -77,13 +77,13 @@ public class MasterInfo implements Writable {
 
     @Override
     public void write(DataOutput out) throws IOException {
-        Text.writeString(out, ip);
+        Text.writeString(out, host);
         out.writeInt(httpPort);
         out.writeInt(rpcPort);
     }
 
     public void readFields(DataInput in) throws IOException {
-        ip = Text.readString(in);
+        host = Text.readString(in);
         httpPort = in.readInt();
         rpcPort = in.readInt();
     }

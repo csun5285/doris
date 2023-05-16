@@ -398,7 +398,7 @@ public class CloudClusterChecker extends MasterDaemon {
         List<SelectdbCloud.NodeInfoPB> expectedFes = cpb.getNodesList();
         diffNodes(toAdd, toDel, () -> {
             Map<String, Frontend> currentMap = new HashMap<>();
-            String selfNode = Env.getCurrentEnv().getSelfNode().toString();
+            String selfNode = Env.getCurrentEnv().getSelfNode().toHostPortString();
             for (Frontend fe : currentFes) {
                 String endpoint = fe.getHost() + ":" + fe.getEditLogPort();
                 if (selfNode.equals(endpoint)) {
@@ -409,7 +409,7 @@ public class CloudClusterChecker extends MasterDaemon {
             return currentMap;
         }, () -> {
             Map<String, Frontend> nodeMap = new HashMap<>();
-            String selfNode = Env.getCurrentEnv().getSelfNode().toString();
+            String selfNode = Env.getCurrentEnv().getSelfNode().toHostPortString();
             for (SelectdbCloud.NodeInfoPB node : expectedFes) {
                 String endpoint = node.getIp() + ":" + node.getEditLogPort();
                 if (selfNode.equals(endpoint)) {

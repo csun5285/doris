@@ -44,6 +44,10 @@ private:
 // is returned, addresses may still be of zero length.
 Status hostname_to_ip_addrs(const std::string& name, std::vector<std::string>* addresses);
 
+bool is_valid_ip(const std::string& ip);
+
+Status hostname_to_ip(const std::string& host, std::string& ip);
+
 // Finds the first non-localhost IP address in the given list. Returns
 // true if such an address was found, false otherwise.
 bool find_first_non_localhost(const std::vector<std::string>& addresses, std::string* addr);
@@ -58,5 +62,7 @@ Status get_hosts_v4(std::vector<InetAddress>* hosts);
 TNetworkAddress make_network_address(const std::string& hostname, int port);
 
 Status get_inet_interfaces(std::vector<std::string>* interfaces, bool include_ipv6 = false);
+
+std::string get_host_port(const std::string& host, int port);
 
 } // namespace doris

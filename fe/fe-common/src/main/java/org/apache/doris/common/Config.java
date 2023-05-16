@@ -2047,6 +2047,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_storage_policy = false;
 
+    @ConfField(mutable = false, masterOnly = true)
+    public static boolean enable_fqdn_mode = false;
+
     @ConfField(mutable = true, masterOnly = true)
     public static int cloud_copy_list_objects_version = 2;
 
@@ -2149,5 +2152,12 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true)
     public static int pre_heating_time_limit_sec = 300;
+
+    /**
+     * BDBJE file logging level
+     * OFF, SEVERE, WARNING, INFO, CONFIG, FINE, FINER, FINEST, ALL
+     */
+    @ConfField
+    public static String bdbje_file_logging_level = "ALL";
 }
 

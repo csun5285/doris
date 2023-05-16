@@ -116,8 +116,10 @@ import org.apache.doris.common.io.CountingDataOutputStream;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.util.Daemon;
 import org.apache.doris.common.util.DynamicPartitionUtil;
+import org.apache.doris.common.util.HttpURLUtil;
 import org.apache.doris.common.util.MasterDaemon;
 import org.apache.doris.common.util.MetaLockUtils;
+import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.common.util.QueryableReentrantLock;
@@ -225,6 +227,7 @@ import org.apache.doris.system.Backend;
 import org.apache.doris.system.Frontend;
 import org.apache.doris.system.HeartbeatMgr;
 import org.apache.doris.system.SystemInfoService;
+import org.apache.doris.system.SystemInfoService.HostInfo;
 import org.apache.doris.task.AgentBatchTask;
 import org.apache.doris.task.AgentTaskExecutor;
 import org.apache.doris.task.CompactionTask;
@@ -271,7 +274,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -280,6 +282,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -301,6 +304,8 @@ public class Env {
     private static final int REPLAY_INTERVAL_MS = 1;
     private static final String BDB_DIR = "/bdb";
     public static final String IMAGE_DIR = "/image";
+    public static final String CLIENT_NODE_HOST_KEY = "CLIENT_NODE_HOST";
+    public static final String CLIENT_NODE_PORT_KEY = "CLIENT_NODE_PORT";
 
     private String metaDir;
     private String bdbDir;
@@ -362,9 +367,7 @@ public class Env {
     private FrontendNodeType feType;
     // replica and observer use this value to decide provide read service or not
     private long synchronizedTimeMs;
-    private int masterRpcPort;
-    private int masterHttpPort;
-    private String masterIp;
+    MasterInfo masterInfo;
 
     private MetaIdGenerator idGenerator = new MetaIdGenerator(NEXT_ID_INIT_VALUE);
 
@@ -377,8 +380,8 @@ public class Env {
     private static Env CHECKPOINT = null;
     private static long checkpointThreadId = -1;
     private Checkpoint checkpointer;
-    private List<Pair<String, Integer>> helperNodes = Lists.newArrayList();
-    private Pair<String, Integer> selfNode = null;
+    private List<HostInfo> helperNodes = Lists.newArrayList();
+    private HostInfo selfNode = null;
 
     // node name -> Frontend
     private ConcurrentHashMap<String, Frontend> frontends;
@@ -594,9 +597,7 @@ public class Env {
         this.removedFrontends = new ConcurrentLinkedQueue<>();
 
         this.journalObservable = new JournalObservable();
-        this.masterRpcPort = 0;
-        this.masterHttpPort = 0;
-        this.masterIp = "";
+        this.masterInfo = new MasterInfo();
 
         this.systemInfo = new SystemInfoService();
         this.heartbeatMgr = new HeartbeatMgr(systemInfo, !isCheckpointCatalog);
@@ -945,11 +946,11 @@ public class Env {
         // get helperNodes from ms
         SelectdbCloud.GetClusterResponse response =
                 Env.getCurrentSystemInfo()
-                .getCloudCluster(Config.cloud_sql_server_cluster_name, Config.cloud_sql_server_cluster_id, "");
+                        .getCloudCluster(Config.cloud_sql_server_cluster_name, Config.cloud_sql_server_cluster_id, "");
         if (!response.hasStatus() || !response.getStatus().hasCode()
                 || response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
             LOG.warn("failed to get cloud cluster due to incomplete response, "
-                    + "cloud_unique_id={}, clusterId={}, response={}",
+                            + "cloud_unique_id={}, clusterId={}, response={}",
                     Config.cloud_unique_id, Config.cloud_sql_server_cluster_id, response);
             return null;
         }
@@ -957,7 +958,7 @@ public class Env {
         // Note: get_cluster interface cluster(option -> repeated), so it has at least one cluster.
         if (response.getClusterCount() == 0) {
             LOG.warn("meta service error , return cluster zero, plz check it, "
-                    + "cloud_unique_id={}, clusterId={}, response={}",
+                            + "cloud_unique_id={}, clusterId={}, response={}",
                     Config.cloud_unique_id, Config.cloud_sql_server_cluster_id, response);
             return null;
         }
@@ -967,14 +968,14 @@ public class Env {
         helperNodes.clear();
         helperNodes.addAll(allNodes.stream()
                 .filter(nodeInfoPB -> nodeInfoPB.getNodeType() == NodeInfoPB.NodeType.FE_MASTER)
-                .map(nodeInfoPB -> Pair.of(nodeInfoPB.getIp(), nodeInfoPB.getEditLogPort()))
+                .map(nodeInfoPB -> new HostInfo(nodeInfoPB.getIp(), nodeInfoPB.getEditLogPort()))
                 .collect(Collectors.toList()));
         // check only have one master node.
         Preconditions.checkState(helperNodes.size() == 1);
 
         Optional<NodeInfoPB> local = allNodes.stream().filter(n -> {
             String s = n.getIp() + ":" + n.getEditLogPort();
-            return s.equals(selfNode.toString());
+            return s.equals(selfNode.toHostPortString());
         }).findAny();
         return local.orElse(null);
     }
@@ -1004,7 +1005,7 @@ public class Env {
 
             LOG.info("current fe's role is {}",
                     type == NodeInfoPB.NodeType.FE_MASTER ? "MASTER" :
-                    type == NodeInfoPB.NodeType.FE_OBSERVER ? "OBSERVER" : "UNKNOWN");
+                            type == NodeInfoPB.NodeType.FE_OBSERVER ? "OBSERVER" : "UNKNOWN");
             if (type == NodeInfoPB.NodeType.UNKNOWN) {
                 LOG.warn("type current not support, please check it");
                 System.exit(-1);
@@ -1048,7 +1049,7 @@ public class Env {
                 if (Config.isCloudMode() && type == NodeInfoPB.NodeType.FE_MASTER) {
                     nodeName = feNodeNameFromMeta;
                 } else {
-                    nodeName = genFeNodeName(selfNode.first, selfNode.second, false /* new style */);
+                    nodeName = genFeNodeName(selfNode.getHost(), selfNode.getPort(), false /* new style */);
                 }
                 storage.writeFrontendRoleAndNodeName(role, nodeName);
                 LOG.info("very first time to start this node. role: {}, node name: {}", role.name(), nodeName);
@@ -1068,7 +1069,7 @@ public class Env {
                     if (Config.isCloudMode() && type == NodeInfoPB.NodeType.FE_MASTER) {
                         nodeName = feNodeNameFromMeta;
                     } else {
-                        nodeName = genFeNodeName(selfNode.first, selfNode.second, true /* old style */);
+                        nodeName = genFeNodeName(selfNode.getHost(), selfNode.getPort(), true /* old style */);
                     }
                     storage.writeFrontendRoleAndNodeName(role, nodeName);
                     LOG.info("forward compatibility. role: {}, node name: {}", role.name(), nodeName);
@@ -1079,10 +1080,10 @@ public class Env {
                     // But is metadata_failure_recovery is true,
                     // we will not check it because this may be a FE migration.
                     String[] split = nodeName.split("_");
-                    if (Config.metadata_failure_recovery.equals("false") && !selfNode.first.equalsIgnoreCase(
+                    if (Config.metadata_failure_recovery.equals("false") && !selfNode.getHost().equalsIgnoreCase(
                             split[0])) {
                         throw new IOException(
-                                "the self host " + selfNode.first + " does not equal to the host in ROLE" + " file "
+                                "the self host " + selfNode.getHost() + " does not equal to the host in ROLE" + " file "
                                         + split[0] + ". You need to set 'priority_networks' config"
                                         + " in fe.conf to match the host " + split[0]);
                     }
@@ -1099,7 +1100,7 @@ public class Env {
                 storage.writeClusterIdAndToken();
 
                 isFirstTimeStartUp = true;
-                Frontend self = new Frontend(role, nodeName, selfNode.first, selfNode.second);
+                Frontend self = new Frontend(role, nodeName, selfNode.getHost(), selfNode.getPort());
                 // We don't need to check if frontends already contains self.
                 // frontends must be empty cause no image is loaded and no journal is replayed yet.
                 // And this frontend will be persisted later after opening bdbje environment.
@@ -1144,7 +1145,7 @@ public class Env {
             Preconditions.checkNotNull(role);
             Preconditions.checkNotNull(nodeName);
 
-            Pair<String, Integer> rightHelperNode = helperNodes.get(0);
+            HostInfo rightHelperNode = helperNodes.get(0);
 
             Storage storage = new Storage(this.imageDir);
             if (roleFile.exists() && (role != storage.getRole() || !nodeName.equals(storage.getNodeName()))
@@ -1155,7 +1156,7 @@ public class Env {
                 // If the version file doesn't exist, download it from helper node
                 if (!getVersionFileFromHelper(rightHelperNode)) {
                     throw new IOException(
-                            "fail to download version file from " + rightHelperNode.first + " will exit.");
+                            "fail to download version file from " + rightHelperNode.getHost() + " will exit.");
                 }
 
                 // NOTE: cluster_id will be init when Storage object is constructed,
@@ -1172,15 +1173,15 @@ public class Env {
                 clusterId = storage.getClusterID();
                 token = storage.getToken();
                 try {
-                    URL idURL = new URL("http://" + rightHelperNode.first + ":" + Config.http_port + "/check");
-                    HttpURLConnection conn = null;
-                    conn = (HttpURLConnection) idURL.openConnection();
+                    String url = "http://" + NetUtils
+                            .getHostPortInAccessibleFormat(rightHelperNode.getHost(), Config.http_port) + "/check";
+                    HttpURLConnection conn = HttpURLUtil.getConnectionWithNodeIdent(url);
                     conn.setConnectTimeout(2 * 1000);
                     conn.setReadTimeout(2 * 1000);
                     String clusterIdString = conn.getHeaderField(MetaBaseAction.CLUSTER_ID);
                     int remoteClusterId = Integer.parseInt(clusterIdString);
                     if (remoteClusterId != clusterId) {
-                        LOG.error("cluster id is not equal with helper node {}. will exit.", rightHelperNode.first);
+                        LOG.error("cluster id is not equal with helper node {}. will exit.", rightHelperNode.getHost());
                         System.exit(-1);
                     }
                     String remoteToken = conn.getHeaderField(MetaBaseAction.TOKEN);
@@ -1195,7 +1196,7 @@ public class Env {
                         Preconditions.checkNotNull(remoteToken);
                         if (!token.equals(remoteToken)) {
                             throw new IOException(
-                                    "token is not equal with helper node " + rightHelperNode.first + ". will exit.");
+                                    "token is not equal with helper node " + rightHelperNode.getHost() + ". will exit");
                         }
                     }
                 } catch (Exception e) {
@@ -1221,11 +1222,10 @@ public class Env {
     }
 
     public static String genFeNodeName(String host, int port, boolean isOldStyle) {
-        String name = host + "_" + port;
         if (isOldStyle) {
-            return name;
+            return host + "_" + port;
         } else {
-            return name + "_" + System.currentTimeMillis();
+            return "fe_" + UUID.randomUUID().toString().replace("-", "_");
         }
     }
 
@@ -1242,13 +1242,14 @@ public class Env {
     private boolean getFeNodeTypeAndNameFromHelpers() {
         // we try to get info from helper nodes, once we get the right helper node,
         // other helper nodes will be ignored and removed.
-        Pair<String, Integer> rightHelperNode = null;
-        for (Pair<String, Integer> helperNode : helperNodes) {
+        HostInfo rightHelperNode = null;
+        for (HostInfo helperNode : helperNodes) {
             try {
-                URL url = new URL("http://" + helperNode.first + ":" + Config.http_port + "/role?host=" + selfNode.first
-                        + "&port=" + selfNode.second);
-                HttpURLConnection conn = null;
-                conn = (HttpURLConnection) url.openConnection();
+                String url = "http://" + NetUtils.getHostPortInAccessibleFormat(helperNode.getHost(), Config.http_port)
+                        + "/role?host=" + selfNode.getHost() + "&hostname=" + selfNode.getHost()
+                        + "&port=" + selfNode.getPort();
+
+                HttpURLConnection conn = HttpURLUtil.getConnectionWithNodeIdent(url);
                 if (conn.getResponseCode() != 200) {
                     LOG.warn("failed to get fe node type from helper node: {}. response code: {}", helperNode,
                             conn.getResponseCode());
@@ -1273,14 +1274,14 @@ public class Env {
 
                 if (Strings.isNullOrEmpty(nodeName)) {
                     // For forward compatibility, we use old-style name: "ip_port"
-                    nodeName = genFeNodeName(selfNode.first, selfNode.second, true /* old style */);
+                    nodeName = genFeNodeName(selfNode.getHost(), selfNode.getPort(), true /* old style */);
                 }
             } catch (Exception e) {
                 LOG.warn("failed to get fe node type from helper node: {}.", helperNode, e);
                 continue;
             }
 
-            LOG.info("get fe node type {}, name {} from {}:{}", role, nodeName, helperNode.first, Config.http_port);
+            LOG.info("get fe node type {}, name {} from {}:{}", role, nodeName, helperNode.getHost(), Config.http_port);
             rightHelperNode = helperNode;
             break;
         }
@@ -1295,9 +1296,11 @@ public class Env {
     }
 
     private void getSelfHostPort() {
-        selfNode = Pair.of(FrontendOptions.getLocalHostAddress(), Config.edit_log_port);
-        LOG.debug("get self node: {}", selfNode);
+        String host = Strings.nullToEmpty(FrontendOptions.getLocalHostAddress());
+        selfNode = new HostInfo(host, Config.edit_log_port);
+        LOG.info("get self node: {}", selfNode);
     }
+
 
     private void getHelperNodes(String[] args) throws Exception {
         String helpers = null;
@@ -1328,7 +1331,7 @@ public class Env {
             if (helpers != null) {
                 String[] splittedHelpers = helpers.split(",");
                 for (String helper : splittedHelpers) {
-                    Pair<String, Integer> helperHostPort = SystemInfoService.validateHostAndPort(helper);
+                    HostInfo helperHostPort = SystemInfoService.getHostAndPort(helper);
                     if (helperHostPort.equals(selfNode)) {
                         /**
                          * If user specified the helper node to this FE itself,
@@ -1346,7 +1349,7 @@ public class Env {
                 }
             } else {
                 // If helper node is not designated, use local node as helper node.
-                helperNodes.add(Pair.of(selfNode.first, Config.edit_log_port));
+                helperNodes.add(new HostInfo(selfNode.getHost(), Config.edit_log_port));
             }
         }
 
@@ -1369,7 +1372,7 @@ public class Env {
             // This is not the first time this node start up.
             // It should already added to FE group, just set helper node as it self.
             LOG.info("role file exist. this is not the first time to start up");
-            helperNodes = Lists.newArrayList(Pair.of(selfNode.first, Config.edit_log_port));
+            helperNodes = Lists.newArrayList(new HostInfo(selfNode.getHost(), Config.edit_log_port));
             return;
         }
 
@@ -1444,12 +1447,11 @@ public class Env {
 
         // MUST set master ip before starting checkpoint thread.
         // because checkpoint thread need this info to select non-master FE to push image
-        this.masterIp = FrontendOptions.getLocalHostAddress();
-        this.masterRpcPort = Config.rpc_port;
-        this.masterHttpPort = Config.http_port;
-        MasterInfo info = new MasterInfo(this.masterIp, this.masterHttpPort, this.masterRpcPort);
-        editLog.logMasterInfo(info);
-        LOG.info("logMasterInfo:{}", info);
+        this.masterInfo = new MasterInfo(Env.getCurrentEnv().getSelfNode().getHost(),
+                Config.http_port,
+                Config.rpc_port);
+        editLog.logMasterInfo(masterInfo);
+        LOG.info("logMasterInfo:{}", masterInfo);
 
         // for master, the 'isReady' is set behind.
         // but we are sure that all metadata is replayed if we get here.
@@ -1559,6 +1561,7 @@ public class Env {
         if (!Config.enable_deploy_manager.equalsIgnoreCase("disable")) {
             LOG.info("deploy manager {} start", deployManager.getName());
             deployManager.start();
+            deployManager.startListener();
         }
         // start routine load scheduler
         routineLoadScheduler.start();
@@ -1610,15 +1613,6 @@ public class Env {
         }
 
         // transfer from INIT/UNKNOWN to OBSERVER/FOLLOWER
-
-        // add helper sockets
-        if (Config.edit_log_type.equalsIgnoreCase("bdb")) {
-            for (Frontend fe : frontends.values()) {
-                if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
-                    ((BDBHA) getHaProtocol()).addHelperSocket(fe.getHost(), fe.getEditLogPort());
-                }
-            }
-        }
 
         if (replayer == null) {
             createReplayer();
@@ -1682,11 +1676,11 @@ public class Env {
             return;
         }
 
-        Frontend fe = checkFeExist(selfNode.first, selfNode.second);
+        Frontend fe = checkFeExist(selfNode.getHost(), selfNode.getPort());
         if (fe == null) {
             LOG.error("current node {}:{} is not added to the cluster, will exit."
                             + " Your FE IP maybe changed, please set 'priority_networks' config in fe.conf properly.",
-                    selfNode.first, selfNode.second);
+                    selfNode.getHost(), selfNode.getPort());
             System.exit(-1);
         } else if (fe.getRole() != role) {
             LOG.error("current node role is {} not match with frontend recorded role {}. will exit", role,
@@ -1704,9 +1698,9 @@ public class Env {
         }
     }
 
-    private boolean getVersionFileFromHelper(Pair<String, Integer> helperNode) throws IOException {
+    private boolean getVersionFileFromHelper(HostInfo helperNode) throws IOException {
         try {
-            String url = "http://" + helperNode.first + ":" + Config.http_port + "/version";
+            String url = "http://" + helperNode.getHost() + ":" + Config.http_port + "/version";
             File dir = new File(this.imageDir);
             MetaHelper.getRemoteFile(url, HTTP_TIMEOUT_SECOND * 1000,
                     MetaHelper.getOutputStream(Storage.VERSION_FILE, dir));
@@ -1719,17 +1713,18 @@ public class Env {
         return false;
     }
 
-    private void getNewImage(Pair<String, Integer> helperNode) throws IOException {
+    private void getNewImage(HostInfo helperNode) throws IOException {
         long localImageVersion = 0;
         Storage storage = new Storage(this.imageDir);
         localImageVersion = storage.getLatestImageSeq();
 
         try {
-            URL infoUrl = new URL("http://" + helperNode.first + ":" + Config.http_port + "/info");
+            String hostPort = NetUtils.getHostPortInAccessibleFormat(helperNode.getHost(), Config.http_port);
+            String infoUrl = "http://" + hostPort + "/info";
             StorageInfo info = getStorageInfo(infoUrl);
             long version = info.getImageSeq();
             if (version > localImageVersion) {
-                String url = "http://" + helperNode.first + ":" + Config.http_port + "/image?version=" + version;
+                String url = "http://" + helperNode.getHost() + ":" + Config.http_port + "/image?version=" + version;
                 String filename = Storage.IMAGE + "." + version;
                 File dir = new File(this.imageDir);
                 MetaHelper.getRemoteFile(url, HTTP_TIMEOUT_SECOND * 1000, MetaHelper.getOutputStream(filename, dir));
@@ -1747,10 +1742,10 @@ public class Env {
         Preconditions.checkNotNull(selfNode);
         Preconditions.checkNotNull(helperNodes);
         LOG.debug("self: {}. helpers: {}", selfNode, helperNodes);
-        // if helper nodes contain it self, remove other helpers
+        // if helper nodes contain itself, remove other helpers
         boolean containSelf = false;
-        for (Pair<String, Integer> helperNode : helperNodes) {
-            if (selfNode.equals(helperNode)) {
+        for (HostInfo helperNode : helperNodes) {
+            if (selfNode.isSame(helperNode)) {
                 containSelf = true;
             }
         }
@@ -1762,12 +1757,12 @@ public class Env {
         return containSelf;
     }
 
-    private StorageInfo getStorageInfo(URL url) throws IOException {
+    private StorageInfo getStorageInfo(String url) throws IOException {
         ObjectMapper mapper = new ObjectMapper();
 
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) url.openConnection();
+            connection = HttpURLUtil.getConnectionWithNodeIdent(url);
             connection.setConnectTimeout(HTTP_TIMEOUT_SECOND * 1000);
             connection.setReadTimeout(HTTP_TIMEOUT_SECOND * 1000);
 
@@ -1847,12 +1842,14 @@ public class Env {
     }
 
     public long loadMasterInfo(DataInputStream dis, long checksum) throws IOException {
-        masterIp = Text.readString(dis);
-        masterRpcPort = dis.readInt();
+        String masterHost = Text.readString(dis);
+        int masterRpcPort = dis.readInt();
         long newChecksum = checksum ^ masterRpcPort;
-        masterHttpPort = dis.readInt();
+        int masterHttpPort = dis.readInt();
         newChecksum ^= masterHttpPort;
-
+        masterInfo.setHost(masterHost);
+        masterInfo.setRpcPort(masterRpcPort);
+        masterInfo.setHttpPort(masterHttpPort);
         LOG.info("finished replay masterInfo from image");
         return newChecksum;
     }
@@ -2192,14 +2189,9 @@ public class Env {
     }
 
     public long saveMasterInfo(CountingDataOutputStream dos, long checksum) throws IOException {
-        Text.writeString(dos, masterIp);
-
-        checksum ^= masterRpcPort;
-        dos.writeInt(masterRpcPort);
-
-        checksum ^= masterHttpPort;
-        dos.writeInt(masterHttpPort);
-
+        masterInfo.write(dos);
+        checksum ^= masterInfo.getRpcPort();
+        checksum ^= masterInfo.getHttpPort();
         return checksum;
     }
 
@@ -2702,7 +2694,6 @@ public class Env {
         };
     }
 
-
     public void addFrontend(FrontendNodeType role, String host, int editLogPort, String nodeName) throws DdlException {
         if (!tryLock(false)) {
             throw new DdlException("Failed to acquire catalog lock. Try again");
@@ -2712,11 +2703,12 @@ public class Env {
             if (fe != null) {
                 throw new DdlException("frontend already exists " + fe);
             }
-
+            if (Config.enable_fqdn_mode && StringUtils.isEmpty(host)) {
+                throw new DdlException("frontend's hostName should not be empty while enable_fqdn_mode is true");
+            }
             if (Strings.isNullOrEmpty(nodeName)) {
                 nodeName = genFeNodeName(host, editLogPort, false /* new name style */);
             }
-
             if (removedFrontends.contains(nodeName)) {
                 throw new DdlException("frontend name already exists " + nodeName + ". Try again");
             }
@@ -2725,8 +2717,7 @@ public class Env {
             frontends.put(nodeName, fe);
             BDBHA bdbha = (BDBHA) haProtocol;
             if (role == FrontendNodeType.FOLLOWER || role == FrontendNodeType.REPLICA) {
-                bdbha.addHelperSocket(host, editLogPort);
-                helperNodes.add(Pair.of(host, editLogPort));
+                helperNodes.add(new HostInfo(host, editLogPort));
                 bdbha.addUnReadyElectableNode(nodeName, getFollowerCount());
             }
             bdbha.removeConflictNodeIfExist(host, editLogPort);
@@ -2737,7 +2728,8 @@ public class Env {
     }
 
     public void dropFrontend(FrontendNodeType role, String host, int port) throws DdlException {
-        if (host.equals(selfNode.first) && port == selfNode.second && feType == FrontendNodeType.MASTER) {
+        if (port == selfNode.getPort() && feType == FrontendNodeType.MASTER
+                && selfNode.getHost().equals(host)) {
             throw new DdlException("can not drop current master node.");
         }
         if (!tryLock(false)) {
@@ -2756,7 +2748,7 @@ public class Env {
 
             if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
                 haProtocol.removeElectableNode(fe.getNodeName());
-                helperNodes.remove(Pair.of(host, port));
+                removeHelperNode(host, port);
                 BDBHA ha = (BDBHA) haProtocol;
                 ha.removeUnReadyElectableNode(fe.getNodeName(), getFollowerCount());
             }
@@ -2766,18 +2758,15 @@ public class Env {
         }
     }
 
+    private void removeHelperNode(String host, int port) {
+        // ip may be changed, so we need use both ip and hostname to check.
+        // use node.getIdent() for simplicity here.
+        helperNodes.removeIf(node -> node.getHost().equals(host) && node.getPort() == port);
+    }
+
     public Frontend checkFeExist(String host, int port) {
         for (Frontend fe : frontends.values()) {
             if (fe.getHost().equals(host) && fe.getEditLogPort() == port) {
-                return fe;
-            }
-        }
-        return null;
-    }
-
-    public Frontend getFeByHost(String host) {
-        for (Frontend fe : frontends.values()) {
-            if (fe.getHost().equals(host)) {
                 return fe;
             }
         }
@@ -2931,7 +2920,7 @@ public class Env {
             boolean hidePassword, boolean getDdlForLike, long specificVersion) {
         if (Config.isCloudMode()) {
             getCloudDdlStmt(ddlStmt, dbName, table, createTableStmt, addPartitionStmt, createRollupStmt,
-                            separatePartition, hidePassword, getDdlForLike, specificVersion);
+                    separatePartition, hidePassword, getDdlForLike, specificVersion);
             return;
         }
 
@@ -3849,12 +3838,12 @@ public class Env {
     }
 
     public boolean unprotectDropTable(Database db, Table table, boolean isForceDrop, boolean isReplay,
-                                      Long recycleTime) {
+            Long recycleTime) {
         return getInternalCatalog().unprotectDropTable(db, table, isForceDrop, isReplay, recycleTime);
     }
 
     public void replayDropTable(Database db, long tableId, boolean isForceDrop,
-                                Long recycleTime) throws MetaNotFoundException {
+            Long recycleTime) throws MetaNotFoundException {
         getInternalCatalog().replayDropTable(db, tableId, isForceDrop, recycleTime);
     }
 
@@ -3912,7 +3901,7 @@ public class Env {
                 // DO NOT add helper sockets here, cause BDBHA is not instantiated yet.
                 // helper sockets will be added after start BDBHA
                 // But add to helperNodes, just for show
-                helperNodes.add(Pair.of(fe.getHost(), fe.getEditLogPort()));
+                helperNodes.add(new HostInfo(fe.getHost(), fe.getEditLogPort()));
             }
         } finally {
             unlock();
@@ -3928,7 +3917,7 @@ public class Env {
                 return;
             }
             if (removedFe.getRole() == FrontendNodeType.FOLLOWER || removedFe.getRole() == FrontendNodeType.REPLICA) {
-                helperNodes.remove(Pair.of(removedFe.getHost(), removedFe.getEditLogPort()));
+                removeHelperNode(removedFe.getHost(), removedFe.getEditLogPort());
             }
 
             removedFrontends.add(removedFe.getNodeName());
@@ -4182,16 +4171,16 @@ public class Env {
         return this.role;
     }
 
-    public Pair<String, Integer> getHelperNode() {
+    public HostInfo getHelperNode() {
         Preconditions.checkState(helperNodes.size() >= 1);
         return this.helperNodes.get(0);
     }
 
-    public List<Pair<String, Integer>> getHelperNodes() {
+    public List<HostInfo> getHelperNodes() {
         return Lists.newArrayList(helperNodes);
     }
 
-    public Pair<String, Integer> getSelfNode() {
+    public HostInfo getSelfNode() {
         return this.selfNode;
     }
 
@@ -4207,21 +4196,21 @@ public class Env {
         if (!isReady()) {
             return 0;
         }
-        return this.masterRpcPort;
+        return this.masterInfo.getRpcPort();
     }
 
     public int getMasterHttpPort() {
         if (!isReady()) {
             return 0;
         }
-        return this.masterHttpPort;
+        return this.masterInfo.getHttpPort();
     }
 
-    public String getMasterIp() {
+    public String getMasterHost() {
         if (!isReady()) {
             return "";
         }
-        return this.masterIp;
+        return this.masterInfo.getHost();
     }
 
     public EsRepository getEsRepository() {
@@ -4241,11 +4230,8 @@ public class Env {
     }
 
     public void setMaster(MasterInfo info) {
-        this.masterIp = info.getIp();
-        this.masterHttpPort = info.getHttpPort();
-        this.masterRpcPort = info.getRpcPort();
+        this.masterInfo = info;
         LOG.info("setMaster MasterInfo:{}", info);
-
     }
 
     public boolean canRead() {
@@ -5144,7 +5130,7 @@ public class Env {
         if (!Env.getCurrentSystemInfo().getCloudClusterNames().contains(clusterName)) {
             LOG.debug("current instance does not have a cluster name :{}", clusterName);
             throw new DdlException(String.format("Cluster %s not exist", clusterName),
-                                                 ErrorCode.ERR_ClOUD_CLUSTER_ERROR);
+                    ErrorCode.ERR_ClOUD_CLUSTER_ERROR);
         }
     }
 

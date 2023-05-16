@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "common/config.h"
+#include "util/network_util.h"
 #include "gen_cpp/Types_types.h" // TNetworkAddress
 #include "gen_cpp/function_service.pb.h"
 #include "gen_cpp/internal_service.pb.h"
@@ -60,7 +61,16 @@ public:
 #endif
 
     std::shared_ptr<T> get_client(const std::string& host, int port) {
-        std::string host_port = fmt::format("{}:{}", host, port);
+        std::string realhost;
+        realhost = host;
+        if (!is_valid_ip(host)) {
+            Status status = hostname_to_ip(host, realhost);
+            if (!status.ok()) {
+                LOG(WARNING) << "failed to get ip from host:" << status.to_string();
+                return nullptr;
+            }
+        }
+        std::string host_port = get_host_port(realhost, port);
         return get_client(host_port);
     }
 

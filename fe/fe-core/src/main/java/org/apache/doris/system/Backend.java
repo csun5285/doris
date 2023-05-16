@@ -312,6 +312,10 @@ public class Backend implements Writable {
         this.backendState = state.ordinal();
     }
 
+    public void setHost(String host) {
+        this.host = host;
+    }
+
     public void setAlive(boolean isAlive) {
         this.isAlive.set(isAlive);
     }
