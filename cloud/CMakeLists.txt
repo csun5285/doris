@@ -560,6 +560,8 @@ endif ()
 if (${MAKE_TEST} STREQUAL "OFF")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lfdb_c -L${THIRDPARTY_DIR}/lib")
 
+    add_subdirectory(tools)
+
     add_executable(selectdb_cloud src/main.cpp)
 
     # This permits libraries loaded by dlopen to link to the symbols in the program.

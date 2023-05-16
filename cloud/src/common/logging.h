@@ -12,10 +12,10 @@ bool init_glog(const char* basename);
 
 /// Wrap a glog stream and tag on the log. usage:
 ///   LOG_INFO("here is an info for a {} query", query_type).tag("query_id", queryId);
-#define LOG_INFO(...) TaggableLogger(LOG(INFO), ##__VA_ARGS__)
-#define LOG_WARNING(...) TaggableLogger(LOG(WARNING), ##__VA_ARGS__)
-#define LOG_ERROR(...) TaggableLogger(LOG(ERROR), ##__VA_ARGS__)
-#define LOG_FATAL(...) TaggableLogger(LOG(FATAL), ##__VA_ARGS__)
+#define LOG_INFO(...) ::selectdb::TaggableLogger(LOG(INFO), ##__VA_ARGS__)
+#define LOG_WARNING(...) ::selectdb::TaggableLogger(LOG(WARNING), ##__VA_ARGS__)
+#define LOG_ERROR(...) ::selectdb::TaggableLogger(LOG(ERROR), ##__VA_ARGS__)
+#define LOG_FATAL(...) ::selectdb::TaggableLogger(LOG(FATAL), ##__VA_ARGS__)
 
 class TaggableLogger {
 public:
