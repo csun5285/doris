@@ -70,7 +70,7 @@ suite("smooth_upgrade") {
         println("the http port is " + httpPort)
         println("the be unique id is " + beUniqueId)
 
-        addNodeForSmoothUpgrade(beUniqueId, ip, hbPort, "selectdb-cloud-dev-smooth-upgrade_name_cluster0", "selectdb-cloud-dev-smooth-upgrade_cluster0")
+        addNodeForSmoothUpgrade(beUniqueId, ip, hbPort, "selectdb_cloud_dev_smooth_upgrade_asan_name_cluster0", "selectdb_cloud_dev_smooth_upgrade_asan_id_cluster0")
 
         sleep(20000)
 
@@ -81,7 +81,7 @@ suite("smooth_upgrade") {
     def del_new_be = { ->
         println("delete be unique id is " + beUniqueId)
 
-        d_node.call(beUniqueId, ip, hbPort, "selectdb-cloud-dev-smooth-upgrade_name_cluster0", "selectdb-cloud-dev-smooth-upgrade_cluster0")
+        d_node.call(beUniqueId, ip, hbPort, "selectdb_cloud_dev_smooth_upgrade_asan_name_cluster0", "selectdb_cloud_dev_smooth_upgrade_asan_id_cluster0")
 
         sleep(20000)
 
