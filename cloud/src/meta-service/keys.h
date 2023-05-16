@@ -40,6 +40,7 @@
 //
 // 0x01 "job" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id}   -> TabletJobInfoPB
 // 0x01 "job" ${instance_id} "recycle"                                                       -> JobRecyclePB
+// 0x01 "job" ${instance_id} "check"                                                         -> JobRecyclePB
 //
 // 0x02 "system" "meta-service" "registry"                                                   -> MetaServiceRegistryPB
 // 0x02 "system" "meta-service" "arn_info"                                                   -> RamUserPB
@@ -189,6 +190,7 @@ void stats_tablet_num_segs_key(const StatsTabletKeyInfo& in, std::string* out);
 static inline std::string stats_tablet_key(const StatsTabletKeyInfo& in) { std::string s; stats_tablet_key(in, &s); return s; }
 
 void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out);
+void job_check_key(const JobRecycleKeyInfo& in, std::string* out);
 void job_tablet_key(const JobTabletKeyInfo& in, std::string* out);
 static inline std::string job_tablet_key(const JobTabletKeyInfo& in) { std::string s; job_tablet_key(in, &s); return s; }
 

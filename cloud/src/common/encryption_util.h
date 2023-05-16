@@ -1,18 +1,22 @@
 #pragma once
 
-#include <gen_cpp/selectdb_cloud.pb.h>
 #include <stdint.h>
-#include <cstdint>
-#include <string>
-#include "common/config.h"
-#include "common/util.h"
-#include "meta-service/keys.h"
-#include "meta-service/txn_kv.h"
 
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace selectdb {
+namespace config {
+extern std::string encryption_method;
+} // namespace config
+class TxnKv;
+class EncryptionInfoPB;
 
 using AkSkPair = std::pair<std::string, std::string>;
+using AkSkRef = std::pair<std::string_view, std::string_view>;
 /**
  * @brief Encrypt ak/sk pair
  *
@@ -22,7 +26,8 @@ using AkSkPair = std::pair<std::string, std::string>;
  * @param cipher_ak_sk output cipher ak/sk pair in base64 format
  * @return 0 for success, negative for error
  */
-int encrypt_ak_sk(const AkSkPair& plain_ak_sk, const std::string& encryption_method, const std::string& encryption_key, AkSkPair* cipher_ak_sk);
+int encrypt_ak_sk(AkSkRef plain_ak_sk, const std::string& encryption_method,
+                  const std::string& encryption_key, AkSkPair* cipher_ak_sk);
 
 /**
  * @brief Decrypt ak/sk pair
@@ -33,10 +38,10 @@ int encrypt_ak_sk(const AkSkPair& plain_ak_sk, const std::string& encryption_met
  * @param plain_ak_sk output plain ak/sk pair
  * @return 0 for success, negative for error
  */
-int decrypt_ak_sk(const AkSkPair& cipher_ak_sk, const std::string& encryption_method, const std::string& encryption_key, AkSkPair* plain_ak_sk);
+int decrypt_ak_sk(AkSkRef cipher_ak_sk, const std::string& encryption_method,
+                  const std::string& encryption_key, AkSkPair* plain_ak_sk);
 
 extern std::map<int64_t, std::string> global_encryption_key_info_map;
-
 
 // Todo: Should we need to refresh it
 int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv);
@@ -56,6 +61,9 @@ inline static int get_encryption_key_for_ak_sk(int64_t key_id, std::string* encr
     return -1;
 }
 
+int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
+                         const EncryptionInfoPB& encryption_info, AkSkPair* plain_ak_sk_pair);
+
 /**
  * @brief Get the newest encryption key for ak sk
  * 
@@ -63,7 +71,8 @@ inline static int get_encryption_key_for_ak_sk(int64_t key_id, std::string* encr
  * @param encryption_key 
  * @return 0 for success, negative for error  
  */
-inline static int get_newest_encryption_key_for_ak_sk(int64_t* key_id, std::string* encryption_key) {
+inline static int get_newest_encryption_key_for_ak_sk(int64_t* key_id,
+                                                      std::string* encryption_key) {
     if (global_encryption_key_info_map.empty()) {
         return -1;
     }
@@ -73,7 +82,7 @@ inline static int get_newest_encryption_key_for_ak_sk(int64_t* key_id, std::stri
     return 0;
 }
 
-inline static std::string get_encryption_method_for_ak_sk() {
+inline static const std::string& get_encryption_method_for_ak_sk() {
     return config::encryption_method;
 }
 

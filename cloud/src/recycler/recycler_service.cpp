@@ -10,14 +10,16 @@
 #include "common/logging.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
+#include "recycler/checker.h"
 #include "recycler/recycler.h"
 
 namespace selectdb {
 
 extern std::string convert_ms_code_to_http_code(const MetaServiceCode& ret, int& status_code);
 
-RecyclerServiceImpl::RecyclerServiceImpl(std::shared_ptr<TxnKv> txn_kv, Recycler* recycler)
-        : txn_kv_(std::move(txn_kv)), recycler_(recycler) {}
+RecyclerServiceImpl::RecyclerServiceImpl(std::shared_ptr<TxnKv> txn_kv, Recycler* recycler,
+                                         Checker* checker)
+        : txn_kv_(std::move(txn_kv)), recycler_(recycler), checker_(checker) {}
 
 RecyclerServiceImpl::~RecyclerServiceImpl() = default;
 
@@ -71,10 +73,55 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
             continue;
         }
         instances.push_back(std::move(instance));
-        LOG_INFO("add instance to recycle queue").tag("instance_id", id);
     }
+    {
+        std::lock_guard lock(recycler_->mtx_);
+        for (auto& i : instances) {
+            auto [_, success] = recycler_->pending_instance_set_.insert(i.instance_id());
+            // skip instance already in pending queue
+            if (success) {
+                // TODO(plat1ko): Support high priority
+                recycler_->pending_instance_queue_.push_back(std::move(i));
+            }
+        }
+        recycler_->pending_instance_cond_.notify_all();
+    }
+}
 
-    recycler_->add_pending_instances(std::move(instances));
+void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaServiceCode& code,
+                                         std::string& msg) {
+    std::unique_ptr<Transaction> txn;
+    int ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        return;
+    }
+    std::string key;
+    instance_key({instance_id}, &key);
+    std::string val;
+    ret = txn->get(key, &val);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        msg = fmt::format("failed to get instance, instance_id={}", instance_id);
+        return;
+    }
+    InstanceInfoPB instance;
+    if (!instance.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = fmt::format("malformed instance info, key={}", hex(key));
+        return;
+    }
+    {
+        std::lock_guard lock(checker_->mtx_);
+        auto [_, success] = checker_->pending_instance_set_.insert(instance_id);
+        // skip instance already in pending queue
+        if (success) {
+            // TODO(plat1ko): Support high priority
+            checker_->pending_instance_queue_.push_back(std::move(instance));
+        }
+        checker_->pending_instance_cond_.notify_all();
+    }
 }
 
 void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
@@ -126,7 +173,7 @@ void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& 
 }
 
 void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
-                      MetaServiceCode& code, std::string& msg) {
+                      std::string_view key, MetaServiceCode& code, std::string& msg) {
     std::unique_ptr<Transaction> txn;
     int ret = txn_kv->create_txn(&txn);
     if (ret != 0) {
@@ -134,8 +181,7 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
         msg = "failed to create txn";
         return;
     }
-    std::string key, val;
-    job_recycle_key({instance_id}, &key);
+    std::string val;
     ret = txn->get(key, &val);
     JobRecyclePB job_info;
     if (ret != 0) {
@@ -255,7 +301,43 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
             status_code = 400;
             return;
         }
-        recycle_job_info(txn_kv_, *instance_id, code, msg);
+        std::string key;
+        job_recycle_key({*instance_id}, &key);
+        recycle_job_info(txn_kv_, *instance_id, key, code, msg);
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "check_instance") {
+        auto instance_id = uri.GetQuery("instance_id");
+        if (instance_id == nullptr || instance_id->empty()) {
+            msg = "no instance id";
+            response_body = msg;
+            status_code = 400;
+            return;
+        }
+        if (!checker_) {
+            msg = "checker not enabled";
+            response_body = msg;
+            status_code = 400;
+            return;
+        }
+        check_instance(*instance_id, code, msg);
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "check_job_info") {
+        auto instance_id = uri.GetQuery("instance_id");
+        if (instance_id == nullptr || instance_id->empty()) {
+            msg = "no instance id";
+            response_body = msg;
+            status_code = 400;
+            return;
+        }
+        std::string key;
+        job_check_key({*instance_id}, &key);
+        recycle_job_info(txn_kv_, *instance_id, key, code, msg);
         response_body = msg;
         return;
     }

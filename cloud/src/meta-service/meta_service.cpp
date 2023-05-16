@@ -3227,7 +3227,7 @@ static int encrypt_ak_sk_helper(const std::string plain_ak, const std::string pl
         LOG(WARNING) << msg;
         return -1;
     }
-    std::string encryption_method = get_encryption_method_for_ak_sk();
+    auto& encryption_method = get_encryption_method_for_ak_sk();
     AkSkPair plain_ak_sk_pair {plain_ak, plain_sk};
     ret = encrypt_ak_sk(plain_ak_sk_pair, encryption_method, key, cipher_ak_sk_pair);
     if (ret != 0) {
@@ -3241,31 +3241,15 @@ static int encrypt_ak_sk_helper(const std::string plain_ak, const std::string pl
     return 0;
 }
 
-static int decrypt_ak_sk_helper(const std::string cipher_ak, const std::string cipher_sk,
+static int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
                                 const EncryptionInfoPB& encryption_info, AkSkPair* plain_ak_sk_pair,
                                 MetaServiceCode& code, std::string& msg) {
-    std::string key;
-    int ret = get_encryption_key_for_ak_sk(encryption_info.key_id(), &key);
-    {
-        TEST_SYNC_POINT_CALLBACK("decrypt_ak_sk:get_encryption_key_ret", &ret);
-        TEST_SYNC_POINT_CALLBACK("decrypt_ak_sk:get_encryption_key", &key);
-    }
-    if (ret != 0) {
-        msg = "failed to get encryption key";
-        code = MetaServiceCode::ERR_DECPYPT;
-        LOG(WARNING) << msg << " key_id: " << encryption_info.key_id();
-        return -1;
-    }
-    AkSkPair cipher_ak_sk_pair {cipher_ak, cipher_sk};
-    ret = decrypt_ak_sk(cipher_ak_sk_pair, encryption_info.encryption_method(), key,
-                        plain_ak_sk_pair);
+    int ret = decrypt_ak_sk_helper(cipher_ak, cipher_sk, encryption_info, plain_ak_sk_pair);
     if (ret != 0) {
         msg = "failed to decrypt";
         code = MetaServiceCode::ERR_DECPYPT;
-        LOG(WARNING) << msg;
-        return -1;
     }
-    return 0;
+    return ret;
 }
 
 static int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_id,

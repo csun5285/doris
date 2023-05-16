@@ -34,7 +34,8 @@ public:
     virtual int put_object(const std::string& relative_path, const std::string& content) = 0;
 
     // returns 0 for success otherwise error
-    virtual int list(const std::string& relative_path, std::vector<std::string>* keys) = 0;
+    // NOTE: `paths` are relative paths
+    virtual int list(const std::string& relative_path, std::vector<std::string>* paths) = 0;
 
     // return 0 if object exists, 1 if object is not found, negative for error
     virtual int exist(const std::string& relative_path) = 0;
@@ -77,7 +78,8 @@ public:
     int put_object(const std::string& relative_path, const std::string& content) override;
 
     // returns 0 for success otherwise error
-    int list(const std::string& relative_path, std::vector<std::string>* keys) override;
+    // NOTE: `paths` are relative paths
+    int list(const std::string& relative_path, std::vector<std::string>* paths) override;
 
     // return 0 if object exists, 1 if object is not found, otherwise error
     int exist(const std::string& relative_path) override;

@@ -57,6 +57,7 @@ public:
 
     // returns 0 for success otherwise error
     int delete_object(const std::string& relative_path) override {
+        LOG(INFO) << "delete object path=" << relative_path;
         std::lock_guard lock(mtx_);
         objects_.erase(relative_path);
         return 0;
@@ -71,11 +72,11 @@ public:
     }
 
     // returns 0 for success otherwise error
-    int list(const std::string& relative_path, std::vector<std::string>* keys) override {
+    int list(const std::string& relative_path, std::vector<std::string>* paths) override {
         std::lock_guard lock(mtx_);
         if (relative_path == "") {
             for (const auto& obj : objects_) {
-                keys->push_back(obj);
+                paths->push_back(obj);
             }
             return 0;
         }
@@ -87,7 +88,7 @@ public:
         path1.back() += 1;
         auto end = objects_.lower_bound(path1);
         for (auto it = begin; it != end; ++it) {
-            keys->push_back(*it);
+            paths->push_back(*it);
         }
         return 0;
     }

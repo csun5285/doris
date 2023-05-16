@@ -332,6 +332,11 @@ void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out) {
     encode_bytes("recycle", out); // "recycle"
 }
 
+void job_check_key(const JobRecycleKeyInfo& in, std::string* out) {
+    encode_prefix(in, out);     // 0x01 "job" ${instance_id}
+    encode_bytes("check", out); // "check"
+}
+
 //==============================================================================
 // Copy keys
 //==============================================================================

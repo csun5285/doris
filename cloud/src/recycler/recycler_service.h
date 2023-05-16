@@ -7,10 +7,11 @@
 namespace selectdb {
 
 class Recycler;
+class Checker;
 
 class RecyclerServiceImpl : public selectdb::RecyclerService {
 public:
-    RecyclerServiceImpl(std::shared_ptr<TxnKv> txn_kv, Recycler* recycler);
+    RecyclerServiceImpl(std::shared_ptr<TxnKv> txn_kv, Recycler* recycler, Checker* checker);
     ~RecyclerServiceImpl() override;
 
     void recycle_instance(::google::protobuf::RpcController* controller,
@@ -24,8 +25,12 @@ public:
               ::google::protobuf::Closure* done) override;
 
 private:
+    void check_instance(const std::string& instance_id, MetaServiceCode& code, std::string& msg);
+
+private:
     std::shared_ptr<TxnKv> txn_kv_;
-    Recycler* recycler_;
+    Recycler* recycler_; // Ref
+    Checker* checker_;   // Ref
 };
 
 } // namespace selectdb

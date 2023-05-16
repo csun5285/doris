@@ -357,6 +357,7 @@ message JobRecyclePB {
     optional int64 expiration_time_ms = 4;
     optional int64 last_finish_time_ms = 5;
     optional Status status = 6;
+    optional int64 last_success_time_ms = 7;
 }
 
 message TabletIndexPB {

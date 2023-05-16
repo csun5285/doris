@@ -1,5 +1,6 @@
 #include "common/encryption_util.h"
 
+#include <glog/logging.h>
 #include <math.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -9,10 +10,19 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
-namespace selectdb {
+#include "common/sync_point.h"
+#include "common/util.h"
+#include "gen_cpp/selectdb_cloud.pb.h"
+#include "meta-service/keys.h"
+#include "meta-service/txn_kv.h"
 
+namespace selectdb {
+namespace config {
+extern std::string encryption_key;
+}; // namespace config
 
 enum class EncryptionMode {
     AES_128_ECB,
@@ -45,7 +55,6 @@ public:
                        const unsigned char* key, uint32_t key_length, const char* iv_str,
                        int iv_input_length, bool padding, unsigned char* decrypt_content);
 };
-
 
 // aes encrypty/dencrypty
 static const int ENCRYPTION_MAX_KEY_LENGTH = 256;
@@ -90,21 +99,11 @@ const EVP_CIPHER* get_evp_type(const EncryptionMode mode) {
 }
 
 static uint mode_key_sizes[] = {
-        128 /* AES_128_ECB */,
-        256 /* AES_256_ECB */,
-        128 /* AES_128_CBC */,
-        256 /* AES_256_CBC */,
-        128 /* AES_128_CFB */,
-        256 /* AES_256_CFB */,
-        128 /* AES_128_CFB1 */,
-        256 /* AES_256_CFB1 */,
-        128 /* AES_128_CFB8 */,
-        256 /* AES_256_CFB8 */,
-        128 /* AES_128_CFB128 */,
-        256 /* AES_256_CFB128 */,
-        128 /* AES_128_CTR */,
-        256 /* AES_256_CTR */,
-        128 /* AES_128_OFB */,
+        128 /* AES_128_ECB */,  256 /* AES_256_ECB */,    128 /* AES_128_CBC */,
+        256 /* AES_256_CBC */,  128 /* AES_128_CFB */,    256 /* AES_256_CFB */,
+        128 /* AES_128_CFB1 */, 256 /* AES_256_CFB1 */,   128 /* AES_128_CFB8 */,
+        256 /* AES_256_CFB8 */, 128 /* AES_128_CFB128 */, 256 /* AES_256_CFB128 */,
+        128 /* AES_128_CTR */,  256 /* AES_256_CTR */,    128 /* AES_128_OFB */,
         256 /* AES_256_OFB */,
 };
 
@@ -249,7 +248,6 @@ int EncryptionUtil::decrypt(EncryptionMode mode, const unsigned char* encrypt,
     }
 }
 
-
 // base64 endcode/decode
 
 static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
@@ -372,29 +370,29 @@ size_t base64_decode(const char* data, size_t length, char* decoded_data) {
     return j;
 }
 
-
 // encrypty/dencrypty with base64
 
 static std::unordered_map<std::string, EncryptionMode> to_encryption_mode {
-    {"AES_128_ECB", EncryptionMode::AES_128_ECB},
-    {"AES_256_ECB", EncryptionMode::AES_256_ECB},
-    {"AES_128_CBC", EncryptionMode::AES_128_CBC},
-    {"AES_256_CBC", EncryptionMode::AES_256_CBC},
-    {"AES_128_CFB", EncryptionMode::AES_128_CFB},
-    {"AES_256_CFB", EncryptionMode::AES_256_CFB},
-    {"AES_128_CFB1", EncryptionMode::AES_128_CFB1},
-    {"AES_256_CFB1", EncryptionMode::AES_256_CFB1},
-    {"AES_128_CFB8", EncryptionMode::AES_128_CFB8},
-    {"AES_256_CFB8", EncryptionMode::AES_256_CFB8},
-    {"AES_128_CFB128", EncryptionMode::AES_128_CFB128},
-    {"AES_256_CFB128", EncryptionMode::AES_256_CFB128},
-    {"AES_128_CTR", EncryptionMode::AES_128_CTR},
-    {"AES_256_CTR", EncryptionMode::AES_256_CTR},
-    {"AES_128_OFB", EncryptionMode::AES_128_OFB},
-    {"AES_256_OFB", EncryptionMode::AES_256_OFB},
+        {"AES_128_ECB", EncryptionMode::AES_128_ECB},
+        {"AES_256_ECB", EncryptionMode::AES_256_ECB},
+        {"AES_128_CBC", EncryptionMode::AES_128_CBC},
+        {"AES_256_CBC", EncryptionMode::AES_256_CBC},
+        {"AES_128_CFB", EncryptionMode::AES_128_CFB},
+        {"AES_256_CFB", EncryptionMode::AES_256_CFB},
+        {"AES_128_CFB1", EncryptionMode::AES_128_CFB1},
+        {"AES_256_CFB1", EncryptionMode::AES_256_CFB1},
+        {"AES_128_CFB8", EncryptionMode::AES_128_CFB8},
+        {"AES_256_CFB8", EncryptionMode::AES_256_CFB8},
+        {"AES_128_CFB128", EncryptionMode::AES_128_CFB128},
+        {"AES_256_CFB128", EncryptionMode::AES_256_CFB128},
+        {"AES_128_CTR", EncryptionMode::AES_128_CTR},
+        {"AES_256_CTR", EncryptionMode::AES_256_CTR},
+        {"AES_128_OFB", EncryptionMode::AES_128_OFB},
+        {"AES_256_OFB", EncryptionMode::AES_256_OFB},
 };
 
-static inline int encrypt_to_base64_impl(const std::string& source, EncryptionMode mode, const std::string& key, std::string* encrypt) {
+static inline int encrypt_to_base64_impl(std::string_view source, EncryptionMode mode,
+                                         const std::string& key, std::string* encrypt) {
     /*
      * Buffer for ciphertext. Ensure the buffer is long enough for the
      * ciphertext which may be longer than the plaintext, depending on the
@@ -403,8 +401,8 @@ static inline int encrypt_to_base64_impl(const std::string& source, EncryptionMo
     int cipher_len = source.length() + 16;
     std::unique_ptr<unsigned char[]> cipher_text(new unsigned char[cipher_len]);
     int cipher_text_len = EncryptionUtil::encrypt(
-            mode, (unsigned char*)source.c_str(), source.length(),
-            (unsigned char*)key.c_str(), key.length(), nullptr, 0, true, cipher_text.get());
+            mode, (unsigned char*)source.data(), source.length(), (unsigned char*)key.c_str(),
+            key.length(), nullptr, 0, true, cipher_text.get());
     if (cipher_text_len < 0) {
         return -1;
     }
@@ -419,33 +417,33 @@ static inline int encrypt_to_base64_impl(const std::string& source, EncryptionMo
     return 0;
 }
 
-static int encrypt_to_base64(const std::string& source, const std::string& encrypt_method, const std::string& key, std::string* encrypt) {
+static int encrypt_to_base64(std::string_view source, const std::string& encrypt_method,
+                             const std::string& key, std::string* encrypt) {
     if (source.empty()) {
         *encrypt = "";
         return 0;
     }
     auto iter = to_encryption_mode.find(encrypt_method);
-    if (iter == to_encryption_mode.end()){
+    if (iter == to_encryption_mode.end()) {
         return -1;
     }
 
     return encrypt_to_base64_impl(source, iter->second, key, encrypt);
 }
 
-static inline int decrypt_with_base64_impl(const std::string& encrypt, EncryptionMode mode, const std::string& key,
-                             std::string* source) {
+static inline int decrypt_with_base64_impl(std::string_view encrypt, EncryptionMode mode,
+                                           const std::string& key, std::string* source) {
     // base64
     std::unique_ptr<char[]> decoded_text(new char[encrypt.length()]);
-    int decoded_text_len = base64_decode(encrypt.c_str(), encrypt.length(), decoded_text.get());
+    int decoded_text_len = base64_decode(encrypt.data(), encrypt.length(), decoded_text.get());
     if (decoded_text_len < 0) {
         return -1;
     }
 
     std::unique_ptr<char[]> plain_text(new char[decoded_text_len]);
-    int plain_text_len =
-            EncryptionUtil::decrypt(mode, (unsigned char*)decoded_text.get(),
-                                    decoded_text_len, (unsigned char*)key.c_str(), key.length(),
-                                    nullptr, 0, true, (unsigned char*)plain_text.get());
+    int plain_text_len = EncryptionUtil::decrypt(
+            mode, (unsigned char*)decoded_text.get(), decoded_text_len, (unsigned char*)key.c_str(),
+            key.length(), nullptr, 0, true, (unsigned char*)plain_text.get());
     if (plain_text_len < 0) {
         return -1;
     }
@@ -453,33 +451,33 @@ static inline int decrypt_with_base64_impl(const std::string& encrypt, Encryptio
     return 0;
 }
 
-static int decrypt_with_base64(const std::string& encrypt, const std::string& encrypt_method,
+static int decrypt_with_base64(std::string_view encrypt, const std::string& encrypt_method,
                                const std::string& key, std::string* source) {
     if (encrypt.empty()) {
         *source = "";
         return 0;
     }
     auto iter = to_encryption_mode.find(encrypt_method);
-    if (iter == to_encryption_mode.end()){
+    if (iter == to_encryption_mode.end()) {
         return -1;
     }
     return decrypt_with_base64_impl(encrypt, iter->second, key, source);
-
 }
 
-int encrypt_ak_sk(const AkSkPair& plain_ak_sk, const std::string& encryption_method,
+int encrypt_ak_sk(AkSkRef plain_ak_sk, const std::string& encryption_method,
                   const std::string& encryption_key, AkSkPair* cipher_ak_sk) {
     std::string encrypt_ak;
     std::string encrypt_sk;
-    if (encrypt_to_base64(plain_ak_sk.second, encryption_method, encryption_key, &encrypt_sk) != 0) {
+    if (encrypt_to_base64(plain_ak_sk.second, encryption_method, encryption_key, &encrypt_sk) !=
+        0) {
         *cipher_ak_sk = {"", ""};
         return -1;
     }
-    *cipher_ak_sk = {plain_ak_sk.first, encrypt_sk};
+    *cipher_ak_sk = {std::string(plain_ak_sk.first), std::move(encrypt_sk)};
     return 0;
 }
 
-int decrypt_ak_sk(const AkSkPair& cipher_ak_sk, const std::string& encryption_method,
+int decrypt_ak_sk(AkSkRef cipher_ak_sk, const std::string& encryption_method,
                   const std::string& encryption_key, AkSkPair* plain_ak_sk) {
     std::string ak;
     std::string sk;
@@ -487,12 +485,33 @@ int decrypt_ak_sk(const AkSkPair& cipher_ak_sk, const std::string& encryption_me
         *plain_ak_sk = {"", ""};
         return -1;
     }
-    *plain_ak_sk = {cipher_ak_sk.first, sk};
+    *plain_ak_sk = {std::string(cipher_ak_sk.first), std::move(sk)};
     return 0;
 }
 
 // Does not need to be locked, only generated when the process is initialized
 std::map<int64_t, std::string> global_encryption_key_info_map; // key_id->encryption_key
+
+int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
+                         const EncryptionInfoPB& encryption_info, AkSkPair* plain_ak_sk_pair) {
+    std::string key;
+    int ret = get_encryption_key_for_ak_sk(encryption_info.key_id(), &key);
+    {
+        TEST_SYNC_POINT_CALLBACK("decrypt_ak_sk:get_encryption_key_ret", &ret);
+        TEST_SYNC_POINT_CALLBACK("decrypt_ak_sk:get_encryption_key", &key);
+    }
+    if (ret != 0) {
+        LOG(WARNING) << "failed to get encryptionn key version_id: " << encryption_info.key_id();
+        return -1;
+    }
+    ret = decrypt_ak_sk({cipher_ak, cipher_sk}, encryption_info.encryption_method(), key,
+                        plain_ak_sk_pair);
+    if (ret != 0) {
+        LOG(WARNING) << "failed to decrypt";
+        return -1;
+    }
+    return 0;
+}
 
 int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
     std::string key = system_meta_service_encryption_key_info_key();
@@ -506,7 +525,9 @@ int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
     if (ret == 1) {
         if (selectdb::config::encryption_key.empty()) return -1;
         std::string decoded_string(selectdb::config::encryption_key.length(), '0');
-        int decoded_text_len = base64_decode(selectdb::config::encryption_key.c_str(), selectdb::config::encryption_key.length(), decoded_string.data());
+        int decoded_text_len =
+                base64_decode(selectdb::config::encryption_key.c_str(),
+                              selectdb::config::encryption_key.length(), decoded_string.data());
         if (decoded_text_len < 0) {
             LOG(WARNING) << "fail to decode encryption_key";
             return -1;
@@ -519,8 +540,8 @@ int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
         val = key_info.SerializeAsString();
         if (val.empty()) return -1;
         txn->put(key, val);
-        LOG(INFO) << "put server encryption_key, encryption_key=" << selectdb::config::encryption_key
-                  << " key_id=1";
+        LOG(INFO) << "put server encryption_key, encryption_key="
+                  << selectdb::config::encryption_key << " key_id=1";
         ret = txn->commit();
         if (ret != 0) {
             LOG(WARNING) << "failed to commit encryption_key";
@@ -536,12 +557,14 @@ int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
     LOG(INFO) << "get server encryption_key"
               << " key_info=" << proto_to_json(key_info);
     bool add_new_encryption_key = !selectdb::config::encryption_key.empty();
-    for (auto& item: key_info.items()) {
-        if (!selectdb::config::encryption_key.empty() && selectdb::config::encryption_key == item.key()) {
+    for (auto& item : key_info.items()) {
+        if (!selectdb::config::encryption_key.empty() &&
+            selectdb::config::encryption_key == item.key()) {
             add_new_encryption_key = false;
         }
         std::string decoded_string(item.key().length(), '0');
-        int decoded_text_len = base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
+        int decoded_text_len =
+                base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
         if (decoded_text_len < 0) {
             LOG(WARNING) << "fail to decode encryption_key";
             return -1;
@@ -551,7 +574,9 @@ int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
     }
     if (add_new_encryption_key) {
         std::string decoded_string(selectdb::config::encryption_key.length(), '0');
-        int decoded_text_len = base64_decode(selectdb::config::encryption_key.c_str(), selectdb::config::encryption_key.length(), decoded_string.data());
+        int decoded_text_len =
+                base64_decode(selectdb::config::encryption_key.c_str(),
+                              selectdb::config::encryption_key.length(), decoded_string.data());
         if (decoded_text_len < 0) {
             LOG(WARNING) << "fail to decode encryption_key";
             return -1;
@@ -565,8 +590,8 @@ int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
         val = key_info.SerializeAsString();
         if (val.empty()) return -1;
         txn->put(key, val);
-        LOG(INFO) << "put server encryption_key, encryption_key=" << selectdb::config::encryption_key
-                  << " key_id=" << new_key_id;
+        LOG(INFO) << "put server encryption_key, encryption_key="
+                  << selectdb::config::encryption_key << " key_id=" << new_key_id;
         ret = txn->commit();
         if (ret != 0) {
             LOG(WARNING) << "failed to commit encryption_key";

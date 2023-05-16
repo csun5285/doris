@@ -1,66 +1,68 @@
 #pragma once
 
-#include <brpc/server.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 
-#include "meta-service/txn_kv.h"
-#include "recycler/s3_accessor.h"
 #include "recycler/white_black_list.h"
 
+namespace brpc {
+class Server;
+} // namespace brpc
+
 namespace selectdb {
+class TxnKv;
+class InstanceRecycler;
+class ObjStoreAccessor;
 class Checker;
 
 class Recycler {
 public:
-    Recycler();
+    explicit Recycler(std::shared_ptr<TxnKv> txn_kv);
     ~Recycler();
 
     // returns 0 for success otherwise error
-    int start(bool with_brpc);
+    int start(brpc::Server* server);
 
-    void join();
+    void stop();
 
-    void add_pending_instances(std::vector<InstanceInfoPB> instances);
+    bool stopped() const { return stopped_.load(std::memory_order_acquire); }
 
 private:
     void recycle_callback();
 
-    std::vector<InstanceInfoPB> get_instances();
     void instance_scanner_callback();
 
-    bool prepare_instance_recycle_job(const std::string& instance_id);
-    void finish_instance_recycle_job(const std::string& instance_id);
-    void lease_instance_recycle_job(const std::string& instance_id);
-    void do_lease();
+    void lease_recycle_jobs();
 
 private:
-    std::shared_ptr<TxnKv> txn_kv_;
-    std::unique_ptr<brpc::Server> server_;
+    friend class RecyclerServiceImpl;
 
-    std::unique_ptr<Checker> checker_;
+    std::shared_ptr<TxnKv> txn_kv_;
+    std::atomic_bool stopped_;
 
     std::vector<std::thread> workers_;
 
+    std::mutex mtx_;
     // notify recycle workers
     std::condition_variable pending_instance_cond_;
-    std::mutex pending_instance_mtx_;
     std::deque<InstanceInfoPB> pending_instance_queue_;
     std::unordered_set<std::string> pending_instance_set_;
-
-    // for lease mechanism
-    std::mutex recycling_instance_set_mtx_;
-    std::unordered_set<std::string> recycling_instance_set_;
+    std::unordered_map<std::string, std::shared_ptr<InstanceRecycler>> recycling_instance_map_;
+    // notify instance scanner and lease thread
+    std::condition_variable notifier_;
 
     std::string ip_port_;
 
     WhiteBlackList instance_filter_;
+    std::unique_ptr<Checker> checker_;
 };
 
 class InstanceRecycler {
@@ -70,20 +72,31 @@ public:
 
     int init();
 
+    void stop() { stopped_.store(true, std::memory_order_release); }
+    bool stopped() const { return stopped_.load(std::memory_order_acquire); }
+
+    // returns 0 for success otherwise error
+    int do_recycle();
+
     // remove all kv and data in this instance, ONLY be called when instance has been deleted
-    void recycle_instance();
+    // returns 0 for success otherwise error
+    int recycle_instance();
 
     // scan and recycle expired indexes
-    void recycle_indexes();
+    // returns 0 for success otherwise error
+    int recycle_indexes();
 
     // scan and recycle expired partitions
-    void recycle_partitions();
+    // returns 0 for success otherwise error
+    int recycle_partitions();
 
     // scan and recycle expired rowsets
-    void recycle_rowsets();
+    // returns 0 for success otherwise error
+    int recycle_rowsets();
 
     // scan and recycle expired tmp rowsets
-    void recycle_tmp_rowsets();
+    // returns 0 for success otherwise error
+    int recycle_tmp_rowsets();
 
     /**
      * recycle all tablets belonging to the index specified by `index_id`
@@ -101,19 +114,24 @@ public:
     int recycle_tablet(int64_t tablet_id);
 
     // scan and abort timeout txn label
-    void abort_timeout_txn();
+    // returns 0 for success otherwise error
+    int abort_timeout_txn();
 
     //scan and recycle expire txn label
-    void recycle_expired_txn_label();
+    // returns 0 for success otherwise error
+    int recycle_expired_txn_label();
 
     // scan and recycle finished or timeout copy jobs
-    void recycle_copy_jobs();
+    // returns 0 for success otherwise error
+    int recycle_copy_jobs();
 
     // scan and recycle dropped internal stage
-    void recycle_stage();
+    // returns 0 for success otherwise error
+    int recycle_stage();
 
     // scan and recycle expired stage objects
-    void recycle_expired_stage_objects();
+    // returns 0 for success otherwise error
+    int recycle_expired_stage_objects();
 
 private:
     /**
@@ -143,6 +161,7 @@ private:
                                std::shared_ptr<ObjStoreAccessor>* accessor);
 
 private:
+    std::atomic_bool stopped_ {false};
     std::shared_ptr<TxnKv> txn_kv_;
     std::string instance_id_;
     InstanceInfoPB instance_info_;

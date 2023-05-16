@@ -19,7 +19,7 @@ class MetaServerRegister;
 
 class MetaServer {
 public:
-    MetaServer();
+    MetaServer(std::shared_ptr<TxnKv> txn_kv);
     ~MetaServer() = default;
 
     /**
@@ -27,12 +27,11 @@ public:
      *
      * return 0 for success otherwise failure
      */
-    int start();
+    int start(brpc::Server* server);
 
-    void join();
+    void stop();
 
 private:
-    std::unique_ptr<brpc::Server> server_;
     std::shared_ptr<TxnKv> txn_kv_;
     std::unique_ptr<MetaServerRegister> server_register_;
     std::unique_ptr<FdbMetricExporter> fdb_metric_exporter_;

@@ -1,6 +1,7 @@
 #include "recycler/recycler.h"
 
-#include <butil/strings/string_split.h>
+#include <brpc/server.h>
+#include <butil/endpoint.h>
 #include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 #include <signal.h>
@@ -10,6 +11,9 @@
 #include <deque>
 #include <string>
 #include <string_view>
+
+#include "recycler/checker.h"
+#include "recycler/s3_accessor.h"
 #ifdef UNIT_TEST
 #include "../test/mock_accessor.h"
 #endif
@@ -20,71 +24,10 @@
 #include "common/sync_point.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
-#include "recycler/checker.h"
 #include "recycler/recycler_service.h"
+#include "recycler/util.h"
 
 namespace selectdb {
-
-static std::atomic_bool s_is_working = false;
-static std::mutex s_working_mtx;
-static std::condition_variable s_working_cond;
-
-static bool is_working() {
-#ifdef UNIT_TEST
-    return true;
-#endif
-    return s_is_working.load(std::memory_order_acquire);
-}
-
-static void signal_handler(int signal) {
-    LOG(INFO) << "signal_handler capture signal=" << signal;
-    if (signal == SIGINT || signal == SIGTERM) {
-        s_is_working = false;
-        s_working_cond.notify_all();
-    }
-}
-
-static int install_signal(int signo, void (*handler)(int)) {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(struct sigaction));
-    sa.sa_handler = handler;
-    sigemptyset(&sa.sa_mask);
-    int ret = sigaction(signo, &sa, nullptr);
-    if (ret != 0) {
-        char buf[64];
-        LOG(ERROR) << "install signal failed, signo=" << signo << ", errno=" << errno
-                   << ", err=" << strerror_r(errno, buf, sizeof(buf));
-    }
-    return ret;
-}
-
-static void init_signals() {
-    int ret = install_signal(SIGINT, signal_handler);
-    if (ret < 0) {
-        exit(-1);
-    }
-    ret = install_signal(SIGTERM, signal_handler);
-    if (ret < 0) {
-        exit(-1);
-    }
-}
-
-std::string segment_path(int64_t tablet_id, const std::string& rowset_id, int64_t segment_id) {
-    return fmt::format("data/{}/{}_{}.dat", tablet_id, rowset_id, segment_id);
-}
-
-std::string inverted_index_path(int64_t tablet_id, const std::string& rowset_id, int64_t segment_id,
-                                int64_t index_id) {
-    return fmt::format("data/{}/{}_{}_{}.idx", tablet_id, rowset_id, segment_id, index_id);
-}
-
-std::string rowset_path_prefix(int64_t tablet_id, const std::string& rowset_id) {
-    return fmt::format("data/{}/{}_", tablet_id, rowset_id);
-}
-
-std::string tablet_path_prefix(int64_t tablet_id) {
-    return fmt::format("data/{}/", tablet_id);
-}
 
 // return 0 for success get a key, 1 for key not found, negative for error
 [[maybe_unused]] static int txn_get(TxnKv* txn_kv, std::string_view key, std::string& val) {
@@ -145,412 +88,178 @@ static int txn_remove(TxnKv* txn_kv, std::vector<std::string> keys) {
     return txn->commit();
 }
 
-Recycler::Recycler() = default;
-
-Recycler::~Recycler() = default;
-
-std::vector<InstanceInfoPB> Recycler::get_instances() {
-    std::vector<InstanceInfoPB> instances;
-    InstanceKeyInfo key0_info {""};
-    InstanceKeyInfo key1_info {"\xff"}; // instance id are human readable strings
-    std::string key0;
-    std::string key1;
-    instance_key(key0_info, &key0);
-    instance_key(key1_info, &key1);
-
-    std::unique_ptr<Transaction> txn;
-    int ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        LOG(INFO) << "failed to init txn, ret=" << ret;
-        return instances;
-    }
-
-    std::unique_ptr<RangeGetIterator> it;
-    do {
-        ret = txn->get(key0, key1, &it);
-        if (ret != 0) {
-            LOG(WARNING) << "internal error, failed to get instance, ret=" << ret;
-            return instances;
-        }
-
-        while (it->has_next()) {
-            auto [k, v] = it->next();
-            if (!it->has_next()) key0 = k;
-
-            InstanceInfoPB instance_info;
-            if (!instance_info.ParseFromArray(v.data(), v.size())) {
-                LOG_WARNING("malformed instance info").tag("key", hex(k));
-                return instances;
-            }
-
-            LOG(INFO) << "get an instance, instance_id=" << instance_info.instance_id();
-            instances.push_back(std::move(instance_info));
-        }
-        key0.push_back('\x00'); // Update to next smallest key for iteration
-    } while (it->more());
-
-    return instances;
+Recycler::Recycler(std::shared_ptr<TxnKv> txn_kv) : txn_kv_(std::move(txn_kv)) {
+    ip_port_ = std::string(butil::my_ip_cstr()) + ":" + std::to_string(config::brpc_listen_port);
 }
 
-void Recycler::add_pending_instances(std::vector<InstanceInfoPB> instances) {
-    if (instances.empty()) {
-        return;
+Recycler::~Recycler() {
+    if (!stopped()) {
+        stop();
     }
-    std::lock_guard lock(pending_instance_mtx_);
-    for (auto& instance : instances) {
-        if (instance_filter_.filter_out(instance.instance_id())) continue;
-        auto [_, success] = pending_instance_set_.insert(instance.instance_id());
-        // skip instance already in pending queue
-        if (success) {
-            pending_instance_queue_.push_back(std::move(instance));
-        }
-    }
-    pending_instance_cond_.notify_all();
 }
 
 void Recycler::instance_scanner_callback() {
-    while (is_working()) {
-        auto instances = get_instances();
+    while (!stopped()) {
+        std::vector<InstanceInfoPB> instances;
+        get_all_instances(txn_kv_.get(), instances);
         // TODO(plat1ko): delete job recycle kv of non-existent instances
-        add_pending_instances(std::move(instances));
+        LOG(INFO) << "Recycler get instances: " << [&instances] {
+            std::stringstream ss;
+            for (auto& i : instances) ss << ' ' << i.instance_id();
+            return ss.str();
+        }();
+        if (!instances.empty()) {
+            // enqueue instances
+            std::lock_guard lock(mtx_);
+            for (auto& instance : instances) {
+                if (instance_filter_.filter_out(instance.instance_id())) continue;
+                auto [_, success] = pending_instance_set_.insert(instance.instance_id());
+                // skip instance already in pending queue
+                if (success) {
+                    pending_instance_queue_.push_back(std::move(instance));
+                }
+            }
+            pending_instance_cond_.notify_all();
+        }
         {
-            std::unique_lock lock(s_working_mtx);
-            s_working_cond.wait_for(lock, std::chrono::seconds(config::recycle_interval_seconds),
-                                    []() { return !is_working(); });
+            std::unique_lock lock(mtx_);
+            notifier_.wait_for(lock, std::chrono::seconds(config::recycle_interval_seconds),
+                               [&]() { return stopped(); });
         }
     }
-}
-
-bool Recycler::prepare_instance_recycle_job(const std::string& instance_id) {
-    JobRecycleKeyInfo key_info {instance_id};
-    std::string key;
-    std::string val;
-    job_recycle_key(key_info, &key);
-    std::unique_ptr<Transaction> txn;
-    int ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to create txn";
-        return false;
-    }
-    ret = txn->get(key, &val);
-    if (ret < 0) {
-        LOG(WARNING) << "failed to get kv";
-        return false;
-    }
-
-    using namespace std::chrono;
-    auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    JobRecyclePB job_info;
-
-    auto is_expired = [&]() {
-        if (!job_info.ParseFromString(val)) {
-            LOG(WARNING) << "failed to parse JobRecyclePB";
-            // if failed to parse, just recycle it.
-            return true;
-        }
-        DCHECK(job_info.instance_id() == instance_id);
-        bool lease_expired =
-                job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
-        bool finish_expired =
-                job_info.status() == JobRecyclePB::IDLE &&
-                now - job_info.last_finish_time_ms() > config::recycle_interval_seconds * 1000;
-        return lease_expired || finish_expired;
-    };
-    if (ret == 1 || is_expired()) {
-        job_info.set_status(JobRecyclePB::BUSY);
-        job_info.set_instance_id(instance_id);
-        job_info.set_ip_port(ip_port_);
-        job_info.set_ctime_ms(now);
-        job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
-        job_info.set_last_finish_time_ms(-1);
-        val = job_info.SerializeAsString();
-        txn->put(key, val);
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to commit";
-            return false;
-        }
-        LOG(INFO) << "host: " << ip_port_ << " start recycle job, instance_id: " << instance_id;
-        return true;
-    }
-    return false;
-}
-
-void Recycler::finish_instance_recycle_job(const std::string& instance_id) {
-    JobRecycleKeyInfo key_info {instance_id};
-    std::string key;
-    std::string val;
-    job_recycle_key(key_info, &key);
-    int retry_times = 3;
-    do {
-        std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to create txn";
-            return;
-        }
-        ret = txn->get(key, &val);
-        if (ret < 0 || ret == 1) {
-            LOG(WARNING) << "failed to get kv";
-            return;
-        }
-
-        using namespace std::chrono;
-        auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-        JobRecyclePB job_info;
-        if (!job_info.ParseFromString(val)) {
-            LOG(WARNING) << "failed to parse JobRecyclePB";
-            return;
-        }
-        DCHECK(job_info.instance_id() == instance_id);
-        if (job_info.ip_port() != ip_port_) {
-            LOG(WARNING) << "recycle job of instance_id: " << instance_id
-                         << " is doing at other machine: " << job_info.ip_port();
-            return;
-        }
-        if (job_info.status() != JobRecyclePB::BUSY) {
-            LOG(WARNING) << "recycle job of instance_id: " << instance_id << " is not busy";
-            return;
-        }
-        job_info.set_status(JobRecyclePB::IDLE);
-        job_info.set_instance_id(instance_id);
-        job_info.set_last_finish_time_ms(now);
-        val = job_info.SerializeAsString();
-        txn->put(key, val);
-        ret = txn->commit();
-        if (ret == 0) {
-            LOG(INFO) << "succ to commit to finish recycle job, instance_id: " << instance_id;
-            return;
-        }
-        // maybe conflict with the commit of the leased thread
-        LOG(WARNING) << "failed to commit to finish recycle job, instance_id: " << instance_id
-                     << " try it again";
-    } while (retry_times--);
-    LOG(WARNING) << "finally failed to commit to finish recycle job, instance_id: " << instance_id;
 }
 
 void Recycler::recycle_callback() {
-    while (is_working()) {
+    while (!stopped()) {
         InstanceInfoPB instance;
         {
-            std::unique_lock lock(pending_instance_mtx_);
+            std::unique_lock lock(mtx_);
             pending_instance_cond_.wait(
-                    lock, [&]() { return !pending_instance_queue_.empty() || !is_working(); });
-            if (!is_working()) {
+                    lock, [&]() { return !pending_instance_queue_.empty() || stopped(); });
+            if (stopped()) {
                 return;
             }
             instance = std::move(pending_instance_queue_.front());
             pending_instance_queue_.pop_front();
             pending_instance_set_.erase(instance.instance_id());
         }
-        {
-            std::lock_guard lock(recycling_instance_set_mtx_);
-            auto [_, success] = recycling_instance_set_.insert(instance.instance_id());
-            if (!success) {
-                // skip instance in recycling
-                continue;
-            }
-            if (!prepare_instance_recycle_job(instance.instance_id())) {
-                recycling_instance_set_.erase(instance.instance_id());
-                continue;
-            }
-        }
-
         auto& instance_id = instance.instance_id();
-        if (instance.obj_info().empty()) {
-            LOG_WARNING("instance has no object store info").tag("instance_id", instance_id);
-            continue;
+        {
+            std::lock_guard lock(mtx_);
+            // skip instance in recycling
+            if (recycling_instance_map_.count(instance_id)) continue;
         }
-        auto instance_recycler = std::make_unique<InstanceRecycler>(txn_kv_, instance);
+        auto instance_recycler = std::make_shared<InstanceRecycler>(txn_kv_, instance);
         if (instance_recycler->init() != 0) {
             LOG(WARNING) << "failed to init instance recycler, instance_id=" << instance_id;
             continue;
         }
-        if (instance.status() == InstanceInfoPB::DELETED) {
-            instance_recycler->recycle_instance();
-        } else if (instance.status() == InstanceInfoPB::NORMAL) {
-            LOG_INFO("begin to recycle instance").tag("instance_id", instance_id);
-            instance_recycler->recycle_indexes();
-            instance_recycler->recycle_partitions();
-            instance_recycler->recycle_tmp_rowsets();
-            instance_recycler->recycle_rowsets();
-            instance_recycler->abort_timeout_txn();
-            instance_recycler->recycle_expired_txn_label();
-            instance_recycler->recycle_copy_jobs();
-            instance_recycler->recycle_stage();
-            instance_recycler->recycle_expired_stage_objects();
+        std::string recycle_job_key;
+        job_recycle_key({instance_id}, &recycle_job_key);
+        int ret = prepare_instance_recycle_job(txn_kv_.get(), recycle_job_key, instance_id,
+                                               ip_port_, config::recycle_interval_seconds * 1000);
+        if (ret != 0) { // Prepare failed
+            continue;
         } else {
-            LOG(WARNING) << "unknown instance status: " << instance.status()
-                         << " instance_id=" << instance_id;
+            std::lock_guard lock(mtx_);
+            recycling_instance_map_.emplace(instance_id, instance_recycler);
+        }
+        if (stopped()) return;
+        LOG_INFO("begin to recycle instance").tag("instance_id", instance_id);
+        ret = instance_recycler->do_recycle();
+        // If instance recycler has been aborted, don't finish this job
+        if (!instance_recycler->stopped()) {
+            finish_instance_recycle_job(txn_kv_.get(), recycle_job_key, instance_id, ip_port_,
+                                        ret == 0);
         }
         {
-            std::lock_guard lock(recycling_instance_set_mtx_);
-            recycling_instance_set_.erase(instance_id);
+            std::lock_guard lock(mtx_);
+            recycling_instance_map_.erase(instance_id);
         }
-        finish_instance_recycle_job(instance_id);
         LOG_INFO("finish recycle instance").tag("instance_id", instance_id);
     }
 }
 
-void Recycler::lease_instance_recycle_job(const std::string& instance_id) {
-    JobRecycleKeyInfo key_info {instance_id};
-    std::string key;
-    std::string val;
-    job_recycle_key(key_info, &key);
-
-    std::unique_ptr<Transaction> txn;
-    int ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to create txn";
-        return;
-    }
-    ret = txn->get(key, &val);
-    if (ret < 0 || ret == 1) {
-        LOG(WARNING) << "failed to get kv";
-        return;
-    }
-
-    using namespace std::chrono;
-    auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    JobRecyclePB job_info;
-    if (!job_info.ParseFromString(val)) {
-        LOG(WARNING) << "failed to parse JobRecyclePB";
-        return;
-    }
-    DCHECK(job_info.instance_id() == instance_id);
-    if (job_info.ip_port() != ip_port_) {
-        LOG(WARNING) << "recycle job of instance_id: " << instance_id
-                     << " is doing at other machine: " << job_info.ip_port();
-        // Todo: abort the recycle of this instance_id
-        return;
-    }
-    if (job_info.status() != JobRecyclePB::BUSY) {
-        LOG(WARNING) << "recycle job of instance_id: " << instance_id << " is not busy";
-        return;
-    }
-    job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
-    val = job_info.SerializeAsString();
-    txn->put(key, val);
-    ret = txn->commit();
-    if (ret != 0) {
-        LOG(WARNING) << "failed to commit, failed to lease recycle job of instance_id: "
-                     << instance_id;
-    }
-}
-
-void Recycler::do_lease() {
-    while (is_working()) {
-        std::unordered_set<std::string> instance_set;
+void Recycler::lease_recycle_jobs() {
+    while (!stopped()) {
+        std::vector<std::string> instances;
+        instances.reserve(recycling_instance_map_.size());
         {
-            std::lock_guard lock(recycling_instance_set_mtx_);
-            instance_set = recycling_instance_set_;
+            std::lock_guard lock(mtx_);
+            for (auto& [id, _] : recycling_instance_map_) {
+                instances.push_back(id);
+            }
         }
-        for (const auto& instance_id : instance_set) {
-            lease_instance_recycle_job(instance_id);
+        for (auto& i : instances) {
+            std::string recycle_job_key;
+            job_recycle_key({i}, &recycle_job_key);
+            int ret = lease_instance_recycle_job(txn_kv_.get(), recycle_job_key, i, ip_port_);
+            if (ret == 1) {
+                std::lock_guard lock(mtx_);
+                if (auto it = recycling_instance_map_.find(i);
+                    it != recycling_instance_map_.end()) {
+                    it->second->stop();
+                }
+            }
         }
         {
-            std::unique_lock lock(s_working_mtx);
-            s_working_cond.wait_for(
-                    lock, std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3),
-                    []() { return !is_working(); });
+            std::unique_lock lock(mtx_);
+            notifier_.wait_for(lock,
+                               std::chrono::milliseconds(config::recycle_job_lease_expired_ms / 3),
+                               [&]() { return stopped(); });
         }
     }
 }
 
-int Recycler::start(bool with_brpc) {
-    init_signals(); // for graceful exit
-
+int Recycler::start(brpc::Server* server) {
     instance_filter_.reset(config::recycle_whitelist, config::recycle_blacklist);
-    int ret = 0;
-    txn_kv_ = std::make_shared<FdbTxnKv>();
-    LOG(INFO) << "begin to init txn kv";
-    ret = txn_kv_->init();
-    if (ret != 0) {
-        LOG(WARNING) << "failed to init txnkv, ret=" << ret;
-        return -1;
-    }
-    LOG(INFO) << "successfully init txn kv";
 
-    if (init_global_encryption_key_info_map(txn_kv_) != 0) {
-        LOG(WARNING) << "failed to init global encryption key map";
-        return -1;
-    }
-
-    // Whether brpc server is enabled or not, still need `ip_port_` to identify a recycler process in lease mechanism
-    ip_port_ = std::string(butil::my_ip_cstr()) + ":" + std::to_string(config::brpc_listen_port);
-    if (with_brpc) {
-        server_ = std::make_unique<brpc::Server>();
-        // Add service
-        auto recycler_service = new RecyclerServiceImpl(txn_kv_, this);
-        server_->AddService(recycler_service, brpc::SERVER_OWNS_SERVICE);
-        // start service
-        brpc::ServerOptions options;
-        if (config::brpc_num_threads != -1) {
-            options.num_threads = config::brpc_num_threads;
-        }
-        int port = selectdb::config::brpc_listen_port;
-        if (server_->Start(port, &options) != 0) {
-            char buf[64];
-            LOG(WARNING) << "failed to start brpc, errno=" << errno
-                         << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
-            return -1;
-        }
-        LOG(INFO) << "successfully started brpc listening on port=" << port;
-    }
     if (config::enable_checker) {
         checker_ = std::make_unique<Checker>(txn_kv_);
-        ret = checker_->start();
+        int ret = checker_->start();
+        std::string msg;
         if (ret != 0) {
-            LOG(WARNING) << "failed to init checker, ret=" << ret;
-            return -1;
+            msg = "failed to start checker";
+            LOG(ERROR) << msg;
+            std::cerr << msg << std::endl;
+            return ret;
         }
-        LOG(INFO) << "successfully init checker";
+        msg = "checker started";
+        LOG(INFO) << msg;
+        std::cout << msg << std::endl;
     }
-    s_is_working = true;
+
+    if (server) {
+        // Add service
+        auto recycler_service = new RecyclerServiceImpl(txn_kv_, this, checker_.get());
+        server->AddService(recycler_service, brpc::SERVER_OWNS_SERVICE);
+    }
 
     workers_.push_back(std::thread(std::bind(&Recycler::instance_scanner_callback, this)));
     for (int i = 0; i < config::recycle_concurrency; ++i) {
         workers_.push_back(std::thread(std::bind(&Recycler::recycle_callback, this)));
     }
 
-    workers_.push_back(std::thread(std::mem_fn(&Recycler::do_lease), this));
+    workers_.push_back(std::thread(std::mem_fn(&Recycler::lease_recycle_jobs), this));
     return 0;
 }
 
-void Recycler::join() {
-    if (server_) { // with brpc
-        server_->RunUntilAskedToQuit();
-        server_->ClearServices();
-    }
+void Recycler::stop() {
+    stopped_ = true;
+    notifier_.notify_all();
+    pending_instance_cond_.notify_all();
     {
-        std::unique_lock lock(s_working_mtx);
-        s_working_cond.wait(lock, []() { return !is_working(); });
+        std::lock_guard lock(mtx_);
+        for (auto& [_, recycler] : recycling_instance_map_) {
+            recycler->stop();
+        }
     }
-    if (checker_) { // enable checker
+    for (auto& w : workers_) {
+        if (w.joinable()) w.join();
+    }
+    if (checker_) {
         checker_->stop();
     }
-    pending_instance_cond_.notify_all();
-    for (auto& w : workers_) {
-        w.join();
-    }
-}
-
-static int decrypt_ak_sk_helper(const std::string& cipher_ak, const std::string& cipher_sk,
-                                const EncryptionInfoPB& encryption_info,
-                                AkSkPair* plain_ak_sk_pair) {
-    std::string key;
-    int ret = get_encryption_key_for_ak_sk(encryption_info.key_id(), &key);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to get encryptionn key version_id: " << encryption_info.key_id();
-        return -1;
-    }
-    ret = decrypt_ak_sk({cipher_ak, cipher_sk}, encryption_info.encryption_method(), key,
-                        plain_ak_sk_pair);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to decrypt";
-        return -1;
-    }
-    return 0;
 }
 
 class InstanceRecycler::InvertedIndexIdCache {
@@ -671,27 +380,47 @@ int InstanceRecycler::init() {
     return 0;
 }
 
-void InstanceRecycler::recycle_instance() {
-    LOG_INFO("begin to remove all data in instance").tag("instance_id", instance_id_);
+int InstanceRecycler::do_recycle() {
+    TEST_SYNC_POINT("InstanceRecycler.do_recycle");
+    if (instance_info_.status() == InstanceInfoPB::DELETED) {
+        return recycle_instance();
+    } else if (instance_info_.status() == InstanceInfoPB::NORMAL) {
+        int ret = recycle_indexes();
+        if (recycle_partitions() != 0) ret = -1;
+        if (recycle_tmp_rowsets() != 0) ret = -1;
+        if (recycle_rowsets() != 0) ret = -1;
+        if (abort_timeout_txn() != 0) ret = -1;
+        if (recycle_expired_txn_label() != 0) ret = -1;
+        if (recycle_copy_jobs() != 0) ret = -1;
+        if (recycle_stage() != 0) ret = -1;
+        if (recycle_expired_stage_objects() != 0) ret = -1;
+        return ret;
+    } else {
+        LOG(WARNING) << "unknown instance status: " << instance_info_.status()
+                     << " instance_id=" << instance_id_;
+        return -1;
+    }
+}
 
-    bool success = true;
+int InstanceRecycler::recycle_instance() {
+    LOG_INFO("begin to recycle deleted instance").tag("instance_id", instance_id_);
+
+    int ret = 0;
     using namespace std::chrono;
     auto start_time = steady_clock::now();
 
     std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
         auto cost = duration<float>(steady_clock::now() - start_time).count();
-        LOG(INFO) << (success ? "successfully" : "failed to")
-                  << " remove all data in instance, cost=" << cost
+        LOG(INFO) << (ret == 0 ? "successfully" : "failed to")
+                  << " recycle deleted instance, cost=" << cost
                   << "s, instance_id=" << instance_id_;
     });
 
-    int ret = 0;
     std::unique_ptr<Transaction> txn;
     ret = txn_kv_->create_txn(&txn);
     if (ret != 0) {
         LOG(WARNING) << "failed to create txn";
-        success = false;
-        return;
+        return ret;
     }
     LOG(INFO) << "begin to delete all kv, instance_id=" << instance_id_;
     // delete kv before deleting objects to prevent the checker from misjudging data loss
@@ -722,25 +451,25 @@ void InstanceRecycler::recycle_instance() {
     ret = txn->commit();
     if (ret != 0) {
         LOG(WARNING) << "failed to delete all kv, instance_id=" << instance_id_;
-        success = false;
     }
 
     for (auto& [_, accessor] : accessor_map_) {
+        if (stopped()) return ret;
         LOG(INFO) << "begin to delete all objects in " << accessor->path();
-        ret = accessor->delete_objects_by_prefix("");
-        if (ret == 0) {
+        if (accessor->delete_objects_by_prefix("") == 0) {
             LOG(INFO) << "successfully delete all objects in " << accessor->path();
         } else { // no need to log, because S3Accessor has logged this error
-            success = false;
+            ret = -1;
         }
     }
+    // FIXME(meiyi): Delete objects in stages
 
-    if (success) {
+    if (ret == 0) {
         // remove instance kv
         ret = txn_kv_->create_txn(&txn);
         if (ret != 0) {
             LOG(WARNING) << "failed to create txn";
-            return;
+            return ret;
         }
         std::string key;
         instance_key({instance_id_}, &key);
@@ -750,9 +479,10 @@ void InstanceRecycler::recycle_instance() {
             LOG(WARNING) << "failed to delete instance kv, instance_id=" << instance_id_;
         }
     }
+    return ret;
 }
 
-void InstanceRecycler::recycle_indexes() {
+int InstanceRecycler::recycle_indexes() {
     int num_scanned = 0;
     int num_expired = 0;
     int num_recycled = 0;
@@ -829,10 +559,10 @@ void InstanceRecycler::recycle_indexes() {
         return 0;
     };
 
-    scan_and_recycle(index_key0, index_key1, std::move(recycle_func), std::move(loop_done));
+    return scan_and_recycle(index_key0, index_key1, std::move(recycle_func), std::move(loop_done));
 }
 
-void InstanceRecycler::recycle_partitions() {
+int InstanceRecycler::recycle_partitions() {
     int num_scanned = 0;
     int num_expired = 0;
     int num_recycled = 0;
@@ -915,7 +645,7 @@ void InstanceRecycler::recycle_partitions() {
         return 0;
     };
 
-    scan_and_recycle(part_key0, part_key1, std::move(recycle_func), std::move(loop_done));
+    return scan_and_recycle(part_key0, part_key1, std::move(recycle_func), std::move(loop_done));
 }
 
 int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_t partition_id) {
@@ -1221,7 +951,7 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
     return ret;
 }
 
-void InstanceRecycler::recycle_rowsets() {
+int InstanceRecycler::recycle_rowsets() {
     int num_scanned = 0;
     int num_expired = 0;
     std::atomic_int num_recycled = 0;
@@ -1374,20 +1104,22 @@ void InstanceRecycler::recycle_rowsets() {
         return 0;
     };
 
-    scan_and_recycle(recyc_rs_key0, recyc_rs_key1, std::move(handle_rowset_kv),
-                     std::move(loop_done));
+    int ret = scan_and_recycle(recyc_rs_key0, recyc_rs_key1, std::move(handle_rowset_kv),
+                               std::move(loop_done));
     worker_pool->stop();
 
     if (!async_recycled_rowset_keys.empty()) {
         if (txn_remove(txn_kv_.get(), async_recycled_rowset_keys) != 0) {
             LOG(WARNING) << "failed to delete recycle rowset kv, instance_id=" << instance_id_;
+            return -1;
         } else {
             num_recycled.fetch_add(async_recycled_rowset_keys.size(), std::memory_order_relaxed);
         }
     }
+    return ret;
 }
 
-void InstanceRecycler::recycle_tmp_rowsets() {
+int InstanceRecycler::recycle_tmp_rowsets() {
     int num_scanned = 0;
     int num_expired = 0;
     int num_recycled = 0;
@@ -1471,7 +1203,8 @@ void InstanceRecycler::recycle_tmp_rowsets() {
         return 0;
     };
 
-    scan_and_recycle(tmp_rs_key0, tmp_rs_key1, std::move(handle_rowset_kv), std::move(loop_done));
+    return scan_and_recycle(tmp_rs_key0, tmp_rs_key1, std::move(handle_rowset_kv),
+                            std::move(loop_done));
 }
 
 int InstanceRecycler::scan_and_recycle(
@@ -1481,9 +1214,9 @@ int InstanceRecycler::scan_and_recycle(
     int ret = 0;
     std::unique_ptr<RangeGetIterator> it;
     do {
-        ret = txn_get(txn_kv_.get(), begin, end, it);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to get kv, key=" << begin << " ret=" << ret;
+        int get_ret = txn_get(txn_kv_.get(), begin, end, it);
+        if (get_ret != 0) {
+            LOG(WARNING) << "failed to get kv, key=" << begin << " ret=" << get_ret;
             return -1;
         }
         VLOG_DEBUG << "fetch " << it->size() << " kv";
@@ -1504,11 +1237,11 @@ int InstanceRecycler::scan_and_recycle(
         if (loop_done) {
             if (loop_done() != 0) ret = -1;
         }
-    } while (it->more() && is_working());
+    } while (it->more() && !stopped());
     return ret;
 }
 
-void InstanceRecycler::abort_timeout_txn() {
+int InstanceRecycler::abort_timeout_txn() {
     int num_scanned = 0;
     int num_timeout = 0;
     int num_abort = 0;
@@ -1619,10 +1352,11 @@ void InstanceRecycler::abort_timeout_txn() {
         return 0;
     };
 
-    scan_and_recycle(begin_txn_running_key, end_txn_running_key, std::move(handle_txn_running_kv));
+    return scan_and_recycle(begin_txn_running_key, end_txn_running_key,
+                            std::move(handle_txn_running_kv));
 }
 
-void InstanceRecycler::recycle_expired_txn_label() {
+int InstanceRecycler::recycle_expired_txn_label() {
     int num_scanned = 0;
     int num_expired = 0;
     int num_recycled = 0;
@@ -1739,10 +1473,11 @@ void InstanceRecycler::recycle_expired_txn_label() {
         return 0;
     };
 
-    scan_and_recycle(begin_recycle_txn_key, end_recycle_txn_key, std::move(handle_recycle_txn_kv));
+    return scan_and_recycle(begin_recycle_txn_key, end_recycle_txn_key,
+                            std::move(handle_recycle_txn_kv));
 }
 
-void InstanceRecycler::recycle_copy_jobs() {
+int InstanceRecycler::recycle_copy_jobs() {
     int num_scanned = 0;
     int num_finished = 0;
     int num_expired = 0;
@@ -1803,7 +1538,7 @@ void InstanceRecycler::recycle_copy_jobs() {
                 } else {
                     auto ret = init_copy_job_accessor(stage_id, copy_job.stage_type(), &accessor);
                     if (ret < 0) { // error
-                        return false;
+                        return -1;
                     } else if (ret == 0) {
                         stage_accessor_map.emplace(stage_id, accessor);
                     } else { // stage not found, skip check storage
@@ -1904,7 +1639,7 @@ void InstanceRecycler::recycle_copy_jobs() {
         return 0;
     };
 
-    scan_and_recycle(key0, key1, std::move(recycle_func));
+    return scan_and_recycle(key0, key1, std::move(recycle_func));
 }
 
 int InstanceRecycler::init_copy_job_accessor(const std::string& stage_id,
@@ -2021,7 +1756,7 @@ int InstanceRecycler::init_copy_job_accessor(const std::string& stage_id,
     return 0;
 }
 
-void InstanceRecycler::recycle_stage() {
+int InstanceRecycler::recycle_stage() {
     int num_scanned = 0;
     int num_recycled = 0;
 
@@ -2121,10 +1856,10 @@ void InstanceRecycler::recycle_stage() {
         return 0;
     };
 
-    scan_and_recycle(key0, key1, std::move(recycle_func), std::move(loop_done));
+    return scan_and_recycle(key0, key1, std::move(recycle_func), std::move(loop_done));
 }
 
-void InstanceRecycler::recycle_expired_stage_objects() {
+int InstanceRecycler::recycle_expired_stage_objects() {
     LOG_INFO("begin to recycle expired stage objects").tag("instance_id", instance_id_);
 
     using namespace std::chrono;
@@ -2134,9 +1869,9 @@ void InstanceRecycler::recycle_expired_stage_objects() {
         auto cost = duration<float>(steady_clock::now() - start_time).count();
         LOG_INFO("recycle expired stage objects, cost={}s", cost).tag("instance_id", instance_id_);
     });
-
+    int ret = 0;
     for (const auto& stage : instance_info_.stages()) {
-        if (!is_working()) break;
+        if (stopped()) break;
         if (stage.type() == StagePB::EXTERNAL) {
             continue;
         }
@@ -2151,9 +1886,9 @@ void InstanceRecycler::recycle_expired_stage_objects() {
         s3_conf.sk = old_obj.sk();
         if (old_obj.has_encryption_info()) {
             AkSkPair plain_ak_sk_pair;
-            int ret = decrypt_ak_sk_helper(old_obj.ak(), old_obj.sk(), old_obj.encryption_info(),
-                                           &plain_ak_sk_pair);
-            if (ret != 0) {
+            int ret1 = decrypt_ak_sk_helper(old_obj.ak(), old_obj.sk(), old_obj.encryption_info(),
+                                            &plain_ak_sk_pair);
+            if (ret1 != 0) {
                 LOG(WARNING) << "fail to decrypt ak sk "
                              << "obj_info:" << proto_to_json(old_obj);
             } else {
@@ -2167,9 +1902,10 @@ void InstanceRecycler::recycle_expired_stage_objects() {
         s3_conf.prefix = stage.obj_info().prefix();
         std::shared_ptr<ObjStoreAccessor> accessor =
                 std::make_shared<S3Accessor>(std::move(s3_conf));
-        auto ret = accessor->init();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to init s3 accessor ret=" << ret;
+        auto ret1 = accessor->init();
+        if (ret1 != 0) {
+            LOG(WARNING) << "failed to init s3 accessor ret=" << ret1;
+            ret = -1;
             continue;
         }
 
@@ -2181,13 +1917,15 @@ void InstanceRecycler::recycle_expired_stage_objects() {
         int64_t expired_time =
                 duration_cast<seconds>(system_clock::now().time_since_epoch()).count() -
                 config::internal_stage_objects_expire_time_second;
-        ret = accessor->delete_expired_objects("", expired_time);
-        if (ret != 0) {
+        ret1 = accessor->delete_expired_objects("", expired_time);
+        if (ret1 != 0) {
             LOG(WARNING) << "failed to recycle expired stage objects, instance_id=" << instance_id_
-                         << ", stage_id=" << stage.stage_id() << ", ret=" << ret;
+                         << ", stage_id=" << stage.stage_id() << ", ret=" << ret1;
+            ret = -1;
             continue;
         }
     }
+    return ret;
 }
 
 } // namespace selectdb

@@ -25,40 +25,14 @@
 #include <thread>
 // clang-format on
 
-namespace brpc {
-DECLARE_uint64(max_body_size);
-DECLARE_int64(socket_max_unwritten_bytes);
-} // namespace brpc
-
 namespace selectdb {
 
-MetaServer::MetaServer() {
-    server_.reset(new brpc::Server());
-}
+MetaServer::MetaServer(std::shared_ptr<TxnKv> txn_kv) : txn_kv_(std::move(txn_kv)) {}
 
-int MetaServer::start() {
-    if (config::use_mem_kv) {
-        // MUST NOT be used in production environment
-        std::cerr << "use volatile mem kv, please make sure it is not a production environment"
-                  << std::endl;
-        txn_kv_ = std::make_shared<MemTxnKv>();
-    } else {
-        txn_kv_ = std::dynamic_pointer_cast<TxnKv>(std::make_shared<FdbTxnKv>());
-    }
-    if (txn_kv_ == nullptr) {
-        LOG(WARNING) << "failed to create txn kv, invalid txnkv type";
-        return 1;
-    }
-    LOG(INFO) << "begin to init txn kv";
-    int ret = txn_kv_->init();
-    if (ret != 0) {
-        LOG(WARNING) << "failed to init txnkv, ret=" << ret;
-        return 1;
-    }
-    LOG(INFO) << "successfully init txn kv";
-
+int MetaServer::start(brpc::Server* server) {
+    DCHECK(server);
     auto rc_mgr = std::make_shared<ResourceManager>(txn_kv_);
-    ret = rc_mgr->init();
+    int ret = rc_mgr->init();
     if (ret != 0) {
         LOG(WARNING) << "failed to init resrouce manager, ret=" << ret;
         return 1;
@@ -76,41 +50,16 @@ int MetaServer::start() {
         LOG(WARNING) << "failed to start fdb metric exporter";
     }
 
-    if (init_global_encryption_key_info_map(txn_kv_) != 0) {
-        LOG(WARNING) << "failed to init global encryption key map";
-        return -1;
-    }
-
     auto rate_limiter = std::make_shared<RateLimiter>();
-
-    brpc::FLAGS_max_body_size = selectdb::config::brpc_max_body_size;
-    brpc::FLAGS_socket_max_unwritten_bytes = selectdb::config::brpc_socket_max_unwritten_bytes;
 
     // Add service
     auto meta_service = new MetaServiceImpl(txn_kv_, rc_mgr, rate_limiter);
-    server_->AddService(meta_service, brpc::SERVER_OWNS_SERVICE);
-    // start service
-    brpc::ServerOptions options;
-    if (config::brpc_num_threads != -1) {
-        options.num_threads = config::brpc_num_threads;
-    }
-    int port = selectdb::config::brpc_listen_port;
-    if (server_->Start(port, &options) != 0) {
-        char buf[64];
-        LOG(WARNING) << "failed to start brpc, errno=" << errno
-                     << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
-        return -1;
-    }
-    LOG(INFO) << "succesfully started brpc listening on port=" << port;
+    server->AddService(meta_service, brpc::SERVER_OWNS_SERVICE);
 
     return 0;
 }
 
-void MetaServer::join() {
-    server_->RunUntilAskedToQuit();
-    // server_->Stop(1000);
-    // server_->Join();
-    server_->ClearServices();
+void MetaServer::stop() {
     server_register_->stop();
     fdb_metric_exporter_->stop();
 }

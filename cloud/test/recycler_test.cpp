@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 
@@ -19,6 +20,8 @@
 #include "meta-service/meta_service.h"
 #include "mock_resource_manager.h"
 #include "rate-limiter/rate_limiter.h"
+#include "recycler/checker.h"
+#include "recycler/s3_accessor.h"
 #include "recycler/white_black_list.h"
 
 static const std::string instance_id = "instance_id_recycle_test";
@@ -570,7 +573,7 @@ TEST(RecyclerTest, recycle_empty) {
     InstanceRecycler recycler(txn_kv, instance);
     ASSERT_EQ(recycler.init(), 0);
 
-    recycler.recycle_rowsets();
+    ASSERT_EQ(recycler.recycle_rowsets(), 0);
 }
 
 TEST(RecyclerTest, recycle_rowsets) {
@@ -626,7 +629,7 @@ TEST(RecyclerTest, recycle_rowsets) {
         create_recycle_rowset(txn_kv.get(), accessor.get(), rowset, RecycleRowsetPB::COMPACT, true);
     }
 
-    recycler.recycle_rowsets();
+    ASSERT_EQ(recycler.recycle_rowsets(), 0);
 
     // check rowset does not exist on obj store
     std::vector<std::string> files;
@@ -696,7 +699,7 @@ TEST(RecyclerTest, bench_recycle_rowsets) {
                               i & 1);
     }
 
-    recycler.recycle_rowsets();
+    ASSERT_EQ(recycler.recycle_rowsets(), 0);
 
     // check rowset does not exist on obj store
     std::vector<std::string> files;
@@ -763,7 +766,7 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
         }
     }
 
-    recycler.recycle_tmp_rowsets();
+    ASSERT_EQ(recycler.recycle_tmp_rowsets(), 0);
 
     // check rowset does not exist on obj store
     std::vector<std::string> files;
@@ -903,7 +906,7 @@ TEST(RecyclerTest, recycle_indexes) {
         }
     }
     create_recycle_index(txn_kv.get(), index_id, RecycleIndexPB::DROP);
-    recycler.recycle_indexes();
+    ASSERT_EQ(recycler.recycle_indexes(), 0);
 
     // check rowset does not exist on s3
     std::vector<std::string> files;
@@ -955,7 +958,7 @@ TEST(RecyclerTest, recycle_indexes) {
     ASSERT_EQ(it->size(), 0);
 
     // Test recycle tmp rowsets after recycle indexes
-    recycler.recycle_tmp_rowsets();
+    ASSERT_EQ(recycler.recycle_tmp_rowsets(), 0);
     ASSERT_EQ(txn_kv->create_txn(&txn), 0);
     begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
     end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
@@ -1014,7 +1017,7 @@ TEST(RecyclerTest, recycle_partitions) {
         }
     }
     create_recycle_partiton(txn_kv.get(), partition_id, index_ids, RecyclePartitionPB::DROP);
-    recycler.recycle_partitions();
+    ASSERT_EQ(recycler.recycle_partitions(), 0);
 
     // check rowset does not exist on s3
     std::vector<std::string> files;
@@ -1095,7 +1098,7 @@ TEST(RecyclerTest, abort_timeout_txn) {
     InstanceRecycler recycler(txn_kv, instance);
     ASSERT_EQ(recycler.init(), 0);
     sleep(1);
-    recycler.abort_timeout_txn();
+    ASSERT_EQ(recycler.abort_timeout_txn(), 0);
     TxnInfoPB txn_info_pb;
     get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb);
     ASSERT_EQ(txn_info_pb.status(), TxnStatusPB::TXN_STATUS_ABORTED);
@@ -1138,7 +1141,7 @@ TEST(RecyclerTest, abort_timeout_txn_and_rebegin) {
     InstanceRecycler recycler(txn_kv, instance);
     ASSERT_EQ(recycler.init(), 0);
     sleep(1);
-    recycler.abort_timeout_txn();
+    ASSERT_EQ(recycler.abort_timeout_txn(), 0);
     TxnInfoPB txn_info_pb;
     get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb);
     ASSERT_EQ(txn_info_pb.status(), TxnStatusPB::TXN_STATUS_ABORTED);
@@ -1446,7 +1449,7 @@ TEST(RecyclerTest, recycle_copy_jobs) {
         }
     }
 
-    recycler.recycle_copy_jobs();
+    ASSERT_EQ(recycler.recycle_copy_jobs(), 0);
 
     // check object files
     std::vector<std::tuple<std::shared_ptr<ObjStoreAccessor>, std::string, int>>
@@ -1542,7 +1545,7 @@ TEST(RecyclerTest, recycle_stage) {
     ASSERT_EQ(0, txn->get(key, &val));
 
     // recycle stage
-    recycler.recycle_stage();
+    ASSERT_EQ(0, recycler.recycle_stage());
     std::vector<std::string> files;
     ASSERT_EQ(0, accessor->list("", &files));
     ASSERT_EQ(0, files.size());
@@ -1552,61 +1555,234 @@ TEST(RecyclerTest, recycle_stage) {
 
 TEST(RecyclerTest, DISABLED_multi_recycler) {
     config::recycle_concurrency = 2;
-    config::recycle_interval_seconds = 2;
-    config::recycle_job_lease_expired_ms = 3;
+    config::recycle_interval_seconds = 10;
+    config::recycle_job_lease_expired_ms = 60;
     auto mem_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(mem_kv->init(), 0);
-    {
-        for (int i = 0; i < 10; ++i) {
-            InstanceInfoPB instance;
-            instance.set_instance_id(std::to_string(i));
-            auto obj_info = instance.add_obj_info();
-            obj_info->set_id("multi_recycler_test");
-            obj_info->set_ak(config::test_s3_ak);
-            obj_info->set_sk(config::test_s3_sk);
-            obj_info->set_endpoint(config::test_s3_endpoint);
-            obj_info->set_region(config::test_s3_region);
-            obj_info->set_bucket(config::test_s3_bucket);
-            obj_info->set_prefix("multi_recycler_test");
-            InstanceKeyInfo key_info {std::to_string(i)};
-            std::string key;
-            instance_key(key_info, &key);
-            std::string val = instance.SerializeAsString();
-            std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(0, mem_kv->create_txn(&txn));
-            txn->put(key, val);
-            ASSERT_EQ(0, txn->commit());
-        }
+
+    std::atomic_int count {0};
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("InstanceRecycler.do_recycle", [&count](void*) {
+        sleep(1);
+        ++count;
+    });
+    sp->enable_processing();
+
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    for (int i = 0; i < 10; ++i) {
+        InstanceInfoPB instance;
+        instance.set_instance_id(std::to_string(i));
+        auto obj_info = instance.add_obj_info();
+        obj_info->set_id("multi_recycler_test");
+        obj_info->set_ak(config::test_s3_ak);
+        obj_info->set_sk(config::test_s3_sk);
+        obj_info->set_endpoint(config::test_s3_endpoint);
+        obj_info->set_region(config::test_s3_region);
+        obj_info->set_bucket(config::test_s3_bucket);
+        obj_info->set_prefix("multi_recycler_test");
+        InstanceKeyInfo key_info {std::to_string(i)};
+        std::string key;
+        instance_key(key_info, &key);
+        std::string val = instance.SerializeAsString();
+        txn->put(key, val);
     }
-    Recycler r1;
-    r1.txn_kv_ = mem_kv;
+    ASSERT_EQ(0, txn->commit());
+
+    Recycler r1(mem_kv);
     r1.ip_port_ = "r1:p1";
-    r1.start(false);
-    Recycler r2;
-    r2.txn_kv_ = mem_kv;
+    r1.start(nullptr);
+    Recycler r2(mem_kv);
     r2.ip_port_ = "r2:p2";
-    r2.start(false);
+    r2.start(nullptr);
+    Recycler r3(mem_kv);
+    r3.ip_port_ = "r3:p3";
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    r3.start(nullptr);
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    r1.join();
-    r2.join();
+    r1.stop();
+    r2.stop();
+    r3.stop();
 
+    ASSERT_EQ(0, mem_kv->create_txn(&txn));
     for (int i = 0; i < 10; ++i) {
         JobRecycleKeyInfo key_info {std::to_string(i)};
         JobRecyclePB job_info;
         std::string key;
         std::string val;
         job_recycle_key(key_info, &key);
-        std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(0, mem_kv->create_txn(&txn));
-        int ret = txn->get(key, &val);
-        if (ret == 0) {
-            ASSERT_EQ(true, job_info.ParseFromString(val));
-        }
-        ASSERT_EQ(JobRecyclePB::IDLE, job_info.status());
+        ASSERT_EQ(0, txn->get(key, &val)) << i;
+        ASSERT_TRUE(job_info.ParseFromString(val));
+        EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
+        EXPECT_GT(job_info.last_finish_time_ms(), 0);
         std::cout << "host: " << job_info.ip_port() << " finish recycle job of instance_id: " << i
                   << std::endl;
     }
+    EXPECT_EQ(count, 10);
+}
+
+TEST(CheckerTest, normal) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("1");
+    obj_info->set_ak(config::test_s3_ak);
+    obj_info->set_sk(config::test_s3_sk);
+    obj_info->set_endpoint(config::test_s3_endpoint);
+    obj_info->set_region(config::test_s3_region);
+    obj_info->set_bucket(config::test_s3_bucket);
+    obj_info->set_prefix("CheckerTest");
+
+    InstanceChecker checker(txn_kv, instance_id);
+    ASSERT_EQ(checker.init(instance), 0);
+
+    auto accessor = checker.accessor_map_.begin()->second;
+    for (int t = 10001; t <= 10100; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 1);
+        }
+    }
+    for (int t = 10101; t <= 10200; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 5);
+        }
+    }
+    ASSERT_EQ(checker.do_check(), 0);
+}
+
+TEST(CheckerTest, abnormal) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("1");
+    obj_info->set_ak(config::test_s3_ak);
+    obj_info->set_sk(config::test_s3_sk);
+    obj_info->set_endpoint(config::test_s3_endpoint);
+    obj_info->set_region(config::test_s3_region);
+    obj_info->set_bucket(config::test_s3_bucket);
+    obj_info->set_prefix("CheckerTest");
+
+    InstanceChecker checker(txn_kv, instance_id);
+    ASSERT_EQ(checker.init(instance), 0);
+
+    auto accessor = checker.accessor_map_.begin()->second;
+    for (int t = 10001; t <= 10100; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 1, 0);
+        }
+    }
+    for (int t = 10101; t <= 10200; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 5, 0);
+        }
+    }
+
+    // Delete some objects
+    std::mt19937 gen(std::chrono::system_clock::now().time_since_epoch().count());
+    std::vector<std::string> paths;
+    std::vector<std::string> deleted_paths;
+    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10001 + gen() % 100), &paths));
+    deleted_paths.push_back(paths[gen() % paths.size()]);
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
+    paths.clear();
+    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10101 + gen() % 100), &paths));
+    deleted_paths.push_back(paths[gen() % paths.size()]);
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
+
+    std::vector<std::string> lost_paths;
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("InstanceChecker.do_check1", [&lost_paths](void* arg) {
+        lost_paths.push_back(*(std::string*)arg);
+    });
+    sp->set_call_back("InstanceChecker.do_check2", [&lost_paths](void* arg) {
+        lost_paths.push_back(*(std::string*)arg);
+    });
+    sp->enable_processing();
+
+    ASSERT_NE(checker.do_check(), 0);
+    EXPECT_EQ(deleted_paths, lost_paths);
+}
+
+TEST(CheckerTest, multi_checker) {
+    config::recycle_concurrency = 2;
+    config::check_object_interval_seconds = 10;
+    config::recycle_job_lease_expired_ms = 60;
+    auto mem_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(mem_kv->init(), 0);
+
+    std::atomic_int count {0};
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("InstanceChecker.do_check", [&count](void*) {
+        sleep(1);
+        ++count;
+    });
+    sp->enable_processing();
+
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    for (int i = 0; i < 10; ++i) {
+        InstanceInfoPB instance;
+        instance.set_instance_id(std::to_string(i));
+        auto obj_info = instance.add_obj_info();
+        obj_info->set_id("1");
+        obj_info->set_ak(config::test_s3_ak);
+        obj_info->set_sk(config::test_s3_sk);
+        obj_info->set_endpoint(config::test_s3_endpoint);
+        obj_info->set_region(config::test_s3_region);
+        obj_info->set_bucket(config::test_s3_bucket);
+        obj_info->set_prefix("CheckerTest");
+        InstanceKeyInfo key_info {std::to_string(i)};
+        std::string key;
+        instance_key(key_info, &key);
+        std::string val = instance.SerializeAsString();
+        txn->put(key, val);
+    }
+    ASSERT_EQ(0, txn->commit());
+
+    Checker c1(mem_kv);
+    c1.ip_port_ = "r1:p1";
+    c1.start();
+    Checker c2(mem_kv);
+    c2.ip_port_ = "r2:p2";
+    c2.start();
+    Checker c3(mem_kv);
+    c3.ip_port_ = "r3:p3";
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    c3.start();
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    c1.stop();
+    c2.stop();
+    c3.stop();
+
+    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    for (int i = 0; i < 10; ++i) {
+        JobRecycleKeyInfo key_info {std::to_string(i)};
+        JobRecyclePB job_info;
+        std::string key;
+        std::string val;
+        job_check_key(key_info, &key);
+        ASSERT_EQ(0, txn->get(key, &val)) << i;
+        ASSERT_TRUE(job_info.ParseFromString(val));
+        EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
+        EXPECT_GT(job_info.last_finish_time_ms(), 0);
+        std::cout << "host: " << job_info.ip_port() << " finish check job of instance_id: " << i
+                  << std::endl;
+    }
+    EXPECT_EQ(count, 10);
 }
 
 } // namespace selectdb

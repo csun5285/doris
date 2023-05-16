@@ -1,16 +1,14 @@
 #pragma once
-#include "common/logging.h"
-#include "meta-service/codec.h"
-#include "meta-service/txn_kv.h"
 
 #include <string>
-#include <butil/iobuf.h>
 
 namespace google::protobuf {
 class Message;
 }
 
 namespace selectdb {
+class TxnKv;
+class Transaction;
 
 std::string hex(std::string_view str);
 

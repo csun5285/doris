@@ -1,9 +1,13 @@
 
 // clang-format off
 #include "util.h"
+#include <bthread/butex.h>
+#include <butil/iobuf.h>
 // FIXME: we should not rely other modules that may rely on this common module
+#include "common/logging.h"
 #include "meta-service/keys.h"
 #include "meta-service/codec.h"
+#include "meta-service/txn_kv.h"
 
 #include "google/protobuf/util/json_util.h"
 

@@ -2,11 +2,15 @@
 
 #include "common/arg_parser.h"
 #include "common/config.h"
+#include "common/encryption_util.h"
 #include "common/logging.h"
 #include "gen_cpp/selectdb_version.h"
+#include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_server.h"
+#include "meta-service/txn_kv.h"
 #include "recycler/recycler.h"
 
+#include <brpc/server.h>
 #include <unistd.h> // ::lockf
 #include <fcntl.h> // ::open
 #include <functional>
@@ -58,9 +62,9 @@ std::shared_ptr<int> gen_pidfile(const std::string& process_name) {
 std::string prepare_extra_conf_file() {
     std::fstream fdb_cluter_file(selectdb::config::fdb_cluster_file_path, std::ios::out);
     fdb_cluter_file << "# DO NOT EDIT UNLESS YOU KNOW WHAT YOU ARE DOING!\n"
-        << "# This file is auto-generated with selectdb_cloud.conf:fdb_cluster.\n"
-        << "# It is not to be edited by hand.\n"
-        << selectdb::config::fdb_cluster;
+                    << "# This file is auto-generated with selectdb_cloud.conf:fdb_cluster.\n"
+                    << "# It is not to be edited by hand.\n"
+                    << selectdb::config::fdb_cluster;
     fdb_cluter_file.close();
     return "";
 }
@@ -105,6 +109,11 @@ static std::string build_info() {
     return ss.str();
 }
 
+namespace brpc {
+DECLARE_uint64(max_body_size);
+DECLARE_int64(socket_max_unwritten_bytes);
+} // namespace brpc
+
 int main(int argc, char** argv) {
     if (argc > 1) {
         if (auto ret = args.parse(argc - 1, argv + 1); !ret.empty()) {
@@ -127,8 +136,7 @@ int main(int argc, char** argv) {
     // FIXME(gavin): do we need to enable running both MS and recycler within
     //               single process
     if (!(args.get<bool>(ARG_META_SERVICE) ^ args.get<bool>(ARG_RECYCLER))) {
-        std::cerr << "only one of --meta-service and --recycler must be specified"
-                  << std::endl;
+        std::cerr << "only one of --meta-service and --recycler must be specified" << std::endl;
         return 1;
     }
 
@@ -167,35 +175,91 @@ int main(int argc, char** argv) {
     std::string msg;
     LOG(INFO) << build_info();
     std::cout << build_info() << std::endl;
+
+    using namespace selectdb;
+    brpc::Server server;
+    brpc::FLAGS_max_body_size = config::brpc_max_body_size;
+    brpc::FLAGS_socket_max_unwritten_bytes = config::brpc_socket_max_unwritten_bytes;
+
+    std::shared_ptr<TxnKv> txn_kv;
+    if (config::use_mem_kv) {
+        // MUST NOT be used in production environment
+        std::cerr << "use volatile mem kv, please make sure it is not a production environment"
+                  << std::endl;
+        txn_kv = std::make_shared<MemTxnKv>();
+    } else {
+        txn_kv = std::make_shared<FdbTxnKv>();
+    }
+    if (txn_kv == nullptr) {
+        LOG(WARNING) << "failed to create txn kv, invalid txnkv type";
+        return 1;
+    }
+    LOG(INFO) << "begin to init txn kv";
+    int ret = txn_kv->init();
+    if (ret != 0) {
+        LOG(WARNING) << "failed to init txnkv, ret=" << ret;
+        return 1;
+    }
+    LOG(INFO) << "successfully init txn kv";
+
+    if (init_global_encryption_key_info_map(txn_kv) != 0) {
+        LOG(WARNING) << "failed to init global encryption key map";
+        return -1;
+    }
+
+    std::unique_ptr<MetaServer> meta_server;
+    std::unique_ptr<Recycler> recycler;
+
     if (args.get<bool>(ARG_META_SERVICE)) {
-        selectdb::MetaServer meta_server;
-        int ret = meta_server.start();
+        meta_server = std::make_unique<MetaServer>(txn_kv);
+        int ret = meta_server->start(&server);
         if (ret != 0) {
             msg = "failed to start meta server";
             LOG(ERROR) << msg;
             std::cerr << msg << std::endl;
             return ret;
         }
-        msg = "successfully started as meta-service";
+        msg = "meta-service started";
         LOG(INFO) << msg;
         std::cout << msg << std::endl;
-        meta_server.join(); // Wait for signals
     } else if (args.get<bool>(ARG_RECYCLER)) {
-        selectdb::Recycler recycler;
-        int ret = recycler.start(true); // enable brpc server
+        recycler = std::make_unique<Recycler>(txn_kv);
+        int ret = recycler->start(&server);
         if (ret != 0) {
             msg = "failed to start recycler";
             LOG(ERROR) << msg;
             std::cerr << msg << std::endl;
             return ret;
         }
-        msg = "successfully started as recycler";
+        msg = "recycler started";
         LOG(INFO) << msg;
         std::cout << msg << std::endl;
-        recycler.join();
+
     } else {
         std::cerr << "selectdb starts without doing anything and exits" << std::endl;
         return -1;
+    }
+    // start service
+    brpc::ServerOptions options;
+    if (config::brpc_num_threads != -1) {
+        options.num_threads = config::brpc_num_threads;
+    }
+    int port = config::brpc_listen_port;
+    if (server.Start(port, &options) != 0) {
+        char buf[64];
+        LOG(WARNING) << "failed to start brpc, errno=" << errno
+                     << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
+        return -1;
+    }
+    LOG(INFO) << "succesfully started brpc listening on port=" << port;
+
+    server.RunUntilAskedToQuit(); // Wait for signals
+    server.ClearServices();
+    if (meta_server) {
+        meta_server->stop();
+    }
+    if (recycler) {
+        recycler->stop();
     }
 
     return 0;
