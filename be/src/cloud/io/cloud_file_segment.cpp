@@ -75,8 +75,7 @@ size_t FileSegment::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segmen
 
 uint64_t FileSegment::get_caller_id() {
     uint64_t id = 0;
-    id = bthread_self() == 0 ? std::hash<std::thread::id> {}(std::this_thread::get_id())
-                             : bthread_self();
+    id = bthread_self() == 0 ? static_cast<uint64_t>(pthread_self()): bthread_self();
     DCHECK(id != 0);
     return id;
 }
