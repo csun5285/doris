@@ -44,6 +44,11 @@ using namespace Aws::S3::Model;
 using Aws::S3::S3Client;
 using namespace ErrorCode;
 
+bvar::Adder<uint64_t> s3_file_writer("s3_file_writer", "total_num");
+bvar::Adder<uint64_t> s3_bytes_written("s3_file_writer", "bytes_written");
+bvar::Adder<uint64_t> s3_file_created("s3_file_writer", "file_created");
+bvar::Adder<uint64_t> s3_file_being_written("s3_file_writer", "file_being_written");
+
 S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
                            std::shared_ptr<S3Client> client, std::shared_ptr<S3FileSystem> fs,
                            IOState* state, bool sse_enabled)
@@ -54,12 +59,16 @@ S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
           _sse_enabled(sse_enabled),
           _client(std::move(client)),
           _expiration_time(state ? state->expiration_time : 0),
-          _is_cold_data(state ? state->is_cold_data : true) {}
+          _is_cold_data(state ? state->is_cold_data : true) {
+    s3_file_writer << 1;
+    s3_file_being_written << 1;
+}
 
 S3FileWriter::~S3FileWriter() {
     if (!_closed) {
         abort();
     }
+    s3_file_being_written << -1;
 }
 
 Status S3FileWriter::open() {
@@ -210,6 +219,8 @@ void S3FileWriter::_upload_one_part(int64_t part_num, S3FileBuffer& buf) {
         return;
     }
 
+    s3_bytes_written << buf.get_size();
+
     std::shared_ptr<CompletedPart> completed_part = std::make_shared<CompletedPart>();
     completed_part->SetPartNumber(part_num);
     auto etag = upload_part_outcome.GetResult().GetETag();
@@ -256,6 +267,7 @@ Status S3FileWriter::_complete() {
         LOG(WARNING) << s;
         return s;
     }
+    s3_file_created << 1;
     return Status::OK();
 }
 

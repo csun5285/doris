@@ -31,6 +31,10 @@ namespace doris {
 namespace io {
 
 bvar::Adder<uint64_t> s3_file_reader_counter("s3_file_reader", "read_at");
+bvar::Adder<uint64_t> s3_file_reader("s3_file_reader", "total_num");
+bvar::Adder<uint64_t> s3_bytes_read("s3_file_reader", "bytes_read");
+bvar::Adder<uint64_t> s3_file_being_read("s3_file_reader", "file_being_read");
+
 
 S3FileReader::S3FileReader(Path path, size_t file_size, std::string key, std::string bucket,
                            std::shared_ptr<S3FileSystem> fs)
@@ -41,10 +45,13 @@ S3FileReader::S3FileReader(Path path, size_t file_size, std::string key, std::st
           _key(std::move(key)) {
     DorisMetrics::instance()->s3_file_open_reading->increment(1);
     DorisMetrics::instance()->s3_file_reader_total->increment(1);
+    s3_file_reader << 1;
+    s3_file_being_read << 1;
 }
 
 S3FileReader::~S3FileReader() {
     close();
+    s3_file_being_read << -1;
 }
 
 Status S3FileReader::close() {
@@ -100,6 +107,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                _path.native(), *bytes_read, bytes_req);
     }
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
+    s3_bytes_read << *bytes_read;
     return Status::OK();
 }
 
