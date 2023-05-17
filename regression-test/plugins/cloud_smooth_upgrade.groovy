@@ -20,6 +20,7 @@ import org.apache.doris.regression.suite.Suite
 Suite.metaClass.addNodeForSmoothUpgrade = { String be_unique_id, String ip, String port, String cluster_name, String cluster_id ->
 
     def token = context.config.metaServiceToken
+    def instance_id = context.config.multiClusterInstance
 
     // which suite invoke current function?
     Suite suite = delegate as Suite
