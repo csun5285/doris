@@ -2,6 +2,8 @@
 // clang-format off
 #include "txn_kv.h"
 
+#include <bthread/countdown_event.h>
+
 #include "common/bvars.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -95,13 +97,12 @@ int Network::init() {
                 // Will not return until fdb_stop_network() called
                 auto err = fdb_run_network();
                 LOG(WARNING) << "exit fdb_run_network"
-                    << (err ? std::string(", error: ") + fdb_get_error(err) : "");
-                }
-            ),
+                             << (err ? std::string(", error: ") + fdb_get_error(err) : "");
+            }),
             [](auto* p) {
                 auto err = fdb_stop_network();
                 LOG(WARNING) << "fdb_stop_network"
-                    << (err ? std::string(", error: ") + fdb_get_error(err) : "");
+                             << (err ? std::string(", error: ") + fdb_get_error(err) : "");
                 p->join();
                 delete p;
 
@@ -137,7 +138,6 @@ int Database::init() {
 // Impl of Trasaction
 // =============================================================================
 
-
 int Transaction::init() {
     // TODO: process opt
     fdb_error_t err = fdb_database_create_transaction(db_->db(), &txn_);
@@ -159,21 +159,51 @@ void Transaction::put(std::string_view key, std::string_view val) {
     g_bvar_txn_kv_put << sw.elapsed_us();
 }
 
+// return 0 for success otherwise error
+static int bthread_fdb_future_block_until_ready(FDBFuture* fut) {
+    bthread::CountdownEvent event;
+    static auto callback = [](FDBFuture* fut, void* event) {
+        ((bthread::CountdownEvent*)event)->signal();
+    };
+    auto err = fdb_future_set_callback(fut, callback, &event);
+    if (err) [[unlikely]] {
+        LOG(WARNING) << "fdb_future_set_callback failed, err=" << fdb_get_error(err);
+        return -1;
+    }
+    if (int ec = event.wait(); ec != 0) [[unlikely]] {
+        LOG(WARNING) << "CountdownEvent wait failed, err=" << std::strerror(ec);
+        return -1;
+    }
+    return 0;
+}
+
+// return 0 for success otherwise error
+static int await_future(FDBFuture* fut) {
+    if (bthread_self() != 0) {
+        return bthread_fdb_future_block_until_ready(fut);
+    }
+    auto err = fdb_future_block_until_ready(fut);
+    if (err) [[unlikely]] {
+        LOG(WARNING) << "fdb_future_block_until_ready failed: " << fdb_get_error(err);
+        return -1;
+    }
+    return 0;
+}
+
 int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     StopWatch sw;
     auto fut = fdb_transaction_get(txn_, (uint8_t*)key.data(), key.size(), snapshot);
 
-    auto release_fut = [fut, &sw](int*) { fdb_future_destroy(fut); g_bvar_txn_kv_get << sw.elapsed_us(); };
+    auto release_fut = [fut, &sw](int*) {
+        fdb_future_destroy(fut);
+        g_bvar_txn_kv_get << sw.elapsed_us();
+    };
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
-
-    auto err = fdb_future_block_until_ready(fut);
-    if (err) {
-        LOG(WARNING) << __PRETTY_FUNCTION__
-                     << " failed to fdb_future_block_until_ready err=" << fdb_get_error(err)
-                     << " key=" << hex(key);
+    if (await_future(fut) != 0) {
+        LOG(WARNING) << "failed to await future";
         return -1;
     }
-    err = fdb_future_get_error(fut);
+    auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_error err=" << fdb_get_error(err)
@@ -202,7 +232,7 @@ int Transaction::get(std::string_view begin, std::string_view end,
                      std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
     StopWatch sw;
     std::unique_ptr<int, std::function<void(int*)>> defer(
-            (int*)0x01, [&sw](int*) { g_bvar_txn_kv_range_get << sw.elapsed_us();});
+            (int*)0x01, [&sw](int*) { g_bvar_txn_kv_range_get << sw.elapsed_us(); });
 
     FDBFuture* fut = fdb_transaction_get_range(
             txn_, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)begin.data(), begin.size()),
@@ -211,12 +241,11 @@ int Transaction::get(std::string_view begin, std::string_view end,
             //       FDBStreamingMode::FDB_STREAMING_MODE_ITERATOR,
             0 /*iteration*/, snapshot, false /*reverse*/);
 
-    auto err = fdb_future_block_until_ready(fut);
-    if (err) {
-        LOG(WARNING) << fdb_get_error(err);
+    if (await_future(fut) != 0) {
+        LOG(WARNING) << "failed to await future";
         return -1;
     }
-    err = fdb_future_get_error(fut);
+    auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << fdb_get_error(err);
         return -2;
@@ -291,18 +320,20 @@ void Transaction::remove(std::string_view begin, std::string_view end) {
 int Transaction::commit() {
     StopWatch sw;
     auto fut = fdb_transaction_commit(txn_);
-    auto release_fut = [fut, &sw](int*) { fdb_future_destroy(fut); g_bvar_txn_kv_commit << sw.elapsed_us(); };
+    auto release_fut = [fut, &sw](int*) {
+        fdb_future_destroy(fut);
+        g_bvar_txn_kv_commit << sw.elapsed_us();
+    };
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
-    auto err = fdb_future_block_until_ready(fut);
-    if (err) {
-        LOG(WARNING) << "fdb commit error, code=" << err <<  " msg=" << fdb_get_error(err);
-        err == 1020 ? g_bvar_txn_kv_commit_conflict_counter << 1 : g_bvar_txn_kv_commit_error_counter << 1;
-        return err == 1020 ? -1 : -2;
+    if (await_future(fut) != 0) {
+        LOG(WARNING) << "failed to await future";
+        return -1;
     }
-    err = fdb_future_get_error(fut);
+    auto err = fdb_future_get_error(fut);
     if (err) {
-        LOG(WARNING) << "fdb commit error, code=" << err <<  " msg=" << fdb_get_error(err);
-        err == 1020 ? g_bvar_txn_kv_commit_conflict_counter << 1 : g_bvar_txn_kv_commit_error_counter << 1;
+        LOG(WARNING) << "fdb commit error, code=" << err << " msg=" << fdb_get_error(err);
+        err == 1020 ? g_bvar_txn_kv_commit_conflict_counter << 1
+                    : g_bvar_txn_kv_commit_error_counter << 1;
         return err == 1020 ? -1 : -2;
     }
     return 0;
@@ -311,15 +342,15 @@ int Transaction::commit() {
 int64_t Transaction::get_read_version() {
     StopWatch sw;
     auto fut = fdb_transaction_get_read_version(txn_);
-    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01,
-                                                          [fut, &sw](...) { fdb_future_destroy(fut);
-                                                                            g_bvar_txn_kv_get_read_version << sw.elapsed_us(); });
-    auto err = fdb_future_block_until_ready(fut);
-    if (err) {
-        LOG(WARNING) << " " << fdb_get_error(err);
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [fut, &sw](...) {
+        fdb_future_destroy(fut);
+        g_bvar_txn_kv_get_read_version << sw.elapsed_us();
+    });
+    if (await_future(fut) != 0) {
+        LOG(WARNING) << "failed to await future";
         return -1;
     }
-    err = fdb_future_get_error(fut);
+    auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << " " << fdb_get_error(err);
         return -2;
