@@ -2060,7 +2060,7 @@ public class Config extends ConfigBase {
     public static int meta_service_rpc_retry_times = 200;
 
     @ConfField(mutable = true)
-    public static bool meta_service_use_short_connection = false;
+    public static boolean meta_service_use_short_connection = false;
 
     // 0 means no limit
     @ConfField(mutable = true)
