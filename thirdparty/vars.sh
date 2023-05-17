@@ -452,6 +452,17 @@ HADOOP_LIBS_X86_DOWNLOAD="https://github.com/apache/doris-thirdparty/releases/do
 HADOOP_LIBS_X86_NAME="hadoop_lib_3.3.4-x86.tar.gz"
 HADOOP_LIBS_X86_SOURCE="hadoop_lib_3.3.4-x86"
 HADOOP_LIBS_X86_MD5SUM="96117450170487f007ffeca5ddf62f7e"
+# poco
+POCO_DOWNLOAD="https://github.com/pocoproject/poco/archive/refs/tags/poco-1.9.4-release.zip"
+POCO_NAME=poco-1.9.4-release.zip
+POCO_SOURCE=poco-poco-1.9.4-release
+POCO_MD5SUM="e2c06018adaa3698ab7564c10b8052b0"
+
+# cos
+COS_SDK_DOWNLOAD="https://github.com/tencentyun/cos-cpp-sdk-v5/archive/refs/tags/v5.5.10.tar.gz"
+COS_SDK_NAME=v5-5.5.10.tar.gz
+COS_SDK_SOURCE=cos-cpp-sdk-v5-5.5.10
+COS_SDK_MD5SUM="7b923b9ebfeaa4d38e02ce82b03a5fc2"
 
 # all thirdparties which need to be downloaded is set in array TP_ARCHIVES
 export TP_ARCHIVES=(
@@ -519,6 +530,8 @@ export TP_ARCHIVES=(
     'FAST_FLOAT'
     'CLUCENE'
     'HADOOP_LIBS_X86'
+    'POCO'
+    'COS_SDK'
 )
 
 if [[ "$(uname -s)" == 'Darwin' ]]; then

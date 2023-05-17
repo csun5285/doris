@@ -416,3 +416,26 @@ if [[ "${SIMDJSON_SOURCE}" = "simdjson-1.0.2" ]]; then
     cd -
 fi
 echo "Finished patching ${SIMDJSON_SOURCE}"
+
+
+# patch poco
+if [[ "${POCO_SOURCE}" = "poco-poco-1.9.4-release" ]]; then
+    cd "${TP_SOURCE_DIR}/${POCO_SOURCE}"
+    if [[ ! -f "${PATCHED_MARK}" ]]; then
+        patch -p1 <"${TP_PATCH_DIR}/poco-1.9.4.patch"
+        touch "${PATCHED_MARK}"
+    fi
+    cd -
+fi
+echo "Finished patching ${POCO_SOURCE}"
+
+# patch cos sdk
+if [[ "${COS_SDK_SOURCE}" = "cos-cpp-sdk-v5-5.5.10" ]]; then
+    cd "${TP_SOURCE_DIR}/${COS_SDK_SOURCE}"
+    if [[ ! -f "${PATCHED_MARK}" ]]; then
+        patch -p1 <"${TP_PATCH_DIR}/cos-cpp-sdk-v5-5.5.10.patch"
+        touch "${PATCHED_MARK}"
+    fi
+    cd -
+fi
+echo "Finished patching ${COS_SOURCE}"

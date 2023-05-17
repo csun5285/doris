@@ -1,0 +1,12 @@
+diff --git a/Foundation/src/NumericString.cpp b/Foundation/src/NumericString.cpp
+index 111f661..14848ed 100644
+--- a/Foundation/src/NumericString.cpp
++++ b/Foundation/src/NumericString.cpp
+@@ -16,6 +16,7 @@
+ 
+ 
+ // +++ double conversion +++
++#define double_conversion poco_double_conversion
+ #define UNREACHABLE poco_bugcheck
+ #define UNIMPLEMENTED poco_bugcheck
+ #include "diy-fp.cc"

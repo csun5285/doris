@@ -1,5 +1,57 @@
+diff --git a/aws-cpp-sdk-s3-crt/source/model/CopyObjectRequest.cpp b/aws-cpp-sdk-s3-crt/source/model/CopyObjectRequest.cpp
+index 0f749a4ec..fa5980717 100644
+--- a/aws-cpp-sdk-s3-crt/source/model/CopyObjectRequest.cpp
++++ b/aws-cpp-sdk-s3-crt/source/model/CopyObjectRequest.cpp
+@@ -151,7 +151,7 @@ Aws::Http::HeaderValueCollection CopyObjectRequest::GetRequestSpecificHeaders()
+   if(m_copySourceHasBeenSet)
+   {
+     ss << m_copySource;
+-    headers.emplace("x-amz-copy-source", URI::URLEncodePath(ss.str()));
++    headers.emplace("x-amz-copy-source", ss.str());
+     ss.str("");
+   }
+ 
+diff --git a/aws-cpp-sdk-s3-crt/source/model/UploadPartCopyRequest.cpp b/aws-cpp-sdk-s3-crt/source/model/UploadPartCopyRequest.cpp
+index d3493a6df..d09bb5f26 100644
+--- a/aws-cpp-sdk-s3-crt/source/model/UploadPartCopyRequest.cpp
++++ b/aws-cpp-sdk-s3-crt/source/model/UploadPartCopyRequest.cpp
+@@ -90,7 +90,7 @@ Aws::Http::HeaderValueCollection UploadPartCopyRequest::GetRequestSpecificHeader
+   if(m_copySourceHasBeenSet)
+   {
+     ss << m_copySource;
+-    headers.emplace("x-amz-copy-source", URI::URLEncodePath(ss.str()));
++    headers.emplace("x-amz-copy-source", ss.str());
+     ss.str("");
+   }
+ 
+diff --git a/aws-cpp-sdk-s3/source/model/CopyObjectRequest.cpp b/aws-cpp-sdk-s3/source/model/CopyObjectRequest.cpp
+index 0cbaa1e8f..dc230acdb 100644
+--- a/aws-cpp-sdk-s3/source/model/CopyObjectRequest.cpp
++++ b/aws-cpp-sdk-s3/source/model/CopyObjectRequest.cpp
+@@ -151,7 +151,7 @@ Aws::Http::HeaderValueCollection CopyObjectRequest::GetRequestSpecificHeaders()
+   if(m_copySourceHasBeenSet)
+   {
+     ss << m_copySource;
+-    headers.emplace("x-amz-copy-source", URI::URLEncodePath(ss.str()));
++    headers.emplace("x-amz-copy-source", ss.str());
+     ss.str("");
+   }
+ 
+diff --git a/aws-cpp-sdk-s3/source/model/UploadPartCopyRequest.cpp b/aws-cpp-sdk-s3/source/model/UploadPartCopyRequest.cpp
+index 7b1195ccb..66a672590 100644
+--- a/aws-cpp-sdk-s3/source/model/UploadPartCopyRequest.cpp
++++ b/aws-cpp-sdk-s3/source/model/UploadPartCopyRequest.cpp
+@@ -90,7 +90,7 @@ Aws::Http::HeaderValueCollection UploadPartCopyRequest::GetRequestSpecificHeader
+   if(m_copySourceHasBeenSet)
+   {
+     ss << m_copySource;
+-    headers.emplace("x-amz-copy-source", URI::URLEncodePath(ss.str()));
++    headers.emplace("x-amz-copy-source", ss.str());
+     ss.str("");
+   }
+ 
 diff --git a/aws-cpp-sdk-transfer/include/aws/transfer/TransferHandle.h b/aws-cpp-sdk-transfer/include/aws/transfer/TransferHandle.h
-index 02745ceb37..6b63714105 100644
+index 02745ceb3..6b6371410 100644
 --- a/aws-cpp-sdk-transfer/include/aws/transfer/TransferHandle.h
 +++ b/aws-cpp-sdk-transfer/include/aws/transfer/TransferHandle.h
 @@ -31,6 +31,8 @@ namespace Aws
@@ -32,7 +84,7 @@ index 02745ceb37..6b63714105 100644
  
          AWS_TRANSFER_API Aws::OStream& operator << (Aws::OStream& s, TransferStatus status);
 diff --git a/aws-cpp-sdk-transfer/include/aws/transfer/TransferManager.h b/aws-cpp-sdk-transfer/include/aws/transfer/TransferManager.h
-index bd8bfe19d7..d1a3b2a142 100644
+index bd8bfe19d..d1a3b2a14 100644
 --- a/aws-cpp-sdk-transfer/include/aws/transfer/TransferManager.h
 +++ b/aws-cpp-sdk-transfer/include/aws/transfer/TransferManager.h
 @@ -143,7 +143,8 @@ namespace Aws
@@ -115,7 +167,7 @@ index bd8bfe19d7..d1a3b2a142 100644
              bool MultipartUploadSupported(uint64_t length) const;
              bool InitializePartsForDownload(const std::shared_ptr<TransferHandle>& handle);
 diff --git a/aws-cpp-sdk-transfer/source/transfer/TransferManager.cpp b/aws-cpp-sdk-transfer/source/transfer/TransferManager.cpp
-index f6568b799a..e94f890186 100644
+index f6568b799..e94f89018 100644
 --- a/aws-cpp-sdk-transfer/source/transfer/TransferManager.cpp
 +++ b/aws-cpp-sdk-transfer/source/transfer/TransferManager.cpp
 @@ -78,18 +78,20 @@ namespace Aws

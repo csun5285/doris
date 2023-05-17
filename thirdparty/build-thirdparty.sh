@@ -1675,6 +1675,34 @@ build_hadoop_libs_x86() {
     cp -r ./* "${TP_INSTALL_DIR}/lib/hadoop_hdfs/"
 }
 
+build_poco() {
+    check_if_source_exist "${POCO_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${POCO_SOURCE}"
+    rm -rf "${BUILD_DIR}"
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
+    ../configure --prefix="${TP_INSTALL_DIR}" --omit=Data/ODBC,Data/MySQL
+    cmake .. -DPOCO_STATIC=ON -DCMAKE_BUILD_TYPE=Release
+    make -j "${PARALLEL}"
+    mkdir -p "${TP_INSTALL_DIR}/lib64/poco"
+    cp -r ./lib/* "${TP_INSTALL_DIR}/lib64/poco/"
+}
+
+build_cos_sdk() {
+    build_poco
+    check_if_source_exist "${COS_SDK_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${COS_SDK_SOURCE}"
+    cp -r ./third_party/include/Poco/ "${TP_INSTALL_DIR}/include/"
+    cp -r ./include/cos "${TP_INSTALL_DIR}/include/"
+    # rm -rf ./third_party
+    rm -rf "${BUILD_DIR}"
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
+    cmake .. -DTP_INSTALL_DIR=${TP_INSTALL_DIR} -DCMAKE_BUILD_TYPE=Release
+    make -j "${PARALLEL}"
+    cp ./lib/libcossdk.a "${TP_INSTALL_DIR}/lib64/"
+}
+
 if [[ "$(uname -s)" == 'Darwin' ]]; then
     echo 'build for Darwin'
     build_binutils
@@ -1789,6 +1817,7 @@ build_xxhash
 build_concurrentqueue
 build_clucene
 build_fast_float
+build_cos_sdk
 
 # Full build done
 cd "${TP_DIR}"

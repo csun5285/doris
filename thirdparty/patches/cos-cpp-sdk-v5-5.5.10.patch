@@ -1,0 +1,749 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7b2c4eb..03d6684 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -4,9 +4,10 @@ project(cos-cpp-sdk)
+ set(CMAKE_VERBOSE_MAKEFILE  ON)
+ 
+ option(BUILD_UNITTEST "Build unittest" OFF)
+-option(BUILD_DEMO "Build demo" ON)
++option(BUILD_DEMO "Build demo" OFF)
+ option(BUILD_SHARED_LIB "Build shared library" OFF)
+ option(ENABLE_COVERAGE "Enable Coverage" OFF)
++option(TP_INSTALL_DIR "Thirdparty dir")
+ 
+ if(APPLE)
+     set(OS_TYPE "APPLE")
+@@ -28,7 +29,7 @@ endif()
+ 
+ message(STATUS "OS type: ${OS_TYPE}")
+ 
+-set(POCO_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third_party/include/)
++set(POCO_INCLUDE_DIR ${TP_INSTALL_DIR}/include/)
+ set(POCO_LIBS PocoNetSSL PocoNet PocoCrypto PocoUtil PocoJSON PocoXML PocoFoundation)
+ if (${OS_TYPE} STREQUAL "WINDOWS")
+     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+@@ -65,7 +66,9 @@ else()
+         set(POCO_LINK_DIR ${CMAKE_SOURCE_DIR}/third_party/lib/macOS/poco/)
+         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wextra")
+     else()
+-        set(POCO_LINK_DIR ${CMAKE_SOURCE_DIR}/third_party/lib/linux/poco/)
++	set(OPENSSL_LIBS ssl crypto)
++        set(OPENSSL_LINK_DIR ${TP_INSTALL_DIR}/lib64/)
++        set(POCO_LINK_DIR ${TP_INSTALL_DIR}/lib64/poco/)
+         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -Wextra")
+     endif()
+ 
+@@ -97,4 +100,4 @@ endif()
+ if(BUILD_DEMO)
+     message(STATUS "Build demo")
+     add_subdirectory(demo)
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/include/cos_api.h b/include/cos/cos_api.h
+similarity index 99%
+rename from include/cos_api.h
+rename to include/cos/cos_api.h
+index 99f013a..98cbe3e 100644
+--- a/include/cos_api.h
++++ b/include/cos/cos_api.h
+@@ -1,12 +1,12 @@
+ ﻿#ifndef COS_API_H
+ #define COS_API_H
+ 
+-#include "op/bucket_op.h"
+-#include "op/cos_result.h"
+-#include "op/object_op.h"
+-#include "op/service_op.h"
+-#include "util/auth_tool.h"
+-#include "util/codec_util.h"
++#include "cos/op/bucket_op.h"
++#include "cos/op/cos_result.h"
++#include "cos/op/object_op.h"
++#include "cos/op/service_op.h"
++#include "cos/util/auth_tool.h"
++#include "cos/util/codec_util.h"
+ #include "Poco/TaskManager.h"
+ 
+ namespace qcloud_cos {
+diff --git a/include/cos_config.h b/include/cos/cos_config.h
+similarity index 96%
+rename from include/cos_config.h
+rename to include/cos/cos_config.h
+index 7de1d98..9875f1e 100644
+--- a/include/cos_config.h
++++ b/include/cos/cos_config.h
+@@ -8,7 +8,7 @@
+ #include <string>
+ 
+ #include "Poco/JSON/Parser.h"
+-#include "util/log_util.h"
++#include "cos/util/log_util.h"
+ 
+ namespace qcloud_cos {
+ class CosConfig {
+diff --git a/include/cos_defines.h b/include/cos/cos_defines.h
+similarity index 96%
+rename from include/cos_defines.h
+rename to include/cos/cos_defines.h
+index c1094e0..7c19813 100644
+--- a/include/cos_defines.h
++++ b/include/cos/cos_defines.h
+@@ -7,7 +7,7 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "util/log_util.h"
++#include "cos/util/log_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/cos_params.h b/include/cos/cos_params.h
+similarity index 100%
+rename from include/cos_params.h
+rename to include/cos/cos_params.h
+diff --git a/include/cos_sys_config.h b/include/cos/cos_sys_config.h
+similarity index 95%
+rename from include/cos_sys_config.h
+rename to include/cos/cos_sys_config.h
+index d19e26c..94e6bb1 100644
+--- a/include/cos_sys_config.h
++++ b/include/cos/cos_sys_config.h
+@@ -2,8 +2,8 @@
+ #define COS_SYS_CONF_H
+ #include <stdint.h>
+ 
+-#include "cos_defines.h"
+-#include "util/log_util.h"
++#include "cos/cos_defines.h"
++#include "cos/util/log_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/op/base_op.h b/include/cos/op/base_op.h
+similarity index 94%
+rename from include/op/base_op.h
+rename to include/cos/op/base_op.h
+index 9e7126e..483973a 100644
+--- a/include/op/base_op.h
++++ b/include/cos/op/base_op.h
+@@ -6,9 +6,9 @@
+ #include <map>
+ #include <string>
+ 
+-#include "cos_config.h"
+-#include "op/cos_result.h"
+-#include "trsf/transfer_handler.h"
++#include "cos/cos_config.h"
++#include "cos/op/cos_result.h"
++#include "cos/trsf/transfer_handler.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/op/bucket_op.h b/include/cos/op/bucket_op.h
+similarity index 98%
+rename from include/op/bucket_op.h
+rename to include/cos/op/bucket_op.h
+index af80de1..7a75233 100644
+--- a/include/op/bucket_op.h
++++ b/include/cos/op/bucket_op.h
+@@ -7,15 +7,15 @@
+ 
+ #pragma once
+ 
+-#include "cos_sys_config.h"
+-#include "op/base_op.h"
+-#include "op/cos_result.h"
+-#include "request/bucket_req.h"
+-#include "request/data_process_req.h"
+-#include "request/auditing_req.h"
+-#include "response/bucket_resp.h"
+-#include "response/data_process_resp.h"
+-#include "response/auditing_resp.h"
++#include "cos/cos_sys_config.h"
++#include "cos/op/base_op.h"
++#include "cos/op/cos_result.h"
++#include "cos/request/bucket_req.h"
++#include "cos/request/data_process_req.h"
++#include "cos/request/auditing_req.h"
++#include "cos/response/bucket_resp.h"
++#include "cos/response/data_process_resp.h"
++#include "cos/response/auditing_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+@@ -556,4 +556,4 @@ class BucketOp : public BaseOp {
+                        bool is_ci_req = false);
+ };
+ 
+-}  // namespace qcloud_cos
+\ No newline at end of file
++}  // namespace qcloud_cos
+diff --git a/include/op/cos_result.h b/include/cos/op/cos_result.h
+similarity index 100%
+rename from include/op/cos_result.h
+rename to include/cos/op/cos_result.h
+diff --git a/include/op/file_copy_task.h b/include/cos/op/file_copy_task.h
+similarity index 100%
+rename from include/op/file_copy_task.h
+rename to include/cos/op/file_copy_task.h
+diff --git a/include/op/file_download_task.h b/include/cos/op/file_download_task.h
+similarity index 91%
+rename from include/op/file_download_task.h
+rename to include/cos/op/file_download_task.h
+index ec426be..03ccd5c 100644
+--- a/include/op/file_download_task.h
++++ b/include/cos/op/file_download_task.h
+@@ -13,8 +13,8 @@
+ 
+ #include "Poco/Foundation.h"
+ #include "Poco/Runnable.h"
+-#include "cos_config.h"
+-#include "trsf/transfer_handler.h"
++#include "cos/cos_config.h"
++#include "cos/trsf/transfer_handler.h"
+ 
+ namespace qcloud_cos {
+ 
+@@ -76,4 +76,4 @@ class FileDownTask : public Poco::Runnable {
+   SharedConfig m_config;
+ };
+ 
+-}  // namespace qcloud_cos
+\ No newline at end of file
++}  // namespace qcloud_cos
+diff --git a/include/op/file_upload_task.h b/include/cos/op/file_upload_task.h
+similarity index 94%
+rename from include/op/file_upload_task.h
+rename to include/cos/op/file_upload_task.h
+index e622552..d8851bd 100644
+--- a/include/op/file_upload_task.h
++++ b/include/cos/op/file_upload_task.h
+@@ -5,8 +5,8 @@
+ 
+ #include "Poco/Foundation.h"
+ #include "Poco/Runnable.h"
+-#include "request/object_req.h"
+-#include "trsf/transfer_handler.h"
++#include "cos/request/object_req.h"
++#include "cos/trsf/transfer_handler.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/op/object_op.h b/include/cos/op/object_op.h
+similarity index 98%
+rename from include/op/object_op.h
+rename to include/cos/op/object_op.h
+index 0bfe267..a6c9440 100644
+--- a/include/op/object_op.h
++++ b/include/cos/op/object_op.h
+@@ -8,14 +8,14 @@
+ #ifndef OBJECT_OP_H
+ #define OBJECT_OP_H
+ 
+-#include "op/base_op.h"
+-#include "op/cos_result.h"
+-#include "request/data_process_req.h"
+-#include "request/object_req.h"
+-#include "request/auditing_req.h"
+-#include "response/data_process_resp.h"
+-#include "response/object_resp.h"
+-#include "response/auditing_resp.h"
++#include "cos/op/base_op.h"
++#include "cos/op/cos_result.h"
++#include "cos/request/data_process_req.h"
++#include "cos/request/object_req.h"
++#include "cos/request/auditing_req.h"
++#include "cos/response/data_process_resp.h"
++#include "cos/response/object_resp.h"
++#include "cos/response/auditing_resp.h"
+ 
+ 
+ namespace qcloud_cos {
+diff --git a/include/op/service_op.h b/include/cos/op/service_op.h
+similarity index 84%
+rename from include/op/service_op.h
+rename to include/cos/op/service_op.h
+index 2818d48..d694d0c 100644
+--- a/include/op/service_op.h
++++ b/include/cos/op/service_op.h
+@@ -9,11 +9,11 @@
+ #define SERVICEOP_H
+ #pragma once
+ 
+-#include "cos_sys_config.h"
+-#include "op/base_op.h"
+-#include "op/cos_result.h"
+-#include "request/service_req.h"
+-#include "response/service_resp.h"
++#include "cos/cos_sys_config.h"
++#include "cos/op/base_op.h"
++#include "cos/op/cos_result.h"
++#include "cos/request/service_req.h"
++#include "cos/response/service_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/rapidxml/1.13/license.txt b/include/cos/rapidxml/1.13/license.txt
+similarity index 100%
+rename from include/rapidxml/1.13/license.txt
+rename to include/cos/rapidxml/1.13/license.txt
+diff --git a/include/rapidxml/1.13/rapidxml.hpp b/include/cos/rapidxml/1.13/rapidxml.hpp
+similarity index 100%
+rename from include/rapidxml/1.13/rapidxml.hpp
+rename to include/cos/rapidxml/1.13/rapidxml.hpp
+diff --git a/include/rapidxml/1.13/rapidxml_iterators.hpp b/include/cos/rapidxml/1.13/rapidxml_iterators.hpp
+similarity index 100%
+rename from include/rapidxml/1.13/rapidxml_iterators.hpp
+rename to include/cos/rapidxml/1.13/rapidxml_iterators.hpp
+diff --git a/include/rapidxml/1.13/rapidxml_print.hpp b/include/cos/rapidxml/1.13/rapidxml_print.hpp
+similarity index 100%
+rename from include/rapidxml/1.13/rapidxml_print.hpp
+rename to include/cos/rapidxml/1.13/rapidxml_print.hpp
+diff --git a/include/rapidxml/1.13/rapidxml_utils.hpp b/include/cos/rapidxml/1.13/rapidxml_utils.hpp
+similarity index 100%
+rename from include/rapidxml/1.13/rapidxml_utils.hpp
+rename to include/cos/rapidxml/1.13/rapidxml_utils.hpp
+diff --git a/include/request/auditing_req.h b/include/cos/request/auditing_req.h
+similarity index 99%
+rename from include/request/auditing_req.h
+rename to include/cos/request/auditing_req.h
+index 5c7e8da..c22a304 100644
+--- a/include/request/auditing_req.h
++++ b/include/cos/request/auditing_req.h
+@@ -6,8 +6,8 @@
+ 
+ #include "Poco/Dynamic/Struct.h"
+ #include "Poco/JSON/Object.h"
+-#include "request/bucket_req.h"
+-#include "request/object_req.h"
++#include "cos/request/bucket_req.h"
++#include "cos/request/object_req.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/request/base_req.h b/include/cos/request/base_req.h
+similarity index 99%
+rename from include/request/base_req.h
+rename to include/cos/request/base_req.h
+index 94e5e06..55ab8f7 100644
+--- a/include/request/base_req.h
++++ b/include/cos/request/base_req.h
+@@ -11,7 +11,7 @@
+ #include <map>
+ #include <string>
+ 
+-#include "util/string_util.h"
++#include "cos/util/string_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/request/bucket_req.h b/include/cos/request/bucket_req.h
+similarity index 99%
+rename from include/request/bucket_req.h
+rename to include/cos/request/bucket_req.h
+index c2b6045..0e7b33e 100644
+--- a/include/request/bucket_req.h
++++ b/include/cos/request/bucket_req.h
+@@ -9,9 +9,9 @@
+ #define BUCKET_REQ_H
+ #pragma once
+ 
+-#include "cos_defines.h"
+-#include "request/base_req.h"
+-#include "util/string_util.h"
++#include "cos/cos_defines.h"
++#include "cos/request/base_req.h"
++#include "cos/util/string_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/request/data_process_req.h b/include/cos/request/data_process_req.h
+similarity index 99%
+rename from include/request/data_process_req.h
+rename to include/cos/request/data_process_req.h
+index fc89eed..6dca8be 100644
+--- a/include/request/data_process_req.h
++++ b/include/cos/request/data_process_req.h
+@@ -6,8 +6,8 @@
+ 
+ #include "Poco/Dynamic/Struct.h"
+ #include "Poco/JSON/Object.h"
+-#include "request/bucket_req.h"
+-#include "request/object_req.h"
++#include "cos/request/bucket_req.h"
++#include "cos/request/object_req.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/request/object_req.h b/include/cos/request/object_req.h
+similarity index 99%
+rename from include/request/object_req.h
+rename to include/cos/request/object_req.h
+index 65d2e98..f4229d3 100644
+--- a/include/request/object_req.h
++++ b/include/cos/request/object_req.h
+@@ -12,10 +12,10 @@
+ #if defined(_WIN32)
+ #include <codecvt>
+ #endif
+-#include "cos_sys_config.h"
+-#include "request/base_req.h"
+-#include "trsf/async_context.h"
+-#include "util/file_util.h"
++#include "cos/cos_sys_config.h"
++#include "cos/request/base_req.h"
++#include "cos/trsf/async_context.h"
++#include "cos/util/file_util.h"
+ 
+ namespace qcloud_cos {
+ 
+@@ -1829,4 +1829,4 @@ class DeleteObjectsByPrefixReq {
+   std::string m_prefix;
+ };
+ 
+-}  // namespace qcloud_cos
+\ No newline at end of file
++}  // namespace qcloud_cos
+diff --git a/include/request/service_req.h b/include/cos/request/service_req.h
+similarity index 81%
+rename from include/request/service_req.h
+rename to include/cos/request/service_req.h
+index d79ab88..c920173 100644
+--- a/include/request/service_req.h
++++ b/include/cos/request/service_req.h
+@@ -9,9 +9,9 @@
+ #define SERVICE_REQ_H
+ #pragma once
+ 
+-#include "cos_defines.h"
+-#include "request/base_req.h"
+-#include "util/string_util.h"
++#include "cos/cos_defines.h"
++#include "cos/request/base_req.h"
++#include "cos/util/string_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/auditing_resp.h b/include/cos/response/auditing_resp.h
+similarity index 96%
+rename from include/response/auditing_resp.h
+rename to include/cos/response/auditing_resp.h
+index b0a73d6..3762928 100644
+--- a/include/response/auditing_resp.h
++++ b/include/cos/response/auditing_resp.h
+@@ -5,11 +5,11 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "rapidxml/1.13/rapidxml.hpp"
+-#include "rapidxml/1.13/rapidxml_print.hpp"
+-#include "rapidxml/1.13/rapidxml_utils.hpp"
+-#include "request/auditing_req.h"
+-#include "response/object_resp.h"
++#include "cos/rapidxml/1.13/rapidxml.hpp"
++#include "cos/rapidxml/1.13/rapidxml_print.hpp"
++#include "cos/rapidxml/1.13/rapidxml_utils.hpp"
++#include "cos/request/auditing_req.h"
++#include "cos/response/object_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/base_resp.h b/include/cos/response/base_resp.h
+similarity index 98%
+rename from include/response/base_resp.h
+rename to include/cos/response/base_resp.h
+index 537ff5f..4ced89a 100644
+--- a/include/response/base_resp.h
++++ b/include/cos/response/base_resp.h
+@@ -15,9 +15,9 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "cos_defines.h"
+-#include "cos_params.h"
+-#include "util/string_util.h"
++#include "cos/cos_defines.h"
++#include "cos/cos_params.h"
++#include "cos/util/string_util.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/bucket_resp.h b/include/cos/response/bucket_resp.h
+similarity index 98%
+rename from include/response/bucket_resp.h
+rename to include/cos/response/bucket_resp.h
+index c835a51..f826220 100644
+--- a/include/response/bucket_resp.h
++++ b/include/cos/response/bucket_resp.h
+@@ -11,12 +11,12 @@
+ 
+ #include <vector>
+ 
+-#include "cos_config.h"
+-#include "cos_defines.h"
+-#include "rapidxml/1.13/rapidxml.hpp"
+-#include "rapidxml/1.13/rapidxml_print.hpp"
+-#include "rapidxml/1.13/rapidxml_utils.hpp"
+-#include "response/base_resp.h"
++#include "cos/cos_config.h"
++#include "cos/cos_defines.h"
++#include "cos/rapidxml/1.13/rapidxml.hpp"
++#include "cos/rapidxml/1.13/rapidxml_print.hpp"
++#include "cos/rapidxml/1.13/rapidxml_utils.hpp"
++#include "cos/response/base_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/data_process_resp.h b/include/cos/response/data_process_resp.h
+similarity index 96%
+rename from include/response/data_process_resp.h
+rename to include/cos/response/data_process_resp.h
+index 540d9dd..b83b0ff 100644
+--- a/include/response/data_process_resp.h
++++ b/include/cos/response/data_process_resp.h
+@@ -4,11 +4,11 @@
+ #include <string>
+ #include <vector>
+ 
+-#include "rapidxml/1.13/rapidxml.hpp"
+-#include "rapidxml/1.13/rapidxml_print.hpp"
+-#include "rapidxml/1.13/rapidxml_utils.hpp"
+-#include "request/data_process_req.h"
+-#include "response/object_resp.h"
++#include "cos/rapidxml/1.13/rapidxml.hpp"
++#include "cos/rapidxml/1.13/rapidxml_print.hpp"
++#include "cos/rapidxml/1.13/rapidxml_utils.hpp"
++#include "cos/request/data_process_req.h"
++#include "cos/response/object_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/object_resp.h b/include/cos/response/object_resp.h
+similarity index 99%
+rename from include/response/object_resp.h
+rename to include/cos/response/object_resp.h
+index a17af3e..3642204 100644
+--- a/include/response/object_resp.h
++++ b/include/cos/response/object_resp.h
+@@ -12,9 +12,9 @@
+ #include <iostream>
+ #include <vector>
+ 
+-#include "cos_config.h"
+-#include "cos_params.h"
+-#include "response/base_resp.h"
++#include "cos/cos_config.h"
++#include "cos/cos_params.h"
++#include "cos/response/base_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/response/service_resp.h b/include/cos/response/service_resp.h
+similarity index 89%
+rename from include/response/service_resp.h
+rename to include/cos/response/service_resp.h
+index 3f3f77b..8e80ef2 100644
+--- a/include/response/service_resp.h
++++ b/include/cos/response/service_resp.h
+@@ -11,9 +11,9 @@
+ 
+ #include <vector>
+ 
+-#include "cos_config.h"
+-#include "cos_defines.h"
+-#include "response/base_resp.h"
++#include "cos/cos_config.h"
++#include "cos/cos_defines.h"
++#include "cos/response/base_resp.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/trsf/async_context.h b/include/cos/trsf/async_context.h
+similarity index 88%
+rename from include/trsf/async_context.h
+rename to include/cos/trsf/async_context.h
+index 307e099..a065594 100644
+--- a/include/trsf/async_context.h
++++ b/include/cos/trsf/async_context.h
+@@ -1,6 +1,6 @@
+ #pragma once
+-#include "response/object_resp.h"
+-#include "trsf/transfer_handler.h"
++#include "cos/response/object_resp.h"
++#include "cos/trsf/transfer_handler.h"
+ #include <memory>
+ 
+ namespace qcloud_cos {
+@@ -33,4 +33,4 @@ class AsyncContext {
+   SharedTransferHandler m_handler;
+ };
+ 
+-}  // namespace qcloud_cos
+\ No newline at end of file
++}  // namespace qcloud_cos
+diff --git a/include/trsf/async_task.h b/include/cos/trsf/async_task.h
+similarity index 100%
+rename from include/trsf/async_task.h
+rename to include/cos/trsf/async_task.h
+diff --git a/include/trsf/transfer_handler.h b/include/cos/trsf/transfer_handler.h
+similarity index 98%
+rename from include/trsf/transfer_handler.h
+rename to include/cos/trsf/transfer_handler.h
+index db85cb2..d5db29e 100644
+--- a/include/trsf/transfer_handler.h
++++ b/include/cos/trsf/transfer_handler.h
+@@ -1,8 +1,8 @@
+ ﻿#ifndef __TRSF_HANDLER_H__
+ #define __TRSF_HANDLER_H__
+ 
+-#include "op/cos_result.h"
+-#include "response/object_resp.h"
++#include "cos/op/cos_result.h"
++#include "cos/response/object_resp.h"
+ #include <condition_variable>
+ #include <exception>
+ #include <functional>
+diff --git a/include/util/auth_tool.h b/include/cos/util/auth_tool.h
+similarity index 96%
+rename from include/util/auth_tool.h
+rename to include/cos/util/auth_tool.h
+index f875bec..9952081 100644
+--- a/include/util/auth_tool.h
++++ b/include/cos/util/auth_tool.h
+@@ -7,8 +7,8 @@
+ #include <string>
+ #include <vector>
+ #include <unordered_set>
+-#include "request/base_req.h"
+-#include "util/noncopyable.h"
++#include "cos/request/base_req.h"
++#include "cos/util/noncopyable.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/util/codec_util.h b/include/cos/util/codec_util.h
+similarity index 100%
+rename from include/util/codec_util.h
+rename to include/cos/util/codec_util.h
+diff --git a/include/util/crc64.h b/include/cos/util/crc64.h
+similarity index 100%
+rename from include/util/crc64.h
+rename to include/cos/util/crc64.h
+diff --git a/include/util/file_util.h b/include/cos/util/file_util.h
+similarity index 100%
+rename from include/util/file_util.h
+rename to include/cos/util/file_util.h
+diff --git a/include/util/http_sender.h b/include/cos/util/http_sender.h
+similarity index 99%
+rename from include/util/http_sender.h
+rename to include/cos/util/http_sender.h
+index dfa17b1..e7f1e2d 100644
+--- a/include/util/http_sender.h
++++ b/include/cos/util/http_sender.h
+@@ -14,7 +14,7 @@
+ #include <map>
+ #include <string>
+ 
+-#include "trsf/transfer_handler.h"
++#include "cos/trsf/transfer_handler.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/util/log_util.h b/include/cos/util/log_util.h
+similarity index 93%
+rename from include/util/log_util.h
+rename to include/cos/util/log_util.h
+index 8568eb9..7c2fd8f 100644
+--- a/include/util/log_util.h
++++ b/include/cos/util/log_util.h
+@@ -5,7 +5,7 @@
+ 
+ #include <string>
+ 
+-#include "cos_defines.h"
++#include "cos/cos_defines.h"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/util/lru_cache.h b/include/cos/util/lru_cache.h
+similarity index 100%
+rename from include/util/lru_cache.h
+rename to include/cos/util/lru_cache.h
+diff --git a/include/util/noncopyable.h b/include/cos/util/noncopyable.h
+similarity index 100%
+rename from include/util/noncopyable.h
+rename to include/cos/util/noncopyable.h
+diff --git a/include/util/sha1.h b/include/cos/util/sha1.h
+similarity index 100%
+rename from include/util/sha1.h
+rename to include/cos/util/sha1.h
+diff --git a/include/util/simple_dns_cache.h b/include/cos/util/simple_dns_cache.h
+similarity index 100%
+rename from include/util/simple_dns_cache.h
+rename to include/cos/util/simple_dns_cache.h
+diff --git a/include/util/string_util.h b/include/cos/util/string_util.h
+similarity index 92%
+rename from include/util/string_util.h
+rename to include/cos/util/string_util.h
+index 62a7e7f..a682aa8 100644
+--- a/include/util/string_util.h
++++ b/include/cos/util/string_util.h
+@@ -1,14 +1,14 @@
+-#ifndef STRING_UTIL_H
+-#define STRING_UTIL_H
++#ifndef COS_STRING_UTIL_H
++#define COS_STRING_UTIL_H
+ 
+ #include <stdint.h>
+ 
+ #include <string>
+ 
+-#include "cos_defines.h"
+-#include "rapidxml/1.13/rapidxml.hpp"
+-#include "rapidxml/1.13/rapidxml_print.hpp"
+-#include "rapidxml/1.13/rapidxml_utils.hpp"
++#include "cos/cos_defines.h"
++#include "cos/rapidxml/1.13/rapidxml.hpp"
++#include "cos/rapidxml/1.13/rapidxml_print.hpp"
++#include "cos/rapidxml/1.13/rapidxml_utils.hpp"
+ 
+ namespace qcloud_cos {
+ 
+diff --git a/include/util/test_utils.h b/include/cos/util/test_utils.h
+similarity index 100%
+rename from include/util/test_utils.h
+rename to include/cos/util/test_utils.h
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index c9b23d3..898d4d5 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,12 +1,13 @@
+ project(cossdk)
+ 
+-file(GLOB sdk_common_header "${CMAKE_SOURCE_DIR}/include/*.h")
+-file(GLOB sdk_op_header "${CMAKE_SOURCE_DIR}/include/op/*.h")
+-file(GLOB sdk_request_header "${CMAKE_SOURCE_DIR}/include/request/*.h")
+-file(GLOB sdk_response_header "${CMAKE_SOURCE_DIR}/include/response/*.h")
+-file(GLOB sdk_threadpool_header "${CMAKE_SOURCE_DIR}/include/threadpool/*.h")
+-file(GLOB sdk_trsf_header "${CMAKE_SOURCE_DIR}/include/trsf/*.h")
+-file(GLOB sdk_util_header "${CMAKE_SOURCE_DIR}/include/util/*.h")
++include_directories(${CMAKE_SOURCE_DIR}/include/cos)
++file(GLOB sdk_common_header "${CMAKE_SOURCE_DIR}/include/cos/*.h")
++file(GLOB sdk_op_header "${CMAKE_SOURCE_DIR}/include/cos/op/*.h")
++file(GLOB sdk_request_header "${CMAKE_SOURCE_DIR}/include/cos/request/*.h")
++file(GLOB sdk_response_header "${CMAKE_SOURCE_DIR}/include/cos/response/*.h")
++file(GLOB sdk_threadpool_header "${CMAKE_SOURCE_DIR}/include/cos/threadpool/*.h")
++file(GLOB sdk_trsf_header "${CMAKE_SOURCE_DIR}/include/cos/trsf/*.h")
++file(GLOB sdk_util_header "${CMAKE_SOURCE_DIR}/include/cos/util/*.h")
+ file(GLOB sdk_header
+         ${sdk_common_header}
+         ${sdk_op_header}
+@@ -44,4 +45,4 @@ if(BUILD_SHARED_LIB)
+     add_library(${PROJECT_NAME}-shared SHARED ${sdk_src})
+     include_directories(${CMAKE_SOURCE_DIR}/include/ ${POCO_INCLUDE_DIR})
+     target_link_libraries(${PROJECT_NAME}-shared ${POCO_LIBS} ${OPENSSL_LIBS} ${SYSTEM_LIBS})
+-endif()
+\ No newline at end of file
++endif()

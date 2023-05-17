@@ -38,16 +38,17 @@ usage() {
     echo "
 Usage: $0 <options>
   Optional options:
-     [no option]        build all components
-     --fe               build Frontend and Spark DPP application. Default ON.
-     --be               build Backend. Default ON.
-     --meta-tool        build Backend meta tool. Default OFF.
-     --broker           build Broker. Default ON.
-     --audit            build audit loader. Default ON.
-     --spark-dpp        build Spark DPP application. Default ON.
-     --hive-udf         build Hive UDF library for Spark Load. Default ON.
-     --clean            clean and build target
-     -j                 build Backend parallel
+     [no option]            build all components
+     --fe                   build Frontend and Spark DPP application. Default ON.
+     --be                   build Backend. Default ON.
+     --meta-tool            build Backend meta tool. Default OFF.
+     --cloud-recovery-tool  build recovery tool. Default OFF.
+     --broker               build Broker. Default ON.
+     --audit                build audit loader. Default ON.
+     --spark-dpp            build Spark DPP application. Default ON.
+     --hive-udf             build Hive UDF library for Spark Load. Default ON.
+     --clean                clean and build target
+     -j                     build Backend parallel
 
   Environment variables:
     USE_AVX2                    If the CPU does not support AVX2 instruction set, please set USE_AVX2=0. Default is ON.
@@ -58,6 +59,7 @@ Usage: $0 <options>
     $0                                      build all
     $0 --be                                 build Backend
     $0 --meta-tool                          build Backend meta tool
+    $0 --cloud-recovery-tool                build cloud recovery tool
     $0 --fe --clean                         clean and build Frontend and Spark Dpp application
     $0 --fe --be --clean                    clean and build Frontend, Spark Dpp application and Backend
     $0 --spark-dpp                          build Spark DPP application alone
@@ -114,6 +116,7 @@ if ! OPTS="$(getopt \
     -l 'broker' \
     -l 'audit' \
     -l 'meta-tool' \
+    -l 'cloud-recovery-tool' \
     -l 'spark-dpp' \
     -l 'hive-udf' \
     -l 'clean' \
@@ -134,6 +137,7 @@ BUILD_CLOUD=0
 BUILD_BROKER=0
 BUILD_AUDIT=0
 BUILD_META_TOOL='OFF'
+BUILD_CLOUD_RECOVERY_TOOL='OFF'
 BUILD_SPARK_DPP=0
 BUILD_JAVA_UDF=0
 BUILD_HIVE_UDF=0
@@ -151,6 +155,7 @@ if [[ "$#" == 1 ]]; then
     BUILD_BROKER=1
     BUILD_AUDIT=1
     BUILD_META_TOOL='OFF'
+    BUILD_CLOUD_RECOVERY_TOOL='OFF'
     BUILD_SPARK_DPP=1
     BUILD_HIVE_UDF=1
     BUILD_JAVA_UDF=1
@@ -184,6 +189,10 @@ else
             ;;
         --meta-tool)
             BUILD_META_TOOL='ON'
+            shift
+            ;;
+        --cloud-recovery-tool)
+            BUILD_CLOUD_RECOVERY_TOOL='ON'
             shift
             ;;
         --spark-dpp)
@@ -237,6 +246,7 @@ else
         BUILD_BROKER=1
         BUILD_AUDIT=1
         BUILD_META_TOOL='ON'
+        BUILD_CLOUD_RECOVERY_TOOL='ON'
         BUILD_SPARK_DPP=1
         BUILD_HIVE_UDF=1
         BUILD_JAVA_UDF=1
@@ -396,6 +406,7 @@ echo "Get params:
     BUILD_BROKER        -- ${BUILD_BROKER}
     BUILD_AUDIT         -- ${BUILD_AUDIT}
     BUILD_META_TOOL     -- ${BUILD_META_TOOL}
+    BUILD_CLOUD_RECOVERY_TOOL -- ${BUILD_CLOUD_RECOVERY_TOOL}
     BUILD_SPARK_DPP     -- ${BUILD_SPARK_DPP}
     BUILD_JAVA_UDF      -- ${BUILD_JAVA_UDF}
     BUILD_HIVE_UDF      -- ${BUILD_HIVE_UDF}
@@ -484,6 +495,7 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
         -DWITH_LZO="${WITH_LZO}" \
         -DUSE_LIBCPP="${USE_LIBCPP}" \
         -DBUILD_META_TOOL="${BUILD_META_TOOL}" \
+        -DBUILD_CLOUD_RECOVERY_TOOL="${BUILD_CLOUD_RECOVERY_TOOL}" \
         -DSTRIP_DEBUG_INFO="${STRIP_DEBUG_INFO}" \
         -DUSE_DWARF="${USE_DWARF}" \
         -DUSE_MEM_TRACKER="${USE_MEM_TRACKER}" \
@@ -659,6 +671,11 @@ EOF
 
     if [[ "${BUILD_META_TOOL}" = "ON" ]]; then
         cp -r -p "${DORIS_HOME}/be/output/lib/meta_tool" "${DORIS_OUTPUT}/be/lib"/
+    fi
+
+    if [[ "${BUILD_CLOUD_RECOVERY_TOOL}" = "ON" ]]; then
+        mkdir -p ${DORIS_OUTPUT}/be/lib/recovery 
+        cp -r -p "${DORIS_HOME}/be/output/lib/recovery_tool" "${DORIS_OUTPUT}/be/lib/recovery"/
     fi
 
     cp -r -p "${DORIS_HOME}/be/output/udf"/*.a "${DORIS_OUTPUT}/udf/lib"/
