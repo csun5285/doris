@@ -58,6 +58,9 @@ Status CloudMetaMgr::open() {
     auto channel = std::make_unique<brpc::Channel>();
     auto endpoint = config::meta_service_endpoint;
     int ret_code = 0;
+    if (config::meta_service_use_short_connection) {
+        options.connection_type = brpc::ConnectionType::CONNECTION_TYPE_SHORT;
+    }
     if (config::meta_service_use_load_balancer) {
         ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
     } else {

@@ -2059,6 +2059,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int meta_service_rpc_retry_times = 200;
 
+    @ConfField(mutable = true)
+    public static bool meta_service_use_short_connection = false;
+
     // 0 means no limit
     @ConfField(mutable = true)
     public static int cloud_max_copy_job_per_table = 10000;

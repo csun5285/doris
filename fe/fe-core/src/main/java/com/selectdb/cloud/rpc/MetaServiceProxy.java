@@ -64,6 +64,10 @@ public class MetaServiceProxy {
     }
 
     private MetaServiceClient getProxy(TNetworkAddress address) {
+        if (Config.meta_service_use_short_connection) {
+            return new MetaServiceClient(address);
+        }
+
         MetaServiceClient service = serviceMap.get(address);
         if (service != null) {
             return service;
