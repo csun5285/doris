@@ -5,138 +5,100 @@ suite("test_recycler") {
     // create table
     def token = "greedisgood9999"
     def instanceId = context.config.instanceId;
-    def cloudUniqueId = context.config.cloudUniqueId
-    def tableName = 'test_recycler'
 
-    def start_time = System.currentTimeMillis()
-
-    sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
-    sql """
-        CREATE TABLE IF NOT EXISTS `${tableName}` (
-        `lo_orderkey` bigint(20) NOT NULL COMMENT "",
-        `lo_linenumber` bigint(20) NOT NULL COMMENT "",
-        `lo_custkey` int(11) NOT NULL COMMENT "",
-        `lo_partkey` int(11) NOT NULL COMMENT "",
-        `lo_suppkey` int(11) NOT NULL COMMENT "",
-        `lo_orderdate` int(11) NOT NULL COMMENT "",
-        `lo_orderpriority` varchar(16) NOT NULL COMMENT "",
-        `lo_shippriority` int(11) NOT NULL COMMENT "",
-        `lo_quantity` bigint(20) NOT NULL COMMENT "",
-        `lo_extendedprice` bigint(20) NOT NULL COMMENT "",
-        `lo_ordtotalprice` bigint(20) NOT NULL COMMENT "",
-        `lo_discount` bigint(20) NOT NULL COMMENT "",
-        `lo_revenue` bigint(20) NOT NULL COMMENT "",
-        `lo_supplycost` bigint(20) NOT NULL COMMENT "",
-        `lo_tax` bigint(20) NOT NULL COMMENT "",
-        `lo_commitdate` bigint(20) NOT NULL COMMENT "",
-        `lo_shipmode` varchar(11) NOT NULL COMMENT ""
-        )
-        PARTITION BY RANGE(`lo_orderdate`)
-        (PARTITION p1992 VALUES [("-2147483648"), ("19930101")),
-        PARTITION p1993 VALUES [("19930101"), ("19940101")),
-        PARTITION p1994 VALUES [("19940101"), ("19950101")),
-        PARTITION p1995 VALUES [("19950101"), ("19960101")),
-        PARTITION p1996 VALUES [("19960101"), ("19970101")),
-        PARTITION p1997 VALUES [("19970101"), ("19980101")),
-        PARTITION p1998 VALUES [("19980101"), ("19990101")))
-        DISTRIBUTED BY HASH(`lo_orderkey`) BUCKETS 2;
-    """
-
-    // create indexes
-
-    // load data
-    def columns = """lo_orderkey,lo_linenumber,lo_custkey,lo_partkey,lo_suppkey,lo_orderdate,lo_orderpriority, 
-                    lo_shippriority,lo_quantity,lo_extendedprice,lo_ordtotalprice,lo_discount, 
-                    lo_revenue,lo_supplycost,lo_tax,lo_commitdate,lo_shipmode,lo_dummy"""
-
-    for (int index = 0; index < 1; index++) {
-        streamLoad {
-            table tableName
-
-            // default label is UUID:
-            // set 'label' UUID.randomUUID().toString()
-
-            // default column_separator is specify in doris fe config, usually is '\t'.
-            // this line change to ','
-            set 'column_separator', '|'
-            set 'compress_type', 'GZ'
-            set 'columns', columns
-            // relate to ${DORIS_HOME}/regression-test/data/demo/streamload_input.csv.
-            // also, you can stream load a http stream, e.g. http://xxx/some.csv
-            file """${context.sf1DataPath}/ssb/sf0.1/lineorder.tbl.gz"""
-
-            time 10000 // limit inflight 10s
-
-            // stream load action will check result, include Success status, and NumberTotalRows == NumberLoadedRows
-
-            // if declared a check callback, the default check condition will ignore.
-            // So you must check all condition
-            check { result, exception, startTime, endTime ->
-                if (exception != null) {
-                    throw exception
-                }
-                log.info("Stream load result: ${result}".toString())
-                def json = parseJson(result)
-                assertEquals("success", json.Status.toLowerCase())
-                assertEquals(json.NumberTotalRows, json.NumberLoadedRows)
-                assertTrue(json.NumberLoadedRows > 0 && json.LoadBytes > 0)
-            }
-        }
-        logger.info("index:${index}")
-    }
-
-    qt_sql """ select count(*) from ${tableName};"""
-
-    String[][] tabletInfoList = sql """ show tablets from ${tableName}; """
-    logger.debug("tabletInfoList:${tabletInfoList}")
-
-    HashSet<String> tabletIdSet= new HashSet<String>()
-    for (tabletInfo : tabletInfoList) {
-        tabletIdSet.add(tabletInfo[0])
-    }
-    logger.info("tabletIdSet:${tabletIdSet}")
-
-    // drop table
-    sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
-
-    int retry = 15
-    boolean success = false
-    // recycle data
-    do {
-        triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 20s
-        if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
-            success = true
-            break
-        }
-    } while (retry--)
-    assertTrue(success)
+    def caseStartTime = System.currentTimeMillis()
+    def recyclerLastSuccessTime = -1
 
     // Make sure to complete at least one round of recycling
-    def recycleJobInfo = { checkFunc ->
-        httpTest {
-            endpoint context.config.recycleServiceHttpAddress
-            uri "/RecyclerService/http/recycle_job_info?token=$token&instance_id=$instanceId"
-            op "get"
-            check checkFunc
+    def getRecycleJobInfo = {
+        def recycleJobInfoApi = { checkFunc ->
+            httpTest {
+                endpoint context.config.recycleServiceHttpAddress
+                uri "/RecyclerService/http/recycle_job_info?token=$token&instance_id=$instanceId"
+                op "get"
+                check checkFunc
+            }
         }
-    }
-    do {
-        def last_finish_time_ms = -1
-        recycleJobInfo.call() {
+        recycleJobInfoApi.call() {
             respCode, body ->
                 logger.info("http cli result: ${body} ${respCode}")
                 recycleJobInfoResult = body
                 logger.info("recycleJobInfoResult:${recycleJobInfoResult}")
                 assertEquals(respCode, 200)
                 def info = parseJson(recycleJobInfoResult.trim())
-                last_finish_time_ms = Long.parseLong(info.last_finish_time_ms)
+                if (info.last_success_time_ms != null) {
+                    recyclerLastSuccessTime = Long.parseLong(info.last_success_time_ms)
+                }
         }
-        logger.info("last_finish_time=${last_finish_time_ms}, start_time=${start_time}")
-        if (last_finish_time_ms > start_time) {
+    }
+
+    int retry = 60 // 10min
+    boolean success = false
+    do {
+        triggerRecycle(token, instanceId)
+        Thread.sleep(10000)
+        getRecycleJobInfo()
+        logger.info("caseStartTime=${caseStartTime}, recyclerLastSuccessTime=${recyclerLastSuccessTime}")
+        if (recyclerLastSuccessTime > caseStartTime) {
+            success = true
             break
         }
-        triggerRecycle(token, instanceId)
+    } while (retry--)
+    assertTrue(success)
+
+    // Make sure to complete at least one round of checking
+    def checkerLastSuccessTime = -1
+    def checkerLastFinishTime = -1
+
+    def triggerChecker = {
+        def triggerCheckerApi = { checkFunc ->
+            httpTest {
+                endpoint context.config.recycleServiceHttpAddress
+                uri "/RecyclerService/http/check_instance?token=$token&instance_id=$instanceId"
+                op "get"
+                check checkFunc
+            }
+        }
+        triggerCheckerApi.call() {
+            respCode, body ->
+                log.info("http cli result: ${body} ${respCode}".toString())
+                triggerCheckerResult = body
+                logger.info("triggerCheckerResult:${triggerCheckerResult}".toString())
+                assertTrue(triggerCheckerResult.trim().equalsIgnoreCase("OK"))
+        }
+    }
+    def getCheckJobInfo = {
+        def checkJobInfoApi = { checkFunc ->
+            httpTest {
+                endpoint context.config.recycleServiceHttpAddress
+                uri "/RecyclerService/http/check_job_info?token=$token&instance_id=$instanceId"
+                op "get"
+                check checkFunc
+            }
+        }
+        checkJobInfoApi.call() {
+            respCode, body ->
+                logger.info("http cli result: ${body} ${respCode}")
+                checkJobInfoResult = body
+                logger.info("checkJobInfoResult:${checkJobInfoResult}")
+                assertEquals(respCode, 200)
+                def info = parseJson(checkJobInfoResult.trim())
+                if (info.last_finish_time_ms != null) { // Check done
+                    checkerLastFinishTime = Long.parseLong(info.last_finish_time_ms)
+                    assertTrue(info.last_success_time_ms != null)
+                    checkerLastSuccessTime = Long.parseLong(info.last_success_time_ms)
+                }
+        }
+    }
+
+    do {
+        triggerChecker()
         Thread.sleep(10000) // 10s
+        getCheckJobInfo()
+        logger.info("checkerLastFinishTime=${checkerLastFinishTime}, checkerLastSuccessTime=${checkerLastSuccessTime}")
+        if (checkerLastFinishTime > recyclerLastSuccessTime) {
+            break
+        }
     } while (true)
+    assertEquals(checkerLastFinishTime, checkerLastSuccessTime)
 }
