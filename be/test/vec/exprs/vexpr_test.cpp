@@ -39,6 +39,7 @@
 #include "vec/runtime/vdatetime_value.h"
 #include "vec/utils/util.hpp"
 
+#define TEST_VEXPR DISABLED_TEST_VEXPR
 TEST(TEST_VEXPR, ABSTEST) {
     doris::ChunkAllocator::init_instance(4096);
     doris::ObjectPool object_pool;

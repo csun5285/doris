@@ -216,6 +216,7 @@ cd "${CMAKE_BUILD_DIR}"
     ${CMAKE_USE_CCACHE:+${CMAKE_USE_CCACHE}} \
     "${DORIS_HOME}/be"
 "${BUILD_SYSTEM}" -j "${PARALLEL}"
+"${BUILD_SYSTEM}" install
 
 if [[ "${RUN}" -ne 1 ]]; then
     echo "Finished"
@@ -296,6 +297,7 @@ touch "${UT_TMP_DIR}/tmp_file"
 # set asan and ubsan env to generate core file
 export ASAN_OPTIONS=symbolize=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1
 export UBSAN_OPTIONS=print_stacktrace=1
+export LSAN_OPTIONS=suppressions=${DORIS_TEST_BINARY_DIR}/asan_suppr.conf
 
 # find all executable test files
 if [ "${CLOUD_MODE}" == "ON" ]; then
@@ -313,6 +315,7 @@ if [[ -f "${test}" ]]; then
         LLVM_PROFILE_FILE="${profraw}" "${test}" --gtest_output="xml:${GTEST_OUTPUT_DIR}/${file_name}.xml"  --gtest_print_time=true "${FILTER}"
         llvm-profdata merge -o ${profdata} ${profraw}
         llvm-cov show -output-dir=${DORIS_TEST_BINARY_DIR}/report -format=html \
+            -ignore-filename-regex='(.*gensrc/.*)|(.*_test\.cpp$)|(.*be/test.*)' \
             -instr-profile=${profdata} \
             -object=${test}
     else

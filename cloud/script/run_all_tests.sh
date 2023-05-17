@@ -54,7 +54,7 @@ function report_coverage()
   done
   llvm-profdata merge -o ${profdata} ${profraw}
   llvm-cov show -output-dir=report -format=html \
-      -ignore-filename-regex='.*gensrc.*|.*_test\.cpp$' \
+      -ignore-filename-regex='(.*gensrc/.*)|(.*_test\.cpp$)' \
       -instr-profile=${profdata} \
       ${binary_objects_options[*]}
 }

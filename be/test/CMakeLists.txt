@@ -514,3 +514,8 @@ if (BUILD_BENCHMARK_TOOL AND BUILD_BENCHMARK_TOOL STREQUAL "ON")
     target_link_libraries(benchmark_tool ${TEST_LINK_LIBS})
     set_target_properties(benchmark_tool PROPERTIES COMPILE_FLAGS "-fno-access-control")
 endif()
+
+install(FILES
+    ${BASE_DIR}/../conf/asan_suppr.conf
+    DESTINATION ${EXECUTABLE_OUTPUT_PATH}
+)
