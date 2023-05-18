@@ -1273,6 +1273,7 @@ void PInternalServiceImpl::get_file_cache_meta_by_tablet_id(
                                     meta->set_size(std::get<1>(tuple));
                                     meta->set_cache_type(cache_type_to_pb(std::get<2>(tuple)));
                                     meta->set_expiration_time(std::get<3>(tuple));
+                                    meta->set_done(false);
                                 });
                     }
                 });

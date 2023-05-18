@@ -592,6 +592,7 @@ message FileCacheSegmentMeta {
     required int64 size = 6;
     required FileCacheType cache_type = 7;
     required int64 expiration_time = 8;
+    optional bool done = 9;
 }
 
 message PGetFileCacheMetaResponse {

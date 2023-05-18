@@ -39,7 +39,7 @@ public:
         }
     }
 
-    virtual void download_segments(DownloadTask task) = 0;
+    virtual void download_segments(std::shared_ptr<DownloadTask> task, bool* is_busy) = 0;
 
     inline static FileCacheSegmentDownloader* downloader {nullptr};
 
@@ -60,7 +60,7 @@ protected:
 private:
     std::thread _download_thread;
     std::condition_variable _empty;
-    std::deque<DownloadTask> _task_queue;
+    std::deque<std::shared_ptr<DownloadTask>> _task_queue;
     std::atomic_bool _closed {false};
     const size_t _max_size {1024};
 };
@@ -74,13 +74,14 @@ public:
 
     FileCacheSegmentS3Downloader() = default;
 
-    void download_segments(DownloadTask task) override;
+    void download_segments(std::shared_ptr<DownloadTask> task, bool* is_busy) override;
 
     void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) override;
 
 private:
     std::atomic<size_t> _cur_download_file {0};
     std::unordered_set<int64_t> _inflight_tasks;
+    std::map<std::tuple<std::string, int64>, int64> _inflight_segments;
 };
 
 } // namespace doris::io
