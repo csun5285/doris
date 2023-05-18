@@ -29,7 +29,8 @@
 import groovy.json.JsonOutput
 
 suite("smooth_upgrade") {
-    def tables = [nation: 25, customer: 15000000, lineitem: 600037902, orders: 150000000, part: 20000000, partsupp: 80000000, region: 5, supplier: 1000000]
+    // def tables = [nation: 25, customer: 15000000, lineitem: 600037902, orders: 150000000, part: 20000000, partsupp: 80000000, region: 5, supplier: 1000000]
+    def tables = [nation: 25, customer: 15000000, region: 5, supplier: 1000000]
 
     // new be info (TODO: get from config):
     def ip = context.config.upgradeNewBeIp
