@@ -51,9 +51,11 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class CloudTabletRebalancer extends MasterDaemon {
@@ -64,6 +66,8 @@ public class CloudTabletRebalancer extends MasterDaemon {
     private Map<Long, List<Tablet>> futureBeToTabletsGlobal;
 
     private Map<String, List<Long>> clusterToBes;
+
+    private Set<Long> allBes;
 
     private List<UpdateCloudReplicaInfo> replicaInfos;
 
@@ -113,6 +117,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
         LOG.info("cloud tablet rebalance begin");
 
         clusterToBes = new HashMap<String, List<Long>>();
+        allBes = new HashSet<Long>();
         long start = System.currentTimeMillis();
 
         // 1 build cluster to backend info
@@ -121,6 +126,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
             Backend be = systemInfoService.getBackend(beId);
             clusterToBes.putIfAbsent(be.getCloudClusterId(), new ArrayList<Long>());
             clusterToBes.get(be.getCloudClusterId()).add(beId);
+            allBes.add(beId);
         }
         LOG.info("cluster to backends {}", clusterToBes);
 
@@ -370,6 +376,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
                     Map<String, List<Long>> clusterToBackends =
                             ((CloudReplica) replica).getClusterToBackends();
                     for (List<Long> bes : clusterToBackends.values()) {
+                        if (!allBes.contains(bes.get(0))) {
+                            continue;
+                        }
+
                         fillBeToTablets(bes.get(0), partition, index, tablet, this.beToTabletsGlobal,
                                 this.partitionToTablets);
 
