@@ -32,6 +32,7 @@ import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
 import org.apache.doris.persist.EditLog;
 import org.apache.doris.rpc.RpcException;
@@ -163,19 +164,29 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         Preconditions.checkNotNull(beginTxnResponse);
         Preconditions.checkNotNull(beginTxnResponse.getStatus());
-        switch (beginTxnResponse.getStatus().getCode()) {
-            case OK:
-                break;
-            case TXN_DUPLICATED_REQ:
-                throw new DuplicatedRequestException(DebugUtil.printId(requestId),
-                        beginTxnResponse.getDupTxnId(), beginTxnResponse.getStatus().getMsg());
-            case TXN_LABEL_ALREADY_USED:
-                throw new LabelAlreadyUsedException(beginTxnResponse.getStatus().getMsg());
-            default:
-                throw new BeginTransactionException(beginTxnResponse.getStatus().getMsg());
+
+        if (beginTxnResponse.getStatus().getCode() != MetaServiceCode.OK) {
+            switch (beginTxnResponse.getStatus().getCode()) {
+                case TXN_DUPLICATED_REQ:
+                    throw new DuplicatedRequestException(DebugUtil.printId(requestId),
+                            beginTxnResponse.getDupTxnId(), beginTxnResponse.getStatus().getMsg());
+                case TXN_LABEL_ALREADY_USED:
+                    if (MetricRepo.isInit) {
+                        MetricRepo.COUNTER_TXN_REJECT.increase(1L);
+                    }
+                    throw new LabelAlreadyUsedException(beginTxnResponse.getStatus().getMsg());
+                default:
+                    if (MetricRepo.isInit) {
+                        MetricRepo.COUNTER_TXN_REJECT.increase(1L);
+                    }
+                    throw new BeginTransactionException(beginTxnResponse.getStatus().getMsg());
+            }
         }
 
         long txnId = beginTxnResponse.getTxnId();
+        if (MetricRepo.isInit) {
+            MetricRepo.COUNTER_TXN_BEGIN.increase(1L);
+        }
         return txnId;
     }
 
@@ -293,7 +304,8 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 && commitTxnResponse.getStatus().getCode() != MetaServiceCode.TXN_ALREADY_VISIBLE) {
             LOG.warn("commitTxn failed, transactionId={}, for {} times, commitTxnResponse:{}",
                     transactionId, retryTime, commitTxnResponse);
-            StringBuilder internalMsgBuilder = new StringBuilder("commitTxn failed, transactionId=");
+            StringBuilder internalMsgBuilder =
+                    new StringBuilder("commitTxn failed, transactionId=");
             internalMsgBuilder.append(transactionId);
             internalMsgBuilder.append(" code=");
             internalMsgBuilder.append(commitTxnResponse.getStatus().getCode());
@@ -302,16 +314,16 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         TransactionState txnState = TxnUtil.transactionStateFromPb(commitTxnResponse.getTxnInfo());
         TxnStateChangeCallback cb = callbackFactory.getCallback(txnState.getCallbackId());
-        if (cb == null) {
-            LOG.info("commitTxn, no callback to run for this txn, transactionId={} callbackId={}, txnState={}",
+        if (cb != null) {
+            LOG.info("commitTxn, run txn callback, transactionId={} callbackId={}, txnState={}",
                     txnState.getTransactionId(), txnState.getCallbackId(), txnState);
-            return;
+            cb.afterCommitted(txnState, true);
+            cb.afterVisible(txnState, true);
         }
-
-        LOG.info("commitTxn, run txn callback, transactionId={} callbackId={}, txnState={}",
-                txnState.getTransactionId(), txnState.getCallbackId(), txnState);
-        cb.afterCommitted(txnState, true);
-        cb.afterVisible(txnState, true);
+        if (MetricRepo.isInit) {
+            MetricRepo.COUNTER_TXN_SUCCESS.increase(1L);
+            MetricRepo.HISTO_TXN_EXEC_LATENCY.update(txnState.getCommitTime() - txnState.getPrepareTime());
+        }
     }
 
     @Override
@@ -374,14 +386,14 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         }
         TransactionState txnState = TxnUtil.transactionStateFromPb(abortTxnResponse.getTxnInfo());
         TxnStateChangeCallback cb = callbackFactory.getCallback(txnState.getCallbackId());
-        if (cb == null) {
-            LOG.info("no callback to run for this txn, txnId={} callbackId={}", txnState.getTransactionId(),
-                        txnState.getCallbackId());
-            return;
+        if (cb != null) {
+            LOG.info("run txn callback, txnId={} callbackId={}", txnState.getTransactionId(),
+                    txnState.getCallbackId());
+            cb.afterAborted(txnState, true, txnState.getReason());
         }
-
-        LOG.info("run txn callback, txnId={} callbackId={}", txnState.getTransactionId(), txnState.getCallbackId());
-        cb.afterAborted(txnState, true, txnState.getReason());
+        if (MetricRepo.isInit) {
+            MetricRepo.COUNTER_TXN_FAILED.increase(1L);
+        }
     }
 
     @Override
@@ -419,6 +431,9 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         LOG.info("run txn callback, txnId={} callbackId={}", txnState.getTransactionId(), txnState.getCallbackId());
         cb.afterAborted(txnState, true, txnState.getReason());
+        if (MetricRepo.isInit) {
+            MetricRepo.COUNTER_TXN_FAILED.increase(1L);
+        }
     }
 
     @Override
