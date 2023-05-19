@@ -77,6 +77,9 @@ void MetaServerRegister::prepare_registry(ServiceRegistryPB* reg) {
     item.set_ctime_ms(now);
     item.set_mtime_ms(now);
     item.set_expiration_time_ms(now + config::meta_server_lease_ms);
+    if (!config::hostname.empty()) {
+        item.set_host(config::hostname);
+    }
 
     if (!id_.empty() && id_ != id) {
         LOG(WARNING) << "server id changed, old=" << id_ << " new=" << id;

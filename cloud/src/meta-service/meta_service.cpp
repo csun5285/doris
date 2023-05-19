@@ -6359,19 +6359,32 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
                      << " ret=" << ret;
         return;
     }
-    std::string self_endpoint =
-            std::string(butil::my_ip_cstr()) + ":" + std::to_string(config::brpc_listen_port);
+    std::string self_endpoint;
+    if (config::hostname.empty()) {
+        self_endpoint = fmt::format("{}:{}", butil::my_ip_cstr(), config::brpc_listen_port);
+    } else {
+        self_endpoint = fmt::format("{}:{}", config::hostname, config::brpc_listen_port);
+    }
     ServiceRegistryPB reg;
     reg.ParseFromString(val);
+
     brpc::ChannelOptions options;
+    options.connection_type = brpc::ConnectionType::CONNECTION_TYPE_SHORT;
+
     static std::unordered_map<std::string, std::shared_ptr<MetaService_Stub>> stubs;
     static std::mutex mtx;
+
     std::vector<bthread_t> btids;
     btids.reserve(reg.items_size());
     for (int i = 0; i < reg.items_size(); ++i) {
         ret = 0;
         auto& e = reg.items(i);
-        auto endpoint = e.ip() + ":" + std::to_string(e.port());
+        std::string endpoint;
+        if (e.has_host()) {
+            endpoint = fmt::format("{}:{}", e.host(), e.port());
+        } else {
+            endpoint = fmt::format("{}:{}", e.ip(), e.port());
+        }
         if (endpoint == self_endpoint) continue;
 
         // Prepare stub
@@ -6405,11 +6418,19 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
                 req.set_instance_id(instance_id);
                 req.set_op(AlterInstanceRequest::REFRESH);
                 stub->alter_instance(&cntl, &req, &res, nullptr);
-                succ = res.status().code() == MetaServiceCode::OK;
-                LOG(INFO) << (succ ? "succ" : "failed")
-                          << " to issue refresh_instance rpc, num_try=" << num_try
-                          << " endpoint=" << endpoint << " response=" << proto_to_json(res);
-                if (succ) return;
+                if (cntl.Failed()) {
+                    LOG_WARNING("issue refresh instance rpc")
+                            .tag("endpoint", endpoint)
+                            .tag("num_try", num_try)
+                            .tag("code", cntl.ErrorCode())
+                            .tag("msg", cntl.ErrorText());
+                } else {
+                    succ = res.status().code() == MetaServiceCode::OK;
+                    LOG(INFO) << (succ ? "succ" : "failed")
+                              << " to issue refresh_instance rpc, num_try=" << num_try
+                              << " endpoint=" << endpoint << " response=" << proto_to_json(res);
+                    if (succ) return;
+                }
                 bthread_usleep(300000);
             }
             if (succ) return;

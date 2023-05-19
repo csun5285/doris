@@ -40,6 +40,10 @@ add_executable(meta_service_test
    detach_schema_kv_test.cpp
 )
 
+add_executable(meta_server_test
+    meta_server_test.cpp
+)
+
 add_executable(rate_limiter_test
     rate_limiter_test.cpp
 )
@@ -65,6 +69,10 @@ target_link_libraries(keys_test
 )
 
 target_link_libraries(meta_service_test
+    ${TEST_LINK_LIBS}
+)
+
+target_link_libraries(meta_server_test
     ${TEST_LINK_LIBS}
 )
 

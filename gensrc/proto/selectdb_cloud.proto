@@ -482,6 +482,9 @@ message ServiceRegistryPB {
         optional int64 ctime_ms = 4;
         optional int64 mtime_ms = 5;
         optional int64 expiration_time_ms = 6;
+
+        // Support FQDN
+        optional string host = 7;
     }
     repeated Item items = 1;
 }
