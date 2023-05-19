@@ -93,6 +93,7 @@ public class LoadManager implements Writable {
     private Map<Long, Map<String, List<LoadJob>>> dbIdToLabelToLoadJobs = Maps.newConcurrentMap();
     private LoadJobScheduler loadJobScheduler;
     private CleanCopyJobScheduler cleanCopyJobScheduler;
+    private Map<EtlJobType, Map<JobState, Long>> expiredLoadJobNum = Maps.newHashMap();
 
     private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -418,10 +419,44 @@ public class LoadManager implements Writable {
         readLock();
         try {
             return idToLoadJob.values().stream().filter(j -> j.getState() == jobState && j.getJobType() == jobType)
-                    .count();
+                    .count() + getExpiredLoadJobNum(jobState, jobType);
         } finally {
             readUnlock();
         }
+    }
+
+    /**
+     * addExpiredLoadJobNum(): increase expired load job num, used by metric,
+     * must be called after LoadManager.writeLock()
+     * @param jobState
+     * @param jobType
+     */
+    public void addExpiredLoadJobNum(JobState jobState, EtlJobType jobType) {
+        if (!expiredLoadJobNum.containsKey(jobType)) {
+            Map<JobState, Long> loadJobNumMap = Maps.newHashMap();
+            loadJobNumMap.put(jobState, new Long(0));
+            expiredLoadJobNum.put(jobType, loadJobNumMap);
+            return;
+        }
+        long loadJobNum = expiredLoadJobNum.get(jobType).get(jobState) + 1;
+        expiredLoadJobNum.get(jobType).replace(jobState, loadJobNum);
+    }
+
+    /**
+     * getExpiredLoadJobNum get expired load job num, used by metric,
+     * must be called after LoadManager.readLock()
+     * @param jobState
+     * @param jobType
+     * @return the expired load job num (cancelled or finished)
+     */
+    public long getExpiredLoadJobNum(JobState jobState, EtlJobType jobType) {
+        if (!expiredLoadJobNum.containsKey(jobType)) {
+            return 0;
+        }
+        if (!expiredLoadJobNum.get(jobType).containsKey(jobState)) {
+            return 0;
+        }
+        return expiredLoadJobNum.get(jobType).get(jobState);
     }
 
     /**
@@ -449,6 +484,7 @@ public class LoadManager implements Writable {
                     if (map.isEmpty()) {
                         dbIdToLabelToLoadJobs.remove(job.getDbId());
                     }
+                    addExpiredLoadJobNum(job.getState(), job.getJobType());
                 }
             }
         } finally {
@@ -524,6 +560,7 @@ public class LoadManager implements Writable {
                         LoadJob job = iter.next();
                         iter.remove();
                         idToLoadJob.remove(job.getId());
+                        addExpiredLoadJobNum(job.getState(), job.getJobType());
                     }
                     if (jobs.isEmpty()) {
                         labelToJob.remove(label);
