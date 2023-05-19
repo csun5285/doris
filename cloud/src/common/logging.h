@@ -1,9 +1,11 @@
 
 #pragma once
 
+#include <butil/containers/linked_list.h>
 #include <fmt/format.h>
 #include <glog/logging.h>
 
+#include <string_view>
 #include <type_traits>
 
 namespace selectdb {
@@ -17,6 +19,29 @@ bool init_glog(const char* basename);
 #define LOG_ERROR(...) ::selectdb::TaggableLogger(LOG(ERROR), ##__VA_ARGS__)
 #define LOG_FATAL(...) ::selectdb::TaggableLogger(LOG(FATAL), ##__VA_ARGS__)
 
+class AnnotateTag final : public butil::LinkNode<AnnotateTag> {
+    struct default_tag_t {};
+    constexpr static default_tag_t default_tag {};
+
+public:
+    template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>, T>>
+    AnnotateTag(std::string_view key, T value)
+            : AnnotateTag(default_tag, key, std::to_string(value)) {}
+    AnnotateTag(std::string_view key, std::string_view value);
+    ~AnnotateTag();
+
+    static void format_tag_list(std::ostream& stream);
+
+    static void* operator new(size_t) = delete;
+    static void* operator new[](size_t) = delete;
+
+private:
+    explicit AnnotateTag(default_tag_t, std::string_view key, std::string value);
+
+    std::string_view key_;
+    std::string value_;
+};
+
 class TaggableLogger {
 public:
     template <typename... Args>
@@ -26,6 +51,7 @@ public:
         } else {
             stream_ << fmt::format(fmt, std::forward<Args>(args)...);
         }
+        AnnotateTag::format_tag_list(stream_);
     };
 
     template <typename V>

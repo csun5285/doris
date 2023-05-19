@@ -289,6 +289,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
         msg = ss.str();
         return;
     }
+
     RPC_RATE_LIMIT(begin_txn)
     //1. Generate version stamp for txn id
     std::unique_ptr<Transaction> txn;

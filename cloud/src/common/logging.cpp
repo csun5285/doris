@@ -3,6 +3,8 @@
 #include "logging.h"
 #include "config.h"
 
+#include <bthread/bthread.h>
+#include <bthread/types.h>
 #include <glog/logging.h>
 #include <glog/vlog_is_on.h>
 
@@ -11,6 +13,49 @@
 // clang-format on
 
 namespace selectdb {
+
+static butil::LinkedList<AnnotateTag>* get_annotate_tag_list() {
+    static std::once_flag log_annotated_tags_key_once;
+    static bthread_key_t log_annotated_tags_key;
+    std::call_once(
+            log_annotated_tags_key_once,
+            +[](bthread_key_t* key) {
+                bthread_key_create(
+                        key, +[](void* value) {
+                            delete reinterpret_cast<butil::LinkedList<AnnotateTag>*>(value);
+                        });
+            },
+            &log_annotated_tags_key);
+
+    auto* tag_list = reinterpret_cast<butil::LinkedList<AnnotateTag>*>(
+            bthread_getspecific(log_annotated_tags_key));
+    if (!tag_list) {
+        tag_list = new butil::LinkedList<AnnotateTag>();
+        bthread_setspecific(log_annotated_tags_key, tag_list);
+    }
+    return tag_list;
+}
+
+AnnotateTag::AnnotateTag(default_tag_t, std::string_view key, std::string value)
+        : key_(key), value_(std::move(value)) {
+    get_annotate_tag_list()->Append(this);
+}
+
+AnnotateTag::AnnotateTag(std::string_view key, std::string_view value)
+        : AnnotateTag(default_tag, key, fmt::format("\"{}\"", value)) {}
+
+AnnotateTag::~AnnotateTag() {
+    RemoveFromList();
+}
+
+void AnnotateTag::format_tag_list(std::ostream& stream) {
+    butil::LinkedList<AnnotateTag>* list = get_annotate_tag_list();
+    butil::LinkNode<AnnotateTag>* head = list->head();
+    const butil::LinkNode<AnnotateTag>* end = list->end();
+    for (; head != end; head = head->next()) {
+        stream << ' ' << head->value()->key_ << '=' << head->value()->value_;
+    }
+}
 
 /**
  * @param basename the basename of log file
