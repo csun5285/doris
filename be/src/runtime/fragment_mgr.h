@@ -141,4 +141,7 @@ private:
     RuntimeFilterMergeController _runtimefilter_controller;
 };
 
+uint64_t get_fragment_executing_count();
+uint64_t get_fragment_last_active_time();
+
 } // namespace doris

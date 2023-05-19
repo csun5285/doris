@@ -263,8 +263,13 @@ public class HeartbeatMgr extends MasterDaemon {
                     if (tBackendInfo.isSetBeNodeRole()) {
                         nodeRole = tBackendInfo.getBeNodeRole();
                     }
+
+                    long fragmentNum = tBackendInfo.getFragmentExecutingCount();
+                    long lastFragmentUpdateTime = tBackendInfo.getFragmentLastActiveTime();
+
                     return new BackendHbResponse(backendId, bePort, httpPort, brpcPort,
-                            System.currentTimeMillis(), beStartTime, version, nodeRole);
+                            System.currentTimeMillis(), beStartTime, version, nodeRole,
+                        fragmentNum, lastFragmentUpdateTime);
                 } else {
                     return new BackendHbResponse(backendId, backend.getHost(),
                             result.getStatus().getErrorMsgs().isEmpty()

@@ -54,12 +54,23 @@
 #include "util/uid_util.h"
 #include "util/url_coding.h"
 
+using namespace std::chrono;
+
 namespace doris {
 
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(plan_fragment_count, MetricUnit::NOUNIT);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(timeout_canceled_fragment_count, MetricUnit::NOUNIT);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(fragment_thread_pool_queue_size, MetricUnit::NOUNIT);
-bvar::LatencyRecorder g_fragmentmgr_prepare_latency("doris_FragmentMgr", "prepare");
+bvar::LatencyRecorder g_fragmentmgr_prepare_latency("fragment_prepare_latency", "prepare");
+bvar::Adder<uint64_t> g_fragment_executing_count("fragment_executing_count");
+bvar::Status<uint64_t> g_fragment_last_active_time("fragment_last_active_time", 0);
+
+uint64_t get_fragment_executing_count() {
+    return g_fragment_executing_count.get_value();
+}
+uint64_t get_fragment_last_active_time() {
+    return g_fragment_last_active_time.get_value();
+}
 
 using apache::thrift::TException;
 using apache::thrift::TProcessor;
@@ -506,8 +517,11 @@ void FragmentMgr::_exec_actual(std::shared_ptr<FragmentExecState> exec_state, Fi
 
     // remove exec state after this fragment finished
     {
+        int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         std::lock_guard<std::mutex> lock(_lock);
         _fragment_map.erase(exec_state->fragment_instance_id());
+        g_fragment_executing_count << -1;
+        g_fragment_last_active_time.set_value(now);
         if (all_done && fragments_ctx) {
             _fragments_ctx_map.erase(fragments_ctx->query_id);
         }
@@ -711,6 +725,7 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params, Fi
         std::lock_guard<std::mutex> lock(_lock);
         _fragment_map.insert(std::make_pair(params.params.fragment_instance_id, exec_state));
         _cv.notify_all();
+        g_fragment_executing_count << 1;
     }
 
     auto st = _thread_pool->submit_func(
@@ -720,9 +735,12 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params, Fi
             });
     if (!st.ok()) {
         {
+            int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
             // Remove the exec state added
             std::lock_guard<std::mutex> lock(_lock);
             _fragment_map.erase(params.params.fragment_instance_id);
+            g_fragment_executing_count << -1;
+            g_fragment_last_active_time.set_value(now);
         }
         exec_state->cancel(PPlanFragmentCancelReason::INTERNAL_ERROR,
                            "push plan fragment to thread pool failed");

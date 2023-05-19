@@ -275,6 +275,14 @@ public class Backend implements Writable {
         return this.backendStatus.isActive;
     }
 
+    public long getCurrentFragmentNum() {
+        return this.backendStatus.currentFragmentNum;
+    }
+
+    public long getLasetCurrentFragmentNum() {
+        return this.backendStatus.lastFragmentUpdateTime;
+    }
+
     // for test only
     public void updateOnce(int bePort, int httpPort, int beRpcPort) {
         if (this.bePort != bePort) {
@@ -771,6 +779,9 @@ public class Backend implements Writable {
 
             heartbeatErrMsg = "";
             this.heartbeatFailureCounter = 0;
+
+            this.backendStatus.currentFragmentNum = hbResponse.getFragmentNum();
+            this.backendStatus.lastFragmentUpdateTime = hbResponse.getLastFragmentUpdateTime();
         } else {
             // Only set backend to dead if the heartbeat failure counter exceed threshold.
             if (++this.heartbeatFailureCounter >= Config.max_backend_heartbeat_failure_tolerance_count) {
@@ -825,6 +836,10 @@ public class Backend implements Writable {
         public volatile boolean isLoadDisabled = false;
         @SerializedName("isActive")
         public volatile boolean isActive = true;
+
+        // cloud mode, cloud control just query master, so not need SerializedName
+        public volatile long currentFragmentNum = 0;
+        public volatile long lastFragmentUpdateTime = 0;
     }
 
     public Tag getLocationTag() {

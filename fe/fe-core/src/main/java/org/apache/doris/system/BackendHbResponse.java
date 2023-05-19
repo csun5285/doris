@@ -36,6 +36,8 @@ public class BackendHbResponse extends HeartbeatResponse implements Writable {
     private String host;
     private String version = "";
     private String nodeRole = Tag.VALUE_MIX;
+    private long fragmentNum;
+    private long lastFragmentUpdateTime;
 
     public BackendHbResponse() {
         super(HeartbeatResponse.Type.BACKEND);
@@ -55,7 +57,8 @@ public class BackendHbResponse extends HeartbeatResponse implements Writable {
     }
 
     public BackendHbResponse(long beId, int bePort, int httpPort, int brpcPort,
-            long hbTime, long beStartTime, String version, String nodeRole) {
+            long hbTime, long beStartTime, String version, String nodeRole,
+                             long fragmentNum, long lastFragmentUpdateTime) {
         super(HeartbeatResponse.Type.BACKEND);
         this.beId = beId;
         this.status = HbStatus.OK;
@@ -66,6 +69,8 @@ public class BackendHbResponse extends HeartbeatResponse implements Writable {
         this.beStartTime = beStartTime;
         this.version = version;
         this.nodeRole = nodeRole;
+        this.fragmentNum = fragmentNum;
+        this.lastFragmentUpdateTime = lastFragmentUpdateTime;
     }
 
     public BackendHbResponse(long beId, String errMsg) {
@@ -81,6 +86,14 @@ public class BackendHbResponse extends HeartbeatResponse implements Writable {
         this.beId = beId;
         this.host = host;
         this.msg = errMsg;
+    }
+
+    public long getFragmentNum() {
+        return fragmentNum;
+    }
+
+    public long getLastFragmentUpdateTime() {
+        return lastFragmentUpdateTime;
     }
 
     public long getBeId() {

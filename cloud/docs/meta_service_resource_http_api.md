@@ -1596,3 +1596,77 @@ Content-Type: text/plain
  "msg": "already has the same arn info"
 }
 ```
+
+
+## 获取cluster下的be节点执行情况
+
+### 接口描述
+
+本接口用于获取cluster下，be节点运行fragment的情况，注意此接口是请求fe的接口
+
+### 请求(Request)
+
+* 请求语法
+
+```
+GET /rest/v2/manager/cluster/cluster_info/cloud_cluster_status HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+
+
+```
+* 请求参数
+
+| 参数名             | 描述                              | 是否必须 | 备注        |
+|-----------------|---------------------------------|------|-----------|
+| user     |        用户名                     | 是    |        鉴权信息   |
+| password  |       密码                              | 是    |      鉴权信息     |
+
+
+* 请求示例
+
+```
+curl -u root: http://127.0.0.1:12100/rest/v2/manager/cluster/cluster_info/cloud_cluster_status
+```
+
+* 返回参数
+
+| 参数名  | 描述    | 是否必须 | 备注                                                       |
+|------|-------|------|----------------------------------------------------------|
+| code | 返回状态码 | 是    ||
+| msg  | 出错原因  | 是    |                                  |
+|data | 返回的一个map，key为clusterId, value为be列表| |
+
+* 成功返回示例
+
+```
+{
+    "msg": "success",
+    "code": 0,
+    "data": {
+        "regression_cluster_id2": [
+            {
+                "host": "127.0.0.1",
+                "heartbeatPort": 14102,
+                "bePort": -1,
+                "httpPort": -1,
+                "brpcPort": -1,
+                "currentFragmentNum": 0,
+                "lastFragmentUpdateTime": 0
+            }
+        ],
+        "regression_test_cluster_id0": [
+            {
+                "host": "127.0.0.1",
+                "heartbeatPort": 11102,
+                "bePort": 11100,
+                "httpPort": 11101,
+                "brpcPort": 11103,
+                "currentFragmentNum": 3,
+                "lastFragmentUpdateTime": 1684152350291
+            }
+        ]
+    },
+    "count": 0
+}
+```
