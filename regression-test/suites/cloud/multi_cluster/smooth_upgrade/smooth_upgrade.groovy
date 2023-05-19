@@ -38,6 +38,7 @@ suite("smooth_upgrade") {
     def httpPort = context.config.upgradeNewBeHttpPort
     def beUniqueId = context.config.upgradeNewBeUniqueId
 
+    def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
 
     def create_table_and_start_load = { ->
         def s3BucketName = getS3BucketName()
@@ -52,7 +53,6 @@ suite("smooth_upgrade") {
         // set fe configuration
         sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
 
-        def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
         tables.each { table, rows ->
             sql """ DROP TABLE IF EXISTS $table """
             // create table if not exists
@@ -96,6 +96,7 @@ suite("smooth_upgrade") {
     def wait_and_check_load = { ->
         tables.each { table, rows ->
             while (true) {
+                def loadLabel = table + "_" + uniqueID
                 def stateResult = sql "show load where Label = '${loadLabel}'"
                 def loadState = stateResult[stateResult.size() - 1][2].toString()
                 if ("CANCELLED".equalsIgnoreCase(loadState)) {
