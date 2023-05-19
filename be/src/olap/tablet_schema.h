@@ -198,6 +198,7 @@ public:
     std::vector<const TabletIndex*> get_indexes_for_column(int32_t col_unique_id) const;
     bool has_inverted_index(int32_t col_unique_id) const;
     const TabletIndex* get_inverted_index(int32_t col_unique_id) const;
+    std::vector<const TabletIndex*> get_inverted_indexes() const;
     void update_indexes_from_thrift(const std::vector<doris::TOlapTableIndex>& indexes);
 
     int32_t schema_version() const { return _schema_version; }

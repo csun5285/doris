@@ -882,6 +882,17 @@ vectorized::Block TabletSchema::create_block(bool ignore_dropped_col) const {
     return block;
 }
 
+std::vector<const TabletIndex*> TabletSchema::get_inverted_indexes() const {
+    std::vector<const TabletIndex*> inverted_indexes;
+    for (size_t i = 0; i < _indexes.size(); i++) {
+        if (_indexes[i].index_type() == IndexType::INVERTED) {
+            DCHECK(_indexes[i].col_unique_ids().size() == 1);
+            inverted_indexes.push_back(&(_indexes[i]));
+        }
+    }
+    return inverted_indexes;
+}
+
 bool operator==(const TabletColumn& a, const TabletColumn& b) {
     if (a._unique_id != b._unique_id) return false;
     if (a._col_name != b._col_name) return false;

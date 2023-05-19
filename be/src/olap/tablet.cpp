@@ -55,6 +55,7 @@
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/rowset_meta_manager.h"
+#include "olap/rowset/segment_v2/inverted_index_desc.h"
 #include "olap/schema_change.h"
 #include "olap/storage_engine.h"
 #include "olap/storage_policy_mgr.h"
@@ -833,13 +834,22 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
     }
     if (config::enable_file_cache) {
         for (auto& rs : expired_rowsets) {
+            auto inverted_indexes = rs->tablet_schema()->get_inverted_indexes();
             for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
-                auto file_key = io::CloudFileCache::hash(
-                        io::Path(rs->segment_file_path(seg_id)).filename().native());
+                auto seg_path = rs->segment_file_path(seg_id);
+                auto file_key = io::CloudFileCache::hash(io::Path(seg_path).filename().native());
                 auto file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
                 file_cache->remove_if_cached(file_key);
+                for (auto index_meta : inverted_indexes) {
+                    std::string inverted_index_file = InvertedIndexDescriptor::get_index_file_name(
+                            seg_path, index_meta->index_id());
+                    file_key = io::CloudFileCache::hash(
+                            io::Path(inverted_index_file).filename().native());
+                    file_cache = io::FileCacheFactory::instance().get_by_path(file_key);
+                    file_cache->remove_if_cached(file_key);
+                }
             }
-    }
+        }
     }
     return expired_rowsets.size();
 }
