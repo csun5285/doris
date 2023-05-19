@@ -5,6 +5,9 @@
 
 #include "gtest/gtest.h"
 
+#include <bthread/bthread.h>
+#include <bthread/countdown_event.h>
+
 #include <cstring>
 #include <iostream>
 #include <random>

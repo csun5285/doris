@@ -323,6 +323,7 @@ message RecyclePartitionPB {
     optional int64 creation_time = 3;
     optional int64 expiration = 4; // expiration timestamp
     optional Type type = 5;
+    optional int64 db_id = 6; // For version recycling
 }
 
 message RecycleRowsetPB {
@@ -719,6 +720,7 @@ message PartitionRequest {
     optional int64 table_id = 3;
     repeated int64 index_ids = 4;
     optional int64 expiration = 5;
+    optional int64 db_id = 6;
 }
 
 message PartitionResponse {

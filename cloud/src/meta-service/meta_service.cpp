@@ -2974,6 +2974,7 @@ void put_recycle_partition_kv(MetaServiceCode& code, std::string& msg, int& ret,
         recycle_partition_key(key_info, &key);
 
         RecyclePartitionPB recycle_partition;
+        recycle_partition.set_db_id(request->db_id());
         recycle_partition.set_table_id(request->table_id());
         *recycle_partition.mutable_index_id() = index_ids;
         recycle_partition.set_creation_time(creation_time);

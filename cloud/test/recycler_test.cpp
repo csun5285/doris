@@ -25,8 +25,8 @@
 #include "recycler/white_black_list.h"
 
 static const std::string instance_id = "instance_id_recycle_test";
-static constexpr int64_t table_id = 10086;
 static int64_t current_time = 0;
+static constexpr int64_t db_id = 1000;
 
 int main(int argc, char** argv) {
     auto conf_file = "selectdb_cloud.conf";
@@ -226,7 +226,8 @@ static int create_committed_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     return 0;
 }
 
-static int create_tablet(TxnKv* txn_kv, int64_t index_id, int64_t partition_id, int64_t tablet_id) {
+static int create_tablet(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t partition_id,
+                         int64_t tablet_id) {
     std::unique_ptr<Transaction> txn;
     if (txn_kv->create_txn(&txn) != 0) {
         return -1;
@@ -248,7 +249,7 @@ static int create_tablet(TxnKv* txn_kv, int64_t index_id, int64_t partition_id, 
     return 0;
 }
 
-static int create_recycle_partiton(TxnKv* txn_kv, int64_t partition_id,
+static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t partition_id,
                                    const std::vector<int64_t>& index_ids,
                                    RecyclePartitionPB::Type type) {
     std::string key;
@@ -258,7 +259,7 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t partition_id,
     recycle_partition_key(key_info, &key);
 
     RecyclePartitionPB partition_pb;
-
+    partition_pb.set_db_id(db_id);
     partition_pb.set_table_id(table_id);
     for (auto index_id : index_ids) {
         partition_pb.add_index_id(index_id);
@@ -278,7 +279,24 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t partition_id,
     return 0;
 }
 
-static int create_recycle_index(TxnKv* txn_kv, int64_t index_id, RecycleIndexPB::Type type) {
+static int create_version_kv(TxnKv* txn_kv, int64_t table_id, int64_t partition_id) {
+    auto key = version_key({instance_id, db_id, table_id, partition_id});
+    VersionPB version;
+    version.set_version(1);
+    auto val = version.SerializeAsString();
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv->create_txn(&txn) != 0) {
+        return -1;
+    }
+    txn->put(key, val);
+    if (txn->commit() != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_id,
+                                RecycleIndexPB::Type type) {
     std::string key;
     std::string val;
 
@@ -812,9 +830,9 @@ TEST(RecyclerTest, recycle_tablet) {
         }
     }
 
-    constexpr int index_id = 10001, partition_id = 10002, tablet_id = 10003;
+    constexpr int table_id = 10000, index_id = 10001, partition_id = 10002, tablet_id = 10003;
     auto accessor = recycler.accessor_map_.begin()->second;
-    create_tablet(txn_kv.get(), index_id, partition_id, tablet_id);
+    create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
     for (int i = 0; i < 500; ++i) {
         auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[i % 5]);
         create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
@@ -885,13 +903,13 @@ TEST(RecyclerTest, recycle_indexes) {
         }
     }
 
-    constexpr int index_id = 10001, partition_id = 10002;
+    constexpr int table_id = 10000, index_id = 10001, partition_id = 10002;
     auto accessor = recycler.accessor_map_.begin()->second;
     int64_t tablet_id_base = 10100;
     int64_t txn_id_base = 114115;
     for (int i = 0; i < 100; ++i) {
         int64_t tablet_id = tablet_id_base + i;
-        create_tablet(txn_kv.get(), index_id, partition_id, tablet_id);
+        create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
         for (int j = 0; j < 10; ++j) {
             auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
             create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
@@ -905,7 +923,7 @@ TEST(RecyclerTest, recycle_indexes) {
             create_committed_rowset(txn_kv.get(), accessor.get(), "recycle_indexes", tablet_id, j);
         }
     }
-    create_recycle_index(txn_kv.get(), index_id, RecycleIndexPB::DROP);
+    create_recycle_index(txn_kv.get(), table_id, index_id, RecycleIndexPB::DROP);
     ASSERT_EQ(recycler.recycle_indexes(), 0);
 
     // check rowset does not exist on s3
@@ -994,7 +1012,7 @@ TEST(RecyclerTest, recycle_partitions) {
         }
     }
 
-    constexpr int partition_id = 30020;
+    constexpr int table_id = 10000, partition_id = 30020;
     auto accessor = recycler.accessor_map_.begin()->second;
     std::vector<int64_t> index_ids {20200, 20201, 20202, 20203, 20204};
 
@@ -1002,7 +1020,7 @@ TEST(RecyclerTest, recycle_partitions) {
     for (auto index_id : index_ids) {
         for (int i = 0; i < 20; ++i) {
             int64_t tablet_id = tablet_id_base + i;
-            create_tablet(txn_kv.get(), index_id, partition_id, tablet_id);
+            create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
             for (int j = 0; j < 10; ++j) {
                 auto rowset =
                         create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
@@ -1016,7 +1034,8 @@ TEST(RecyclerTest, recycle_partitions) {
             }
         }
     }
-    create_recycle_partiton(txn_kv.get(), partition_id, index_ids, RecyclePartitionPB::DROP);
+    create_recycle_partiton(txn_kv.get(), table_id, partition_id, index_ids,
+                            RecyclePartitionPB::DROP);
     ASSERT_EQ(recycler.recycle_partitions(), 0);
 
     // check rowset does not exist on s3
@@ -1062,6 +1081,61 @@ TEST(RecyclerTest, recycle_partitions) {
     end_key = recycle_key_prefix(instance_id + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
     ASSERT_EQ(it->size(), 0);
+}
+
+TEST(RecyclerTest, recycle_versions) {
+    config::retention_seconds = 0;
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    std::vector<int64_t> index_ids {20001, 20002, 20003, 20004, 20005};
+    std::vector<int64_t> partition_ids {30001, 30002, 30003, 30004, 30005, 30006};
+    constexpr int64_t table_id = 10000;
+
+    int64_t tablet_id = 40000;
+    for (auto index_id : index_ids) {
+        for (auto partition_id : partition_ids) {
+            create_tablet(txn_kv.get(), table_id, index_id, partition_id, ++tablet_id);
+        }
+    }
+    for (auto partition_id : partition_ids) {
+        create_version_kv(txn_kv.get(), table_id, partition_id);
+    }
+    // Drop partitions
+    for (int i = 0; i < 5; ++i) {
+        create_recycle_partiton(txn_kv.get(), table_id, partition_ids[i], index_ids,
+                                RecyclePartitionPB::DROP);
+    }
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    InstanceRecycler recycler(txn_kv, instance);
+    ASSERT_EQ(recycler.init(), 0);
+    // Recycle all partitions in table except 30006
+    ASSERT_EQ(recycler.recycle_partitions(), 0);
+    ASSERT_EQ(recycler.recycle_versions(), 0); // `recycle_versions` should do nothing
+    // All version kvs except version of partition 30006 must have been deleted
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    auto key_begin = version_key({instance_id, db_id, table_id, 0});
+    auto key_end = version_key({instance_id, db_id, table_id, INT64_MAX});
+    std::unique_ptr<RangeGetIterator> iter;
+    ASSERT_EQ(txn->get(key_begin, key_end, &iter), 0);
+    ASSERT_EQ(iter->size(), 1);
+    auto [k, v] = iter->next();
+    EXPECT_EQ(k, version_key({instance_id, db_id, table_id, 30006}));
+
+    // Drop indexes
+    for (auto index_id : index_ids) {
+        create_recycle_index(txn_kv.get(), table_id, index_id, RecycleIndexPB::DROP);
+    }
+    // Recycle all indexes of the table, that is, the table has been dropped
+    ASSERT_EQ(recycler.recycle_indexes(), 0);
+    // `recycle_versions` should delete all version kvs of the dropped table
+    ASSERT_EQ(recycler.recycle_versions(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(key_begin, key_end, &iter), 0);
+    ASSERT_EQ(iter->size(), 0);
 }
 
 TEST(RecyclerTest, abort_timeout_txn) {
@@ -1553,7 +1627,7 @@ TEST(RecyclerTest, recycle_stage) {
     ASSERT_EQ(1, txn->get(key, &val));
 }
 
-TEST(RecyclerTest, DISABLED_multi_recycler) {
+TEST(RecyclerTest, multi_recycler) {
     config::recycle_concurrency = 2;
     config::recycle_interval_seconds = 10;
     config::recycle_job_lease_expired_ms = 60;
@@ -1702,12 +1776,10 @@ TEST(CheckerTest, abnormal) {
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
-    sp->set_call_back("InstanceChecker.do_check1", [&lost_paths](void* arg) {
-        lost_paths.push_back(*(std::string*)arg);
-    });
-    sp->set_call_back("InstanceChecker.do_check2", [&lost_paths](void* arg) {
-        lost_paths.push_back(*(std::string*)arg);
-    });
+    sp->set_call_back("InstanceChecker.do_check1",
+                      [&lost_paths](void* arg) { lost_paths.push_back(*(std::string*)arg); });
+    sp->set_call_back("InstanceChecker.do_check2",
+                      [&lost_paths](void* arg) { lost_paths.push_back(*(std::string*)arg); });
     sp->enable_processing();
 
     ASSERT_NE(checker.do_check(), 0);
