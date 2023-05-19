@@ -23,6 +23,8 @@ struct DownloadTask {
     DownloadTask(std::vector<FileCacheSegmentMeta> metas) : metas(std::move(metas)) {
         atime = std::chrono::steady_clock::now();
     }
+
+    DownloadTask() { }
 };
 
 class FileCacheSegmentDownloader {
@@ -39,7 +41,7 @@ public:
         }
     }
 
-    virtual void download_segments(std::shared_ptr<DownloadTask> task, bool* is_busy) = 0;
+    virtual void download_segments(DownloadTask task) = 0;
 
     inline static FileCacheSegmentDownloader* downloader {nullptr};
 
@@ -56,11 +58,14 @@ public:
 
 protected:
     std::mutex _mtx;
+    std::mutex _inflight_mtx;
+    // tablet id -> inflight segment num of tablet
+    std::unordered_map<int64_t, int64_t> _inflight_tablets;
 
 private:
     std::thread _download_thread;
     std::condition_variable _empty;
-    std::deque<std::shared_ptr<DownloadTask>> _task_queue;
+    std::deque<DownloadTask> _task_queue;
     std::atomic_bool _closed {false};
     const size_t _max_size {1024};
 };
@@ -74,14 +79,13 @@ public:
 
     FileCacheSegmentS3Downloader() = default;
 
-    void download_segments(std::shared_ptr<DownloadTask> task, bool* is_busy) override;
+    void download_segments(DownloadTask task) override;
 
     void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) override;
 
 private:
     std::atomic<size_t> _cur_download_file {0};
-    std::unordered_set<int64_t> _inflight_tasks;
-    std::map<std::tuple<std::string, int64>, int64> _inflight_segments;
+
 };
 
 } // namespace doris::io

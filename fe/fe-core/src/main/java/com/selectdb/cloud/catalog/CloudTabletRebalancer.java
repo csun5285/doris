@@ -239,6 +239,9 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 if (result.getValue()
                         || System.currentTimeMillis() / 1000 - task.startTimestamp
                             > Config.pre_heating_time_limit_sec) {
+                    if (!result.getValue()) {
+                        LOG.info("{} pre cache timeout, forced to change the mapping", result.getKey());
+                    }
                     updateClusterToBeMap(task.pickedTablet, task.destBe, task.clusterId);
                     tabletToInfightTask.remove(result.getKey());
                 }

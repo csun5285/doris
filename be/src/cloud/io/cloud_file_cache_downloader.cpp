@@ -21,63 +21,65 @@ namespace doris::io {
 bvar::Adder<uint64_t> file_cache_downloader_counter("file_cache_downloader", "size");
 
 void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
-    std::lock_guard lock(_mtx);
-    if (_task_queue.size() == _max_size) {
-        _task_queue.pop_front();
+    {
+        std::lock_guard lock(_mtx);
+        if (_task_queue.size() == _max_size) {
+            _task_queue.pop_front();
+        }
+        _task_queue.push_back(task);
+        _empty.notify_all();
     }
-    _task_queue.push_back(std::make_shared<DownloadTask>(std::move(task)));
-    _empty.notify_all();
+
+    {
+        std::lock_guard lock(_inflight_mtx);
+        for (auto meta : task.metas) {
+            auto it = _inflight_tablets.find(meta.tablet_id());
+            if (it == _inflight_tablets.end()) {
+                _inflight_tablets.insert({meta.tablet_id(), 1});
+            } else {
+                it->second++;
+            }
+        }
+    }
 }
 
 void FileCacheSegmentDownloader::polling_download_task() {
     const int64_t hot_interval = 2 * 60 * 60; // 2 hours
     while (true) {
-        std::unique_lock lock(_mtx);
-        if (_task_queue.empty()) {
-            _empty.wait(lock, [this]() { return !_task_queue.empty() || _closed; });
-        }
-        if (_closed) {
-            break;
-        }
-        std::shared_ptr<DownloadTask> task = _task_queue.front();
-        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() -
-                                                             task->atime)
-                    .count() < hot_interval) {
-            bool is_busy = false;
-            download_segments(task, &is_busy);
-            if (is_busy) {
-                lock.unlock();
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
+        DownloadTask task;
+        {
+            std::unique_lock lock(_mtx);
+            if (_task_queue.empty()) {
+                _empty.wait(lock, [this]() { return !_task_queue.empty() || _closed; });
             }
+            if (_closed) {
+                break;
+            }
+            task = std::move(_task_queue.front());
+            _task_queue.pop_front();
         }
-        _task_queue.pop_front();
+
+        if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() -
+                                                             task.atime)
+                    .count() < hot_interval) {
+            download_segments(std::move(task));
+        }
     }
 }
 
 void FileCacheSegmentS3Downloader::check_download_task(const std::vector<int64_t>& tablets,
         std::map<int64_t, bool>* done) {
-    std::unique_lock lock(_mtx);
-    for (int64_t tablet : tablets) {
-        bool ret = true;
-        for (auto& segment : _inflight_segments) {
-            if (segment.second == tablet) {
-                ret = false;
-            }
-        }
-        done->insert({tablet, ret});
+    std::lock_guard lock(_inflight_mtx);
+    for (int64_t tablet_id : tablets) {
+        done->insert({tablet_id, _inflight_tablets.count(tablet_id) == 0});
     }
+
 }
 
-void FileCacheSegmentS3Downloader::download_segments(std::shared_ptr<DownloadTask> task, bool* is_busy) {
-    *is_busy = false;
-    std::for_each(task->metas.cbegin(), task->metas.cend(), [this, is_busy, task](const FileCacheSegmentMeta& meta) {
+void FileCacheSegmentS3Downloader::download_segments(DownloadTask task) {
+    std::for_each(task.metas.cbegin(), task.metas.cend(), [this](const FileCacheSegmentMeta& meta) {
         TabletSharedPtr tablet;
-        if (meta.done()) {
-            return;
-        }
         cloud::tablet_mgr()->get_tablet(meta.tablet_id(), &tablet);
-        _inflight_tasks.insert(meta.tablet_id());
         auto id_to_rowset_meta_map = tablet->tablet_meta()->snapshot_rs_metas();
         if (auto iter = id_to_rowset_meta_map.find(meta.rowset_id());
             iter != id_to_rowset_meta_map.end()) {
@@ -103,25 +105,23 @@ void FileCacheSegmentS3Downloader::download_segments(std::shared_ptr<DownloadTas
                 file_segment->get_or_set_downloader() == FileSegment::get_caller_id()) {
                 S3FileSystem* s3_file_system =
                         dynamic_cast<S3FileSystem*>(iter->second->fs().get());
-                std::tuple<std::string, int64> segment_id = {meta.rowset_id(), meta.segment_id()};
-                auto set_it = _inflight_segments.find(segment_id);
-                if (set_it != _inflight_segments.end()) {
-                    return;
-                }
+                size_t cur_download_size = 0, next_download_size;
+                do {
+                    if (cur_download_size >= config::s3_transfer_executor_pool_size) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
 
-                if (_inflight_segments.size() >= config::s3_transfer_executor_pool_size) {
-                    *is_busy = true;
-                    return;
-                }
-
-                _inflight_segments.insert({std::move(segment_id), meta.tablet_id()});
-
+                    cur_download_size = _cur_download_file;
+                    next_download_size = cur_download_size + 1;
+                } while (cur_download_size >= config::s3_transfer_executor_pool_size ||
+                         !_cur_download_file.compare_exchange_strong(cur_download_size,
+                                                                     next_download_size));
                 auto transfer_manager = s3_file_system->get_transfer_manager();
                 if (!transfer_manager) {
                     return;
                 }
                 auto download_callback =
-                        [this, file_segment, &meta, task](const Aws::Transfer::TransferHandle* handle) {
+                        [this, file_segment, meta](const Aws::Transfer::TransferHandle* handle) {
                             if (handle->GetStatus() == Aws::Transfer::TransferStatus::NOT_STARTED ||
                                 handle->GetStatus() == Aws::Transfer::TransferStatus::IN_PROGRESS) {
                                 return; // not finish
@@ -136,12 +136,22 @@ void FileCacheSegmentS3Downloader::download_segments(std::shared_ptr<DownloadTas
                                 LOG(WARNING) << "s3 download error " << handle->GetStatus();
                             }
                             _cur_download_file--;
+
                             {
-                                std::unique_lock lock(_mtx);
-                                _inflight_tasks.erase(meta.tablet_id());
-                                const_cast<FileCacheSegmentMeta&>(meta).set_done(true);
-                                std::tuple<std::string, int64> segment_id = {meta.rowset_id(), meta.segment_id()};
-                                _inflight_segments.erase(segment_id);
+                                std::lock_guard lock(_inflight_mtx);
+                                auto it = _inflight_tablets.find(meta.tablet_id());
+                                if (it == _inflight_tablets.end()) {
+                                    LOG(WARNING) << "inflight ref cnt not exist, tablet id " << meta.tablet_id();
+                                } else {
+                                    it->second--;
+                                    if (it->second < 0) {
+                                        LOG(WARNING) << "reference count is less than 0, tablet id " << meta.tablet_id()
+                                                     << " ref cnt " << it->second;
+                                    }
+                                    if (it->second <= 0) {
+                                        _inflight_tablets.erase(it);
+                                    }
+                                }
                             }
                         };
                 std::string download_file = file_segment->get_path_in_local_cache(true);
