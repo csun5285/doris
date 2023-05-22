@@ -48,7 +48,6 @@ Status CloudCumulativeCompaction::prepare_compact() {
     if (!lock.owns_lock()) {
         return Status::Error<TRY_LOCK_FAILED>();
     }
-    TRACE("got cumulative compaction lock");
 
     bool need_sync_tablet = true;
     {
@@ -81,7 +80,6 @@ Status CloudCumulativeCompaction::prepare_compact() {
         }
         return st;
     }
-    TRACE("rowsets picked");
 
     for (auto& rs : _input_rowsets) {
         _input_row_num += rs->num_rows();

@@ -1894,26 +1894,8 @@ double Tablet::calculate_scan_frequency() {
 
 Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compaction_type,
                                                         TabletSharedPtr tablet, int64_t* permits) {
-    scoped_refptr<Trace> trace;
-    if (!config::disable_compaction_trace_log) {
-        trace = new Trace;
-    }
-    ADOPT_TRACE(trace ? trace.get() : nullptr);
-    MonotonicStopWatch watch;
-    watch.start();
-    SCOPED_CLEANUP({
-        if (trace &&
-            watch.elapsed_time() / 1e9 > (compaction_type == CompactionType::CUMULATIVE_COMPACTION
-                                                  ? config::cumulative_compaction_trace_threshold
-                                                  : config::base_compaction_trace_threshold)) {
-            trace->DumpAccumulatedTime(&LOG(WARNING));
-            trace->Dump(&LOG(WARNING), Trace::INCLUDE_ALL);
-        }
-    });
-
     std::vector<RowsetSharedPtr> compaction_rowsets;
     if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-        TRACE("create cumulative compaction");
         StorageEngine::instance()->create_cumulative_compaction(tablet, _cumulative_compaction);
         DorisMetrics::instance()->cumulative_compaction_request_total->increment(1);
         Status res = _cumulative_compaction->prepare_compact();
@@ -1932,7 +1914,6 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
         }
         compaction_rowsets = _cumulative_compaction->get_input_rowsets();
     } else {
-        TRACE("create base compaction");
         StorageEngine::instance()->create_base_compaction(tablet, _base_compaction);
         DorisMetrics::instance()->base_compaction_request_total->increment(1);
         Status res = _base_compaction->prepare_compact();
@@ -1952,7 +1933,7 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
         compaction_rowsets = _base_compaction->get_input_rowsets();
     }
     *permits = 0;
-    for (auto rowset : compaction_rowsets) {
+    for (auto& rowset : compaction_rowsets) {
         *permits += rowset->rowset_meta()->get_compaction_score();
     }
     return Status::OK();

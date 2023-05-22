@@ -46,7 +46,6 @@ Status CloudBaseCompaction::prepare_compact() {
     if (!lock.owns_lock()) {
         return Status::Error<TRY_LOCK_FAILED>();
     }
-    TRACE("got base compaction lock");
 
     bool need_sync_tablet = true;
     {
@@ -69,7 +68,6 @@ Status CloudBaseCompaction::prepare_compact() {
     int64_t cumulative_compaction_cnt = _tablet->cumulative_compaction_cnt();
 
     RETURN_IF_ERROR(pick_rowsets_to_compact());
-    TRACE("rowsets picked");
 
     for (auto& rs : _input_rowsets) {
         _input_row_num += rs->num_rows();
