@@ -497,4 +497,5 @@ void load(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     }
     CHECK_EQ(bthread_list_add(&bthread_list, start_load_watcher(ctx)), 0);
     CHECK_EQ(bthread_list_join(&bthread_list), 0);
+    bthread_list_destroy(&bthread_list);
 }

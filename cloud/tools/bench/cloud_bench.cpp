@@ -2,13 +2,19 @@
 #include <brpc/controller.h>
 #include <brpc/grpc.h>
 #include <bthread/bthread.h>
+#include <bthread/condition_variable.h>
+#include <bthread/mutex.h>
 #include <butil/endpoint.h>
+#include <butil/macros.h>
+#include <butil/string_splitter.h>
+#include <butil/strings/string_split.h>
 #include <bvar/latency_recorder.h>
 #include <bvar/status.h>
 #include <fmt/format.h>
 #include <gflags/gflags.h>
 #include <google/protobuf/service.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <iostream>
@@ -19,11 +25,13 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/stopwatch.h"
+#include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 
 DEFINE_string(cmd, "copy-into", "The command to execute, allowed values: copy-into, version, read");
 DEFINE_string(endpoints, "127.0.0.1:5000", "The endpoints of meta service, seperated by comma");
 DEFINE_uint64(concurrency, 0, "The number of concurrency");
+DEFINE_uint64(prepare_concurrency, 0, "The number of concurrency during prepare");
 DEFINE_uint64(instance_id, 1, "The first id of instances to bench");
 DEFINE_uint64(report_intervals, 10, "The interval to report progress, in secs");
 DEFINE_uint64(start_intervals, 0,
@@ -35,9 +43,37 @@ DEFINE_uint32(workload_payload_size, 1024, "The total bytes of payload of each r
 
 using Status = selectdb::MetaServiceResponseStatus;
 
+class ConcurrencyLimiter {
+    DISALLOW_COPY_AND_ASSIGN(ConcurrencyLimiter);
+
+public:
+    ConcurrencyLimiter(size_t num) : num_(num) {}
+
+    void Acquire() {
+        std::unique_lock<bthread::Mutex> lock(mutex_);
+        while (num_ == 0) {
+            cv_.wait(lock);
+        }
+        num_ -= 1;
+    }
+
+    void Release() {
+        std::unique_lock<bthread::Mutex> lock(mutex_);
+        num_ += 1;
+        cv_.notify_one();
+    }
+
+private:
+    bthread::Mutex mutex_;
+    bthread::ConditionVariable cv_;
+    size_t num_;
+};
+
 static std::atomic<uint64_t> g_next(0);
 static std::atomic<uint64_t> g_success(0);
 static std::atomic<uint64_t> g_failure(0);
+static std::atomic<uint64_t> g_concurrency(0);
+static std::unique_ptr<ConcurrencyLimiter> g_limiter;
 static bvar::LatencyRecorder g_bvar_op_latency("cloud_bench", "copy_into");
 
 void run(selectdb::MetaService_Stub* service);
@@ -55,8 +91,15 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    if (FLAGS_prepare_concurrency == 0) {
+        FLAGS_prepare_concurrency = std::thread::hardware_concurrency();
+    }
+    g_limiter = std::make_unique<ConcurrencyLimiter>(FLAGS_prepare_concurrency);
+
     // build brpc service stub by a list of endpoints and a round-robin selector.
     brpc::ChannelOptions options;
+    options.connect_timeout_ms = 1000;
+    options.timeout_ms = 60 * 1000;
     auto channel = std::make_unique<brpc::Channel>();
     auto endpoints = fmt::format("list://{}", FLAGS_endpoints);
     if (channel->Init(endpoints.c_str(), "rr", &options)) {
@@ -90,7 +133,8 @@ static std::string rowset_payload(uint64_t rowset_id) {
 }
 
 static std::string cloud_unique_id(uint64_t instance_id) {
-    return fmt::format("{}_cloud_unique_id", instance_id);
+    // degraded format
+    return fmt::format("1:{}:unique_id", instance_id);
 }
 
 static void create_instance(selectdb::MetaService_Stub* service, uint64_t instance_id) {
@@ -197,25 +241,29 @@ static doris::TabletMetaPB add_tablet(int64_t table_id, int64_t index_id, int64_
 
 static void create_tablet(selectdb::MetaService_Stub* meta_service, uint64_t instance_id,
                           int64_t tablet_id) {
-    brpc::Controller ctrl;
-    selectdb::CreateTabletsRequest req;
-    selectdb::CreateTabletsResponse resp;
-    req.set_cloud_unique_id(cloud_unique_id(instance_id));
-    req.add_tablet_metas()->CopyFrom(add_tablet(tablet_id, tablet_id, tablet_id, tablet_id));
-    meta_service->create_tablets(&ctrl, &req, &resp, nullptr);
-    if (ctrl.Failed()) {
-        LOG_FATAL("create_tablets")
-                .tag("instance_id", instance_id)
-                .tag("tablet_id", tablet_id)
-                .tag("code", ctrl.ErrorCode())
-                .tag("msg", ctrl.ErrorText());
-    }
-    if (resp.status().code() != selectdb::MetaServiceCode::OK) {
-        LOG_FATAL("create tablet")
-                .tag("instance_id", instance_id)
-                .tag("tablet_id", tablet_id)
-                .tag("code", resp.status().code())
-                .tag("msg", resp.status().msg());
+    CHECK_GT(tablet_id, 0);
+    while (true) {
+        brpc::Controller ctrl;
+        selectdb::CreateTabletsRequest req;
+        selectdb::CreateTabletsResponse resp;
+        req.set_cloud_unique_id(cloud_unique_id(instance_id));
+        req.add_tablet_metas()->CopyFrom(add_tablet(tablet_id, tablet_id, tablet_id, tablet_id));
+        meta_service->create_tablets(&ctrl, &req, &resp, nullptr);
+        if (ctrl.Failed()) {
+            LOG_FATAL("create_tablets")
+                    .tag("instance_id", instance_id)
+                    .tag("tablet_id", tablet_id)
+                    .tag("code", ctrl.ErrorCode())
+                    .tag("msg", ctrl.ErrorText());
+        }
+        if (resp.status().code() != selectdb::MetaServiceCode::OK) {
+            LOG_FATAL("create tablet")
+                    .tag("instance_id", instance_id)
+                    .tag("tablet_id", tablet_id)
+                    .tag("code", resp.status().code())
+                    .tag("msg", resp.status().msg());
+        }
+        return;
     }
 }
 
@@ -266,12 +314,14 @@ static Status commit_txn(selectdb::MetaService_Stub* service, uint64_t instance_
 }
 
 static doris::RowsetMetaPB create_rowset(int64_t tablet_id, std::string rowset_id, int64_t txn_id,
-
                                          int64_t version = -1, int num_rows = 100) {
+    CHECK_GT(tablet_id, 0);
+
     doris::RowsetMetaPB rowset;
     rowset.set_rowset_id(0); // required
     rowset.set_rowset_id_v2(rowset_id);
     rowset.set_tablet_id(tablet_id);
+    rowset.set_partition_id(tablet_id);
     rowset.set_txn_id(txn_id);
     if (version >= 0) {
         rowset.set_start_version(version);
@@ -403,7 +453,7 @@ static std::vector<uint64_t> prepare_instance_and_tablets(selectdb::MetaService_
     create_instance(service, instance_id);
     add_cluster(service, instance_id);
     std::vector<uint64_t> tablet_ids;
-    for (uint64_t i = 0; i < FLAGS_workload_num_rowset; ++i) {
+    for (uint64_t i = 1; i <= FLAGS_workload_num_rowset; ++i) {
         create_tablet(service, instance_id, i);
         tablet_ids.push_back(i);
     }
@@ -471,14 +521,51 @@ static Status get_tablet_meta(selectdb::MetaService_Stub* service, uint64_t inst
     return Status();
 }
 
+static Status get_tablet_stats(selectdb::MetaService_Stub* service, uint64_t instance_id,
+                               int64_t tablet_id, selectdb::TabletStatsPB* stats) {
+    brpc::Controller ctrl;
+    selectdb::GetTabletStatsRequest req;
+    selectdb::GetTabletStatsResponse resp;
+    req.set_cloud_unique_id(cloud_unique_id(instance_id));
+    auto* tablet_idx = req.mutable_tablet_idx()->Add();
+    tablet_idx->set_tablet_id(tablet_id);
+    service->get_tablet_stats(&ctrl, &req, &resp, nullptr);
+    if (ctrl.Failed()) {
+        LOG_FATAL("get tablet stats")
+                .tag("instance_id", instance_id)
+                .tag("tablet_id", tablet_id)
+                .tag("code", ctrl.ErrorCode())
+                .tag("msg", ctrl.ErrorText());
+    }
+
+    auto status = resp.status();
+    if (status.code() != selectdb::MetaServiceCode::OK) {
+        LOG_ERROR("get_tablet_stats")
+                .tag("instance_id", instance_id)
+                .tag("tablet_id", tablet_id)
+                .tag("code", status.code())
+                .tag("msg", status.msg());
+    }
+
+    stats->CopyFrom(resp.tablet_stats().at(0));
+
+    return Status();
+}
+
 static Status get_rowset_meta(selectdb::MetaService_Stub* service, uint64_t instance_id,
-                              int64_t tablet_id) {
+                              int64_t tablet_id, const selectdb::TabletStatsPB& stats) {
+    CHECK_GT(tablet_id, 0);
+
     brpc::Controller ctrl;
     selectdb::GetRowsetRequest req;
     selectdb::GetRowsetResponse resp;
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
+    req.mutable_idx()->set_tablet_id(tablet_id);
     req.set_start_version(0);
     req.set_end_version(FLAGS_workload_num_version);
+    req.set_base_compaction_cnt(stats.base_compaction_cnt());
+    req.set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());
+    req.set_cumulative_point(stats.cumulative_point());
     service->get_rowset(&ctrl, &req, &resp, nullptr);
     if (ctrl.Failed()) {
         LOG_FATAL("get_rowset")
@@ -545,14 +632,16 @@ static void reporter() {
         auto success = g_success.load(std::memory_order_relaxed);
         auto failure = g_failure.load(std::memory_order_relaxed);
 
+        auto concurrency = g_concurrency.load(std::memory_order_relaxed) - 1;
         auto ops = static_cast<double>(success - saved_success) / duration_seconds;
         auto p50 = g_bvar_op_latency.latency_percentile(0.5);
         auto p99 = g_bvar_op_latency.latency_percentile(0.99);
         auto p999 = g_bvar_op_latency.latency_percentile(0.999);
         auto pmax = g_bvar_op_latency.max_latency();
 
-        auto msg = fmt::format("{} {:8} OPS cost {:.2}s, P50 {}, P99 {}, P999 {}, MAX {}", cmd, ops,
-                               duration_seconds, p50, p99, p999, pmax);
+        auto msg = fmt::format(
+                "{} {:8} OPS cost {:.2}s, P50 {}, P99 {}, P999 {}, MAX {}, CONCURRENCY {}", cmd,
+                static_cast<uint64_t>(ops), duration_seconds, p50, p99, p999, pmax, concurrency);
         std::cout << msg << std::endl;
 
         saved_success = success;
@@ -562,6 +651,8 @@ static void reporter() {
 }
 
 static void prepare_version_workload(selectdb::MetaService_Stub* service, size_t id) {
+    g_limiter->Acquire();
+
     uint64_t instance_id = FLAGS_instance_id + id;
     auto tablet_ids = prepare_instance_and_tablets(service, instance_id);
 
@@ -577,6 +668,8 @@ static void prepare_version_workload(selectdb::MetaService_Stub* service, size_t
                 .tag("code", status.code())
                 .tag("msg", status.msg());
     }
+
+    g_limiter->Release();
 }
 
 static void run_version(selectdb::MetaService_Stub* service, size_t id) {
@@ -589,7 +682,7 @@ static void run_version(selectdb::MetaService_Stub* service, size_t id) {
         }
 
         selectdb::StopWatch sw;
-        int64_t tablet_id = idx++ % FLAGS_workload_num_rowset;
+        int64_t tablet_id = idx++ % FLAGS_workload_num_rowset + 1;
         auto status = get_version(service, instance_id, tablet_id);
         g_bvar_op_latency << sw.elapsed_us();
 
@@ -602,6 +695,8 @@ static void run_version(selectdb::MetaService_Stub* service, size_t id) {
 }
 
 static void prepare_read_workload(selectdb::MetaService_Stub* service, size_t id) {
+    g_limiter->Acquire();
+
     uint64_t instance_id = FLAGS_instance_id + id;
     auto tablet_ids = prepare_instance_and_tablets(service, instance_id);
 
@@ -619,10 +714,26 @@ static void prepare_read_workload(selectdb::MetaService_Stub* service, size_t id
                     .tag("msg", status.msg());
         }
     }
+
+    g_limiter->Release();
 }
 
 static void read_tablet_meta(selectdb::MetaService_Stub* service, size_t id) {
     uint64_t instance_id = FLAGS_instance_id + id;
+
+    std::vector<selectdb::TabletStatsPB> tablet_stats;
+    for (int64_t i = 1; i <= FLAGS_workload_num_rowset; ++i) {
+        selectdb::TabletStatsPB stats;
+        auto status = get_tablet_stats(service, instance_id, i, &stats);
+        if (status.code() != selectdb::MetaServiceCode::OK) {
+            LOG_FATAL("read tablet meta: get tablet stats")
+                    .tag("instance_id", instance_id)
+                    .tag("tablet_id", i)
+                    .tag("code", status.code())
+                    .tag("msg", status.msg());
+        }
+        tablet_stats.push_back(stats);
+    }
 
     size_t idx = 0;
     while (true) {
@@ -632,10 +743,11 @@ static void read_tablet_meta(selectdb::MetaService_Stub* service, size_t id) {
         }
 
         selectdb::StopWatch sw;
-        int64_t tablet_id = idx++ % FLAGS_workload_num_rowset;
+        int64_t tablet_id = idx++ % FLAGS_workload_num_rowset + 1;
         auto status = get_tablet_meta(service, instance_id, tablet_id);
         if (status.code() == selectdb::MetaServiceCode::OK) {
-            status = get_rowset_meta(service, instance_id, tablet_id);
+            const auto& stat = tablet_stats[tablet_id - 1];
+            status = get_rowset_meta(service, instance_id, tablet_id, stat);
         }
         g_bvar_op_latency << sw.elapsed_us();
 
@@ -657,7 +769,9 @@ static bthread_t start_bthread(Fn fn, Args... args) {
     };
     auto task_fn = +[](void* raw_task) -> void* {
         std::unique_ptr<Task> task(reinterpret_cast<Task*>(raw_task));
+        g_concurrency.fetch_add(1, std::memory_order_relaxed);
         std::apply(std::move(task->fn), std::move(task->args));
+        g_concurrency.fetch_sub(1, std::memory_order_relaxed);
         return nullptr;
     };
 
@@ -685,6 +799,7 @@ void run(selectdb::MetaService_Stub* service) {
             CHECK_EQ(bthread_list_add(&bthread_list, tid), 0);
         }
         CHECK_EQ(bthread_list_join(&bthread_list), 0);
+        bthread_list_destroy(&bthread_list);
 
         workload_fn = run_version;
     } else if (FLAGS_cmd == "read-meta") {
@@ -695,6 +810,7 @@ void run(selectdb::MetaService_Stub* service) {
             CHECK_EQ(bthread_list_add(&bthread_list, tid), 0);
         }
         CHECK_EQ(bthread_list_join(&bthread_list), 0);
+        bthread_list_destroy(&bthread_list);
 
         workload_fn = read_tablet_meta;
     } else {
@@ -707,7 +823,9 @@ void run(selectdb::MetaService_Stub* service) {
     bthread_list_t bthread_list;
     CHECK_EQ(bthread_list_init(&bthread_list, 0, 0), 0);
     CHECK_EQ(bthread_list_add(&bthread_list, start_bthread(reporter)), 0);
-    for (size_t i = 0; i < FLAGS_concurrency; ++i) {
+    for (size_t i = 0;
+         i < FLAGS_concurrency && g_next.load(std::memory_order_relaxed) < FLAGS_workload_num_op;
+         ++i) {
         auto tid = start_bthread(workload_fn, service, i);
         CHECK_EQ(bthread_list_add(&bthread_list, tid), 0);
         if (FLAGS_start_intervals != 0) {
@@ -715,4 +833,5 @@ void run(selectdb::MetaService_Stub* service) {
         }
     }
     CHECK_EQ(bthread_list_join(&bthread_list), 0);
+    bthread_list_destroy(&bthread_list);
 }
