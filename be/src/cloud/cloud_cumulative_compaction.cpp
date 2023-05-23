@@ -301,12 +301,23 @@ void CloudCumulativeCompaction::update_cumulative_point(int64_t base_compaction_
     compaction_job->set_type(selectdb::TabletCompactionJobPB::EMPTY_CUMULATIVE);
     compaction_job->set_base_compaction_cnt(base_compaction_cnt);
     compaction_job->set_cumulative_compaction_cnt(cumulative_compaction_cnt);
+    int64_t now = time(nullptr);
+    compaction_job->set_lease(now + config::lease_compaction_interval_seconds);
+    // No need to set expiration time, since there is no output rowset
     auto st = cloud::meta_mgr()->prepare_tablet_job(job);
     if (!st.ok()) {
+        if (st.is<STALE_TABLET_CACHE>()) {
+            // set last_sync_time to 0 to force sync tablet next time
+            _tablet->set_last_sync_time(0);
+        } else if (st.is<NOT_FOUND>()) {
+            // tablet not found
+            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+        }
         LOG_WARNING("failed to update cumulative point to meta srv")
                 .tag("job_id", _uuid)
                 .tag("tablet_id", _tablet->tablet_id())
                 .error(st);
+        return;
     }
     int64_t input_cumulative_point = _tablet->cumulative_layer_point();
     int64_t output_cumulative_point = _last_delete_version.first + 1;
