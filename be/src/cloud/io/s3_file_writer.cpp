@@ -142,28 +142,30 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
         size_t data_size = data[i].get_size();
         for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
             if (!_pending_buf) {
-                _pending_buf = S3FileBufferPool::GetInstance()->allocate();
-                // capture part num by value along with the value of the shared ptr
-                _pending_buf->set_upload_remote_callback(
-                        [part_num = _cur_part_num, this, cur_buf = _pending_buf]() {
-                            _upload_one_part(part_num, *cur_buf);
-                        });
-                _pending_buf->set_allocate_file_segments_holder(
-                        [this, offset = _bytes_appended]() -> FileSegmentsHolderPtr {
-                            return _allocate_file_segments(offset);
-                        });
-                _pending_buf->set_file_offset(_bytes_appended);
-                _pending_buf->set_index_offset(_index_offset);
-                // later we might need to wait all prior tasks to be finished
-                _pending_buf->set_finish_upload([this]() { _wait.done(); });
-                _pending_buf->set_is_cancel([this]() { return _failed.load(); });
-                _pending_buf->set_on_failed([this, part_num = _cur_part_num](Status st) {
-                    VLOG_NOTICE << "failed at key: " << _key << ", load part " << part_num
-                                << ", st " << st;
-                    std::unique_lock<std::mutex> _lck {_completed_lock};
-                    _failed = true;
-                    this->_st = std::move(st);
-                });
+                auto builder = FileBufferBuilder();
+                builder.set_type(BufferType::UPLOAD)
+                        .set_upload_callback(
+                                [part_num = _cur_part_num, this](UploadFileBuffer& buf) {
+                                    _upload_one_part(part_num, buf);
+                                })
+                        .set_allocate_file_segments_holder(
+                                [this, offset = _bytes_appended]() -> FileSegmentsHolderPtr {
+                                    return _allocate_file_segments(offset);
+                                })
+                        .set_file_offset(_bytes_appended)
+                        .set_index_offset(_index_offset)
+                        .set_sync_after_complete_task([this, part_num = _cur_part_num](Status s) {
+                            if (!s.ok()) [[unlikely]] {
+                                VLOG_NOTICE << "failed at key: " << _key << ", load part "
+                                            << part_num << ", st " << s;
+                                std::unique_lock<std::mutex> _lck {_completed_lock};
+                                _failed = true;
+                                this->_st = std::move(s);
+                            }
+                            _wait.done();
+                        })
+                        .set_is_done([this]() { return _failed.load(); });
+                _pending_buf = builder.build();
             }
             // we need to make sure all parts except the last one to be 5MB or more
             // and shouldn't be larger than buf
@@ -189,8 +191,8 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     return Status::OK();
 }
 
-void S3FileWriter::_upload_one_part(int64_t part_num, S3FileBuffer& buf) {
-    if (buf._is_cancelled()) {
+void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
+    if (buf.is_done()) {
         return;
     }
     UploadPartRequest upload_request;
@@ -215,7 +217,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, S3FileBuffer& buf) {
                 _bucket, _path.native(), part_num, _upload_id,
                 upload_part_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
-        buf._on_failed(s);
+        buf.set_val(s);
         return;
     }
 
@@ -248,7 +250,9 @@ Status S3FileWriter::_complete() {
     CompleteMultipartUploadRequest complete_request;
     complete_request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
 
-    _wait.wait();
+    while (!_wait.wait()) {
+        LOG_WARNING("The upload {} {} {} takes a long time", _bucket, _key, _path.native());
+    }
     // make sure _completed_parts are ascending order
     std::sort(_completed_parts.begin(), _completed_parts.end(),
               [](auto& p1, auto& p2) { return p1->GetPartNumber() < p2->GetPartNumber(); });

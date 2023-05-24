@@ -35,7 +35,7 @@ set(IO_FILES
     io/cached_remote_file_reader.cpp
     io/cloud_file_cache_profile.cpp
     io/tmp_file_mgr.cpp
-    io/s3_file_write_bufferpool.cpp
+    io/s3_file_bufferpool.cpp
     io/cloud_file_cache_settings.cpp
     io/cloud_file_cache_downloader.cpp
 )

@@ -313,6 +313,7 @@ set(VEC_TEST_FILES
 set(IO_TEST_FILES
     io/s3_file_writer_test.cpp
     io/s3_file_system_test.cpp
+    io/s3_downloader_test.cpp
 )
 
 if (CLOUD_MODE)

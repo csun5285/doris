@@ -7,9 +7,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <memory>
+#include <thread>
+#include <variant>
 
-#include "cloud/io/s3_file_system.h"
-#include "common/status.h"
+#include "cloud/io/file_system.h"
 
 namespace Aws::Transfer {
 class TransferManager;
@@ -17,14 +19,21 @@ class TransferManager;
 
 namespace doris::io {
 
-struct DownloadTask {
-    std::chrono::steady_clock::time_point atime;
-    std::vector<FileCacheSegmentMeta> metas;
-    DownloadTask(std::vector<FileCacheSegmentMeta> metas) : metas(std::move(metas)) {
-        atime = std::chrono::steady_clock::now();
-    }
+struct S3FileMeta {
+    Path path;
+    size_t file_size;
+    io::FileSystemSPtr file_system;
+    int64_t expiration_time {0};
+    bool is_cold_data {false};
+    std::function<void(Status)> download_callback;
+};
 
-    DownloadTask() { }
+struct DownloadTask {
+    std::chrono::steady_clock::time_point atime = std::chrono::steady_clock::now();
+    std::variant<std::vector<FileCacheSegmentMeta>, S3FileMeta> task_message;
+    DownloadTask(std::vector<FileCacheSegmentMeta> metas) : task_message(std::move(metas)) {}
+    DownloadTask(S3FileMeta meta) : task_message(std::move(meta)) {}
+    DownloadTask() = default;
 };
 
 class FileCacheSegmentDownloader {
@@ -41,9 +50,7 @@ public:
         }
     }
 
-    virtual void download_segments(DownloadTask task) = 0;
-
-    inline static FileCacheSegmentDownloader* downloader {nullptr};
+    virtual void download_segments(DownloadTask& task) = 0;
 
     static FileCacheSegmentDownloader* instance() {
         DCHECK(downloader);
@@ -54,20 +61,22 @@ public:
 
     void polling_download_task();
 
-    virtual void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) = 0;
+    virtual void check_download_task(const std::vector<int64_t>& tablets,
+                                     std::map<int64_t, bool>* done) = 0;
 
 protected:
     std::mutex _mtx;
     std::mutex _inflight_mtx;
     // tablet id -> inflight segment num of tablet
     std::unordered_map<int64_t, int64_t> _inflight_tablets;
+    inline static FileCacheSegmentDownloader* downloader {nullptr};
 
 private:
     std::thread _download_thread;
     std::condition_variable _empty;
     std::deque<DownloadTask> _task_queue;
     std::atomic_bool _closed {false};
-    const size_t _max_size {1024};
+    const size_t _max_size {10240};
 };
 
 class FileCacheSegmentS3Downloader : FileCacheSegmentDownloader {
@@ -79,13 +88,16 @@ public:
 
     FileCacheSegmentS3Downloader() = default;
 
-    void download_segments(DownloadTask task) override;
+    void download_segments(DownloadTask& task) override;
 
-    void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done) override;
+    void check_download_task(const std::vector<int64_t>& tablets,
+                             std::map<int64_t, bool>* done) override;
 
 private:
+    std::mutex _mtx;
+    void download_file_cache_segment(std::vector<FileCacheSegmentMeta>&);
+    void download_s3_file(S3FileMeta&);
     std::atomic<size_t> _cur_download_file {0};
-
 };
 
 } // namespace doris::io

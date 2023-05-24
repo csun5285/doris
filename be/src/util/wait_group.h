@@ -48,16 +48,17 @@ void done() {
     }
 }
 
-// wait for all concurrent workers finish their work
-// would return if timeout, default timeout would be 5min
-void wait(int64_t timeout_seconds = 300) {
+// wait for all concurrent workers finish their work then return true
+// would return false if timeout, default timeout would be 5min
+bool wait(int64_t timeout_seconds = 300) {
     if (_count.load() <= 0) {
-        return;
+        return true;
     }
     std::unique_lock<std::mutex> lck{_lock};
     _cv.wait_for(lck, std::chrono::seconds(timeout_seconds), [this](){
         return _count.load() <= 0;
     });
+    return _count.load() <= 0;
 }
 
 

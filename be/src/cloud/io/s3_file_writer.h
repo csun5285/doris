@@ -24,7 +24,7 @@
 #include "cloud/io/file_reader.h"
 #include "cloud/io/file_writer.h"
 #include "cloud/io/s3_file_system.h"
-#include "cloud/io/s3_file_write_bufferpool.h"
+#include "cloud/io/s3_file_bufferpool.h"
 #include "util/wait_group.h"
 
 namespace Aws::Transfer {
@@ -73,7 +73,8 @@ public:
             _index_offset = _bytes_appended;
             // Only the normal data need to change to index data
             if (_pending_buf) {
-                _pending_buf->set_index_offset(_index_offset);
+                std::dynamic_pointer_cast<UploadFileBuffer>(_pending_buf)
+                        ->set_index_offset(_index_offset);
             }
         }
     }
@@ -81,7 +82,7 @@ public:
 private:
     Status _complete();
     // void _upload_to_cache(const Slice& data, S3FileBuffer& buf);
-    void _upload_one_part(int64_t part_num, S3FileBuffer& buf);
+    void _upload_one_part(int64_t part_num, UploadFileBuffer& buf);
 
     FileSegmentsHolderPtr _allocate_file_segments(size_t offset);
 
@@ -115,7 +116,7 @@ private:
     Status _st = Status::OK();
     size_t _bytes_written = 0;
 
-    std::shared_ptr<S3FileBuffer> _pending_buf = nullptr;
+    std::shared_ptr<FileBuffer> _pending_buf = nullptr;
     int64_t _expiration_time;
     bool _is_cold_data;
 };

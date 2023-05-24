@@ -46,7 +46,7 @@
 #include "cloud/io/cloud_file_cache_profile.h"
 #include "cloud/io/cloud_file_cache_settings.h"
 #include "cloud/io/local_file_system.h"
-#include "cloud/io/s3_file_write_bufferpool.h"
+#include "cloud/io/s3_file_bufferpool.h"
 #include "cloud/io/tmp_file_mgr.h"
 #include "common/config.h"
 #include "common/daemon.h"
