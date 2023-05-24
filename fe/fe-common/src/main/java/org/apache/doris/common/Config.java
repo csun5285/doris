@@ -2047,7 +2047,7 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_storage_policy = false;
 
-    @ConfField(mutable = false, masterOnly = true)
+    @ConfField(mutable = false)
     public static boolean enable_fqdn_mode = false;
 
     @ConfField(mutable = true, masterOnly = true)

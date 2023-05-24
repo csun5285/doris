@@ -4845,13 +4845,28 @@ void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
         std::vector<NodeInfo> decomission_nodes;
         for (auto& node : nodes) {
             for (auto req_node : request->cluster().nodes()) {
-                std::string endpoint =
+                bool ip_processed = false;
+                if (node.node_info.has_ip() && req_node.has_ip()) {
+                    std::string endpoint =
                         node.node_info.ip() + ":" + std::to_string(node.node_info.heartbeat_port());
-                std::string req_endpoint =
+                    std::string req_endpoint =
                         req_node.ip() + ":" + std::to_string(req_node.heartbeat_port());
-                if (endpoint == req_endpoint) {
-                    decomission_nodes.push_back(node);
-                    node.node_info.set_status(NodeStatusPB::NODE_STATUS_DECOMMISSIONING);
+                    if (endpoint == req_endpoint) {
+                        decomission_nodes.push_back(node);
+                        node.node_info.set_status(NodeStatusPB::NODE_STATUS_DECOMMISSIONING);
+                    }
+                    ip_processed = true;
+                }
+
+                if (!ip_processed && node.node_info.has_host() && req_node.has_host()) {
+                    std::string endpoint =
+                        node.node_info.host() + ":" + std::to_string(node.node_info.heartbeat_port());
+                    std::string req_endpoint =
+                        req_node.host() + ":" + std::to_string(req_node.heartbeat_port());
+                    if (endpoint == req_endpoint) {
+                        decomission_nodes.push_back(node);
+                        node.node_info.set_status(NodeStatusPB::NODE_STATUS_DECOMMISSIONING);
+                    }
                 }
             }
         }
@@ -4892,12 +4907,26 @@ void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
         std::vector<NodeInfo> decomission_nodes;
         for (auto& node : nodes) {
             for (auto req_node : request->cluster().nodes()) {
-                std::string endpoint =
+                bool ip_processed = false;
+                if (node.node_info.has_ip() && req_node.has_ip()) {
+                    std::string endpoint =
                         node.node_info.ip() + ":" + std::to_string(node.node_info.heartbeat_port());
-                std::string req_endpoint =
+                    std::string req_endpoint =
                         req_node.ip() + ":" + std::to_string(req_node.heartbeat_port());
-                if (endpoint == req_endpoint) {
-                    decomission_nodes.push_back(node);
+                    if (endpoint == req_endpoint) {
+                        decomission_nodes.push_back(node);
+                    }
+                    ip_processed = true;
+                }
+
+                if (!ip_processed && node.node_info.has_host() && req_node.has_host()) {
+                    std::string endpoint =
+                        node.node_info.host() + ":" + std::to_string(node.node_info.heartbeat_port());
+                    std::string req_endpoint =
+                        req_node.host() + ":" + std::to_string(req_node.heartbeat_port());
+                    if (endpoint == req_endpoint) {
+                        decomission_nodes.push_back(node);
+                    }
                 }
             }
         }

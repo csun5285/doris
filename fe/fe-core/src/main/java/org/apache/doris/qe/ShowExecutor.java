@@ -1826,11 +1826,6 @@ public class ShowExecutor {
     private void handleShowBackends() {
         final ShowBackendsStmt showStmt = (ShowBackendsStmt) stmt;
         List<List<String>> backendInfos = BackendsProcDir.getClusterBackendInfos(showStmt.getClusterName());
-
-        for (List<String> row : backendInfos) {
-            row.remove(BackendsProcDir.HOSTNAME_INDEX);
-        }
-
         resultSet = new ShowResultSet(showStmt.getMetaData(), backendInfos);
     }
 

@@ -5,6 +5,7 @@ import com.selectdb.cloud.proto.SelectdbCloud.ClusterPB;
 import com.selectdb.cloud.proto.SelectdbCloud.ClusterPB.Type;
 import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
 
+import com.google.common.base.Strings;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
@@ -72,13 +73,6 @@ public class CloudClusterChecker extends MasterDaemon {
         toAddClusterIds.forEach(
                 addId -> {
                     LOG.debug("begin to add clusterId: {}", addId);
-                    /*
-                    List<Backend> toAdd = new ArrayList<>();
-                    for (SelectdbCloud.NodeInfoPB node : remoteClusterIdToPB.get(addId).getNodesList()) {
-                        Backend b = new Backend(Env.getCurrentEnv().getNextId(), node.getIp(), node.getHeartbeatPort());
-                        toAdd.add(b);
-                    }
-                    */
                     // Attach tag to BEs
                     Map<String, String> newTagMap = Tag.DEFAULT_BACKEND_TAG.toMap();
                     String clusterName = remoteClusterIdToPB.get(addId).getClusterName();
@@ -89,7 +83,12 @@ public class CloudClusterChecker extends MasterDaemon {
                     //toAdd.forEach(i -> i.setTagMap(newTagMap));
                     List<Backend> toAdd = new ArrayList<>();
                     for (SelectdbCloud.NodeInfoPB node : remoteClusterIdToPB.get(addId).getNodesList()) {
-                        Backend b = new Backend(Env.getCurrentEnv().getNextId(), node.getIp(), node.getHeartbeatPort());
+                        String addr = Config.enable_fqdn_mode ? node.getHost() : node.getIp();
+                        if (Strings.isNullOrEmpty(addr)) {
+                            LOG.warn("cant get valid add from ms {}", node);
+                            continue;
+                        }
+                        Backend b = new Backend(Env.getCurrentEnv().getNextId(), addr, node.getHeartbeatPort());
                         newTagMap.put(Tag.CLOUD_UNIQUE_ID, node.getCloudUniqueId());
                         b.setTagMap(newTagMap);
                         toAdd.add(b);
@@ -131,7 +130,12 @@ public class CloudClusterChecker extends MasterDaemon {
         }
 
         for (SelectdbCloud.NodeInfoPB node : expectedBes) {
-            String endpoint = node.getIp() + ":" + node.getHeartbeatPort();
+            String addr = Config.enable_fqdn_mode ? node.getHost() : node.getIp();
+            if (Strings.isNullOrEmpty(addr)) {
+                LOG.warn("cant get valid add from ms {}", node);
+                continue;
+            }
+            String endpoint = addr + ":" + node.getHeartbeatPort();
             SelectdbCloud.NodeStatusPB status = node.getStatus();
             Backend be = currentMap.get(endpoint);
 
@@ -181,7 +185,15 @@ public class CloudClusterChecker extends MasterDaemon {
                     backend.getHost() + ":" + backend.getHeartbeatPort()).collect(Collectors.toList());
             List<SelectdbCloud.NodeInfoPB> expectedBes = remoteClusterIdToPB.get(cid).getNodesList();
             List<String> remoteBeEndpoints = expectedBes.stream()
-                    .map(pb -> pb.getIp() + ":" + pb.getHeartbeatPort()).collect(Collectors.toList());
+                    .map(pb -> {
+                        String addr = Config.enable_fqdn_mode ? pb.getHost() : pb.getIp();
+                        if (Strings.isNullOrEmpty(addr)) {
+                            LOG.warn("cant get valid add from ms {}", pb);
+                            return "";
+                        }
+                        return addr + ":" + pb.getHeartbeatPort();
+                    }).filter(e -> !Strings.isNullOrEmpty(e))
+                    .collect(Collectors.toList());
             LOG.info("get cloud cluster, clusterId={} local nodes={} remote nodes={}", cid,
                     currentBeEndpoints, remoteBeEndpoints);
 
@@ -202,8 +214,13 @@ public class CloudClusterChecker extends MasterDaemon {
             }, () -> {
                 Map<String, Backend> nodeMap = new HashMap<>();
                 for (SelectdbCloud.NodeInfoPB node : expectedBes) {
-                    String endpoint = node.getIp() + ":" + node.getHeartbeatPort();
-                    Backend b = new Backend(Env.getCurrentEnv().getNextId(), node.getIp(), node.getHeartbeatPort());
+                    String host = Config.enable_fqdn_mode ? node.getHost() : node.getIp();
+                    if (Strings.isNullOrEmpty(host)) {
+                        LOG.warn("cant get valid add from ms {}", node);
+                        continue;
+                    }
+                    String endpoint = host + ":" + node.getHeartbeatPort();
+                    Backend b = new Backend(Env.getCurrentEnv().getNextId(), host, node.getHeartbeatPort());
                     if (node.hasIsSmoothUpgrade()) {
                         b.setSmoothUpgradeDst(node.getIsSmoothUpgrade());
                     }
@@ -411,13 +428,18 @@ public class CloudClusterChecker extends MasterDaemon {
             Map<String, Frontend> nodeMap = new HashMap<>();
             String selfNode = Env.getCurrentEnv().getSelfNode().toHostPortString();
             for (SelectdbCloud.NodeInfoPB node : expectedFes) {
-                String endpoint = node.getIp() + ":" + node.getEditLogPort();
+                String host = Config.enable_fqdn_mode ? node.getHost() : node.getIp();
+                if (Strings.isNullOrEmpty(host)) {
+                    LOG.warn("cant get valid add from ms {}", node);
+                    continue;
+                }
+                String endpoint = host + ":" + node.getEditLogPort();
                 if (selfNode.equals(endpoint)) {
                     continue;
                 }
                 Frontend fe = new Frontend(FrontendNodeType.OBSERVER,
-                        Env.genFeNodeNameFromMeta(node.getIp(), node.getEditLogPort(),
-                        node.getCtime() * 1000), node.getIp(), node.getEditLogPort());
+                        Env.genFeNodeNameFromMeta(host, node.getEditLogPort(),
+                        node.getCtime() * 1000), host, node.getEditLogPort());
                 nodeMap.put(endpoint, fe);
             }
             return nodeMap;

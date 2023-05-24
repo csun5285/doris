@@ -60,6 +60,10 @@ add_executable(log_test
     log_test.cpp
 )
 
+add_executable(resource_test
+    resource_test.cpp
+)
+
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -97,6 +101,9 @@ target_link_libraries(log_test
     ${TEST_LINK_LIBS}
 )
 
+target_link_libraries(resource_test
+    ${TEST_LINK_LIBS}
+)
 # FDB related tests need to be linked with libfdb_c
 set(FDB_LINKER_FLAGS "-lfdb_c -L${THIRDPARTY_DIR}/lib")
 

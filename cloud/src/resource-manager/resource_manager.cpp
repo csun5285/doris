@@ -3,6 +3,7 @@
 #include "resource_manager.h"
 #include "meta-service/keys.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "common/util.h"
 
 #include <sstream>
@@ -593,6 +594,10 @@ std::string ResourceManager::modify_nodes(const std::string& instance_id,
     std::shared_ptr<Transaction> txn(txn0.release());
     InstanceInfoPB instance;
     auto [c0, m0] = get_instance(txn, instance_id, &instance);
+    {
+        TEST_SYNC_POINT_CALLBACK("modify_nodes:get_instance", &c0);
+        TEST_SYNC_POINT_CALLBACK("modify_nodes:get_instance_ret", &instance);
+    }
     if (c0 != 0) {
         err = m0;
         return err;
@@ -665,16 +670,32 @@ std::string ResourceManager::modify_nodes(const std::string& instance_id,
         ClusterPB copied_cluster;
         bool is_compute_node = n.node_info.has_heartbeat_port();
         for (auto it = c.nodes().begin(); it != c.nodes().end(); ++it) {
-            std::string c_endpoint = it->ip() + ":" +
-                                     (is_compute_node ? std::to_string(it->heartbeat_port())
-                                                      : std::to_string(it->edit_log_port()));
-            std::string n_endpoint =
+            if (it->has_ip() && n.node_info.has_ip()) {
+                std::string c_endpoint = it->ip() + ":" +
+                                         (is_compute_node ? std::to_string(it->heartbeat_port())
+                                                          : std::to_string(it->edit_log_port()));
+                std::string n_endpoint =
                     n.node_info.ip() + ":" +
                     (is_compute_node ? std::to_string(n.node_info.heartbeat_port())
                                      : std::to_string(n.node_info.edit_log_port()));
-            if (c_endpoint == n_endpoint) {
-                // replicate request, do nothing
-                return "";
+                if (c_endpoint == n_endpoint) {
+                    // replicate request, do nothing
+                    return "";
+                }
+            }
+
+            if (it->has_host() && n.node_info.has_host()) {
+                std::string c_endpoint_host = it->host() + ":" +
+                                              (is_compute_node ? std::to_string(it->heartbeat_port())
+                                                               : std::to_string(it->edit_log_port()));
+                std::string n_endpoint_host =
+                    n.node_info.host() + ":" +
+                    (is_compute_node ? std::to_string(n.node_info.heartbeat_port())
+                                     : std::to_string(n.node_info.edit_log_port()));
+                if (c_endpoint_host == n_endpoint_host) {
+                    // replicate request, do nothing
+                    return "";
+                }
             }
         }
 
@@ -721,19 +742,38 @@ std::string ResourceManager::modify_nodes(const std::string& instance_id,
         bool found = false;
         for (auto it = start; it != end; ++it) {
             const auto& m_node = it->second.node_info;
-            std::string m_endpoint =
+            if (m_node.has_ip() && n.node_info.has_ip()) {
+                std::string m_endpoint =
                     m_node.ip() + ":" +
                     (m_node.has_heartbeat_port() ? std::to_string(m_node.heartbeat_port())
                                                  : std::to_string(m_node.edit_log_port()));
 
-            std::string n_endpoint = n.node_info.ip() + ":" +
-                                     (n.node_info.has_heartbeat_port()
-                                              ? std::to_string(n.node_info.heartbeat_port())
-                                              : std::to_string(n.node_info.edit_log_port()));
+                std::string n_endpoint = n.node_info.ip() + ":" +
+                                         (n.node_info.has_heartbeat_port()
+                                          ? std::to_string(n.node_info.heartbeat_port())
+                                          : std::to_string(n.node_info.edit_log_port()));
 
-            if (m_endpoint == n_endpoint) {
-                found = true;
-                break;
+                if (m_endpoint == n_endpoint) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (m_node.has_host() && n.node_info.has_host()) {
+                std::string m_endpoint_host =
+                    m_node.host() + ":" +
+                    (m_node.has_heartbeat_port() ? std::to_string(m_node.heartbeat_port())
+                                                 : std::to_string(m_node.edit_log_port()));
+
+                std::string n_endpoint_host = n.node_info.host() + ":" +
+                                              (n.node_info.has_heartbeat_port()
+                                               ? std::to_string(n.node_info.heartbeat_port())
+                                               : std::to_string(n.node_info.edit_log_port()));
+
+                if (m_endpoint_host == n_endpoint_host) {
+                    found = true;
+                    break;
+                }
             }
         }
         if (!found) {
@@ -759,19 +799,38 @@ std::string ResourceManager::modify_nodes(const std::string& instance_id,
         const auto& ni = n.node_info;
         for (auto& cn : c.nodes()) {
             idx++;
-            std::string cn_endpoint =
+            if (cn.has_ip() && ni.has_ip()) {
+                std::string cn_endpoint =
                     cn.ip() + ":" +
                     (cn.has_heartbeat_port() ? std::to_string(cn.heartbeat_port())
                                              : std::to_string(cn.edit_log_port()));
 
-            std::string ni_endpoint =
+                std::string ni_endpoint =
                     ni.ip() + ":" +
                     (ni.has_heartbeat_port() ? std::to_string(ni.heartbeat_port())
                                              : std::to_string(ni.edit_log_port()));
 
-            if (ni.cloud_unique_id() == cn.cloud_unique_id() && cn_endpoint == ni_endpoint) {
-                found = true;
-                break;
+                if (ni.cloud_unique_id() == cn.cloud_unique_id() && cn_endpoint == ni_endpoint) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (cn.has_host() && ni.has_host()) {
+                std::string cn_endpoint_host =
+                    cn.host() + ":" +
+                    (cn.has_heartbeat_port() ? std::to_string(cn.heartbeat_port())
+                                             : std::to_string(cn.edit_log_port()));
+
+                std::string ni_endpoint_host =
+                    ni.host() + ":" +
+                    (ni.has_heartbeat_port() ? std::to_string(ni.heartbeat_port())
+                                             : std::to_string(ni.edit_log_port()));
+
+                if (ni.cloud_unique_id() == cn.cloud_unique_id() && cn_endpoint_host == ni_endpoint_host) {
+                    found = true;
+                    break;
+                }
             }
         }
 

@@ -968,15 +968,14 @@ public class Env {
         helperNodes.clear();
         helperNodes.addAll(allNodes.stream()
                 .filter(nodeInfoPB -> nodeInfoPB.getNodeType() == NodeInfoPB.NodeType.FE_MASTER)
-                .map(nodeInfoPB -> new HostInfo(nodeInfoPB.getIp(), nodeInfoPB.getEditLogPort()))
+                .map(nodeInfoPB -> new HostInfo(
+                    Config.enable_fqdn_mode ? nodeInfoPB.getHost() : nodeInfoPB.getIp(), nodeInfoPB.getEditLogPort()))
                 .collect(Collectors.toList()));
         // check only have one master node.
         Preconditions.checkState(helperNodes.size() == 1);
 
-        Optional<NodeInfoPB> local = allNodes.stream().filter(n -> {
-            String s = n.getIp() + ":" + n.getEditLogPort();
-            return s.equals(selfNode.toHostPortString());
-        }).findAny();
+        Optional<NodeInfoPB> local = allNodes.stream().filter(n -> ((Config.enable_fqdn_mode ? n.getHost() : n.getIp())
+                + ":" + n.getEditLogPort()).equals(selfNode.toHostPortString())).findAny();
         return local.orElse(null);
     }
 
@@ -998,7 +997,8 @@ public class Env {
                     continue;
                 }
                 type = nodeInfoPB.getNodeType();
-                feNodeNameFromMeta = genFeNodeNameFromMeta(nodeInfoPB.getIp(),
+                feNodeNameFromMeta = genFeNodeNameFromMeta(
+                        Config.enable_fqdn_mode ? nodeInfoPB.getHost() : nodeInfoPB.getIp(),
                         nodeInfoPB.getEditLogPort(), nodeInfoPB.getCtime() * 1000);
                 break;
             }
