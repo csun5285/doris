@@ -14,7 +14,6 @@
 #include "cloud/io/cloud_file_cache_fwd.h"
 #include "cloud/io/cloud_file_segment.h"
 #include "cloud/io/s3_common.h"
-#include "cloud/io/s3_downloader.h"
 #include "cloud/io/s3_file_bufferpool.h"
 #include "cloud/io/s3_file_system.h"
 #include "cloud/utils.h"
@@ -27,7 +26,7 @@ using Aws::S3::Model::GetObjectRequest;
 
 bvar::Adder<uint64_t> file_cache_downloader_counter("file_cache_downloader", "size");
 
-static Status _download_part(std::shared_ptr<S3Client> client, std::string key_name,
+static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name,
                              std::string bucket, size_t offset, size_t size, Slice& s) {
     GetObjectRequest request;
     request.WithBucket(bucket).WithKey(key_name);
@@ -69,7 +68,7 @@ struct DownloadTaskExecutor {
     DownloadTaskExecutor() = default;
     ~DownloadTaskExecutor() = default;
 
-    void execute(std::shared_ptr<S3Client> client, std::string key_name, size_t offset, size_t size,
+    void execute(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
                  std::string bucket,
                  std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder,
                  std::function<void(Status)> download_callback, Slice s) {
@@ -136,12 +135,12 @@ private:
     WaitGroup wg;
 };
 extern void download_file(
-        std::shared_ptr<S3Client> client, std::string key_name, size_t offset, size_t size,
+        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
         std::string bucket,
         std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder = nullptr,
         std::function<void(Status)> download_callback = nullptr, Slice s = Slice());
 
-void download_file(std::shared_ptr<S3Client> client, std::string key_name, size_t offset,
+void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
                    size_t size, std::string bucket,
                    std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder,
                    std::function<void(Status)> download_callback, Slice s) {

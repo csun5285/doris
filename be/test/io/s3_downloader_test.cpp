@@ -14,9 +14,6 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-#include "cloud/io/s3_downloader.h"
-
 #include <gtest/gtest.h>
 
 #include <future>
@@ -35,7 +32,7 @@ std::shared_ptr<io::S3FileSystem> downloader_s3_fs = nullptr;
 using FileSegmentsHolderPtr = std::unique_ptr<io::FileSegmentsHolder>;
 namespace io {
 extern void download_file(
-        std::shared_ptr<S3Client> client, std::string key_name, size_t offset, size_t size,
+        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
         std::string bucket,
         std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder = nullptr,
         std::function<void(Status)> download_callback = nullptr, Slice s = Slice());
