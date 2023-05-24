@@ -135,8 +135,14 @@ private:
     mutable doris::Mutex _mutex;
 
     // metrics
-    std::shared_ptr<bvar::Status<size_t>> _cur_size_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_cache_size_metrics;
     std::shared_ptr<bvar::Status<size_t>> _cur_ttl_cache_size_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_normal_queue_element_count_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_normal_queue_cache_size_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_index_queue_element_count_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_index_queue_cache_size_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_disposable_queue_element_count_metrics;
+    std::shared_ptr<bvar::Status<size_t>> _cur_disposable_queue_cache_size_metrics;
 
     bool try_reserve(const Key& key, const CacheContext& context, size_t offset, size_t size,
                      std::lock_guard<doris::Mutex>& cache_lock);

@@ -24,10 +24,22 @@ CloudFileCache::CloudFileCache(const std::string& cache_base_path,
           _total_size(cache_settings.total_size),
           _max_file_segment_size(cache_settings.max_file_segment_size),
           _max_query_cache_size(cache_settings.max_query_cache_size) {
-    _cur_size_metrics =
-            std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(), "cur_size", 0);
-    _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
-                                                                         "cur_ttl_cache_size", 0);
+    _cur_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
+                                                               "file_cache_cache_size", 0);
+    _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_ttl_cache_size", 0);
+    _cur_normal_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_normal_queue_element_count", 0);
+    _cur_normal_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_normal_queue_cache_size", 0);
+    _cur_index_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_index_queue_element_count", 0);
+    _cur_index_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_index_queue_cache_size", 0);
+    _cur_disposable_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_disposable_queue_element_count", 0);
+    _cur_disposable_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
+            _cache_base_path.c_str(), "file_cache_disposable_queue_cache_size", 0);
 
     _disposable_queue = LRUQueue(cache_settings.disposable_queue_size,
                                  cache_settings.disposable_queue_elements, 60 * 60);
@@ -1339,11 +1351,22 @@ void CloudFileCache::run_background_operation() {
         }
 
         // report
-        _cur_size_metrics->set_value(_cur_cache_size);
+        _cur_cache_size_metrics->set_value(_cur_cache_size);
         _cur_ttl_cache_size_metrics->set_value(_cur_cache_size -
                                                _index_queue.get_total_cache_size(cache_lock) -
                                                _normal_queue.get_total_cache_size(cache_lock) -
                                                _disposable_queue.get_total_cache_size(cache_lock));
+        _cur_normal_queue_cache_size_metrics->set_value(
+                _normal_queue.get_total_cache_size(cache_lock));
+        _cur_normal_queue_element_count_metrics->set_value(
+                _normal_queue.get_elements_num(cache_lock));
+        _cur_index_queue_cache_size_metrics->set_value(
+                _index_queue.get_total_cache_size(cache_lock));
+        _cur_index_queue_element_count_metrics->set_value(_index_queue.get_elements_num(cache_lock));
+        _cur_disposable_queue_cache_size_metrics->set_value(
+                _disposable_queue.get_total_cache_size(cache_lock));
+        _cur_disposable_queue_element_count_metrics->set_value(
+                _disposable_queue.get_elements_num(cache_lock));
     }
 }
 
