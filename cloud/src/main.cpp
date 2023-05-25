@@ -60,18 +60,32 @@ std::shared_ptr<int> gen_pidfile(const std::string& process_name) {
  * Prepares extra conf files
  */
 std::string prepare_extra_conf_file() {
-    std::fstream fdb_cluter_file(selectdb::config::fdb_cluster_file_path, std::ios::out);
-    fdb_cluter_file << "# DO NOT EDIT UNLESS YOU KNOW WHAT YOU ARE DOING!\n"
-                    << "# This file is auto-generated with selectdb_cloud.conf:fdb_cluster.\n"
-                    << "# It is not to be edited by hand.\n"
-                    << selectdb::config::fdb_cluster;
-    fdb_cluter_file.close();
+    // If the target file is not empty and `config::fdb_cluster` is empty, use the exists file.
+    if (selectdb::config::fdb_cluster.empty()) {
+        try {
+            if (std::filesystem::exists(selectdb::config::fdb_cluster_file_path) &&
+                std::filesystem::file_size(selectdb::config::fdb_cluster_file_path) > 0) {
+                return "";
+            }
+        } catch (std::filesystem::filesystem_error& e) {
+            return fmt::format("prepare_extra_conf_file: {}", e.what());
+        }
+
+        return "Please specify the fdb_cluster in selectdb_cloud.conf";
+    }
+
+    std::fstream fdb_cluster_file(selectdb::config::fdb_cluster_file_path, std::ios::out);
+    fdb_cluster_file << "# DO NOT EDIT UNLESS YOU KNOW WHAT YOU ARE DOING!\n"
+                     << "# This file is auto-generated with selectdb_cloud.conf:fdb_cluster.\n"
+                     << "# It is not to be edited by hand.\n"
+                     << selectdb::config::fdb_cluster;
+    fdb_cluster_file.close();
     return "";
 }
 
 // TODO(gavin): support daemon mode
 // must be called before pidfile generation and any network resource
-// initializaiton, <https://man7.org/linux/man-pages/man3/daemon.3.html>
+// initialization, <https://man7.org/linux/man-pages/man3/daemon.3.html>
 // void daemonize(1, 1); // Maybe nohup will do?
 
 // Arguments
@@ -251,7 +265,7 @@ int main(int argc, char** argv) {
                      << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;
         return -1;
     }
-    LOG(INFO) << "succesfully started brpc listening on port=" << port;
+    LOG(INFO) << "successfully started brpc listening on port=" << port;
 
     server.RunUntilAskedToQuit(); // Wait for signals
     server.ClearServices();
