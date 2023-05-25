@@ -184,7 +184,14 @@ Status CloudFileCache::initialize() {
 Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_is_initialized) {
         if (std::filesystem::exists(_cache_base_path)) {
-            RETURN_IF_ERROR(load_cache_info_into_memory(cache_lock));
+            _cache_background_load_thread = std::thread([&](){
+                _lazy_open_done = false;
+                Status st = load_cache_info_into_memory();
+                if (!st) [[unlikely]] {
+                    LOG(ERROR) << st;
+                }
+                _lazy_open_done = true;
+            });
         } else {
             std::error_code ec;
             std::filesystem::create_directories(_cache_base_path, ec);
@@ -273,8 +280,73 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
     /// find list [segment1, ..., segmentN] of segments which intersect with given range.
     auto it = _files.find(key);
     if (it == _files.end()) {
-        return {};
+        if (_lazy_open_done) {
+            return {};
+        }
+        // async load, can't find key, need to check exist.
+        auto key_path = get_path_in_local_cache(key, context.expiration_time);
+        if (!std::filesystem::exists(key_path)) {
+            // cache miss
+            return {};
+        }
+        CacheContext context_original;
+        context_original.query_id = TUniqueId();
+        context_original.expiration_time = context.expiration_time;
+
+        // load key into mem
+        std::filesystem::directory_iterator check_it {key_path};
+        for (; check_it != std::filesystem::directory_iterator(); ++check_it) {
+            uint64_t offset = 0;
+            auto offset_with_suffix = check_it->path().filename().native();
+            auto delim_pos1 = offset_with_suffix.find('_');
+            CacheType cache_type = CacheType::NORMAL;
+            bool parsed = true;
+            try {
+                if (delim_pos1 == std::string::npos) {
+                    // same as type "normal"
+                    offset = stoull(offset_with_suffix);
+                } else {
+                    offset = stoull(offset_with_suffix.substr(0, delim_pos1));
+                    std::string suffix = offset_with_suffix.substr(delim_pos1 + 1);
+                    if (suffix == "persistent" || suffix == "tmp") [[unlikely]] {
+                        std::error_code ec;
+                        std::filesystem::remove(check_it->path(), ec);
+                        if (ec) [[unlikely]] {
+                            LOG(WARNING) << "remove err=" << Status::IOError(ec.message());
+                        }
+                        continue;
+                    } else {
+                        cache_type = string_to_cache_type(suffix);
+                    }
+                }
+            } catch (...) {
+                parsed = false;
+            }
+
+            if (!parsed) [[unlikely]] {
+                LOG(WARNING) << "parse offset err, path=" << offset_with_suffix;
+                continue;
+            }
+
+            size_t size = check_it->file_size();
+            if (size == 0) [[unlikely]] {
+                std::error_code ec;
+                std::filesystem::remove(check_it->path(), ec);
+                if (ec) [[unlikely]] {
+                    LOG(WARNING) << "remove err=" << Status::IOError(ec.message());
+                }
+                continue;
+            }
+            context_original.cache_type = cache_type;
+            add_cell(key, context_original, offset, size, FileSegment::State::DOWNLOADED, cache_lock);
+        }
+
+        it = _files.find(key);
+        if (it == _files.end()) [[unlikely]] {
+            return {};
+        }
     }
+
 
     auto& file_segments = it->second;
     if (file_segments.empty()) {
@@ -642,27 +714,28 @@ bool CloudFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mut
 
             /// It is guaranteed that cell is not removed from cache as long as
             /// pointer to corresponding file segment is hold by any other thread.
-
-            if (cell->releasable()) {
-                auto& file_segment = cell->file_segment;
-
-                std::lock_guard segment_lock(file_segment->_mutex);
-
-                switch (file_segment->_download_state) {
-                case FileSegment::State::DOWNLOADED: {
-                    /// Cell will actually be removed only if
-                    /// we managed to reserve enough space.
-
-                    to_evict.push_back(cell);
-                    break;
-                }
-                default: {
-                    trash.push_back(cell);
-                    break;
-                }
-                }
-                removed_size += cell_size;
+            if (!cell->releasable()) {
+                continue;
             }
+
+            auto& file_segment = cell->file_segment;
+
+            std::lock_guard segment_lock(file_segment->_mutex);
+
+            switch (file_segment->_download_state) {
+            case FileSegment::State::DOWNLOADED: {
+                /// Cell will actually be removed only if
+                /// we managed to reserve enough space.
+
+                to_evict.push_back(cell);
+                break;
+            }
+            default: {
+                trash.push_back(cell);
+                break;
+            }
+            }
+            removed_size += cell_size;
         }
     };
     if (disposable_queue_size != 0) {
@@ -682,25 +755,33 @@ bool CloudFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mut
     return true;
 }
 
-// 1. if ttl cache
+// 1. if async load file cache not finish
+//     a. evict from lru queue
+// 2. if ttl cache
 //     a. evict from disposable/normal/index queue one by one
-// 2. if dont reach query limit or dont have query limit
+// 3. if dont reach query limit or dont have query limit
 //     a. evict from other queue
 //     b. evict from current queue
 //         a.1 if the data belong write, then just evict cold data
-// 3. if reach query limit
+// 4. if reach query limit
 //     a. evict from query queue
 //     b. evict from other queue
 
 bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, size_t offset,
                                  size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
+    if (!_lazy_open_done) {
+        return try_reserve_for_lazy_load(size, cache_lock);
+    }
+
     if (context.cache_type == CacheType::TTL) {
         return try_reserve_for_ttl(size, cache_lock);
     }
+
     auto query_context =
             _enable_file_cache_query_limit && (context.query_id.hi != 0 || context.query_id.lo != 0)
                     ? get_query_context(context.query_id, cache_lock)
                     : nullptr;
+
     if (!query_context) {
         return try_reserve_for_lru(key, nullptr, context, offset, size, cache_lock);
     } else if (query_context->get_cache_size(cache_lock) + size <=
@@ -745,28 +826,28 @@ bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, si
             size_t cell_size = cell->size();
             DCHECK(iter->size == cell_size);
 
-            if (cell->releasable()) {
-                auto& file_segment = cell->file_segment;
-                std::lock_guard segment_lock(file_segment->_mutex);
-
-                switch (file_segment->_download_state) {
-                case FileSegment::State::DOWNLOADED: {
-                    to_evict.push_back(cell);
-                    break;
-                }
-                default: {
-                    trash.push_back(cell);
-                    break;
-                }
-                }
-                removed_size += cell_size;
+            if (!cell->releasable()) {
+                continue;
             }
+            auto& file_segment = cell->file_segment;
+            std::lock_guard segment_lock(file_segment->_mutex);
+
+            switch (file_segment->_download_state) {
+            case FileSegment::State::DOWNLOADED: {
+                to_evict.push_back(cell);
+                break;
+            }
+            default: {
+                trash.push_back(cell);
+                break;
+            }
+            }
+            removed_size += cell_size;
         }
     }
 
     auto remove_file_segment_if = [&](FileSegmentCell* cell) {
-        FileSegmentSPtr file_segment = cell->file_segment;
-        if (file_segment) {
+        if (FileSegmentSPtr file_segment = cell->file_segment; file_segment) {
             query_context->remove(file_segment->key(), file_segment->offset(), cache_lock);
             std::lock_guard segment_lock(file_segment->_mutex);
             remove(file_segment, cache_lock, segment_lock);
@@ -849,8 +930,7 @@ void CloudFileCache::remove_if_cached(const Key& file_key) {
             }
         }
         auto remove_file_segment_if = [&](FileSegmentCell* cell) {
-            FileSegmentSPtr file_segment = cell->file_segment;
-            if (file_segment) {
+            if (FileSegmentSPtr file_segment = cell->file_segment; file_segment) {
                 std::lock_guard segment_lock(file_segment->_mutex);
                 remove(file_segment, cache_lock, segment_lock);
             }
@@ -917,29 +997,28 @@ bool CloudFileCache::try_reserve_from_other_queue(CacheType cur_cache_type, size
                 break;
             }
 
-            if (cell->releasable()) {
-                auto& file_segment = cell->file_segment;
-
-                std::lock_guard segment_lock(file_segment->_mutex);
-
-                switch (file_segment->_download_state) {
-                case FileSegment::State::DOWNLOADED: {
-                    to_evict.push_back(cell);
-                    break;
-                }
-                default: {
-                    trash.push_back(cell);
-                    break;
-                }
-                }
-
-                removed_size += cell_size;
+            if (!cell->releasable()) {
+                continue;
             }
+            auto& file_segment = cell->file_segment;
+
+            std::lock_guard segment_lock(file_segment->_mutex);
+
+            switch (file_segment->_download_state) {
+            case FileSegment::State::DOWNLOADED: {
+                to_evict.push_back(cell);
+                break;
+            }
+            default: {
+                trash.push_back(cell);
+                break;
+            }
+            }
+            removed_size += cell_size;
         }
     }
     auto remove_file_segment_if = [&](FileSegmentCell* cell) {
-        FileSegmentSPtr file_segment = cell->file_segment;
-        if (file_segment) {
+        if (FileSegmentSPtr file_segment = cell->file_segment; file_segment) {
             std::lock_guard segment_lock(file_segment->_mutex);
             remove(file_segment, cache_lock, segment_lock);
         }
@@ -995,33 +1074,33 @@ bool CloudFileCache::try_reserve_for_lru(const Key& key, QueryContextPtr query_c
                 cell->atime + queue.get_hot_data_interval() > cur_time) {
                 continue;
             }
-            if (cell->releasable()) {
-                auto& file_segment = cell->file_segment;
-
-                std::lock_guard segment_lock(file_segment->_mutex);
-
-                switch (file_segment->_download_state) {
-                case FileSegment::State::DOWNLOADED: {
-                    /// Cell will actually be removed only if
-                    /// we managed to reserve enough space.
-
-                    to_evict.push_back(cell);
-                    break;
-                }
-                default: {
-                    trash.push_back(cell);
-                    break;
-                }
-                }
-
-                removed_size += cell_size;
-                --queue_element_size;
+            if (!cell->releasable()) {
+                continue;
             }
+            auto& file_segment = cell->file_segment;
+
+            std::lock_guard segment_lock(file_segment->_mutex);
+
+            switch (file_segment->_download_state) {
+            case FileSegment::State::DOWNLOADED: {
+                /// Cell will actually be removed only if
+                /// we managed to reserve enough space.
+
+                to_evict.push_back(cell);
+                break;
+            }
+            default: {
+                trash.push_back(cell);
+                break;
+            }
+            }
+
+            removed_size += cell_size;
+            --queue_element_size;
         }
 
         auto remove_file_segment_if = [&](FileSegmentCell* cell) {
-            FileSegmentSPtr file_segment = cell->file_segment;
-            if (file_segment) {
+            if (FileSegmentSPtr file_segment = cell->file_segment; file_segment) {
                 std::lock_guard segment_lock(file_segment->_mutex);
                 remove(file_segment, cache_lock, segment_lock);
             }
@@ -1082,11 +1161,10 @@ void CloudFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<doris:
     }
 }
 
-Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>& cache_lock) {
+Status CloudFileCache::load_cache_info_into_memory() {
     Key key;
     uint64_t offset = 0;
     size_t size = 0;
-    std::vector<std::pair<Key, size_t>> queue_entries;
 
     // upgrade the cache
     std::filesystem::directory_iterator upgrade_key_it {_cache_base_path};
@@ -1100,9 +1178,20 @@ Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>
             }
         }
     }
+    int scan_length = 10000;
+    std::vector<BatchLoadArgs> batch_load_buffer;
+    batch_load_buffer.reserve(scan_length);
+
     std::vector<std::string> need_to_check_if_empty_dir;
     /// cache_base_path / key / offset
     std::filesystem::directory_iterator key_it {_cache_base_path};
+    auto add_cell_batch_func = [&]() {
+        std::lock_guard cache_lock(_mutex);
+        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args){
+            add_cell(args.key, args.ctx, args.offset, args.size, FileSegment::State::DOWNLOADED, cache_lock);
+        });
+        batch_load_buffer.clear();
+    };
     for (; key_it != std::filesystem::directory_iterator(); ++key_it) {
         auto key_with_suffix = key_it->path().filename().native();
         auto delim_pos = key_with_suffix.find('_');
@@ -1118,17 +1207,17 @@ Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>
         context.expiration_time = std::stol(expiration_time_str);
         for (; offset_it != std::filesystem::directory_iterator(); ++offset_it) {
             auto offset_with_suffix = offset_it->path().filename().native();
-            auto delim_pos = offset_with_suffix.find('_');
+            auto delim_pos1 = offset_with_suffix.find('_');
             CacheType cache_type = CacheType::NORMAL;
             bool parsed = true;
             try {
-                if (delim_pos == std::string::npos) {
+                if (delim_pos1 == std::string::npos) {
                     // same as type "normal"
                     offset = stoull(offset_with_suffix);
                 } else {
-                    offset = stoull(offset_with_suffix.substr(0, delim_pos));
-                    std::string suffix = offset_with_suffix.substr(delim_pos + 1);
-                    // not need persistent any more
+                    offset = stoull(offset_with_suffix.substr(0, delim_pos1));
+                    std::string suffix = offset_with_suffix.substr(delim_pos1 + 1);
+                    // not need persistent anymore
                     // if suffix is equals to "tmp", it should be removed too.
                     if (suffix == "persistent" || suffix == "tmp") [[unlikely]] {
                         std::error_code ec;
@@ -1146,6 +1235,7 @@ Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>
             }
 
             if (!parsed) {
+                LOG(WARNING) << "parse offset err, path=" << offset_it->path().native();
                 return Status::IOError("Unexpected file: {}", offset_it->path().native());
             }
 
@@ -1159,43 +1249,17 @@ Status CloudFileCache::load_cache_info_into_memory(std::lock_guard<doris::Mutex>
                 continue;
             }
             context.cache_type = cache_type;
-            if (try_reserve(key, context, offset, size, cache_lock)) {
-                add_cell(key, context, offset, size, FileSegment::State::DOWNLOADED, cache_lock);
-                if (cache_type != CacheType::TTL) {
-                    queue_entries.emplace_back(key, offset);
-                }
-            } else {
-                std::error_code ec;
-                std::filesystem::remove(offset_it->path(), ec);
-                if (ec) {
-                    return Status::IOError(ec.message());
-                }
-                need_to_check_if_empty_dir.push_back(key_it->path());
+            batch_load_buffer.push_back(BatchLoadArgs{key, context, offset, size, key_it->path(), offset_it->path()});
+
+            // add lock
+            if (batch_load_buffer.size() >= scan_length) {
+                add_cell_batch_func();
+                std::this_thread::sleep_for(std::chrono::microseconds(10));
             }
         }
     }
-
-    std::for_each(need_to_check_if_empty_dir.cbegin(), need_to_check_if_empty_dir.cend(),
-                  [](auto& dir) {
-                      std::error_code ec;
-                      if (std::filesystem::is_empty(dir, ec) && !ec) {
-                          std::filesystem::remove(dir, ec);
-                      }
-                      if (ec) {
-                          LOG(ERROR) << ec.message();
-                      }
-                  });
-
-    /// Shuffle cells to have random order in LRUQueue as at startup all cells have the same priority.
-    auto rng = std::default_random_engine {
-            static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())};
-    std::shuffle(queue_entries.begin(), queue_entries.end(), rng);
-    for (const auto& [key, offset] : queue_entries) {
-        auto* cell = get_cell(key, offset, cache_lock);
-        if (cell) {
-            auto& queue = get_queue(cell->cache_type);
-            queue.move_to_end(*cell->queue_iterator, cache_lock);
-        }
+    if (batch_load_buffer.size() != 0) {
+        add_cell_batch_func();
     }
     return Status::OK();
 }
@@ -1487,6 +1551,74 @@ bool CloudFileCache::contains_file_reader(const AccessKeyAndOffset& key) {
 
 size_t CloudFileCache::file_reader_cache_size() {
     return s_file_name_to_reader.size();
+}
+
+bool CloudFileCache::try_reserve_for_lazy_load(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
+    size_t removed_size = 0;
+    auto remove_file_segment_if = [&](FileSegmentCell* cell) {
+        if (FileSegmentSPtr file_segment = cell->file_segment; file_segment) {
+            std::lock_guard segment_lock(file_segment->_mutex);
+            remove(file_segment, cache_lock, segment_lock);
+        }
+    };
+    size_t normal_queue_size = _normal_queue.get_total_cache_size(cache_lock);
+    size_t disposable_queue_size = _disposable_queue.get_total_cache_size(cache_lock);
+    size_t index_queue_size = _index_queue.get_total_cache_size(cache_lock);
+
+    std::vector<FileSegmentCell*> trash;
+    std::vector<FileSegmentCell*> to_evict;
+    auto collect_eliminate_fragments = [&](LRUQueue& queue) {
+        for (const auto& [entry_key, entry_offset, entry_size] : queue) {
+            if (removed_size >= size) {
+                break;
+            }
+            auto* cell = get_cell(entry_key, entry_offset, cache_lock);
+
+            DCHECK(cell) << "Cache became inconsistent. Key: " << entry_key.to_string()
+                         << ", offset: " << entry_offset;
+
+            size_t cell_size = cell->size();
+            DCHECK(entry_size == cell_size);
+
+            /// It is guaranteed that cell is not removed from cache as long as
+            /// pointer to corresponding file segment is hold by any other thread.
+
+            if (!cell->releasable()) {
+                continue;
+            }
+            auto& file_segment = cell->file_segment;
+
+            std::lock_guard segment_lock(file_segment->_mutex);
+
+            switch (file_segment->_download_state) {
+                case FileSegment::State::DOWNLOADED: {
+                    /// Cell will actually be removed only if
+                    /// we managed to reserve enough space.
+
+                    to_evict.push_back(cell);
+                    break;
+                }
+                default: {
+                    trash.push_back(cell);
+                    break;
+                }
+            }
+            removed_size += cell_size;
+        }
+    };
+    if (disposable_queue_size != 0) {
+        collect_eliminate_fragments(get_queue(CacheType::DISPOSABLE));
+    }
+    if (normal_queue_size != 0) {
+        collect_eliminate_fragments(get_queue(CacheType::NORMAL));
+    }
+    if (index_queue_size != 0) {
+        collect_eliminate_fragments(get_queue(CacheType::INDEX));
+    }
+    std::for_each(trash.begin(), trash.end(), remove_file_segment_if);
+    std::for_each(to_evict.begin(), to_evict.end(), remove_file_segment_if);
+
+    return removed_size >= size;
 }
 
 } // namespace io

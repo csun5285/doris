@@ -65,6 +65,9 @@ public:
         if (_cache_background_thread.joinable()) {
             _cache_background_thread.join();
         }
+        if (_cache_background_load_thread.joinable()) {
+            _cache_background_load_thread.join();
+        }
     }
 
     /// Restore cache from local filesystem.
@@ -120,6 +123,10 @@ public:
 
     // when cache change to read-write  from read-only, it need reinitialize
     Status reinitialize();
+
+    bool get_lazy_open_success() {
+        return _lazy_open_done;
+    }
 
     CloudFileCache& operator=(const CloudFileCache&) = delete;
     CloudFileCache(const CloudFileCache&) = delete;
@@ -282,6 +289,18 @@ private:
         LRUQueue& queue() { return lru_queue; }
     };
 
+    struct BatchLoadArgs {
+        Key key;
+        CacheContext ctx;
+        uint64_t offset;
+        size_t size;
+        std::string key_path;
+        std::string offset_path;
+        explicit BatchLoadArgs(const Key& key, CacheContext ctx, uint64_t offset,
+                      size_t size, const std::string& key_path, const std::string& offset_path) : key(key), ctx(ctx),
+                      offset(offset), size(size), key_path(key_path), offset_path(offset_path) {}
+    };
+
     using QueryContextPtr = std::shared_ptr<QueryContext>;
     using QueryContextMap = std::unordered_map<TUniqueId, QueryContextPtr>;
 
@@ -333,6 +352,8 @@ private:
                              const CacheContext& context, size_t offset, size_t size,
                              std::lock_guard<doris::Mutex>& cache_lock);
 
+    bool try_reserve_for_lazy_load(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
+
     std::vector<CacheType> get_other_cache_type(CacheType cur_cache_type);
 
     bool try_reserve_from_other_queue(CacheType cur_cache_type, size_t offset, int64_t cur_time,
@@ -344,7 +365,7 @@ private:
 
     size_t get_available_cache_size(CacheType type) const;
 
-    Status load_cache_info_into_memory(std::lock_guard<doris::Mutex>& cache_lock);
+    Status load_cache_info_into_memory();
 
     FileSegments split_range_into_cells(const Key& key, const CacheContext& context, size_t offset,
                                         size_t size, FileSegment::State state,
@@ -375,6 +396,8 @@ private:
 
     std::atomic_bool _close {false};
     std::thread _cache_background_thread;
+    std::atomic_bool _lazy_open_done {false};
+    std::thread _cache_background_load_thread;
 
 public:
     /// Save a query context information, and adopt different cache policies

@@ -223,10 +223,7 @@ Status S3FileSystem::open_file_impl(const Path& path, metrics_hook metrics, File
             std::move(fs_path), fsize, std::move(key), _s3_conf.bucket,
             std::static_pointer_cast<S3FileSystem>(shared_from_this()));
     if (config::enable_file_cache) {
-        if (config::enable_file_cache) {
-            *reader = std::make_shared<CachedRemoteFileReader>(std::move(*reader),
-                                                               std::move(metrics));
-        }
+        *reader = std::make_shared<CachedRemoteFileReader>(std::move(*reader), std::move(metrics));
     }
     return Status::OK();
 }

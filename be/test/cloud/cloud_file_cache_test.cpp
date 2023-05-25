@@ -195,6 +195,12 @@ void test_file_cache(io::CacheType cache_type) {
     {
         io::CloudFileCache cache(cache_base_path, settings);
         ASSERT_TRUE(cache.initialize());
+        while(true) {
+            if (cache.get_lazy_open_success()){
+                break;
+            };
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         {
             auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
             auto segments = fromHolder(holder);
@@ -548,6 +554,12 @@ void test_file_cache(io::CacheType cache_type) {
 
         io::CloudFileCache cache2(cache_base_path, settings);
         cache2.initialize();
+        while(true) {
+            if (cache2.get_lazy_open_success()){
+                break;
+            };
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         auto holder1 = cache2.get_or_set(key, 2, 28, context); /// Get [2, 29]
 
         auto segments1 = fromHolder(holder1);
@@ -576,7 +588,13 @@ void test_file_cache(io::CacheType cache_type) {
         settings2.query_queue_elements = 0;
         settings2.max_file_segment_size = 10;
         io::CloudFileCache cache2(caches_dir / "cache2", settings2);
-
+        cache2.initialize();
+        while(true) {
+            if (cache2.get_lazy_open_success()){
+                break;
+            };
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         auto holder1 = cache2.get_or_set(key, 0, 25, context); /// Get [0, 24]
         auto segments1 = fromHolder(holder1);
 
@@ -631,6 +649,12 @@ TEST(LRUFileCache, resize) {
     settings.max_file_segment_size = 100;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -654,6 +678,12 @@ TEST(LRUFileCache, query_limit_heap_use_after_free) {
     settings.total_size = 15;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
@@ -739,6 +769,12 @@ TEST(LRUFileCache, query_limit_dcheck) {
     settings.total_size = 15;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
@@ -858,6 +894,12 @@ TEST(LRUFileCache, reset_range) {
     settings.total_size = 15;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
@@ -902,6 +944,12 @@ TEST(LRUFileCache, change_cache_type) {
     settings.total_size = 30;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
@@ -947,6 +995,12 @@ TEST(LRUFileCache, fd_cache_remove) {
     settings.total_size = 15;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
@@ -1030,6 +1084,12 @@ TEST(LRUFileCache, fd_cache_evict) {
     settings.total_size = 15;
     io::CloudFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
+    while(true) {
+        if (cache.get_lazy_open_success()){
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     io::CacheContext context;
     context.cache_type = io::CacheType::NORMAL;
     auto key = io::CloudFileCache::hash("key1");
