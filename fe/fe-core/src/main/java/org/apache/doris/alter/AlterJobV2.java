@@ -250,6 +250,14 @@ public abstract class AlterJobV2 implements Writable {
         }
     }
 
+    protected void sleepSeveralSeconds() {
+        try {
+            Thread.sleep(10000);
+        } catch (InterruptedException ie) {
+            LOG.warn("ignore InterruptedException");
+        }
+    }
+
     protected abstract void runPendingJob() throws AlterCancelException;
 
     protected abstract void runWaitingTxnJob() throws AlterCancelException;

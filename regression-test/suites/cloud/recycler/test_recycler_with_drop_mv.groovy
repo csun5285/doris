@@ -2,12 +2,12 @@ import groovy.json.JsonOutput
 import org.codehaus.groovy.runtime.IOGroovyMethods
 import java.util.stream.Collectors
 
-suite("test_recycler_with_drop_rollup") {
+suite("test_recycler_with_drop_mv") {
     def token = "greedisgood9999"
     def instanceId = context.config.instanceId;
     def cloudUniqueId = context.config.cloudUniqueId
-    def tableName = 'test_recycler_with_drop_rollup'
-    def rollupName = "test_recycler_with_drop_rollup_name"
+    def tableName = 'test_recycler_with_drop_mv'
+    def mvName = "test_recycler_with_drop_mv_name"
     def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
     def loadLabel = tableName + "_" + uniqueID
 
@@ -65,8 +65,8 @@ suite("test_recycler_with_drop_rollup") {
     logger.info("tabletIdSet1:${tabletIdSet1}")
     assertTrue(tabletIdSet1.size() > 0)
 
-    sql "alter table ${tableName} add rollup ${rollupName}(C_CUSTKEY, C_ADDRESS);"
-    waitRollupJobFinished(tableName)
+    sql "create materialized view ${mvName} as select C_CUSTKEY, C_ADDRESS from ${tableName};"
+    waitMvJobFinished(tableName)
 
     String[][] tabletInfoList2 = sql """ show tablets from ${tableName}; """
     logger.debug("tabletInfoList2:${tabletInfoList2}")
@@ -81,10 +81,7 @@ suite("test_recycler_with_drop_rollup") {
     logger.info("rowCount:{}", rowCount)
     assertEquals(rowCount[0][0], 15000000)
 
-    sql """ alter table ${tableName} drop rollup ${rollupName};"""
-    rowCount = sql "select count(*) from ${tableName}"
-    logger.info("rowCount:{}", rowCount)
-    assertEquals(rowCount[0][0], 15000000)
+    sql "drop materialized view ${mvName} on ${tableName};"
     int retry = 15
     boolean success = false
     do {
@@ -100,8 +97,9 @@ suite("test_recycler_with_drop_rollup") {
     rowCount = sql "select count(*) from ${tableName}"
     logger.info("rowCount:{}", rowCount)
     assertEquals(rowCount[0][0], 15000000)
-    sql """ drop table if exists ${tableName} force """
 
+    sql "drop materialized view if exists ${mvName} on ${tableName};"
+    sql """ drop table if exists ${tableName} force """
     // trigger recycle and check data has been deleted
     retry = 15
     success = false

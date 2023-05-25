@@ -140,10 +140,12 @@ Suite.metaClass.restartProcess = { String nodeIp, String processName, String ins
             break
         } catch (Exception e) {
             logger.info("checkProcessAlive failed, tryTimes=${tryTimes}")
-            sleep(5000)
             if (tryTimes <= 0) {
                 throw e
             }
+        } finally {
+            // sleep 5 seconds for wait qe service ready
+            sleep(5000)
         }
     }
     // sleep 5 seconds for wait qe service ready
@@ -176,7 +178,7 @@ Suite.metaClass.checkBrokerLoadLoading = { String label /* param */ ->
 
 Suite.metaClass.checkBrokerLoadFinished = { String label /* param */ ->
     // check load state
-    int tryTimes = 120
+    int tryTimes = 20
     while (tryTimes-- > 0) {
         def stateResult = sql "show load where Label = '${label}'"
         def loadState = stateResult[stateResult.size() - 1][2].toString()
@@ -192,7 +194,6 @@ Suite.metaClass.checkBrokerLoadFinished = { String label /* param */ ->
 }
 
 Suite.metaClass.checkCopyIntoLoading = { String label /* param */ ->
-    // check load state
     int tryTimes = 600
     while (tryTimes-- > 0) {
         def stateResult = sql "show copy where label like '${label}'"
@@ -216,8 +217,7 @@ Suite.metaClass.checkCopyIntoLoading = { String label /* param */ ->
 }
 
 Suite.metaClass.checkCopyIntoFinished = { String label /* param */ ->
-    // check load state
-    int tryTimes = 120
+    int tryTimes = 20
     while (tryTimes-- > 0) {
         def stateResult = sql "show copy where label like '${label}'"
         def loadState = stateResult[stateResult.size() - 1][3].toString()
@@ -231,6 +231,128 @@ Suite.metaClass.checkCopyIntoFinished = { String label /* param */ ->
         sleep(60000)
     }
 }
+
+Suite.metaClass.waitSchemaChangeJobRunning = { String tableName /* param */ ->
+    int tryTimes = 600
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
+        def jobState = jobResult[0][9].toString()
+        if ("pending".equalsIgnoreCase(jobState) || "WAITING_TXN".equalsIgnoreCase(jobState)) {
+            sleep(1000)
+            continue
+        }
+
+        logger.info("jobResult:{}", jobResult)
+        if ("running".equalsIgnoreCase(jobState)) {
+            break
+        }
+        if ("cancelled".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ("finished".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been finished")
+        }
+    }
+}
+
+Suite.metaClass.waitSchemaChangeJobFinished = { String tableName /* param */ ->
+    int tryTimes = 20
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
+        def jobState = jobResult[0][9].toString()
+        if ('cancelled'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ('finished'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            break
+        }
+        sleep(60000)
+    }
+}
+
+Suite.metaClass.waitRollupJobRunning = { String tableName /* param */ ->
+    int tryTimes = 600
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1"""
+        def jobState = jobResult[0][8].toString()
+        if ("pending".equalsIgnoreCase(jobState) || "WAITING_TXN".equalsIgnoreCase(jobState)) {
+            sleep(1000)
+            continue
+        }
+
+        logger.info("jobResult:{}", jobResult)
+        if ("running".equalsIgnoreCase(jobState)) {
+            break
+        }
+        if ("cancelled".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ("finished".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been finished")
+        }
+    }
+}
+
+Suite.metaClass.waitRollupJobFinished = { String tableName /* param */ ->
+    int tryTimes = 20
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1"""
+        def jobState = jobResult[0][8].toString()
+        if ('cancelled'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ('finished'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            break
+        }
+        sleep(60000)
+    }
+}
+
+Suite.metaClass.waitMvJobRunning = { String tableName /* param */ ->
+    int tryTimes = 600
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1 """
+        def jobState = jobResult[0][8].toString()
+        if ("pending".equalsIgnoreCase(jobState) || "WAITING_TXN".equalsIgnoreCase(jobState)) {
+            sleep(1000)
+            continue
+        } 
+
+        logger.info("jobResult:{}", jobResult)
+        if ("running".equalsIgnoreCase(jobState)) {
+            break
+        }
+        if ("cancelled".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ("finished".equalsIgnoreCase(jobState)) {
+            throw new IllegalStateException("${tableName}'s job has been finished")
+        }
+    }
+}
+
+Suite.metaClass.waitMvJobFinished = { String tableName /* param */ ->
+    int tryTimes = 20
+    while (tryTimes-- > 0) {
+        def jobResult = sql """SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1 """
+        def jobState = jobResult[0][8].toString()
+        if ('cancelled'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            throw new IllegalStateException("${tableName}'s job has been cancelled")
+        }
+        if ('finished'.equalsIgnoreCase(jobState)) {
+            logger.info("jobResult:{}", jobResult)
+            break
+        }
+        sleep(60000)
+    }
+}
+
+
 
 
 

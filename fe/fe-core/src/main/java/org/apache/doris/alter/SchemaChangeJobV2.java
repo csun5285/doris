@@ -76,12 +76,12 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /*
  * Version 2 of SchemaChangeJob.
@@ -264,7 +264,6 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
 
         tbl.readLock();
         try {
-
             Preconditions.checkState(tbl.getState() == OlapTableState.SCHEMA_CHANGE);
             for (long partitionId : partitionIndexMap.rowKeySet()) {
                 Partition partition = tbl.getPartition(partitionId);
@@ -361,6 +360,69 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         }
     }
 
+    private void commitCloudShadowIndex() throws AlterCancelException {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        List<Long> shadowIdxList =
+                indexIdMap.keySet().stream().collect(Collectors.toList());
+        try {
+            Env.getCurrentInternalCatalog().commitCloudMaterializedIndex(tableId,
+                    shadowIdxList);
+        } catch (Exception e) {
+            LOG.warn("commitCloudMaterializedIndex exception:", e);
+            throw new AlterCancelException(e.getMessage());
+        }
+        LOG.info("commitCloudShadowIndex finished, dbId:{}, tableId:{}, jobId:{}, shadowIdxList:{}",
+                dbId, tableId, jobId, shadowIdxList);
+    }
+
+    private void dropCloudShadowIndex() {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        List<Long> shadowIdxList = indexIdMap.keySet().stream().collect(Collectors.toList());
+        long tryTimes = 1;
+        while (true) {
+            try {
+                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tableId, shadowIdxList);
+                break;
+            } catch (Exception e) {
+                LOG.warn("tryTimes:{}, dropCloudShadowIndex exception:", tryTimes, e);
+            }
+            sleepSeveralSeconds();
+            tryTimes++;
+        }
+
+        LOG.info("dropCloudShadowIndex finished, dbId:{}, tableId:{}, jobId:{}, shadowIdxList:{}",
+                dbId, tableId, jobId, shadowIdxList);
+    }
+
+    private void dropCloudOriginIndex() {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        List<Long> originIdxList = indexIdMap.values().stream().collect(Collectors.toList());
+
+        int tryTimes = 1;
+        while (true) {
+            try {
+                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tableId, originIdxList);
+                break;
+            } catch (Exception e) {
+                LOG.warn("tryTimes:{}, dropCloudOriginIndex exception:", tryTimes, e);
+            }
+            sleepSeveralSeconds();
+            tryTimes++;
+        }
+
+        LOG.info("dropCloudOriginIndex finished, dbId:{}, tableId:{}, jobId:{}, originIdxList:{}",
+                dbId, tableId, jobId, originIdxList);
+    }
+
     private void createCloudShadowIndexReplica() throws AlterCancelException {
         Database db = Env.getCurrentInternalCatalog()
                 .getDbOrException(dbId, s -> new AlterCancelException("Database " + s + " does not exist"));
@@ -391,13 +453,10 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         tbl.readLock();
         try {
             Preconditions.checkState(tbl.getState() == OlapTableState.SCHEMA_CHANGE);
-
-            List<Long> shadowIdxList = new ArrayList<Long>();
-            for (Long shadowIdx : indexIdMap.keySet()) {
-                shadowIdxList.add(shadowIdx);
-            }
             try {
-                Env.getCurrentInternalCatalog().prepareCloudMaterializedIndex(tbl, shadowIdxList, expiration);
+                List<Long> shadowIdxList = indexIdMap.keySet().stream().collect(Collectors.toList());
+                Env.getCurrentInternalCatalog().prepareCloudMaterializedIndex(tableId, shadowIdxList,
+                        expiration);
 
                 for (long partitionId : partitionIndexMap.rowKeySet()) {
                     Partition partition = tbl.getPartition(partitionId);
@@ -431,7 +490,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                     }
                 }
             } catch (Exception e) {
-                LOG.warn("createCloudShadowIndexReplica Exception:{}", e);
+                LOG.warn("createCloudShadowIndexReplica Exception:", e);
                 throw new AlterCancelException(e.getMessage());
             }
 
@@ -737,41 +796,15 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             try {
                 Preconditions.checkState(tbl.getState() == OlapTableState.SCHEMA_CHANGE);
                 tbl.setState(OlapTableState.NORMAL);
-                if (Config.isCloudMode()) {
-                    List<Long> shadowIdxList = new ArrayList<Long>();
-                    for (Long shadowIdx : indexIdMap.keySet()) {
-                        shadowIdxList.add(shadowIdx);
-                    }
-                    try {
-                        Env.getCurrentInternalCatalog().commitCloudMaterializedIndex(tbl, shadowIdxList);
-                    } catch (Exception e) {
-                        LOG.warn("commitCloudMaterializedIndex Exception:{}", e);
-                        throw new AlterCancelException(e.getMessage());
-                    }
-                }
+                pruneMeta();
+                this.jobState = JobState.FINISHED;
+                this.finishedTimeMs = System.currentTimeMillis();
+                Env.getCurrentEnv().getEditLog().logAlterJob(this);
+                LOG.info("schema change job finished: {}", jobId);
+                return;
             } finally {
                 tbl.writeUnlock();
             }
-            pruneMeta();
-            this.jobState = JobState.FINISHED;
-            this.finishedTimeMs = System.currentTimeMillis();
-            Env.getCurrentEnv().getEditLog().logAlterJob(this);
-            LOG.info("schema change job finished: {}", jobId);
-            List<Long> originIdxList = null;
-            try {
-                if (Config.isCloudMode()) {
-                    originIdxList = new ArrayList<Long>();
-                    for (Long originIdx : indexIdMap.values()) {
-                        originIdxList.add(originIdx);
-                    }
-                    Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tbl, originIdxList);
-                }
-            } catch (Exception e) {
-                //Do not throw exception. we think schema change successfully here.
-                LOG.warn("dropCloudMaterializedIndex exception : {}, tableId:{}, originIdxList:{}",
-                        e, tbl.getId(), originIdxList);
-            }
-            return;
         }
 
         try {
@@ -814,57 +847,22 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                 }
             } // end for partitions
             // all partitions are good
-            onFinished(tbl);
 
-            if (Config.isCloudMode()) {
-                List<Long> shadowIdxList = new ArrayList<Long>();
-                for (Long shadowIdx : indexIdMap.keySet()) {
-                    shadowIdxList.add(shadowIdx);
-                }
-                try {
-                    Env.getCurrentInternalCatalog().commitCloudMaterializedIndex(tbl, shadowIdxList);
-                } catch (Exception e) {
-                    LOG.warn("commitCloudMaterializedIndex Exception:{}", e);
-                    throw new AlterCancelException(e.getMessage());
-                }
-            }
+            // for cloud schema change
+            commitCloudShadowIndex();
+            onFinished(tbl);
         } finally {
             tbl.writeUnlock();
         }
+
         pruneMeta();
         this.jobState = JobState.FINISHED;
         this.finishedTimeMs = System.currentTimeMillis();
 
         Env.getCurrentEnv().getEditLog().logAlterJob(this);
         LOG.info("schema change job finished: {}", jobId);
-
-        if (Config.isCloudMode()) {
-            List<Long> originIdxList = new ArrayList<Long>();
-            for (Long originIdx : indexIdMap.values()) {
-                originIdxList.add(originIdx);
-            }
-
-            int tryCnt = 0;
-            while (true) {
-                try {
-                    Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tbl, originIdxList);
-                    tryCnt++;
-                } catch (Exception e) {
-                    //Do not throw exception. we think schema change successfully here.
-                    LOG.warn("dropCloudMaterializedIndex exception : {}, tableId:{}, originIdxList:{}, cnt:{}",
-                            e, tbl.getId(), originIdxList, tryCnt);
-                    try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException ie) {
-                        LOG.warn("Thread sleep is interrupted");
-                    }
-                    continue;
-                }
-                break;
-            }
-            LOG.info("dropCloudMaterializedIndex finished, tableId:{}, originIdxList:{}, jobId: {}",
-                    tbl.getId(), originIdxList, jobId);
-        }
+        // try best to drop origin index
+        dropCloudOriginIndex();
     }
 
     private void onFinished(OlapTable tbl) {
@@ -964,12 +962,14 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         }
 
         cancelInternal();
-
         pruneMeta();
         this.errMsg = errMsg;
         this.finishedTimeMs = System.currentTimeMillis();
         LOG.info("cancel {} job {}, err: {}", this.type, jobId, errMsg);
         Env.getCurrentEnv().getEditLog().logAlterJob(this);
+
+        // try best to drop shadow index, when job is cancelled
+        dropCloudShadowIndex();
         return true;
     }
 
@@ -1096,37 +1096,12 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                 } finally {
                     tbl.writeUnlock();
                 }
-
-            }
-
-            if (Config.isCloudMode()) {
-                List<Long> originIdxList = new ArrayList<Long>();
-                for (Long originIdx : indexIdMap.values()) {
-                    originIdxList.add(originIdx);
-                }
-
-                int tryCnt = 0;
-                while (true) {
-                    try {
-                        Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tbl, originIdxList);
-                        tryCnt++;
-                    } catch (Exception e) {
-                        //Do not throw exception. we think schema change successfully here.
-                        LOG.warn("dropCloudMaterializedIndex exception : {}, tableId:{}, originIdxList:{}, cnt:{}",
-                                e, tbl.getId(), originIdxList, tryCnt);
-                        try {
-                            Thread.sleep(3000);
-                        } catch (InterruptedException ie) {
-                            LOG.warn("Thread sleep is interrupted");
-                        }
-                        continue;
-                    }
-                    break;
-                }
-                LOG.info("dropCloudMaterializedIndex finished, tableId: {}, originIdxList:{}, jobId:{}",
-                        tbl.getId(), originIdxList, jobId);
             }
         }
+        // try best to drop shadow index
+        dropCloudOriginIndex();
+
+        pruneMeta();
         jobState = JobState.FINISHED;
         this.finishedTimeMs = replayedJob.finishedTimeMs;
         LOG.info("replay finished schema change job: {}", jobId);
@@ -1137,6 +1112,8 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
      */
     private void replayCancelled(SchemaChangeJobV2 replayedJob) {
         cancelInternal();
+        // try best to drop shadow index
+        dropCloudShadowIndex();
         this.jobState = JobState.CANCELLED;
         this.finishedTimeMs = replayedJob.finishedTimeMs;
         this.errMsg = replayedJob.errMsg;

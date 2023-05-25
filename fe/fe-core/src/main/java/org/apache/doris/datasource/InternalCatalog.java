@@ -2283,7 +2283,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
                             idGeneratorBuffer, olapTable.disableAutoCompaction(), isPersistent, isDynamicSchema);
                 } else {
-                    prepareCloudMaterializedIndex(olapTable, olapTable.getIndexIdList(), 0);
+                    prepareCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList(), 0);
                     partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(),
                         olapTable.getId(), olapTable.getBaseIndexId(), partitionId, partitionName,
                         olapTable.getIndexIdToMeta(), partitionDistributionInfo,
@@ -2292,7 +2292,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
                         isPersistent, isDynamicSchema, olapTable.getName(), olapTable.getTTLSeconds());
-                    commitCloudMaterializedIndex(olapTable, olapTable.getIndexIdList());
+                    commitCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList());
                 }
                 olapTable.addPartition(partition);
             } else if (partitionInfo.getType() == PartitionType.RANGE
@@ -2336,7 +2336,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 }
 
                 if (Config.isCloudMode()) {
-                    prepareCloudMaterializedIndex(olapTable, olapTable.getIndexIdList(), 0);
+                    prepareCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList(), 0);
                 }
 
                 // this is a 2-level partitioned tables
@@ -2377,7 +2377,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 }
 
                 if (Config.isCloudMode()) {
-                    commitCloudMaterializedIndex(olapTable, olapTable.getIndexIdList());
+                    commitCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList());
                 }
             } else {
                 throw new DdlException("Unsupported partition method: " + partitionInfo.getType().name());
@@ -3994,48 +3994,75 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
+    private void sleepSeveralMs() {
+        // sleep random millis [20, 200] ms, avoid txn conflict
+        int randomMillis = 20 + (int) (Math.random() * (200 - 20));
+        LOG.debug("randomMillis:{}", randomMillis);
+        try {
+            Thread.sleep(randomMillis);
+        } catch (InterruptedException e) {
+            LOG.info("ignore InterruptedException: ", e);
+        }
+    }
+
     // if `expiration` = 0, recycler will delete uncommitted indexes in `retention_seconds`
-    public void prepareCloudMaterializedIndex(OlapTable olapTable, List<Long> indexIds, long expiration)
-            throws DdlException {
-        //prepare for index
-        SelectdbCloud.IndexRequest.Builder indexRequestBuilder = SelectdbCloud.IndexRequest.newBuilder();
+    public void prepareCloudMaterializedIndex(Long tableId, List<Long> indexIds,
+            long expiration) throws DdlException {
+        SelectdbCloud.IndexRequest.Builder indexRequestBuilder =
+                SelectdbCloud.IndexRequest.newBuilder();
         indexRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         indexRequestBuilder.addAllIndexIds(indexIds);
-        indexRequestBuilder.setTableId(olapTable.getId());
+        indexRequestBuilder.setTableId(tableId);
         indexRequestBuilder.setExpiration(expiration);
-        SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
-        LOG.info("prepareIndex request: {} ", indexRequest);
+        final SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
 
         SelectdbCloud.IndexResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().prepareIndex(indexRequest);
-        } catch (RpcException e) {
-            LOG.warn("failed to prepareIndex response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().prepareIndex(indexRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, prepareIndex RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
 
-        LOG.info("prepareIndex response: {} ", response);
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
             LOG.warn("prepareIndex response: {} ", response);
             throw new DdlException(response.getStatus().getMsg());
         }
     }
 
-    public void commitCloudMaterializedIndex(OlapTable olapTable, List<Long> indexIds) throws DdlException {
-        //commit for index
-        SelectdbCloud.IndexRequest.Builder indexRequestBuilder = SelectdbCloud.IndexRequest.newBuilder();
+    public void commitCloudMaterializedIndex(Long tableId, List<Long> indexIds)
+            throws DdlException {
+        SelectdbCloud.IndexRequest.Builder indexRequestBuilder =
+                SelectdbCloud.IndexRequest.newBuilder();
         indexRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         indexRequestBuilder.addAllIndexIds(indexIds);
-        indexRequestBuilder.setTableId(olapTable.getId());
-        SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
-        LOG.info("commitIndex request: {} ", indexRequest);
+        indexRequestBuilder.setTableId(tableId);
+        final SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
 
         SelectdbCloud.IndexResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().commitIndex(indexRequest);
-        } catch (RpcException e) {
-            LOG.warn("failed to commitIndex response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().commitIndex(indexRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, commitIndex RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4044,21 +4071,31 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void dropCloudMaterializedIndex(OlapTable olapTable, List<Long> indexIds) throws DdlException {
-        //drop for index
-        SelectdbCloud.IndexRequest.Builder indexRequestBuilder = SelectdbCloud.IndexRequest.newBuilder();
+    // if not set expiration recycler will delete uncommitted indexes in `retention_seconds`
+    public void dropCloudMaterializedIndex(Long tableId, List<Long> indexIds)
+            throws DdlException {
+        SelectdbCloud.IndexRequest.Builder indexRequestBuilder =
+                SelectdbCloud.IndexRequest.newBuilder();
         indexRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         indexRequestBuilder.addAllIndexIds(indexIds);
-        indexRequestBuilder.setTableId(olapTable.getId());
-        SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
-        LOG.info("dropIndex request: {} ", indexRequest);
+        indexRequestBuilder.setTableId(tableId);
+        final SelectdbCloud.IndexRequest indexRequest = indexRequestBuilder.build();
 
         SelectdbCloud.IndexResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().dropIndex(indexRequest);
-        } catch (RpcException e) {
-            LOG.warn("dropIndex response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().dropIndex(indexRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, dropIndex RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4068,25 +4105,33 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     // if `expiration` = 0, recycler will delete uncommitted partitions in `retention_seconds`
-    public void prepareCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds, long expiration)
-            throws DdlException {
-        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder = SelectdbCloud.PartitionRequest.newBuilder();
+    public void prepareCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds,
+            long expiration) throws DdlException {
+        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
+                SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         partitionRequestBuilder.setTableId(tableId);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
         partitionRequestBuilder.setExpiration(expiration);
-        SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
-        LOG.info("preparePartition request: {} ", partitionRequest);
+        final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().preparePartition(partitionRequest);
-        } catch (RpcException e) {
-            LOG.warn("preparePartition response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().preparePartition(partitionRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, preparePartition RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
-        LOG.info("preparePartition response: {} ", response);
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
             LOG.warn("preparePartition response: {} ", response);
@@ -4095,21 +4140,29 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     public void commitCloudPartition(long tableId, List<Long> partitionIds) throws DdlException {
-        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder = SelectdbCloud.PartitionRequest.newBuilder();
+        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
+                SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.setTableId(tableId);
-        SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
-        LOG.info("commitPartition request: {} ", partitionRequest);
+        final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().commitPartition(partitionRequest);
-        } catch (RpcException e) {
-            LOG.warn("commitPartition response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().commitPartition(partitionRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, commitPartition RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
-        LOG.info("commitPartition response: {} ", response);
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
             LOG.warn("commitPartition response: {} ", response);
@@ -4119,22 +4172,30 @@ public class InternalCatalog implements CatalogIf<Database> {
 
     public void dropCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds)
             throws DdlException {
-        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder = SelectdbCloud.PartitionRequest.newBuilder();
+        SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
+                SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         partitionRequestBuilder.setTableId(tableId);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
-        SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
-        LOG.info("dropPartition request: {} ", partitionRequest);
+        final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
-        try {
-            response = MetaServiceProxy.getInstance().dropPartition(partitionRequest);
-        } catch (RpcException e) {
-            LOG.warn("dropPartition response: {} ", response);
-            throw new DdlException(e.getMessage());
+        int tryTimes = 0;
+        while (tryTimes++ < Config.meta_service_rpc_retry_times) {
+            try {
+                response = MetaServiceProxy.getInstance().dropPartition(partitionRequest);
+                if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+            } catch (RpcException e) {
+                LOG.warn("tryTimes:{}, dropPartition RpcException", tryTimes, e);
+                if (tryTimes + 1 >= Config.meta_service_rpc_retry_times) {
+                    throw new DdlException(e.getMessage());
+                }
+            }
+            sleepSeveralMs();
         }
-        LOG.info("dropPartition response: {} ", response);
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
             LOG.warn("dropPartition response: {} ", response);

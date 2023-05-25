@@ -5835,7 +5835,7 @@ public class Env {
                 if (indexs.isEmpty()) {
                     break;
                 }
-                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(olapTable, indexs);
+                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(olapTable.getId(), indexs);
                 tryCnt++;
             } catch (Exception e) {
                 LOG.warn("failed to drop index {} of table {}, try cnt {}, execption {}",

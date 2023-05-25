@@ -317,7 +317,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
             try {
                 List<Long> rollupIndexList = new ArrayList<Long>();
                 rollupIndexList.add(rollupIndexId);
-                Env.getCurrentInternalCatalog().prepareCloudMaterializedIndex(tbl, rollupIndexList, expiration);
+                Env.getCurrentInternalCatalog().prepareCloudMaterializedIndex(tbl.getId(), rollupIndexList, expiration);
 
                 for (Map.Entry<Long, MaterializedIndex> entry : this.partitionIdToRollupIndex.entrySet()) {
                     long partitionId = entry.getKey();
@@ -623,17 +623,8 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                 } // end for tablets
             } // end for partitions
 
+            commitCloudRollupIndex();
             onFinished(tbl);
-            if (Config.isCloudMode()) {
-                List<Long> rollupIndexList = new ArrayList<Long>();
-                rollupIndexList.add(rollupIndexId);
-                try {
-                    Env.getCurrentInternalCatalog().commitCloudMaterializedIndex(tbl, rollupIndexList);
-                } catch (Exception e) {
-                    LOG.warn("commitCloudMaterializedIndex Exception:{}", e);
-                    throw new AlterCancelException(e.getMessage());
-                }
-            }
         } finally {
             tbl.writeUnlock();
         }
@@ -688,6 +679,9 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         this.finishedTimeMs = System.currentTimeMillis();
         LOG.info("cancel {} job {}, err: {}", this.type, jobId, errMsg);
         Env.getCurrentEnv().getEditLog().logAlterJob(this);
+
+        // try best to drop roll index, when job is cancelled
+        dropCloudRollupIndex();
         return true;
     }
 
@@ -816,6 +810,8 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
      */
     private void replayCancelled(RollupJobV2 replayedJob) {
         cancelInternal();
+        // try best to drop roll index, when job is cancelled
+        dropCloudRollupIndex();
         this.jobState = JobState.CANCELLED;
         this.finishedTimeMs = replayedJob.finishedTimeMs;
         this.errMsg = replayedJob.errMsg;
@@ -952,5 +948,46 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
             throw new IOException("error happens when parsing create materialized view stmt: " + stmt, e);
         }
         setColumnsDefineExpr(stmt.getMVColumnItemList());
+    }
+
+    private void commitCloudRollupIndex() throws AlterCancelException {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        List<Long> rollupIndexList = new ArrayList<Long>();
+        rollupIndexList.add(rollupIndexId);
+        try {
+            Env.getCurrentInternalCatalog().commitCloudMaterializedIndex(tableId, rollupIndexList);
+        } catch (Exception e) {
+            LOG.warn("commitCloudMaterializedIndex Exception:{}", e);
+            throw new AlterCancelException(e.getMessage());
+        }
+
+        LOG.info("commitCloudRollupIndex finished, dbId:{}, tableId:{}, jobId:{}, rollupIndexList:{}",
+                dbId, tableId, jobId, rollupIndexList);
+    }
+
+    private void dropCloudRollupIndex() {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        List<Long> rollupIndexList = new ArrayList<Long>();
+        rollupIndexList.add(rollupIndexId);
+        long tryTimes = 1;
+        while (true) {
+            try {
+                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tableId, rollupIndexList);
+                break;
+            } catch (Exception e) {
+                LOG.warn("tryTimes:{}, dropCloudRollupIndex exception:", tryTimes, e);
+            }
+            sleepSeveralSeconds();
+            tryTimes++;
+        }
+
+        LOG.info("dropCloudRollupIndex finished, dbId:{}, tableId:{}, jobId:{}, rollupIndexList:{}",
+                dbId, tableId, jobId, rollupIndexList);
     }
 }
