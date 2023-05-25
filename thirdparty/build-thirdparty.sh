@@ -1681,8 +1681,8 @@ build_poco() {
     rm -rf "${BUILD_DIR}"
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
-    ../configure --prefix="${TP_INSTALL_DIR}" --omit=Data/ODBC,Data/MySQL
-    cmake .. -DPOCO_STATIC=ON -DCMAKE_BUILD_TYPE=Release
+    ../configure --prefix="${TP_INSTALL_DIR}"
+    cmake .. -DPOCO_STATIC=ON -DCMAKE_BUILD_TYPE=Release -DENABLE_DATA_MYSQL=OFF -DENABLE_DATA_ODBC=OFF
     make -j "${PARALLEL}"
     mkdir -p "${TP_INSTALL_DIR}/lib64/poco"
     cp -r ./lib/* "${TP_INSTALL_DIR}/lib64/poco/"
