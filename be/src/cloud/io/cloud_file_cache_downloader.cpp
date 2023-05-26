@@ -305,8 +305,10 @@ void FileCacheSegmentS3Downloader::download_segments(DownloadTask& task) {
     switch (task.task_message.index()) {
     case 0:
         download_file_cache_segment(std::get<0>(task.task_message));
+        break;
     case 1:
         download_s3_file(std::get<1>(task.task_message));
+        break;
     }
 }
 
