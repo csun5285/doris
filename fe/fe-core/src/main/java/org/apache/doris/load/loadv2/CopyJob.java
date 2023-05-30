@@ -34,7 +34,6 @@ import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.BrokerFileGroupAggInfo.FileGroupAggKey;
 import org.apache.doris.load.EtlJobType;
 import org.apache.doris.load.FailMsg;
-import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TUniqueId;
@@ -103,7 +102,7 @@ public class CopyJob extends BrokerLoadJob {
         this.pattern = pattern;
         this.objectInfo = objectInfo;
         this.forceCopy = forceCopy;
-        this.copyId = DebugUtil.printId(ConnectContext.get().queryId());
+        this.copyId = DebugUtil.printId(queryId);
         this.properties.put(USER_NAME_KEY, user);
     }
 

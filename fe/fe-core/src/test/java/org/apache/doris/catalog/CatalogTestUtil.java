@@ -23,6 +23,7 @@ import org.apache.doris.analysis.SinglePartitionDesc;
 import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
 import org.apache.doris.catalog.MaterializedIndex.IndexState;
 import org.apache.doris.catalog.Replica.ReplicaState;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.persist.EditLog;
@@ -34,6 +35,8 @@ import org.apache.doris.thrift.TStorageType;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.selectdb.cloud.catalog.CloudPartition;
+import com.selectdb.cloud.catalog.CloudReplica;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
@@ -120,8 +123,14 @@ public class CatalogTestUtil {
         Env.getCurrentSystemInfo().addBackend(backend3);
         env.initDefaultCluster();
 
-        Database db = createSimpleDb(testDbId1, testTableId1, testPartitionId1, testIndexId1, testTabletId1,
-                testStartVersion);
+        Database db = null;
+        if (!Config.isCloudMode()) {
+            db = createSimpleDb(testDbId1, testTableId1, testPartitionId1, testIndexId1, testTabletId1,
+                    testStartVersion);
+        } else {
+            db = createCloudSimpleDb(testDbId1, testTableId1, testPartitionId1, testIndexId1, testTabletId1,
+                    testStartVersion);
+        }
         env.unprotectCreateDb(db);
         return env;
     }
@@ -332,5 +341,72 @@ public class CatalogTestUtil {
         // backend.updateOnce(bePort, httpPort, 10000);
         backend.setAlive(true);
         return backend;
+    }
+
+    public static Database createCloudSimpleDb(long dbId, long tableId, long partitionId, long indexId, long tabletId,
+            long version) {
+        Env.getCurrentInvertedIndex().clear();
+
+        // replica
+        Replica replica1 = new CloudReplica(testReplicaId1, Lists.newArrayList(testBackendId1), ReplicaState.NORMAL,
+                version, 0, 0L, 0L, 0L, -1, 0);
+
+        // tablet
+        Tablet tablet = new Tablet(tabletId);
+
+        // index
+        MaterializedIndex index = new MaterializedIndex(indexId, IndexState.NORMAL);
+        TabletMeta tabletMeta = new TabletMeta(dbId, tableId, partitionId, indexId, 0, TStorageMedium.HDD);
+        index.addTablet(tablet, tabletMeta);
+
+        tablet.addReplica(replica1);
+
+        // columns
+        List<Column> columns = new ArrayList<Column>();
+        Column temp = new Column("k1", PrimitiveType.INT);
+        temp.setIsKey(true);
+        columns.add(temp);
+        temp = new Column("k2", PrimitiveType.INT);
+        temp.setIsKey(true);
+        columns.add(temp);
+        columns.add(new Column("v", ScalarType.createType(PrimitiveType.DOUBLE), false, AggregateType.SUM, "0", ""));
+
+        List<Column> keysColumn = new ArrayList<Column>();
+        temp = new Column("k1", PrimitiveType.INT);
+        temp.setIsKey(true);
+        keysColumn.add(temp);
+        temp = new Column("k2", PrimitiveType.INT);
+        temp.setIsKey(true);
+        keysColumn.add(temp);
+
+        HashDistributionInfo distributionInfo = new HashDistributionInfo(10, keysColumn);
+        Partition partition = new CloudPartition(partitionId, testPartition1, index, distributionInfo, dbId, tableId);
+        partition.updateVisibleVersion(testStartVersion);
+        partition.setNextVersion(testStartVersion + 1);
+
+        // table
+        PartitionInfo partitionInfo = new SinglePartitionInfo();
+        partitionInfo.setDataProperty(partitionId, new DataProperty(DataProperty.DEFAULT_STORAGE_MEDIUM));
+        partitionInfo.setReplicaAllocation(partitionId, new ReplicaAllocation((short) 1));
+        OlapTable table = new OlapTable(tableId, testTable1, columns, KeysType.AGG_KEYS, partitionInfo,
+                distributionInfo);
+        table.addPartition(partition);
+        table.setIndexMeta(indexId, testIndex1, columns, 0, testSchemaHash1, (short) 1,
+                TStorageType.COLUMN, KeysType.AGG_KEYS);
+        table.setBaseIndexId(indexId);
+        // db
+        Database db = new Database(dbId, testDb1);
+        db.createTable(table);
+        db.setClusterName(SystemInfoService.DEFAULT_CLUSTER);
+
+        // add a es table to catalog
+        try {
+            createEsTable(db);
+            createDupTable(db);
+        } catch (DdlException e) {
+            // TODO Auto-generated catch block
+            // e.printStackTrace();
+        }
+        return db;
     }
 }

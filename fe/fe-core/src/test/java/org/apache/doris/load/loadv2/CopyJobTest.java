@@ -17,18 +17,61 @@
 
 package org.apache.doris.load.loadv2;
 
+import org.apache.doris.analysis.BrokerDesc;
+import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.CatalogTestUtil;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.FakeEditLog;
+import org.apache.doris.catalog.FakeEnv;
 import org.apache.doris.common.Config;
+import org.apache.doris.common.FeMetaVersion;
+import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.Pair;
+import org.apache.doris.meta.MetaContext;
+import org.apache.doris.qe.OriginStatement;
+import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.Lists;
+import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB.Provider;
+import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
 import com.selectdb.cloud.stage.StageUtil;
+import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class CopyJobTest {
+    private static final Logger LOG = LogManager.getLogger(CopyJobTest.class);
+    private static final String fileName = "./CopyJobTest";
+
+    private static FakeEditLog fakeEditLog;
+    private static FakeEnv fakeEnv;
+    private static Env masterEnv;
+
+    @Before
+    public void setUp() throws InstantiationException, IllegalAccessException, IllegalArgumentException,
+            InvocationTargetException, NoSuchMethodException, SecurityException {
+        fakeEditLog = new FakeEditLog();
+        fakeEnv = new FakeEnv();
+        masterEnv = CatalogTestUtil.createTestCatalog();
+        fakeEnv.setMetaVersion(FeMetaVersion.VERSION_CURRENT);
+        MetaContext metaContext = new MetaContext();
+        metaContext.setMetaVersion(FeMetaVersion.VERSION_CURRENT);
+        metaContext.setThreadLocalInfo();
+    }
 
     @Test
     public void testParseLoadFiles() {
@@ -63,5 +106,42 @@ public class CopyJobTest {
             parseFiles.add(stagePrefix + "/load1/load" + i);
         }
         return Pair.of(loadFiles, parseFiles);
+    }
+
+    @Test
+    public void testSerialization() throws IOException, MetaNotFoundException {
+        File file = new File(fileName);
+        file.createNewFile();
+
+        long dbId = CatalogTestUtil.testDbId1;
+        String label = "copy_test";
+        String userName = "admin";
+        UUID uuid = UUID.randomUUID();
+        TUniqueId queryId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
+        BrokerDesc brokerDesc = new BrokerDesc("test_broker", null);
+        OriginStatement originStmt = new OriginStatement("test_sql", 0);
+        UserIdentity userIdent = UserIdentity.ROOT;
+        String stageId = "test_stage";
+        String stagePrefix = "test_prefix";
+        String stagePattern = "test_pattern";
+        ObjectInfo objectInfo = new ObjectInfo(Provider.OSS, "test_ak", "test_sk", "test_bucket", "test_endpoint", "test_region",
+                            "test_prefix");
+
+        LoadJob copyJob1 = new CopyJob(dbId, label, queryId,
+                        brokerDesc, originStmt, userIdent, stageId,
+                        StageType.INTERNAL, stagePrefix, 112131231, stagePattern,
+                        objectInfo, true, userName);
+
+        DataOutputStream out = new DataOutputStream(new FileOutputStream(file));
+        copyJob1.write(out);
+        out.flush();
+        out.close();
+
+        DataInputStream in = new DataInputStream(new FileInputStream(file));
+        LoadJob copyJob2 = LoadJob.read(in);
+        Assert.assertEquals(copyJob1.getDbId(), copyJob2.getDbId());
+        in.close();
+        file.delete();
+        Assert.assertEquals(copyJob1.getDbId(), copyJob2.getDbId());
     }
 }
