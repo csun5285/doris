@@ -26,6 +26,7 @@
 #include "common/compiler_util.h"
 #include "common/config.h"
 #include "common/status.h"
+#include "io/s3_reader.h"
 #include "olap/olap_define.h"
 #include "runtime/exec_env.h"
 #include "util/bit_util.h"
@@ -84,6 +85,19 @@ void PrefetchBuffer::prefetch_buffer() {
         {
             SCOPED_TIMER(_remote_read_timer);
             s = _reader->readat(_offset, nbytes, &_len, _buf.data());
+        }
+        if (UNLIKELY(_len != nbytes)) {
+            // This indicates that the data size returned by S3 object storage is smaller than what we requested,
+            // which seems to be a violation of the S3 protocol since our request range was valid.
+            // We currently consider this situation a bug and will treat this task as a failure.
+            _prefetch_status =
+                    Status::InternalError("Data size returned by S3 is not equal to requested");
+            auto s3_reader = dynamic_cast<S3Reader*>(_reader);
+            // actucally only S3 reader will use buffered reader
+            if (s3_reader != nullptr) {
+                LOG(WARNING) << _prefetch_status << " uri " << s3_reader->uri().to_string()
+                             << " request bytes " << nbytes << " returned size " << _len;
+            }
         }
         g_bytes_downloaded << _len;
         COUNTER_UPDATE(_remote_read_counter, 1);

@@ -56,6 +56,7 @@ public:
     virtual Status tell(int64_t* position) override;
     virtual void close() override;
     virtual bool closed() override;
+    const S3URI uri() { return _uri; }
 
 private:
     const std::map<std::string, std::string>& _properties;
