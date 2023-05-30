@@ -1249,7 +1249,12 @@ void PInternalServiceImpl::get_file_cache_meta_by_tablet_id(
     std::for_each(
             request->tablet_ids().cbegin(), request->tablet_ids().cend(), [&](int64_t tablet_id) {
                 TabletSharedPtr tablet;
-                cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+                Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+                if (!st.ok()) {
+                    LOG(ERROR) << "failed to get tablet: " << tablet_id
+                               << " err msg: " << st.to_string();
+                    return;
+                }
                 auto rowsets = tablet->get_snapshot_rowset();
                 std::for_each(rowsets.cbegin(), rowsets.cend(), [&](RowsetSharedPtr rowset) {
                     std::string rowset_id = rowset->rowset_id().to_string();
