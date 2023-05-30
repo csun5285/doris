@@ -978,6 +978,8 @@ CONF_String(meta_service_endpoint, "");
 CONF_Bool(meta_service_use_load_balancer, "false");
 CONF_mInt32(meta_service_rpc_timeout_ms, "10000");
 CONF_Bool(meta_service_use_short_connection, "false");
+// whether to randomly use short connectino if `meta_service_use_short_connection` is true.
+CONF_mBool(fuzzy_meta_service_use_short_connection, "false");
 CONF_Int64(tablet_cache_capacity, "10000");
 CONF_Int64(tablet_cache_shards, "16");
 CONF_mInt32(refresh_s3_info_interval_seconds, "60");

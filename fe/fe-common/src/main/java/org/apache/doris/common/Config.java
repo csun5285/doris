@@ -2062,6 +2062,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static boolean meta_service_use_short_connection = false;
 
+    @ConfField(mutable = true)
+    public static boolean fuzzy_meta_service_use_short_connection = false;
+
     // 0 means no limit
     @ConfField(mutable = true)
     public static int cloud_max_copy_job_per_table = 10000;
