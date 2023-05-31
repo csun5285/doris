@@ -45,6 +45,40 @@
 namespace doris {
 namespace stream_load {
 
+class OpenPartitionClosure : public google::protobuf::Closure {
+public:
+    OpenPartitionClosure(NodeChannel* node_channel, IndexChannel* index_channel,
+                         int64_t partition_id)
+            : node_channel(node_channel),
+              index_channel(index_channel),
+              partition_id(partition_id) {};
+
+    ~OpenPartitionClosure() = default;
+
+    void Run() override {
+        SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
+        if (cntl.Failed()) {
+            std::stringstream ss;
+            ss << "failed to open partition, error=" << berror(this->cntl.ErrorCode())
+               << ", error_text=" << this->cntl.ErrorText();
+            LOG(WARNING) << ss.str() << " " << node_channel->channel_info();
+            node_channel->cancel("Open partition error");
+            index_channel->mark_as_failed(node_channel->node_id(), node_channel->host(),
+                                          fmt::format("{}, open failed, err: {}",
+                                                      node_channel->channel_info(), ss.str()),
+                                          -1);
+        }
+    }
+
+    void join() { brpc::Join(cntl.call_id()); }
+
+    brpc::Controller cntl;
+    OpenPartitionResult result;
+    NodeChannel* node_channel;
+    IndexChannel* index_channel;
+    int64_t partition_id;
+};
+
 NodeChannel::NodeChannel(OlapTableSink* parent, IndexChannel* index_channel, int64_t node_id)
         : _parent(parent), _index_channel(index_channel), _node_id(node_id) {
     _node_channel_tracker = std::make_shared<MemTracker>(fmt::format(
@@ -152,6 +186,34 @@ void NodeChannel::open() {
                               _open_closure);
     request.release_id();
     request.release_schema();
+}
+
+void NodeChannel::open_partition(int64_t partition_id) {
+    _timeout_watch.reset();
+    SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
+    OpenPartitionRequest request;
+    *request.mutable_id() = _parent->_load_id;
+    request.set_index_id(_index_channel->_index_id);
+    for (auto& tablet : _all_tablets) {
+        if (partition_id == tablet.partition_id) {
+            auto ptablet = request.add_tablets();
+            ptablet->set_partition_id(tablet.partition_id);
+            ptablet->set_tablet_id(tablet.tablet_id);
+        }
+    }
+
+    auto open_partition_closure =
+            std::make_unique<OpenPartitionClosure>(this, _index_channel, partition_id);
+
+    int remain_ms = _rpc_timeout_ms - _timeout_watch.elapsed_time();
+    if (UNLIKELY(remain_ms < config::min_load_rpc_timeout_ms)) {
+        remain_ms = config::min_load_rpc_timeout_ms;
+    }
+    open_partition_closure->cntl.set_timeout_ms(remain_ms);
+    open_partition_closure->cntl.set_timeout_ms(remain_ms);
+    _stub->open_partition(&open_partition_closure.get()->cntl, &request,
+                          &open_partition_closure.get()->result, open_partition_closure.get());
+    _open_partition_closures.insert(std::move(open_partition_closure));
 }
 
 void NodeChannel::_cancel_with_msg(const std::string& msg) {
@@ -429,52 +491,6 @@ void NodeChannel::_close_check() {
     std::lock_guard<std::mutex> lg(_pending_batches_lock);
     CHECK(_pending_batches.empty()) << name();
     CHECK(_cur_batch == nullptr) << name();
-}
-Status NodeChannel::close_wait(RuntimeState* state) {
-    SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
-    // set _is_closed to true finally
-    Defer set_closed {[&]() {
-        std::lock_guard<std::mutex> l(_closed_lock);
-        _is_closed = true;
-    }};
-
-    auto st = none_of({_cancelled, !_eos_is_produced});
-    if (!st.ok()) {
-        if (_cancelled) {
-            std::lock_guard<SpinLock> l(_cancel_msg_lock);
-            return Status::InternalError("wait close failed. {}", _cancel_msg);
-        } else {
-            return std::move(
-                    st.prepend("already stopped, skip waiting for close. cancelled/!eos: "));
-        }
-    }
-
-    // waiting for finished, it may take a long time, so we couldn't set a timeout
-    while (!_add_batches_finished && !_cancelled && !state->is_cancelled()) {
-        bthread_usleep(1000);
-    }
-    _close_time_ms = UnixMillis() - _close_time_ms;
-
-    if (_add_batches_finished) {
-        _close_check();
-        state->tablet_commit_infos().insert(state->tablet_commit_infos().end(),
-                                            std::make_move_iterator(_tablet_commit_infos.begin()),
-                                            std::make_move_iterator(_tablet_commit_infos.end()));
-
-        _index_channel->set_error_tablet_in_state(state);
-        _index_channel->set_tablets_received_rows(_tablets_received_rows, _node_id);
-        return Status::OK();
-    }
-
-    std::stringstream ss;
-    ss << "close wait failed coz rpc error";
-    {
-        std::lock_guard<SpinLock> l(_cancel_msg_lock);
-        if (_cancel_msg != "") {
-            ss << ". " << _cancel_msg;
-        }
-    }
-    return Status::InternalError(ss.str());
 }
 
 void NodeChannel::cancel(const std::string& cancel_msg) {
@@ -1024,10 +1040,13 @@ Status OlapTableSink::open(RuntimeState* state) {
         RETURN_IF_ERROR(Expr::open(_output_expr_ctxs, state));
     }
 
+    fmt::memory_buffer buf;
     for (auto index_channel : _channels) {
+        fmt::format_to(buf, "index id:{}", index_channel->index_id());
         index_channel->for_each_node_channel(
                 [](const std::shared_ptr<NodeChannel>& ch) { ch->open(); });
     }
+    VLOG_DEBUG << "list of open index id = " << fmt::to_string(buf);
 
     for (auto index_channel : _channels) {
         index_channel->for_each_node_channel([&index_channel](
@@ -1277,6 +1296,56 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
     _close_status = status;
     DataSink::close(state, close_status);
     return status;
+}
+
+Status NodeChannel::close_wait(RuntimeState* state) {
+    SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
+    for (auto& open_partition_closure : _open_partition_closures) {
+        open_partition_closure->join();
+    }
+    // set _is_closed to true finally
+    Defer set_closed {[&]() {
+        std::lock_guard<std::mutex> l(_closed_lock);
+        _is_closed = true;
+    }};
+
+    auto st = none_of({_cancelled, !_eos_is_produced});
+    if (!st.ok()) {
+        if (_cancelled) {
+            std::lock_guard<SpinLock> l(_cancel_msg_lock);
+            return Status::InternalError("wait close failed. {}", _cancel_msg);
+        } else {
+            return std::move(
+                    st.prepend("already stopped, skip waiting for close. cancelled/!eos: "));
+        }
+    }
+
+    // waiting for finished, it may take a long time, so we couldn't set a timeout
+    while (!_add_batches_finished && !_cancelled && !state->is_cancelled()) {
+        bthread_usleep(1000);
+    }
+    _close_time_ms = UnixMillis() - _close_time_ms;
+
+    if (_add_batches_finished) {
+        _close_check();
+        state->tablet_commit_infos().insert(state->tablet_commit_infos().end(),
+                                            std::make_move_iterator(_tablet_commit_infos.begin()),
+                                            std::make_move_iterator(_tablet_commit_infos.end()));
+
+        _index_channel->set_error_tablet_in_state(state);
+        _index_channel->set_tablets_received_rows(_tablets_received_rows, _node_id);
+        return Status::OK();
+    }
+
+    std::stringstream ss;
+    ss << "close wait failed coz rpc error";
+    {
+        std::lock_guard<SpinLock> l(_cancel_msg_lock);
+        if (_cancel_msg != "") {
+            ss << ". " << _cancel_msg;
+        }
+    }
+    return Status::InternalError(ss.str());
 }
 
 Status OlapTableSink::_convert_batch(RuntimeState* state, RowBatch* input_batch,

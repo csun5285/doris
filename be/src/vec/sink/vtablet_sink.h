@@ -114,6 +114,8 @@ private:
     // so here need to do the convert operation
     void _convert_to_dest_desc_block(vectorized::Block* block);
 
+    void _open_partition(const VOlapTablePartition* partition);
+
     Status find_tablet(RuntimeState* state, vectorized::Block* block, int row_index,
                        const VOlapTablePartition** partition, uint32_t& tablet_index,
                        bool& stop_processing, bool& is_continue);
@@ -127,6 +129,8 @@ private:
 
     VOlapTablePartitionParam* _vpartition = nullptr;
     std::vector<vectorized::VExprContext*> _output_vexpr_ctxs;
+
+    std::unordered_set<int64_t> _opened_partitions;
 };
 
 } // namespace stream_load

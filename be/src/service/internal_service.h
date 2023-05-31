@@ -78,6 +78,11 @@ public:
                             PTabletWriterOpenResult* response,
                             google::protobuf::Closure* done) override;
 
+    void open_partition(google::protobuf::RpcController* controller,
+                            const OpenPartitionRequest* request,
+                            OpenPartitionResult* response,
+                            google::protobuf::Closure* done) override;
+
     void tablet_writer_add_batch(google::protobuf::RpcController* controller,
                                  const PTabletWriterAddBatchRequest* request,
                                  PTabletWriterAddBatchResult* response,

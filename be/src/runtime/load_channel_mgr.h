@@ -53,6 +53,8 @@ public:
     // open a new load channel if not exist
     Status open(const PTabletWriterOpenRequest& request);
 
+    Status open_partition(const OpenPartitionRequest& params);
+
     template <typename TabletWriterAddRequest, typename TabletWriterAddResult>
     Status add_batch(const TabletWriterAddRequest& request, TabletWriterAddResult* response);
 

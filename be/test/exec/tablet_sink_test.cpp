@@ -325,6 +325,14 @@ public:
         status.to_protobuf(response->mutable_status());
     }
 
+    void open_partition(google::protobuf::RpcController* controller,
+                        const OpenPartitionRequest* request, OpenPartitionResult* response,
+                        google::protobuf::Closure* done) override {
+        brpc::ClosureGuard done_guard(done);
+        Status status;
+        status.to_protobuf(response->mutable_status());
+    }
+
     void tablet_writer_add_batch(google::protobuf::RpcController* controller,
                                  const PTabletWriterAddBatchRequest* request,
                                  PTabletWriterAddBatchResult* response,

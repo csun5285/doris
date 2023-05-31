@@ -1368,6 +1368,11 @@ The RPC timeout for sending a Batch (1024 lines) during import. The default is 6
 
 When meet '[E1011]The server is overcrowded' error, you can tune the configuration `brpc_socket_max_unwritten_bytes`, but it can't be modified at runtime. Set it to `true` to avoid writing failed temporarily. Notice that, it only effects `write`, other rpc requests will still check if overcrowded.
 
+#### `enable_lazy_open_partition`
+* Type: bool
+* Description: When importing, most partitions may not need to be written, and lazy opening can be used to only open the partitions that need to be written.When there is mixed deployment in the upgraded version, it needs to be set to false.
+* Default value: false
+
 ### `thrift_client_retry_interval_ms`
 
 * Type: int64

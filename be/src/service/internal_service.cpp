@@ -198,6 +198,21 @@ void PInternalServiceImpl::tablet_writer_open(google::protobuf::RpcController* c
     st.to_protobuf(response->mutable_status());
 }
 
+void PInternalServiceImpl::open_partition(google::protobuf::RpcController* controller,
+                                          const OpenPartitionRequest* request,
+                                          OpenPartitionResult* response,
+                                          google::protobuf::Closure* done) {
+    VLOG_RPC << "partition open"
+             << ", index_id=" << request->index_id();
+    brpc::ClosureGuard closure_guard(done);
+    auto st = _exec_env->load_channel_mgr()->open_partition(*request);
+    if (!st.ok()) {
+        LOG(WARNING) << "load channel open failed, message=" << st
+                     << ", index_ids=" << request->index_id();
+    }
+    st.to_protobuf(response->mutable_status());
+}
+
 void PInternalServiceImpl::exec_plan_fragment(google::protobuf::RpcController* cntl_base,
                                               const PExecPlanFragmentRequest* request,
                                               PExecPlanFragmentResult* response,

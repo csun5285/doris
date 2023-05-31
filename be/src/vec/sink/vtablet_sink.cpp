@@ -466,6 +466,25 @@ Status VOlapTableSink::open(RuntimeState* state) {
     return OlapTableSink::open(state);
 }
 
+void VOlapTableSink::_open_partition(const VOlapTablePartition* partition) {
+    const auto& id = partition->id;
+    auto it = _opened_partitions.find(id);
+    if (it == _opened_partitions.end()) {
+        _opened_partitions.insert(id);
+        fmt::memory_buffer buf;
+        for (int j = 0; j < partition->indexes.size(); ++j) {
+            fmt::format_to(buf, "index id:{}", partition->indexes[j].index_id);
+            for (const auto& tid : partition->indexes[j].tablets) {
+                auto it = _channels[j]->_channels_by_tablet.find(tid);
+                for (const auto& channel : it->second) {
+                    channel->open_partition(partition->id);
+                }
+            }
+        }
+        VLOG_DEBUG << "list of lazy open index id = " << fmt::to_string(buf);
+    }
+}
+
 size_t VOlapTableSink::get_pending_bytes() const {
     size_t mem_consumption = 0;
     for (auto& indexChannel : _channels) {
@@ -643,6 +662,11 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block)
                 int64_t tablet_id = partition->indexes[j].tablets[tablet_index];
                 _channels[j]->add_row(block_row, tablet_id);
                 _number_output_rows++;
+            }
+
+            // open partition
+            if (config::enable_lazy_open_partition) {
+                _open_partition(partition);
             }
         }
     }

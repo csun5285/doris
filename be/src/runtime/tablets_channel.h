@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -69,6 +70,9 @@ public:
 
     Status open(const PTabletWriterOpenRequest& request);
 
+    // Open specific partition all writers
+    Status open_all_writers_for_partition(const OpenPartitionRequest& request);
+
     // no-op when this channel has been closed or cancelled
     template <typename TabletWriterAddRequest, typename TabletWriterAddResult>
     Status add_batch(const TabletWriterAddRequest& request, TabletWriterAddResult* response);
@@ -98,6 +102,10 @@ private:
     // open all writer
     Status _open_all_writers(const PTabletWriterOpenRequest& request);
 
+    template <typename TabletWriterAddRequest>
+    Status _open_all_writers_for_partition(int64_t tablet_id,
+                                           const TabletWriterAddRequest& request);
+
     bool _try_to_wait_flushing();
 
 #ifndef CLOUD_MODE
@@ -108,6 +116,7 @@ private:
                      PSlaveTabletNodes slave_tablet_nodes, const bool write_single_replica);
 #endif
 
+    void _build_partition_tablets_relation(const PTabletWriterOpenRequest& request);
     void _add_broken_tablet(int64_t tablet_id);
     bool _is_broken_tablet(int64_t tablet_id);
 
@@ -118,6 +127,7 @@ private:
     doris::Mutex _lock;
 
     SpinLock _tablet_writers_lock;
+    std::mutex _tablet_writers_open_lock;
 
     enum State {
         kInitialized,
@@ -145,8 +155,13 @@ private:
     // currently it's OK.
     Status _close_status;
 
+    std::map<int64, std::vector<int64>> _partition_tablets_map;
+    std::map<int64, int64> _tablet_partition_map;
+
     // tablet_id -> TabletChannel
     std::unordered_map<int64_t, DeltaWriter*> _tablet_writers;
+    SpinLock _tablet_writers_init_lock;
+    bool _tablet_writers_init = false;
     // broken tablet ids.
     // If a tablet write fails, it's id will be added to this set.
     // So that following batch will not handle this tablet anymore.

@@ -46,6 +46,8 @@ public:
     // open a new load channel if not exist
     Status open(const PTabletWriterOpenRequest& request);
 
+    Status open_partition(const OpenPartitionRequest& params);
+
     // this batch must belong to a index in one transaction
     template <typename TabletWriterAddRequest, typename TabletWriterAddResult>
     Status add_batch(const TabletWriterAddRequest& request, TabletWriterAddResult* response);

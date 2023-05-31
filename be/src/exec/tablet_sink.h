@@ -60,6 +60,7 @@ class MutableBlock;
 namespace stream_load {
 
 class OlapTableSink;
+class OpenPartitionClosure;
 
 // The counter of add_batch rpc of a single node
 struct AddBatchCounter {
@@ -183,6 +184,9 @@ public:
 
     // we use open/open_wait to parallel
     void open();
+
+    virtual void open_partition(int64_t partition_id);
+
     virtual Status open_wait();
 
     Status add_row(Tuple* tuple, int64_t tablet_id);
@@ -200,7 +204,8 @@ public:
     // 1. mark_close()->close_wait() PS. close_wait() will block waiting for the last AddBatch rpc response.
     // 2. just cancel()
     virtual void mark_close();
-    Status close_wait(RuntimeState* state);
+
+    virtual Status close_wait(RuntimeState* state);
 
     void cancel(const std::string& cancel_msg);
 
@@ -335,6 +340,7 @@ private:
     using AddBatchReq = std::pair<std::unique_ptr<RowBatch>, PTabletWriterAddBatchRequest>;
     std::queue<AddBatchReq> _pending_batches;
     ReusableClosure<PTabletWriterAddBatchResult>* _add_batch_closure = nullptr;
+    std::unordered_set<std::unique_ptr<OpenPartitionClosure>> _open_partition_closures;
 };
 
 class IndexChannel {
