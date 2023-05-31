@@ -1,11 +1,15 @@
 import groovy.json.JsonOutput
 import org.codehaus.groovy.runtime.IOGroovyMethods
+import java.util.stream.Collectors
 
 suite("test_recycler_with_drop_column") {
     def token = "greedisgood9999"
     def instanceId = context.config.instanceId;
     def cloudUniqueId = context.config.cloudUniqueId
     def tableName = 'test_recycler_with_drop_column'
+
+    def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
+    def loadLabel = tableName + "_" + uniqueID
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -57,7 +61,7 @@ suite("test_recycler_with_drop_column") {
 
     HashSet<String> tabletIdSet = tabletInfoList.stream().map(tabletInfo -> tabletInfo[0]).collect(Collectors.toSet());
     logger.info("tabletIdSet:${tabletIdSet}")
-    assertTrue(tabletIdSet1.size() > 0)
+    assertTrue(tabletIdSet.size() > 0)
 
     // drop column 
     sql """alter table ${tableName} drop column C_NAME"""
@@ -85,7 +89,7 @@ suite("test_recycler_with_drop_column") {
 
     HashSet<String> tabletIdSet2 = tabletInfoList2.stream().map(tabletInfo -> tabletInfo[0]).collect(Collectors.toSet());
     logger.info("tabletIdSet2:${tabletIdSet2}")
-    assertTrue(tabletIdSet1.size() > 0)
+    assertTrue(tabletIdSet2.size() > 0)
 
     // drop table
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
@@ -96,11 +100,10 @@ suite("test_recycler_with_drop_column") {
     do {
         triggerRecycle(token, instanceId)
         Thread.sleep(20000) // 20s
-        if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
+        if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet2)) {
             success = true
             break
         }
     } while (retry--)
     assertTrue(success)
-    qt_sql """ select count(*) from ${tableName}"""
 }
