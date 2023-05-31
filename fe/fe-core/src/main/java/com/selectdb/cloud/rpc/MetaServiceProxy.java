@@ -67,8 +67,8 @@ public class MetaServiceProxy {
         if (Config.meta_service_use_short_connection) {
             return true;
         }
-        if (Config.fuzzy_meta_service_use_short_connection &&
-            System.currentTimeMillis() % 2 == 0) {
+        if (Config.fuzzy_meta_service_use_short_connection
+                && System.currentTimeMillis() % 2 == 0) {
             return true;
         }
         return false;
