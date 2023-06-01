@@ -38,30 +38,30 @@ on:
       - synchronize
 
 env:
-  PULL_REQUEST_NUM: $(echo "${{ github.event.issue.pull_request.url }}" | awk -F/ '{print $NF}')
-  LATEST_COMMIT: $(curl -H "Authorization:Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/pulls/$(echo '${{ github.event.issue.pull_request.url }}' | awk -F/ '{print $NF}')" > pr_details.json && jq -r '.head.sha' pr_details.json)
+  PULL_REQUEST_NUM: $(echo "${{ github.event.issue.number }}" | awk -F/ '{print $NF}')
+  LATEST_COMMIT: $(curl -H "Authorization:Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/pulls/$(echo '${{ github.event.issue.number }}' | awk -F/ '{print $NF}')" > pr_details.json && jq -r '.head.sha' pr_details.json)
   APP_SERVER: '43.138.9.29:8888'
 
 jobs:
   feishu_notify:
     runs-on: ubuntu-latest
-
+    if: ${{ github.event.issue.pull_request }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Pull-Request Comment Notification
         run: |
-          if [ "_xx""${{ github.event.issue.pull_request.url }}" != "_xx" ]; then
-            echo "Comment was made on pull request: $(echo ${{ github.event.issue.pull_request.url }} | awk -F/ '{print $NF}')"
+          if [ "_xx""${{ github.event.issue.number }}" != "_xx" ]; then
+            echo "Comment was made on pull request: $(echo ${{ github.event.issue.number }} | awk -F/ '{print $NF}')"
           else
             echo "Comment was made on an issue, not a pull request."
           fi
-          number=${{ env.PULL_REQUEST_NUM }}
-          comment=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "${{ github.event.issue.pull_request.comment }}")
-          title=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' " ${{ github.event.issue.pull_request.title }} ")
+          number=${{ github.event.issue.number }}
+          comment=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "${{ github.event.comment.body }}")
+          title=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' " ${{ github.event.issue.title }} ")
           url=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' " ${{ github.event.issue.pull_request.url }}")
-          user="${{ github.event.issue.pull_request.url }}"
+          user="${{ github.event.issue.user.login }}"
           latest_commit_id="${{ env.LATEST_COMMIT }}"
           server="${{ env.APP_SERVER }}"
 
