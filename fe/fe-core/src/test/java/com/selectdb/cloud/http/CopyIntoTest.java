@@ -10,6 +10,7 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.http.DorisHttpTestCase;
 import org.apache.doris.httpv2.util.ExecutionResultSet;
 import org.apache.doris.httpv2.util.StatementSubmitter.StmtContext;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.utframe.MockedMetaServerFactory;
 import org.apache.doris.utframe.UtFrameUtils;
 import org.json.simple.JSONObject;
@@ -35,6 +36,7 @@ public class CopyIntoTest extends DorisHttpTestCase {
 
     @BeforeClass
     public static void beforeClass() throws Exception {
+        MetricRepo.init();
         port = UtFrameUtils.createMetaServer(MockedMetaServerFactory.METASERVER_DEFAULT_IP);
     }
 
