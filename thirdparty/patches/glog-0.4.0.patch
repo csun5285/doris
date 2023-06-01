@@ -194,7 +194,7 @@ diff -uprN a/src/logging.cc b/src/logging.cc
 +    if (severity_ == GLOG_WARNING && FLAGS_warn_log_filenum_quota > 0) {
 +      log_filenum_quota = FLAGS_warn_log_filenum_quota;
 +    }
-+    while (log_filenum_quota > 0 && file_list_.size() >= log_filenum_quota) {
++    while (log_filenum_quota > 0 && file_list_.size() > log_filenum_quota) {
 +       // fprintf(stderr, "delete %s\n", file_list_.front().name.c_str());
 +        unlink(file_list_.front().name.c_str());
 +        file_list_.pop_front();
