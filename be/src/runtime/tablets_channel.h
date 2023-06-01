@@ -160,8 +160,7 @@ private:
 
     // tablet_id -> TabletChannel
     std::unordered_map<int64_t, DeltaWriter*> _tablet_writers;
-    SpinLock _tablet_writers_init_lock;
-    bool _tablet_writers_init = false;
+
     // broken tablet ids.
     // If a tablet write fails, it's id will be added to this set.
     // So that following batch will not handle this tablet anymore.
