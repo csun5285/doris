@@ -1181,7 +1181,8 @@ public class Env {
                     String clusterIdString = conn.getHeaderField(MetaBaseAction.CLUSTER_ID);
                     int remoteClusterId = Integer.parseInt(clusterIdString);
                     if (remoteClusterId != clusterId) {
-                        LOG.error("cluster id is not equal with helper node {}. will exit.", rightHelperNode.getHost());
+                        LOG.error("cluster id is not equal with helper node {}. will exit. remote:{}, local:{}",
+                                rightHelperNode.getHost(), clusterIdString, clusterId);
                         System.exit(-1);
                     }
                     String remoteToken = conn.getHeaderField(MetaBaseAction.TOKEN);
