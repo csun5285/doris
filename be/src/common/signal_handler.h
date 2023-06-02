@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include <bthread/bthread.h>
+#include <bthread/types.h>
 #include <glog/logging.h>
 #include <gutil/macros.h>
 
@@ -53,6 +55,16 @@ namespace doris::signal {
 
 inline thread_local uint64 query_id_hi;
 inline thread_local uint64 query_id_lo;
+
+inline bthread_key_t btls_signal_key;
+struct BthreadSignalCtx {
+    uint64 query_id_hi;
+    uint64 query_id_lo;
+};
+
+inline void signal_context_deleter(void* d) {
+    delete static_cast<BthreadSignalCtx*>(d);
+}
 
 namespace {
 
@@ -254,6 +266,11 @@ void DumpTimeInfo() {
     char buf[256]; // Big enough for time info.
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("*** Query id: ");
+    if (bthread_self() != 0) {
+        BthreadSignalCtx* ctx = static_cast<BthreadSignalCtx*>(bthread_getspecific(btls_signal_key));
+        query_id_hi = ctx != nullptr ? ctx->query_id_hi : 0;
+        query_id_lo = ctx != nullptr ? ctx->query_id_lo : 0;
+    }
     formatter.AppendUint64(query_id_hi, 16);
     formatter.AppendString("-");
     formatter.AppendUint64(query_id_lo, 16);

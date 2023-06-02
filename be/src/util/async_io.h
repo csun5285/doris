@@ -9,6 +9,7 @@
 #include "cloud/io/file_reader.h"
 #include "cloud/io/file_system.h"
 #include "common/logging.h"
+#include "common/signal_handler.h"
 #include "olap/olap_define.h"
 #include "priority_thread_pool.hpp"
 #include "runtime/threadlocal.h"
@@ -59,8 +60,12 @@ public:
             bthread::CountdownEvent event;
 
             AsyncIOCtx* ctx = static_cast<AsyncIOCtx*>(bthread_getspecific(btls_io_ctx_key));
-            int nice = 18;
-            if (ctx != nullptr) { nice = ctx->nice; }
+            int nice = ctx != nullptr ? ctx->nice : 18;
+
+            doris::signal::BthreadSignalCtx* sig_ctx =
+                        static_cast<doris::signal::BthreadSignalCtx*>(bthread_getspecific(doris::signal::btls_signal_key));
+            uint64_t query_id_hi = sig_ctx != nullptr ? sig_ctx->query_id_hi : 0;
+            uint64_t query_id_lo = sig_ctx != nullptr ? sig_ctx->query_id_lo : 0;
 
             auto task_wait_time = std::chrono::steady_clock::now();
             auto task_wake_up_time = std::chrono::steady_clock::now();
@@ -71,6 +76,8 @@ public:
                         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - task_wait_time).count();
                 {
                     SCOPED_RAW_TIMER(&task_stats.task_exec_timer_ns);
+                    doris::signal::query_id_hi = query_id_hi;
+                    doris::signal::query_id_lo = query_id_lo;
                     fn();
                 }
                 task_wake_up_time = std::chrono::steady_clock::now();

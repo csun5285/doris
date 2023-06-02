@@ -29,6 +29,7 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/consts.h"
+#include "common/signal_handler.h"
 #include "gen_cpp/BackendService.h"
 #include "gen_cpp/internal_service.pb.h"
 #include "http/http_client.h"
@@ -117,12 +118,14 @@ PInternalServiceImpl::PInternalServiceImpl(ExecEnv* exec_env)
                          [this]() { return _tablet_worker_pool.get_queue_size(); });
     CHECK_EQ(0, bthread_key_create(&btls_key, thread_context_deleter));
     CHECK_EQ(0, bthread_key_create(&AsyncIO::btls_io_ctx_key, AsyncIO::io_ctx_key_deleter));
+    CHECK_EQ(0, bthread_key_create(&doris::signal::btls_signal_key, doris::signal::signal_context_deleter));
 }
 
 PInternalServiceImpl::~PInternalServiceImpl() {
     DEREGISTER_HOOK_METRIC(add_batch_task_queue_size);
     CHECK_EQ(0, bthread_key_delete(btls_key));
     CHECK_EQ(0, bthread_key_delete(AsyncIO::btls_io_ctx_key));
+    CHECK_EQ(0, bthread_key_delete(doris::signal::btls_signal_key));
 }
 
 void PInternalServiceImpl::transmit_data(google::protobuf::RpcController* cntl_base,

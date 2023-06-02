@@ -20,6 +20,7 @@
 #include <cstddef>
 
 #include "common/config.h"
+#include "common/signal_handler.h"
 #include "util/async_io.h"
 #include "util/priority_thread_pool.hpp"
 #include "util/priority_work_stealing_thread_pool.hpp"
@@ -214,17 +215,28 @@ void ScannerScheduler::_schedule_scanners(ScannerContext* ctx) {
     ctx->incr_num_scanner_scheduling(this_run.size());
     while (iter != this_run.end()) {
         (*iter)->start_wait_worker_timer();
-        AsyncIOCtx io_ctx {.nice = nice};
 
-        auto f = new std::function<void()> ([this, scanner = *iter, parent_span = cur_span, ctx, io_ctx]{
+        auto f = new std::function<void()> ([this, scanner = *iter, parent_span = cur_span, ctx, nice]{
             AsyncIOCtx* set_io_ctx =
                     static_cast<AsyncIOCtx*>(bthread_getspecific(AsyncIO::btls_io_ctx_key));
             if (set_io_ctx == nullptr) {
-                set_io_ctx = new AsyncIOCtx(io_ctx);
+                set_io_ctx = new AsyncIOCtx{.nice = nice};
                 CHECK_EQ(0, bthread_setspecific(AsyncIO::btls_io_ctx_key, set_io_ctx));
             } else {
                 LOG(WARNING) << "New bthread should not have io_nice_key";
             }
+
+            doris::signal::BthreadSignalCtx* set_signal_ctx =
+                    static_cast<doris::signal::BthreadSignalCtx*>(bthread_getspecific(doris::signal::btls_signal_key));
+            if (set_signal_ctx == nullptr) {
+                uint64_t hi = scanner->runtime_state()->query_id().hi;
+                uint64_t lo = scanner->runtime_state()->query_id().lo;
+                set_signal_ctx = new doris::signal::BthreadSignalCtx{.query_id_hi=hi, .query_id_lo=lo};
+                CHECK_EQ(0, bthread_setspecific(doris::signal::btls_signal_key, set_signal_ctx));
+            } else {
+                LOG(WARNING) << "set signal ctx failed";
+            }
+
             opentelemetry::trace::Scope scope {parent_span};
             this->_scanner_scan(this, ctx, scanner);
         });
