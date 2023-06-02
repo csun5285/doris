@@ -191,6 +191,9 @@ struct TQueryOptions {
 
   // Indicate where useServerPrepStmts enabled
   57: optional bool mysql_row_binary_format = false;
+
+  // to control if the content would be written into file cache
+  58: optional bool disable_file_cache = false
 }
 
 // A scan range plus the parameters needed to execute that scan.

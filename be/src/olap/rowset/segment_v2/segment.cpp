@@ -242,6 +242,7 @@ Status Segment::load_index() {
             opts.stats = &tmp_stats;
             opts.type = INDEX_PAGE;
             opts.read_segment_index = true;
+            opts.disable_file_cache = _disable_file_cache;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(

@@ -175,6 +175,7 @@ Status ColumnReader::read_page(const ColumnIteratorOptions& iter_opts, const Pag
     opts.use_disposable_cache = iter_opts.use_disposable_cache;
     opts.type = iter_opts.type;
     opts.encoding_info = _encoding_info;
+    opts.disable_file_cache = iter_opts.disable_file_cache;
     // index page should not pre decode
     if (iter_opts.type == INDEX_PAGE) {
         opts.pre_decode = false;
@@ -202,6 +203,7 @@ Status ColumnReader::read_pages(const ColumnIteratorOptions& iter_opts,
     opts.use_disposable_cache = iter_opts.use_disposable_cache;
     opts.type = iter_opts.type;
     opts.encoding_info = _encoding_info;
+    opts.disable_file_cache = iter_opts.disable_file_cache;
 
     return PageIO::read_and_decompress_pages(opts, handles, page_bodys, footers);
 }
@@ -387,7 +389,7 @@ Status ColumnReader::get_row_ranges_by_bloom_filter(const AndBlockColumnPredicat
 Status ColumnReader::_load_ordinal_index(bool use_page_cache, bool kept_in_memory) {
     DCHECK(_ordinal_index_meta != nullptr);
     _ordinal_index.reset(new OrdinalIndexReader(_file_reader, _ordinal_index_meta, _num_rows));
-    return _ordinal_index->load(use_page_cache, kept_in_memory);
+    return _ordinal_index->load(use_page_cache, kept_in_memory, _opts.disable_file_cache);
 }
 
 Status ColumnReader::_load_zone_map_index(bool use_page_cache, bool kept_in_memory) {

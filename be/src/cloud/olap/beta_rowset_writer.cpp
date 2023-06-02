@@ -935,6 +935,7 @@ Status BetaRowsetWriter::_do_create_segment_writer(
                                        ? 0
                                        : _create_time + _file_cache_ttl_seconds;
     io_state.is_cold_data = !_is_hot_data;
+    io_state.disable_file_cache = _context.disable_file_cache;
     Status st = fs->create_file(path, &file_writer, &io_state);
     if (!st.ok()) {
         LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;

@@ -107,6 +107,9 @@ struct RowsetWriterContext {
     // for tracing local schema change record
     std::shared_ptr<vectorized::schema_util::LocalSchemaChangeRecorder> schema_change_recorder =
             nullptr;
+    // If it is true the content would also write into file cache
+    // it would be only written into s3 if it's false
+    bool disable_file_cache = false;
 };
 
 } // namespace doris

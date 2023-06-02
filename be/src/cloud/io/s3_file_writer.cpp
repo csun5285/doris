@@ -59,7 +59,8 @@ S3FileWriter::S3FileWriter(Path path, std::string key, std::string bucket,
           _sse_enabled(sse_enabled),
           _client(std::move(client)),
           _expiration_time(state ? state->expiration_time : 0),
-          _is_cold_data(state ? state->is_cold_data : true) {
+          _is_cold_data(state ? state->is_cold_data : true),
+          _disable_file_cache(state == nullptr ? false : state->disable_file_cache) {
     s3_file_writer << 1;
     s3_file_being_written << 1;
 }
@@ -73,7 +74,7 @@ S3FileWriter::~S3FileWriter() {
 
 Status S3FileWriter::open() {
     VLOG_DEBUG << "S3FileWriter::open, path: " << _path.native();
-    if (config::enable_file_cache) {
+    if (config::enable_file_cache && !_disable_file_cache) {
         _cache_key = CloudFileCache::hash(_path.filename().native());
         _cache = FileCacheFactory::instance().get_by_path(_cache_key);
     }
@@ -148,10 +149,6 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                                 [part_num = _cur_part_num, this](UploadFileBuffer& buf) {
                                     _upload_one_part(part_num, buf);
                                 })
-                        .set_allocate_file_segments_holder(
-                                [this, offset = _bytes_appended]() -> FileSegmentsHolderPtr {
-                                    return _allocate_file_segments(offset);
-                                })
                         .set_file_offset(_bytes_appended)
                         .set_index_offset(_index_offset)
                         .set_sync_after_complete_task([this, part_num = _cur_part_num](Status s) {
@@ -165,6 +162,12 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                             _wait.done();
                         })
                         .set_is_done([this]() { return _failed.load(); });
+                if (!_disable_file_cache) {
+                    builder.set_allocate_file_segments_holder(
+                            [this, offset = _bytes_appended]() -> FileSegmentsHolderPtr {
+                                return _allocate_file_segments(offset);
+                            });
+                }
                 _pending_buf = builder.build();
             }
             // we need to make sure all parts except the last one to be 5MB or more

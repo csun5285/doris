@@ -126,6 +126,8 @@ public:
     bool is_lazy_open = false;
     bool no_need_to_read_index = false;
     vectorized::ScannerContext* ctx = nullptr;
+
+    bool disable_file_cache = false;
 };
 
 // Used to read data in RowBlockV2 one by one

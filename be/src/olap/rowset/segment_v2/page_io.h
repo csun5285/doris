@@ -76,6 +76,8 @@ struct PageReadOptions {
     // index_page should not be pre-decoded
     bool pre_decode = true;
 
+    bool disable_file_cache = false;
+
     void sanity_check() const {
         CHECK_NOTNULL(file_reader);
         CHECK_NOTNULL(stats);

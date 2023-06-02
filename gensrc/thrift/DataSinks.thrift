@@ -189,6 +189,7 @@ struct TOlapTableSink {
     17: optional bool write_single_replica
     18: optional Descriptors.TOlapTableLocationParam slave_location
     19: optional i64 txn_timeout_s // timeout of load txn in second
+    20: optional bool disable_file_cache = false // skip writing content into file cache
 }
 
 struct TDataSink {

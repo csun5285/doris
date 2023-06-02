@@ -259,6 +259,7 @@ public class SessionVariable implements Serializable, Writable {
 
     public static final String GROUP_CONCAT_MAX_LEN = "group_concat_max_len";
 
+    public static final String DISABLE_FILE_CACHE = "disable_file_cache";
     public static final String GROUP_BY_AND_HAVING_USE_ALIAS_FIRST = "group_by_and_having_use_alias_first";
 
     public static final String TOPN_OPT_LIMIT_THRESHOLD = "topn_opt_limit_threshold";
@@ -689,6 +690,11 @@ public class SessionVariable implements Serializable, Writable {
     // should first use column name not alias. According to mysql.
     @VariableMgr.VarAttr(name = GROUP_BY_AND_HAVING_USE_ALIAS_FIRST)
     public boolean groupByAndHavingUseAliasFirst = false;
+
+    // Whether disable block file cache. Block cache only works when FE's query options sets disableFileCache false
+    // along with BE's config `enable_file_cache` true
+    @VariableMgr.VarAttr(name = DISABLE_FILE_CACHE, needForward = true)
+    public boolean disableFileCache = false;
 
     @VariableMgr.VarAttr(name = TOPN_OPT_LIMIT_THRESHOLD)
     public long topnOptLimitThreshold = 1024;
@@ -1394,6 +1400,14 @@ public class SessionVariable implements Serializable, Writable {
         this.fragmentTransmissionCompressionCodec = codec;
     }
 
+    public boolean isDisableFileCache() {
+        return disableFileCache;
+    }
+
+    public void setDisableFileCache(boolean disableFileCache) {
+        this.disableFileCache = disableFileCache;
+    }
+
     /**
      * Serialize to thrift object.
      * Used for rest api.
@@ -1452,6 +1466,8 @@ public class SessionVariable implements Serializable, Writable {
         tResult.setSkipDeleteBitmap(skipDeleteBitmap);
 
         tResult.setPartitionedHashJoinRowsThreshold(partitionedHashJoinRowsThreshold);
+
+        tResult.setDisableFileCache(disableFileCache);
 
         return tResult;
     }

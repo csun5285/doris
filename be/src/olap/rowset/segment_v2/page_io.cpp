@@ -185,7 +185,8 @@ Status PageIO::read_and_decompress_pages(const PageReadOptions& opts,
         SCOPED_RAW_TIMER(&opts.stats->io_ns);
         size_t bytes_read = 0;
         io::IOState state(opts.query_id, opts.stats, opts.use_disposable_cache,
-                          opts.read_segment_index, opts.expiration_time);
+                          opts.read_segment_index, opts.expiration_time,
+                          opts.disable_file_cache);
         RETURN_IF_ERROR(opts.file_reader->read_at(start_offset, pages_slice, &bytes_read, &state));
         DCHECK_EQ(bytes_read, pages_size);
         opts.stats->compressed_bytes_read += pages_size;
@@ -310,7 +311,8 @@ Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle*
         SCOPED_RAW_TIMER(&opts.stats->io_ns);
         size_t bytes_read = 0;
         io::IOState state(opts.query_id, opts.stats, opts.use_disposable_cache,
-                          opts.read_segment_index, opts.expiration_time);
+                          opts.read_segment_index, opts.expiration_time,
+                          opts.disable_file_cache);
         RETURN_IF_ERROR(opts.file_reader->read_at(opts.page_pointer.offset, page_slice, &bytes_read,
                                                   &state));
 

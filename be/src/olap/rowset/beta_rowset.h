@@ -90,7 +90,8 @@ public:
 
     bool check_file_exist() override;
 
-    Status load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments, bool is_lazy_open = false);
+    Status load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments,
+                         bool is_lazy_open = false, bool disable_file_cache = false);
 
     Status load_segments(int64_t seg_id_begin, int64_t seg_id_end,
                          std::vector<segment_v2::SegmentSharedPtr>* segments);

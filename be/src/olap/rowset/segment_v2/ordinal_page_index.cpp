@@ -61,7 +61,7 @@ Status OrdinalIndexWriter::finish(io::FileWriter* file_writer, ColumnIndexMetaPB
     return Status::OK();
 }
 
-Status OrdinalIndexReader::load(bool use_page_cache, bool kept_in_memory) {
+Status OrdinalIndexReader::load(bool use_page_cache, bool kept_in_memory, bool disable_file_cache) {
     if (_index_meta->root_page().is_root_data_page()) {
         // only one data page, no index page
         _num_pages = 1;
@@ -81,6 +81,7 @@ Status OrdinalIndexReader::load(bool use_page_cache, bool kept_in_memory) {
     opts.kept_in_memory = kept_in_memory;
     opts.type = INDEX_PAGE;
     opts.read_segment_index = true;
+    opts.disable_file_cache = disable_file_cache;
 
     // read index page
     PageHandle page_handle;

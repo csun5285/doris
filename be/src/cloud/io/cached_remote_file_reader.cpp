@@ -25,11 +25,13 @@
 #include "cloud/io/cloud_file_segment.h"
 #include "common/config.h"
 #include "olap/olap_common.h"
+#include "util/defer_op.h"
 #include "util/doris_metrics.h"
 #include "util/runtime_profile.h"
 
 namespace doris {
 namespace io {
+bvar::Adder<uint64_t> cache_skipped_bytes_read("cached_remote_reader", "cache_skipped_read_bytes");
 
 CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader,
                                                metrics_hook metrics)
@@ -79,6 +81,19 @@ Status CachedRemoteFileReader::read_at(size_t offset, Slice result, size_t* byte
         return Status::OK();
     }
     ReadStatistics stats;
+    // session variable chooses to close file cache for this query
+    if (state != nullptr && state->disable_file_cache) {
+        SCOPED_RAW_TIMER(&stats.remote_read_timer);
+        RETURN_IF_ERROR(_remote_file_reader->read_at(offset, result, bytes_read, state));
+        DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
+        cache_skipped_bytes_read << *bytes_read;
+        if (state->stats && _metrics) {
+            stats.bytes_read += bytes_req;
+            _update_state(stats, state);
+            _metrics(state->stats);
+        }
+        return Status::OK();
+    }
     auto [align_left, align_size] = _align_size(offset, bytes_req);
     auto cache_context = CacheContext::create(state);
     FileSegmentsHolder holder =

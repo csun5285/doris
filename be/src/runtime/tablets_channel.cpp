@@ -516,6 +516,7 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
         wrequest.slots = index_slots;
         wrequest.is_high_priority = _is_high_priority;
         wrequest.table_schema_param = _schema;
+        wrequest.disable_file_cache = request.disable_file_cache();
 
         DeltaWriter* writer = nullptr;
         auto st = DeltaWriter::open(&wrequest, &writer, _load_id, _is_vec);

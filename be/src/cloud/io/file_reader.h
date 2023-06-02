@@ -33,12 +33,13 @@ class FileSystem;
 
 struct IOState {
     IOState(const TUniqueId* query_id, OlapReaderStatistics* stats, bool is_disposable,
-            bool read_segment_index, int64_t expiration_time)
+            bool read_segment_index, int64_t expiration_time, bool disable_file_cache = false)
             : query_id(query_id),
               stats(stats),
               is_disposable(is_disposable),
               read_segment_index(read_segment_index),
-              expiration_time(expiration_time) {}
+              expiration_time(expiration_time),
+              disable_file_cache(disable_file_cache) {}
     IOState() = default;
     const TUniqueId* query_id = nullptr;
     OlapReaderStatistics* stats = nullptr;
@@ -47,6 +48,7 @@ struct IOState {
     bool read_segment_index = false;
     int64_t expiration_time {0};
     bool is_cold_data {false};
+    bool disable_file_cache = false;
 };
 class FileReader {
 public:

@@ -70,7 +70,7 @@ public:
               _num_values(num_values) {}
 
     // load and parse the index page into memory
-    Status load(bool use_page_cache, bool kept_in_memory);
+    Status load(bool use_page_cache, bool kept_in_memory, bool disable_file_cache = false);
 
     // the returned iter points to the largest element which is less than `ordinal`,
     // or points to the first element if all elements are greater than `ordinal`,

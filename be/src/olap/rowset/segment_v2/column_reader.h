@@ -67,6 +67,7 @@ struct ColumnReaderOptions {
     // whether verify checksum when read page
     bool verify_checksum = true;
     bool no_need_to_read_index = false;
+    bool disable_file_cache = false;
 };
 
 struct ColumnIteratorOptions {
@@ -80,6 +81,7 @@ struct ColumnIteratorOptions {
     // INDEX_PAGE including index_page, dict_page and short_key_page
     PageTypePB type;
     IOContext io_ctx;
+    bool disable_file_cache = false;
 
     bool kept_in_memory = false;
     bool use_disposable_cache = false;

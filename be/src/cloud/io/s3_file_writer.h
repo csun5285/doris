@@ -119,6 +119,7 @@ private:
     std::shared_ptr<FileBuffer> _pending_buf = nullptr;
     int64_t _expiration_time;
     bool _is_cold_data;
+    bool _disable_file_cache = false;
 };
 
 } // namespace io

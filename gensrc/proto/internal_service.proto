@@ -84,6 +84,7 @@ message PTabletWriterOpenRequest {
     optional string sender_ip = 11 [default = ""];
     optional bool is_vectorized = 12 [default = false];
     optional int64 txn_expiration = 13;
+    optional bool disable_file_cache = 14 [default = false];
 };
 
 message PTabletWriterOpenResult {

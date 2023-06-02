@@ -44,13 +44,15 @@ namespace segment_v2 {
 
 Status Segment::open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
                      const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
-                     std::shared_ptr<Segment>* output, metrics_hook metrics, bool is_lazy_open) {
+                     std::shared_ptr<Segment>* output, metrics_hook metrics, bool is_lazy_open,
+                     bool disable_file_cache) {
     std::shared_ptr<Segment> segment(
             new Segment(segment_id, rowset_meta->rowset_id(), tablet_schema));
     io::FileReaderSPtr file_reader;
     RETURN_IF_ERROR(fs->open_file(path, metrics, &file_reader,
                                   rowset_meta->get_segment_file_size(segment_id)));
     segment->_file_reader = std::move(file_reader);
+    segment->_disable_file_cache = disable_file_cache;
     if (is_lazy_open) {
         segment->_is_lazy_open = true;
         *output = std::move(segment);
@@ -121,6 +123,9 @@ Status Segment::new_iterator(const Schema& schema, const StorageReadOptions& rea
             }
         }
     }
+    if (read_options.runtime_state != nullptr) {
+        _disable_file_cache = read_options.runtime_state->query_options().disable_file_cache;
+    }    
 
     if (!read_options.is_lazy_open) {
         RETURN_IF_ERROR(load_index());
@@ -147,6 +152,7 @@ Status Segment::_parse_footer() {
     size_t bytes_read = 0;
     io::IOState state;
     state.read_segment_index = true;
+    state.disable_file_cache = _disable_file_cache;
     RETURN_IF_ERROR(
             _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read, &state));
     DCHECK_EQ(bytes_read, 12);
@@ -227,6 +233,7 @@ Status Segment::load_index() {
             opts.stats = &tmp_stats;
             opts.type = INDEX_PAGE;
             opts.read_segment_index = true;
+            opts.disable_file_cache = _disable_file_cache;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(
@@ -267,6 +274,7 @@ Status Segment::_create_column_readers() {
         }
 
         ColumnReaderOptions opts;
+        opts.disable_file_cache = _disable_file_cache;
         std::unique_ptr<ColumnReader> reader;
         RETURN_IF_ERROR(ColumnReader::create(opts, _footer.columns(iter->second),
                                              _footer.num_rows(), _file_reader, &reader));

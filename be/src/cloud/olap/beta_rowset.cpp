@@ -123,7 +123,8 @@ Status BetaRowset::get_segments_size(std::vector<size_t>* segments_size) {
     }
     return Status::OK();
 }
-Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments, bool is_lazy_open) {
+Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments,
+                                 bool is_lazy_open, bool disable_file_cache) {
     auto fs = _rowset_meta->fs();
     if (!fs || _schema == nullptr) {
         return Status::Error<INIT_FAILED>();
@@ -136,8 +137,9 @@ Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segm
         auto seg_path = segment_file_path(seg_id);
         std::shared_ptr<segment_v2::Segment> segment;
         auto s = segment_v2::Segment::open(fs, seg_path, seg_id, rowset_meta(), _schema, &segment,
-                                           count, is_lazy_open);
-        if (s.is<EMPTY_SEGMENT>()) [[unlikely]] continue;
+                                           count, is_lazy_open, disable_file_cache);
+        if (s.is<EMPTY_SEGMENT>()) [[unlikely]]
+            continue;
         if (!s.ok()) {
             LOG(WARNING) << "failed to open segment " << seg_path << " : " << s.to_string();
             return Status::Error<ROWSET_LOAD_FAILED>();

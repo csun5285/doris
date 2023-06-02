@@ -61,6 +61,8 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     // convert RowsetReaderContext to StorageReadOptions
     if (read_context->runtime_state != nullptr) {
         _read_options.query_id = &read_context->runtime_state->query_id();
+        _read_options.disable_file_cache =
+                read_context->runtime_state->query_options().disable_file_cache;
     }
 
     if (read_context->reader_type != ReaderType::READER_QUERY) {
@@ -207,8 +209,9 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
         // load segments
         // use cache is true when do vertica compaction
         bool should_use_cache = use_cache || read_context->reader_type == ReaderType::READER_QUERY;
-        RETURN_NOT_OK(SegmentLoader::instance()->load_segments(_rowset, &_segment_cache_handle,
-                                                               should_use_cache, _read_options.is_lazy_open));
+        RETURN_NOT_OK(SegmentLoader::instance()->load_segments(
+                _rowset, &_segment_cache_handle, should_use_cache, _read_options.is_lazy_open,
+                _read_options.disable_file_cache));
     }
 
     _read_options.ctx = read_context->ctx;

@@ -38,10 +38,10 @@
 #include "util/doris_metrics.h"
 #include "util/key_util.h"
 #include "util/simd/bits.h"
+#include "vec/data_types/data_type_factory.hpp"
 #include "vec/data_types/data_type_number.h"
 #include "vec/exprs/vliteral.h"
 #include "vec/functions/function_helpers.h"
-#include "vec/data_types/data_type_factory.hpp"
 
 namespace doris {
 using namespace ErrorCode;
@@ -422,6 +422,10 @@ Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_ra
             iter_opts.kept_in_memory = _opts.kept_in_memory;
             iter_opts.use_disposable_cache = _opts.use_disposable_cache;
             iter_opts.expiration_time = _opts.expiration_time;
+            iter_opts.disable_file_cache =
+                    _opts.runtime_state == nullptr
+                            ? false
+                            : _opts.runtime_state->query_options().disable_file_cache;
 
             RETURN_IF_ERROR(_column_iterators[unique_id]->init(iter_opts));
         }
@@ -1163,6 +1167,10 @@ Status SegmentIterator::_init_return_column_iterators() {
             iter_opts.kept_in_memory = _opts.kept_in_memory;
             iter_opts.use_disposable_cache = _opts.use_disposable_cache;
             iter_opts.expiration_time = _opts.expiration_time;
+            iter_opts.disable_file_cache =
+                    _opts.runtime_state == nullptr
+                            ? false
+                            : _opts.runtime_state->query_options().disable_file_cache;
 
             RETURN_IF_ERROR(_column_iterators[unique_id]->init(iter_opts));
         }

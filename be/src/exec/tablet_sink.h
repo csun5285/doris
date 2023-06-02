@@ -593,6 +593,7 @@ private:
     OlapTablePartitionParam* _partition = nullptr;
     std::vector<ExprContext*> _output_expr_ctxs;
     std::unique_ptr<RowBatch> _output_batch;
+    bool _disable_file_cache = false;
 };
 
 } // namespace stream_load

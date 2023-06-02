@@ -172,6 +172,7 @@ void NodeChannel::open() {
     request.set_sender_ip(BackendOptions::get_localhost());
     request.set_is_vectorized(_is_vectorized);
     request.set_txn_expiration(_parent->_txn_expiration);
+    request.set_disable_file_cache(_parent->_disable_file_cache);
 
     _open_closure = new RefCountClosure<PTabletWriterOpenResult>();
     _open_closure->ref();
@@ -898,6 +899,9 @@ Status OlapTableSink::init(const TDataSink& t_sink) {
         } else {
             findTabletMode = FindTabletMode::FIND_TABLET_EVERY_BATCH;
         }
+    }
+    if (table_sink.__isset.disable_file_cache) {
+        _disable_file_cache = table_sink.disable_file_cache;
     }
     return Status::OK();
 }

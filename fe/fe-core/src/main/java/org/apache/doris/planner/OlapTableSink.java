@@ -44,6 +44,8 @@ import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TColumn;
@@ -119,6 +121,10 @@ public class OlapTableSink extends DataSink {
         }
         tSink.setLoadToSingleTablet(loadToSingleTablet);
         tSink.setTxnTimeoutS(txnTimeoutS);
+        if (ConnectContext.get() != null) {
+            SessionVariable var = ConnectContext.get().getSessionVariable();
+            tSink.setDisableFileCache(var.isDisableFileCache());
+        }
         tDataSink = new TDataSink(TDataSinkType.OLAP_TABLE_SINK);
         tDataSink.setOlapTableSink(tSink);
 

@@ -196,7 +196,7 @@ void UploadFileBuffer::submit() {
  * write the content of the memory buffer to local file cache
  */
 void UploadFileBuffer::upload_to_local_file_cache() {
-    if (!config::enable_file_cache) {
+    if (!config::enable_file_cache || _alloc_holder == nullptr) {
         return;
     }
     if (_holder) {

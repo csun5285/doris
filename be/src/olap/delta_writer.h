@@ -52,6 +52,7 @@ struct WriteRequest {
     bool is_high_priority = false;
     OlapTableSchemaParam* table_schema_param;
     int64_t index_id = 0;
+    bool disable_file_cache = false;
 };
 
 // Writer for a particular (load, index, tablet).

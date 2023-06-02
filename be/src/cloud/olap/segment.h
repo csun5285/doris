@@ -68,7 +68,8 @@ class Segment : public std::enable_shared_from_this<Segment> {
 public:
     static Status open(const io::FileSystemSPtr& fs, const std::string& path, uint32_t segment_id,
                        const RowsetMetaSharedPtr& rowset_meta, TabletSchemaSPtr tablet_schema,
-                       std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr, bool is_lazy_open = false);
+                       std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr,
+                       bool is_lazy_open = false, bool disable_file_cache = false);
 
     ~Segment();
 
@@ -81,7 +82,8 @@ public:
 
     uint32_t num_rows() const { return _footer.num_rows(); }
 
-    Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter, bool without_index = false);
+    Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter,
+                               bool without_index = false);
 
     Status new_bitmap_index_iterator(const TabletColumn& tablet_column, BitmapIndexIterator** iter);
 
@@ -123,6 +125,8 @@ public:
     io::FileReaderSPtr file_reader() { return _file_reader; }
 
     int64_t meta_mem_usage() const { return _meta_mem_usage; }
+
+    bool disable_file_cache() const { return _disable_file_cache; }
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
@@ -172,7 +176,7 @@ private:
 
     DorisCallOnce<Status> _lazy_open_once;
     std::atomic<bool> _is_lazy_open = false;
- 
+    bool _disable_file_cache = false;
 };
 
 } // namespace segment_v2
