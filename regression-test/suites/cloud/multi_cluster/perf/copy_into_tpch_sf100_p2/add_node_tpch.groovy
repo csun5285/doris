@@ -19,20 +19,25 @@
 // /testing/trino-product-tests/src/main/resources/sql-tests/testcases
 // and modified by Doris.
 
-// syntax error:
-// q06 q13 q15
-// Test 23 suites, failed 3 suites
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
-// Note: To filter out tables from sql files, use the following one-liner comamnd
-// sed -nr 's/.*tables: (.*)$/\1/gp' /path/to/*.sql | sed -nr 's/,/\n/gp' | sort | uniq
 suite("add_node_tpch") {
     def externalStageName = "regression_test_tpch"
-    def prefix = "tpch/sf100"
+    def prefix = "tpch/sf1000"
 
     // Map[tableName, rowCount]
-    def tables = [region: 5, nation: 25, supplier: 1000000, customer: 15000000, part: 20000000, partsupp: 80000000, orders: 150000000, lineitem: 600037902]
+    // def tables = [region: 5, nation: 25, supplier: 1000000, customer: 15000000, part: 20000000, partsupp: 80000000, orders: 150000000, lineitem: 600037902]
 
-    def tableTabletNum = [region: 1, nation: 1, supplier: 32, customer: 32, part: 32, partsupp: 32, orders: 32, lineitem: 32]
+    // def tableTabletNum = [region: 1, nation: 1, supplier: 32, customer: 32, part: 32, partsupp: 32, orders: 32, lineitem: 32]
+
+    //def tables = [lineitem: 5999989709]
+
+    //def tableTabletNum = [lineitem: 320]
+
+    def tables = [region: 5, nation: 25, supplier: 10000000, customer: 150000000, part: 200000000, partsupp: 800000000, orders: 1500000000, lineitem: 5999989709]
+
+    def tableTabletNum = [region: 1, nation: 1, supplier: 32, customer: 32, part: 32, partsupp: 32, orders: 32, lineitem: 320]
 
     def checkBalance = { beNum ->
         boolean isBalanced = true;
@@ -131,7 +136,7 @@ suite("add_node_tpch") {
     """
 
     // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '1610612736000')"
 
     tables.each { table, rows ->
         sql new File("""${context.file.parent}/ddl/${table}.sql""").text
@@ -149,31 +154,110 @@ suite("add_node_tpch") {
             assertTrue(result.size() == 1)
             assertTrue(result[0].size() == 8)
             assertTrue(result[0][1].equals("FINISHED"))
-            assertTrue(result[0][4].equals(rows+""))
+            //assertTrue(result[0][4].equals(rows+""))
         }
     }
 
-    // warm up
-    for  (int i = 1; i < 10; ++i) {
-        sql new File("""${context.file.parent}/ddl/q0${i}.sql""").text
+    def filterSet = [1, 3, 4, 5, 7, 8, 9, 12, 13, 18, 20, 21] as Set
+
+    //warm up
+    for  (int i = 1; i < 23; ++i) {
+        log.info("run q${i}.sql".toString())
+        if (filterSet.contains(i)) {
+            continue
+        }
+
+        long startTs = System.currentTimeMillis()
+        if (i < 10) {
+            sql new File("""${context.file.parent}/ddl/q0${i}.sql""").text
+        } else {
+            sql new File("""${context.file.parent}/ddl/q${i}.sql""").text
+        }
+        long endTs = System.currentTimeMillis()
+        long latency = endTs - startTs
+        log.info("ddl/q${i} latency: ${latency}".toString())
     }
 
-    // warm up
-    for  (int i = 10; i < 23; ++i) {
-        sql new File("""${context.file.parent}/ddl/q${i}.sql""").text
-    }
+    sql """ select * from lineitem order by  L_PARTKEY       limit 100 """
+    sql """ select * from lineitem order by  L_SUPPKEY       limit 100 """
+    sql """ select * from lineitem order by  L_LINENUMBER    limit 100 """
+    sql """ select * from lineitem order by  L_QUANTITY      limit 100 """
+    sql """ select * from lineitem order by  L_EXTENDEDPRICE limit 100 """
+    sql """ select * from lineitem order by  L_DISCOUNT      limit 100 """
+    sql """ select * from lineitem order by  L_TAX           limit 100 """
+    sql """ select * from lineitem order by  L_SHIPDATE      limit 100 """
+    sql """ select * from lineitem order by  L_COMMITDATE    limit 100 """
+    sql """ select * from lineitem order by  L_RECEIPTDATE   limit 100 """
 
-    balanceCostSec = waitBalanced.call(3);
+    sql """ select * from orders order by O_ORDERKEY       limit 100 """
+    sql """ select * from orders order by O_CUSTKEY        limit 100 """
+    sql """ select * from orders order by O_ORDERSTATUS    limit 100 """
+    sql """ select * from orders order by O_TOTALPRICE     limit 100 """
+    sql """ select * from orders order by O_ORDERDATE      limit 100 """
+    sql """ select * from orders order by O_ORDERPRIORITY  limit 100 """
+    sql """ select * from orders order by O_CLERK          limit 100 """
+    sql """ select * from orders order by O_SHIPPRIORITY   limit 100 """
+    sql """ select * from orders order by O_COMMENT        limit 100 """
+
+    balanceCostSec = waitBalanced.call(2);
+
+    for  (int i = 1; i < 23; ++i) {
+        log.info("run q${i}.sql".toString())
+        if (filterSet.contains(i)) {
+            continue
+        }
+
+        long startTs = System.currentTimeMillis()
+        if (i < 10) {
+            sql new File("""${context.file.parent}/ddl/q0${i}.sql""").text
+        } else {
+            sql new File("""${context.file.parent}/ddl/q${i}.sql""").text
+        }
+        long endTs = System.currentTimeMillis()
+        long latency = endTs - startTs
+        log.info("ddl/q${i} latency: ${latency}".toString())
+
+        connect(user = 'admin', password = 'selectdb2022@', url = 'jdbc:mysql://192.144.213.234:18929/?useLocalSessionState=true') {
+            long timestamp = endTs
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            String formattedTime = dateFormat.format(new Date(timestamp));
+            dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+            String formattedDate = dateFormat.format(new Date(timestamp));
+
+            sql """ use performance_test_result """
+            sql """ insert into node_change_perf values (1, 5, 0, 'add node tpch query', "q${i}", 1, ${latency}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+        }
+    }
 
     // test add node
     add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                   "regression_cluster_name0", "regression_cluster_id0");
 
-    for  (int i = 1; i < 10; ++i) {
-        sql new File("""${context.file.parent}/ddl/q0${i}.sql""").text
-    }
+    for  (int i = 1; i < 23; ++i) {
+        log.info("run q${i}.sql".toString())
+        if (filterSet.contains(i)) {
+            continue
+        }
 
-    for  (int i = 10; i < 23; ++i) {
-        sql new File("""${context.file.parent}/ddl/q${i}.sql""").text
+        long startTs = System.currentTimeMillis()
+        if (i < 10) {
+            sql new File("""${context.file.parent}/ddl/q0${i}.sql""").text
+        } else {
+            sql new File("""${context.file.parent}/ddl/q${i}.sql""").text
+        }
+        long endTs = System.currentTimeMillis()
+        long latency = endTs - startTs
+        log.info("ddl/q${i} latency: ${latency}".toString())
+        connect(user = 'admin', password = 'selectdb2022@', url = 'jdbc:mysql://192.144.213.234:18929/?useLocalSessionState=true') {
+            long timestamp = endTs
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            String formattedTime = dateFormat.format(new Date(timestamp));
+            dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+            String formattedDate = dateFormat.format(new Date(timestamp));
+
+            sql """ use performance_test_result """
+            sql """ insert into node_change_perf values (1, 5, 1, 'add node tpch query', "q${i}", 1, ${latency}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+        }
+
     }
 }

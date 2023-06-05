@@ -21,12 +21,14 @@ import java.util.concurrent.Executors
 import groovy.util.concurrent.*
 import java.util.concurrent.*
 import java.util.concurrent.locks.ReentrantLock;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
-suite("decommission_query") {
-    def externalStageName = "decommission_query"
-    def prefix = "tpch/sf1"
-    def parallel = 50
-    def queryNum = 10000
+suite("add_node_query") {
+    def externalStageName = "add_node_query"
+    def prefix = "tpch/sf100"
+    def parallel = 10
+    def queryNum = 6000
 
     List<String> ipList = new ArrayList<>()
     List<String> hbPortList = new ArrayList<>()
@@ -162,6 +164,8 @@ suite("decommission_query") {
                 println("id " + id);
                 Random random = new Random()
                 def connRes = connect(user = 'root', password = '', url = context.config.jdbcUrl) {
+                    sql "use @regression_cluster_name0"
+
                     for (int queryIndex = 0; queryIndex < queryNumPerThread; queryIndex++) {
                         rand = random.nextInt(600000000)
 
@@ -206,26 +210,70 @@ suite("decommission_query") {
         totalMetric
     }
 
-    totalMetric = queryParallel.call(parallel, queryNum);
+    // warm up
+    queryParallel.call(parallel, queryNum);
     waitQueryFinish.call(parallel);
+
+    queryParallel.call(parallel, queryNum);
+    totalMetric = waitQueryFinish.call(parallel);
+    def firstTs = totalMetric.entrySet().iterator().next().getKey();
 
     for (e : totalMetric) {
         println("timestamp " + e.key + " qps " + e.value);
     }
 
+    def connRes = connect(user = 'admin', password = 'selectdb2022@', url = 'jdbc:mysql://192.144.213.234:18929/?useLocalSessionState=true') {
+        for (e : totalMetric) {
+            println("timestamp " + e.key + " qps " + e.value);
+            int qps = e.value
+            long timestamp = e.key * 1000
+
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            String formattedTime = dateFormat.format(new Date(timestamp));
+            dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+            String formattedDate = dateFormat.format(new Date(timestamp));
+
+            sql """ use performance_test_result """
+            sql """ insert into node_change_perf values (1, 1, 0, 'add node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+        }
+    }
+
     boolean isBalanced = checkBalance.call(2);
     println("isBalanced: " + isBalanced);
+
+    // test decommission
+    //sql """ admin set frontend config("preheating_enabled"="false"); """
 
     add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                   "regression_cluster_name0", "regression_cluster_id0");
 
-    totalMetric = queryParallel.call(parallel, queryNum);
+    queryParallel.call(parallel, queryNum);
 
     balanceCostSec = waitBalanced.call(3);
     log.info("balance Cost Sec: " + balanceCostSec);
 
-    waitQueryFinish.call(parallel);
-    for (e : totalMetric) {
+    dropTotalMetric = waitQueryFinish.call(parallel);
+    for (e : dropTotalMetric) {
         println("timestamp " + e.key + " qps " + e.value);
+    }
+
+    def dropFirstTs = dropTotalMetric.entrySet().iterator().next().getKey();
+    def diffSec = dropFirstTs - firstTs
+    println("firstTs " + firstTs + " dropFirstTs " + dropFirstTs + " diffSec " + diffSec);
+
+    def dropConnRes = connect(user = 'admin', password = 'selectdb2022@', url = 'jdbc:mysql://192.144.213.234:18929/?useLocalSessionState=true') {
+        for (e : dropTotalMetric) {
+            println("timestamp " + e.key + " qps " + e.value);
+            int qps = e.value
+            long timestamp = (e.key - diffSec) * 1000
+
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            String formattedTime = dateFormat.format(new Date(timestamp));
+            dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+            String formattedDate = dateFormat.format(new Date(timestamp));
+
+            sql """ use performance_test_result """
+            sql """ insert into node_change_perf values (1, 1, 1, 'add node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+        }
     }
 }

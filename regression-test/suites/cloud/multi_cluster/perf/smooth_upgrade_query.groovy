@@ -24,8 +24,8 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-suite("decommission_query") {
-    def externalStageName = "decommission_query"
+suite("smooth_upgrade_query") {
+    def externalStageName = "smooth_upgrade_query"
     def prefix = "tpch/sf100"
     def parallel = 10
     def queryNum = 6000
@@ -68,8 +68,6 @@ suite("decommission_query") {
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
     add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                  "regression_cluster_name0", "regression_cluster_id0");
-    add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                   "regression_cluster_name0", "regression_cluster_id0");
 
     sleep(16000)
@@ -212,6 +210,10 @@ suite("decommission_query") {
         totalMetric
     }
 
+    // warm up
+    queryParallel.call(parallel, queryNum);
+    waitQueryFinish.call(parallel);
+
     queryParallel.call(parallel, queryNum);
     totalMetric = waitQueryFinish.call(parallel);
     def firstTs = totalMetric.entrySet().iterator().next().getKey();
@@ -232,20 +234,22 @@ suite("decommission_query") {
             String formattedDate = dateFormat.format(new Date(timestamp));
 
             sql """ use performance_test_result """
-            sql """ insert into node_change_perf values (1, 3, 0, 'drop node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+            sql """ insert into node_change_perf values (1, 1, 0, 'add node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
         }
     }
 
-    boolean isBalanced = checkBalance.call(3);
+    boolean isBalanced = checkBalance.call(2);
     println("isBalanced: " + isBalanced);
 
-    // test decommission
-    //sql """ admin set frontend config("preheating_enabled"="false"); """
-    d_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
-                "regression_cluster_name0", "regression_cluster_id0");
+    // upgrade be
+    addNodeForSmoothUpgrade(beUniqueIdList[2], ipList[2], hbPortList[2],
+                  "regression_cluster_name0", "regression_cluster_id0");
+
+    d_node.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                  "regression_cluster_name0", "regression_cluster_id0");
 
     queryParallel.call(parallel, queryNum);
-
+    sleep(21000)
     balanceCostSec = waitBalanced.call(2);
     log.info("balance Cost Sec: " + balanceCostSec);
 
@@ -270,7 +274,7 @@ suite("decommission_query") {
             String formattedDate = dateFormat.format(new Date(timestamp));
 
             sql """ use performance_test_result """
-            sql """ insert into node_change_perf values (1, 3, 1, 'drop node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+            sql """ insert into node_change_perf values (1, 1, 1, 'add node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
         }
     }
 }

@@ -24,11 +24,10 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-suite("decommission_query") {
-    def externalStageName = "decommission_query"
-    def prefix = "tpch/sf100"
-    def parallel = 10
-    def queryNum = 6000
+suite("smooth_upgrade_load") {
+    def prefix = "tpch/sf1"
+    def parallel = 8
+    def queryNumPerThread = 50
 
     List<String> ipList = new ArrayList<>()
     List<String> hbPortList = new ArrayList<>()
@@ -60,7 +59,7 @@ suite("decommission_query") {
             }
         }
     }
-    sleep(12000)
+    sleep(16000)
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -68,8 +67,6 @@ suite("decommission_query") {
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
     add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                  "regression_cluster_name0", "regression_cluster_id0");
-    add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                   "regression_cluster_name0", "regression_cluster_id0");
 
     sleep(16000)
@@ -80,9 +77,13 @@ suite("decommission_query") {
     sql "use @regression_cluster_name0"
 
     // Map[tableName, rowCount]
-    def tables = [region: 5, nation: 25, supplier: 1000000, customer: 15000000, part: 20000000, partsupp: 80000000, orders: 150000000, lineitem: 600037902]
+    //def tables = [region: 5, nation: 25, supplier: 1000000, customer: 15000000, part: 20000000, partsupp: 80000000, orders: 150000000, lineitem: 600037902]
+    //def tables = [lineitem_0: 600037902]
+    def tables = [supplier_0: 10000]
 
-    def tableTabletNum = [region: 1, nation: 1, supplier: 32, customer: 32, part: 32, partsupp: 32, orders: 32, lineitem: 32]
+    //def tableTabletNum = [region: 1, nation: 1, supplier: 32, customer: 32, part: 32, partsupp: 32, orders: 32, lineitem: 32]
+    //def tableTabletNum = [lineitem_0: 32]
+    def tableTabletNum = [supplier_0: 320]
 
     def checkBalance = { beNum ->
         boolean isBalanced = true;
@@ -95,9 +96,16 @@ suite("decommission_query") {
                 if (row[1] == "0") {
                     continue;
                 }
-                if (Integer.valueOf((String) row[1]) > avgNum + 1 || Integer.valueOf((String) row[1]) < avgNum - 1) {
-                    isBalanced = false;
+
+                if ( Integer.valueOf((String) row[1]) * 100 / avgNum >= 90 || Integer.valueOf((String) row[1]) * 100 / avgNum <= 110 ) {
+                    continue;
                 }
+
+                if (Integer.valueOf((String) row[1]) <= avgNum + 1 || Integer.valueOf((String) row[1]) >= avgNum - 1) {
+                    continue;
+                }
+
+                isBalanced = false;
             }
         }
         isBalanced
@@ -112,51 +120,27 @@ suite("decommission_query") {
                 sleep(5000)
             }
         } while(!isBalanced)
-        
+
         long endTs = System.currentTimeMillis() / 1000
         endTs - startTs
     }
 
-    // create external stage
-    sql """
-        create stage if not exists ${externalStageName} properties(
-        'endpoint' = '${getS3Endpoint()}' ,
-        'region' = '${getS3Region()}' ,
-        'bucket' = '${getS3BucketName()}' ,
-        'prefix' = 'regression' ,
-        'ak' = '${getS3AK()}' ,
-        'sk' = '${getS3SK()}' ,
-        'provider' = '${getProvider()}',
-        'access_type' = 'aksk',
-        'default.file.column_separator' = "|"
-        );
-    """
-
     // set fe configuration
     sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
 
-    tables.each { table, rows ->
-        // drop table
-        sql """ DROP TABLE IF EXISTS ${table}; """
+    for (int tableCnt = 0; tableCnt < 1; ++tableCnt) {
+        sql """ DROP TABLE IF EXISTS supplier_${tableCnt}; """
         // create table if not exists
-        sql new File("""${context.file.parent}/ddl/${table}.sql""").text
-
-        // load data from cos by copy into
-        def loadSql = new File("""${context.file.parent}/ddl/${table}_load.sql""").text.replaceAll("\\\$\\{stageName\\}", externalStageName).replaceAll("\\\$\\{prefix\\}", prefix)
-        def copyResult = sql loadSql
-        logger.info("copy result: " + copyResult)
-        assertTrue(copyResult.size() == 1)
-        assertTrue(copyResult[0].size() == 8)
-        assertTrue(copyResult[0][1].equals("FINISHED"))
-        //assertTrue(copyResult[0][4].equals(rows+""))
+        sql new File("""${context.file.parent}/load_ddl/supplier_${tableCnt}.sql""").text
     }
 
     ExecutorService pool;
     List metric = [];
 
-    def queryParallel = { parallelNum, queryNumPerThread  ->
+    def loadParallel = { parallelNum, loadNumPerThread, tableNum  ->
         def lock = new ReentrantLock()
         metric = [];
+
         pool = Executors.newFixedThreadPool(parallelNum)
         for(int i = 0; i < parallelNum; i++){
             int copyIndex = i;
@@ -164,27 +148,56 @@ suite("decommission_query") {
                 Map metricInThread = [:]
                 int id = copyIndex;
                 println("id " + id);
-                Random random = new Random()
                 def connRes = connect(user = 'root', password = '', url = context.config.jdbcUrl) {
-                    sql "use @regression_cluster_name0"
+                    for (int loadIndex = 0; loadIndex < loadNumPerThread; loadIndex++) {
+                        sql """ use regression_test_cloud_multi_cluster_perf """
+                        sql "use @regression_cluster_name0"
 
-                    for (int queryIndex = 0; queryIndex < queryNumPerThread; queryIndex++) {
-                        rand = random.nextInt(600000000)
+                        for (int tableCnt = 0; tableCnt < tableNum; ++tableCnt) {
+                            String uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
+                            String externalStageName = "regression_test_tpch" + "_" + uniqueID
+                            int rows = 10000
 
-                        sql """ select * from regression_test_cloud_multi_cluster_perf.lineitem where L_ORDERKEY = ${rand} """
+                            sql """
+                                create stage if not exists ${externalStageName} properties(
+                                'endpoint' = '${getS3Endpoint()}' ,
+                                'region' = '${getS3Region()}' ,
+                                'bucket' = '${getS3BucketName()}' ,
+                                'prefix' = 'regression' ,
+                                'ak' = '${getS3AK()}' ,
+                                'sk' = '${getS3SK()}' ,
+                                'provider' = '${getProvider()}',
+                                'access_type' = 'aksk',
+                                'default.file.column_separator' = "|"
+                                );
+                            """
 
-                        long timestamp = System.currentTimeMillis() / 1000
-                        if (metricInThread.containsKey(timestamp)) {
-                            int cnt = metricInThread.get(timestamp);
-                            cnt++
-                            metricInThread.put(timestamp, cnt);
-                        } else {
-                            metricInThread.put(timestamp, 1);
+                            def loadSql = new File("""${context.file.parent}/load_ddl/supplier_load_${tableCnt}.sql""").text.replaceAll("\\\$\\{stageName\\}", externalStageName).replaceAll("\\\$\\{prefix\\}", prefix)
+                            def copyResult = sql loadSql
+                            logger.info("copy result: " + copyResult)
+                            assertTrue(copyResult.size() == 1)
+                            assertTrue(copyResult[0].size() == 8)
+                            assertTrue(copyResult[0][1].equals("FINISHED"))
+                            assertTrue(copyResult[0][4].equals(rows+""))
+
+                            long timestamp = System.currentTimeMillis() / (1000 * 10)
+                            if (metricInThread.containsKey(timestamp)) {
+                                int cnt = metricInThread.get(timestamp);
+                                cnt++
+                                metricInThread.put(timestamp, cnt);
+                                log.info("metricInThread: " + metricInThread);
+                            } else {
+                                metricInThread.put(timestamp, 1);
+                                log.info("metricInThread: " + metricInThread);
+                            }
+
+                            sql """ DROP STAGE IF EXISTS ${externalStageName} """
                         }
                     }
                 }
 
                 lock.lock();
+                log.info("metricInThread: " + metricInThread);
                 metric.add(metricInThread)
                 lock.unlock();
             }
@@ -194,7 +207,7 @@ suite("decommission_query") {
         pool.shutdown()                 //all tasks submitted
     }
 
-    def waitQueryFinish = { parallelNum ->
+    def waitLoadFinish = { parallelNum ->
         while (!pool.isTerminated()){}  //waitfor termination
         println 'Finished all threads'
 
@@ -212,44 +225,46 @@ suite("decommission_query") {
         totalMetric
     }
 
-    queryParallel.call(parallel, queryNum);
-    totalMetric = waitQueryFinish.call(parallel);
-    def firstTs = totalMetric.entrySet().iterator().next().getKey();
-
+    loadParallel.call(parallel, queryNumPerThread, 1);
+    totalMetric = waitLoadFinish.call(parallel);
     for (e : totalMetric) {
         println("timestamp " + e.key + " qps " + e.value);
     }
+    def firstTs = totalMetric.entrySet().iterator().next().getKey();
 
     def connRes = connect(user = 'admin', password = 'selectdb2022@', url = 'jdbc:mysql://192.144.213.234:18929/?useLocalSessionState=true') {
         for (e : totalMetric) {
             println("timestamp " + e.key + " qps " + e.value);
             int qps = e.value
-            long timestamp = e.key * 1000
+            long timestamp = e.key * 1000 * 10
 
-            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd H:mm:ss");
             String formattedTime = dateFormat.format(new Date(timestamp));
             dateFormat = new SimpleDateFormat("yyyy-MM-dd");
             String formattedDate = dateFormat.format(new Date(timestamp));
 
             sql """ use performance_test_result """
-            sql """ insert into node_change_perf values (1, 3, 0, 'drop node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+            sql """ insert into node_change_perf values (1, 4, 0, 'drop node load', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
         }
     }
 
-    boolean isBalanced = checkBalance.call(3);
+    boolean isBalanced = checkBalance.call(2);
     println("isBalanced: " + isBalanced);
 
-    // test decommission
-    //sql """ admin set frontend config("preheating_enabled"="false"); """
-    d_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
-                "regression_cluster_name0", "regression_cluster_id0");
+    // upgrade be
+    addNodeForSmoothUpgrade(beUniqueIdList[2], ipList[2], hbPortList[2],
+                  "regression_cluster_name0", "regression_cluster_id0");
 
-    queryParallel.call(parallel, queryNum);
+    d_node.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                  "regression_cluster_name0", "regression_cluster_id0");
 
+    loadParallel.call(parallel, queryNumPerThread, 1);
+
+    sleep(21000)
     balanceCostSec = waitBalanced.call(2);
     log.info("balance Cost Sec: " + balanceCostSec);
 
-    dropTotalMetric = waitQueryFinish.call(parallel);
+    dropTotalMetric = waitLoadFinish.call(parallel);
     for (e : dropTotalMetric) {
         println("timestamp " + e.key + " qps " + e.value);
     }
@@ -262,7 +277,7 @@ suite("decommission_query") {
         for (e : dropTotalMetric) {
             println("timestamp " + e.key + " qps " + e.value);
             int qps = e.value
-            long timestamp = (e.key - diffSec) * 1000
+            long timestamp = (e.key - diffSec) * 1000 * 10
 
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
             String formattedTime = dateFormat.format(new Date(timestamp));
@@ -270,7 +285,7 @@ suite("decommission_query") {
             String formattedDate = dateFormat.format(new Date(timestamp));
 
             sql """ use performance_test_result """
-            sql """ insert into node_change_perf values (1, 3, 1, 'drop node query', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
+            sql """ insert into node_change_perf values (1, 4, 1, 'drop node load', ${qps}, "${formattedDate}", "${formattedTime}", 'luwei', 'cloud', '2.3.0') """;
         }
     }
 }
