@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "bthread/bthread.h"
+#include "bthread/task_group.h"
 #include "common/status.h"
 #include "exprs/expr_context.h"
 #include "olap/tablet.h"
@@ -80,7 +82,26 @@ public:
 
     void update_wait_worker_timer() { _scanner_wait_worker_timer += _watch.elapsed_time(); }
 
-    void update_scan_cpu_timer() { _scan_cpu_timer += _cpu_watch.elapsed_time(); }
+    void update_scan_cpu_timer() {
+        if (bthread_self() == 0) {
+            _scan_cpu_timer += _cpu_watch.elapsed_time();
+            return;
+        }
+
+        // If in bthread, use the cputime in TaskMeta.
+        bthread::TaskMeta* const m = bthread::TaskGroup::address_meta(bthread_self());
+        if (m == nullptr) {
+            return;
+        }
+        const uint32_t given_ver = bthread::get_version(bthread_self());
+        {
+            std::lock_guard l(m->version_lock);
+            if (given_ver != *m->version_butex) {
+                return;
+            }
+            _scan_cpu_timer += m->stat.cputime_ns;
+        }
+    }
 
     RuntimeState* runtime_state() { return _state; }
 
