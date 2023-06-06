@@ -24,6 +24,8 @@
 #include <aws/s3/model/DeleteObjectsRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
+#include <aws/s3/model/ListObjectVersionsRequest.h>
+#include <aws/s3/model/GetBucketVersioningRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/transfer/TransferManager.h>
 #include <bvar/bvar.h>
@@ -42,6 +44,7 @@
 #include "gutil/strings/stringpiece.h"
 #include "olap/olap_common.h"
 #include "util/async_io.h"
+#include "util/network_util.h"
 #include "util/s3_util.h"
 #include "util/string_util.h"
 
@@ -333,8 +336,9 @@ Status S3FileSystem::exists(const Path& path, bool* res) const {
     } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
         *res = false;
     } else {
-        return Status::IOError("failed to get object head(endpoint={}, bucket={}, key={}): {}",
+        return Status::IOError("failed to get object head(endpoint={}, bucket={}, key={}): {} {}",
                                _s3_conf.endpoint, _s3_conf.bucket, key,
+                               static_cast<int>(outcome.GetError().GetResponseCode()),
                                outcome.GetError().GetMessage());
     }
     return Status::OK();
@@ -400,6 +404,129 @@ std::string S3FileSystem::generate_presigned_url(const Path& path, int64_t expir
     DCHECK(client != nullptr);
     return client->GeneratePresignedUrl(_s3_conf.bucket, key, Aws::Http::HttpMethod::HTTP_GET,
                                         expiration_secs);
+}
+
+// All exception logs start with "Versioning Err":
+Status S3FileSystem::check_bucket_versioning() const {
+    auto s3_client = get_client();
+    CHECK_S3_CLIENT(s3_client);
+
+    auto ip = BackendOptions::get_localhost();
+    if (ip.empty() || ip == "127.0.0.1") {
+        return Status::InternalError("Versioning Err: fail to get correct host ip, ip=" + ip); 
+    }
+    const std::string check_key = _s3_conf.prefix +  "/error_log/" + ip + "_check_versioning.txt";
+    const std::string check_value = "check bucket versioning";
+    const std::string bucket = _s3_conf.bucket;
+
+    auto log_with_s3_info = [&]() {
+        std::stringstream ss;
+        ss << " s3info: endpoint: " << _s3_conf.endpoint
+            << " bucket:" << _s3_conf.bucket
+            << " key: " << check_key;
+        return ss.str();
+    };
+
+    Aws::S3::Model::GetBucketVersioningRequest request;
+    request.SetBucket(bucket);
+    auto outcome = s3_client->GetBucketVersioning(request);
+
+    if (outcome.IsSuccess()) {
+        auto versioning_configuration = outcome.GetResult().GetStatus();
+        if (versioning_configuration == Aws::S3::Model::BucketVersioningStatus::Enabled) {
+            LOG(INFO) << "Bucket versioning is enabled";
+        } else {
+            return Status::InternalError("Versioning Err: Bucket versioning is not enabled" + log_with_s3_info());
+        }
+    } else {
+        return Status::InternalError("Versioning Err: Error get bucket versioning configuration: "
+                                        + outcome.GetError().GetMessage() + log_with_s3_info());
+    }
+
+    // Todo: cos does not support the ListObjectVersions yet
+    if (_s3_conf.provider == selectdb::ObjectStoreInfoPB::COS) {
+        return Status::OK();
+    }
+
+    // Test whether the versioning behavior is correct with the following process:
+    // put obj-> delete obj-> list&check obj version -> get obj with version & check content -> put obj again
+
+    // put obj
+    Aws::S3::Model::PutObjectRequest upload_request;
+    upload_request.WithBucket(bucket).WithKey(check_key);
+    auto input_data = Aws::MakeShared<Aws::StringStream>("PutObjectInputStream");
+    *input_data << check_value;
+    upload_request.SetBody(input_data);
+    auto upload_response = s3_client->PutObject(upload_request);
+    if (!upload_response.IsSuccess()) {
+        return Status::InternalError("Versioning Err: Error uploading check object : " 
+                                        + upload_response.GetError().GetMessage() + log_with_s3_info());
+    }
+    std::string check_version_id = upload_response.GetResult().GetVersionId();
+    VLOG_DEBUG << "put verison_id:" << upload_response.GetResult().GetVersionId();
+
+    // delete obj
+    Aws::S3::Model::DeleteObjectRequest delete_request;
+    delete_request.WithBucket(bucket).WithKey(check_key);
+    auto delete_response = s3_client->DeleteObject(delete_request);
+    if (!delete_response.IsSuccess()) {
+        return Status::InternalError("Versioning Err: Error deleting check object : " + delete_response.GetError().GetMessage() + log_with_s3_info());
+    } else {
+        VLOG_DEBUG << "delete version_id: " << delete_response.GetResult().GetVersionId();
+    }
+
+    // list&check version
+    Aws::S3::Model::ListObjectVersionsRequest list_request;
+    // get last two version
+    list_request.WithBucket(bucket).WithPrefix(check_key).WithMaxKeys(2);
+    auto list_response = s3_client->ListObjectVersions(list_request);
+    if (!list_response.IsSuccess()){
+        return Status::InternalError("Versioning Err: Error listing object versions: " + list_response.GetError().GetMessage() + log_with_s3_info());
+    } else {
+        const auto& object_version_list = list_response.GetResult().GetVersions();
+        bool hit_check_version_id = false;
+        for (const auto& object_version : object_version_list) {
+            VLOG_DEBUG << "object version_id: " << object_version.GetVersionId();
+            if (object_version.GetVersionId() == check_version_id) {
+                hit_check_version_id = true;
+            }
+        }
+        const auto& delete_marker_list = list_response.GetResult().GetDeleteMarkers();
+        for (const auto& delete_marker : delete_marker_list) {
+            VLOG_DEBUG << "object deleteMarker version_id: " << delete_marker.GetVersionId();
+        }
+        if (!hit_check_version_id) {
+            return Status::InternalError("Versioning Err: do not contain check version obj." + log_with_s3_info());
+        }
+    }
+
+    // get obj with version & check content
+    Aws::S3::Model::GetObjectRequest get_request;
+    get_request.WithBucket(bucket).WithKey(check_key).WithVersionId(check_version_id);
+    auto get_response = s3_client->GetObject(get_request);
+    if (!get_response.IsSuccess()) {
+        return Status::InternalError("Versioning Err: Error getting check object with version: " + get_response.GetError().GetMessage() + log_with_s3_info());
+    }
+
+    auto res_stream = std::stringstream{};
+    res_stream << get_response.GetResult().GetBody().rdbuf();
+    std::string res_string = res_stream.str();
+
+    if (res_string != check_value) {
+        return Status::InternalError("Versioning Err: check object value does not match original value." + log_with_s3_info());
+    }
+
+    // put obj again
+    Aws::S3::Model::PutObjectRequest reupload_request;
+    reupload_request.WithBucket(bucket).WithKey(check_key);
+    auto reupload_input_data = Aws::MakeShared<Aws::StringStream>("PutObjectInputStream");
+    *reupload_input_data << check_value;
+    reupload_request.SetBody(reupload_input_data);
+    auto reupload_response = s3_client->PutObject(reupload_request);
+    if (!reupload_response.IsSuccess()) {
+        return Status::InternalError("Versioning Err: Error re-uploading check object: " + reupload_response.GetError().GetMessage() + log_with_s3_info());
+    }
+    return Status::OK();
 }
 
 } // namespace io

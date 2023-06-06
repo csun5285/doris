@@ -82,6 +82,8 @@ public:
         return _client;
     };
 
+    Status check_bucket_versioning() const;
+
     std::shared_ptr<Aws::Transfer::TransferManager> get_transfer_manager();
 
     void reset_transfer_manager();

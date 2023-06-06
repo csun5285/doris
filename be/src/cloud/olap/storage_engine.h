@@ -267,6 +267,9 @@ private:
     // clean file descriptors cache
     void _fd_cache_clean_callback();
 
+    // Check bucket enable versioning
+    void _check_bucket_enable_versioning_callback();
+
     // path gc process function
     void _path_gc_thread_callback(DataDir* data_dir);
 
@@ -396,6 +399,7 @@ private:
     scoped_refptr<Thread> _vacuum_stale_rowsets_thread;
     scoped_refptr<Thread> _sync_tablets_thread;
     scoped_refptr<Thread> _lease_compaction_thread;
+    scoped_refptr<Thread> _check_bucket_enable_versioning_thread;
 
     // For tablet and disk-stat report
     std::mutex _report_mtx;

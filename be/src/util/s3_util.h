@@ -23,6 +23,7 @@
 #include <memory>
 #include <string>
 
+#include "gen_cpp/selectdb_cloud.pb.h"
 namespace Aws {
 namespace S3 {
 class S3Client;
@@ -51,6 +52,7 @@ struct S3Conf {
     int request_timeout_ms = -1;
     int connect_timeout_ms = -1;
     bool sse_enabled = false;
+    selectdb::ObjectStoreInfoPB::Provider provider;
 
     std::string to_string() const;
 };

@@ -358,6 +358,7 @@ Status CloudMetaMgr::get_s3_info(std::vector<std::tuple<std::string, S3Conf>>* s
         s3_conf.bucket = obj_store.bucket();
         s3_conf.prefix = obj_store.prefix();
         s3_conf.sse_enabled = obj_store.sse_enabled();
+        s3_conf.provider = obj_store.provider();
         s3_infos->emplace_back(obj_store.id(), std::move(s3_conf));
     }
     return Status::OK();

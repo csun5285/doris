@@ -195,6 +195,11 @@ Status StorageEngine::cloud_start_bg_threads() {
             [this]() { this->_fd_cache_clean_callback(); }, &_fd_cache_clean_thread));
     LOG(INFO) << "fd cache clean thread started";
 
+    RETURN_IF_ERROR(Thread::create(
+            "StorageEngine", "check_bucket_enable_versioning_thread",
+            [this]() { this->_check_bucket_enable_versioning_callback(); }, &_check_bucket_enable_versioning_thread));
+    LOG(INFO) << "check bucket enable versioning thread started";
+
     // compaction tasks producer thread
     ThreadPoolBuilder("BaseCompactionTaskThreadPool")
             .set_min_threads(config::max_base_compaction_threads)
@@ -299,6 +304,26 @@ void StorageEngine::_fd_cache_clean_callback() {
         }
 
         _start_clean_cache();
+    }
+}
+
+void StorageEngine::_check_bucket_enable_versioning_callback() {
+#ifdef GOOGLE_PROFILER
+    ProfilerRegisterThread();
+#endif
+
+    int32_t interval = config::refresh_s3_info_interval_seconds;
+    while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval))) {
+        if (latest_fs() == nullptr) {
+            LOG(WARNING) << "s3 fs is not ready";
+            continue;
+        }
+        auto s3_fs = std::reinterpret_pointer_cast<io::S3FileSystem>(latest_fs());
+        Status s = s3_fs->check_bucket_versioning();
+        if (!s.ok()) {
+            LOG(WARNING) << s.get_error_msg();
+        }
+        interval = config::check_enable_versioning_interval_seconds;
     }
 }
 

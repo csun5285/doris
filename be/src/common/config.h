@@ -991,6 +991,7 @@ CONF_mInt32(tablet_sync_interval_seconds, "1800");
 CONF_mInt32(schedule_sync_tablets_interval_seconds, "600");
 CONF_mInt32(compaction_timeout_seconds, "86400");
 CONF_mInt32(lease_compaction_interval_seconds, "20");
+CONF_mInt32(check_enable_versioning_interval_seconds, "3600"); // 1 hours
 CONF_mInt32(meta_service_rpc_retry_times, "200");
 // it must be larger than or equal to 5MB
 CONF_mInt32(s3_write_buffer_size, "5242880");
