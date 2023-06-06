@@ -61,6 +61,10 @@ public:
 
     const std::string& path() const override { return path_; }
 
+    const std::shared_ptr<Aws::S3::S3Client>& s3_client() const { return s3_client_; }
+
+    const S3Conf& conf() const { return conf_; }
+
     // returns 0 for success otherwise error
     int init() override;
 
@@ -87,6 +91,7 @@ public:
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
     int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override;
+
 private:
     std::string get_key(const std::string& relative_path) const;
     // return empty string if the input key does not start with the prefix of S3 conf

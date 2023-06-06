@@ -54,8 +54,12 @@ public:
     explicit InstanceChecker(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id);
     // Return 0 if success, otherwise error
     int init(const InstanceInfoPB& instance);
-    // Return 0 if success, otherwise error
+    // Return 0 if success, otherwise failed
     int do_check();
+    // Check whether the objects in the object store of the instance belong to the visible rowsets.
+    // This function is used to verify that there is no garbage data leakage, should only be called in recycler test.
+    // Return 0 if success, otherwise failed
+    int do_inverted_check();
     void stop() { stopped_.store(true, std::memory_order_release); }
     bool stopped() const { return stopped_.load(std::memory_order_acquire); }
 

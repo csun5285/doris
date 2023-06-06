@@ -59,6 +59,8 @@ CONF_Strings(recycle_whitelist, ""); // Comma seprated list
 CONF_Strings(recycle_blacklist, ""); // Comma seprated list
 CONF_mInt32(instance_recycler_worker_pool_size, "10");
 CONF_Bool(enable_checker, "false");
+// Currently only used for recycler test
+CONF_Bool(enable_inverted_check, "false");
 CONF_mInt32(check_object_interval_seconds, "259200"); // 72h
 
 CONF_String(test_s3_ak, "ak");
