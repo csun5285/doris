@@ -639,6 +639,19 @@ CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(
             << ", size: " << size
             << ".\nCurrent cache structure: " << dump_structure_unlocked(key, cache_lock);
 
+    // in async load mode, a cell may be added twice.
+    if (_lazy_open_done) {
+        DCHECK_EQ(_files[key].count(offset), 0)
+                << "Cache already exists for key: " << key.to_string() << ", offset: " << offset
+                << ", size: " << size
+                << ".\nCurrent cache structure: " << dump_structure_unlocked(key, cache_lock);
+    }
+
+    if (!_lazy_open_done && _files[key].count(offset) != 0) {
+        // in async load mode, if a cell added, just return
+        return &_files[key].at(offset);
+    }
+
     auto& offsets = _files[key];
     DCHECK((context.expiration_time == 0 && context.cache_type != CacheType::TTL) ||
            (context.cache_type == CacheType::TTL && context.expiration_time != 0));
