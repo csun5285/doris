@@ -7,6 +7,7 @@
 #include <random>
 #include <string>
 #include <system_error>
+#include <sys/statfs.h>
 #include <utility>
 
 #include "cloud/io/cloud_file_cache_fwd.h"
@@ -14,6 +15,8 @@
 #include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
+#include "common/logging.h"
+#include "common/sync_point.h"
 
 namespace doris {
 namespace io {
@@ -214,7 +217,7 @@ Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
     _is_initialized = true;
     _cache_background_thread = std::thread(&CloudFileCache::run_background_operation, this);
     LOG(INFO) << fmt::format(
-            "q file cache path={}, disposable queue size={} elements={}, index queue size={} "
+            "file cache path={}, disposable queue size={} elements={}, index queue size={} "
             "elements={}, query queue "
             "size={} elements={}",
             _cache_base_path, _disposable_queue.get_total_cache_size(cache_lock),
@@ -813,6 +816,12 @@ bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, si
                                  size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_lazy_open_done) {
         return try_reserve_for_lazy_load(size, cache_lock);
+    }
+
+    // use this strategy in scenarios where there is insufficient disk capacity or insufficient number of inodes remaining
+    // directly eliminate 5 times the size of the space
+    if (_disk_resource_limit_mode) {
+        size = 5 * size;
     }
 
     if (context.cache_type == CacheType::TTL) {
@@ -1456,10 +1465,62 @@ void CloudFileCache::change_cache_type(const Key& key, size_t offset, CacheType 
     }
 }
 
+// @brief: get a path's disk capacity percent, inode used percent
+// @param: path
+// @param: percent.first disk used percent, percent.second inode used percent
+int disk_used_percentage(const std::string& path, std::pair<int, int>* percent) {
+    struct statfs stat;
+    int ret = statfs(path.c_str(), &stat);
+    TEST_SYNC_POINT_CALLBACK("CloudFileCache::set_stat_ret", &ret);
+    TEST_SYNC_POINT_CALLBACK("CloudFileCache::set_stat", &stat);
+    if (ret != 0) {
+        return ret;
+    }
+    // https://github.com/coreutils/coreutils/blob/master/src/df.c#L1195
+    // v->used = stat.f_blocks - stat.f_bfree
+    // nonroot_total = stat.f_blocks - stat.f_bfree + stat.f_bavail
+    uintmax_t u100 = (stat.f_blocks - stat.f_bfree) * 100;
+    uintmax_t nonroot_total = stat.f_blocks - stat.f_bfree + stat.f_bavail;
+    int capacity_percentage = u100 / nonroot_total + (u100 % nonroot_total != 0);
+
+    unsigned long long inode_free = stat.f_ffree;
+    unsigned long long inode_total = stat.f_files;
+    int inode_percentage = (inode_free * 1.0 / inode_total) * 100;
+    percent->first = capacity_percentage;
+    percent->second = inode_percentage;
+    return 0;
+}
+
+void CloudFileCache::check_disk_resource_limit(const std::string& path) {
+    std::pair<int, int> percent;
+    int ret = disk_used_percentage(path, &percent);
+    if (ret != 0) {
+        LOG_ERROR("").tag("file cache path", path).tag("error", strerror(errno));
+        return;
+    }
+    auto [capacity_percentage, inode_percentage] = percent;
+    DCHECK(capacity_percentage >= 0 && capacity_percentage <= 100);
+    DCHECK(inode_percentage >= 0 && inode_percentage <= 100);
+    if (((100 - capacity_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent)
+        || ((100 - inode_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent)) {
+        _disk_resource_limit_mode = true;
+    } else if (_disk_resource_limit_mode
+            && ((100 - capacity_percentage) > config::file_cache_exit_disk_resource_limit_mode_percent)
+            && ((100 - inode_percentage) > config::file_cache_exit_disk_resource_limit_mode_percent)) {
+        _disk_resource_limit_mode = false;
+    }
+    LOG_INFO("file cache background thread").tag("remain space percent", 100 - capacity_percentage)
+        .tag("remain inode percent", 100 - inode_percentage)
+        .tag("mode", _disk_resource_limit_mode ? "run in resource limit" : "run in resource normal");
+}
+
 void CloudFileCache::run_background_operation() {
     int64_t interval_time_seconds = 20;
     while (!_close) {
+        TEST_SYNC_POINT_CALLBACK("CloudFileCache::set_sleep_time", &interval_time_seconds);
         std::this_thread::sleep_for(std::chrono::seconds(interval_time_seconds));
+        check_disk_resource_limit(_cache_base_path);
+
         // gc
         int64_t cur_time = UnixSeconds();
         std::lock_guard cache_lock(_mutex);

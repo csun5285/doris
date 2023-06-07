@@ -394,10 +394,14 @@ private:
 
     void run_background_operation();
 
+    void check_disk_resource_limit(const std::string& path);
+
     std::atomic_bool _close {false};
     std::thread _cache_background_thread;
     std::atomic_bool _lazy_open_done {false};
     std::thread _cache_background_load_thread;
+    // disk space or inode is less than the specified value
+    std::atomic_bool _disk_resource_limit_mode {false};
 
 public:
     /// Save a query context information, and adopt different cache policies

@@ -961,7 +961,10 @@ CONF_Int32(max_column_reader_prefetch_size, "0");
 CONF_mInt32(prefetch_single_buffer_size_mb, "4");
 
 // file cache
-
+// default enter disk resource limit mode 5%
+CONF_Int32(file_cache_enter_disk_resource_limit_mode_percent, "5");
+// default exit disk resource limit mode 20%
+CONF_Int32(file_cache_exit_disk_resource_limit_mode_percent, "20");
 CONF_Bool(enable_file_cache, "false");
 // format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","total_size":21474836480,"query_limit":10737418240}]
 CONF_String(file_cache_path, "");
