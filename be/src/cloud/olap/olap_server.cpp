@@ -321,7 +321,7 @@ void StorageEngine::_check_bucket_enable_versioning_callback() {
         auto s3_fs = std::reinterpret_pointer_cast<io::S3FileSystem>(latest_fs());
         Status s = s3_fs->check_bucket_versioning();
         if (!s.ok()) {
-            LOG(WARNING) << s.get_error_msg();
+            LOG(WARNING) << "failed to check bucket versioning. " << s;
         }
         interval = config::check_enable_versioning_interval_seconds;
     }
