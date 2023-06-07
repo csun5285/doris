@@ -105,8 +105,13 @@ std::string CloudFileCache::get_path_in_local_cache(const Key& key, int64_t expi
 
 std::string CloudFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time) const {
     auto key_str = key.to_string();
-    return std::filesystem::path(_cache_base_path) /
-           (key_str + "_" + std::to_string(expiration_time));
+    try {
+        return std::filesystem::path(_cache_base_path) /
+               (key_str + "_" + std::to_string(expiration_time));
+    } catch (std::filesystem::filesystem_error& e) {
+        LOG(WARNING) << "fail to get_path_in_local_cache=" << e.what();
+        return "";
+    }
 }
 
 CloudFileCache::QueryContextHolderPtr CloudFileCache::get_query_context_holder(
@@ -183,7 +188,8 @@ Status CloudFileCache::initialize() {
 
 Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_is_initialized) {
-        if (std::filesystem::exists(_cache_base_path)) {
+        std::error_code ec;
+        if (bool is_exist = std::filesystem::exists(_cache_base_path, ec);  is_exist && !ec) {
             _cache_background_load_thread = std::thread([&](){
                 _lazy_open_done = false;
                 Status st = load_cache_info_into_memory();
@@ -192,10 +198,14 @@ Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
                 }
                 _lazy_open_done = true;
             });
+        } else if (ec) [[unlikely]] {
+            LOG(WARNING) << "fail to dir exists=" << std::strerror(ec.value());
+            return Status::IOError("filesystem exists {}: {}", _cache_base_path,
+                                   std::strerror(ec.value()));
         } else {
-            std::error_code ec;
             std::filesystem::create_directories(_cache_base_path, ec);
             if (ec) {
+                LOG(WARNING) << "fail to create_directories=" << std::strerror(ec.value());
                 return Status::IOError("cannot create {}: {}", _cache_base_path,
                                        std::strerror(ec.value()));
             }
@@ -233,10 +243,11 @@ Status CloudFileCache::reinitialize() {
 void CloudFileCache::use_cell(const FileSegmentCell& cell, FileSegments& result,
                               bool move_iter_flag, std::lock_guard<doris::Mutex>& cache_lock) {
     auto file_segment = cell.file_segment;
+    std::error_code ec;
     DCHECK(!(file_segment->is_downloaded() &&
              std::filesystem::file_size(
                      get_path_in_local_cache(file_segment->key(), file_segment->expiration_time(),
-                                             file_segment->offset(), cell.cache_type)) == 0))
+                                             file_segment->offset(), cell.cache_type), ec) == 0) && !ec)
             << "Cannot have zero size downloaded file segments. Current file segment: "
             << file_segment->range().to_string();
 
@@ -285,16 +296,26 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
         }
         // async load, can't find key, need to check exist.
         auto key_path = get_path_in_local_cache(key, context.expiration_time);
-        if (!std::filesystem::exists(key_path)) {
+        std::error_code ec;
+        if (bool is_exist = std::filesystem::exists(key_path, ec); !is_exist && !ec) {
             // cache miss
             return {};
+        } else if (ec) [[unlikely]] {
+            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path << " error=" << ec.message();
+            return {};
         }
+
         CacheContext context_original;
         context_original.query_id = TUniqueId();
         context_original.expiration_time = context.expiration_time;
 
         // load key into mem
-        std::filesystem::directory_iterator check_it {key_path};
+        std::error_code dec;
+        std::filesystem::directory_iterator check_it (key_path, dec);
+        if (dec) [[unlikely]] {
+            LOG(ERROR) << "fail to directory_iterator=" << std::strerror(dec.value());
+            return {};
+        }
         for (; check_it != std::filesystem::directory_iterator(); ++check_it) {
             uint64_t offset = 0;
             auto offset_with_suffix = check_it->path().filename().native();
@@ -312,7 +333,7 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
                         std::error_code ec;
                         std::filesystem::remove(check_it->path(), ec);
                         if (ec) [[unlikely]] {
-                            LOG(WARNING) << "remove err=" << Status::IOError(ec.message());
+                            LOG(WARNING) << "filesystem error, failed to remove file, file=" << check_it->path() << " error=" << ec.message();
                         }
                         continue;
                     } else {
@@ -333,7 +354,7 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
                 std::error_code ec;
                 std::filesystem::remove(check_it->path(), ec);
                 if (ec) [[unlikely]] {
-                    LOG(WARNING) << "remove err=" << Status::IOError(ec.message());
+                    LOG(WARNING) << "filesystem error, failed to remove file, file=" << check_it->path() << " error=" << ec.message();
                 }
                 continue;
             }
@@ -367,12 +388,14 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
         }
         /// Note: it is guaranteed that there is no concurrency with files deletion,
         /// because cache files are deleted only inside CloudFileCache and under cache lock.
-        if (std::filesystem::exists(key_path)) {
-            std::error_code ec;
+        std::error_code ec;
+        if (bool is_exist = std::filesystem::exists(key_path, ec); is_exist && !ec) {
             std::filesystem::remove_all(key_path, ec);
-            if (ec) {
-                LOG(ERROR) << ec.message();
+            if (ec) [[unlikely]] {
+                LOG(WARNING) << "filesystem error, failed to remove_all file, file=" << key_path << " error=" << ec.message();
             }
+        } else if (ec) [[unlikely]] {
+            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path << " error=" << ec.message();
         }
 
         return {};
@@ -406,7 +429,9 @@ FileSegments CloudFileCache::get_impl(const Key& key, const CacheContext& contex
         std::filesystem::rename(get_path_in_local_cache(key, iter->second),
                                 get_path_in_local_cache(key, context.expiration_time), ec);
         if (ec) [[unlikely]] {
-            LOG(ERROR) << ec.message();
+            LOG(WARNING) << "filesystem error, failed to rename file, from file="
+                         << get_path_in_local_cache(key, iter->second) << " to file="
+                         << get_path_in_local_cache(key, context.expiration_time) << " error=" << ec.message();
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
@@ -619,14 +644,18 @@ CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(
            (context.cache_type == CacheType::TTL && context.expiration_time != 0));
     if (offsets.empty()) {
         auto key_path = get_path_in_local_cache(key, context.expiration_time);
-        if (!std::filesystem::exists(key_path)) {
-            std::error_code ec;
+        std::error_code ec;
+        if (bool is_exist = std::filesystem::exists(key_path, ec); !is_exist || !ec) {
             std::filesystem::create_directories(key_path, ec);
-            if (ec) {
-                LOG(ERROR) << fmt::format("cannot create {}: {}", key_path,
+            if (ec) [[unlikely]] {
+                LOG(WARNING) << fmt::format("cannot create {}: {}", key_path,
                                           std::strerror(ec.value()));
                 state = FileSegment::State::SKIP_CACHE;
             }
+        } else if (ec) [[unlikely]] {
+            LOG(WARNING) << fmt::format("cannot exists {}: {}", key_path,
+                                      std::strerror(ec.value()));
+            state = FileSegment::State::SKIP_CACHE;
         }
     }
     FileSegmentCell cell(std::make_shared<FileSegment>(offset, size, key, this, state,
@@ -1143,17 +1172,18 @@ void CloudFileCache::remove(FileSegmentSPtr file_segment, std::lock_guard<doris:
 
     auto cache_file_path = get_path_in_local_cache(key, expiration_time, offset, type,
                                                    state == FileSegment::State::EMPTY);
-    if (std::filesystem::exists(cache_file_path)) {
-        std::error_code ec;
+    std::error_code ec;
+    if (bool is_exist = std::filesystem::exists(cache_file_path, ec); is_exist && !ec) {
         std::filesystem::remove(cache_file_path, ec);
         if (ec) {
-            LOG(ERROR) << ec.message();
+            LOG(WARNING) << "filesystem error, failed to remove file, file=" << cache_file_path << " error=" << ec.message();
         }
+    } else if (ec) {
+        LOG(WARNING) << "filesystem error, failed to exists file, file=" << cache_file_path << " error=" << ec.message();
     }
     if (offsets.empty()) {
         auto key_path = get_path_in_local_cache(key, expiration_time);
         _files.erase(key);
-        std::error_code ec;
         std::filesystem::remove_all(key_path, ec);
         if (ec) {
             LOG(ERROR) << ec.message();
@@ -1167,7 +1197,12 @@ Status CloudFileCache::load_cache_info_into_memory() {
     size_t size = 0;
 
     // upgrade the cache
-    std::filesystem::directory_iterator upgrade_key_it {_cache_base_path};
+    std::error_code dec;
+    std::filesystem::directory_iterator upgrade_key_it (_cache_base_path, dec);
+    if (dec) [[unlikely]] {
+        LOG(WARNING) << dec.message();
+        return Status::IOError(dec.message());
+    }
     for (; upgrade_key_it != std::filesystem::directory_iterator(); ++upgrade_key_it) {
         if (upgrade_key_it->path().filename().native().find('_') == std::string::npos) {
             std::error_code ec;
@@ -1184,7 +1219,11 @@ Status CloudFileCache::load_cache_info_into_memory() {
 
     std::vector<std::string> need_to_check_if_empty_dir;
     /// cache_base_path / key / offset
-    std::filesystem::directory_iterator key_it {_cache_base_path};
+    std::filesystem::directory_iterator key_it (_cache_base_path, dec);
+    if (dec) [[unlikely]] {
+        LOG(ERROR) << dec.message();
+        return Status::IOError(dec.message());
+    }
     auto add_cell_batch_func = [&]() {
         std::lock_guard cache_lock(_mutex);
         std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args){
@@ -1201,7 +1240,12 @@ Status CloudFileCache::load_cache_info_into_memory() {
         key_str = key_with_suffix.substr(0, delim_pos);
         expiration_time_str = key_with_suffix.substr(delim_pos + 1);
         key = Key(vectorized::unhex_uint<uint128_t>(key_str.c_str()));
-        std::filesystem::directory_iterator offset_it {key_it->path()};
+        std::error_code ec;
+        std::filesystem::directory_iterator offset_it (key_it->path(), ec);
+        if (ec) [[unlikely]] {
+            LOG(WARNING) << "filesystem error, failed to remove file, file=" << key_it->path() << " error=" << ec.message();
+            continue;
+        }
         CacheContext context;
         context.query_id = TUniqueId();
         context.expiration_time = std::stol(expiration_time_str);
@@ -1447,7 +1491,9 @@ void CloudFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
         std::filesystem::rename(get_path_in_local_cache(key, iter->second),
                                 get_path_in_local_cache(key, new_expiration_time), ec);
         if (ec) [[unlikely]] {
-            LOG(ERROR) << ec.message();
+            LOG(WARNING) << "filesystem error, failed to rename file, from file="
+                         << get_path_in_local_cache(key, iter->second) << " to file="
+                         << get_path_in_local_cache(key, new_expiration_time) << " error=" << ec.message();
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
