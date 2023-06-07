@@ -33,11 +33,12 @@ namespace io {
  * 0. check if the inner memory buffer is empty or not
  * 1. relcaim the memory buffer if it's mot empty
  */
-void FileBuffer::on_finish() const {
+void FileBuffer::on_finish() {
     if (_buffer.empty()) {
         return;
     }
     S3FileBufferPool::GetInstance()->reclaim(Slice {_buffer.get_data(), _capacity});
+    _buffer.clear();
 }
 
 /**

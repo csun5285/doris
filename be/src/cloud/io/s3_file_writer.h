@@ -86,6 +86,8 @@ private:
 
     FileSegmentsHolderPtr _allocate_file_segments(size_t offset);
 
+    void _wait_until_finish(std::string task_name);
+
     Path _path;
     std::shared_ptr<S3FileSystem> _fs;
 

@@ -70,6 +70,16 @@ S3FileWriter::~S3FileWriter() {
         abort();
     }
     s3_file_being_written << -1;
+    _wait_until_finish("dtor");
+}
+
+void S3FileWriter::_wait_until_finish(std::string task_name) {
+    auto msg =
+            fmt::format("{} multipart upload already takes 5 min, bucket={}, key={}, upload_id={}",
+                        std::move(task_name), _bucket, _path.native(), _upload_id);
+    while (!_wait.wait(300)) {
+        LOG(WARNING) << msg;
+    }
 }
 
 Status S3FileWriter::open() {
@@ -102,9 +112,13 @@ Status S3FileWriter::abort() {
     if (_closed || !_opened) {
         return Status::OK();
     }
+    if (_pending_buf != nullptr) {
+        _pending_buf->on_finish();
+        _pending_buf = nullptr;
+    }
     VLOG_DEBUG << "S3FileWriter::abort, path: " << _path.native();
     _closed = true;
-    _wait.wait();
+    _wait_until_finish("early quit");
     AbortMultipartUploadRequest request;
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
     auto outcome = _client->AbortMultipartUpload(request);
@@ -126,6 +140,11 @@ Status S3FileWriter::close(bool /*sync*/) {
     }
     VLOG_DEBUG << "S3FileWriter::close, path: " << _path.native();
     _closed = true;
+    if (_pending_buf != nullptr) {
+        _wait.add();
+        _pending_buf->submit();
+        _pending_buf = nullptr;
+    }
     RETURN_IF_ERROR(_complete());
 
     return Status::OK();
@@ -248,14 +267,13 @@ FileSegmentsHolderPtr S3FileWriter::_allocate_file_segments(size_t offset) {
 
 Status S3FileWriter::_complete() {
     if (_failed) {
+        _wait_until_finish("early quit");
         return _st;
     }
     CompleteMultipartUploadRequest complete_request;
     complete_request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
 
-    while (!_wait.wait()) {
-        LOG_WARNING("The upload {} {} {} takes a long time", _bucket, _key, _path.native());
-    }
+    _wait_until_finish("Complete");
     // make sure _completed_parts are ascending order
     std::sort(_completed_parts.begin(), _completed_parts.end(),
               [](auto& p1, auto& p2) { return p1->GetPartNumber() < p2->GetPartNumber(); });

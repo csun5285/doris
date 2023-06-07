@@ -45,10 +45,15 @@ struct OperationState {
     *
     * @param S the execution result
     */
-    void set_val(Status s = Status::OK()) const {
+    void set_val(Status s = Status::OK()) {
+        // make sure we wouldn't sync twice
+        if (_value_set) [[unlikely]] {
+            return;
+        }
         if (nullptr != _sync_after_complete_task) {
             _sync_after_complete_task(s);
         }
+        _value_set = true;
     }
 
     /**
@@ -63,12 +68,13 @@ struct OperationState {
 
     std::function<void(Status)> _sync_after_complete_task;
     std::function<bool()> _is_done;
+    bool _value_set = false;
 };
 
 struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     FileBuffer(std::function<FileSegmentsHolderPtr()> alloc_holder, size_t offset,
                OperationState state, bool reserve = false);
-    virtual ~FileBuffer() = default;
+    virtual ~FileBuffer() { on_finish(); }
     /**
     * submit the correspoding task to async executor
     */
@@ -82,7 +88,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     /**
     * call the reclaim callback when task is done 
     */
-    void on_finish() const;
+    void on_finish();
     /**
     * swap memory buffer
     *
@@ -94,7 +100,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     *
     * @param S the execution result
     */
-    void set_val(Status s) const { _state.set_val(s); }
+    void set_val(Status s) { _state.set_val(s); }
     /**
     * get the start offset of this file buffer
     *
@@ -326,7 +332,6 @@ public:
     */
     void reclaim(Slice buf) {
         std::unique_lock<std::mutex> lck {_lock};
-        // _free_buffers.emplace_front(std::move(buf));
         _free_raw_buffers.emplace_back(buf);
         // only works when not set file cache
         _cv.notify_all();
