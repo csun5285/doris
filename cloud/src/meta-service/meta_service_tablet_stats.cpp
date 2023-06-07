@@ -30,7 +30,7 @@ void internal_get_tablet_stats(MetaServiceCode& code, std::string& msg, int& ret
     }
     auto [k, v] = it->next();
     // First key MUST be tablet stats key
-    DCHECK(k == begin_key);
+    DCHECK(k == begin_key) << hex(k) << " vs " << hex(begin_key);
     if (!stats.ParseFromArray(v.data(), v.size())) {
         code = MetaServiceCode::PROTOBUF_PARSE_ERR;
         msg = fmt::format("marformed tablet stats value, key={}", hex(k));

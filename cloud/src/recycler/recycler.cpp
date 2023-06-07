@@ -701,7 +701,7 @@ int InstanceRecycler::recycle_versions() {
         DCHECK_EQ(out.size(), 6) << k;
         auto table_id = std::get<int64_t>(std::get<0>(out[4]));
         if (table_id == last_scanned_table_id) { // Already handle kvs of this table
-            num_recycled += is_recycled; // Version kv of this table has been recycled
+            num_recycled += is_recycled;         // Version kv of this table has been recycled
             return 0;
         }
         last_scanned_table_id = table_id;
@@ -853,7 +853,10 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
         return -1;
     }
     txn->remove(stats_key_begin, stats_key_end);
+    LOG(WARNING) << "remove stats kv, begin=" << hex(stats_key_begin)
+                 << " end=" << hex(stats_key_end);
     txn->remove(job_key_begin, job_key_end);
+    LOG(WARNING) << "remove job kv, begin=" << hex(job_key_begin) << " end=" << hex(job_key_end);
     std::string schema_key_begin, schema_key_end;
     if (partition_id <= 0) {
         // Delete schema kv of this index
