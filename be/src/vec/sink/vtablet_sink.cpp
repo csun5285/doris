@@ -17,6 +17,10 @@
 
 #include "vec/sink/vtablet_sink.h"
 
+#include <numeric>
+
+#include "cloud/utils.h"
+#include "olap/tablet.h"
 #include "runtime/thread_context.h"
 #include "util/brpc_client_cache.h"
 #include "util/debug/sanitizer_scopes.h"
@@ -125,6 +129,7 @@ Status VNodeChannel::open_wait() {
             // and notice that _index_channel may already be destroyed.
             return;
         }
+        _refresh_load_wait_time(result.tablet_load_rowset_num_infos());
         Status status(result.status());
         if (status.ok()) {
             // if has error tablet, handle them first
@@ -246,6 +251,14 @@ int VNodeChannel::try_send_and_fetch_status(RuntimeState* state,
     auto st = none_of({_cancelled, _send_finished});
     if (!st.ok()) {
         return 0;
+    }
+
+    auto load_pressure_wait_time = _load_pressure_wait_time.load();
+    if (UNLIKELY(load_pressure_wait_time > 0)) {
+        VLOG_DEBUG << "try to sleep due to high load pressure for " << load_pressure_wait_time;
+        std::this_thread::sleep_for(std::chrono::milliseconds(load_pressure_wait_time));
+        _load_pressure_block_ns.fetch_add(load_pressure_wait_time);
+        _load_pressure_wait_time = 0;
     }
 
     if (!_add_block_closure->try_set_in_flight()) {

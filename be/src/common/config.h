@@ -1040,6 +1040,8 @@ CONF_mBool(enable_injection_point, "false");
 CONF_Bool(enable_limit_optimize, "true");
 CONF_Bool(enable_scanner_early_cancel, "true");
 
+// the max sleep time when meeting high pressure load task
+CONF_mInt64(max_load_pressure_wait_time_ms, "3000");
 } // namespace config
 
 } // namespace doris

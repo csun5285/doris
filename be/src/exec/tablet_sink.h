@@ -223,7 +223,7 @@ public:
                      int64_t* serialize_batch_ns, int64_t* mem_exceeded_block_ns,
                      int64_t* queue_push_lock_ns, int64_t* actual_consume_ns,
                      int64_t* total_add_batch_exec_time_ns, int64_t* add_batch_exec_time_ns,
-                     int64_t* total_add_batch_num) {
+                     int64_t* total_add_batch_num, int64_t* load_pressure_time_ns) {
         (*add_batch_counter_map)[_node_id] += _add_batch_counter;
         (*add_batch_counter_map)[_node_id].close_wait_time_ms = _close_time_ms;
         *serialize_batch_ns += _serialize_batch_ns;
@@ -233,6 +233,7 @@ public:
         *add_batch_exec_time_ns = (_add_batch_counter.add_batch_execution_time_us * 1000);
         *total_add_batch_exec_time_ns += *add_batch_exec_time_ns;
         *total_add_batch_num += _add_batch_counter.add_batch_num;
+        *load_pressure_time_ns += _load_pressure_block_ns;
     }
 
     int64_t node_id() const { return _node_id; }
@@ -256,6 +257,9 @@ protected:
     void _cancel_with_msg(const std::string& msg);
 
     virtual void _close_check();
+
+    void _refresh_load_wait_time(
+            const ::google::protobuf::RepeatedPtrField<::doris::PTabletLoadRowsetInfo>& response);
 
 protected:
     bool _is_vectorized = false;
@@ -313,6 +317,7 @@ protected:
     std::atomic<int64_t> _mem_exceeded_block_ns {0};
     std::atomic<int64_t> _queue_push_lock_ns {0};
     std::atomic<int64_t> _actual_consume_ns {0};
+    std::atomic<int64_t> _load_pressure_block_ns {0};
 
     // lock to protect _is_closed.
     // The methods in the IndexChannel are called back in the RpcClosure in the NodeChannel.
@@ -333,6 +338,7 @@ protected:
     friend class OlapTableSink;
     int64_t _build_rowset_latency_ms = 0;
     int64_t _commit_rowset_latency_ms = 0;
+    std::atomic<int64_t> _load_pressure_wait_time = 0;
 
 private:
     std::unique_ptr<RowBatch> _cur_batch;
@@ -562,6 +568,7 @@ protected:
     RuntimeProfile::Counter* _max_add_batch_exec_timer = nullptr;
     RuntimeProfile::Counter* _add_batch_number = nullptr;
     RuntimeProfile::Counter* _num_node_channels = nullptr;
+    RuntimeProfile::Counter* _wait_load_pressure_timer = nullptr;
 
     // load mem limit is for remote load channel
     int64_t _load_mem_limit = -1;

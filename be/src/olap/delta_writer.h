@@ -125,6 +125,9 @@ public:
     int64_t total_data_size() const { return _rowset_writer->total_data_size(); }
     int64_t total_received_rows() const { return _total_received_rows; }
 
+    void set_tablet_load_rowset_num_info(
+            google::protobuf::RepeatedPtrField<PTabletLoadRowsetInfo>* tablet_info);
+
 private:
     DeltaWriter(WriteRequest* req, StorageEngine* storage_engine, const UniqueId& load_id,
                 bool is_vec);

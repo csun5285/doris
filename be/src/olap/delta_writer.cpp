@@ -144,7 +144,10 @@ Status DeltaWriter::init() {
 
 #ifdef CLOUD_MODE
     auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
-    if (version_cnt > config::max_tablet_version_num - 100) {
+    // to cooperate with load backoff algorithm,  we try to make sure submit one
+    // compaction task to reduce the load pressure each time we meet high load
+    // pressure condition
+    if (version_cnt > config::max_tablet_version_num / 2) {
         // trigger compaction early to reduce -235
         StorageEngine::instance()->submit_compaction_task(_tablet,
                                                           CompactionType::CUMULATIVE_COMPACTION);
@@ -605,6 +608,16 @@ int64_t DeltaWriter::mem_consumption() {
 
 int64_t DeltaWriter::partition_id() const {
     return _req.partition_id;
+}
+
+void DeltaWriter::set_tablet_load_rowset_num_info(
+        google::protobuf::RepeatedPtrField<PTabletLoadRowsetInfo>* tablet_infos) {
+    if (auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0) + +_mem_table_num.load();
+        UNLIKELY(version_cnt > (config::max_tablet_version_num / 2))) {
+        auto load_info = tablet_infos->Add();
+        load_info->set_current_rowset_nums(_tablet->fetch_add_approximate_num_rowsets(0));
+        load_info->set_max_config_rowset_nums(config::max_tablet_version_num);
+    }
 }
 
 void DeltaWriter::_build_current_tablet_schema(int64_t index_id,

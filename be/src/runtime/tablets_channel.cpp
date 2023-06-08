@@ -61,7 +61,8 @@ TabletsChannel::~TabletsChannel() {
     delete _schema;
 }
 
-Status TabletsChannel::open(const PTabletWriterOpenRequest& request) {
+Status TabletsChannel::open(const PTabletWriterOpenRequest& request,
+                            PTabletWriterOpenResult* response) {
     std::lock_guard l(_lock);
     if (_state == kOpened) {
         // Normal case, already open by other sender
@@ -81,7 +82,7 @@ Status TabletsChannel::open(const PTabletWriterOpenRequest& request) {
     _closed_senders.Reset(_num_remaining_senders);
 
     if (!config::enable_lazy_open_partition) {
-        RETURN_IF_ERROR(_open_all_writers(request));
+        RETURN_IF_ERROR(_open_all_writers(request, response));
     } else {
         _build_partition_tablets_relation(request);
     }
@@ -489,7 +490,8 @@ void TabletsChannel::reduce_mem_usage() {
 }
 
 // Old logic,used for opening all writers of all partitions.
-Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request) {
+Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request,
+                                         PTabletWriterOpenResult* response) {
     std::vector<SlotDescriptor*>* index_slots = nullptr;
     int32_t schema_hash = 0;
     for (auto& index : _schema->indexes()) {
@@ -502,6 +504,7 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
     if (index_slots == nullptr) {
         return Status::InternalError("unknown index id, key={}", _key.to_string());
     }
+    auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
     for (auto& tablet : request.tablets()) {
         WriteRequest wrequest;
         wrequest.index_id = request.index_id();
@@ -531,6 +534,17 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
         {
             std::lock_guard<SpinLock> l(_tablet_writers_lock);
             _tablet_writers.emplace(tablet.tablet_id(), writer);
+        }
+        TabletSharedPtr tabletsptr = nullptr;
+        cloud::tablet_mgr()->get_tablet(tablet.tablet_id(), &tabletsptr);
+        if (tabletsptr == nullptr) [[unlikely]] {
+            continue;
+        }
+        if (auto version_cnt = tabletsptr->fetch_add_approximate_num_rowsets(0);
+            UNLIKELY(version_cnt > (config::max_tablet_version_num / 2))) {
+            auto load_info = tablet_load_infos->Add();
+            load_info->set_current_rowset_nums(version_cnt);
+            load_info->set_max_config_rowset_nums(config::max_tablet_version_num);
         }
     }
     // In CLOUD_MODE, init DeltaWriter will issue RPC, so it's necessary to init writers by batch.
@@ -773,6 +787,7 @@ Status TabletsChannel::add_batch(const TabletWriterAddRequest& request,
         }
     }
 
+    auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
     for (auto& [tablet_id, rowidxs] : tablet_to_rowidxs) {
         DeltaWriter* tablet_writer = nullptr;
         {
@@ -797,6 +812,7 @@ Status TabletsChannel::add_batch(const TabletWriterAddRequest& request,
             // continue write to other tablet.
             // the error will return back to sender.
         }
+        tablet_writer->set_tablet_load_rowset_num_info(tablet_load_infos);
     }
 
     {

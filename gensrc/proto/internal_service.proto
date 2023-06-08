@@ -59,6 +59,11 @@ message PTabletWithPartition {
     required int64 tablet_id = 2;
 }
 
+message PTabletLoadRowsetInfo {
+    required int32 current_rowset_nums = 1;
+    required int32 max_config_rowset_nums = 2;
+}
+
 message PTabletInfo {
     required int64 tablet_id = 1;
     required int32 schema_hash = 2;
@@ -89,6 +94,7 @@ message PTabletWriterOpenRequest {
 
 message PTabletWriterOpenResult {
     required PStatus status = 1;
+    repeated PTabletLoadRowsetInfo tablet_load_rowset_num_infos = 2;
 };
 
 message OpenPartitionRequest{
@@ -185,6 +191,8 @@ message PTabletWriterAddBatchResult {
     //optional int64 DEPRECATED_avg_build_rowset_cost_ms = 11;
     //optional int64 DEPRECATED_upload_speed_bytes_s = 12;
     optional int64 commit_rowset_latency_ms = 13;
+    // Used to indicate if the corresponding tablet is under high load pressure
+    repeated PTabletLoadRowsetInfo tablet_load_rowset_num_infos = 14;
 };
 
 message PTabletWriterAddBlockResult {
@@ -201,6 +209,8 @@ message PTabletWriterAddBlockResult {
     //optional int64 DEPRECATED_avg_build_rowset_cost_ms = 11;
     //optional int64 DEPRECATED_upload_speed_bytes_s = 12;
     optional int64 commit_rowset_latency_ms = 13;
+    // Used to indicate if the corresponding tablet is under high load pressure
+    repeated PTabletLoadRowsetInfo tablet_load_rowset_num_infos = 14;
 };
 
 // tablet writer cancel

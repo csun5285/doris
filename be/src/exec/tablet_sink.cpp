@@ -18,6 +18,7 @@
 #include "exec/tablet_sink.h"
 
 #include <fmt/format.h>
+#include <gen_cpp/internal_service.pb.h>
 
 #include <chrono>
 #include <sstream>
@@ -228,6 +229,38 @@ void NodeChannel::_cancel_with_msg(const std::string& msg) {
     _cancelled = true;
 }
 
+void NodeChannel::_refresh_load_wait_time(
+        const ::google::protobuf::RepeatedPtrField<::doris::PTabletLoadRowsetInfo>&
+                tablet_load_infos) {
+    int64_t max_rowset_num_gap = 0;
+    // if any one tablet is under high load pressure, we would make the whole procedure
+    // sleep to prevent the corresponding BE return -235
+    std::for_each(tablet_load_infos.begin(), tablet_load_infos.end(),
+                  [&max_rowset_num_gap](auto& load_info) {
+                      int64_t cur_rowset_num = load_info.current_rowset_nums();
+                      int64_t high_load_point = load_info.max_config_rowset_nums() / 2;
+                      DCHECK(cur_rowset_num > high_load_point);
+                      max_rowset_num_gap =
+                              std::max(max_rowset_num_gap, cur_rowset_num - high_load_point);
+                  });
+    // to slow down the high load pressure
+    // we would use the rowset num gap to calculate one sleep time
+    // for example:
+    // if the max tablet version is 2000, there are 3 BE
+    // A: ====================  1800
+    // B: ================      1400
+    // C: ==================    1600
+    //    ========
+    //            ^
+    //            the high load point
+    // then then max gap is 800, we would make the whole send procesure sleep
+    // 1800ms for compaction to be done toe reduce the high pressure
+    auto max_time = config::max_load_pressure_wait_time_ms;
+    if (UNLIKELY(max_rowset_num_gap > 0)) {
+        _load_pressure_wait_time.store(std::min(max_rowset_num_gap + 1000, max_time));
+    }
+}
+
 Status NodeChannel::open_wait() {
     _open_closure->join();
     SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
@@ -247,6 +280,12 @@ Status NodeChannel::open_wait() {
                                      _open_closure->cntl.ErrorText());
     }
     Status status(_open_closure->result.status());
+    if (status.ok()) {
+        // in case the sending process is too fast that the _load_pressure_wait_time
+        // would not take effect. i.e: if all the data is already sent to receiver
+        // then there would be no try send batch anymore
+        _refresh_load_wait_time(_open_closure->result.tablet_load_rowset_num_infos());
+    }
     if (_open_closure->unref()) {
         delete _open_closure;
     }
@@ -994,6 +1033,7 @@ Status OlapTableSink::prepare(RuntimeState* state) {
     _filtered_rows_counter = ADD_COUNTER(_profile, "RowsFiltered", TUnit::UNIT);
     _send_data_timer = ADD_TIMER(_profile, "SendDataTime");
     _wait_mem_limit_timer = ADD_CHILD_TIMER(_profile, "WaitMemLimitTime", "SendDataTime");
+    _wait_load_pressure_timer = ADD_CHILD_TIMER(_profile, "WaitLoadPressureTime", "SendDataTime");
     _convert_batch_timer = ADD_TIMER(_profile, "ConvertBatchTime");
     _validate_data_timer = ADD_TIMER(_profile, "ValidateDataTime");
     _open_timer = ADD_TIMER(_profile, "OpenTime");
@@ -1185,7 +1225,8 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
         std::unordered_map<int64_t, AddBatchCounter> node_add_batch_counter_map;
         int64_t serialize_batch_ns = 0, mem_exceeded_block_ns = 0, queue_push_lock_ns = 0,
                 actual_consume_ns = 0, total_add_batch_exec_time_ns = 0,
-                max_add_batch_exec_time_ns = 0, total_add_batch_num = 0, num_node_channels = 0;
+                max_add_batch_exec_time_ns = 0, total_add_batch_num = 0, num_node_channels = 0,
+                load_pressure_time_ns = 0;
         {
             SCOPED_TIMER(_close_timer);
             for (auto index_channel : _channels) {
@@ -1199,6 +1240,7 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                         [&index_channel, &state, &node_add_batch_counter_map, &serialize_batch_ns,
                          &mem_exceeded_block_ns, &queue_push_lock_ns, &actual_consume_ns,
                          &total_add_batch_exec_time_ns, &add_batch_exec_time, &total_add_batch_num,
+                         &load_pressure_time_ns,
                          profile = _profile](const std::shared_ptr<NodeChannel>& ch) {
                             auto s = ch->close_wait(state);
                             if (!s.ok()) {
@@ -1213,7 +1255,8 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                             ch->time_report(&node_add_batch_counter_map, &serialize_batch_ns,
                                             &mem_exceeded_block_ns, &queue_push_lock_ns,
                                             &actual_consume_ns, &total_add_batch_exec_time_ns,
-                                            &add_batch_exec_time, &total_add_batch_num);
+                                            &add_batch_exec_time, &total_add_batch_num,
+                                            &load_pressure_time_ns);
                             // clang-format off
                             auto counter = profile->add_counter(fmt::format("BuildRowsetTime_{}_{}", index_channel->index_id(), ch->node_id()), TUnit::TIME_MS);
                             COUNTER_SET(counter, ch->_build_rowset_latency_ms);
@@ -1240,6 +1283,7 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
         LOG(INFO) << "total mem_exceeded_block_ns=" << mem_exceeded_block_ns
                   << ", total queue_push_lock_ns=" << queue_push_lock_ns
                   << ", total actual_consume_ns=" << actual_consume_ns
+                  << ", total load_pressure_wait_ns=" << load_pressure_time_ns
                   << ", load id=" << print_id(_load_id);
 
         COUNTER_SET(_input_rows_counter, _number_input_rows);
