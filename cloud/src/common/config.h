@@ -61,7 +61,10 @@ CONF_mInt32(instance_recycler_worker_pool_size, "10");
 CONF_Bool(enable_checker, "false");
 // Currently only used for recycler test
 CONF_Bool(enable_inverted_check, "false");
-CONF_mInt32(check_object_interval_seconds, "259200"); // 72h
+// interval for scanning instances to do checks and inspections
+CONF_mInt32(scan_instances_interval_seconds, "60"); // 1min
+// interval for check object
+CONF_mInt32(check_object_interval_seconds, "43200")  // 12hours
 
 CONF_String(test_s3_ak, "ak");
 CONF_String(test_s3_sk, "sk");
@@ -109,5 +112,8 @@ CONF_String(encryption_method, "AES_256_ECB");
 CONF_mBool(write_schema_kv, "false");
 CONF_mBool(split_tablet_stats, "false");
 CONF_mBool(snapshot_get_tablet_stats, "false");
+
+// For instance check interval
+CONF_Int32(reserved_buffer_days, "3");
 
 } // namespace selectdb::config

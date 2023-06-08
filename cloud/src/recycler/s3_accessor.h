@@ -43,6 +43,12 @@ public:
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
     virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
+
+    // return 0 for success otherwise error
+    virtual int get_bucket_lifecycle(int* expiration_days) = 0;
+
+    // returns 0 for enabling bucket versioning, otherwise error
+    virtual int check_bucket_versioning() = 0;
 };
 
 struct S3Conf {
@@ -92,6 +98,11 @@ public:
     // returns 0 for success otherwise error
     int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override;
 
+    // returns 0 for success otherwise error
+    int get_bucket_lifecycle(int* expiration_days) override;
+
+    // returns 0 for enabling bucket versioning, otherwise error
+    int check_bucket_versioning() override;
 private:
     std::string get_key(const std::string& relative_path) const;
     // return empty string if the input key does not start with the prefix of S3 conf

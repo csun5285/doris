@@ -56,6 +56,55 @@ private:
     std::map<std::string, std::shared_ptr<bvar::LatencyRecorder>> bvar_map_;
 };
 
+template <class T>
+class BvarStatusWithTag {
+public:
+    BvarStatusWithTag(std::string module, std::string name): module_(module), name_(name){}
+
+    void put(const std::string& tag, T value) {
+        std::shared_ptr<bvar::Status<T>> instance = nullptr;
+        {
+            std::lock_guard<bthread::Mutex> l(mutex_);
+            auto it = bvar_map_.find(tag);
+            if (it == bvar_map_.end()) {
+                instance = std::make_shared<bvar::Status<T>>(
+                                                module_, name_ + "_" + tag, T());
+                bvar_map_[tag] = instance;
+            } else {
+                instance = it->second;
+            }
+        }
+        (*instance).set_value(value);
+    }
+
+    std::shared_ptr<bvar::Status<T>> get(const std::string& tag) {
+        std::shared_ptr<bvar::Status<T>> instance = nullptr;
+        std::lock_guard<bthread::Mutex> l(mutex_);
+
+        auto it = bvar_map_.find(tag);
+        if (it == bvar_map_.end()) {
+            instance = std::make_shared<bvar::Status<T>>(
+                                                module_, name_ + "_" + tag);
+            bvar_map_[tag] = instance;
+            return instance;
+        }
+        return it->second;
+
+    }
+
+    void remove(const std::string& tag) {
+        std::lock_guard<bthread::Mutex> l(mutex_);
+        bvar_map_.erase(tag);
+    }
+
+private:
+    bthread::Mutex mutex_;
+    std::string module_;
+    std::string name_;
+    std::map<std::string, std::shared_ptr<bvar::Status<T>>> bvar_map_;
+};
+
+
 // meta-service's bvars
 extern BvarLatencyRecorderWithTag g_bvar_ms_begin_txn;
 extern BvarLatencyRecorderWithTag g_bvar_ms_precommit_txn;
@@ -137,3 +186,12 @@ extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_flight_bytes;
 extern bvar::Status<int64_t> g_bvar_fdb_data_moving_data_in_queue_bytes;
 extern bvar::Status<int64_t> g_bvar_fdb_data_moving_total_written_bytes;
 extern bvar::Status<int64_t> g_bvar_fdb_coordinators_unreachable_count;
+
+
+// checker
+extern BvarStatusWithTag<long> g_bvar_checker_num_scanned;
+extern BvarStatusWithTag<long> g_bvar_checker_num_scanned_with_segment;
+extern BvarStatusWithTag<long> g_bvar_checker_num_check_failed;
+extern BvarStatusWithTag<long> g_bvar_checker_check_cost_s;
+extern BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s;
+extern BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms;

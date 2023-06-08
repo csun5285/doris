@@ -24,7 +24,7 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
 
 void finish_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
                                  const std::string& instance_id, const std::string& ip_port,
-                                 bool success);
+                                 bool success, int64_t ctime_ms);
 
 /**
  *

@@ -114,7 +114,10 @@ void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaSer
     }
     {
         std::lock_guard lock(checker_->mtx_);
-        auto [_, success] = checker_->pending_instance_set_.insert(instance_id);
+        using namespace std::chrono;
+        auto enqueue_time_s = duration_cast<seconds>(
+                    system_clock::now().time_since_epoch()).count();
+        auto [_, success] = checker_->pending_instance_map_.insert({instance_id, enqueue_time_s});
         // skip instance already in pending queue
         if (success) {
             // TODO(plat1ko): Support high priority
@@ -191,7 +194,7 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
             ret = txn->get(key, &val);
             if (ret == 0) { // Never performed a recycle on this instance before
                 job_info.set_status(JobRecyclePB::IDLE);
-                job_info.set_ctime_ms(0);
+                job_info.set_last_ctime_ms(0);
                 job_info.set_last_finish_time_ms(0);
                 job_info.set_instance_id(instance_id);
                 msg = proto_to_json(job_info);

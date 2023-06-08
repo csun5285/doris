@@ -1788,7 +1788,7 @@ TEST(CheckerTest, abnormal) {
 
 TEST(CheckerTest, multi_checker) {
     config::recycle_concurrency = 2;
-    config::check_object_interval_seconds = 10;
+    config::scan_instances_interval_seconds = 10;
     config::recycle_job_lease_expired_ms = 60;
     auto mem_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(mem_kv->init(), 0);
@@ -1855,6 +1855,107 @@ TEST(CheckerTest, multi_checker) {
                   << std::endl;
     }
     EXPECT_EQ(count, 10);
+}
+
+TEST(CheckerTest, do_inspect) {
+    using namespace std::chrono;
+    {
+        auto mem_kv = std::make_shared<MemTxnKv>();
+        ASSERT_EQ(mem_kv->init(), 0);
+
+        InstanceInfoPB instance;
+        instance.set_instance_id(instance_id);
+        instance.set_ctime(11111);
+        auto obj_info = instance.add_obj_info();
+        obj_info->set_id("1");
+        obj_info->set_ak(config::test_s3_ak);
+        obj_info->set_sk(config::test_s3_sk);
+        obj_info->set_endpoint(config::test_s3_endpoint);
+        obj_info->set_region(config::test_s3_region);
+        obj_info->set_bucket(config::test_s3_bucket);
+        obj_info->set_prefix("Test");
+
+        Checker checker(mem_kv);
+        checker.do_inspect(instance);
+
+        {
+            // empty job info
+            auto sp = SyncPoint::get_instance();
+            std::unique_ptr<int, std::function<void(int*)>> defer(
+                    (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+            sp->set_call_back("Checker:do_inspect", [](void* p) {
+                ASSERT_TRUE(*reinterpret_cast<int64_t*>(p) == 11111);
+                std::cout << "last_ctime: " << *reinterpret_cast<int64_t*>(p) << std::endl;
+            });
+            sp->enable_processing();
+        }
+
+        {
+            // add job_info but no last ctime
+            std::unique_ptr<Transaction> txn;
+            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            JobRecyclePB job_info;
+            job_info.set_instance_id(instance_id);
+            std::string key = job_check_key({instance_id});
+            std::string val = job_info.SerializeAsString();
+            txn->put(key, val);
+            ASSERT_EQ(0, txn->commit());
+            checker.do_inspect(instance);
+            auto sp = SyncPoint::get_instance();
+            std::unique_ptr<int, std::function<void(int*)>> defer(
+                    (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+            sp->set_call_back("Checker:do_inspect", [](void* p) {
+                ASSERT_TRUE(*reinterpret_cast<int64_t*>(p) == 11111);
+            });
+            sp->enable_processing();
+        }
+
+        {
+            // add job_info with last ctime
+            std::unique_ptr<Transaction> txn;
+            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            JobRecyclePB job_info;
+            job_info.set_instance_id(instance_id);
+            job_info.set_last_ctime_ms(12345);
+            auto sp = SyncPoint::get_instance();
+            std::unique_ptr<int, std::function<void(int*)>> defer(
+                    (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+            sp->set_call_back("Checker:do_inspect", [](void* p) {
+                ASSERT_TRUE(*reinterpret_cast<int64_t*>(p) == 12345);
+            });
+            sp->enable_processing();
+            std::string key = job_check_key({instance_id});
+            std::string val = job_info.SerializeAsString();
+            txn->put(key, val);
+            ASSERT_EQ(0, txn->commit());
+            checker.do_inspect(instance);
+        }
+        {
+            // alarm
+            int64_t expiration_ms = 7 > config::reserved_buffer_days
+                                            ? (7 - config::reserved_buffer_days) * 3600000
+                                            : 7 * 3600000;
+            auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+            std::unique_ptr<Transaction> txn;
+            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            JobRecyclePB job_info;
+            job_info.set_instance_id(instance_id);
+            job_info.set_last_ctime_ms(now - expiration_ms - 10);
+            auto sp = SyncPoint::get_instance();
+            std::unique_ptr<int, std::function<void(int*)>> defer(
+                    (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+
+            bool alarm = false;
+            sp->set_call_back("Checker:do_inspect", [&alarm](void*) { alarm = true; });
+            sp->enable_processing();
+            std::string key = job_check_key({instance_id});
+            std::string val = job_info.SerializeAsString();
+            txn->put(key, val);
+            ASSERT_EQ(0, txn->commit());
+            checker.do_inspect(instance);
+            ASSERT_TRUE(alarm);
+        }
+    }
 }
 
 } // namespace selectdb

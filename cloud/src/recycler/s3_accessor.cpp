@@ -5,7 +5,10 @@
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/DeleteObjectsRequest.h>
+#include <aws/s3/model/GetBucketLifecycleConfigurationRequest.h>
+#include <aws/s3/model/GetBucketVersioningRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
+#include <aws/s3/model/LifecycleRule.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
@@ -289,6 +292,66 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
         is_truncated = result.GetIsTruncated();
         request.SetContinuationToken(result.GetNextContinuationToken());
     } while (is_truncated);
+    return 0;
+}
+
+int S3Accessor::get_bucket_lifecycle(int* expiration_days) {
+    Aws::S3::Model::GetBucketLifecycleConfigurationRequest request;
+    request.SetBucket(conf_.bucket);
+
+    auto outcome = s3_client_->GetBucketLifecycleConfiguration(request);
+    bool has_lifecycle = false;
+    if (outcome.IsSuccess()) {
+        auto& rules = outcome.GetResult().GetRules();
+        for (const auto& rule : rules) {
+            if (rule.NoncurrentVersionExpirationHasBeenSet()) {
+                has_lifecycle = true;
+                *expiration_days = rule.GetNoncurrentVersionExpiration().GetNoncurrentDays();
+            }
+        }
+    } else {
+        LOG_WARNING("Err for check interval: failed to get bucket lifecycle")
+                .tag("endpoint", conf_.endpoint)
+                .tag("bucket", conf_.bucket)
+                .tag("prefix", conf_.prefix)
+                .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
+                .tag("error", outcome.GetError().GetMessage());
+        return -1;
+    }
+
+    if (!has_lifecycle) {
+        LOG_WARNING("Err for check interval: bucket doesn't have lifecycle configuration")
+                .tag("endpoint", conf_.endpoint)
+                .tag("bucket", conf_.bucket)
+                .tag("prefix", conf_.prefix);
+        return -1;
+    }
+    return 0;
+}
+
+int S3Accessor::check_bucket_versioning() {
+    Aws::S3::Model::GetBucketVersioningRequest request;
+    request.SetBucket(conf_.bucket);
+    auto outcome = s3_client_->GetBucketVersioning(request);
+
+    if (outcome.IsSuccess()) {
+        auto& versioning_configuration = outcome.GetResult().GetStatus();
+        if (versioning_configuration != Aws::S3::Model::BucketVersioningStatus::Enabled) {
+            LOG_WARNING("Err for check interval: bucket doesn't enable bucket versioning")
+                    .tag("endpoint", conf_.endpoint)
+                    .tag("bucket", conf_.bucket)
+                    .tag("prefix", conf_.prefix);
+            return -1;
+        }
+    } else {
+        LOG_WARNING("Err for check interval: failed to get status of bucket versioning")
+                .tag("endpoint", conf_.endpoint)
+                .tag("bucket", conf_.bucket)
+                .tag("prefix", conf_.prefix)
+                .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
+                .tag("error", outcome.GetError().GetMessage());
+        return -1;
+    }
     return 0;
 }
 } // namespace selectdb

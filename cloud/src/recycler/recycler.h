@@ -46,7 +46,7 @@ private:
     friend class RecyclerServiceImpl;
 
     std::shared_ptr<TxnKv> txn_kv_;
-    std::atomic_bool stopped_;
+    std::atomic_bool stopped_{false};
 
     std::vector<std::thread> workers_;
 

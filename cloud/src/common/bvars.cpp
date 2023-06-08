@@ -89,3 +89,11 @@ bvar::Status<int64_t> g_bvar_fdb_workload_transactions_committed_hz("fdb_workloa
 bvar::Status<int64_t> g_bvar_fdb_workload_conflict_rate_hz("fdb_workload_conflict_rate_hz", BVAR_FDB_INVALID_VALUE);
 bvar::Status<int64_t> g_bvar_fdb_client_count("fdb_client_count", BVAR_FDB_INVALID_VALUE);
 bvar::Status<int64_t> g_bvar_fdb_coordinators_unreachable_count("fdb_coordinators_unreachable_count", BVAR_FDB_INVALID_VALUE);
+
+// checker's bvars
+BvarStatusWithTag<long> g_bvar_checker_num_scanned("checker", "num_scanned");
+BvarStatusWithTag<long> g_bvar_checker_num_scanned_with_segment("checker", "num_scanned_with_segment");
+BvarStatusWithTag<long> g_bvar_checker_num_check_failed("checker", "num_check_failed");
+BvarStatusWithTag<long> g_bvar_checker_check_cost_s("checker", "check_cost_seconds");
+BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s("checker", "enqueue_cost_seconds");
+BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms("checker", "last_success_time_ms");

@@ -104,6 +104,13 @@ public:
         return 0;
     }
 
+    int get_bucket_lifecycle(int* expiration_days) override {
+        *expiration_days = 7;
+        return 0;
+    }
+
+    int check_bucket_versioning() override { return 0; }
+
 private:
     std::string path_;
 

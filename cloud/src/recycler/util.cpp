@@ -1,6 +1,7 @@
 #include "recycler/util.h"
 
 #include <glog/logging.h>
+#include <cstdint>
 
 #include "common/util.h"
 #include "meta-service/keys.h"
@@ -81,7 +82,7 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         bool lease_expired =
                 job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
         bool finish_expired =
-                job_info.status() == JobRecyclePB::IDLE && now - job_info.ctime_ms() > interval_ms;
+                job_info.status() == JobRecyclePB::IDLE && now - job_info.last_ctime_ms() > interval_ms;
         return lease_expired || finish_expired;
     };
 
@@ -89,7 +90,6 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         job_info.set_status(JobRecyclePB::BUSY);
         job_info.set_instance_id(instance_id);
         job_info.set_ip_port(ip_port);
-        job_info.set_ctime_ms(now);
         job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
         val = job_info.SerializeAsString();
         txn->put(key, val);
@@ -105,7 +105,7 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
 
 void finish_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
                                  const std::string& instance_id, const std::string& ip_port,
-                                 bool success) {
+                                 bool success, int64_t ctime_ms) {
     std::string val;
     int retry_times = 0;
     do {
@@ -141,7 +141,10 @@ void finish_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         job_info.set_status(JobRecyclePB::IDLE);
         job_info.set_instance_id(instance_id);
         job_info.set_last_finish_time_ms(now);
-        if (success) job_info.set_last_success_time_ms(now);
+        job_info.set_last_ctime_ms(ctime_ms);
+        if (success) {
+            job_info.set_last_success_time_ms(now);
+        }
         val = job_info.SerializeAsString();
         txn->put(key, val);
         ret = txn->commit();
