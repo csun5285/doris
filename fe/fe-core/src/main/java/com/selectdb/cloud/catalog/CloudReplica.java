@@ -24,6 +24,7 @@ import com.google.gson.annotations.SerializedName;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Replica;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.system.Backend;
@@ -154,7 +155,11 @@ public class CloudReplica extends Replica {
         // use alive be to exec sql
         List<Backend> availableBes = new ArrayList<>();
         for (Backend be : clusterBes) {
-            if (be.isAlive() && !be.isSmoothUpgradeSrc()) {
+            long lastUpdateMs = be.getLastUpdateMs();
+            long missTimeMs = Math.abs(lastUpdateMs - System.currentTimeMillis());
+            // be core or restart must in heartbeat_interval_second
+            if ((be.isAlive() || missTimeMs <= FeConstants.heartbeat_interval_second * 1000L)
+                    && !be.isSmoothUpgradeSrc()) {
                 availableBes.add(be);
             }
         }

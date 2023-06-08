@@ -116,6 +116,7 @@ import org.apache.doris.rpc.RpcException;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.statistics.util.InternalQueryBuffer;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
+import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.task.LoadEtlTask;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileType;
@@ -160,6 +161,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 // Do one COM_QUERY process.
@@ -171,6 +174,7 @@ public class StmtExecutor implements ProfileWriter {
     private static final AtomicLong STMT_ID_GENERATOR = new AtomicLong(0);
     private static final int MAX_DATA_TO_SEND_FOR_TXN = 100;
     private static final String NULL_VALUE_FOR_LOAD = "\\N";
+    private Pattern beIpPattern = Pattern.compile("\\[(\\d+):");
     private final Object writeProfileLock = new Object();
     private ConnectContext context;
     private final StatementContext statementContext;
@@ -520,6 +524,10 @@ public class StmtExecutor implements ProfileWriter {
                 }
 
                 int retryTime = Config.max_query_retry_time;
+                if (Config.isCloudMode()) {
+                    // be core and be restarted, need retry more times, one hour?
+                    retryTime = Config.cloud_meta_service_rpc_failed_retry_times;
+                }
                 for (int i = 0; i < retryTime; i++) {
                     try {
                         //reset query id for each retry
@@ -530,14 +538,49 @@ public class StmtExecutor implements ProfileWriter {
                             AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}",
                                     DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
                             context.setQueryId(newQueryId);
+                            if (Config.isCloudMode()) {
+                                // sleep random millis [500, 1000] ms
+                                int randomMillis = 500 + (int) (Math.random() * (1000 - 500));
+                                LOG.debug("stmt executor retry times {}, wait randomMillis:{}, stmt:{}",
+                                        i, randomMillis, originStmt.originStmt);
+                                try {
+                                    if (i > retryTime / 2) {
+                                        // sleep random millis [1000, 1500] ms
+                                        randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
+                                    }
+                                    Thread.sleep(randomMillis);
+                                } catch (InterruptedException e) {
+                                    LOG.info("stmt executor sleep wait InterruptedException: ", e);
+                                }
+                            }
                         }
                         handleQueryStmt();
                         break;
-                    } catch (RpcException e) {
-                        if (i == retryTime - 1) {
-                            throw e;
+                    } catch (Exception e) {
+                        // cloud mode retry
+                        LOG.debug("due to exception {} retry {} rpc {} user {}",
+                                e.getMessage(), i, e instanceof RpcException, e instanceof UserException);
+                        // errCode = 2, detailMessage = There is no scanNode Backend available.[10003: not alive]
+                        List<String> bes = Env.getCurrentSystemInfo().getBackendIds(false).stream()
+                                .map(id -> Long.toString(id)).collect(Collectors.toList());
+                        String msg = e.getMessage();
+                        boolean isNeedRetry = false;
+                        if (e instanceof UserException
+                                && msg.contains(SystemInfoService.NO_SCAN_NODE_BACKEND_AVAILABLE_MSG)) {
+                            Matcher matcher = beIpPattern.matcher(msg);
+                            // here retry planner not be recreated, so
+                            // in cloud mode drop node, be id invalid, so need not retry
+                            // such as be ids [11000, 11001] -> after drop node 11001
+                            // don't need to retry 11001's request
+                            if (matcher.find()) {
+                                String notAliveBe = matcher.group(1);
+                                isNeedRetry = bes.contains(notAliveBe);
+                            }
                         }
-                        if (!context.getMysqlChannel().isSend()) {
+                        if (e instanceof RpcException || isNeedRetry) {
+                            if (i == retryTime - 1 || context.getMysqlChannel().isSend()) {
+                                throw e;
+                            }
                             LOG.warn("retry {} times. stmt: {}", (i + 1), parsedStmt.getOrigStmt().originStmt);
                         } else {
                             throw e;
@@ -781,6 +824,10 @@ public class StmtExecutor implements ProfileWriter {
             // table id in tableList is in ascending order because that table map is a sorted map
             List<TableIf> tables = Lists.newArrayList(tableMap.values());
             int analyzeTimes = 2;
+            if (Config.isCloudMode()) {
+                // be core and be restarted, need retry more times
+                analyzeTimes = Config.cloud_meta_service_rpc_failed_retry_times;
+            }
             for (int i = 1; i <= analyzeTimes; i++) {
                 MetaLockUtils.readLockTables(tables);
                 try {
@@ -799,6 +846,25 @@ public class StmtExecutor implements ProfileWriter {
                         resetAnalyzerAndStmt();
                     }
                 } catch (UserException e) {
+                    // cloud mode retry
+                    if (Config.isCloudMode()
+                            && e.getMessage().contains(SystemInfoService.NOT_USING_VALID_CLUSTER_MSG)) {
+                        LOG.debug("cloud mode analyzeAndGenerateQueryPlan retry times {}", i);
+                        // sleep random millis [500, 1000] ms
+                        int randomMillis = 500 + (int) (Math.random() * (1000 - 500));
+                        try {
+                            if (i > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
+                                randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
+                            }
+                            Thread.sleep(randomMillis);
+                        } catch (InterruptedException ie) {
+                            LOG.info("stmt executor sleep wait InterruptedException: ", ie);
+                        }
+                        if (i == analyzeTimes) {
+                            throw e;
+                        }
+                        continue;
+                    }
                     throw e;
                 } catch (Exception e) {
                     LOG.warn("Analyze failed. {}, {}", context.getQueryIdentifier(), e);

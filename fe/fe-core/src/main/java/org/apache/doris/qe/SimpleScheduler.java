@@ -170,9 +170,9 @@ public class SimpleScheduler {
     }
 
     public static void addToBlacklist(Long backendID, String reason) {
-        if (backendID == null || Config.disable_backend_black_list) {
-            LOG.warn("ignore backend black list for backend: {}, disabled: {}", backendID,
-                    Config.disable_backend_black_list);
+        if (backendID == null || Config.disable_backend_black_list || Config.isCloudMode()) {
+            LOG.warn("ignore backend black list for backend: {}, disabled: {}, mode: {}", backendID,
+                    Config.disable_backend_black_list, Config.isCloudMode());
             return;
         }
 

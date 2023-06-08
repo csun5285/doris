@@ -61,6 +61,7 @@ import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.statistics.StatsDeriveResult;
 import org.apache.doris.statistics.StatsRecursiveDerive;
 import org.apache.doris.system.Backend;
+import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TColumn;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -698,8 +699,8 @@ public class OlapScanNode extends ScanNode {
             for (Replica replica : replicas) {
                 long backendId = replica.getBackendId();
                 if (backendId == -1 && Config.isCloudMode()) {
-                    throw new UserException(InternalErrorCode.META_NOT_FOUND_ERR, "Not using valid cloud clusters, "
-                            + "please use a cluster before issuing any queries");
+                    throw new UserException(InternalErrorCode.META_NOT_FOUND_ERR,
+                            SystemInfoService.NOT_USING_VALID_CLUSTER_MSG);
                 }
                 Backend backend = Env.getCurrentSystemInfo().getBackend(backendId);
                 if (backend == null || !backend.isAlive()) {

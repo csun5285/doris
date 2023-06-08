@@ -1856,6 +1856,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static int default_query_timeout_second = 1800;
 
+    @ConfField
+    public static int cloud_meta_service_rpc_failed_retry_times = 200;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

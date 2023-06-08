@@ -38,6 +38,7 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.plugin.AuditEvent.AuditEventBuilder;
 import org.apache.doris.resource.Tag;
+import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TResourceInfo;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionEntry;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 // When one client connect in, we create a connect context for it.
 // We store session information here. Meanwhile ConnectScheduler all
@@ -723,10 +725,19 @@ public class ConnectContext {
         for (String cloudClusterName : cloudClusterNames) {
             if (Env.getCurrentEnv().getAuth().checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(),
                     cloudClusterName, PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
-                // set a cluster to context cloudCluster
-                setCloudCluster(cloudClusterName);
-                LOG.debug("set context cluster name {}", cloudClusterName);
-                break;
+                // find a cluster has more than one alive be
+                List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
+                AtomicBoolean hasAliveBe = new AtomicBoolean(false);
+                bes.stream().filter(Backend::isActive).findAny().ifPresent(backend -> {
+                    LOG.debug("get a clusterName {}, it's has more than one alive be {}", clusterName, backend);
+                    hasAliveBe.set(true);
+                });
+                if (hasAliveBe.get()) {
+                    // set a cluster to context cloudCluster
+                    setCloudCluster(cloudClusterName);
+                    LOG.debug("set context cluster name {}", cloudClusterName);
+                    break;
+                }
             }
         }
         if (Strings.isNullOrEmpty(this.cloudCluster)) {

@@ -85,6 +85,8 @@ Status CloudMetaMgr::open() {
 
 Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tablet_meta) {
     VLOG_DEBUG << "send GetTabletRequest, tablet_id: " << tablet_id;
+    int tried = 0;
+TRY_AGAIN:
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::GetTabletRequest req;
@@ -92,7 +94,23 @@ Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tab
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_tablet_id(tablet_id);
     _stub->get_tablet(&cntl, &req, &resp, nullptr);
+    int retry_times = config::meta_service_rpc_retry_times;
     if (cntl.Failed()) {
+        if (tried++ < retry_times) {
+            auto rng = std::default_random_engine {
+                static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+            };
+            std::uniform_int_distribution<uint32_t> u(20, 200);
+            std::uniform_int_distribution<uint32_t> u1(500, 1000);
+            uint32_t duration_ms = tried >= 100 ? u(rng) : u1(rng);
+            std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+            LOG_INFO("failed to get tablet meta")
+                .tag("reason", cntl.ErrorText())
+                .tag("tablet_id", tablet_id)
+                .tag("tried", tried)
+                .tag("sleep", duration_ms);
+            goto TRY_AGAIN;
+        }
         return Status::RpcError("failed to get tablet meta: {}", cntl.ErrorText());
     }
     if (resp.status().code() != selectdb::MetaServiceCode::OK) {
@@ -137,7 +155,26 @@ TRY_AGAIN:
     brpc::Join(cntl.call_id()); // to get more accurate latency
     int64_t latency = cntl.latency_us();
     g_get_rowset_latency << latency;
+    int retry_times = config::meta_service_rpc_retry_times;
     if (cntl.Failed()) {
+        if (tried++ < retry_times) {
+            auto rng = std::default_random_engine {
+                static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+            };
+            std::uniform_int_distribution<uint32_t> u(20, 200);
+            std::uniform_int_distribution<uint32_t> u1(500, 1000);
+            uint32_t duration_ms = tried >= 100 ? u(rng) : u1(rng);
+            std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+            LOG_INFO("failed to get rowset meta")
+                .tag("reason", cntl.ErrorText())
+                .tag("tablet_id", tablet_id)
+                .tag("table_id", table_id)
+                .tag("index_id", index_id)
+                .tag("partition_id", tablet->partition_id())
+                .tag("tried", tried)
+                .tag("sleep", duration_ms);
+            goto TRY_AGAIN;
+        }
         return Status::RpcError("failed to get rowset meta: {}", cntl.ErrorText());
     }
     if (resp.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {

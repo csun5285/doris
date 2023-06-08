@@ -67,7 +67,7 @@ public class CloudPartition extends Partition {
         int retryTime = 0;
         long version = -1;
         boolean succ = false;
-        while (retryTime++ < 3) {
+        while (retryTime++ < Config.cloud_meta_service_rpc_failed_retry_times) {
             version = getVersionFromMeta(System.currentTimeMillis()
                     + Config.default_get_version_from_ms_timeout_second * 1000L);
             LOG.debug("cloud get version from metaService, use previous version, parition={} version={} retryTime={}",
@@ -78,7 +78,19 @@ public class CloudPartition extends Partition {
                 succ = true;
                 break;
             } else {
+                // sleep random millis [20, 200] ms, retry rpc failed
+                int randomMillis = 20 + (int) (Math.random() * (200 - 20));
                 version = super.getVisibleVersion();
+                try {
+                    if (retryTime > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
+                        // sleep random millis [500, 1000] ms, retry rpc failed
+                        randomMillis = 500 + (int) (Math.random() * (1000 - 500));
+                    }
+                    Thread.sleep(randomMillis);
+                } catch (InterruptedException ie) {
+                    LOG.info("stmt executor sleep wait InterruptedException: ", ie);
+                }
+
                 LOG.warn("failed to get version from metaService, use previous version, "
                         + "parition={} version={} retryTime={}", getName(), version, retryTime);
             }
