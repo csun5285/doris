@@ -75,7 +75,7 @@ size_t FileSegment::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segmen
 
 uint64_t FileSegment::get_caller_id() {
     uint64_t id = 0;
-    id = bthread_self() == 0 ? static_cast<uint64_t>(pthread_self()): bthread_self();
+    id = bthread_self() == 0 ? static_cast<uint64_t>(pthread_self()) : bthread_self();
     DCHECK(id != 0);
     return id;
 }
@@ -229,7 +229,7 @@ Status FileSegment::finalize_write(bool need_to_get_file_size) {
     }
     std::lock_guard segment_lock(_mutex);
     _downloaded_size = need_to_get_file_size ? downloaded_size : _downloaded_size;
-    if (_downloaded_size != _segment_range.size()) {
+    if (_downloaded_size != 0 && _downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
         _segment_range.right = _segment_range.left + _downloaded_size - 1;
@@ -265,6 +265,13 @@ FileSegment::State FileSegment::wait() {
 Status FileSegment::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock */) {
     Status status = Status::OK();
     if (_is_downloaded) {
+        return status;
+    }
+
+    if (_downloaded_size == 0) {
+        _download_state = State::EMPTY;
+        _downloader_id = 0;
+        _cache_writer.reset();
         return status;
     }
 
@@ -354,9 +361,10 @@ FileSegmentsHolder::~FileSegmentsHolder() {
             std::lock_guard cache_lock(cache->_mutex);
             std::lock_guard segment_lock(file_segment->_mutex);
             file_segment->complete_unlocked(segment_lock);
-            if (file_segment->state_unlock(segment_lock) == FileSegment::State::EMPTY) {
+            if (file_segment.use_count() == 2) {
+                DCHECK(file_segment->state_unlock(segment_lock) != FileSegment::State::DOWNLOADING);
                 // one in cache, one in here
-                if (file_segment.use_count() == 2) {
+                if (file_segment->state_unlock(segment_lock) == FileSegment::State::EMPTY) {
                     cache->remove(file_segment, cache_lock, segment_lock);
                 }
             }

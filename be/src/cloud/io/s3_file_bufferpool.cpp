@@ -105,13 +105,14 @@ void UploadFileBuffer::append_data(const Slice& data) {
                 if (_index_offset != 0) {
                     segment->change_cache_type_self(CacheType::INDEX);
                 }
-                segment->get_or_set_downloader();
-                DCHECK(segment->is_downloader());
             }
             // if cache_is_not_enough, cannot use it !
             _cur_file_segment = _holder->file_segments.begin();
             _append_offset = (*_cur_file_segment)->range().left;
             _holder = cache_is_not_enough ? nullptr : std::move(_holder);
+            if (_holder) {
+                (*_cur_file_segment)->get_or_set_downloader();
+            }
             _is_cache_allocated = true;
         }
         if (_holder) [[likely]] {
@@ -123,8 +124,12 @@ void UploadFileBuffer::append_data(const Slice& data) {
                 size_t append_size = std::min(data_remain_size, segment_remain_size);
                 Slice append_data(data.get_data() + pos, append_size);
                 (*_cur_file_segment)->append(append_data);
-                _cur_file_segment = segment_remain_size == append_size ? ++_cur_file_segment
-                                                                       : _cur_file_segment;
+                if (segment_remain_size == append_size) {
+                    (*_cur_file_segment)->finalize_write(); // DOWNLOADED
+                    if (++_cur_file_segment != _holder->file_segments.end()) {
+                        (*_cur_file_segment)->get_or_set_downloader();
+                    }
+                }
                 data_remain_size -= append_size;
                 _append_offset += append_size;
                 pos += append_size;
@@ -184,6 +189,9 @@ void DownloadFileBuffer::submit() {
 void UploadFileBuffer::submit() {
     if (!_buffer.empty()) [[likely]] {
         _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);
+    }
+    if (_holder && _cur_file_segment != _holder->file_segments.end()) {
+        (*_cur_file_segment)->finalize_write();   
     }
     ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
