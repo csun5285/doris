@@ -176,18 +176,6 @@ bool FileSegment::change_cache_type(CacheType new_type) {
     if (new_type == _cache_type) {
         return true;
     }
-    if (_download_state == State::DOWNLOADING) {
-        segment_lock.unlock();
-        int retry_time = 10;
-        while (--retry_time && wait() == State::DOWNLOADING) {
-        }
-        if (retry_time == 0) {
-            LOG(WARNING) << fmt::format("Segment change type too long, {} to {}", _cache_type,
-                                        new_type);
-            return false;
-        }
-        segment_lock.lock();
-    }
     if (_download_state == State::DOWNLOADED) {
         std::error_code ec;
         std::filesystem::rename(
