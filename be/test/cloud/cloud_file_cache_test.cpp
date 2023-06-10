@@ -6,11 +6,17 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
-#include <memory>
 #include <thread>
 #include <sys/statfs.h>
+#include <unistd.h>
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cstring>
+#include <sys/types.h>
+#include <dirent.h>
+#include <sys/wait.h>
 
-#include "cloud/io/cloud_file_cache.h"
 #include "cloud/io/cloud_file_cache_fwd.h"
 #include "cloud/io/cloud_file_cache_settings.h"
 #include "cloud/io/cloud_file_segment.h"
@@ -20,6 +26,12 @@
 #include "common/sync_point.h"
 #include "olap/options.h"
 #include "util/slice.h"
+
+namespace doris {
+    namespace io {
+        extern int disk_used_percentage(const std::string &path, std::pair<int, int> *percent);
+    }
+}
 
 namespace doris::cloud {
 
@@ -951,6 +963,59 @@ TEST(LRUFileCache, normal) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
+}
+
+template <std::size_t N>
+int get_disk_info(const char* const (&argv)[N], int* percent) {
+    assert((N > 0) && (argv[N - 1] == nullptr));
+    std::vector<std::string> rets;
+    int pipefds[2];
+    if (::pipe(pipefds) == -1) {
+        std::cerr << "Error creating pipe" << std::endl;
+        return -1;
+    }
+    pid_t pid = ::vfork();
+    if (pid == -1) {
+        std::cerr << "Error forking process" << std::endl;
+        return -1;
+    } else if (pid == 0) {
+        ::close(pipefds[0]);
+        ::dup2(pipefds[1], STDOUT_FILENO);
+        ::execvp("df", const_cast<char* const*>(argv));
+        std::cerr << "Error executing command" << std::endl;
+        _Exit(-1);
+    } else {
+        waitpid(pid, nullptr, 0);
+        close(pipefds[1]);
+        char buffer[PATH_MAX];
+        ssize_t nbytes;
+        while ((nbytes = read(pipefds[0], buffer, PATH_MAX)) > 0) {
+            buffer[nbytes-1] = '\0';
+            rets.push_back(buffer);
+        }
+        ::close(pipefds[0]);
+    }
+
+    // df return
+    // 已用%
+    // 73%
+    // str save 73
+    std::string str = rets[0].substr(rets[0].rfind('\n'), rets[0].rfind('%') - rets[0].rfind('\n'));
+    *percent = std::stoi(str);
+    return 0;
+}
+
+TEST(LRUFileCache, disk_used_percentage_test) {
+    std::string dir = "/dev";
+    std::pair<int, int> percent;
+    doris::io::disk_used_percentage(dir, &percent);
+    int disk_used, inode_remain;
+    auto ret = get_disk_info({ (char*)"df", (char*)"--output=pcent", (char*)"/dev", (char*)nullptr }, &disk_used);
+    ASSERT_TRUE(!ret);
+    ret = get_disk_info({ (char*)"df", (char*)"--output=ipcent", (char*)"/dev", (char*)nullptr }, &inode_remain);
+    ASSERT_TRUE(!ret);
+    ASSERT_EQ(percent.first, disk_used);
+    ASSERT_EQ(100 - percent.second, inode_remain);
 }
 
 // run in disk space or disk inode not enough mode

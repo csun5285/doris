@@ -252,7 +252,9 @@ void CloudFileCache::use_cell(const FileSegmentCell& cell, FileSegments& result,
                      get_path_in_local_cache(file_segment->key(), file_segment->expiration_time(),
                                              file_segment->offset(), cell.cache_type), ec) == 0) && !ec)
             << "Cannot have zero size downloaded file segments. Current file segment: "
-            << file_segment->range().to_string();
+            << file_segment->range().to_string() << " key: " << file_segment->key().to_string()
+            << " cell size: " << cell.size()
+            << " offset: " << file_segment->offset() << " type: " << cell.cache_type;
 
     result.push_back(cell.file_segment);
     if (cell.cache_type != CacheType::TTL) {
@@ -875,7 +877,11 @@ bool CloudFileCache::try_reserve(const Key& key, const CacheContext& context, si
             removed_size += iter->size;
         } else {
             size_t cell_size = cell->size();
-            DCHECK(iter->size == cell_size);
+            DCHECK(iter->size == cell_size) << " iter size and cell size not eq, iter size: " << iter->size
+                << " iter offset: " << iter->offset << " iter key: " << iter->key.to_string()
+                << " range: " << cell->file_segment->range().to_string() << " cell size: " << cell_size
+                << " type: " << cell->cache_type << " offset: " <<  cell->file_segment->offset()
+                << " cell key: " << cell->file_segment->key().to_string();
 
             if (!cell->releasable()) {
                 continue;
@@ -1465,9 +1471,11 @@ void CloudFileCache::change_cache_type(const Key& key, size_t offset, CacheType 
     }
 }
 
-// @brief: get a path's disk capacity percent, inode used percent
+extern int disk_used_percentage(const std::string& path, std::pair<int, int>* percent);
+
+// @brief: get a path's disk capacity used percent, inode remain percent
 // @param: path
-// @param: percent.first disk used percent, percent.second inode used percent
+// @param: percent.first disk used percent, percent.second inode remain percent
 int disk_used_percentage(const std::string& path, std::pair<int, int>* percent) {
     struct statfs stat;
     int ret = statfs(path.c_str(), &stat);
@@ -1498,19 +1506,19 @@ void CloudFileCache::check_disk_resource_limit(const std::string& path) {
         LOG_ERROR("").tag("file cache path", path).tag("error", strerror(errno));
         return;
     }
-    auto [capacity_percentage, inode_percentage] = percent;
+    auto [capacity_percentage, inode_remain_percentage] = percent;
     DCHECK(capacity_percentage >= 0 && capacity_percentage <= 100);
-    DCHECK(inode_percentage >= 0 && inode_percentage <= 100);
+    DCHECK(inode_remain_percentage >= 0 && inode_remain_percentage <= 100);
     if (((100 - capacity_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent)
-        || ((100 - inode_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent)) {
+        || (inode_remain_percentage < config::file_cache_enter_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = true;
     } else if (_disk_resource_limit_mode
             && ((100 - capacity_percentage) > config::file_cache_exit_disk_resource_limit_mode_percent)
-            && ((100 - inode_percentage) > config::file_cache_exit_disk_resource_limit_mode_percent)) {
+            && (inode_remain_percentage > config::file_cache_exit_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = false;
     }
     LOG_INFO("file cache background thread").tag("remain space percent", 100 - capacity_percentage)
-        .tag("remain inode percent", 100 - inode_percentage)
+        .tag("remain inode percent", inode_remain_percentage)
         .tag("mode", _disk_resource_limit_mode ? "run in resource limit" : "run in resource normal");
 }
 
