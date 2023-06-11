@@ -212,6 +212,9 @@ Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
                 return Status::IOError("cannot create {}: {}", _cache_base_path,
                                        std::strerror(ec.value()));
             }
+            // when asynchronously loading, but not exist cache dir (such as ut)
+            // it is necessary to set the flag to true here to end the asynchronous loading state
+            _lazy_open_done = true;
         }
     }
     _is_initialized = true;
