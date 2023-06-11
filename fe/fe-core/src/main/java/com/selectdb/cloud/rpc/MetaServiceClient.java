@@ -3,6 +3,8 @@ package com.selectdb.cloud.rpc;
 import com.selectdb.cloud.proto.MetaServiceGrpc;
 import com.selectdb.cloud.proto.SelectdbCloud;
 
+import com.google.gson.Gson;
+import com.google.gson.stream.JsonReader;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.apache.doris.common.Config;
@@ -10,13 +12,15 @@ import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class MetaServiceClient {
     public static final Logger LOG = LogManager.getLogger(MetaServiceClient.class);
 
-    private static final int MAX_RETRY_NUM = 0;
     private final TNetworkAddress address;
     private final MetaServiceGrpc.MetaServiceFutureStub stub;
     private final MetaServiceGrpc.MetaServiceBlockingStub blockingStub;
@@ -26,10 +30,21 @@ public class MetaServiceClient {
         this.address = address;
         channel = NettyChannelBuilder.forAddress(address.getHostname(), address.getPort())
             .flowControlWindow(Config.grpc_max_message_size_bytes)
-            .maxInboundMessageSize(Config.grpc_max_message_size_bytes).enableRetry().maxRetryAttempts(MAX_RETRY_NUM)
+            .maxInboundMessageSize(Config.grpc_max_message_size_bytes)
+            .defaultServiceConfig(getRetryingServiceConfig())
+            .enableRetry()
             .usePlaintext().build();
         stub = MetaServiceGrpc.newFutureStub(channel);
         blockingStub = MetaServiceGrpc.newBlockingStub(channel);
+    }
+
+    protected Map<String, ?> getRetryingServiceConfig() {
+        // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#retry-policy-capabilities
+        Map<String, ?> serviceConfig = new Gson().fromJson(new JsonReader(new InputStreamReader(
+                MetaServiceClient.class.getResourceAsStream("/retrying_service_config.json"),
+                        StandardCharsets.UTF_8)), Map.class);
+        LOG.info("serviceConfig:{}", serviceConfig);
+        return serviceConfig;
     }
 
     public void shutdown() {
