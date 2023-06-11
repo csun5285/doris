@@ -58,8 +58,6 @@ import com.selectdb.cloud.proto.SelectdbCloud.GetTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.GetTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.LoadJobSourceTypePB;
 import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
-import com.selectdb.cloud.proto.SelectdbCloud.PrecommitTxnRequest;
-import com.selectdb.cloud.proto.SelectdbCloud.PrecommitTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.UniqueIdPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
@@ -147,6 +145,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         txnInfoBuilder.setCoordinator(TxnUtil.txnCoordinatorToPb(coordinator));
         txnInfoBuilder.setLoadJobSourceType(LoadJobSourceTypePB.forNumber(sourceType.value()));
         txnInfoBuilder.setTimeoutMs(timeoutSecond * 1000);
+        txnInfoBuilder.setPrecommitTimeoutMs(Config.stream_load_default_precommit_timeout_second * 1000);
 
         final BeginTxnRequest beginTxnRequest = BeginTxnRequest.newBuilder()
                 .setTxnInfo(txnInfoBuilder.build())
@@ -194,42 +193,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     public void preCommitTransaction2PC(Database db, List<Table> tableList, long transactionId,
             List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis, TxnCommitAttachment txnCommitAttachment)
             throws UserException {
-
-        LOG.info("try to precommit transaction: {}", transactionId);
-        if (Config.disable_load_job) {
-            throw new TransactionCommitFailedException("disable_load_job is set to true, all load jobs are prevented");
-        }
-
-        PrecommitTxnRequest.Builder builder = PrecommitTxnRequest.newBuilder();
-        builder.setDbId(db.getId());
-        builder.setTxnId(transactionId);
-
-        if (txnCommitAttachment != null) {
-            if (txnCommitAttachment instanceof LoadJobFinalOperation) {
-                LoadJobFinalOperation loadJobFinalOperation = (LoadJobFinalOperation) txnCommitAttachment;
-                builder.setCommitAttachment(TxnUtil
-                        .loadJobFinalOperationToPb(loadJobFinalOperation));
-            } else {
-                throw new UserException("Invalid txnCommitAttachment");
-            }
-        }
-
-        builder.setPrecommitTimeoutMs(timeoutMillis);
-
-        final PrecommitTxnRequest precommitTxnRequest = builder.build();
-        PrecommitTxnResponse precommitTxnResponse = null;
-        try {
-            LOG.info("precommitTxnRequest: {}", precommitTxnRequest);
-            precommitTxnResponse = MetaServiceProxy
-                    .getInstance().precommitTxn(precommitTxnRequest);
-            LOG.info("precommitTxnResponse: {}", precommitTxnResponse);
-        } catch (RpcException e) {
-            throw new UserException(e.getMessage());
-        }
-
-        if (precommitTxnResponse.getStatus().getCode() != MetaServiceCode.OK) {
-            throw new UserException(precommitTxnResponse.getStatus().getMsg());
-        }
+        Preconditions.checkState(false, "should not implement this in derived class");
     }
 
     @Override

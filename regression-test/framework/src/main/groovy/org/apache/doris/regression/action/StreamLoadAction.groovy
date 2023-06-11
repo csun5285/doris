@@ -53,6 +53,7 @@ class StreamLoadAction implements SuiteAction {
     Closure check
     Map<String, String> headers
     SuiteContext context
+    boolean twoPhaseCommit = false;
 
     StreamLoadAction(SuiteContext context) {
         this.address = context.config.feHttpInetSocketAddress
@@ -123,6 +124,14 @@ class StreamLoadAction implements SuiteAction {
         this.time = time.call()
     }
 
+    void twoPhaseCommit(boolean twoPhaseCommit) {
+        this.twoPhaseCommit = twoPhaseCommit;
+    }
+
+    void twoPhaseCommit(Closure<Boolean> twoPhaseCommit) {
+        this.twoPhaseCommit = twoPhaseCommit.call();
+    }
+
     void check(@ClosureParams(value = FromString, options = ["String,Throwable,Long,Long"]) Closure check) {
         this.check = check
     }
@@ -137,7 +146,12 @@ class StreamLoadAction implements SuiteAction {
         Throwable ex = null
         long startTime = System.currentTimeMillis()
         try {
+
             def uri = "http://${address.hostString}:${address.port}/api/${db}/${table}/_stream_load"
+            if (twoPhaseCommit) {
+                uri = "http://${address.hostString}:${address.port}/api/${db}/_stream_load_2pc"
+            }
+
             HttpClients.createDefault().withCloseable { client ->
                 RequestBuilder requestBuilder = prepareRequestHeader(RequestBuilder.put(uri))
                 HttpEntity httpEntity = prepareHttpEntity(client)
@@ -340,6 +354,10 @@ class StreamLoadAction implements SuiteAction {
             def jsonSlurper = new JsonSlurper()
             def parsed = jsonSlurper.parseText(responseText)
             String status = parsed.Status
+            if (twoPhaseCommit) {
+                status = parsed.status
+                return status;
+            }
             long txnId = parsed.TxnId
             if (!status.equalsIgnoreCase("Publish Timeout")) {
                 return status;

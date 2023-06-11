@@ -549,7 +549,7 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
     RPC_PREPROCESS(precommit_txn);
     int64_t txn_id = request->has_txn_id() ? request->txn_id() : -1;
     int64_t db_id = request->has_db_id() ? request->db_id() : -1;
-    if ((txn_id < 0 && db_id < 0) || !request->has_precommit_timeout_ms()) {
+    if ((txn_id < 0 && db_id < 0)) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         ss << "invalid argument, "
            << "txn_id=" << txn_id << " db_id=" << db_id;
@@ -873,7 +873,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         return;
     }
 
-    if (request->has_is_2pc() && request->is_2pc() && TxnStatusPB::TXN_STATUS_PREPARED) {
+    if (request->has_is_2pc() && request->is_2pc() && txn_info.status() == TxnStatusPB::TXN_STATUS_PREPARED) {
         code = MetaServiceCode::TXN_INVALID_STATUS;
         ss << "transaction is prepare, not pre-committed: db_id=" << db_id << " txn_id" << txn_id;
         msg = ss.str();
