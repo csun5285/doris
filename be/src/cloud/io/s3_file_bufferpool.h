@@ -201,6 +201,13 @@ struct UploadFileBuffer final : public FileBuffer {
     */
     std::shared_ptr<std::iostream> get_stream() const { return _stream_ptr; }
 
+    /**
+    * Currently only used for small file to set callback
+    */
+    void set_upload_to_remote(std::function<void(UploadFileBuffer&)> cb) {
+        _upload_to_remote = std::move(cb);
+    }
+
 private:
     std::function<void(UploadFileBuffer&)> _upload_to_remote = nullptr;
     std::shared_ptr<std::iostream> _stream_ptr; // point to _buffer.get_data()

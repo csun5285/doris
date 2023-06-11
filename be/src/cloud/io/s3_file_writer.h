@@ -81,8 +81,9 @@ public:
 
 private:
     Status _complete();
-    // void _upload_to_cache(const Slice& data, S3FileBuffer& buf);
+    Status _open();
     void _upload_one_part(int64_t part_num, UploadFileBuffer& buf);
+    void _put_object(UploadFileBuffer& buf);
 
     FileSegmentsHolderPtr _allocate_file_segments(size_t offset);
 
@@ -101,13 +102,11 @@ private:
     std::string _upload_id;
     size_t _bytes_appended {0};
     size_t _index_offset {0};
-    // size_t _index_offset {0};
-    // bool _set_index_idx {false};
 
     // Current Part Num for CompletedPart
     int _cur_part_num = 1;
     std::mutex _completed_lock;
-    std::vector<std::shared_ptr<Aws::S3::Model::CompletedPart>> _completed_parts;
+    std::vector<std::unique_ptr<Aws::S3::Model::CompletedPart>> _completed_parts;
 
     Key _cache_key;
     CloudFileCachePtr _cache;
