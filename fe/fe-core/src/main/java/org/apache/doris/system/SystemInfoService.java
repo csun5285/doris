@@ -194,7 +194,11 @@ public class SystemInfoService {
     }
 
     public List<Backend> getBackendsByClusterId(final String clusterId) {
-        return clusterIdToBackend.get(clusterId);
+        return clusterIdToBackend.getOrDefault(clusterId, new ArrayList<>());
+    }
+
+    public List<String> getCloudClusterIds() {
+        return new ArrayList<>(clusterIdToBackend.keySet());
     }
 
     public void updateClusterNameToId(final String newName,

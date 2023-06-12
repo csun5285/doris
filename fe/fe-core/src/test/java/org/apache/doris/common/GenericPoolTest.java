@@ -48,6 +48,8 @@ import org.apache.doris.thrift.TScanOpenResult;
 import org.apache.doris.thrift.TSnapshotRequest;
 import org.apache.doris.thrift.TStatus;
 import org.apache.doris.thrift.TStreamLoadRecordResult;
+import org.apache.doris.thrift.TSyncLoadForTabletsRequest;
+import org.apache.doris.thrift.TSyncLoadForTabletsResponse;
 import org.apache.doris.thrift.TTabletStatResult;
 import org.apache.doris.thrift.TTransmitDataParams;
 import org.apache.doris.thrift.TTransmitDataResult;
@@ -243,6 +245,11 @@ public class GenericPoolTest {
         @Override
         public TCheckPreCacheResponse checkPreCache(TCheckPreCacheRequest request) throws TException {
             return new TCheckPreCacheResponse();
+        }
+
+        @Override
+        public TSyncLoadForTabletsResponse syncLoadForTablets(TSyncLoadForTabletsRequest request) throws TException {
+            return new TSyncLoadForTabletsResponse();
         }
     }
 

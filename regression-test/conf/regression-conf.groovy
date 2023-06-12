@@ -102,8 +102,8 @@ es_6_port=19200
 es_7_port=29200
 es_8_port=39200
 
-// be1_ip:be1_heartbeat_port:be1_http_port:be1_unique_id,be2_ip:be2_heartbeat_port:be2_http_port:be2_unique_id
-multiClusterBes = "127.0.0.1:9712:9711:be_1_id,127.0.0.1:9732:9731:be_2_id"
+// be1_ip:be1_heartbeat_port:be1_http_port:be1_unique_id:be1_brpc_port,be2_ip:be2_heartbeat_port:be2_http_port:be2_unique_id:be2_brpc_port
+multiClusterBes = "127.0.0.1:9712:9711:be_1_id:9000,127.0.0.1:9732:9731:be_2_id:9000"
 metaServiceToken = "greedisgood9999"
 multiClusterInstance = "test_instance_id"
 cacheDataPath = "/tmp"

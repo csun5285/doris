@@ -7,11 +7,13 @@
 #include <chrono>
 #include <random>
 
+#include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "olap/rowset/rowset_factory.h"
+#include "olap/tablet.h"
 #include "util/s3_util.h"
 
 namespace doris::cloud {
@@ -122,7 +124,7 @@ TRY_AGAIN:
     return Status::OK();
 }
 
-Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet) {
+Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) {
     int tried = 0;
 
 TRY_AGAIN:
@@ -254,7 +256,8 @@ TRY_AGAIN:
             //   BE has [0-1][2-11][12-12], [12-12] is delete predicate, cp is 2;
             //   after doing EMPTY_CUMULATIVE compaction, MS cp is 13, get_rowset will return [2-11][12-12].
             bool version_overlap = tablet->local_max_version() >= rowsets.front()->start_version();
-            tablet->cloud_add_rowsets(std::move(rowsets), version_overlap);
+            tablet->cloud_add_rowsets(std::move(rowsets), version_overlap,
+                                      need_download_data_async);
         }
         tablet->set_base_compaction_cnt(stats.base_compaction_cnt());
         tablet->set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());

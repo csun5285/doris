@@ -59,6 +59,8 @@ class TStreamLoadRecordResult;
 class TDiskTrashInfo;
 class TPreCacheAsyncResponse;
 class TPreCacheAsyncRequest;
+class TLoadSyncRequest;
+class TLoadSyncResponse;
 
 // This class just forward rpc for actual handler
 // make this class because we can bind multiple service on single point
@@ -143,6 +145,10 @@ public:
 
     void check_pre_cache(TCheckPreCacheResponse& response,
                          const TCheckPreCacheRequest& request) override;
+
+    // If another cluster load, FE need to notify the cluster to sync the load data
+    void sync_load_for_tablets(TSyncLoadForTabletsResponse& response,
+                               const TSyncLoadForTabletsRequest& request) override;
 
 private:
     Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);

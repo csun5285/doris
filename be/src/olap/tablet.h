@@ -18,6 +18,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -173,14 +174,23 @@ public:
     // Synchronize the rowsets from meta service.
     // If tablet state is not `TABLET_RUNNING`, sync tablet meta and all visible rowsets.
     // If `query_version` > 0 and local max_version of the tablet >= `query_version`, do nothing.
-    Status cloud_sync_rowsets(int64_t query_version = -1);
+    // If 'need_download_data_async' is true, it means that we need to download the new version 
+    // rowsets datas async.
+    Status cloud_sync_rowsets(int64_t query_version = -1, bool need_download_data_async = false);
 
     // Synchronize the tablet meta from meta service.
     Status cloud_sync_meta();
 
     // If `version_overlap` is true, function will delete rowsets with overlapped version in this tablet.
     // MUST hold EXCLUSIVE `_meta_lock`.
-    void cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap);
+    // If 'need_download_data_async' is true, it means that we need to download the new version 
+    // rowsets datas async.
+    void cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
+                           bool need_download_data_async = false);
+
+    // It is only used in CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets.
+    // To add rowset after downloading segments
+    void cloud_add_rowsets_async(RowsetSharedPtr to_add, std::lock_guard<std::shared_mutex>&);
 
     // MUST hold EXCLUSIVE `_meta_lock`.
     void cloud_delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete);

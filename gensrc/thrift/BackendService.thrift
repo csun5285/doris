@@ -139,6 +139,13 @@ struct TCheckPreCacheResponse {
     2: optional map<i64, bool> task_done;
 }
 
+struct TSyncLoadForTabletsRequest {
+    1: required list<i64> tablet_ids
+}
+
+struct TSyncLoadForTabletsResponse {
+}
+
 service BackendService {
     // Called by coord to start asynchronous execution of plan fragment in backend.
     // Returns as soon as all incoming data streams have been set up.
@@ -200,4 +207,6 @@ service BackendService {
     TPreCacheAsyncResponse pre_cache_async(1: TPreCacheAsyncRequest request);
 
     TCheckPreCacheResponse check_pre_cache(1: TCheckPreCacheRequest request);
+
+    TSyncLoadForTabletsResponse sync_load_for_tablets(1: TSyncLoadForTabletsRequest request);
 }

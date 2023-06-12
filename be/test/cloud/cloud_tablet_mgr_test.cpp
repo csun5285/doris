@@ -24,7 +24,7 @@ public:
         return Status::OK();
     }
 
-    Status sync_tablet_rowsets(Tablet* tablet) override { return Status::OK(); }
+    Status sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) override { return Status::OK(); }
 };
 
 TEST(CloudTabletMgrTest, normal) {

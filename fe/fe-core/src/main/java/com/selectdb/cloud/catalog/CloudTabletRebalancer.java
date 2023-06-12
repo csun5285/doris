@@ -57,9 +57,12 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class CloudTabletRebalancer extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(CloudTabletRebalancer.class);
+
+    private ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     private Map<Long, List<Tablet>> beToTabletsGlobal;
 
@@ -102,6 +105,23 @@ public class CloudTabletRebalancer extends MasterDaemon {
         public String clusterId;
         public Map<Long, List<Tablet>> beToTablets;
         public long startTimestamp;
+    }
+
+    public Set<Long> getSnapshotTabletsByBeId(Long beId) {
+        Set<Long> snapshotTablets = new HashSet<Long>();
+        try {
+            rwLock.readLock().lock();
+            if (beToTabletsGlobal.containsKey(beId)) {
+                beToTabletsGlobal.get(beId).forEach(tablet -> {
+                    snapshotTablets.add(tablet.getId());
+                });
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to get tablets error {}", e.getMessage());
+        } finally {
+            rwLock.readLock().unlock();
+        }
+        return snapshotTablets;
     }
 
     // 1 build cluster to backends info
@@ -169,8 +189,15 @@ public class CloudTabletRebalancer extends MasterDaemon {
     }
 
     public void balanceAllPartitions() {
-        for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
-            LOG.info("before partition balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+        try {
+            rwLock.readLock().lock();
+            for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
+                LOG.info("before partition balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+            }
+        } catch (Exception e) {
+            LOG.warn("get lock failed {}", e.getMessage());
+        } finally {
+            rwLock.readLock().unlock();
         }
 
         for (Map.Entry<Long, List<Tablet>> entry : futureBeToTabletsGlobal.entrySet()) {
@@ -183,9 +210,15 @@ public class CloudTabletRebalancer extends MasterDaemon {
         for (Map.Entry<String, List<Long>> entry : clusterToBes.entrySet()) {
             balanceInPartition(entry.getValue(), entry.getKey());
         }
-
-        for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
-            LOG.info("after partition balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+        try {
+            rwLock.readLock().lock();
+            for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
+                LOG.info("after partition balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+            }
+        } catch (Exception e) {
+            LOG.warn("get lock failed {}", e.getMessage());
+        } finally {
+            rwLock.readLock().unlock();
         }
 
         for (Map.Entry<Long, List<Tablet>> entry : futureBeToTabletsGlobal.entrySet()) {
@@ -196,8 +229,15 @@ public class CloudTabletRebalancer extends MasterDaemon {
 
     public void globalBalance() {
         if (indexBalanced) {
-            for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
-                LOG.info("before global balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+            try {
+                rwLock.readLock().lock();
+                for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
+                    LOG.info("before global balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+                }
+            } catch (Exception e) {
+                LOG.warn("get lock failed {}", e.getMessage());
+            } finally {
+                rwLock.readLock().unlock();
             }
 
             for (Map.Entry<Long, List<Tablet>> entry : futureBeToTabletsGlobal.entrySet()) {
@@ -208,9 +248,15 @@ public class CloudTabletRebalancer extends MasterDaemon {
             for (Map.Entry<String, List<Long>> entry : clusterToBes.entrySet()) {
                 balanceImpl(entry.getValue(), entry.getKey(), futureBeToTabletsGlobal, true);
             }
-
-            for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
-                LOG.info("after global balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+            try {
+                rwLock.readLock().lock();
+                for (Map.Entry<Long, List<Tablet>> entry : beToTabletsGlobal.entrySet()) {
+                    LOG.info("after global balance be {} tablet num {}", entry.getKey(), entry.getValue().size());
+                }
+            } catch (Exception e) {
+                LOG.warn("get lock failed {}", e.getMessage());
+            } finally {
+                rwLock.readLock().unlock();
             }
 
             for (Map.Entry<Long, List<Tablet>> entry : futureBeToTabletsGlobal.entrySet()) {
@@ -269,8 +315,16 @@ public class CloudTabletRebalancer extends MasterDaemon {
     public void checkDecommissionState(Map<String, List<Long>> clusterToBes) {
         for (Map.Entry<String, List<Long>> entry : clusterToBes.entrySet()) {
             List<Long> beList = entry.getValue();
+            long tabletNum = 0L;
             for (long beId : beList) {
-                long tabletNum = beToTabletsGlobal.get(beId) == null ? 0 : beToTabletsGlobal.get(beId).size();
+                try {
+                    rwLock.readLock().lock();
+                    tabletNum = beToTabletsGlobal.get(beId) == null ? 0 : beToTabletsGlobal.get(beId).size();
+                } catch (Exception e) {
+                    LOG.warn("get lock failed {}", e.getMessage());
+                } finally {
+                    rwLock.readLock().unlock();
+                }
                 Backend backend = Env.getCurrentSystemInfo().getBackend(beId);
                 if (backend.isDecommissioned() && tabletNum == 0 && !backend.isActive()) {
                     if (!beToDecommissionedTime.containsKey(beId)) {
@@ -366,7 +420,14 @@ public class CloudTabletRebalancer extends MasterDaemon {
     }
 
     public void statRouteInfo() {
-        beToTabletsGlobal = new HashMap<Long, List<Tablet>>();
+        try {
+            rwLock.writeLock().lock();
+            beToTabletsGlobal = new HashMap<Long, List<Tablet>>();
+        } catch (Exception e) {
+            LOG.warn("get lock failed {}", e.getMessage());
+        } finally {
+            rwLock.writeLock().unlock();
+        }
         partitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
         futureBeToTabletsGlobal = new HashMap<Long, List<Tablet>>();
         futurePartitionToTablets = new HashMap<Long, Map<Long, Map<Long, List<Tablet>>>>();
@@ -379,10 +440,15 @@ public class CloudTabletRebalancer extends MasterDaemon {
                         if (!allBes.contains(bes.get(0))) {
                             continue;
                         }
-
-                        fillBeToTablets(bes.get(0), partition, index, tablet, this.beToTabletsGlobal,
-                                this.partitionToTablets);
-
+                        try {
+                            rwLock.writeLock().lock();
+                            fillBeToTablets(bes.get(0), partition, index, tablet, this.beToTabletsGlobal,
+                                    this.partitionToTablets);
+                        } catch (Exception e) {
+                            LOG.warn("get lock failed {}", e.getMessage());
+                        } finally {
+                            rwLock.writeLock().unlock();
+                        }
                         if (tabletToInfightTask.containsKey(tablet.getId())) {
                             InfightTask task = tabletToInfightTask.get(tablet.getId());
                             fillBeToTablets(task.destBe, partition, index, tablet, futureBeToTabletsGlobal,
@@ -646,7 +712,14 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 LOG.info("transfer {} from {} to {}, cluster {} minNum {} maxNum {} beNum {} tabletsNum {}, part {}",
                          pickedTablet.getId(), srcBe, destBe, clusterId,
                          minTabletsNum, maxTabletsNum, beNum, totalTabletsNum, cloudReplica.getPartitionId());
-                updateBeToTablets(pickedTablet, srcBe, destBe, isGlobal, clusterId, beToTablets, beToTabletsGlobal);
+                try {
+                    rwLock.writeLock().lock();
+                    updateBeToTablets(pickedTablet, srcBe, destBe, isGlobal, clusterId, beToTablets, beToTabletsGlobal);
+                } catch (Exception e) {
+                    LOG.warn("get lock failed {}", e.getMessage());
+                } finally {
+                    rwLock.writeLock().unlock();
+                }
                 updateClusterToBeMap(pickedTablet, destBe, clusterId);
             }
         }
@@ -662,12 +735,18 @@ public class CloudTabletRebalancer extends MasterDaemon {
     private void migrateTablets(Long srcBe, Long dstBe) {
         SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
         // get tablets
-        if (!beToTabletsGlobal.containsKey(srcBe)) {
-            LOG.info("smooth upgrade srcBe={} does not have any tablets, set inactive", srcBe);
-            Env.getCurrentEnv().getCloudUpgradeMgr().setBeStateInactive(srcBe);
-            return;
+        List<Tablet> tablets = new ArrayList<>();
+        try {
+            rwLock.readLock().lock();
+            if (!beToTabletsGlobal.containsKey(srcBe)) {
+                LOG.info("smooth upgrade srcBe={} does not have any tablets, set inactive", srcBe);
+                Env.getCurrentEnv().getCloudUpgradeMgr().setBeStateInactive(srcBe);
+                return;
+            }
+            tablets = beToTabletsGlobal.get(srcBe);
+        } finally {
+            rwLock.readLock().unlock();
         }
-        List<Tablet> tablets = beToTabletsGlobal.get(srcBe);
         if (tablets.isEmpty()) {
             LOG.info("smooth upgrade srcBe={} does not have any tablets, set inactive", srcBe);
             Env.getCurrentEnv().getCloudUpgradeMgr().setBeStateInactive(srcBe);

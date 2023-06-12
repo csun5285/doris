@@ -24,6 +24,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DataQualityException;
 import org.apache.doris.common.DdlException;
@@ -46,6 +47,10 @@ import org.apache.doris.load.FailMsg;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.service.FrontendOptions;
+import org.apache.doris.system.Backend;
+import org.apache.doris.thrift.BackendService.Client;
+import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TSyncLoadForTabletsRequest;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.BeginTransactionException;
 import org.apache.doris.transaction.TransactionState;
@@ -58,8 +63,10 @@ import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
@@ -322,6 +329,49 @@ public class BrokerLoadJob extends BulkLoadJob {
                     .build());
             Env.getCurrentGlobalTransactionMgr().commitTransaction(
                     dbId, tableList, transactionId, commitInfos, getLoadJobFinalOperation());
+            ConnectContext ctx = null;
+            if (ConnectContext.get() == null) {
+                ctx = new ConnectContext();
+                ctx.setThreadLocalInfo();
+            } else {
+                ctx = ConnectContext.get();
+            }
+            if (ctx.getSessionVariable().enableMultiClusterSyncLoad()
+                    && !clusterId.isEmpty()) {
+                // get the backends of each cluster expect the load cluster
+                List<List<Backend>> backendsList = Env.getCurrentSystemInfo().getCloudClusterIds()
+                                                                    .stream()
+                                                                    .filter(id -> !id.equals(clusterId))
+                                                                    .map(id -> Env.getCurrentSystemInfo()
+                                                                                    .getBackendsByClusterId(id))
+                                                                    .collect(Collectors.toList());
+                // for each all load table, get its tablets
+                tableList.forEach(table -> {
+                    List<Long> allTabletIds = ((OlapTable) table).getAllTabletIds();
+                    // for each all cluster.
+                    backendsList.forEach(backends -> backends.forEach(backend -> {
+                        try {
+                            if (backend.isAlive()) {
+                                List<Long> tabletIdList = new ArrayList<Long>();
+                                Set<Long> beTabletIds = Env.getCurrentEnv()
+                                                            .getCloudTabletRebalancer()
+                                                            .getSnapshotTabletsByBeId(backend.getId());
+                                // for each backend, collect the tabletIds which assign to.
+                                allTabletIds.forEach(tabletId -> {
+                                    if (beTabletIds.contains(tabletId)) {
+                                        tabletIdList.add(tabletId);
+                                    }
+                                });
+                                final Client client = ClientPool.backendPool.borrowObject(
+                                    new TNetworkAddress(backend.getHost(), backend.getBePort()));
+                                client.syncLoadForTablets(new TSyncLoadForTabletsRequest(allTabletIds));
+                            }
+                        } catch (Exception e) {
+                            LOG.warn(e.getMessage());
+                        }
+                    }));
+                });
+            }
             afterCommit();
         } catch (UserException e) {
             LOG.warn(new LogBuilder(LogKey.LOAD_JOB, id)

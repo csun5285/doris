@@ -7,11 +7,16 @@
 #include <sstream>
 #include <variant>
 
+#include "cloud/io/cloud_file_cache_downloader.h"
+#include "cloud/io/s3_file_system.h"
 #include "cloud/meta_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/sync_point.h"
+#include "olap/tablet.h"
 #include "olap/tablet_meta.h"
+#include "util/wait_group.h"
 
 namespace doris::cloud {
 
@@ -115,9 +120,30 @@ private:
 CloudTabletMgr::CloudTabletMgr()
         : _cache(new_lru_cache("TabletCache", config::tablet_cache_capacity, LRUCacheType::NUMBER,
                                config::tablet_cache_shards)),
-          _tablet_map(std::make_shared<TabletMap>()) {}
+          _tablet_map(std::make_shared<TabletMap>()) {
+    for (size_t i = 0; i < mgr_size; i++) {
+        _ovarlap_rowsets_mgrs[i].consumer =
+                std::thread(&CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets,
+                            &_ovarlap_rowsets_mgrs[i]);
+    }
+}
 
-CloudTabletMgr::~CloudTabletMgr() = default;
+CloudTabletMgr::~CloudTabletMgr() {
+    std::for_each(_ovarlap_rowsets_mgrs.begin(), _ovarlap_rowsets_mgrs.end(),
+                  [](OverlapRowsetsMgr& mgr) {
+                      {
+                          std::lock_guard lock(mgr.mtx);
+                          mgr.closed = true;
+                      }
+                      mgr.cond.notify_all();
+                  });
+    std::for_each(_ovarlap_rowsets_mgrs.begin(), _ovarlap_rowsets_mgrs.end(),
+                  [](OverlapRowsetsMgr& mgr) {
+                      if (mgr.prepare_overlap_rowsets_thread.joinable()) {
+                          mgr.prepare_overlap_rowsets_thread.join();
+                      }
+                  });
+}
 
 Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
     // LRU value type
@@ -146,11 +172,6 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
             auto value = new Value();
             value->tablet = tablet;
             value->tablet_map = _tablet_map;
-            st = meta_mgr()->sync_tablet_rowsets(tablet.get());
-            // ignore failure here because we will sync this tablet before query
-            if (!st.ok()) {
-                LOG_WARNING("sync tablet {} failed", tablet_id).error(st);
-            }
             static auto deleter = [](const CacheKey& key, void* value) {
                 auto value1 = reinterpret_cast<Value*>(value);
                 // tablet has been evicted, release it from `tablet_map`
@@ -277,7 +298,7 @@ void CloudTabletMgr::sync_tablets() {
             if (!st) {
                 LOG_WARNING("failed to sync tablet meta {}", tablet->tablet_id()).error(st);
             }
-            st = tablet->cloud_sync_rowsets();
+            st = tablet->cloud_sync_rowsets(-1);
             if (!st) {
                 LOG_WARNING("failed to sync tablet rowsets {}", tablet->tablet_id()).error(st);
             }
@@ -309,10 +330,15 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     };
     auto skip = [&now, type = compaction_type, &last_compaction_time_ms](Tablet* t) {
         // We don't schedule tablets that are recently successfully scheduled
-        int64_t interval = type == CompactionType::BASE_COMPACTION ? config::base_compaction_interval_seconds_since_last_operation * 1000
+        int64_t last_operation_interval = type == CompactionType::BASE_COMPACTION ? config::base_compaction_interval_seconds_since_last_operation * 1000
                            : type == CompactionType::CUMULATIVE_COMPACTION ? 1 * 1000
                            : 0;
-        return  now - last_compaction_time_ms(t) < interval;
+        int64_t freeze_interval = config::enable_freeze_compaction ? type == CompactionType::BASE_COMPACTION ? config::base_compaction_freeze_interval_seconds * 1000
+                           : type == CompactionType::CUMULATIVE_COMPACTION ? config::cu_compaction_freeze_interval_seconds * 1000
+                           : 0 : INT64_MAX;
+        return  now - last_compaction_time_ms(t) < last_operation_interval
+                || StorageEngine::s_last_load_time == 0
+                || now - StorageEngine::s_last_load_time > freeze_interval;
     };
     // We don't schedule tablets that are disabled for compaction
     auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };
@@ -352,6 +378,123 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     for (auto& [t, _] : buf) tablets->emplace_back(std::move(t));
 
     return Status::OK();
+}
+
+void CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets() {
+    while (true) {
+        RowsetSharedPtr download_rowset;
+        Version download_version;
+        int64_t tablet_id;
+        std::vector<RowsetSharedPtr> overlap_rowsets;
+        {
+            std::unique_lock lock(mtx);
+            if (!closed && tablet_id_to_prepare_overlap_rowsets.empty()) {
+                cond.wait(lock, [this]() -> bool {
+                    return closed || !tablet_id_to_prepare_overlap_rowsets.empty();
+                });
+            }
+            DCHECK(tablet_id_to_prepare_overlap_rowsets.size() ==
+                   tablet_id_to_new_version_to_overlap_rowset.size())
+                    << "tablet_id_to_prepare_overlap_rowsets "
+                    << tablet_id_to_prepare_overlap_rowsets.size()
+                    << "tablet_id_to_new_version_to_overlap_rowset "
+                    << tablet_id_to_new_version_to_overlap_rowset.size();
+            if (closed) break;
+            auto iter = tablet_id_to_prepare_overlap_rowsets.begin();
+            DCHECK(tablet_id_to_new_version_to_overlap_rowset.find(iter->first) !=
+                   tablet_id_to_new_version_to_overlap_rowset.end());
+            auto& new_version_to_overlap_rowset =
+                    tablet_id_to_new_version_to_overlap_rowset[iter->first];
+            DCHECK(new_version_to_overlap_rowset.size() == iter->second.size())
+                    << "prepare_overlap_rowsets " << iter->second.size()
+                    << "new_version_to_overlap_rowset " << new_version_to_overlap_rowset.size();
+            tablet_id = iter->first;
+            auto map_iter = iter->second.rbegin();
+            download_version = map_iter->first;
+            DCHECK(new_version_to_overlap_rowset.find(download_version) !=
+                   new_version_to_overlap_rowset.end());
+            download_rowset = map_iter->second;
+            downloading_rowset_id = download_rowset->rowset_id();
+            overlap_rowsets = std::move(new_version_to_overlap_rowset[download_version]);
+            iter->second.erase(download_version);
+            new_version_to_overlap_rowset.erase(download_version);
+            if (iter->second.empty()) {
+                tablet_id_to_new_version_to_overlap_rowset.erase(iter->first);
+                tablet_id_to_prepare_overlap_rowsets.erase(iter);
+            }
+        }
+        TabletSharedPtr tablet;
+        cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+        auto tablet_meta = tablet->tablet_meta();
+        bool is_hot_data {false};
+        std::for_each(overlap_rowsets.cbegin(), overlap_rowsets.cend(),
+                      [&](const RowsetSharedPtr& rowset) {
+                          is_hot_data = is_hot_data || rowset->is_hot();
+                      });
+        std::shared_ptr<WaitGroup> wait = std::make_shared<WaitGroup>();
+        auto callback = [=](Status st) {
+            if (!st.ok()) {
+                LOG_WARNING("handle_overlap_rowsets error").error(st);
+            }
+            wait->done(); 
+        };
+        for (int64_t seg_id = 0; seg_id < download_rowset->num_segments(); seg_id++) {
+            io::S3FileMeta download_file_meta;
+            download_file_meta.is_cold_data = !is_hot_data;
+            auto rowset_meta = download_rowset->rowset_meta();
+            download_file_meta.file_size = rowset_meta->get_segment_file_size(seg_id);
+            download_file_meta.file_system = rowset_meta->fs();
+            download_file_meta.path = io::Path(download_rowset->segment_file_path(seg_id));
+            download_file_meta.expiration_time =
+                    tablet_meta->is_persistent() ? INT64_MAX
+                    : tablet_meta->ttl_seconds() == 0
+                            ? 0
+                            : rowset_meta->newest_write_timestamp() + tablet_meta->ttl_seconds();
+            download_file_meta.download_callback = std::move(callback);
+            wait->add();
+            io::FileCacheSegmentDownloader::instance()->submit_download_task(
+                    std::move(download_file_meta));
+        }
+        // same as be/src/cloud/io/cloud_file_cache_downloader.cpp:FileCacheSegmentDownloader::polling_download_task():hot_interval
+        static const int64_t timeout_seconds = 2 * 60 * 60; // 2 hours
+        wait->wait(timeout_seconds);
+        {
+            std::lock_guard wlock(tablet->get_header_lock());
+            tablet->cloud_delete_rowsets(overlap_rowsets);
+            tablet->cloud_add_rowsets_async(download_rowset, wlock);
+        }
+    }
+}
+
+void CloudTabletMgr::sumbit_overlap_rowsets(int64_t tablet_id, RowsetSharedPtr to_add,
+                                            std::vector<RowsetSharedPtr> to_delete) {
+    auto& overlap_rowsets_mgr = _ovarlap_rowsets_mgrs[tablet_id % mgr_size];
+    {
+        std::lock_guard lock(overlap_rowsets_mgr.mtx);
+        if (overlap_rowsets_mgr.downloading_rowset_id == to_add->rowset_id()) {
+            return;
+        }
+        auto to_add_v = to_add->version();
+        auto& prepare_overlap_rowsets =
+                overlap_rowsets_mgr.tablet_id_to_prepare_overlap_rowsets[tablet_id];
+        if (prepare_overlap_rowsets.find(to_add_v) != prepare_overlap_rowsets.end()) {
+            return;
+        }
+        auto& new_version_to_overlap_rowset =
+                overlap_rowsets_mgr.tablet_id_to_new_version_to_overlap_rowset[tablet_id];
+        auto end_iter = prepare_overlap_rowsets.upper_bound(to_add_v);
+        for (auto iter = prepare_overlap_rowsets.begin(); iter != end_iter;) {
+            if (to_add_v.contains(iter->first)) {
+                new_version_to_overlap_rowset.erase(iter->first);
+                prepare_overlap_rowsets.erase(iter);
+            } else {
+                iter++;
+            }
+        }
+        prepare_overlap_rowsets.insert(std::make_pair(to_add_v, to_add));
+        new_version_to_overlap_rowset.insert(std::make_pair(to_add_v, std::move(to_delete)));
+    }
+    overlap_rowsets_mgr.cond.notify_all();
 }
 
 } // namespace doris::cloud

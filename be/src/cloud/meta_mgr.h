@@ -25,7 +25,7 @@ public:
         return Status::NotSupported("not supported");
     }
 
-    virtual Status sync_tablet_rowsets(Tablet* tablet) {
+    virtual Status sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async = false) {
         return Status::NotSupported("not supported");
     }
 

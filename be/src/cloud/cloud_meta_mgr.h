@@ -18,7 +18,7 @@ public:
 
     Status get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tablet_meta) override;
 
-    Status sync_tablet_rowsets(Tablet* tablet) override;
+    Status sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async = false) override;
 
     Status prepare_rowset(const RowsetMetaSharedPtr& rs_meta, bool is_tmp,
                           RowsetMetaSharedPtr* existed_rs_meta = nullptr) override;

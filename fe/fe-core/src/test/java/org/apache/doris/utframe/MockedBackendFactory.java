@@ -60,6 +60,8 @@ import org.apache.doris.thrift.TSnapshotRequest;
 import org.apache.doris.thrift.TStatus;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TStreamLoadRecordResult;
+import org.apache.doris.thrift.TSyncLoadForTabletsRequest;
+import org.apache.doris.thrift.TSyncLoadForTabletsResponse;
 import org.apache.doris.thrift.TTabletInfo;
 import org.apache.doris.thrift.TTabletStatResult;
 import org.apache.doris.thrift.TTaskType;
@@ -315,6 +317,11 @@ public class MockedBackendFactory {
         @Override
         public TCheckPreCacheResponse checkPreCache(TCheckPreCacheRequest request) throws TException {
             return new TCheckPreCacheResponse();
+        }
+
+        @Override
+        public TSyncLoadForTabletsResponse syncLoadForTablets(TSyncLoadForTabletsRequest request) throws TException {
+            return new TSyncLoadForTabletsResponse();
         }
     }
 

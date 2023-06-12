@@ -37,10 +37,13 @@
 #include <shared_mutex>
 #include <string>
 
+#include "cloud/cloud_meta_mgr.h"
 #include "cloud/io/cloud_file_cache.h"
+#include "cloud/io/cloud_file_cache_downloader.h"
 #include "cloud/io/cloud_file_cache_factory.h"
 #include "cloud/io/path.h"
 #include "cloud/io/remote_file_system.h"
+#include "cloud/io/s3_file_system.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -62,8 +65,8 @@
 #include "olap/tablet_meta.h"
 #include "olap/tablet_meta_manager.h"
 #include "olap/tablet_schema.h"
-#include "olap/version_graph.h"
 #include "olap/txn_manager.h"
+#include "olap/version_graph.h"
 #include "segment_loader.h"
 #include "util/path_util.h"
 #include "util/pretty_printer.h"
@@ -669,7 +672,7 @@ Status Tablet::cloud_sync_meta() {
 }
 
 // There are only two tablet_states RUNNING and NOT_READY in cloud mode
-Status Tablet::cloud_sync_rowsets(int64_t query_version) {
+Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data_async) {
     do {
         // Sync tablet if not running.
         // This could happen when BE didn't finish schema change job and another BE committed this schema change job.
@@ -720,18 +723,65 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version) {
             return Status::OK();
         }
     }
-    auto st = cloud::meta_mgr()->sync_tablet_rowsets(this);
+    auto st = cloud::meta_mgr()->sync_tablet_rowsets(this, need_download_data_async);
     if (st.is<NOT_FOUND>()) {
         cloud::tablet_mgr()->erase_tablet(tablet_id());
     }
     return st;
 }
 
-void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap) {
+void Tablet::cloud_add_rowsets_async(RowsetSharedPtr to_add, std::lock_guard<std::shared_mutex>&) {
+    _rs_version_map.emplace(to_add->version(), to_add);
+    _timestamped_version_tracker.add_version(to_add->version());
+    _max_version = std::max(to_add->end_version(), _max_version);
+    _tablet_meta->cloud_add_rs_metas({to_add});
+}
+
+void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
+                               bool need_download_data_async) {
     if (to_add.empty()) {
         return;
     }
+    auto add_rowsets_directy = [this, version_overlap, need_download_data_async](
+                                       std::vector<RowsetSharedPtr>& add_rowsets) {
+        for (auto& rs : add_rowsets) {
+            if (version_overlap || need_download_data_async) {
+                for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
+                    io::S3FileMeta download_file_meta;
+                    auto rowset_meta = rs->rowset_meta();
+                    static int64_t interval = 600; // 10 mins
+                    // when be restart and receive the load_sync rpc,
+                    // it will sync all historical rowsets first time.
+                    // so we need to filter the old rowsets
+                    // avoid to download the whole table
+                    if (need_download_data_async &&
+                        UnixSeconds() - rowset_meta->newest_write_timestamp() >= interval) {
+                        continue;
+                    }
+                    download_file_meta.file_size = rowset_meta->get_segment_file_size(seg_id);
+                    download_file_meta.file_system = rowset_meta->fs();
+                    auto s3_file_system =
+                            dynamic_cast<io::S3FileSystem*>(download_file_meta.file_system.get());
+                    DCHECK(s3_file_system);
+                    download_file_meta.path = io::Path(rs->segment_file_path(seg_id));
+                    download_file_meta.expiration_time =
+                            _tablet_meta->is_persistent() ? INT64_MAX
+                            : _tablet_meta->ttl_seconds() == 0
+                                    ? 0
+                                    : rowset_meta->newest_write_timestamp() +
+                                              _tablet_meta->ttl_seconds();
+                    io::FileCacheSegmentDownloader::instance()->submit_download_task(
+                            std::move(download_file_meta));
+                }
+            }
+            _rs_version_map.emplace(rs->version(), rs);
+            _timestamped_version_tracker.add_version(rs->version());
+            _max_version = std::max(rs->end_version(), _max_version);
+        }
+        _tablet_meta->cloud_add_rs_metas(add_rowsets);
+    };
     if (version_overlap) {
+        std::vector<RowsetSharedPtr> to_add_directy;
         // Filter out existed rowsets
         auto it = to_add.begin();
         size_t num_filtered = 0;
@@ -754,30 +804,39 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
             }
         }
         to_add.resize(to_add.size() - num_filtered);
-
-        // delete rowsets with overlapped version
-        std::vector<RowsetSharedPtr> to_delete;
         for (auto& to_add_rs : to_add) {
+            // delete rowsets with overlapped version
+            std::vector<RowsetSharedPtr> to_delete;
             Version to_add_v = to_add_rs->version();
             // if start_version  > max_version, we can skip checking overlap here.
             if (to_add_v.first > _max_version) {
-                continue;
-            }
-            for (auto& [v, rs] : _rs_version_map) {
-                if (to_add_v.contains(v)) {
-                    to_delete.push_back(rs);
+                // if start_version  > max_version, we can skip checking overlap here.
+                to_add_directy.push_back(to_add_rs);
+            } else if (to_add_v.second > _max_version) {
+                // if start_version <= max_version and end_version > max_version,
+                // we need to add it directy
+                to_add_directy.push_back(to_add_rs);
+                for (auto& [v, rs] : _rs_version_map) {
+                    if (to_add_v.contains(v)) {
+                        to_delete.push_back(rs);
+                    }
                 }
+                cloud_delete_rowsets(to_delete);
+                continue;
+            } else {
+                for (auto& [v, rs] : _rs_version_map) {
+                    if (to_add_v.contains(v)) {
+                        to_delete.push_back(rs);
+                    }
+                }
+                cloud::tablet_mgr()->sumbit_overlap_rowsets(_tablet_meta->tablet_id(), to_add_rs,
+                                                            std::move(to_delete));
             }
-            cloud_delete_rowsets(to_delete);
-            to_delete.clear();
         }
+        add_rowsets_directy(to_add_directy);
+    } else {
+        add_rowsets_directy(to_add);
     }
-    for (auto& rs : to_add) {
-        _rs_version_map.emplace(rs->version(), rs);
-        _timestamped_version_tracker.add_version(rs->version());
-        _max_version = std::max(rs->end_version(), _max_version);
-    }
-    _tablet_meta->cloud_add_rs_metas(to_add);
 }
 
 void Tablet::cloud_delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete) {

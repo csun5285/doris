@@ -150,6 +150,11 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_queue_size(config::fragment_pool_queue_size)
             .build(&_send_report_thread_pool);
 
+    ThreadPoolBuilder("SyncLoadForTabletsThreadPool")
+            .set_max_threads(config::sync_load_for_tablets_thread)
+            .set_min_threads(config::sync_load_for_tablets_thread)
+            .build(&_sync_load_for_tablets_thread_pool);
+
     ThreadPoolBuilder("JoinNodeThreadPool")
             .set_min_threads(config::fragment_pool_thread_num_min)
             .set_max_threads(std::numeric_limits<int>::max())

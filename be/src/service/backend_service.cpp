@@ -427,4 +427,19 @@ void BackendService::check_pre_cache(TCheckPreCacheResponse& response,
     response.status = t_status;
 }
 
+void BackendService::sync_load_for_tablets(TSyncLoadForTabletsResponse&,
+                                           const TSyncLoadForTabletsRequest& request) {
+    auto f = [tablet_ids = request.tablet_ids]() {
+        std::for_each(tablet_ids.cbegin(), tablet_ids.cend(), [](int64_t tablet_id) {
+            // TODO(liuchangliang): batch sync
+            TabletSharedPtr tablet;
+            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+            if (st) {
+                tablet->cloud_sync_rowsets(-1, true);
+            }
+        });
+    };
+    _exec_env->sync_load_for_tablets_thread_pool()->submit_func(std::move(f));
+}
+
 } // namespace doris

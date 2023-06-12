@@ -63,6 +63,7 @@ import org.apache.doris.analysis.UseStmt;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Table;
@@ -71,6 +72,7 @@ import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.AuditLog;
+import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
@@ -116,17 +118,21 @@ import org.apache.doris.rpc.RpcException;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.statistics.util.InternalQueryBuffer;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
+import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.task.LoadEtlTask;
+import org.apache.doris.thrift.BackendService.Client;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileType;
 import org.apache.doris.thrift.TLoadTxnBeginRequest;
 import org.apache.doris.thrift.TLoadTxnBeginResult;
 import org.apache.doris.thrift.TMergeType;
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TQueryType;
 import org.apache.doris.thrift.TResultBatch;
 import org.apache.doris.thrift.TStreamLoadPutRequest;
+import org.apache.doris.thrift.TSyncLoadForTabletsRequest;
 import org.apache.doris.thrift.TTxnParams;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.thrift.TWaitingTxnStatusRequest;
@@ -1675,6 +1681,38 @@ public class StmtExecutor implements ProfileWriter {
                 }
 
                 insertStmt.afterFinishTxn(true);
+                String clusterName = context.getCloudCluster();
+                if (context.getSessionVariable().enableMultiClusterSyncLoad()
+                        && clusterName != null && !clusterName.isEmpty()) {
+                    List<List<Backend>> backendsList = Env.getCurrentSystemInfo()
+                                                            .getCloudClusterNames()
+                                                            .stream()
+                                                            .filter(name -> !name.equals(clusterName))
+                                                            .map(name -> Env.getCurrentSystemInfo()
+                                                                            .getBackendsByClusterName(name))
+                                                            .collect(Collectors.toList());
+                    List<Long> allTabletIds = ((OlapTable) insertStmt.getTargetTable()).getAllTabletIds();
+                    backendsList.forEach(backends -> backends.forEach(backend -> {
+                        try {
+                            if (backend.isAlive()) {
+                                List<Long> tabletIdList = new ArrayList<Long>();
+                                Set<Long> beTabletIds = Env.getCurrentEnv()
+                                                            .getCloudTabletRebalancer()
+                                                            .getSnapshotTabletsByBeId(backend.getId());
+                                allTabletIds.forEach(tabletId -> {
+                                    if (beTabletIds.contains(tabletId)) {
+                                        tabletIdList.add(tabletId);
+                                    }
+                                });
+                                final Client client = ClientPool.backendPool.borrowObject(
+                                    new TNetworkAddress(backend.getHost(), backend.getBePort()));
+                                client.syncLoadForTablets(new TSyncLoadForTabletsRequest(allTabletIds));
+                            }
+                        } catch (Exception e) {
+                            LOG.warn(e.getMessage());
+                        }
+                    }));
+                }
             } catch (Throwable t) {
                 // if any throwable being thrown during insert operation, first we should abort this txn
                 LOG.warn("handle insert stmt fail: {}", label, t);
