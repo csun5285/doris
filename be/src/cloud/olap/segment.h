@@ -80,7 +80,14 @@ public:
 
     RowsetId rowset_id() const { return _rowset_id; }
 
-    uint32_t num_rows() const { return _footer.num_rows(); }
+    uint32_t num_rows() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+            return 0;
+        }
+        return _footer.num_rows();
+    }
 
     Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter,
                                bool without_index = false);
@@ -90,12 +97,22 @@ public:
     Status new_inverted_index_iterator(const TabletColumn& tablet_column,
                                        const TabletIndex* index_meta, InvertedIndexIterator** iter);
 
-    const ShortKeyIndexDecoder* get_short_key_index() const {
+    const ShortKeyIndexDecoder* get_short_key_index() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+            return nullptr;
+        }
         DCHECK(_load_index_once.has_called() && _load_index_once.stored_result().ok());
         return _sk_index_decoder.get();
     }
 
-    const PrimaryKeyIndexReader* get_primary_key_index() const {
+    const PrimaryKeyIndexReader* get_primary_key_index() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+            return nullptr;
+        }
         DCHECK(_load_index_once.has_called() && _load_index_once.stored_result().ok());
         return _pk_index_reader.get();
     }
@@ -105,19 +122,41 @@ public:
     Status read_key_by_rowid(uint32_t row_id, std::string* key);
 
     // only used by UT
-    const SegmentFooterPB& footer() const { return _footer; }
+    const SegmentFooterPB& footer() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+        }
+        return _footer;
+    }
 
     Status load_index();
 
     Status load_pk_index_and_bf();
 
-    Status lazy_open(StorageReadOptions& opts);
+    Status try_lazy_open_and_load_index(StorageReadOptions *opts = nullptr) {
+        if (_is_lazy_open) [[unlikely]] {
+            RETURN_IF_ERROR(_lazy_open(opts));
+            RETURN_IF_ERROR(load_index());
+        }
+        return Status::OK();
+    }
 
     std::string min_key() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+            return "";
+        }
         DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta());
         return _footer.primary_key_index_meta().min_key();
     };
     std::string max_key() {
+        if (try_lazy_open_and_load_index() != Status::OK()) {
+            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
+            // Todo: What value should be returned when open failed?
+            return "";
+        }
         DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta());
         return _footer.primary_key_index_meta().max_key();
     };
@@ -136,6 +175,8 @@ private:
     Status _parse_footer();
     Status _create_column_readers();
     Status _load_pk_bloom_filter();
+    Status _lazy_open(StorageReadOptions* opts = nullptr);
+
 
 private:
     friend class SegmentIterator;

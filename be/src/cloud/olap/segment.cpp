@@ -211,11 +211,15 @@ Status Segment::_load_pk_bloom_filter() {
 }
 
 Status Segment::load_pk_index_and_bf() {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     RETURN_IF_ERROR(load_index());
     RETURN_IF_ERROR(_load_pk_bloom_filter());
     return Status::OK();
 }
 Status Segment::load_index() {
+    if (_is_lazy_open) [[unlikely]] {
+        RETURN_IF_ERROR(_lazy_open());
+    }
     return _load_index_once.call([this] {
         if (_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta()) {
             _pk_index_reader.reset(new PrimaryKeyIndexReader());
@@ -249,13 +253,16 @@ Status Segment::load_index() {
     });
 }
 
-Status Segment::lazy_open(StorageReadOptions& opts) {
-    return _lazy_open_once.call([this, opts= opts] {
-        opts.stats->lazy_open_segment_number++;
-        SCOPED_RAW_TIMER(&opts.stats->lazy_open_segment_timer);
+Status Segment::_lazy_open(StorageReadOptions* opts) {
+    return _lazy_open_once.call([this, opts = opts] {
+        int64_t lazy_open_segment_timer = 0;
+        SCOPED_RAW_TIMER(&lazy_open_segment_timer);
         RETURN_IF_ERROR(_open());
-        RETURN_IF_ERROR(load_index());
         _is_lazy_open = false;
+        if (opts != nullptr) {
+            opts->stats->lazy_open_segment_number++;
+            opts->stats->lazy_open_segment_timer += lazy_open_segment_timer;
+        }
         return Status::OK();
     });
 }
@@ -297,6 +304,7 @@ Status Segment::_create_column_readers() {
 // but in the old schema column b's cid == 2
 // but they are not the same column
 Status Segment::new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter, bool without_index) {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     if (_column_readers.count(tablet_column.unique_id()) < 1) {
         if (!tablet_column.has_default_value() && !tablet_column.is_nullable()) {
             return Status::InternalError("invalid nonexistent column without default value.");
@@ -321,6 +329,7 @@ Status Segment::new_column_iterator(const TabletColumn& tablet_column, ColumnIte
 
 Status Segment::new_bitmap_index_iterator(const TabletColumn& tablet_column,
                                           BitmapIndexIterator** iter) {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     auto col_unique_id = tablet_column.unique_id();
     if (_column_readers.count(col_unique_id) > 0 &&
         _column_readers.at(col_unique_id)->has_bitmap_index()) {
@@ -332,6 +341,7 @@ Status Segment::new_bitmap_index_iterator(const TabletColumn& tablet_column,
 Status Segment::new_inverted_index_iterator(const TabletColumn& tablet_column,
                                             const TabletIndex* index_meta,
                                             InvertedIndexIterator** iter) {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     auto col_unique_id = tablet_column.unique_id();
     if (_column_readers.count(col_unique_id) > 0 && index_meta) {
         return _column_readers.at(col_unique_id)->new_inverted_index_iterator(index_meta, iter);
@@ -340,6 +350,7 @@ Status Segment::new_inverted_index_iterator(const TabletColumn& tablet_column,
 }
 
 Status Segment::lookup_row_key(const Slice& key, RowLocation* row_location) {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     RETURN_IF_ERROR(load_pk_index_and_bf());
     bool has_seq_col = _tablet_schema->has_sequence_col();
     size_t seq_col_length = 0;
@@ -397,6 +408,7 @@ Status Segment::lookup_row_key(const Slice& key, RowLocation* row_location) {
 }
 
 Status Segment::read_key_by_rowid(uint32_t row_id, std::string* key) {
+    RETURN_IF_ERROR(try_lazy_open_and_load_index());
     RETURN_IF_ERROR(load_pk_index_and_bf());
     std::unique_ptr<segment_v2::IndexedColumnIterator> iter;
     RETURN_IF_ERROR(_pk_index_reader->new_iterator(&iter));

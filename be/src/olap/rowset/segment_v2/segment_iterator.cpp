@@ -1976,9 +1976,7 @@ Status SegmentIterator::next_batch(vectorized::Block* block) {
     bool is_mem_reuse = block->mem_reuse();
     DCHECK(is_mem_reuse);
 
-    if (_segment->_is_lazy_open) {
-        RETURN_IF_ERROR(_segment->lazy_open(_opts));
-    }
+    _segment->try_lazy_open_and_load_index(&_opts);
 
     SCOPED_RAW_TIMER(&_opts.stats->block_load_ns);
     if (UNLIKELY(!_inited)) {
@@ -2218,6 +2216,7 @@ void SegmentIterator::_update_max_row(const vectorized::Block* block) {
 }
 
 Status SegmentIterator::current_block_row_locations(std::vector<RowLocation>* block_row_locations) {
+    _segment->try_lazy_open_and_load_index(&_opts);
     DCHECK(_opts.record_rowids);
     DCHECK_GE(_block_rowids.size(), _current_batch_rows_read);
     uint32_t sid = segment_id();
