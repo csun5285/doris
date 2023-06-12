@@ -334,6 +334,10 @@ void DownloadFileBuffer::on_download() {
     FileSegmentsHolderPtr holder = nullptr;
     bool need_to_download_into_cache = false;
     auto s = Status::OK();
+    Defer def {[&]() {
+        _state.set_val(std::move(s));
+        on_finish();
+    }};
     if (_alloc_holder != nullptr) {
         holder = _alloc_holder();
         std::for_each(holder->file_segments.begin(), holder->file_segments.end(),
@@ -365,6 +369,13 @@ void DownloadFileBuffer::on_download() {
             _state.set_val(std::move(s));
         }
         on_finish();
+    } else {
+        Slice tmp {_buffer.get_data(), _capacity};
+        s = _download(tmp);
+        _size = tmp.get_size();
+        if (_write_to_use_buffer != nullptr) {
+            _write_to_use_buffer({_buffer.get_data(), get_size()}, get_file_offset());
+        }
     }
 }
 

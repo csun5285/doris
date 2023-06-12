@@ -32,8 +32,8 @@ std::shared_ptr<io::S3FileSystem> downloader_s3_fs = nullptr;
 using FileSegmentsHolderPtr = std::unique_ptr<io::FileSegmentsHolder>;
 namespace io {
 extern void download_file(
-        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
-        std::string bucket,
+        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
+        size_t file_size, size_t download_size, std::string bucket,
         std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder = nullptr,
         std::function<void(Status)> download_callback = nullptr, Slice s = Slice());
 }
@@ -87,7 +87,7 @@ TEST_F(S3DownloaderTest, normal) {
     std::promise<Status> pro;
     io::download_file(
             downloader_s3_fs->get_client(), downloader_s3_fs->get_key("normal"), 0, content.size(),
-            downloader_s3_fs->s3_conf().bucket, nullptr,
+            content.size(), downloader_s3_fs->s3_conf().bucket, nullptr,
             [&](Status s) { pro.set_value(std::move(s)); }, Slice {buf, 100});
     auto f = pro.get_future();
     ASSERT_TRUE(f.get());
@@ -113,7 +113,7 @@ TEST_F(S3DownloaderTest, multipart) {
     char buf[100];
     std::promise<Status> pro;
     io::download_file(
-            downloader_s3_fs->get_client(), downloader_s3_fs->get_key("normal"), 0,
+            downloader_s3_fs->get_client(), downloader_s3_fs->get_key("normal"), 0, content.size(),
             content.size() / 2, downloader_s3_fs->s3_conf().bucket, nullptr,
             [&](Status s) { pro.set_value(std::move(s)); }, Slice {buf, 100});
     auto f = pro.get_future();
@@ -121,9 +121,9 @@ TEST_F(S3DownloaderTest, multipart) {
     std::promise<Status> another_pro;
     io::download_file(
             downloader_s3_fs->get_client(), downloader_s3_fs->get_key("normal"), content.size() / 2,
-            content.size() - (content.size() / 2), downloader_s3_fs->s3_conf().bucket, nullptr,
-            [&](Status s) { another_pro.set_value(std::move(s)); }, Slice {buf, 100});
-    auto another_f = pro.get_future();
+            content.size(), content.size() - content.size() / 2, downloader_s3_fs->s3_conf().bucket,
+            nullptr, [&](Status s) { another_pro.set_value(std::move(s)); }, Slice {buf, 100});
+    auto another_f = another_pro.get_future();
     ASSERT_TRUE(another_f.get());
     std::string_view result {buf, content.size()};
     ASSERT_EQ(result, content);

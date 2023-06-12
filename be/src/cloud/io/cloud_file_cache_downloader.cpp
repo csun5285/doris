@@ -68,12 +68,12 @@ struct DownloadTaskExecutor {
     DownloadTaskExecutor() = default;
     ~DownloadTaskExecutor() = default;
 
-    void execute(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
-                 std::string bucket,
+    void execute(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
+                 size_t file_size, size_t download_size, std::string bucket,
                  std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder,
                  std::function<void(Status)> download_callback, Slice s) {
         size_t one_single_task_size = config::s3_write_buffer_size;
-        size_t task_num = (size + one_single_task_size - 1) / one_single_task_size;
+        size_t task_num = (download_size + one_single_task_size - 1) / one_single_task_size;
         auto sync_task = [this, task_num, download_callback](Status s) {
             Defer defer {[&] { wg.done(); }};
             if (!s.ok()) [[unlikely]] {
@@ -94,7 +94,7 @@ struct DownloadTaskExecutor {
         for (size_t i = 0; i < task_num; i++) {
             size_t cur_task_off = offset + i * one_single_task_size;
             FileBufferBuilder builder;
-            size_t cur_task_size = std::min(one_single_task_size, size - cur_task_off);
+            size_t cur_task_size = std::min(one_single_task_size, file_size - cur_task_off);
             auto download = [client, key_name, bucket, cur_task_off,
                              cur_task_size](Slice& s) mutable {
                 return _download_part(client, std::move(key_name), std::move(bucket), cur_task_off,
@@ -114,6 +114,7 @@ struct DownloadTaskExecutor {
                     .set_sync_after_complete_task(sync_task)
                     .set_write_to_local_file_cache(std::move(append_file_cache))
                     .set_is_done([this]() { return _failed.load(); });
+            // TODO(yuejing): could directly use user's buffer to download content
             if (!s.empty()) {
                 auto write_to_use_buffer = [s, cur_task_off](Slice content, size_t /*off*/) {
                     std::memcpy((void*)(s.get_data() + cur_task_off), content.get_data(),
@@ -125,7 +126,8 @@ struct DownloadTaskExecutor {
             buffer->submit();
         }
         while (!wg.wait()) {
-            LOG_WARNING("Downloading {} {} {} {} is too long", bucket, key_name, offset, size);
+            LOG_WARNING("Downloading {} {} {} {} is too long", bucket, key_name, offset,
+                        download_size);
         }
     }
 
@@ -134,23 +136,36 @@ private:
     std::atomic_uint64_t _succ {0};
     WaitGroup wg;
 };
+/**
+    *
+    * @param client the client connecting to the remote s3 file systemt
+    * @param key_name name of the file to be downloaded
+    * @param offset download content's start offset
+    * @param download_size size of the downloaded content 
+    * @param file_size size of the whole 
+    * @param bucket must return buffer with memory allocated
+    * @param alloc_holder must return buffer with memory allocated
+    * @param download_callback must return buffer with memory allocated
+    * @param s must return buffer with memory allocated
+    * @return void
+    */
 extern void download_file(
-        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset, size_t size,
-        std::string bucket,
+        std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
+        size_t download_size, size_t file_size, std::string bucket,
         std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder = nullptr,
         std::function<void(Status)> download_callback = nullptr, Slice s = Slice());
 
 void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
-                   size_t size, std::string bucket,
+                   size_t download_size, size_t file_size, std::string bucket,
                    std::function<FileSegmentsHolderPtr(size_t, size_t)> alloc_holder,
                    std::function<void(Status)> download_callback, Slice s) {
     ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
-            [c = std::move(client), key_name_ = std::move(key_name), offset, size,
-             bucket_ = std::move(bucket), s, holder = std::move(alloc_holder),
+            [c = std::move(client), key_name_ = std::move(key_name), offset, download_size,
+             file_size, bucket_ = std::move(bucket), s, holder = std::move(alloc_holder),
              cb = std::move(download_callback)]() mutable {
                 DownloadTaskExecutor task;
-                task.execute(std::move(c), std::move(key_name_), offset, size, std::move(bucket_),
-                             std::move(holder), std::move(cb), s);
+                task.execute(std::move(c), std::move(key_name_), offset, download_size, file_size,
+                             std::move(bucket_), std::move(holder), std::move(cb), s);
             });
 }
 
@@ -265,7 +280,7 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
             download_file(client,
                           s3_file_system->get_key(BetaRowset::remote_segment_path(
                                   meta.tablet_id(), meta.rowset_id(), meta.segment_id())),
-                          meta.offset(), meta.size(), s3_file_system->s3_conf().bucket,
+                          meta.offset(), meta.size(), meta.size(), s3_file_system->s3_conf().bucket,
                           std::move(alloc_holder), download_callback);
         }
     });
@@ -297,7 +312,7 @@ void FileCacheSegmentS3Downloader::download_s3_file(S3FileMeta& meta) {
         return std::make_unique<FileSegmentsHolder>(std::move(h));
     };
     download_file(s3_file_system->get_client(), s3_file_system->get_key(meta.path), 0, file_size,
-                  s3_file_system->s3_conf().bucket, std::move(alloc_holder),
+                  file_size, s3_file_system->s3_conf().bucket, std::move(alloc_holder),
                   std::move(meta.download_callback));
 }
 
