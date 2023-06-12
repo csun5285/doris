@@ -1529,7 +1529,16 @@ void CloudFileCache::run_background_operation() {
     int64_t interval_time_seconds = 20;
     while (!_close) {
         TEST_SYNC_POINT_CALLBACK("CloudFileCache::set_sleep_time", &interval_time_seconds);
-        std::this_thread::sleep_for(std::chrono::seconds(interval_time_seconds));
+        {
+            std::unique_lock close_lock(_close_mtx);
+            if (_close) break;
+#if !defined(USE_BTHREAD_SCANNER)
+            _close_cv.wait_for(close_lock, std::chrono::seconds(interval_time_seconds));
+#else
+            _close_cv.wait_for(close_lock, interval_time_seconds * 1000000);
+#endif
+            if (_close) break;
+        }
         check_disk_resource_limit(_cache_base_path);
 
         // gc

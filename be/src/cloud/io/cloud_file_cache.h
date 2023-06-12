@@ -61,7 +61,11 @@ public:
     CloudFileCache(const std::string& cache_base_path, const FileCacheSettings& cache_settings);
 
     ~CloudFileCache() {
-        _close = true;
+        {
+            std::lock_guard lock(_close_mtx);
+            _close = true;
+        }
+        _close_cv.notify_all();
         if (_cache_background_thread.joinable()) {
             _cache_background_thread.join();
         }
@@ -396,7 +400,9 @@ private:
 
     void check_disk_resource_limit(const std::string& path);
 
-    std::atomic_bool _close {false};
+    bool _close {false};
+    doris::Mutex _close_mtx;
+    doris::ConditionVariable _close_cv;
     std::thread _cache_background_thread;
     std::atomic_bool _lazy_open_done {false};
     std::thread _cache_background_load_thread;
