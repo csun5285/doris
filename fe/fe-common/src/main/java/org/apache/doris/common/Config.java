@@ -1859,6 +1859,14 @@ public class Config extends ConfigBase {
     @ConfField
     public static int cloud_meta_service_rpc_failed_retry_times = 200;
 
+
+    /**
+     * check physical memmory size, requirs that
+     * physical memory >= xmx + direct + 1GB
+     */
+    @ConfField
+    public static boolean enable_check_physical_memory = true;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

@@ -31,6 +31,7 @@ import org.apache.doris.httpv2.HttpServer;
 import org.apache.doris.journal.bdbje.BDBDebugger;
 import org.apache.doris.journal.bdbje.BDBTool;
 import org.apache.doris.journal.bdbje.BDBToolOptions;
+import org.apache.doris.monitor.jvm.MemoryChecker;
 import org.apache.doris.persist.meta.MetaReader;
 import org.apache.doris.qe.QeService;
 import org.apache.doris.service.ExecuteEnv;
@@ -109,6 +110,11 @@ public class PaloFe {
             }
 
             Log4jConfig.initLogging(dorisHomeDir + "/conf/");
+
+            // check physical memory limit
+            if (Config.enable_check_physical_memory) {
+                MemoryChecker.check();
+            }
 
             // set dns cache ttl
             java.security.Security.setProperty("networkaddress.cache.ttl", "60");
@@ -395,4 +401,5 @@ public class PaloFe {
         public boolean enableHttpServer = true;
         public boolean enableQeService = true;
     }
+
 }
