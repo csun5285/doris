@@ -129,9 +129,8 @@ Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segm
     if (!fs || _schema == nullptr) {
         return Status::Error<INIT_FAILED>();
     }
-    auto count = [table_id = _rowset_meta->table_id(),
-                  partition_id = _rowset_meta->partition_id()](OlapReaderStatistics* stats) {
-        io::FileCacheProfile::instance().update(table_id, partition_id, stats);
+    auto count = [table_id = _rowset_meta->table_id()](OlapReaderStatistics* stats) {
+        io::FileCacheProfile::instance().update(table_id, stats);
     };
     for (int seg_id = 0; seg_id < num_segments(); ++seg_id) {
         auto seg_path = segment_file_path(seg_id);
