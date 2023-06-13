@@ -1630,7 +1630,7 @@ TEST(RecyclerTest, recycle_stage) {
 TEST(RecyclerTest, multi_recycler) {
     config::recycle_concurrency = 2;
     config::recycle_interval_seconds = 10;
-    config::recycle_job_lease_expired_ms = 60;
+    config::recycle_job_lease_expired_ms = 1000;
     auto mem_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(mem_kv->init(), 0);
 
@@ -1789,7 +1789,7 @@ TEST(CheckerTest, abnormal) {
 TEST(CheckerTest, multi_checker) {
     config::recycle_concurrency = 2;
     config::scan_instances_interval_seconds = 10;
-    config::recycle_job_lease_expired_ms = 60;
+    config::recycle_job_lease_expired_ms = 1000;
     auto mem_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(mem_kv->init(), 0);
 
