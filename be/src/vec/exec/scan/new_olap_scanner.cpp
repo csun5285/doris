@@ -17,6 +17,7 @@
 
 #include "vec/exec/scan/new_olap_scanner.h"
 
+#include "cloud/cloud_tablet_hotspot.h"
 #include "cloud/utils.h"
 #include "olap/storage_engine.h"
 #include "util/runtime_profile.h"
@@ -55,6 +56,7 @@ Status NewOlapScanner::prepare(const std::vector<OlapScanRange*>& key_ranges,
 
     {
 #ifdef CLOUD_MODE
+        cloud::TabletHotspot::instance()->count(_tablet);
         {
             NewOlapScanNode* olap_parent = (NewOlapScanNode*)_parent;
             SCOPED_TIMER(olap_parent->_cloud_get_rowset_version_timer);

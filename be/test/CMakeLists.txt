@@ -470,6 +470,8 @@ set(CLOUD_TEST_FILES
     cloud/cloud_file_cache_test.cpp
     cloud/cumulative_compaction_policy_test.cpp
     cloud/fork_and_join_test.cpp
+    cloud/cloud_tablet_hotspot_test.cpp
+    cloud/cloud_warm_up_job_test.cpp
 )
 
 if (CLOUD_MODE)

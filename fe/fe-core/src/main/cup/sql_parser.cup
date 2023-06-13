@@ -280,6 +280,7 @@ terminal String
     KW_BUILD,
     KW_BUILTIN,
     KW_BY,
+    KW_CACHE,
     KW_CANCEL,
     KW_CASE,
     KW_CAST,
@@ -395,6 +396,7 @@ terminal String
     KW_HELP,
     KW_HLL,
     KW_HLL_UNION,
+    KW_HOTSPOT,
     KW_HOUR,
     KW_HUB,
     KW_IDENTIFIED,
@@ -625,7 +627,9 @@ terminal String
     KW_MTMV,
     KW_AUTO,
     KW_PREPARE,
-    KW_EXECUTE;
+    KW_EXECUTE,
+    KW_WARM,
+    KW_UP;
 
 terminal COMMA, COLON, DOT, DOTDOTDOT, AT, STAR, LPAREN, RPAREN, SEMICOLON, LBRACKET, RBRACKET, DIVIDE, MOD, ADD, SUBTRACT, PLACEHOLDER;
 terminal BITAND, BITOR, BITXOR, BITNOT;
@@ -650,7 +654,7 @@ nonterminal StatementBase stmt, show_stmt, show_param, help_stmt, load_stmt,
     use_stmt, use_cloud_cluster_stmt, kill_stmt, drop_stmt, recover_stmt, grant_stmt, revoke_stmt, create_stmt, set_stmt, sync_stmt, cancel_stmt, cancel_param, delete_stmt,
     link_stmt, migrate_stmt, switch_stmt, enter_stmt, transaction_stmt, unsupported_stmt, export_stmt, admin_stmt, truncate_stmt,
     import_columns_stmt, import_delete_on_stmt, import_sequence_stmt, import_where_stmt, install_plugin_stmt, uninstall_plugin_stmt,
-    import_preceding_filter_stmt, unlock_tables_stmt, lock_tables_stmt, refresh_stmt, clean_stmt, analyze_stmt, show_mtmv_stmt, copy_stmt;
+    import_preceding_filter_stmt, unlock_tables_stmt, lock_tables_stmt, refresh_stmt, clean_stmt, analyze_stmt, show_mtmv_stmt, copy_stmt, warm_up_stmt;
 
 nonterminal String transaction_label;
 nonterminal ImportColumnDesc import_column_desc;
@@ -1159,6 +1163,8 @@ stmt ::=
     {: RESULT = stmt; :}
     | execute_stmt:stmt
     {: RESULT = stmt; :}
+    | warm_up_stmt:stmt
+    {: RESULT = stmt; :}
     | /* empty: query only has comments */
     {:
         RESULT = new EmptyStmt();
@@ -1352,6 +1358,21 @@ alter_stmt ::=
       opt_password_option:passwdOptions
     {:
         RESULT = new AlterUserStmt(ifExists, user, userRole, passwdOptions);
+    :}
+    ;
+
+ warm_up_stmt ::=
+    KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH KW_CLUSTER ident:srcClusterName opt_force:force
+    {:
+        RESULT = new WarmUpClusterStmt(dstClusterName, srcClusterName, force);
+    :}
+    | KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH KW_TABLE table_name:tbl opt_force:force
+    {:
+        RESULT = new WarmUpClusterStmt(dstClusterName, tbl, "", force);
+    :}
+    | KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH KW_TABLE table_name:tbl KW_PARTITION ident:partitionName opt_force:force
+    {:
+        RESULT = new WarmUpClusterStmt(dstClusterName, tbl, partitionName, force);
     :}
     ;
 
@@ -3877,6 +3898,10 @@ show_param ::=
     {:
         RESULT = new ShowLoadProfileStmt(loadIdPath);
     :}
+    | KW_CACHE KW_HOTSPOT STRING_LITERAL:tablePath
+    {:
+        RESULT = new ShowCacheHotSpotStmt(tablePath);
+    :}
     | KW_ENCRYPTKEYS opt_db:dbName opt_wild_where
     {:
         RESULT = new ShowEncryptKeysStmt(dbName, parser.wild);
@@ -3922,6 +3947,10 @@ show_param ::=
     | KW_CATALOG KW_RECYCLE KW_BIN opt_wild_where
     {:
         RESULT = new ShowCatalogRecycleBinStmt(parser.where);
+    :}
+    | KW_WARM KW_UP KW_JOB opt_wild_where
+    {:
+        RESULT = new ShowCloudWarmUpStmt(parser.where);
     :}
     ;
 
@@ -4188,6 +4217,10 @@ cancel_param ::=
     | KW_RESTORE opt_db:db
     {:
         RESULT = new CancelBackupStmt(db, true);
+    :}
+    | KW_WARM KW_UP KW_JOB opt_wild_where
+    {:
+        RESULT = new CancelCloudWarmUpStmt(parser.where);
     :}
     ;
 

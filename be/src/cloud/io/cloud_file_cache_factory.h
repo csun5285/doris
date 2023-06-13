@@ -26,12 +26,15 @@ public:
 
     void set_read_only();
 
+    size_t get_total_cache_size() const { return total_cache_size; }
+
     FileCacheFactory() = default;
     FileCacheFactory& operator=(const FileCacheFactory&) = delete;
     FileCacheFactory(const FileCacheFactory&) = delete;
 
 private:
     std::vector<std::unique_ptr<CloudFileCache>> _caches;
+    size_t total_cache_size = 0;
 };
 
 } // namespace io

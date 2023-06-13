@@ -43,6 +43,7 @@ import org.apache.doris.analysis.BackupStmt;
 import org.apache.doris.analysis.CancelAlterSystemStmt;
 import org.apache.doris.analysis.CancelAlterTableStmt;
 import org.apache.doris.analysis.CancelBackupStmt;
+import org.apache.doris.analysis.CancelCloudWarmUpStmt;
 import org.apache.doris.analysis.ColumnRenameClause;
 import org.apache.doris.analysis.CreateClusterStmt;
 import org.apache.doris.analysis.CreateDbStmt;
@@ -251,10 +252,13 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Queues;
+import com.selectdb.cloud.catalog.CacheHotspotManager;
 import com.selectdb.cloud.catalog.CloudClusterChecker;
 import com.selectdb.cloud.catalog.CloudReplica;
 import com.selectdb.cloud.catalog.CloudTabletRebalancer;
 import com.selectdb.cloud.catalog.CloudUpgradeMgr;
+import com.selectdb.cloud.catalog.CloudWarmUpJob;
+import com.selectdb.cloud.catalog.CloudWarmUpJob.JobState;
 import com.selectdb.cloud.proto.SelectdbCloud;
 import com.selectdb.cloud.proto.SelectdbCloud.NodeInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
@@ -472,6 +476,8 @@ public class Env {
 
     private AtomicLong stmtIdCounter;
 
+    private CacheHotspotManager cacheHotspotMgr;
+
     public List<Frontend> getFrontends(FrontendNodeType nodeType) {
         if (nodeType == null) {
             // get all
@@ -601,6 +607,7 @@ public class Env {
 
         this.systemInfo = new SystemInfoService();
         this.heartbeatMgr = new HeartbeatMgr(systemInfo, !isCheckpointCatalog);
+        this.cacheHotspotMgr = new CacheHotspotManager(systemInfo);
         this.cloudClusterCheck = new CloudClusterChecker();
         this.tabletInvertedIndex = new TabletInvertedIndex();
         this.colocateTableIndex = new ColocateTableIndex();
@@ -810,6 +817,10 @@ public class Env {
 
     public StatisticsTaskScheduler getStatisticsTaskScheduler() {
         return statisticsTaskScheduler;
+    }
+
+    public CacheHotspotManager getCacheHotspotMgr() {
+        return cacheHotspotMgr;
     }
 
     // Use tryLock to avoid potential dead lock
@@ -1507,6 +1518,9 @@ public class Env {
         if (Config.isCloudMode()) {
             cloudClusterCheck.start();
             upgradeMgr.start();
+            if (Config.enable_fetch_cluster_cache_hotspot) {
+                cacheHotspotMgr.start();
+            }
         }
 
         // heartbeat mgr
@@ -2011,6 +2025,39 @@ public class Env {
         return newChecksum;
     }
 
+    public long loadCloudWarmUpJob(DataInputStream dis, long checksum) throws Exception {
+        // same as loadAlterJob
+
+        int size = dis.readInt();
+        long newChecksum = checksum ^ size;
+        if (size > 0) {
+            // There should be no old cloudWarmUp jobs, if exist throw exception, should not use this FE version
+            throw new IOException("There are [" + size + "] cloud warm up jobs."
+                    + " Please downgrade FE to an older version and handle residual jobs");
+        }
+
+        // finished or cancelled jobs
+        size = dis.readInt();
+        newChecksum ^= size;
+        if (size > 0) {
+            throw new IOException("There are [" + size + "] old finished or cancelled cloud warm up jobs."
+                    + " Please downgrade FE to an older version and handle residual jobs");
+        }
+
+        size = dis.readInt();
+        newChecksum ^= size;
+        for (int i = 0; i < size; i++) {
+            CloudWarmUpJob cloudWarmUpJob = CloudWarmUpJob.read(dis);
+            if (cloudWarmUpJob.isExpire() || cloudWarmUpJob.getJobState() == JobState.DELETED) {
+                LOG.info("cloud warm up job is expired, {}, ignore it", cloudWarmUpJob.getJobId());
+                continue;
+            }
+            this.getCacheHotspotMgr().addCloudWarmUpJob(cloudWarmUpJob);
+        }
+        LOG.info("finished replay cloud warm up job from image");
+        return newChecksum;
+    }
+
     public long loadBackupHandler(DataInputStream dis, long checksum) throws IOException {
         getBackupHandler().readFields(dis);
         getBackupHandler().setEnv(this);
@@ -2324,6 +2371,28 @@ public class Env {
             alterJobV2.write(dos);
         }
 
+        return checksum;
+    }
+
+    public long saveCloudWarmUpJob(CountingDataOutputStream dos, long checksum) throws IOException {
+        // same as saveAlterJob
+
+        Map<Long, CloudWarmUpJob> cloudWarmUpJobs;
+        cloudWarmUpJobs = this.getCacheHotspotMgr().getCloudWarmUpJobs();
+
+        int size = 0;
+        checksum ^= size;
+        dos.writeInt(size);
+
+        checksum ^= size;
+        dos.writeInt(size);
+
+        size = cloudWarmUpJobs.size();
+        checksum ^= size;
+        dos.writeInt(size);
+        for (CloudWarmUpJob cloudWarmUpJob : cloudWarmUpJobs.values()) {
+            cloudWarmUpJob.write(dos);
+        }
         return checksum;
     }
 
@@ -4398,6 +4467,10 @@ public class Env {
 
     public void cancelBackup(CancelBackupStmt stmt) throws DdlException {
         getBackupHandler().cancel(stmt);
+    }
+
+    public void cancelCloudWarmUp(CancelCloudWarmUpStmt stmt) throws DdlException {
+        getCacheHotspotMgr().cancel(stmt);
     }
 
     // entry of rename table operation

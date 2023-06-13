@@ -401,6 +401,7 @@ public class SchemaTable extends Table {
                                     .column("OLDEST_WRITE_TIMESTAMP", ScalarType.createType(PrimitiveType.BIGINT))
                                     .column("NEWEST_WRITE_TIMESTAMP", ScalarType.createType(PrimitiveType.BIGINT))
                                     .build()))
+            // TODO(yuejing): delete this fake table
             .put("backends", new SchemaTable(SystemIdGenerator.getNextId(), "backends", TableType.SCHEMA,
                     builder().column("BackendId", ScalarType.createType(PrimitiveType.BIGINT))
                             .column("Cluster", ScalarType.createVarchar(64))

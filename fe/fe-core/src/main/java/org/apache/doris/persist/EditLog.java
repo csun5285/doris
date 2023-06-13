@@ -82,6 +82,7 @@ import org.apache.doris.system.Frontend;
 import org.apache.doris.transaction.GlobalTransactionMgr;
 import org.apache.doris.transaction.TransactionState;
 
+import com.selectdb.cloud.catalog.CloudWarmUpJob;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -404,6 +405,11 @@ public class EditLog {
                 case OperationType.OP_UPDATE_CLOUD_REPLICA: {
                     UpdateCloudReplicaInfo info = (UpdateCloudReplicaInfo) journal.getData();
                     env.replayUpdateCloudReplica(info);
+                    break;
+                }
+                case OperationType.OP_MODIFY_CLOUD_WARM_UP_JOB: {
+                    CloudWarmUpJob cloudWarmUpJob = (CloudWarmUpJob) journal.getData();
+                    env.getCacheHotspotMgr().replayCloudWarmUpJob(cloudWarmUpJob);
                     break;
                 }
                 // SELECTDB_CODE_END
@@ -1551,6 +1557,10 @@ public class EditLog {
 
     public void logBatchAlterJob(BatchAlterJobPersistInfo batchAlterJobV2) {
         logEdit(OperationType.OP_BATCH_ADD_ROLLUP, batchAlterJobV2);
+    }
+
+    public void logModifyCloudWarmUpJob(CloudWarmUpJob cloudWarmUpJob) {
+        logEdit(OperationType.OP_MODIFY_CLOUD_WARM_UP_JOB, cloudWarmUpJob);
     }
 
     public void logModifyDistributionType(TableInfo tableInfo) {

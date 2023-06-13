@@ -55,6 +55,7 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
 
     LOG(INFO) << "[FileCache] path: " << cache_base_path
               << " total_size: " << file_cache_settings.total_size;
+    total_cache_size += file_cache_settings.total_size;
     return Status::OK();
 }
 

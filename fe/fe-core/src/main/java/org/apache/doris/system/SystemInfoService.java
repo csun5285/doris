@@ -185,6 +185,10 @@ public class SystemInfoService {
         }
     };
 
+    public boolean containClusterName(String clusterName) {
+        return clusterNameToId.containsKey(clusterName);
+    }
+
     public List<Backend> getBackendsByClusterName(final String clusterName) {
         String clusterId = clusterNameToId.getOrDefault(clusterName, "");
         if (clusterId.isEmpty()) {

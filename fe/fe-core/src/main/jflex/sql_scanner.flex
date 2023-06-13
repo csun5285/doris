@@ -128,6 +128,7 @@ import org.apache.doris.qe.SqlModeHelper;
         keywordMap.put("builtin", new Integer(SqlParserSymbols.KW_BUILTIN));
         keywordMap.put("by", new Integer(SqlParserSymbols.KW_BY));
         keywordMap.put("cancel", new Integer(SqlParserSymbols.KW_CANCEL));
+        keywordMap.put("cache", new Integer(SqlParserSymbols.KW_CACHE));
         keywordMap.put("case", new Integer(SqlParserSymbols.KW_CASE));
         keywordMap.put("cast", new Integer(SqlParserSymbols.KW_CAST));
         keywordMap.put("catalog", new Integer(SqlParserSymbols.KW_CATALOG));
@@ -248,6 +249,7 @@ import org.apache.doris.qe.SqlModeHelper;
         keywordMap.put("hll", new Integer(SqlParserSymbols.KW_HLL));
         keywordMap.put("hll_union", new Integer(SqlParserSymbols.KW_HLL_UNION));
         keywordMap.put("hour", new Integer(SqlParserSymbols.KW_HOUR));
+        keywordMap.put("hotspot", new Integer(SqlParserSymbols.KW_HOTSPOT));
         keywordMap.put("hub", new Integer(SqlParserSymbols.KW_HUB));
         keywordMap.put("identified", new Integer(SqlParserSymbols.KW_IDENTIFIED));
         keywordMap.put("if", new Integer(SqlParserSymbols.KW_IF));
@@ -481,6 +483,8 @@ import org.apache.doris.qe.SqlModeHelper;
         keywordMap.put("auto", new Integer(SqlParserSymbols.KW_AUTO));
         keywordMap.put("prepare", new Integer(SqlParserSymbols.KW_PREPARE));
         keywordMap.put("execute", new Integer(SqlParserSymbols.KW_EXECUTE));
+        keywordMap.put("warm", new Integer(SqlParserSymbols.KW_WARM));
+        keywordMap.put("up", new Integer(SqlParserSymbols.KW_UP));
    }
 
   // map from token id to token description

@@ -143,6 +143,8 @@ public class Backend implements Writable {
     // No need to persist, because only master FE handle heartbeat.
     private int heartbeatFailureCounter = 0;
 
+    private long fileCacheCapactiyBytes = 0;
+
     public Backend() {
         this.host = "";
         this.version = "";
@@ -281,6 +283,14 @@ public class Backend implements Writable {
 
     public long getLasetCurrentFragmentNum() {
         return this.backendStatus.lastFragmentUpdateTime;
+    }
+
+    public void setfileCacheCapacityBytes(long fileCacheCapactiyBytes) {
+        this.fileCacheCapactiyBytes = fileCacheCapactiyBytes;
+    }
+
+    public long getfileCacheCapactiyBytes() {
+        return fileCacheCapactiyBytes;
     }
 
     // for test only

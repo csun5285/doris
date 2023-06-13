@@ -45,6 +45,8 @@ import org.apache.doris.thrift.TExportTaskRequest;
 import org.apache.doris.thrift.TFetchDataParams;
 import org.apache.doris.thrift.TFetchDataResult;
 import org.apache.doris.thrift.TFinishTaskRequest;
+import org.apache.doris.thrift.TGetTopNHotPartitionsRequest;
+import org.apache.doris.thrift.TGetTopNHotPartitionsResponse;
 import org.apache.doris.thrift.THeartbeatResult;
 import org.apache.doris.thrift.TMasterInfo;
 import org.apache.doris.thrift.TPreCacheAsyncRequest;
@@ -68,6 +70,8 @@ import org.apache.doris.thrift.TTaskType;
 import org.apache.doris.thrift.TTransmitDataParams;
 import org.apache.doris.thrift.TTransmitDataResult;
 import org.apache.doris.thrift.TUniqueId;
+import org.apache.doris.thrift.TWarmUpTabletsRequest;
+import org.apache.doris.thrift.TWarmUpTabletsResponse;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -322,6 +326,15 @@ public class MockedBackendFactory {
         @Override
         public TSyncLoadForTabletsResponse syncLoadForTablets(TSyncLoadForTabletsRequest request) throws TException {
             return new TSyncLoadForTabletsResponse();
+        }
+
+        public TGetTopNHotPartitionsResponse getTopNHotPartitions(TGetTopNHotPartitionsRequest request) throws TException {
+            return new TGetTopNHotPartitionsResponse();
+        }
+
+        @Override
+        public TWarmUpTabletsResponse warmUpTablets(TWarmUpTabletsRequest request) throws TException {
+            return new TWarmUpTabletsResponse();
         }
     }
 

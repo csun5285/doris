@@ -48,6 +48,7 @@ import org.apache.doris.analysis.BackupStmt;
 import org.apache.doris.analysis.CancelAlterSystemStmt;
 import org.apache.doris.analysis.CancelAlterTableStmt;
 import org.apache.doris.analysis.CancelBackupStmt;
+import org.apache.doris.analysis.CancelCloudWarmUpStmt;
 import org.apache.doris.analysis.CancelExportStmt;
 import org.apache.doris.analysis.CancelLoadStmt;
 import org.apache.doris.analysis.CleanLabelStmt;
@@ -459,6 +460,9 @@ public class DdlExecutor {
             env.getAuth().alterUser((AlterUserStmt) ddlStmt);
         } else if (ddlStmt instanceof DropTableStatsStmt) {
             env.getStatisticsManager().dropStats((DropTableStatsStmt) ddlStmt);
+        } else if (ddlStmt instanceof CancelCloudWarmUpStmt) {
+            CancelCloudWarmUpStmt stmt = (CancelCloudWarmUpStmt) ddlStmt;
+            env.cancelCloudWarmUp(stmt);
         } else {
             throw new DdlException("Unknown statement.");
         }

@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <gen_cpp/BackendService_types.h>
 #include <thrift/protocol/TDebugProtocol.h>
 #include <time.h>
 
@@ -149,6 +150,12 @@ public:
     // If another cluster load, FE need to notify the cluster to sync the load data
     void sync_load_for_tablets(TSyncLoadForTabletsResponse& response,
                                const TSyncLoadForTabletsRequest& request) override;
+
+    void get_top_n_hot_partitions(TGetTopNHotPartitionsResponse& response,
+                                  const TGetTopNHotPartitionsRequest& request) override;
+
+    void warm_up_tablets(TWarmUpTabletsResponse& response,
+                         const TWarmUpTabletsRequest& request) override;
 
 private:
     Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);

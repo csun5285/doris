@@ -54,6 +54,8 @@ cloud_meta_mgr.cpp
 cloud_schema_change.cpp
 cloud_stream_load_executor.cpp
 cloud_tablet_mgr.cpp
+cloud_tablet_hotspot.cpp
+cloud_warm_up_manager.cpp
 utils.cpp
 ${IO_FILES}
 ${OLAP_FILES}

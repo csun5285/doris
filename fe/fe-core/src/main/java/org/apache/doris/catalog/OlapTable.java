@@ -867,6 +867,10 @@ public class OlapTable extends Table {
         return getPartition(partitionName, false);
     }
 
+    public boolean containPartition(String partitionName) {
+        return nameToPartition.containsKey(partitionName);
+    }
+
     // get partition by name
     public Partition getPartition(String partitionName, boolean isTempPartition) {
         if (isTempPartition) {

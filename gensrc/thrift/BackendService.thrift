@@ -146,6 +146,62 @@ struct TSyncLoadForTabletsRequest {
 struct TSyncLoadForTabletsResponse {
 }
 
+struct THotPartition {
+    1: required i64 partition_id
+    2: required i64 last_access_time
+    3: optional i64 query_per_day
+    4: optional i64 query_per_week
+}
+
+struct THotTableMessage {
+    1: required i64 table_id
+    2: required i64 index_id
+    3: optional list<THotPartition> hot_partitions
+}
+
+struct TGetTopNHotPartitionsRequest {
+
+}
+
+struct TGetTopNHotPartitionsResponse {
+    1: required i64 file_cache_size
+    2: optional list<THotTableMessage> hot_tables
+}
+
+enum TDownloadType {
+    BE = 0,
+    S3 = 1,
+}
+
+enum TWarmUpTabletsRequestType {
+    SET_JOB = 0,
+    SET_BATCH = 1,
+    GET_CURRENT_JOB_STATE_AND_LEASE = 2,
+    CLEAR_JOB = 3,
+}
+
+struct TJobMeta {   
+    1: required TDownloadType download_type
+    2: optional string be_ip
+    3: optional i32 brpc_port
+    4: optional list<i64> tablet_ids
+}
+
+struct TWarmUpTabletsRequest {
+    1: required i64 job_id
+    2: required i64 batch_id
+    3: optional list<TJobMeta> job_metas
+    4: required TWarmUpTabletsRequestType type
+}
+
+struct TWarmUpTabletsResponse {
+    1: required Status.TStatus status;
+    2: optional i64 job_id
+    3: optional i64 batch_id
+    4: optional i64 pending_job_size
+    5: optional i64 finish_job_size
+}
+
 service BackendService {
     // Called by coord to start asynchronous execution of plan fragment in backend.
     // Returns as soon as all incoming data streams have been set up.
@@ -209,4 +265,8 @@ service BackendService {
     TCheckPreCacheResponse check_pre_cache(1: TCheckPreCacheRequest request);
 
     TSyncLoadForTabletsResponse sync_load_for_tablets(1: TSyncLoadForTabletsRequest request);
+
+    TGetTopNHotPartitionsResponse get_top_n_hot_partitions(1: TGetTopNHotPartitionsRequest request);
+
+    TWarmUpTabletsResponse warm_up_tablets(1: TWarmUpTabletsRequest request);
 }

@@ -174,6 +174,12 @@ void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
         {
             std::lock_guard lock(_mtx);
             if (_task_queue.size() == _max_size) {
+                if (_task_queue.front().task_message.index() == 1) {
+                    auto& s3_file_meta = std::get<1>(_task_queue.front().task_message);
+                    if (s3_file_meta.download_callback) {
+                        s3_file_meta.download_callback(Status::InternalError("The downloader queue is full"));
+                    }
+                }
                 _task_queue.pop_front();
             }
             _task_queue.push_back(std::move(task));

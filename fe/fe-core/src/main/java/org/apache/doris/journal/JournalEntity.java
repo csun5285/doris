@@ -114,6 +114,7 @@ import org.apache.doris.system.Frontend;
 import org.apache.doris.transaction.TransactionState;
 
 import com.google.common.base.Preconditions;
+import com.selectdb.cloud.catalog.CloudWarmUpJob;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -733,6 +734,11 @@ public class JournalEntity implements Writable {
             }
             case OperationType.OP_UPDATE_CLOUD_REPLICA: {
                 data = UpdateCloudReplicaInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_MODIFY_CLOUD_WARM_UP_JOB: {
+                data = CloudWarmUpJob.read(in);
                 isRead = true;
                 break;
             }
