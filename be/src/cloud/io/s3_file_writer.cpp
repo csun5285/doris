@@ -39,6 +39,7 @@
 #include "cloud/io/s3_file_system.h"
 #include "common/logging.h"
 #include "common/status.h"
+#include "util/defer_op.h"
 
 namespace doris {
 namespace io {
@@ -117,10 +118,10 @@ Status S3FileWriter::_open() {
 
 Status S3FileWriter::abort() {
     _failed = true;
-    _closed = true;
     if (_closed || !_opened) {
         return Status::OK();
     }
+    Defer defer {[&]() { _closed = true; }};
     // we need to reclaim the memory
     if (_pending_buf) {
         _pending_buf->on_finish();
@@ -148,7 +149,7 @@ Status S3FileWriter::abort() {
 }
 
 Status S3FileWriter::close(bool /*sync*/) {
-    _closed = true;
+    Defer defer {[&]() { _closed = true; }};
     if (_closed || !_opened) {
         return Status::OK();
     }
@@ -346,7 +347,7 @@ Status S3FileWriter::finalize() {
     if (_pending_buf != nullptr) {
         // the whole file size is less than one buffer, we can just call PutObject to reduce network RTT
         if (1 == _cur_part_num) {
-            auto buf = std::static_pointer_cast<UploadFileBuffer>(_pending_buf);
+            auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
             DCHECK(buf != nullptr);
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }

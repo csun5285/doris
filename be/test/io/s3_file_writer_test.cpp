@@ -98,6 +98,46 @@ TEST_F(S3FileWriterTest, normal) {
     ASSERT_FALSE(exists);
 }
 
+TEST_F(S3FileWriterTest, smallFile) {
+    io::IOState state;
+    auto fs = io::global_local_filesystem();
+    {
+        io::FileReaderSPtr local_file_reader;
+
+        ASSERT_TRUE(
+                fs->open_file("./be/test/olap/test_data/all_types_1000.txt", &local_file_reader)
+                        .ok());
+
+        constexpr int buf_size = 8192;
+
+        io::FileWriterPtr s3_file_writer;
+        ASSERT_EQ(Status::OK(), s3_fs->create_file("small", &s3_file_writer, &state));
+
+        char buf[buf_size];
+        Slice slice(buf, buf_size);
+        size_t offset = 0;
+        size_t bytes_read = 0;
+        auto file_size = local_file_reader->size();
+        while (offset < file_size) {
+            ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
+            ASSERT_EQ(Status::OK(), s3_file_writer->append(Slice(buf, bytes_read)));
+            offset += bytes_read;
+        }
+        ASSERT_EQ(s3_file_writer->bytes_appended(), file_size);
+        ASSERT_TRUE(s3_file_writer->finalize().ok());
+        ASSERT_EQ(Status::OK(), s3_file_writer->close());
+        size_t s3_file_size = 0;
+        ASSERT_EQ(Status::OK(), s3_fs->file_size("small", &s3_file_size));
+        ASSERT_EQ(s3_file_size, file_size);
+    }
+    // tmp file in s3_file_writer should be deleted
+    bool exists = true;
+    fs->exists(
+            io::Path(io::TmpFileMgr::instance()->get_tmp_file_dir()) / "s3_file_writer_test_small",
+            &exists);
+    ASSERT_FALSE(exists);
+}
+
 TEST_F(S3FileWriterTest, abort) {
     io::IOState state;
     auto fs = io::global_local_filesystem();
