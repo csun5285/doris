@@ -738,6 +738,9 @@ public class ConnectProcessor {
         if (request.isFoldConstantByBe()) {
             ctx.getSessionVariable().setEnableFoldConstantByBe(request.foldConstantByBe);
         }
+        if (request.isSetNoAuth()) {
+            ctx.setNoAuth(request.isNoAuth());
+        }
 
         if (request.isSetSessionVariables()) {
             ctx.getSessionVariable().setForwardedSessionVariables(request.getSessionVariables());

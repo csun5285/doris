@@ -108,6 +108,7 @@ public class MasterOpExecutor {
         params.setUserIp(ctx.getRemoteIP());
         params.setStmtId(ctx.getStmtId());
         params.setCurrentUserIdent(ctx.getCurrentUserIdentity().toThrift());
+        params.setNoAuth(ctx.getNoAuth());
 
         if (Config.isCloudMode() && !Strings.isNullOrEmpty(ctx.getCloudCluster())) {
             params.setCloudCluster(ctx.getCloudCluster());

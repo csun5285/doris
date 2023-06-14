@@ -466,6 +466,10 @@ public class PaloAuth implements Writable {
     }
 
     public boolean checkGlobalPriv(ConnectContext ctx, PrivPredicate wanted) {
+        if (ctx.getNoAuth()) {
+            return true;
+        }
+
         return checkGlobalPriv(ctx.getCurrentUserIdentity(), wanted);
     }
 
@@ -705,6 +709,15 @@ public class PaloAuth implements Writable {
     }
 
     private boolean checkGlobalInternal(UserIdentity currentUser, PrivPredicate wanted, PrivBitSet savedPrivs) {
+        ConnectContext ctx = ConnectContext.get();
+        if (ctx != null) {
+            if (ctx.getNoAuth()) {
+                return true;
+            }
+        } else {
+            LOG.warn("use checkGlobalInter while can't get connectContext");
+        }
+
         if (isLdapAuthEnabled() && LdapPrivsChecker.hasGlobalPrivFromLdap(currentUser, wanted)) {
             return true;
         }

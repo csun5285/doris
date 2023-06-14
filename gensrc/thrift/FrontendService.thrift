@@ -441,6 +441,7 @@ struct TMasterOpRequest {
     22: optional string cloud_cluster
     23: optional string clientNodeHost
     24: optional i32 clientNodePort;
+    25: optional bool noAuth;
 }
 
 struct TColumnDefinition {

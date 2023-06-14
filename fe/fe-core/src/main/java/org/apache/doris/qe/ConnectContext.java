@@ -96,6 +96,8 @@ public class ConnectContext {
     protected volatile TransactionEntry txnEntry = null;
     // cluster name
     protected volatile String clusterName = "";
+    // used for ShowSqlAction which don't allow a user account
+    protected volatile boolean noAuth = false;
     // username@host of current login user
     protected volatile String qualifiedUser;
     // LDAP authenticated but the Doris account does not exist,
@@ -335,6 +337,14 @@ public class ConnectContext {
 
     public Env getEnv() {
         return env;
+    }
+
+    public boolean getNoAuth() {
+        return noAuth;
+    }
+
+    public void setNoAuth(boolean noAuth) {
+        this.noAuth = noAuth;
     }
 
     public String getQualifiedUser() {

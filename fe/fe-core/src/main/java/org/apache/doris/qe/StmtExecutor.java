@@ -205,6 +205,7 @@ public class StmtExecutor implements ProfileWriter {
     private QueryPlannerProfile plannerProfile = new QueryPlannerProfile();
     private String stmtName;
     private PrepareStmt prepareStmt;
+    private ResultSet resultForNoAuth;
 
     // this constructor is mainly for proxy
     public StmtExecutor(ConnectContext context, OriginStatement originStmt, boolean isProxy) {
@@ -1971,7 +1972,15 @@ public class StmtExecutor implements ProfileWriter {
         context.getMysqlChannel().sendOnePacket(serializer.toByteBuffer());
     }
 
+    public ResultSet fetchResultForNoAuth() {
+        return resultForNoAuth;
+    }
+
     public void sendResultSet(ResultSet resultSet) throws IOException {
+        if (context.getNoAuth()) {
+            resultForNoAuth = resultSet;
+            return;
+        }
         context.updateReturnRows(resultSet.getResultRows().size());
         // Send meta data.
         sendMetaData(resultSet.getMetaData());
