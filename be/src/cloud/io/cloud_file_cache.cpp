@@ -642,10 +642,6 @@ CloudFileCache::FileSegmentCell* CloudFileCache::add_cell(
     if (size == 0) {
         return nullptr; /// Empty files are not cached.
     }
-    DCHECK(_files[key].count(offset) == 0)
-            << "Cache already exists for key: " << key.to_string() << ", offset: " << offset
-            << ", size: " << size
-            << ".\nCurrent cache structure: " << dump_structure_unlocked(key, cache_lock);
 
     // in async load mode, a cell may be added twice.
     if (_lazy_open_done) {
