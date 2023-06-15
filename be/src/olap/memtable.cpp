@@ -436,6 +436,9 @@ Status MemTable::_generate_delete_bitmap(int64_t atomic_num_segments_before_flus
         return Status::OK();
     }
     auto rowset = _rowset_writer->build_tmp();
+    if (rowset == nullptr) {
+        return Status::InternalError("failed to build tmp rowset");
+    }
     auto beta_rowset = reinterpret_cast<BetaRowset*>(rowset.get());
     std::vector<segment_v2::SegmentSharedPtr> segments;
     if (atomic_num_segments_before_flush >= atomic_num_segments_after_flush) {
@@ -444,11 +447,13 @@ Status MemTable::_generate_delete_bitmap(int64_t atomic_num_segments_before_flus
     RETURN_IF_ERROR(beta_rowset->load_segments(atomic_num_segments_before_flush,
                                                atomic_num_segments_after_flush, &segments));
     std::shared_lock meta_rlock(_tablet->get_header_lock());
+#ifndef CLOUD_MODE
     // tablet is under alter process. The delete bitmap will be calculated after conversion.
     if (_tablet->tablet_state() == TABLET_NOTREADY &&
         SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
         return Status::OK();
     }
+#endif
     RETURN_IF_ERROR(_tablet->calc_delete_bitmap(beta_rowset->rowset_id(), segments, &_rowset_ids,
                                                 _delete_bitmap, _cur_max_version));
     return Status::OK();

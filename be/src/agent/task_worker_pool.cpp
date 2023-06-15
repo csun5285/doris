@@ -41,6 +41,7 @@
 #include "olap/tablet.h"
 #include "olap/task/engine_alter_tablet_task.h"
 #include "olap/task/engine_batch_load_task.h"
+#include "olap/task/engine_calc_delete_bitmap_task.h"
 #include "olap/task/engine_checksum_task.h"
 #include "olap/task/engine_clone_task.h"
 #include "olap/task/engine_publish_version_task.h"
@@ -210,6 +211,13 @@ void TaskWorkerPool::start() {
         cb = std::bind<void>(&TaskWorkerPool::_storage_update_storage_policy_worker_thread_callback,
                              this);
         break;
+#ifdef CLOUD_MODE
+    case TaskWorkerType::CALCULATE_DELETE_BITMAP:
+        _worker_count = config::calc_delete_bitmap_worker_count;
+        cb = std::bind<void>(&TaskWorkerPool::_calc_delete_bimtap_worker_thread_callback,
+                             this);
+        break;
+#endif
     default:
         // pass
         break;
@@ -1860,5 +1868,54 @@ void TaskWorkerPool::_storage_update_storage_policy_worker_thread_callback() {
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
     }
 }
+
+#ifdef CLOUD_MODE
+void TaskWorkerPool::_calc_delete_bimtap_worker_thread_callback() {
+    while (_is_work) {
+        TAgentTaskRequest agent_task_req;
+        TCalcDeleteBitmapRequest calc_delete_bitmap_req;
+        {
+            std::unique_lock<std::mutex> worker_thread_lock(_worker_thread_lock);
+            _worker_thread_condition_variable.wait(
+                    worker_thread_lock, [this]() { return !_is_work || !_tasks.empty(); });
+            if (!_is_work) {
+                return;
+            }
+
+            agent_task_req = _tasks.front();
+            calc_delete_bitmap_req = agent_task_req.calc_delete_bitmap_req;
+            _tasks.pop_front();
+        }
+
+        std::vector<TTabletId> error_tablet_ids;
+        std::vector<TTabletId> succ_tablet_ids;
+        Status status;
+        error_tablet_ids.clear();
+        EngineCalcDeleteBitmapTask engine_task(calc_delete_bitmap_req, &error_tablet_ids,
+                &succ_tablet_ids);
+        status = _env->storage_engine()->execute_task(&engine_task);
+
+        TFinishTaskRequest finish_task_request;
+        if (!status) {
+            DorisMetrics::instance()->publish_task_failed_total->increment(1);
+            LOG_WARNING("failed to calculate delete bitmap")
+                    .tag("signature", agent_task_req.signature)
+                    .tag("transaction_id", calc_delete_bitmap_req.transaction_id)
+                    .tag("error_tablets_num", error_tablet_ids.size())
+                    .error(status);
+        }
+
+        status.to_thrift(&finish_task_request.task_status);
+        finish_task_request.__set_backend(_backend);
+        finish_task_request.__set_task_type(agent_task_req.task_type);
+        finish_task_request.__set_signature(agent_task_req.signature);
+        finish_task_request.__set_report_version(_s_report_version);
+        finish_task_request.__set_error_tablet_ids(error_tablet_ids);
+
+        _finish_task(finish_task_request);
+        _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
+    }
+}
+#endif
 
 } // namespace doris

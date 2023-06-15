@@ -68,7 +68,8 @@ public:
         SUBMIT_TABLE_COMPACTION,
         REFRESH_STORAGE_POLICY,
         UPDATE_STORAGE_POLICY,
-        ALTER_INVERTED_INDEX
+        ALTER_INVERTED_INDEX,
+        CALCULATE_DELETE_BITMAP
     };
 
     enum ReportType { TASK, DISK, TABLET };
@@ -130,6 +131,8 @@ public:
             return "UPDATE_STORAGE_POLICY";
         case ALTER_INVERTED_INDEX:
             return "ALTER_INVERTED_INDEX";
+        case CALCULATE_DELETE_BITMAP:
+            return "CALCULATE_DELETE_BITMAP";
         default:
             return "Unknown";
         }
@@ -197,6 +200,9 @@ private:
     void _submit_table_compaction_worker_thread_callback();
     void _storage_refresh_storage_policy_worker_thread_callback();
     void _storage_update_storage_policy_worker_thread_callback();
+#ifdef CLOUD_MODE
+    void _calc_delete_bimtap_worker_thread_callback();
+#endif
 
     void _alter_inverted_index(const TAgentTaskRequest& alter_inverted_index_request, int64_t signature,
                             const TTaskType::type task_type, TFinishTaskRequest* finish_task_request);

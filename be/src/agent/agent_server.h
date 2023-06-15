@@ -83,6 +83,7 @@ private:
 
     std::unique_ptr<TaskWorkerPool> _storage_refresh_policy_workers;
     std::unique_ptr<TaskWorkerPool> _storage_update_policy_workers;
+    std::unique_ptr<TaskWorkerPool> _calc_delete_bimtap_workers;
     std::unique_ptr<TopicSubscriber> _topic_subscriber;
 };
 

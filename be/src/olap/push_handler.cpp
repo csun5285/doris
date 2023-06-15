@@ -20,18 +20,21 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 #include "cloud/utils.h"
 #include "common/object_pool.h"
 #include "common/status.h"
 #include "exec/parquet_scanner.h"
+#include "olap/olap_common.h"
 #include "olap/row.h"
 #include "olap/rowset/rowset_id_generator.h"
 #include "olap/rowset/rowset_meta_manager.h"
 #include "olap/schema_change.h"
 #include "olap/storage_engine.h"
 #include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
 #include "runtime/exec_env.h"
 
@@ -79,6 +82,16 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     if (!st.ok() && !st.is<ALREADY_EXIST>()) {
         return st;
     }
+
+    // TODO(liaoxin) delete operator don't send calculate delete bitmap task from fe,
+    //  then we don't need to set_txn_related_delete_bitmap here.
+    if (tablet->enable_unique_key_merge_on_write()) {
+        DeleteBitmapPtr delete_bitmap = std::make_shared<DeleteBitmap>(tablet->tablet_id());
+        RowsetIdUnorderedSet rowset_ids;
+        StorageEngine::instance()->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
+                request.transaction_id, tablet->tablet_id(), delete_bitmap, rowset_ids, rowset);
+    }
+
     TTabletInfo tablet_info;
     // just need tablet_id
     tablet_info.tablet_id = tablet->tablet_id();

@@ -19,6 +19,7 @@
 
 #include "cloud/io/file_system.h"
 #include "cloud/meta_mgr.h"
+#include "cloud/olap//delete_bitmap_txn_manager.h"
 #include "cloud/olap/segment.h"
 #include "common/status.h"
 #include "gen_cpp/AgentService_types.h"
@@ -151,6 +152,9 @@ public:
 
     TabletManager* tablet_manager() { return _tablet_manager.get(); }
     TxnManager* txn_manager() { return _txn_manager.get(); }
+
+    DeleteBitmapTxnManager* delete_bitmap_txn_manager() { return _delete_bitmap_txn_manager.get(); }
+
     MemTableFlushExecutor* memtable_flush_executor() { return _memtable_flush_executor.get(); }
 
     cloud::MetaMgr* meta_mgr() { return _meta_mgr.get(); }
@@ -214,6 +218,10 @@ public:
 
     std::unique_ptr<ThreadPool>& tablet_publish_txn_thread_pool() {
         return _tablet_publish_txn_thread_pool;
+    }
+
+    std::unique_ptr<ThreadPool>& tablet_calc_delete_bitmap_thread_pool() {
+        return _tablet_calc_delete_bitmap_thread_pool;
     }
 
 private:
@@ -409,6 +417,7 @@ private:
 
     std::unique_ptr<TabletManager> _tablet_manager;
     std::unique_ptr<TxnManager> _txn_manager;
+    std::unique_ptr<DeleteBitmapTxnManager> _delete_bitmap_txn_manager;
 
     std::unique_ptr<RowsetIdGenerator> _rowset_id_generator;
 
@@ -428,6 +437,8 @@ private:
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;
+
+    std::unique_ptr<ThreadPool> _tablet_calc_delete_bitmap_thread_pool;
 
     CompactionPermitLimiter _permit_limiter;
 

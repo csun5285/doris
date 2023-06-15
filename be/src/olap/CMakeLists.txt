@@ -120,6 +120,7 @@ add_library(Olap STATIC
     task/engine_storage_migration_task.cpp
     task/engine_publish_version_task.cpp
     task/engine_alter_tablet_task.cpp
+    task/engine_calc_delete_bitmap_task.cpp
     column_vector.cpp
     segment_loader.cpp
     storage_policy_mgr.cpp

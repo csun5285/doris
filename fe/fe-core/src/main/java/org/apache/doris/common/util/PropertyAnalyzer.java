@@ -701,7 +701,7 @@ public class PropertyAnalyzer {
         unsupportedProperties.add(PROPERTIES_STORAGE_POLICY);
         unsupportedProperties.add(PROPERTIES_STORAGE_COOLDOWN_TIME);
         unsupportedProperties.add(PROPERTIES_DISABLE_AUTO_COMPACTION);
-        unsupportedProperties.add(ENABLE_UNIQUE_KEY_MERGE_ON_WRITE);
+        // unsupportedProperties.add(ENABLE_UNIQUE_KEY_MERGE_ON_WRITE);
         unsupportedProperties.add(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE);
         unsupportedProperties.add(PROPERTIES_REPLICATION_ALLOCATION);
         unsupportedProperties.add(PROPERTIES_REPLICATION_NUM);
@@ -845,6 +845,7 @@ public class PropertyAnalyzer {
         if (value.equals("false")) {
             return false;
         }
+        /*
         if (Config.isCloudMode()) {
             if (Config.merge_on_write_forced_to_false) {
                 LOG.info("merge on write is forced to false in cloud mode, origin value {}", value);
@@ -853,6 +854,7 @@ public class PropertyAnalyzer {
                 throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `false`");
             }
         }
+        */
         if (value.equals("true")) {
             return true;
         }

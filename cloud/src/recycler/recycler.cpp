@@ -1029,6 +1029,14 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
     }
     txn->remove(rs_key0, rs_key1);
     txn->remove(recyc_rs_key0, recyc_rs_key1);
+
+    // remove delete bitmap for MoW table
+    std::string pending_key = meta_pending_delete_bitmap_key({instance_id_, tablet_id});
+    txn->remove(pending_key);
+    std::string delete_bitmap_start = meta_delete_bitmap_key({instance_id_, tablet_id, "", 0, 0});
+    std::string delete_bitmap_end = meta_delete_bitmap_key({instance_id_, tablet_id + 1, "", 0, 0});
+    txn->remove(delete_bitmap_start, delete_bitmap_end);
+
     if (txn->commit() != 0) {
         LOG(WARNING) << "failed to delete rowset kv of tablet " << tablet_id;
         ret = -1;
@@ -1045,6 +1053,7 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
             recycled_tablets_.insert(tablet_id);
         }
     }
+
     return ret;
 }
 

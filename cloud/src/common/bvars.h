@@ -148,6 +148,9 @@ extern BvarLatencyRecorderWithTag g_bvar_ms_get_copy_files;
 extern BvarLatencyRecorderWithTag g_bvar_ms_filter_copy_files;
 extern BvarLatencyRecorderWithTag g_bvar_ms_start_tablet_job;
 extern BvarLatencyRecorderWithTag g_bvar_ms_finish_tablet_job;
+extern BvarLatencyRecorderWithTag g_bvar_ms_update_delete_bitmap;
+extern BvarLatencyRecorderWithTag g_bvar_ms_get_delete_bitmap;
+extern BvarLatencyRecorderWithTag g_bvar_ms_get_delete_bitmap_update_lock;
 
 // txn_kv's bvars
 extern bvar::LatencyRecorder g_bvar_txn_kv_get;

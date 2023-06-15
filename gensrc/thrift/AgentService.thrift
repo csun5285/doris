@@ -326,6 +326,17 @@ struct TPublishVersionRequest {
     3: optional bool strict_mode = false
 }
 
+struct TCalcDeleteBitmapPartitionInfo {
+    1: required Types.TPartitionId partition_id
+    2: required Types.TVersion version
+    3: required list<Types.TTabletId> tablet_ids
+}
+
+struct TCalcDeleteBitmapRequest {
+    1: required Types.TTransactionId transaction_id
+    2: required list<TCalcDeleteBitmapPartitionInfo> partitions;
+}
+
 struct TClearAlterTaskRequest {
     1: required Types.TTabletId tablet_id
     2: required Types.TSchemaHash schema_hash
@@ -402,6 +413,7 @@ struct TAgentTaskRequest {
     28: optional TStorageMigrationReqV2 storage_migration_req_v2
     29: optional TGetStoragePolicy update_policy
     30: optional TAlterInvertedIndexReq alter_inverted_index_req
+    31: optional TCalcDeleteBitmapRequest calc_delete_bitmap_req
 }
 
 struct TAgentResult {

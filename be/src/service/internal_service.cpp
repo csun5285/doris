@@ -535,6 +535,7 @@ void PInternalServiceImpl::fetch_table_schema(google::protobuf::RpcController* c
         col_types[idx].to_protobuf(type_desc);
     }
     st.to_protobuf(result->mutable_status());
+    reader.reset();
 }
 
 void PInternalServiceImpl::get_info(google::protobuf::RpcController* controller,

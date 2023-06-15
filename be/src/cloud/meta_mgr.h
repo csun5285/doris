@@ -79,6 +79,16 @@ public:
     virtual Status update_tablet_schema(int64_t tablet_id, TabletSchemaSPtr tablet_schema) {
         return Status::NotSupported("not supported");
     }
+
+    virtual Status update_delete_bitmap(const Tablet* tablet, int64_t lock_id, int64_t initiator,
+                                        DeleteBitmapPtr delete_bitmap) {
+        return Status::NotSupported("not supported");
+    }
+
+    virtual Status get_delete_bitmap_update_lock(const Tablet* tablet, int64_t lock_id,
+                                                 int64_t initiator) {
+        return Status::NotSupported("not supported");
+    }
 };
 
 } // namespace doris::cloud

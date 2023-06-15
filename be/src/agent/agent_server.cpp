@@ -73,6 +73,7 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
     CREATE_AND_START_THREAD(REPORT_TASK, _report_task_workers);
+    CREATE_AND_START_POOL(CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers);
 #else
     CREATE_AND_START_POOL(CREATE_TABLE, _create_tablet_workers);
     CREATE_AND_START_POOL(DROP_TABLE, _drop_tablet_workers);
@@ -164,6 +165,7 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
             HANDLE_TYPE(TTaskType::COMPACTION, _submit_table_compaction_workers, compaction_req);
             HANDLE_TYPE(TTaskType::NOTIFY_UPDATE_STORAGE_POLICY, _storage_update_policy_workers,
                         update_policy);
+            HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers, calc_delete_bitmap_req);
 
         case TTaskType::REALTIME_PUSH:
         case TTaskType::PUSH:

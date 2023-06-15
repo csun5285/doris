@@ -137,6 +137,7 @@ Status DeltaWriter::init() {
 
     // get rowset ids snapshot
     if (_tablet->enable_unique_key_merge_on_write()) {
+        RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(_tablet.get()));
         std::lock_guard<std::shared_mutex> lck(_tablet->get_header_lock());
         _cur_max_version = _tablet->max_version_unlocked().second;
         _rowset_ids = _tablet->all_rs_id(_cur_max_version);
@@ -466,6 +467,11 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
         return Status::InternalError("fail to build rowset");
     }
 
+    if (_tablet->enable_unique_key_merge_on_write()) {
+        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
+                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
+    }
+
     _delta_written_success = true;
 
     const FlushStatistic& stat = _flush_token->get_stats();
@@ -517,7 +523,7 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
     if (_tablet->enable_unique_key_merge_on_write()) {
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
                 _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
-                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids,
+                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids, _cur_rowset
                 dynamic_cast<BetaRowsetWriter*>(_rowset_writer.get())->get_num_mow_keys());
     }
 

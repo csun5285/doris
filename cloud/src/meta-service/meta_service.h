@@ -228,6 +228,21 @@ public:
                            const ::selectdb::FilterCopyFilesRequest* request,
                            ::selectdb::FilterCopyFilesResponse* response,
                            ::google::protobuf::Closure* done) override;
+
+    void update_delete_bitmap(google::protobuf::RpcController* controller,
+                              const ::selectdb::UpdateDeleteBitmapRequest* request,
+                              ::selectdb::UpdateDeleteBitmapResponse* response,
+                              ::google::protobuf::Closure* done) override;
+    void get_delete_bitmap(google::protobuf::RpcController* controller,
+                           const ::selectdb::GetDeleteBitmapRequest* request,
+                           ::selectdb::GetDeleteBitmapResponse* response,
+                           ::google::protobuf::Closure* done) override;
+
+    void get_delete_bitmap_update_lock(google::protobuf::RpcController* controller,
+                                       const ::selectdb::GetDeleteBitmapUpdateLockRequest* request,
+                                       ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
+                                       ::google::protobuf::Closure* done) override;
+
 private:
     std::pair<MetaServiceCode, std::string> create_instance(
             const ::selectdb::AlterInstanceRequest* request);

@@ -26,6 +26,7 @@ import org.apache.doris.thrift.TAgentServiceVersion;
 import org.apache.doris.thrift.TAgentTaskRequest;
 import org.apache.doris.thrift.TAlterInvertedIndexReq;
 import org.apache.doris.thrift.TAlterTabletReqV2;
+import org.apache.doris.thrift.TCalcDeleteBitmapRequest;
 import org.apache.doris.thrift.TCheckConsistencyReq;
 import org.apache.doris.thrift.TClearAlterTaskRequest;
 import org.apache.doris.thrift.TClearTransactionTaskRequest;
@@ -381,6 +382,15 @@ public class AgentBatchTask implements Runnable {
                     LOG.debug(request.toString());
                 }
                 tAgentTaskRequest.setUpdatePolicy(request);
+                return tAgentTaskRequest;
+            }
+            case CALCULATE_DELETE_BITMAP: {
+                CalcDeleteBitmapTask calcDeleteBitmapTask = (CalcDeleteBitmapTask) task;
+                TCalcDeleteBitmapRequest request = calcDeleteBitmapTask.toThrift();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(request.toString());
+                }
+                tAgentTaskRequest.setCalcDeleteBitmapReq(request);
                 return tAgentTaskRequest;
             }
             default:

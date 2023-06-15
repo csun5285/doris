@@ -123,6 +123,9 @@ StorageEngine::StorageEngine(const EngineOptions& options)
 #ifndef CLOUD_MODE
           _tablet_manager(new TabletManager(config::tablet_map_shard_size)),
           _txn_manager(new TxnManager(config::txn_map_shard_size, config::txn_shard_size)),
+#else
+          _delete_bitmap_txn_manager(
+                  new DeleteBitmapTxnManager(config::delete_bitmap_agg_cache_capacity)),
 #endif
           _rowset_id_generator(new UniqueRowsetIdGenerator(options.backend_uid)),
           _memtable_flush_executor(nullptr),

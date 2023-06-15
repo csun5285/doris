@@ -152,7 +152,7 @@ Status CloudBaseCompaction::execute_compact_impl() {
     return Status::OK();
 }
 
-Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* stats_unused) {
+Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* merger_stats) {
     // commit compaction job
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();
@@ -183,6 +183,19 @@ Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* stats_u
 
     int64_t base_compaction_cnt = _tablet->base_compaction_cnt();
     selectdb::TabletStatsPB stats;
+
+    DeleteBitmapPtr output_rowset_delete_bitmap = nullptr;
+    if (_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
+        _tablet->enable_unique_key_merge_on_write()) {
+        int64_t missed_rows = merger_stats ? merger_stats->merged_rows : -1;
+        int64_t initiator = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
+                            std::numeric_limits<int64_t>::max();
+        RETURN_IF_ERROR(_tablet->cloud_calc_delete_bitmap_for_compaciton(
+                _input_rowsets, _output_rowset, _rowid_conversion, compaction_type(), missed_rows,
+                initiator, output_rowset_delete_bitmap));
+        compaction_job->set_delete_bitmap_lock_initiator(initiator);
+    }
+
     RETURN_IF_ERROR(cloud::meta_mgr()->commit_tablet_job(job, &stats));
     LOG(INFO) << "tablet stats=" << stats.ShortDebugString();
 
@@ -199,6 +212,9 @@ Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* stats_u
         _tablet->set_cumulative_layer_point(stats.cumulative_point());
         _tablet->reset_approximate_stats(stats.num_rowsets(), stats.num_segments(),
                                          stats.num_rows(), stats.data_size());
+        if (output_rowset_delete_bitmap) {
+            _tablet->tablet_meta()->delete_bitmap().merge(*output_rowset_delete_bitmap);
+        }
     }
     return Status::OK();
 }

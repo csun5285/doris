@@ -262,4 +262,15 @@ public class MetaServiceClient {
     public SelectdbCloud.AlterClusterResponse alterCluster(SelectdbCloud.AlterClusterRequest request) {
         return blockingStub.alterCluster(request);
     }
+
+    public SelectdbCloud.GetDeleteBitmapUpdateLockResponse
+            getDeleteBitmapUpdateLock(SelectdbCloud.GetDeleteBitmapUpdateLockRequest request) {
+        if (!request.hasCloudUniqueId()) {
+            SelectdbCloud.GetDeleteBitmapUpdateLockRequest.Builder builder =
+                    SelectdbCloud.GetDeleteBitmapUpdateLockRequest.newBuilder();
+            builder.mergeFrom(request);
+            return blockingStub.getDeleteBitmapUpdateLock(builder.setCloudUniqueId(Config.cloud_unique_id).build());
+        }
+        return blockingStub.getDeleteBitmapUpdateLock(request);
+    }
 }

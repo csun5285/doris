@@ -36,6 +36,9 @@ namespace selectdb {
 [[maybe_unused]] static const char* META_KEY_INFIX_TABLET     = "tablet";
 [[maybe_unused]] static const char* META_KEY_INFIX_TABLET_IDX = "tablet_index";
 [[maybe_unused]] static const char* META_KEY_INFIX_SCHEMA     = "schema";
+[[maybe_unused]] static const char* META_KEY_INFIX_DELETE_BITMAP = "delete_bitmap";
+[[maybe_unused]] static const char* META_KEY_INFIX_DELETE_BITMAP_LOCK = "delete_bitmap_lock";
+[[maybe_unused]] static const char* META_KEY_INFIX_DELETE_BITMAP_PENDING = "delete_bitmap_pending";
 
 [[maybe_unused]] static const char* RECYCLE_KEY_INFIX_INDEX   = "index";
 [[maybe_unused]] static const char* RECYCLE_KEY_INFIX_PART    = "partition";
@@ -92,7 +95,7 @@ static void encode_prefix(const T& t, std::string* key) {
         InstanceKeyInfo,
         TxnLabelKeyInfo, TxnInfoKeyInfo, TxnIndexKeyInfo, TxnRunningKeyInfo,
         MetaRowsetKeyInfo, MetaRowsetTmpKeyInfo, MetaTabletKeyInfo, MetaTabletIdxKeyInfo, MetaSchemaKeyInfo,
-        VersionKeyInfo,
+        MetaDeleteBitmapInfo, MetaDeleteBitmapUpdateLockInfo, MetaPendingDeleteBitmapInfo, VersionKeyInfo,
         RecycleIndexKeyInfo, RecyclePartKeyInfo, RecycleRowsetKeyInfo, RecycleTxnKeyInfo, RecycleStageKeyInfo,
         StatsTabletKeyInfo,
         JobTabletKeyInfo, JobRecycleKeyInfo,
@@ -111,7 +114,10 @@ static void encode_prefix(const T& t, std::string* key) {
                       || std::is_same_v<T, MetaRowsetTmpKeyInfo>
                       || std::is_same_v<T, MetaTabletKeyInfo>
                       || std::is_same_v<T, MetaTabletIdxKeyInfo>
-                      || std::is_same_v<T, MetaSchemaKeyInfo>) {
+                      || std::is_same_v<T, MetaSchemaKeyInfo>
+                      || std::is_same_v<T, MetaDeleteBitmapInfo>
+                      || std::is_same_v<T, MetaDeleteBitmapUpdateLockInfo>
+                      || std::is_same_v<T, MetaPendingDeleteBitmapInfo>) {
         encode_bytes(META_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, VersionKeyInfo>) {
         encode_bytes(VERSION_KEY_PREFIX, key);
@@ -240,6 +246,29 @@ void meta_schema_key(const MetaSchemaKeyInfo& in, std::string* out) {
     encode_bytes(META_KEY_INFIX_SCHEMA, out); // "schema"
     encode_int64(std::get<1>(in), out);       // index_id
     encode_int64(std::get<2>(in), out);       // schema_version
+}
+
+void meta_delete_bitmap_key(const MetaDeleteBitmapInfo& in, std::string* out) {
+    encode_prefix(in, out);                          // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_DELETE_BITMAP, out); // "delete_bitmap"
+    encode_int64(std::get<1>(in), out);              // tablet_id
+    encode_bytes(std::get<2>(in), out);              // rowset_id
+    encode_int64(std::get<3>(in), out);              // version
+    encode_int64(std::get<4>(in), out);              // segment_id
+}
+
+void meta_delete_bitmap_update_lock_key(const MetaDeleteBitmapUpdateLockInfo& in,
+                                        std::string* out) {
+    encode_prefix(in, out);                               // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_DELETE_BITMAP_LOCK, out); // "delete_bitmap_lock"
+    encode_int64(std::get<1>(in), out);                   // table_id
+    encode_int64(std::get<2>(in), out);                   // partition_id
+}
+
+void meta_pending_delete_bitmap_key(const MetaPendingDeleteBitmapInfo& in, std::string* out) {
+    encode_prefix(in, out);                                  // 0x01 "meta" ${instance_id}
+    encode_bytes(META_KEY_INFIX_DELETE_BITMAP_PENDING, out); // "delete_bitmap_pending"
+    encode_int64(std::get<1>(in), out);                      // table_id
 }
 
 //==============================================================================

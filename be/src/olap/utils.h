@@ -323,6 +323,12 @@ struct RowLocation {
             return row_id < rhs.row_id;
         }
     }
+
+    std::string to_sring() const {
+        std::stringstream ss;
+        ss << "|" << rowset_id << "|" << segment_id << "|" << row_id << "|";
+        return ss.str();
+    }
 };
 
 struct GlobalRowLoacation {

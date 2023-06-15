@@ -1047,6 +1047,11 @@ CONF_Bool(enable_scanner_early_cancel, "true");
 
 // the max sleep time when meeting high pressure load task
 CONF_mInt64(max_load_pressure_wait_time_ms, "3000");
+// the count of thread to calc delete bitmap worker
+CONF_Int32(calc_delete_bitmap_worker_count, "8");
+// the count of tablet thread to calc delete bitmap
+CONF_Int32(tablet_calc_delete_bitmap_max_thread, "32");
+
 } // namespace config
 
 } // namespace doris

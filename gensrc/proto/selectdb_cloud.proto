@@ -411,6 +411,7 @@ message TabletCompactionJobPB {
     optional int64 expiration = 22; // prepare
     // Lease time, unix timestamp
     optional int64 lease = 23; // prepare
+    optional int64 delete_bitmap_lock_initiator = 24;
 }
 
 message TabletSchemaChangeJobPB {
@@ -429,6 +430,7 @@ message TabletSchemaChangeJobPB {
     repeated int64 output_versions = 11;
     optional int64 output_cumulative_point = 12;
     optional bool is_inverted_index_change = 13 [default = false];
+    optional int64 delete_bitmap_lock_initiator = 14;
 }
 
 message TabletJobInfoPB {
@@ -528,6 +530,8 @@ message CommitTxnRequest {
     optional int64 txn_id = 3;
     optional bool is_2pc = 4;
     optional TxnCommitAttachmentPB commit_attachment = 5;
+    // merge-on-write table ids
+    repeated int64 mow_table_ids = 6;
 }
 
 message CommitTxnResponse {
@@ -1037,7 +1041,70 @@ enum MetaServiceCode {
     ERR_ENCRYPT = 7001;
     ERR_DECPYPT = 7002;
 
+    // delete bitmap 
+    LOCK_EXPIRED = 8001;
+    LOCK_CONFLICT = 8002;
+
     UNDEFINED_ERR = 1000000;
+}
+
+
+message UpdateDeleteBitmapRequest {
+    optional string cloud_unique_id = 1; // For auth
+    optional int64 table_id = 2;
+    optional int64 partition_id = 3;
+    optional int64 tablet_id = 4;
+    optional int64 lock_id = 5;
+    optional int64 initiator = 6;
+    repeated string rowset_ids = 7;
+    repeated uint32 segment_ids = 8;
+    repeated int64 versions = 9;
+    // Serialized roaring bitmaps indexed with {rowset_id, segment_id, version}
+    repeated bytes segment_delete_bitmaps = 10;
+}
+
+message UpdateDeleteBitmapResponse {
+    optional MetaServiceResponseStatus status = 1;
+}
+
+message GetDeleteBitmapRequest {
+    optional string cloud_unique_id = 1; // For auth
+    optional int64 tablet_id = 2;
+    repeated string rowset_ids = 3;
+    repeated int64 begin_versions = 4;
+    repeated int64 end_versions = 5;
+}
+
+message GetDeleteBitmapResponse {
+    optional MetaServiceResponseStatus status = 1;
+    repeated string rowset_ids = 2;
+    repeated uint32 segment_ids = 3;
+    repeated int64 versions = 4;
+    // Serialized roaring bitmaps indexed with {rowset_id, segment_id, version}
+    repeated bytes segment_delete_bitmaps = 5;
+}
+
+message PendingDeleteBitmapPB {
+    repeated bytes delete_bitmap_keys = 1;
+}
+
+message DeleteBitmapUpdateLockPB {
+    optional int64 lock_id = 1;
+    optional int64 expiration = 2;
+    repeated int64 initiators = 3;
+}
+
+message GetDeleteBitmapUpdateLockRequest {
+    optional string cloud_unique_id = 1; // For auth
+    optional int64 table_id = 2;
+    repeated int64 partition_ids = 3;
+    optional int64 lock_id = 4;
+    optional int64 initiator = 5;
+    optional int64 expiration = 6;
+}
+
+message GetDeleteBitmapUpdateLockResponse {
+    optional MetaServiceResponseStatus status = 1;
 }
 
 service MetaService {
@@ -1093,6 +1160,11 @@ service MetaService {
     rpc get_copy_job(GetCopyJobRequest) returns (GetCopyJobResponse);
     rpc get_copy_files(GetCopyFilesRequest) returns (GetCopyFilesResponse);
     rpc filter_copy_files(FilterCopyFilesRequest) returns (FilterCopyFilesResponse);
+
+    // delete bitmap
+    rpc update_delete_bitmap(UpdateDeleteBitmapRequest) returns(UpdateDeleteBitmapResponse);
+    rpc get_delete_bitmap(GetDeleteBitmapRequest) returns(GetDeleteBitmapResponse);
+    rpc get_delete_bitmap_update_lock(GetDeleteBitmapUpdateLockRequest) returns(GetDeleteBitmapUpdateLockResponse);
 };
 
 service RecyclerService {

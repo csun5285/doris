@@ -426,6 +426,22 @@ public:
             RowsetSharedPtr dst_rowset,
             const std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>&
                     location_map);
+    Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
+                                const RowsetIdUnorderedSet& pre_rowset_ids);
+
+    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset, bool check_pre_segments,
+                                           DeleteBitmapPtr delete_bitmap);
+    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
+                                           RowsetIdUnorderedSet specified_rowset_ids,
+                                           bool check_pre_segments, DeleteBitmapPtr delete_bitmap);
+    Status cloud_update_delete_bitmap(int64_t transaction_id, const RowsetSharedPtr& rowset,
+                                      DeleteBitmapPtr delete_bitmap,
+                                      const RowsetIdUnorderedSet& pre_rowset_ids, int64_t version);
+    Status cloud_calc_delete_bitmap_for_compaciton(
+            const std::vector<RowsetSharedPtr>& input_rowsets, const RowsetSharedPtr& output_rowset,
+            const RowIdConversion& rowid_conversion, ReaderType compaction_type,
+            int64_t merged_rows, int64_t initiator, DeleteBitmapPtr& output_rowset_delete_bitmap);
+
     RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
 
     void remove_self_owned_remote_rowsets();

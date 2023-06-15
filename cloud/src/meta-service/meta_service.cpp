@@ -887,6 +887,8 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     std::map<std::string, uint64_t> new_versions;
     std::map<int64_t, TabletStats> tablet_stats; // tablet_id -> stats
     std::map<int64_t, TabletIndexPB> table_ids;  // tablet_id -> {table/index/partition}_id
+    std::map<int64_t, std::vector<int64_t>> table_id_tablet_ids; // table_id -> tablets_ids
+    std::map<int64_t, std::vector<int64_t>> table_id_partition_ids;
     rowsets.reserve(tmp_rowsets_meta.size());
     for (auto& [_, i] : tmp_rowsets_meta) {
         int64_t tablet_id = i.tablet_id();
@@ -912,6 +914,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 msg = ss.str();
                 return;
             }
+            table_id_tablet_ids[table_ids[tablet_id].table_id()].push_back(tablet_id);
             VLOG_DEBUG << "tablet_id:" << tablet_id
                        << " value:" << table_ids[tablet_id].ShortDebugString();
         }
@@ -952,6 +955,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
             }
             new_version = version + 1;
             new_versions.insert({std::move(ver_key), new_version});
+            table_id_partition_ids[table_id].push_back(partition_id);
         } else {
             new_version = new_versions[ver_key];
         }
@@ -978,6 +982,43 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         ++stats.num_rowsets;
         stats.num_segs += i.num_segments();
     } // for tmp_rowsets_meta
+
+    // process mow table, check lock and remove pending key
+    for (auto table_id : request->mow_table_ids()) {
+        for (auto parition_id : table_id_partition_ids[table_id]) {
+            std::string lock_key =
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, parition_id});
+            std::string lock_val;
+            ret = txn->get(lock_key, &lock_val);
+            LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
+                      << " key=" << hex(lock_key) << " ret=" << ret;
+            if (ret != 0) {
+                ss << "failed to get delete bitmap update lock key info, instance_id="
+                   << instance_id << " table_id=" << table_id << " key=" << hex(lock_key)
+                   << " ret=" << ret;
+                msg = ss.str();
+                code = MetaServiceCode::KV_TXN_GET_ERR;
+                return;
+            }
+            DeleteBitmapUpdateLockPB lock_info;
+            CHECK(lock_info.ParseFromString(lock_val));
+            if (lock_info.lock_id() != request->txn_id()) {
+                msg = "lock is expired";
+                code = MetaServiceCode::LOCK_EXPIRED;
+                return;
+            }
+            txn->remove(lock_key);
+            LOG(INFO) << "xxx remove delete bitmap lock, lock_key=" << hex(lock_key)
+                      << " txn_id=" << txn_id;
+        }
+
+        for (auto tablet_id : table_id_tablet_ids[table_id]) {
+            std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id});
+            txn->remove(pending_key);
+            LOG(INFO) << "xxx remove delete bitmap pending key, pending_key=" << hex(pending_key)
+                      << " txn_id=" << txn_id;
+        }
+    }
 
     // Save rowset meta
     num_put_keys += rowsets.size();
@@ -6475,6 +6516,332 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
     } // for
     for (auto& i : btids) bthread_join(i, nullptr);
     LOG(INFO) << "finish notify_refresh_instance, num_items=" << reg.items_size();
+}
+
+void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* controller,
+                                           const ::selectdb::UpdateDeleteBitmapRequest* request,
+                                           ::selectdb::UpdateDeleteBitmapResponse* response,
+                                           ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(update_delete_bitmap);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(WARNING) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
+        return;
+    }
+    RPC_RATE_LIMIT(update_delete_bitmap)
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv_->create_txn(&txn) != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to init txn";
+        return;
+    }
+
+    // 1.Check whether the lock expires
+    auto table_id = request->table_id();
+    auto partition_id = request->partition_id();
+    std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+    std::string lock_val;
+    DeleteBitmapUpdateLockPB lock_info;
+    ret = txn->get(lock_key, &lock_val);
+    if (ret != 0) {
+        ss << "failed to get delete bitmap lock info, instance_id=" << instance_id
+           << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+        msg = ss.str();
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        return;
+    }
+    CHECK(lock_info.ParseFromString(lock_val));
+    if (lock_info.lock_id() != request->lock_id()) {
+        LOG(WARNING) << "lock is expired, table_id=" << table_id << " key=" << hex(lock_key)
+                     << " request lock_id=" << request->lock_id()
+                     << " locked lock_id=" << lock_info.lock_id() << " ret=" << ret;
+        msg = "lock id not match";
+        code = MetaServiceCode::LOCK_EXPIRED;
+        return;
+    }
+    bool found = false;
+    for (auto initiator : lock_info.initiators()) {
+        if (request->initiator() == initiator) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        LOG(WARNING) << "cannot found initiator, table_id=" << table_id << " key=" << hex(lock_key)
+                     << " request lock_id=" << request->lock_id()
+                     << " request initiator=" << request->initiator()
+                     << " locked lock_id=" << lock_info.lock_id() << " ret=" << ret;
+        msg = "lock initator not exist";
+        code = MetaServiceCode::LOCK_EXPIRED;
+        return;
+    }
+
+    // 2.Check pending delete bitmap
+    auto tablet_id = request->tablet_id();
+    std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id});
+    std::string pending_val;
+    ret = txn->get(pending_key, &pending_val);
+    if (ret < 0) {
+        ss << "failed to get delete bitmap pending info, instance_id=" << instance_id
+           << " tablet_id=" << tablet_id << " key=" << hex(pending_key) << " ret=" << ret;
+        msg = ss.str();
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        return;
+    }
+
+    // delete delete bitmpap of expired txn
+    if (ret == 0) {
+        PendingDeleteBitmapPB pending_info;
+        CHECK(pending_info.ParseFromString(pending_val));
+        for (auto& delete_bitmap_key : pending_info.delete_bitmap_keys()) {
+            txn->remove(delete_bitmap_key);
+            LOG(INFO) << "xxx remove pending delete bitmap, delete_bitmap_key="
+                      << hex(delete_bitmap_key) << " lock_id=" << request->lock_id();
+        }
+    }
+
+    // 3.Update delete bitmap for curent txn
+    int rst_ids_size = request->rowset_ids_size();
+    int seg_ids_size = request->segment_ids_size();
+    int versions_size = request->versions_size();
+    int delete_bitmap_size = request->segment_delete_bitmaps_size();
+    if (rst_ids_size != seg_ids_size || seg_ids_size != delete_bitmap_size ||
+        delete_bitmap_size != versions_size) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        ss << "delete bitmap size not match. "
+           << " rowset_size=" << rst_ids_size << " seg_size=" << seg_ids_size
+           << " ver_size=" << versions_size << " delete_bitmap_size=" << delete_bitmap_size;
+        msg = ss.str();
+        return;
+    }
+
+    // lock_id > 0 : load
+    // lock_id = -1 : compaction
+    // lock_id = -2 : schema change
+    bool is_load_op = request->lock_id() > 0;
+    PendingDeleteBitmapPB new_pending_info;
+    for (size_t i = 0; i < rst_ids_size; ++i) {
+        std::string rowset_id = request->rowset_ids(i);
+        auto seg_id = request->segment_ids(i);
+        auto ver = request->versions(i);
+        std::string val = request->segment_delete_bitmaps(i);
+        MetaDeleteBitmapInfo key_info {instance_id, tablet_id, rowset_id, ver, seg_id};
+        std::string key;
+        meta_delete_bitmap_key(key_info, &key);
+        txn->put(key, val);
+        if (is_load_op) {
+            new_pending_info.add_delete_bitmap_keys(key);
+        }
+        LOG(INFO) << "xxx update delete bitmap put delete_bitmap_key=" << hex(key)
+                  << " lock_id=" << request->lock_id();
+    }
+
+    // no need to record pending key for compaction or schema change,
+    // because delete bitmap will attach to new rowset, just delete new rowset if failed
+    if (is_load_op) {
+        if (!new_pending_info.SerializeToString(&pending_val)) {
+            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+            msg = "failed to serialize pending delete bitmap";
+            return;
+        }
+        txn->put(pending_key, pending_val);
+        LOG(INFO) << "xxx update delete bitmap put pending_key=" << hex(pending_key)
+                  << " lock_id=" << request->lock_id();
+    }
+
+    ret = txn->commit();
+    if (ret != 0) {
+        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
+        ss << "failed to update delete bitmap, ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+}
+
+void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* controller,
+                                        const ::selectdb::GetDeleteBitmapRequest* request,
+                                        ::selectdb::GetDeleteBitmapResponse* response,
+                                        ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_delete_bitmap);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(WARNING) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
+        return;
+    }
+    RPC_RATE_LIMIT(get_delete_bitmap)
+    auto tablet_id = request->tablet_id();
+    auto& rowset_ids = request->rowset_ids();
+    auto& begin_versions = request->begin_versions();
+    auto& end_versions = request->end_versions();
+    if (rowset_ids.size() != begin_versions.size() || rowset_ids.size() != end_versions.size()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        ss << "rowset and version size not match. "
+           << " rowset_size=" << rowset_ids.size()
+           << " begin_version_size=" << begin_versions.size()
+           << " end_version_size=" << end_versions.size();
+        msg = ss.str();
+        return;
+    }
+
+    for (size_t i = 0; i < rowset_ids.size(); i++) {
+        std::unique_ptr<Transaction> txn;
+        if (txn_kv_->create_txn(&txn) != 0) {
+            code = MetaServiceCode::KV_TXN_CREATE_ERR;
+            msg = "failed to init txn";
+            return;
+        }
+        MetaDeleteBitmapInfo key_info0 {instance_id, tablet_id, rowset_ids[i], begin_versions[i],
+                                        0};
+        MetaDeleteBitmapInfo key_info1 {instance_id, tablet_id, rowset_ids[i], end_versions[i],
+                                        INT64_MAX};
+        std::string key0;
+        std::string key1;
+        meta_delete_bitmap_key(key_info0, &key0);
+        meta_delete_bitmap_key(key_info1, &key1);
+
+        std::unique_ptr<RangeGetIterator> it;
+        do {
+            ret = txn->get(key0, key1, &it);
+            if (ret != 0) {
+                code = MetaServiceCode::KV_TXN_GET_ERR;
+                ss << "internal error, failed to get delete bitmap, ret=" << ret;
+                msg = ss.str();
+                return;
+            }
+
+            while (it->has_next()) {
+                auto [k, v] = it->next();
+                auto k1 = k;
+                k1.remove_prefix(1);
+                std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> out;
+                decode_key(&k1, &out);
+                // 0x01 "meta" ${instance_id}  "delete_bitmap" ${tablet_id}
+                // ${rowset_id0} ${version1} ${segment_id0} -> DeleteBitmapPB
+                auto ver = std::get<int64_t>(std::get<0>(out[5]));
+                auto seg_id = std::get<int64_t>(std::get<0>(out[6]));
+                response->add_rowset_ids(rowset_ids[i]);
+                response->add_segment_ids(seg_id);
+                response->add_versions(ver);
+                response->add_segment_delete_bitmaps(std::string(v));
+                if (!it->has_next()) {
+                    key0 = k;
+                }
+            }
+            key0.push_back('\x00'); // Update to next smallest key for iteration
+        } while (it->more());
+    }
+}
+
+void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcController* controller,
+                                       const ::selectdb::GetDeleteBitmapUpdateLockRequest* request,
+                                       ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
+                                       ::google::protobuf::Closure* done)  {
+    RPC_PREPROCESS(get_delete_bitmap_update_lock);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
+        return;
+    }
+
+    RPC_RATE_LIMIT(get_delete_bitmap_update_lock)
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv_->create_txn(&txn) != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to init txn";
+        return;
+    }
+    auto table_id = request->table_id();
+    for (size_t i = 0; i < request->partition_ids_size(); i++) {
+        int64_t partition_id = request->partition_ids(i);
+        std::string lock_key =
+                meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+        std::string lock_val;
+        DeleteBitmapUpdateLockPB lock_info;
+        ret = txn->get(lock_key, &lock_val);
+        if (ret < 0) {
+            ss << "failed to get delete bitmap update lock, instance_id=" << instance_id
+               << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+            msg = ss.str();
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            return;
+        }
+        using namespace std::chrono;
+        int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+        if (ret == 0) {
+            CHECK(lock_info.ParseFromString(lock_val));
+            if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
+                LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
+                          << lock_info.lock_id() << " table_id=" << table_id
+                          << " partition_id=" << partition_id << " now=" << now;
+                lock_info.clear_initiators();
+            } else if (lock_info.lock_id() != request->lock_id()) {
+                ss << "already be locked. requset lock_id=" << request->lock_id()
+                   << " locked by lock_id=" << lock_info.lock_id() << " table_id=" << table_id
+                   << " partition_id=" << partition_id << " now=" << now
+                   << " expiration=" << lock_info.expiration();
+                msg = ss.str();
+                code = MetaServiceCode::LOCK_CONFLICT;
+                continue;
+            }
+        }
+
+        lock_info.set_lock_id(request->lock_id());
+        lock_info.set_expiration(now + request->expiration());
+        bool found = false;
+        for (auto initiator : lock_info.initiators()) {
+            if (request->initiator() == initiator) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            lock_info.add_initiators(request->initiator());
+        }
+        lock_info.SerializeToString(&lock_val);
+        if (lock_val.empty()) {
+            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+            msg = "pb serialization error";
+            return;
+        }
+        txn->put(lock_key, lock_val);
+        LOG(INFO) << "xxx put lock_key=" << hex(lock_key) << " lock_id=" << request->lock_id()
+                  << " initiators_size: " << lock_info.initiators_size();
+    }
+
+    ret = txn->commit();
+    if (ret != 0) {
+        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
+        ss << "failed to get_delete_bitmap_update_lock, ret=" << ret;
+        msg = ss.str();
+        return;
+    }
 }
 
 #undef RPC_PREPROCESS

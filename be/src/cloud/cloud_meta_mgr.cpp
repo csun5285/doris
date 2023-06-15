@@ -5,15 +5,22 @@
 #include <glog/logging.h>
 
 #include <chrono>
+#include <memory>
 #include <random>
+#include <vector>
 
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/status.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
+#include "gutil/integral_types.h"
+#include "olap/olap_common.h"
+#include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 #include "util/s3_util.h"
 
 namespace doris::cloud {
@@ -40,7 +47,8 @@ static constexpr int BRPC_RETRY_TIMES = 3;
             return Status::RpcError("failed to {}: {}", __FUNCTION__, cntl.ErrorText());         \
         if (res.status().code() == selectdb::MetaServiceCode::OK)                                \
             return Status::OK();                                                                 \
-        else if (res.status().code() == selectdb::KV_TXN_CONFLICT) {                             \
+        else if (res.status().code() == selectdb::KV_TXN_CONFLICT ||                             \
+                 res.status().code() == selectdb::MetaServiceCode::LOCK_CONFLICT) {              \
             duration_ms = retry_times >= 100 ? u(rng) : u2(rng);                                 \
             LOG(WARNING) << "failed to " << __FUNCTION__ << " retry times left:" << retry_times  \
                          << " sleep:" << duration_ms << "ms response:" << res.DebugString();     \
@@ -197,6 +205,15 @@ TRY_AGAIN:
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     tablet->set_last_sync_time(now);
 
+    DeleteBitmapPtr delete_bimap = nullptr;
+    if (tablet->enable_unique_key_merge_on_write()) {
+        delete_bimap = std::make_shared<DeleteBitmap>(tablet_id);
+        int64_t old_max_version = req.start_version() - 1;
+        std::vector<RowsetMetaPB> rowset_metas(resp.rowset_meta().begin(), resp.rowset_meta().end());
+        RETURN_IF_ERROR(sync_tablet_delete_bitmap(tablet, old_max_version, rowset_metas, delete_bimap));
+        tablet->tablet_meta()->delete_bitmap().merge(*delete_bimap);
+    }
+
     {
         auto& stats = resp.stats();
         std::lock_guard wlock(tablet->get_header_lock());
@@ -264,6 +281,59 @@ TRY_AGAIN:
         tablet->set_cumulative_layer_point(stats.cumulative_point());
         tablet->reset_approximate_stats(stats.num_rowsets(), stats.num_segments(), stats.num_rows(),
                                         stats.data_size());
+    }
+    return Status::OK();
+}
+
+Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old_max_version,
+                                               std::vector<RowsetMetaPB> rowset_metas,
+                                               DeleteBitmapPtr delete_bitmap) {
+    if (rowset_metas.empty()) {
+        return Status::OK();
+    }
+    int64_t new_max_version = std::max(old_max_version, rowset_metas.rbegin()->end_version());
+    brpc::Controller cntl;
+    cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
+    selectdb::GetDeleteBitmapRequest req;
+    selectdb::GetDeleteBitmapResponse res;
+    req.set_cloud_unique_id(config::cloud_unique_id);
+    req.set_tablet_id(tablet->tablet_id());
+    // New rowset sync all versions of delete bitmap
+    for (auto& meta_pb : rowset_metas) {
+        req.add_rowset_ids(meta_pb.rowset_id_v2());
+        req.add_begin_versions(0);
+        req.add_end_versions(new_max_version);
+    }
+
+    // old rowset sync incremental versions of delete bitmap
+    if (old_max_version < new_max_version) {
+        RowsetIdUnorderedSet all_rs_ids = tablet->all_rs_id(old_max_version);
+        for (auto& rs_id : all_rs_ids) {
+            req.add_rowset_ids(rs_id.to_string());
+            req.add_begin_versions(old_max_version + 1);
+            req.add_end_versions(new_max_version);
+        }
+    }
+    _stub->get_delete_bitmap(&cntl, &req, &res, nullptr);
+    if (cntl.Failed()) {
+        return Status::RpcError("failed to get delete bitmap: {}", cntl.ErrorText());
+    }
+    if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
+        return Status::NotFound("failed to get delete bitmap: {}", res.status().msg());
+    }
+    if (res.status().code() != selectdb::MetaServiceCode::OK) {
+        return Status::InternalError("failed to get delete bitmap: {}", res.status().msg());
+    }
+    auto& rowset_ids = res.rowset_ids();
+    auto& segment_ids = res.segment_ids();
+    auto& vers = res.versions();
+    auto& delete_bitmaps = res.segment_delete_bitmaps();
+    for (size_t i = 0; i < rowset_ids.size(); i++) {
+        RowsetId rst_id;
+        rst_id.init(rowset_ids[i]);
+        delete_bitmap->merge(
+                {rst_id, segment_ids[i], vers[i]},
+                roaring::Roaring::read(delete_bitmaps[i].data()));
     }
     return Status::OK();
 }
@@ -508,6 +578,47 @@ Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, TabletSchemaSPtr ta
     }
     VLOG_DEBUG << "succeed to update tablet schema, tablet_id: " << tablet_id;
     return Status::OK();
+}
+
+Status CloudMetaMgr::update_delete_bitmap(const Tablet* tablet, int64_t lock_id, int64_t initiator,
+                                          DeleteBitmapPtr delete_bitmap) {
+    VLOG_DEBUG << "update_delete_bitmpap , tablet_id: " << tablet->tablet_id();
+    brpc::Controller cntl;
+    cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
+    selectdb::UpdateDeleteBitmapRequest req;
+    selectdb::UpdateDeleteBitmapResponse res;
+    req.set_cloud_unique_id(config::cloud_unique_id);
+    req.set_table_id(tablet->table_id());
+    req.set_partition_id(tablet->partition_id());
+    req.set_tablet_id(tablet->tablet_id());
+    req.set_lock_id(lock_id);
+    req.set_initiator(initiator);
+    for (auto iter = delete_bitmap->delete_bitmap.begin();
+         iter != delete_bitmap->delete_bitmap.end(); ++iter) {
+        req.add_rowset_ids(std::get<0>(iter->first).to_string());
+        req.add_segment_ids(std::get<1>(iter->first));
+        req.add_versions(std::get<2>(iter->first));
+        std::string bitmap_data(iter->second.getSizeInBytes(), '\0');
+        iter->second.write(bitmap_data.data());
+        *(req.add_segment_delete_bitmaps()) = std::move(bitmap_data);
+    }
+    RETRY_RPC(update_delete_bitmap);
+}
+
+Status CloudMetaMgr::get_delete_bitmap_update_lock(const Tablet* tablet, int64_t lock_id,
+                                                   int64_t initiator) {
+    VLOG_DEBUG << "get_delete_bitmap_update_lock , tablet_id: " << tablet->tablet_id();
+    brpc::Controller cntl;
+    cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
+    selectdb::GetDeleteBitmapUpdateLockRequest req;
+    selectdb::GetDeleteBitmapUpdateLockResponse res;
+    req.set_cloud_unique_id(config::cloud_unique_id);
+    req.set_table_id(tablet->table_id());
+    req.add_partition_ids(tablet->partition_id());
+    req.set_lock_id(lock_id);
+    req.set_initiator(initiator);
+    req.set_expiration(10); // 10s expiration time for compaction and schema_change
+    RETRY_RPC(get_delete_bitmap_update_lock);
 }
 
 } // namespace doris::cloud

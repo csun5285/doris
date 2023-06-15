@@ -38,6 +38,7 @@ import org.apache.doris.task.AgentTask;
 import org.apache.doris.task.AgentTaskQueue;
 import org.apache.doris.task.AlterInvertedIndexTask;
 import org.apache.doris.task.AlterReplicaTask;
+import org.apache.doris.task.CalcDeleteBitmapTask;
 import org.apache.doris.task.CheckConsistencyTask;
 import org.apache.doris.task.ClearAlterTask;
 import org.apache.doris.task.CloneTask;
@@ -201,6 +202,9 @@ public class MasterImpl {
                 case UPDATE_TABLET_META_INFO:
                     finishUpdateTabletMeta(task, request);
                     break;
+                case CALCULATE_DELETE_BITMAP:
+                    finishCalcDeleteBitmap(task, request);
+                    break;
                 default:
                     break;
             }
@@ -265,6 +269,31 @@ public class MasterImpl {
             }
         } finally {
             AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.CREATE, task.getSignature());
+        }
+    }
+
+    private void finishCalcDeleteBitmap(AgentTask task, TFinishTaskRequest request) {
+        // if we get here, this task will be removed from AgentTaskQueue for certain.
+        // because in this function, the only problem that cause failure is meta missing.
+        // and if meta is missing, we no longer need to resend this task
+        try {
+            CalcDeleteBitmapTask calcDeleteBitmapTask = (CalcDeleteBitmapTask) task;
+            if (request.getTaskStatus().getStatusCode() != TStatusCode.OK) {
+                calcDeleteBitmapTask.countDownToZero(task.getBackendId() + ": "
+                        + request.getTaskStatus().getErrorMsgs().toString());
+            } else if (request.getErrorTabletIdsSize() > 0) {
+                calcDeleteBitmapTask.countDownToZero(task.getBackendId() + ": error tablet size: "
+                        + request.getErrorTabletIdsSize());
+            } else {
+                calcDeleteBitmapTask.countDownLatch(task.getBackendId(), calcDeleteBitmapTask.getTransactionId());
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("finish calc delete bitmap. transaction id: {}, be: {}, report version: {}",
+                            calcDeleteBitmapTask.getTransactionId(), calcDeleteBitmapTask.getBackendId(),
+                            request.getReportVersion());
+                }
+            }
+        } finally {
+            AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.CALCULATE_DELETE_BITMAP, task.getSignature());
         }
     }
 

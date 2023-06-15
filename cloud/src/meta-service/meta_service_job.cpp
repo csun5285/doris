@@ -535,6 +535,58 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         return;
     }
 
+    // remove delete bitmap update lock for MoW table
+    bool enable_unique_key_merge_on_write = compaction.has_delete_bitmap_lock_initiator();
+    if (enable_unique_key_merge_on_write) {
+        std::string lock_key =
+                meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+        std::string lock_val;
+        ret = txn->get(lock_key, &lock_val);
+        LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
+                  << " partition_id=" << partition_id << " key=" << hex(lock_key) << " ret=" << ret;
+        if (ret != 0) {
+            ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
+               << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+            msg = ss.str();
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            return;
+        }
+        DeleteBitmapUpdateLockPB lock_info;
+        CHECK(lock_info.ParseFromString(lock_val));
+        if (lock_info.lock_id() != -1) {
+            msg = "lock id not match";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return;
+        }
+        bool found = false;
+        auto initiators = lock_info.mutable_initiators();
+        for (auto iter = initiators->begin(); iter != initiators->end(); iter++) {
+            if (compaction.delete_bitmap_lock_initiator() == *iter) {
+                initiators->erase(iter);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            msg = "lock initiator not exist";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return;
+        }
+        if (initiators->empty()) {
+            txn->remove(lock_key);
+        } else {
+            lock_info.SerializeToString(&lock_val);
+            if (lock_val.empty()) {
+                code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+                msg = "pb serialization error";
+                return;
+            }
+            LOG(INFO) << "xxx put delete bitmap lock, lock_key=" << hex(lock_key)
+                      << " initiators_size=" << lock_info.initiators_size();
+            txn->put(lock_key, lock_val);
+        }
+    }
+
     //==========================================================================
     //                    Move input rowsets to recycle
     //==========================================================================
@@ -586,6 +638,15 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                    << " key=" << hex(k);
                 msg = ss.str();
                 return;
+            }
+
+            // remove delete bitmap of input rowset for MoW table
+            if (enable_unique_key_merge_on_write) {
+                auto& delete_bitmap_start = *obj_pool.add(new std::string(
+                        meta_delete_bitmap_key({instance_id, tablet_id, rs.rowset_id_v2(), 0, 0})));
+                auto& delete_bitmap_end = *obj_pool.add(new std::string(meta_delete_bitmap_key(
+                        {instance_id, tablet_id, rs.rowset_id_v2(), INT64_MAX, INT64_MAX})));
+                txn->remove(delete_bitmap_start, delete_bitmap_end);
             }
 
             auto& recycle_key = *obj_pool.add(new std::string(
@@ -924,6 +985,59 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
         msg = "empty txn_ids or output_versions";
         return;
     }
+
+    // process mow table, check lock
+    if (new_tablet_meta.enable_unique_key_merge_on_write()) {
+        std::string lock_key =
+                meta_delete_bitmap_update_lock_key({instance_id, new_table_id, new_partition_id});
+        std::string lock_val;
+        ret = txn->get(lock_key, &lock_val);
+        LOG(INFO) << "get delete bitmap update lock info, table_id=" << new_table_id
+                  << " partition_id=" << new_partition_id << " key=" << hex(lock_key)
+                  << " ret=" << ret;
+        if (ret != 0) {
+            ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
+               << " table_id=" << new_table_id << " key=" << hex(lock_key) << " ret=" << ret;
+            msg = ss.str();
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            return;
+        }
+        DeleteBitmapUpdateLockPB lock_info;
+        CHECK(lock_info.ParseFromString(lock_val));
+        if (lock_info.lock_id() != -2) {
+            msg = "lock id not match";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return;
+        }
+        bool found = false;
+        auto initiators = lock_info.mutable_initiators();
+        for (auto iter = initiators->begin(); iter != initiators->end(); iter++) {
+            if (schema_change.delete_bitmap_lock_initiator() == *iter) {
+                initiators->erase(iter);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            msg = "lock initiator not exist";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return;
+        }
+        if (initiators->empty()) {
+            txn->remove(lock_key);
+        } else {
+            lock_info.SerializeToString(&lock_val);
+            if (lock_val.empty()) {
+                code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+                msg = "pb serialization error";
+                return;
+            }
+            LOG(INFO) << "xxx put delete bitmap lock, lock_key=" << hex(lock_key)
+                      << " initiators_size=" << lock_info.initiators_size();
+            txn->put(lock_key, lock_val);
+        }
+    }
+
     for (size_t i = 0; i < schema_change.txn_ids().size(); ++i) {
         auto& tmp_rowset_key = *obj_pool.add(new std::string(
                 meta_rowset_tmp_key({instance_id, schema_change.txn_ids().at(i), new_tablet_id})));

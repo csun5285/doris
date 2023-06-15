@@ -45,7 +45,16 @@ public:
 
     Status update_tablet_schema(int64_t tablet_id, TabletSchemaSPtr tablet_schema) override;
 
+    Status update_delete_bitmap(const Tablet* tablet, int64_t lock_id, int64_t initiator,
+                                DeleteBitmapPtr delete_bitmap) override;
+
+    Status get_delete_bitmap_update_lock(const Tablet* tablet, int64_t lock_id,
+                                         int64_t initiator) override;
+
 private:
+    Status sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old_max_version,
+                                     std::vector<RowsetMetaPB> rowset_metas,
+                                     DeleteBitmapPtr delete_bitmap);
     std::unique_ptr<selectdb::MetaService_Stub> _stub;
 };
 

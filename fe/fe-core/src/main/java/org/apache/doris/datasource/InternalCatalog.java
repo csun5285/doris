@@ -3776,7 +3776,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                 Set<String> bfColumns, double bfFpp, List<Index> indexes, List<Column> schemaColumns,
                 DataSortInfo dataSortInfo, TCompressionType compressionType, String storagePolicy,
                 boolean isInMemory, boolean isPersistent, boolean isShadow,
-                boolean isDynamicSchema, String tableName, long ttlSeconds) throws DdlException {
+                boolean isDynamicSchema, String tableName, long ttlSeconds,
+                boolean enableUniqueKeyMergeOnWrite) throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
         builder.setIndexId(indexId);
@@ -3804,7 +3805,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         builder.setReplicaId(tablet.getReplicas().get(0).getId());
         builder.setStoragePolicy(storagePolicy);
-        builder.setEnableUniqueKeyMergeOnWrite(false);
+        builder.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
 
         OlapFile.TabletSchemaPB.Builder schemaBuilder = OlapFile.TabletSchemaPB.newBuilder();
         if (keysType == KeysType.DUP_KEYS) {
@@ -3945,7 +3946,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                 OlapFile.TabletMetaPB.Builder builder = createCloudTabletMetaBuilder(tableId, indexId,
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
-                        storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds);
+                        storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
+                        enableUniqueKeyMergeOnWrite);
                 requestBuilder.addTabletMetas(builder);
             }
 
