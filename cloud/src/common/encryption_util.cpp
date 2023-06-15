@@ -1,6 +1,5 @@
 #include "common/encryption_util.h"
 
-#include <glog/logging.h>
 #include <math.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -11,8 +10,10 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 
+#include "common/logging.h"
 #include "common/sync_point.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
@@ -514,92 +515,80 @@ int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
 }
 
 int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
-    std::string key = system_meta_service_encryption_key_info_key();
-    std::string val;
-    std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) return -1;
-    ret = txn->get(key, &val);
-    if (ret != 0 && ret != 1) return -1;
-
-    if (ret == 1) {
-        if (selectdb::config::encryption_key.empty()) return -1;
-        std::string decoded_string(selectdb::config::encryption_key.length(), '0');
-        int decoded_text_len =
-                base64_decode(selectdb::config::encryption_key.c_str(),
-                              selectdb::config::encryption_key.length(), decoded_string.data());
-        if (decoded_text_len < 0) {
-            LOG(WARNING) << "fail to decode encryption_key";
+    while (true) {
+        std::string key = system_meta_service_encryption_key_info_key();
+        std::string val;
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv->create_txn(&txn);
+        if (ret != 0) return -1;
+        ret = txn->get(key, &val);
+        if (ret != 0 && ret != 1) return -1;
+        if (ret == 1 && selectdb::config::encryption_key.empty()) {
+            LOG_WARNING("the server encryption_key is not found and the config is not set");
             return -1;
         }
-        decoded_string.assign(decoded_string.data(), decoded_text_len);
+
         EncryptionKeyInfoPB key_info;
-        auto item = key_info.add_items();
-        item->set_key_id(1);
-        item->set_key(selectdb::config::encryption_key);
-        val = key_info.SerializeAsString();
-        if (val.empty()) return -1;
-        txn->put(key, val);
-        LOG(INFO) << "put server encryption_key, encryption_key="
-                  << selectdb::config::encryption_key << " key_id=1";
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to commit encryption_key";
-            return -1;
+        if (ret != 1) {
+            if (!key_info.ParseFromString(val)) {
+                LOG_WARNING("fail to parse encryption_key");
+                return -1;
+            }
+
+            LOG_INFO("get server encryption_key")
+                .tag("key_info", proto_to_json(key_info));
         }
 
-        global_encryption_key_info_map.insert({1, decoded_string});
+        bool add_new_encryption_key = !selectdb::config::encryption_key.empty();
+        for (auto& item : key_info.items()) {
+            if (!selectdb::config::encryption_key.empty() &&
+                selectdb::config::encryption_key == item.key()) {
+                add_new_encryption_key = false;
+            }
+            std::string decoded_string(item.key().length(), '0');
+            int decoded_text_len =
+                    base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
+            if (decoded_text_len < 0) {
+                LOG_WARNING("fail to decode encryption_key");
+                return -1;
+            }
+            decoded_string.assign(decoded_string.data(), decoded_text_len);
+            global_encryption_key_info_map.insert({item.key_id(), decoded_string});
+        }
+        if (add_new_encryption_key) {
+            std::string decoded_string(selectdb::config::encryption_key.length(), '0');
+            int decoded_text_len =
+                    base64_decode(selectdb::config::encryption_key.c_str(),
+                                  selectdb::config::encryption_key.length(), decoded_string.data());
+            if (decoded_text_len < 0) {
+                LOG_WARNING("fail to decode config encryption_key");
+                return -1;
+            }
+            decoded_string.assign(decoded_string.data(), decoded_text_len);
+
+            int32_t new_key_id = key_info.items().size() + 1;
+            auto item = key_info.add_items();
+            item->set_key_id(new_key_id);
+            item->set_key(selectdb::config::encryption_key);
+            val = key_info.SerializeAsString();
+            if (val.empty()) return -1;
+            txn->put(key, val);
+            LOG_INFO("put server encryption_key")
+                .tag("encryption_key", selectdb::config::encryption_key)
+                .tag("key_id", new_key_id);
+            ret = txn->commit();
+            if (ret == -1) {
+                LOG_WARNING("commit encryption_key is conflicted, retry it later");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            } else if (ret != 0) {
+                LOG_WARNING("failed to commit encryption_key");
+                return -1;
+            }
+            global_encryption_key_info_map.insert({new_key_id, decoded_string});
+        }
         return 0;
     }
-
-    EncryptionKeyInfoPB key_info;
-    if (!key_info.ParseFromString(val)) return -1;
-    LOG(INFO) << "get server encryption_key"
-              << " key_info=" << proto_to_json(key_info);
-    bool add_new_encryption_key = !selectdb::config::encryption_key.empty();
-    for (auto& item : key_info.items()) {
-        if (!selectdb::config::encryption_key.empty() &&
-            selectdb::config::encryption_key == item.key()) {
-            add_new_encryption_key = false;
-        }
-        std::string decoded_string(item.key().length(), '0');
-        int decoded_text_len =
-                base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
-        if (decoded_text_len < 0) {
-            LOG(WARNING) << "fail to decode encryption_key";
-            return -1;
-        }
-        decoded_string.assign(decoded_string.data(), decoded_text_len);
-        global_encryption_key_info_map.insert({item.key_id(), decoded_string});
-    }
-    if (add_new_encryption_key) {
-        std::string decoded_string(selectdb::config::encryption_key.length(), '0');
-        int decoded_text_len =
-                base64_decode(selectdb::config::encryption_key.c_str(),
-                              selectdb::config::encryption_key.length(), decoded_string.data());
-        if (decoded_text_len < 0) {
-            LOG(WARNING) << "fail to decode encryption_key";
-            return -1;
-        }
-        decoded_string.assign(decoded_string.data(), decoded_text_len);
-
-        int32_t new_key_id = key_info.items().size() + 1;
-        auto item = key_info.add_items();
-        item->set_key_id(new_key_id);
-        item->set_key(selectdb::config::encryption_key);
-        val = key_info.SerializeAsString();
-        if (val.empty()) return -1;
-        txn->put(key, val);
-        LOG(INFO) << "put server encryption_key, encryption_key="
-                  << selectdb::config::encryption_key << " key_id=" << new_key_id;
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to commit encryption_key";
-            return -1;
-        }
-        global_encryption_key_info_map.insert({new_key_id, decoded_string});
-    }
-    return 0;
 }
 
 } // namespace selectdb
