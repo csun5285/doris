@@ -5,11 +5,9 @@
 
 #include "common/config.h"
 #include "common/metric.h"
-#include "common/encryption_util.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
-#include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
@@ -107,7 +105,7 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
         while (!running_.load()) {
             LOG(INFO) << "register thread wait for start";
             std::unique_lock l(mtx_);
-            cv_.wait_for(l, std::chrono::seconds(config::meta_server_register_interval_ms));
+            cv_.wait_for(l, std::chrono::milliseconds(config::meta_server_register_interval_ms));
         }
         LOG(INFO) << "register thread begins to run";
         std::mt19937 gen(std::random_device("/dev/urandom")());
@@ -150,14 +148,18 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
 
 int MetaServerRegister::start() {
     if (txn_kv_ == nullptr) return -1;
+    std::unique_lock<std::mutex> lock(mtx_);
     running_.store(true);
     cv_.notify_all();
     return 0;
 }
 
 void MetaServerRegister::stop() {
-    running_.store(false);
-    cv_.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(mtx_);
+        running_.store(false);
+        cv_.notify_all();
+    }
     if (register_thread_ != nullptr) register_thread_->join();
 }
 
