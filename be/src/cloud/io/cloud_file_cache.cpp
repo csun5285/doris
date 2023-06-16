@@ -1516,9 +1516,11 @@ void CloudFileCache::check_disk_resource_limit(const std::string& path) {
             && (inode_remain_percentage > config::file_cache_exit_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = false;
     }
-    LOG_INFO("file cache background thread").tag("remain space percent", 100 - capacity_percentage)
-        .tag("remain inode percent", inode_remain_percentage)
-        .tag("mode", _disk_resource_limit_mode ? "run in resource limit" : "run in resource normal");
+    if (_disk_resource_limit_mode) {
+        LOG_WARNING("file cache background thread").tag("remain space percent", 100 - capacity_percentage)
+                    .tag("remain inode percent", inode_remain_percentage)
+                    .tag("mode", "run in resource limit");
+    }
 }
 
 void CloudFileCache::run_background_operation() {
