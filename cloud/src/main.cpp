@@ -13,12 +13,16 @@
 #include <brpc/server.h>
 #include <unistd.h> // ::lockf
 #include <fcntl.h> // ::open
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <thread>
 // clang-format on
 
 /**
@@ -223,6 +227,10 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<MetaServer> meta_server;
     std::unique_ptr<Recycler> recycler;
+    std::thread periodiccally_log_thread;
+    std::mutex periodiccally_log_thread_lock;
+    std::condition_variable periodiccally_log_thread_cv;
+    std::atomic_bool periodiccally_log_thread_run = true;
 
     if (args.get<bool>(ARG_META_SERVICE)) {
         meta_server = std::make_unique<MetaServer>(txn_kv);
@@ -248,7 +256,15 @@ int main(int argc, char** argv) {
         msg = "recycler started";
         LOG(INFO) << msg;
         std::cout << msg << std::endl;
-
+        auto periodiccally_log = [&]() {
+            while (periodiccally_log_thread_run) {
+                std::unique_lock<std::mutex> lck {periodiccally_log_thread_lock};
+                periodiccally_log_thread_cv.wait_for(
+                        lck, std::chrono::milliseconds(selectdb::config::periodically_log_ms));
+                LOG(INFO) << "Periodically log for recycler";
+            }
+        };
+        periodiccally_log_thread = std::thread {periodiccally_log};
     } else {
         std::cerr << "selectdb starts without doing anything and exits" << std::endl;
         return -1;
@@ -274,6 +290,17 @@ int main(int argc, char** argv) {
     }
     if (recycler) {
         recycler->stop();
+    }
+
+    if (periodiccally_log_thread.joinable()) {
+        {
+            std::unique_lock<std::mutex> lck {periodiccally_log_thread_lock};
+            periodiccally_log_thread_run = false;
+            // immediately notify the log thread to quickly exit in case it block the
+            // whole procedure
+            periodiccally_log_thread_cv.notify_one();
+        }
+        periodiccally_log_thread.join();
     }
 
     return 0;
