@@ -26,7 +26,7 @@ suite("test_inverted_index_compcation"){
                 sb.append(backendId_to_backendIP.get(backend[0]))
                 sb.append(":")
                 sb.append(backendId_to_backendBrpcPort.get(backend[0]))
-                sb.append("/vars/*_file_cache_cur_size")
+                sb.append("/vars/*file_cache_cache_size")
                 String command = sb.toString()
                 logger.info(command);
                 process = command.execute()

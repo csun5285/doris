@@ -10,9 +10,11 @@ suite("test_stale_rowset") {
     def backendId_to_backendHttpPort = [:]
     def backendId_to_backendBrpcPort = [:]
     for (String[] backend in backends) {
-        backendId_to_backendIP.put(backend[0], backend[2])
-        backendId_to_backendHttpPort.put(backend[0], backend[5])
-        backendId_to_backendBrpcPort.put(backend[0], backend[6])
+        if (backend[9].equals("true")) {
+            backendId_to_backendIP.put(backend[0], backend[2])
+            backendId_to_backendHttpPort.put(backend[0], backend[5])
+            backendId_to_backendBrpcPort.put(backend[0], backend[6])
+        }
     }
 
     backend_id = backendId_to_backendIP.keySet()[0]
@@ -82,24 +84,26 @@ suite("test_stale_rowset") {
     def getCurCacheSize = {
         backendIdToCacheSize = [:]
         for (String[] backend in backends) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("curl http://")
-            sb.append(backendId_to_backendIP.get(backend[0]))
-            sb.append(":")
-            sb.append(backendId_to_backendBrpcPort.get(backend[0]))
-            sb.append("/vars/*_file_cache_cur_size")
-            String command = sb.toString()
-            logger.info(command);
-            process = command.execute()
-            code = process.waitFor()
-            err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-            out = process.getText()
-            logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-            assertEquals(code, 0)
-            String[] str = out.split(':')
-            assertEquals(str.length, 2)
-            logger.info(str[1].trim())
-            backendIdToCacheSize.put(backend[0], Long.parseLong(str[1].trim()))
+            if (backend[9].equals("true")) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("curl http://")
+                sb.append(backendId_to_backendIP.get(backend[0]))
+                sb.append(":")
+                sb.append(backendId_to_backendBrpcPort.get(backend[0]))
+                sb.append("/vars/*file_cache_cache_size")
+                String command = sb.toString()
+                logger.info(command);
+                process = command.execute()
+                code = process.waitFor()
+                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+                out = process.getText()
+                logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
+                assertEquals(code, 0)
+                String[] str = out.split(':')
+                assertEquals(str.length, 2)
+                logger.info(str[1].trim())
+                backendIdToCacheSize.put(backend[0], Long.parseLong(str[1].trim()))
+            }
         }
         return backendIdToCacheSize
     }
