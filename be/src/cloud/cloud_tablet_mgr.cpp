@@ -145,7 +145,7 @@ CloudTabletMgr::~CloudTabletMgr() {
                   });
 }
 
-Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
+Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool sync_rowsets) {
     // LRU value type
     struct Value {
         TabletSharedPtr tablet;
@@ -158,7 +158,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
     TEST_SYNC_POINT_CALLBACK("CloudTabletMgr::get_tablet", handle);
 
     if (handle == nullptr) {
-        auto load_tablet = [this, &key](int64_t tablet_id)
+        auto load_tablet = [this, &key, sync_rowsets](int64_t tablet_id)
                 -> std::shared_ptr<std::variant<Status, TabletSharedPtr>> {
             auto res = std::make_shared<std::variant<Status, TabletSharedPtr>>();
 
@@ -172,6 +172,13 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet) {
             auto value = new Value();
             value->tablet = tablet;
             value->tablet_map = _tablet_map;
+            if (sync_rowsets) {
+                st = meta_mgr()->sync_tablet_rowsets(tablet.get());
+                if (!st.ok()) {
+                    *res = std::move(st);
+                    return res;
+                }
+            }
             static auto deleter = [](const CacheKey& key, void* value) {
                 auto value1 = reinterpret_cast<Value*>(value);
                 // tablet has been evicted, release it from `tablet_map`

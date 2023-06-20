@@ -16,7 +16,9 @@ public:
     CloudTabletMgr();
     ~CloudTabletMgr();
 
-    Status get_tablet(int64_t tablet_id, TabletSharedPtr* tablet);
+    // If the tablet is not in cache, mgr will get tablet meta first and sync rowsets after.
+    // If sync_rowsets is false, it will not sync rowsets. 
+    Status get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool sync_rowsets = true);
 
     void erase_tablet(int64_t tablet_id);
 

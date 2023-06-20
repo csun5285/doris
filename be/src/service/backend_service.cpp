@@ -437,7 +437,7 @@ void BackendService::sync_load_for_tablets(TSyncLoadForTabletsResponse&,
         std::for_each(tablet_ids.cbegin(), tablet_ids.cend(), [](int64_t tablet_id) {
             // TODO(liuchangliang): batch sync
             TabletSharedPtr tablet;
-            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet, false);
             if (st) {
                 tablet->cloud_sync_rowsets(-1, true);
             }
