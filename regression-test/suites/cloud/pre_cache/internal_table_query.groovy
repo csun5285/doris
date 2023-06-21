@@ -76,9 +76,19 @@ values("lightman_cluster_id1", 10003, 11002, 11003, 11414, "${LocalDate.now().to
 "regression_test.selectdb_cache_hotspot", "selectdb_cache_hotspot", "p20230529", "lightman_cluster_name1", 1996, 1, 1, "2023-05-29 12:38:02");
     """
 
-    qt_sql """
+    List<List<Object>> results = sql """
     show cache hotspot '/';
     """
+    for (List<Object> row: results) {
+        if (row[0].equals('lightman_cluster_name0')) {
+            assertEquals(row[1], 1255922)
+            assertEquals(row[2], 'regression_test.selectdb_cache_hotspot')
+        }
+        if (row[0].equals('lightman_cluster_name1')) {
+            assertEquals(row[1], 1996)
+            assertEquals(row[2], 'regression_test.selectdb_cache_hotspot')
+        }
+    }
 
     qt_sql """
     show cache hotspot '/lightman_cluster_name0';
