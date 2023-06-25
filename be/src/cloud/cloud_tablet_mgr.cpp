@@ -439,12 +439,6 @@ void CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets() {
                           is_hot_data = is_hot_data || rowset->is_hot();
                       });
         std::shared_ptr<WaitGroup> wait = std::make_shared<WaitGroup>();
-        auto callback = [=](Status st) {
-            if (!st.ok()) {
-                LOG_WARNING("handle_overlap_rowsets error").error(st);
-            }
-            wait->done(); 
-        };
         for (int64_t seg_id = 0; seg_id < download_rowset->num_segments(); seg_id++) {
             io::S3FileMeta download_file_meta;
             download_file_meta.is_cold_data = !is_hot_data;
@@ -457,7 +451,12 @@ void CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets() {
                     : tablet_meta->ttl_seconds() == 0
                             ? 0
                             : rowset_meta->newest_write_timestamp() + tablet_meta->ttl_seconds();
-            download_file_meta.download_callback = std::move(callback);
+            download_file_meta.download_callback = [wait](Status st) {
+                if (!st.ok()) {
+                    LOG_WARNING("handle_overlap_rowsets error").error(st);
+                }
+                wait->done();
+            };
             wait->add();
             io::FileCacheSegmentDownloader::instance()->submit_download_task(
                     std::move(download_file_meta));
