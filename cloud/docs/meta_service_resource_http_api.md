@@ -1670,3 +1670,63 @@ curl -u root: http://127.0.0.1:12100/rest/v2/manager/cluster/cluster_info/cloud_
     "count": 0
 }
 ```
+
+## instance开启对象数据服务端加密
+
+### 接口描述
+
+本接口用于开启instance对象数据服务端加密
+
+### 请求(Request)
+
+* 请求语法
+
+```
+PUT /MetaService/http/enable_instance_sse?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+
+{
+    "instance_id": string
+}
+```
+* 请求参数
+
+| 参数名                        | 描述                     | 是否必须 | 备注                             |
+|----------------------------|------------------------|------|--------------------------------|
+| instance_id                | instance_id            | 是    | 全局唯一(包括历史上)                    |
+
+* 请求示例
+
+```
+PUT /MetaService/http/enable_instance_sse?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+
+{
+    "instance_id": "123456"
+}
+```
+* 返回参数
+
+| 参数名  | 描述    | 是否必须 | 备注                                       |
+|------|-------|------|------------------------------------------|
+| code | 返回状态码 | 是    | 枚举值，包括OK、INVALID_ARGUMENT、INTERNAL_ERROR |
+| msg  | 出错原因  | 是    | 若出错返回错误原因，未出错返回空字符串                      |
+
+* 成功返回示例
+
+```
+{
+ "code": "OK",
+ "msg": ""
+}
+```
+
+* 失败返回示例
+```
+{
+ "code": "INVALID_ARGUMENT",
+ "msg": "failed to enable sse, instance has enabled sse"
+}
+```
