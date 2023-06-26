@@ -56,10 +56,6 @@ namespace segment_v2 {
 class SegmentWriter;
 } // namespace segment_v2
 
-namespace vectorized::schema_util {
-class LocalSchemaChangeRecorder;
-}
-
 class BetaRowsetWriterV2 : public RowsetWriter {
 public:
     BetaRowsetWriterV2(const std::vector<brpc::StreamId>& streams);
@@ -101,6 +97,8 @@ public:
         LOG(FATAL) << "not implemeted";
         return nullptr;
     }
+
+    RowsetWriterContext& mutable_context() override { LOG(FATAL) << "not implemented"; }
 
     Version version() override { return _context.version; }
 
