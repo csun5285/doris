@@ -82,7 +82,6 @@ class ConfigOptions {
     static Option stageIamAkOpt
     static Option stageIamSkOpt
     static Option stageIamUserIdOpt
-    static Option clusterDirOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")
@@ -474,12 +473,6 @@ class ConfigOptions {
                 .desc("stage iam user id")
                 .build()
 
-        clusterDirOpt = Option.builder("clusterDir")
-                .required(false)
-                .hasArg(false)
-                .desc("cloud cluster deploy dir")
-                .build()
-
         Options options = new Options()
                 .addOption(helpOption)
                 .addOption(jdbcOpt)
@@ -531,8 +524,6 @@ class ConfigOptions {
                 .addOption(stageIamAkOpt)
                 .addOption(stageIamSkOpt)
                 .addOption(stageIamUserIdOpt)
-                .addOption(clusterDirOpt)
-
 
         CommandLine cmd = new DefaultParser().parse(options, args, true)
         if (cmd.hasOption(helpOption)) {

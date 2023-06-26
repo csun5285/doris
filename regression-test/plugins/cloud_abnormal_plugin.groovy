@@ -21,19 +21,26 @@ import net.schmizz.sshj.common.IOUtils;
 import net.schmizz.sshj.connection.channel.direct.Session;
 import net.schmizz.sshj.connection.channel.direct.Session.Command;
 
+import groovy.json.JsonSlurper;
 import java.util.concurrent.TimeUnit;
 
-void checkProcessName(String processName)
-{
+void checkProcessName(String processName) throws Exception {
     if (processName in ["fe", "be", "ms"]) {
         return
     }
-    throw new Exception("invalid process name: " + processName)
+    throw new Exception("Invalid process name: " + processName)
 }
 
-Suite.metaClass.checkClusterDir = {
-    if (context.config.clusterDir == null || context.config.clusterDir.isEmpty()) {
-        throw new Exception("empty cluster dir")
+Suite.metaClass.loadClusterMap = { String clusterFile /* param */ ->
+    try {
+        if (clusterFile.isNullOrEmpty()) {
+            throw new Exception("Empty cluster file")
+        }
+        Suite suite = delegate as Suite
+        def clusterMap = new JsonSlurper().parse(new FileReader(clusterFile))
+        return clusterMap
+    } finally {
+        logger.debug("clusterFile:{}, clusterMap:{}", clusterFile, clusterMap);
     }
 }
 
@@ -45,7 +52,7 @@ Suite.metaClass.executeCommand = { String nodeIp, String commandStr /* param */ 
     ssh.connect(nodeIp)
     Session session = null
     try {
-        logger.info("user.name:{}", System.getProperty("user.name"))
+        logger.debug("user.name:{}", System.getProperty("user.name"))
         ssh.authPublickey(System.getProperty("user.name"))
         session = ssh.startSession()
         final Command cmd = session.exec(commandStr)
@@ -54,8 +61,8 @@ Suite.metaClass.executeCommand = { String nodeIp, String commandStr /* param */ 
         def out = IOUtils.readFully(cmd.getInputStream()).toString()
         def err = IOUtils.readFully(cmd.getErrorStream()).toString()
         def errMsg = cmd.getExitErrorMessage()
-        logger.info("commandStr:${commandStr}")
-        logger.info("code:${code}, out:${out}, err:${err}, errMsg:${errMsg}")
+        logger.debug("commandStr:${commandStr}")
+        logger.debug("code:${code}, out:${out}, err:${err}, errMsg:${errMsg}")
         assertEquals(0, code)
     } finally {
         try {
@@ -63,7 +70,7 @@ Suite.metaClass.executeCommand = { String nodeIp, String commandStr /* param */ 
                 session.close()
             }
         } catch (IOException e) {
-            // Do Nothing   
+            logger.warn(e);
         }
         ssh.disconnect()
     }
@@ -74,9 +81,9 @@ Suite.metaClass.stopProcess = { String nodeIp, String processName, String instal
     Suite suite = delegate as Suite
     checkProcessName(processName)
 
-    logger.info("stopProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
+    logger.debug("stopProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
     String commandStr
-    if (processName == "ms") {
+    if (processName.strip().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"${installPath}/bin/stop.sh\""
     } else {
         commandStr = "bash -c \"${installPath}/bin/stop_${processName}.sh\""
@@ -90,10 +97,10 @@ Suite.metaClass.startProcess = { String nodeIp, String processName, String insta
     Suite suite = delegate as Suite
     checkProcessName(processName);
 
-    logger.info("startProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}");
+    logger.debug("startProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}");
 
     String commandStr
-    if (processName == "ms") {
+    if (processName.strip().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"${installPath}/bin/start.sh  --meta-service --daemon\"";
     } else {
         commandStr = "bash -c \"${installPath}/bin/start_${processName}.sh --daemon\"";
@@ -105,19 +112,19 @@ Suite.metaClass.startProcess = { String nodeIp, String processName, String insta
 
 Suite.metaClass.checkProcessAlive = { String nodeIp, String processName, String installPath /* param */ ->
     Suite suite = delegate as Suite
-    logger.info("checkProcessAlive(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
+    logger.debug("checkProcessAlive(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
     checkProcessName(processName)
 
-    commandStr = "invalid command"
-    if (processName == "fe") {
+    String commandStr = null;
+    if (processName.strip().equalsIgnoreCase("fe")) {
         commandStr = "bash -c \"ps aux | grep ${installPath}/log/fe.gc.log | grep -v grep\""
     }
 
-    if (processName == "be") {
+    if (processName.strip().equalsIgnoreCase("be")) {
         commandStr = "bash -c \"ps aux | grep ${installPath}/lib/doris_be | grep -v grep\""
     }
 
-    if (processName == "ms") {
+    if (processName.strip().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"ps aux | grep '${installPath}/lib/selectdb_cloud --meta-service' | grep -v grep\""
     }
 
@@ -127,8 +134,9 @@ Suite.metaClass.checkProcessAlive = { String nodeIp, String processName, String 
 
 Suite.metaClass.restartProcess = { String nodeIp, String processName, String installPath /* param */ ->
     Suite suite = delegate as Suite
-    logger.info("restartProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
+    logger.debug("restartProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
     checkProcessName(processName)
+
     stopProcess(nodeIp, processName, installPath)
     sleep(1000)
     startProcess(nodeIp, processName, installPath)
@@ -143,22 +151,22 @@ Suite.metaClass.restartProcess = { String nodeIp, String processName, String ins
             if (tryTimes <= 0) {
                 throw e
             }
-        } finally {
-            // sleep 5 seconds for wait qe service ready
             sleep(5000)
         }
     }
-    // sleep 5 seconds for wait qe service ready
+    // sleep 5 seconds for service ready
     sleep(5000)
 }
 
 Suite.metaClass.checkBrokerLoadLoading = { String label /* param */ ->
-    // check load state
     int tryTimes = 600
     while (tryTimes-- > 0) {
         def stateResult = sql "show load where Label = '${label}'"
         def loadState = stateResult[stateResult.size() - 1][2].toString()
         if ("pending".equalsIgnoreCase(loadState)) {
+            if (tryTimes <= 1) {
+                throw new IllegalStateException("check load ${label} timeout")
+            }
             sleep(1000)
             continue
         } 
@@ -177,7 +185,6 @@ Suite.metaClass.checkBrokerLoadLoading = { String label /* param */ ->
 }
 
 Suite.metaClass.checkBrokerLoadFinished = { String label /* param */ ->
-    // check load state
     int tryTimes = 20
     while (tryTimes-- > 0) {
         def stateResult = sql "show load where Label = '${label}'"
@@ -189,6 +196,10 @@ Suite.metaClass.checkBrokerLoadFinished = { String label /* param */ ->
             logger.info("stateResult:{}", stateResult)
             break
         }
+
+        if (tryTimes <= 1) {
+            throw new IllegalStateException("check load ${label} timeout")
+        }
         sleep(60000)
     }
 }
@@ -199,6 +210,9 @@ Suite.metaClass.checkCopyIntoLoading = { String label /* param */ ->
         def stateResult = sql "show copy where label like '${label}'"
         def loadState = stateResult[stateResult.size() - 1][3].toString()
         if ("pending".equalsIgnoreCase(loadState)) {
+            if (tryTimes <= 1) {
+                throw new IllegalStateException("check copy into ${label} timeout")
+            }
             sleep(1000)
             continue
         } 

@@ -1,23 +1,110 @@
 suite("test_broker_load_with_restart_fe") {
-    checkClusterDir();
+    def clusterMap = loadClusterMap(Config.clusterFile)
+
     // create table
     def tableName = 'test_broker_load_with_restart_fe'
     def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
     def loadLabel = tableName + "_" + uniqueID
-    def feDir = "${context.config.clusterDir}/fe"
-    def beDir = "${context.config.clusterDir}/cluster0/be"
 
-    String nodeIp = context.config.feHttpAddress.split(':')[0].trim()
+    /* clusterMap demo
+    {
+        "user": "ubuntu",
+        "password": "Cfplhys2022@",
+        "cluster_mode": "cloud",
+        "java_home": "/home/ubuntu/jdk1.8.0_131",
+        "fe": {
+            "http_port": "18047",
+            "rpc_port": "9037",
+            "query_port": "9047",
+            "edit_log_port": "9027",
+            "cloud_http_port": "",
+            "cloud_unique_id": "selectdb_cloud_dev_specific_abnormal_asan_fe",
+            "node": [
+                {
+                    "ip": "172.21.16.8",
+                    "is_master": "true",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/fe"
+                }
+            ]
+        },
+        "be": {
+            "cluster": [
+                {
+                    "be_port": "9077",
+                    "brpc_port": "8077",
+                    "webserver_port": "8057",
+                    "heartbeat_service_port": "9067",
+                    "cloud_unique_id": "selectdb_cloud_dev_specific_abnormalasan_id_cluster0",
+                    "node": [
+                        {
+                            "ip": "172.21.16.8",
+                            "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/cluster0/be"
+                        },
+                        {
+                            "ip": "172.21.16.40",
+                            "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/cluster0/be"
+                        },
+                        {
+                            "ip": "172.21.16.21",
+                            "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/cluster0/be"
+                        }
+                    ]
+                }
+            ]
+        },
+        "meta_service": {
+            "brpc_listen_port": "5017",
+            "node": [
+                {
+                    "ip": "172.21.16.8",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/meta-service"
+                },
+                {
+                    "ip": "172.21.16.40",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/meta-service"
+                },
+                {
+                    "ip": "172.21.16.21",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/meta-service"
+                }
+            ]
+        },
+        "recycler": {
+            "brpc_listen_port": "6017",
+            "node": [
+                {
+                    "ip": "172.21.16.8",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/recycler"
+                },
+                {
+                    "ip": "172.21.16.40",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/recycler"
+                },
+                {
+                    "ip": "172.21.16.21",
+                    "install_path": "/mnt/disk1/selectdb-cloud-dev-specific-abnormal-asan/recycler"
+                }
+            ]
+        },
+        "object_storage": {
+            "ak": "AKIDAE2aqpY0B7oFPIvHMBj01lFSO3RYOxFH",
+            "sk": "nJYWDepkQqzrWv3uWsxlJ0ScV7SXLs88",
+            "provider": "COS",
+            "region": "ap-beijing",
+            "endpoint": "cos.ap-beijing.myqcloud.com",
+            "bucket": "doris-build-1308700295",
+            "prefix": "selectdb-cloud-dev-specific-abnormal-asan-pipeline-0330"
+        },
+        "monitor": {
+            "inconsistent_webhook": "",
+            "default_webhook": ""
+        }
+    }
+    */
 
-    // by default, we need deploy fe/be/ms in the same node
-    def clusterMap = [
-        fe : [[ ip : nodeIp, path : feDir]],
-        be : [[ ip : nodeIp, path: beDir]]
-    ]
-
-    logger.info("clusterMap:${clusterMap}");
-    checkProcessAlive(clusterMap["fe"][0]["ip"], "fe", clusterMap["fe"][0]["path"]);
-    checkProcessAlive(clusterMap["be"][0]["ip"], "be", clusterMap["be"][0]["path"]);
+    logger.debug("clusterMap:${clusterMap}");
+    checkProcessAlive(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -62,8 +149,8 @@ suite("test_broker_load_with_restart_fe") {
     """
 
     checkBrokerLoadLoading(loadLabel)
-    // restart fe
-    restartProcess(clusterMap["fe"][0]["ip"], "fe", clusterMap["fe"][0]["path"])
+
+    restartProcess(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
     resetConnection()
     checkBrokerLoadFinished(loadLabel)
 

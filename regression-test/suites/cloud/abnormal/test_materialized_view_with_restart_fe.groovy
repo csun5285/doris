@@ -1,24 +1,14 @@
 suite("test_materialized_view_with_restart_fe") {
-    checkClusterDir();
+    def clusterMap = loadClusterMap(Config.clusterFile)
     // create table
     def tableName = 'test_materialized_view_with_restart_fe'
     def mvName = "test_materialized_view_with_restart_fe_mv"
     def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
     def loadLabel = tableName + "_" + uniqueID
-    def feDir = "${context.config.clusterDir}/fe"
-    def beDir = "${context.config.clusterDir}/cluster0/be"
 
-    String nodeIp = context.config.feHttpAddress.split(':')[0].trim()
-
-    // by default, we need deploy fe/be/ms in the same node
-    def clusterMap = [
-        fe : [[ ip : nodeIp, path : feDir]],
-        be : [[ ip : nodeIp, path: beDir]]
-    ]
-
-    logger.info("clusterMap:${clusterMap}");
-    checkProcessAlive(clusterMap["fe"][0]["ip"], "fe", clusterMap["fe"][0]["path"]);
-    checkProcessAlive(clusterMap["be"][0]["ip"], "be", clusterMap["be"][0]["path"]);
+    logger.debug("clusterMap:${clusterMap}")
+    checkProcessAlive(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -69,8 +59,7 @@ suite("test_materialized_view_with_restart_fe") {
 
     sql "create materialized view ${mvName} as select C_CUSTKEY, C_ADDRESS from ${tableName};"
     waitMvJobRunning(tableName)
-    // restart fe
-    restartProcess(clusterMap["fe"][0]["ip"], "fe", clusterMap["fe"][0]["path"])
+    restartProcess(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
     resetConnection()
     waitMvJobFinished(tableName)
     sql """ DESC ${tableName}"""
