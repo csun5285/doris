@@ -191,7 +191,8 @@ void NodeChannel::open() {
 }
 
 void NodeChannel::open_partition(int64_t partition_id) {
-    _timeout_watch.reset();
+    MonotonicStopWatch lazy_open_timeout_watch;
+    lazy_open_timeout_watch.start();
     SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
     OpenPartitionRequest request;
     *request.mutable_id() = _parent->_load_id;
@@ -207,7 +208,7 @@ void NodeChannel::open_partition(int64_t partition_id) {
     auto open_partition_closure =
             std::make_unique<OpenPartitionClosure>(this, _index_channel, partition_id);
 
-    int remain_ms = _rpc_timeout_ms - _timeout_watch.elapsed_time();
+    int remain_ms = _rpc_timeout_ms - lazy_open_timeout_watch.elapsed_time();
     if (UNLIKELY(remain_ms < config::min_load_rpc_timeout_ms)) {
         remain_ms = config::min_load_rpc_timeout_ms;
     }
@@ -216,6 +217,12 @@ void NodeChannel::open_partition(int64_t partition_id) {
     _stub->open_partition(&open_partition_closure.get()->cntl, &request,
                           &open_partition_closure.get()->result, open_partition_closure.get());
     _open_partition_closures.insert(std::move(open_partition_closure));
+}
+
+void NodeChannel::open_partition_wait() {
+    for (auto& open_partition_closure : _open_partition_closures) {
+        open_partition_closure->join();
+    }
 }
 
 void NodeChannel::_cancel_with_msg(const std::string& msg) {
@@ -1229,6 +1236,14 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
                 load_pressure_time_ns = 0;
         {
             SCOPED_TIMER(_close_timer);
+            if (config::enable_lazy_open_partition) {
+                for (auto index_channel : _channels) {
+                    index_channel->for_each_node_channel(
+                            [](const std::shared_ptr<NodeChannel>& ch) {
+                                ch->open_partition_wait();
+                            });
+                }
+            }
             for (auto index_channel : _channels) {
                 index_channel->for_each_node_channel(
                         [](const std::shared_ptr<NodeChannel>& ch) { ch->mark_close(); });
@@ -1348,9 +1363,6 @@ Status OlapTableSink::close(RuntimeState* state, Status close_status) {
 
 Status NodeChannel::close_wait(RuntimeState* state) {
     SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
-    for (auto& open_partition_closure : _open_partition_closures) {
-        open_partition_closure->join();
-    }
     // set _is_closed to true finally
     Defer set_closed {[&]() {
         std::lock_guard<std::mutex> l(_closed_lock);

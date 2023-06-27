@@ -187,6 +187,8 @@ public:
 
     virtual void open_partition(int64_t partition_id);
 
+    virtual void open_partition_wait();
+
     virtual Status open_wait();
 
     Status add_row(Tuple* tuple, int64_t tablet_id);
