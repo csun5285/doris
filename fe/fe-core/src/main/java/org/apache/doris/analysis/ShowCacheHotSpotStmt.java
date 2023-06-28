@@ -126,23 +126,31 @@ public class ShowCacheHotSpotStmt extends ShowStmt {
                 + "                             ORDER BY insert_day DESC) AS rn\n"
                 + "   FROM " +  TABLE_NAME.toString() + " ) t \n"
                 + "WHERE rn = 1 ");
-            groupByClause = new StringBuilder("group by t.table_name, t.last_access_time");
+            groupByClause = new StringBuilder("group by t.table_name, t.last_access_time order by t.table_name");
         }
         if (metaDataPos == 2) {
             query = new StringBuilder("SELECT partition_name,\n"
                 + "       last_access_time\n"
                 + "FROM\n"
-                + "  (SELECT *,\n"
-                + "          row_number() OVER (PARTITION BY cluster_id,\n"
-                + "                                          backend_id,\n"
-                + "                                          table_id,\n"
-                + "                                          index_id,\n"
-                + "                                          partition_id\n"
-                + "                             ORDER BY insert_day DESC) AS rn\n"
+                + "  (SELECT partition_name,\n"
+                + "          sum(query_per_day) AS qpd,\n"
+                + "          sum(query_per_week) AS qpw,\n"
+                + "          max(last_access_time) AS last_access_time\n"
+                + "   FROM\n"
+                + "     (SELECT *,\n"
+                + "             row_number() OVER (PARTITION BY cluster_id,\n"
+                + "                                             backend_id,\n"
+                + "                                             table_id,\n"
+                + "                                             index_id,\n"
+                + "                                             partition_id\n"
+                + "                                ORDER BY insert_day DESC) AS rn\n"
                 + "   FROM " +  TABLE_NAME.toString() + " ) t \n"
-                + "WHERE rn = 1");
-            orderClause = new StringBuilder("\n order by t.query_per_day desc"
-                + ", t.query_per_week desc");
+                + "   WHERE rn = 1");
+
+            orderClause = new StringBuilder("   GROUP BY partition_name) d\n"
+                + "WHERE TRUE\n"
+                + "ORDER BY qpd DESC,\n"
+                + "         qpw DESC");
         }
         Preconditions.checkState(query != null);
         for (String s : whereExpr) {

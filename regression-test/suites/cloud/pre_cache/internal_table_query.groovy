@@ -18,6 +18,8 @@ import java.time.LocalDate
 
 suite("test_cloud_dynamic_partition") {
     // insert multi values with different insert day
+    // `cluster_id` ,`backend_id`, `table_id`, `index_id`, `partition_id`, `insert_day`, 
+    // `table_name` ,`index_name`, `partition_name`, `cluster_name`,`file_cache_size`, `query_per_day`, `query_per_week`, `last_access_time`  
     try_sql """
 insert into __internal_schema.selectdb_cache_hotspot 
 values("lightman_cluster_id0", 10003, 11002, 11003, 11414, "${LocalDate.now().toString()}", 
@@ -150,11 +152,12 @@ FROM __internal_schema.selectdb_cache_hotspot) t WHERE rn = 1;
     def validCluster = clusters[0][0]
     
     List<List<Object>> hotspots = sql """
-    show cache hotspot '/';
+    show clusters;
     """
     String clusterId;
     for (List<Object> infos: hotspots) {
-        if (infos[2].contains("sample_table")) {
+        // use current cluster
+        if (infos[1].contains("TRUE")) {
             clusterId = infos[0]
         }
     }
