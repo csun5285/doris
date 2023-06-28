@@ -824,13 +824,17 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
                 cloud_delete_rowsets(to_delete);
                 continue;
             } else {
+                to_add_directy.push_back(to_add_rs);
                 for (auto& [v, rs] : _rs_version_map) {
                     if (to_add_v.contains(v)) {
                         to_delete.push_back(rs);
                     }
                 }
-                cloud::tablet_mgr()->sumbit_overlap_rowsets(_tablet_meta->tablet_id(), to_add_rs,
-                                                            std::move(to_delete));
+                cloud_delete_rowsets(to_delete);
+                continue;
+                // TODO(liuchangliang)
+                // cloud::tablet_mgr()->sumbit_overlap_rowsets(_tablet_meta->tablet_id(), to_add_rs,
+                //                                             std::move(to_delete));
             }
         }
         add_rowsets_directy(to_add_directy);
