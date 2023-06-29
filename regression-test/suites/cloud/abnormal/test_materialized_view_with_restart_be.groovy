@@ -1,5 +1,5 @@
 suite("test_materialized_view_with_restart_be") {
-    def clusterMap = loadClusterMap(Config.clusterFile)
+    def clusterMap = loadClusterMap(getConf("clusterFile"))
     // create table
     def tableName = 'test_materialized_view_with_restart_be'
     def mvName = "test_materialized_view_with_restart_be_mv"
@@ -8,7 +8,8 @@ suite("test_materialized_view_with_restart_be") {
 
     logger.debug("clusterMap:${clusterMap}");
     checkProcessAlive(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
-    checkProcessAlive(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["be"]["cluster"][0]["node"][0]["ip"], "be", clusterMap["be"]["cluster"][0]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["meta_service"]["node"][0]["ip"], "ms", clusterMap["meta_service"]["node"][0]["install_path"])
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -59,8 +60,7 @@ suite("test_materialized_view_with_restart_be") {
 
     sql "create materialized view ${mvName} as select C_CUSTKEY, C_ADDRESS from ${tableName};"
     waitMvJobRunning(tableName)
-    restartProcess(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
-    resetConnection()
+    restartProcess(clusterMap["be"]["cluster"][0]["node"][0]["ip"], "be", clusterMap["be"]["cluster"][0]["node"][0]["install_path"])
 
     waitMvJobFinished(tableName)
     sql """ DESC ${tableName}"""

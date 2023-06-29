@@ -58,4 +58,5 @@ under the License.
         <appender-ref ref="rollingFileAppender" />
     </root>
     <logger name="net.schmizz.sshj" level="error"/>
+    <logger name="com.hierynomus.sshj" level="error"/>
 </configuration>

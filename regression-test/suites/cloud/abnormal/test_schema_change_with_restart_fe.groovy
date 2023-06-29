@@ -1,5 +1,5 @@
 suite("test_schema_change_with_restart_fe") {
-    def clusterMap = loadClusterMap(Config.clusterFile)
+    def clusterMap = loadClusterMap(getConf("clusterFile"))
     // create table
     def tableName = 'test_schema_change_with_restart_fe'
     def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
@@ -7,7 +7,8 @@ suite("test_schema_change_with_restart_fe") {
 
     logger.debug("clusterMap:${clusterMap}");
     checkProcessAlive(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
-    checkProcessAlive(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["be"]["cluster"][0]["node"][0]["ip"], "be", clusterMap["be"]["cluster"][0]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["meta_service"]["node"][0]["ip"], "ms", clusterMap["meta_service"]["node"][0]["install_path"])
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -59,7 +60,7 @@ suite("test_schema_change_with_restart_fe") {
     sql """ alter table ${tableName} drop column C_NAME"""
     waitSchemaChangeJobRunning(tableName)
 
-    restartProcess(clusterMap["be"]["node"][0]["ip"], "fe", clusterMap["be"]["node"][0]["install_path"])
+    restartProcess(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
     resetConnection()
 
     waitSchemaChangeJobFinished(tableName)

@@ -1,11 +1,12 @@
 suite("test_query_with_restart_be", "abnormal") {
-    def clusterMap = loadClusterMap(Config.clusterFile)
+    def clusterMap = loadClusterMap(getConf("clusterFile"))
     // create table
     def tableName = 'test_query_with_restart_be'
 
     logger.debug("clusterMap:${clusterMap}");
     checkProcessAlive(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
-    checkProcessAlive(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["be"]["cluster"][0]["node"][0]["ip"], "be", clusterMap["be"]["cluster"][0]["node"][0]["install_path"])
+    checkProcessAlive(clusterMap["meta_service"]["node"][0]["ip"], "ms", clusterMap["meta_service"]["node"][0]["install_path"])
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """
@@ -36,8 +37,7 @@ suite("test_query_with_restart_be", "abnormal") {
     }
 
     sleep(20 * 1000)
-    restartProcess(clusterMap["be"]["node"][0]["ip"], "be", clusterMap["be"]["node"][0]["install_path"])
-    resetConnection()
+    restartProcess(clusterMap["be"]["cluster"][0]["node"][0]["ip"], "be", clusterMap["be"]["cluster"][0]["node"][0]["install_path"])
     sleep(40 * 1000)
     
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""

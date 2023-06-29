@@ -16,6 +16,7 @@
 // under the License.
 import org.apache.doris.regression.suite.Suite
 
+import com.google.common.base.Strings;
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.common.IOUtils;
 import net.schmizz.sshj.connection.channel.direct.Session;
@@ -32,12 +33,12 @@ void checkProcessName(String processName) throws Exception {
 }
 
 Suite.metaClass.loadClusterMap = { String clusterFile /* param */ ->
+    def clusterMap = null;
     try {
-        if (clusterFile.isNullOrEmpty()) {
+        if (Strings.isNullOrEmpty(clusterFile)) {
             throw new Exception("Empty cluster file")
         }
-        Suite suite = delegate as Suite
-        def clusterMap = new JsonSlurper().parse(new FileReader(clusterFile))
+        clusterMap = new JsonSlurper().parse(new FileReader(clusterFile))
         return clusterMap
     } finally {
         logger.debug("clusterFile:{}, clusterMap:{}", clusterFile, clusterMap);
@@ -83,7 +84,7 @@ Suite.metaClass.stopProcess = { String nodeIp, String processName, String instal
 
     logger.debug("stopProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
     String commandStr
-    if (processName.strip().equalsIgnoreCase("ms")) {
+    if (processName.trim().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"${installPath}/bin/stop.sh\""
     } else {
         commandStr = "bash -c \"${installPath}/bin/stop_${processName}.sh\""
@@ -100,7 +101,7 @@ Suite.metaClass.startProcess = { String nodeIp, String processName, String insta
     logger.debug("startProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}");
 
     String commandStr
-    if (processName.strip().equalsIgnoreCase("ms")) {
+    if (processName.trim().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"${installPath}/bin/start.sh  --meta-service --daemon\"";
     } else {
         commandStr = "bash -c \"${installPath}/bin/start_${processName}.sh --daemon\"";
@@ -116,15 +117,15 @@ Suite.metaClass.checkProcessAlive = { String nodeIp, String processName, String 
     checkProcessName(processName)
 
     String commandStr = null;
-    if (processName.strip().equalsIgnoreCase("fe")) {
+    if (processName.trim().equalsIgnoreCase("fe")) {
         commandStr = "bash -c \"ps aux | grep ${installPath}/log/fe.gc.log | grep -v grep\""
     }
 
-    if (processName.strip().equalsIgnoreCase("be")) {
+    if (processName.trim().equalsIgnoreCase("be")) {
         commandStr = "bash -c \"ps aux | grep ${installPath}/lib/doris_be | grep -v grep\""
     }
 
-    if (processName.strip().equalsIgnoreCase("ms")) {
+    if (processName.trim().equalsIgnoreCase("ms")) {
         commandStr = "bash -c \"ps aux | grep '${installPath}/lib/selectdb_cloud --meta-service' | grep -v grep\""
     }
 
