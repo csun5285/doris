@@ -83,7 +83,6 @@ private:
                 tablet_id_to_prepare_overlap_rowsets;
         std::unordered_map<int64_t, std::map<Version, std::vector<RowsetSharedPtr>, VersionCmp>>
                 tablet_id_to_new_version_to_overlap_rowset;
-        std::thread prepare_overlap_rowsets_thread;
         RowsetId downloading_rowset_id;
         bool closed {false};
         void handle_overlap_rowsets();

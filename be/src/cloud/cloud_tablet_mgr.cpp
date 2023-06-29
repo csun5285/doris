@@ -139,8 +139,8 @@ CloudTabletMgr::~CloudTabletMgr() {
                   });
     std::for_each(_ovarlap_rowsets_mgrs.begin(), _ovarlap_rowsets_mgrs.end(),
                   [](OverlapRowsetsMgr& mgr) {
-                      if (mgr.prepare_overlap_rowsets_thread.joinable()) {
-                          mgr.prepare_overlap_rowsets_thread.join();
+                      if (mgr.consumer.joinable()) {
+                          mgr.consumer.join();
                       }
                   });
 }
