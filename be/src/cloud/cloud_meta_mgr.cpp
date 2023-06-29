@@ -59,15 +59,6 @@ static constexpr int BRPC_RETRY_TIMES = 3;
     } while (retry_times--);                                                                     \
     return Status::InternalError("failed to {}: {}", __FUNCTION__, res.status().msg());
 
-static bool should_use_short_connection() {
-    using namespace std::chrono;
-    if (config::meta_service_use_short_connection) return true;
-    if (config::fuzzy_meta_service_use_short_connection &&
-        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count() & 1)
-        return true;
-    return false;
-}
-
 CloudMetaMgr::CloudMetaMgr() = default;
 
 CloudMetaMgr::~CloudMetaMgr() = default;
@@ -77,9 +68,6 @@ Status CloudMetaMgr::open() {
     auto channel = std::make_unique<brpc::Channel>();
     auto endpoint = config::meta_service_endpoint;
     int ret_code = 0;
-    if (should_use_short_connection()) {
-        options.connection_type = brpc::ConnectionType::CONNECTION_TYPE_SHORT;
-    }
     if (config::meta_service_use_load_balancer) {
         ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
     } else {

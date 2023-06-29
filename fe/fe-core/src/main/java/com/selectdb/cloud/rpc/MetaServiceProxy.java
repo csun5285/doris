@@ -63,22 +63,7 @@ public class MetaServiceProxy {
         }
     }
 
-    private static boolean shouldUseShortConnection() {
-        if (Config.meta_service_use_short_connection) {
-            return true;
-        }
-        if (Config.fuzzy_meta_service_use_short_connection
-                && System.currentTimeMillis() % 2 == 0) {
-            return true;
-        }
-        return false;
-    }
-
     private MetaServiceClient getProxy(TNetworkAddress address) {
-        if (shouldUseShortConnection()) {
-            return new MetaServiceClient(address);
-        }
-
         MetaServiceClient service = serviceMap.get(address);
         if (service != null) {
             return service;
