@@ -1144,7 +1144,7 @@ int InstanceRecycler::recycle_rowsets() {
         ++num_expired;
         if (!rowset.has_type()) {                         // old version `RecycleRowsetPB`
             if (!rowset.has_resource_id()) [[unlikely]] { // impossible
-                LOG_WARNING("rowset meta has empty resource id").tag("key", k);
+                LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
                 return -1;
             }
             // decode rowset_id
@@ -1165,7 +1165,7 @@ int InstanceRecycler::recycle_rowsets() {
         // TODO(plat1ko): check rowset not referenced
         auto rowset_meta = rowset.mutable_rowset_meta();
         if (!rowset_meta->has_resource_id()) [[unlikely]] { // impossible
-            LOG_WARNING("rowset meta has empty resource id").tag("key", k);
+            LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
             return -1;
         }
         LOG(INFO) << "delete rowset data, instance_id=" << instance_id_
