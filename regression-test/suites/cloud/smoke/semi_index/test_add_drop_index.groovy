@@ -59,6 +59,7 @@ suite("smoke_add_drop_index_with_data", "smoke"){
     // show index of create table
     def show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
+    assertEquals(show_result.size(), 2)
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
 
@@ -106,6 +107,7 @@ suite("smoke_add_drop_index_with_data", "smoke"){
     // show index after add index
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
+    assertEquals(show_result.size(), 3)
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
     assertEquals(show_result[2][2], "idx_desc")
