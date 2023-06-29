@@ -1,0 +1,45 @@
+apiVersion: apps/v1      
+kind: Deployment                                                                                               
+metadata:               
+  name: be-deployment 
+  labels:
+    app: be
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: be
+
+  template:
+    metadata:
+      labels:
+        app: be
+    spec:
+      containers:
+      - name: be
+        image: selectdb-be:latest
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: config 
+          mountPath: /opt/selectdb/be/custom_conf
+          readOnly: true
+      volumes:                                         
+      - name: config
+        projected:
+          sources:
+          - configMap:
+              name: be-configmap
+                           
+---          
+apiVersion: v1       
+kind: ConfigMap
+metadata:        
+  name: be-configmap
+data:                                                  
+  be_custom.conf: |                               
+    cloud_unique_id = cloud_unique_id_be
+    meta_service_endpoint = ms-service.default.svc.cluster.local:5000
+    tmp_file_dirs = [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]
+
+

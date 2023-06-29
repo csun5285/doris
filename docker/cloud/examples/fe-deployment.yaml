@@ -1,0 +1,44 @@
+apiVersion: apps/v1      
+kind: Deployment                                                                                               
+metadata:               
+  name: fe-deployment 
+  labels:
+    app: fe
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fe
+
+  template:
+    metadata:
+      labels:
+        app: fe
+    spec:
+      containers:
+      - name: fe
+        image: selectdb-fe:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c", "cp /opt/selectdb/fe/template/fe_custom.conf /opt/selectdb/fe/custom_conf/fe_custom.conf; bin/start_fe.sh"]
+        volumeMounts:
+        - name: config 
+          mountPath: /opt/selectdb/fe/template
+          readOnly: false
+      volumes:                                         
+      - name: config
+        projected:
+          sources:
+          - configMap:
+              name: fe-configmap
+                           
+---          
+apiVersion: v1       
+kind: ConfigMap
+metadata:        
+  name: fe-configmap
+data:                                                  
+  fe_custom.conf: |                               
+    cloud_unique_id = cloud_unique_fe_master
+    meta_service_endpoint = ms-service.default.svc.cluster.local:5000
+
