@@ -204,7 +204,7 @@ Status CachedRemoteFileReader::read_at(size_t offset, Slice result, size_t* byte
                 size_t file_offset = current_offset - left;
                 SCOPED_RAW_TIMER(&stats.local_read_timer);
                 st = segment->read_at(Slice(result.data + (current_offset - offset), read_size),
-                                      file_offset);
+                                      file_offset, state);
             }
             if (!st || segment_state == FileSegment::State::EMPTY) {
                 size_t bytes_read {0};

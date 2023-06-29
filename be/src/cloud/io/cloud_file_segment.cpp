@@ -153,7 +153,7 @@ std::string FileSegment::get_path_in_local_cache(bool is_tmp) const {
     return _cache->get_path_in_local_cache(key(), _expiration_time, offset(), _cache_type, is_tmp);
 }
 
-Status FileSegment::read_at(Slice buffer, size_t read_offset) {
+Status FileSegment::read_at(Slice buffer, size_t read_offset, IOState* state) {
     Status st = Status::OK();
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
@@ -166,7 +166,7 @@ Status FileSegment::read_at(Slice buffer, size_t read_offset) {
         }
     }
     size_t bytes_reads = buffer.size;
-    RETURN_IF_ERROR(reader->read_at(read_offset, buffer, &bytes_reads));
+    RETURN_IF_ERROR(reader->read_at(read_offset, buffer, &bytes_reads, state));
     DCHECK(bytes_reads == buffer.size);
     return st;
 }

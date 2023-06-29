@@ -318,6 +318,7 @@ Status SegmentIterator::_init(bool is_vec) {
 }
 
 Status SegmentIterator::_vec_init_prefetch_column_pages() {
+    SCOPED_RAW_TIMER(&_opts.stats->block_init_prefetch_ns);
     if (config::max_column_reader_prefetch_size == 0 || _opts.read_orderby_key_reverse ||
         _file_reader->fs()->type() == io::FileSystemType::LOCAL) {
         return Status::OK();
@@ -1143,6 +1144,7 @@ std::string SegmentIterator::_gen_predicate_sign(ColumnPredicateInfo* predicate_
 }
 
 Status SegmentIterator::_init_return_column_iterators() {
+    SCOPED_RAW_TIMER(&_opts.stats->block_init_iters_ns);
     if (_cur_rowid >= num_rows()) {
         return Status::OK();
     }

@@ -164,6 +164,9 @@ std::shared_ptr<Aws::S3::S3Client> ClientFactory::create(const S3Conf& s3_conf) 
     if (s3_conf.max_connections > 0) {
         aws_config.maxConnections = s3_conf.max_connections;
     }
+    if (aws_config.maxConnections < config::async_remote_io_thread_pool_thread_num) {
+        aws_config.maxConnections = config::async_remote_io_thread_pool_thread_num;
+    }
     if (s3_conf.request_timeout_ms > 0) {
         aws_config.requestTimeoutMs = s3_conf.request_timeout_ms;
     }

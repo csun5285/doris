@@ -347,6 +347,8 @@ struct OlapReaderStatistics {
     int64_t block_init_ns = 0;
     int64_t block_init_seek_num = 0;
     int64_t block_init_seek_ns = 0;
+    int64_t block_init_iters_ns = 0;
+    int64_t block_init_prefetch_ns = 0;
     int64_t first_read_ns = 0;
     int64_t block_first_read_seek_num = 0;
     int64_t block_first_read_seek_ns = 0;

@@ -83,7 +83,7 @@ public:
     Status append(Slice data);
 
     // read data from cache file
-    Status read_at(Slice buffer, size_t offset);
+    Status read_at(Slice buffer, size_t offset, IOState* state = nullptr);
 
     // finish write, release the file writer
     Status finalize_write(bool need_to_get_file_size = false);
