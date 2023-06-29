@@ -88,6 +88,12 @@ int get_warehouse_info(const std::string& ms_address, const std::string& ms_toke
                        const std::string& warehouse_id, std::string* resp) {
     CURL* curl;
     curl = curl_easy_init();
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&curl](int*) {
+        if (curl != nullptr) {
+            curl_easy_cleanup(curl);
+            curl = nullptr;
+        }
+    });
     if (curl == nullptr) {
         std::cerr << "curl init failed" << std::endl;
         return -1;
@@ -194,6 +200,9 @@ int recovery_data(const S3Conf& s3_conf, const std::string& recovery_file, int l
     aws_config.verifySSL = false;
     Aws::S3::S3Client s3_client(aws_cred, aws_config,
                                 Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never);
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&aws_options](int*) {
+        Aws::ShutdownAPI(aws_options);
+    });
 
     struct obj_version_info {
         std::string version_id;
@@ -205,7 +214,7 @@ int recovery_data(const S3Conf& s3_conf, const std::string& recovery_file, int l
     if (s3_conf.provider == "COS") {
         qcloud_cos::CosConfig cos_config(0, s3_conf.ak, s3_conf.sk, s3_conf.region);
         qcloud_cos::CosAPI cos(cos_config);
-        
+
         qcloud_cos::GetBucketObjectVersionsReq req(s3_conf.bucket);
         req.SetPrefix(recovery_file_key);
         if (list_versions_nums != -1) {
