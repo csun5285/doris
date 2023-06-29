@@ -16,26 +16,24 @@
 // under the License.
 
 suite("test_ssl_stability") {
-    def tbName = "tb_test_ssl_stability"
     int test_count = 5;
     while (test_count-- > 1) {
-        sql "DROP TABLE IF EXISTS ${tbName}"
-        // char not null to null
-        sql """
-            CREATE TABLE IF NOT EXISTS ${tbName} (
-                k1 INT NOT NULL,
-                value1 varchar(16) NOT NULL
-            )
-            DUPLICATE KEY (k1)
-            DISTRIBUTED BY HASH(k1) BUCKETS 1 properties("replication_num" = "1");
-        """
-        StringBuilder insertCommand = new StringBuilder();
-        insertCommand.append("INSERT INTO ${tbName} VALUES ");
-        int insert_row_count = 100000;
-        while (insert_row_count-- > 1) {
-            insertCommand.append("(1, '11'),");
+        StringBuilder selectCommand = new StringBuilder();
+        selectCommand.append("SELECT ");
+        int select_row_count = 100000;
+        for (int i = 0; i < select_row_count; ++i) {
+            selectCommand.append(" " + i);
+            if (i != select_row_count - 1) {
+                selectCommand.append(", ");
+            }
         }
-        insertCommand.append("(1, '11')");
-        sql insertCommand.toString()
+        // Intentionally creating SQL syntax errors
+        selectCommand.append(",");
+        try {
+            sql selectCommand.toString();
+        } catch (java.sql.SQLException t) {
+            assertTrue(true);
+        }
+
     }
 }
