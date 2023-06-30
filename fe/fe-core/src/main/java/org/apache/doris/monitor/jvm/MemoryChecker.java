@@ -52,13 +52,13 @@ public class MemoryChecker {
         for (String s : arguments) {
             if (s.startsWith("-XX:MaxDirectMemorySize=")) {
                 String memSize = s.split("=")[1];
-                if (memSize.endsWith("k")) {
+                if (memSize.endsWith("k") || memSize.endsWith("K")) {
                     maxDirectMemory = Long.parseLong(memSize.substring(0, memSize.length() - 1))
                             * 1024L;
-                } else if (memSize.endsWith("m")) {
+                } else if (memSize.endsWith("m") || memSize.endsWith("M")) {
                     maxDirectMemory = Long.parseLong(memSize.substring(0, memSize.length() - 1))
                             * 1024L * 1024L;
-                } else if (memSize.endsWith("g")) {
+                } else if (memSize.endsWith("g") || memSize.endsWith("G")) {
                     maxDirectMemory = Long.parseLong(memSize.substring(0, memSize.length() - 1))
                             * 1024L * 1024L * 1024L;
                 } else {
