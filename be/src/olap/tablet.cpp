@@ -875,7 +875,7 @@ void Tablet::cloud_delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete)
 int Tablet::cloud_delete_expired_stale_rowsets() {
     std::vector<RowsetSharedPtr> expired_rowsets;
     {
-        std::lock_guard wlock(_meta_lock);
+        std::unique_lock wlock(_meta_lock);
 
         std::vector<int64_t> path_ids;
         // capture the path version to delete
@@ -891,7 +891,7 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
             for (auto& v_ts : version_path->timestamped_versions()) {
                 auto rs_it = _stale_rs_version_map.find(v_ts->version());
                 // clang-format off
-                DCHECK(rs_it != _stale_rs_version_map.end()) << [this]() { std::string json; get_compaction_status(&json); return json; }();
+                DCHECK(rs_it != _stale_rs_version_map.end()) << [this, &wlock]() { wlock.unlock(); std::string json; get_compaction_status(&json); return json; }();
                 // clang-format on
                 if (rs_it != _stale_rs_version_map.end()) {
                     expired_rowsets.push_back(rs_it->second);
