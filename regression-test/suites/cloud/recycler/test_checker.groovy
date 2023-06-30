@@ -37,6 +37,12 @@ suite("test_checker") {
     String[][] tablets = sql """ show tablets from ${tableName}; """
     def tabletId = tablets[0][0]
 
+    HashSet<String> tabletIdSet= new HashSet<String>()
+    for (tabletInfo : tablets) {
+        tabletIdSet.add(tabletInfo[0])
+    }
+    logger.info("tabletIdSet:${tabletIdSet}")
+
     // Randomly delete segment file under tablet dir
     def getObjStoreInfoApiResult = getObjStoreInfo(token, cloudUniqueId)
     String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
@@ -114,4 +120,19 @@ suite("test_checker") {
         }
     } while (true)
     assertTrue(checkerLastSuccessTime < checkerLastFinishTime) // Check MUST fail
+
+    sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
+
+    retry = 15
+    success = false
+    // recycle data
+    do {
+        triggerRecycle(token, instanceId)
+        Thread.sleep(20000) // 20s
+        if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet)) {
+            success = true
+            break
+        }
+    } while (retry--)
+    assertTrue(success)
 }
