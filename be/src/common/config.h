@@ -232,7 +232,7 @@ CONF_mInt32(default_num_rows_per_column_file_block, "1024");
 // pending data policy
 CONF_mInt32(pending_data_expire_time_sec, "1800");
 // inc_rowset snapshot rs sweep time interval
-CONF_mInt32(tablet_rowset_stale_sweep_time_sec, "300");
+CONF_mInt32(tablet_rowset_stale_sweep_time_sec, "120");
 // garbage sweep policy
 CONF_Int32(max_garbage_sweep_interval, "3600");
 CONF_Int32(min_garbage_sweep_interval, "180");
@@ -692,7 +692,7 @@ CONF_mInt32(zone_map_row_num_threshold, "20");
 //    Info = 4,
 //    Debug = 5,
 //    Trace = 6
-CONF_Int32(aws_log_level, "3");
+CONF_Int32(aws_log_level, "0");
 
 // the buffer size when read data from remote storage like s3
 CONF_mInt32(remote_storage_read_buffer_mb, "16");
@@ -986,7 +986,7 @@ CONF_mInt32(meta_service_rpc_timeout_ms, "10000");
 CONF_Int64(tablet_cache_capacity, "10000");
 CONF_Int64(tablet_cache_shards, "16");
 CONF_mInt32(refresh_s3_info_interval_seconds, "60");
-CONF_mInt32(vacuum_stale_rowsets_interval_seconds, "1800");
+CONF_mInt32(vacuum_stale_rowsets_interval_seconds, "120");
 CONF_mInt32(tablet_sync_interval_seconds, "1800");
 CONF_mInt32(schedule_sync_tablets_interval_seconds, "600");
 CONF_mInt32(compaction_timeout_seconds, "86400");
