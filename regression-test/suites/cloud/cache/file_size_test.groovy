@@ -71,8 +71,8 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
                         continue
                     }
                     def i = line.indexOf(' ')
-                    origin_read_count = line.substring(i).toLong()
-                    logger.info("test file size origin count {}", origin_read_count)
+                    origin_count = line.substring(i).toLong()
+                    logger.info("test file size origin count {}", origin_count)
                 }
             }
     }
