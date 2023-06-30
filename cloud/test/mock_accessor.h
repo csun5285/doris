@@ -104,7 +104,7 @@ public:
         return 0;
     }
 
-    int get_bucket_lifecycle(int* expiration_days) override {
+    int get_bucket_lifecycle(int64_t* expiration_days) override {
         *expiration_days = 7;
         return 0;
     }

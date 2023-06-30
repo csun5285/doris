@@ -295,7 +295,7 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
     return 0;
 }
 
-int S3Accessor::get_bucket_lifecycle(int* expiration_days) {
+int S3Accessor::get_bucket_lifecycle(int64_t* expiration_days) {
     Aws::S3::Model::GetBucketLifecycleConfigurationRequest request;
     request.SetBucket(conf_.bucket);
 

@@ -67,7 +67,7 @@ public:
     // Return -2 if having S3 access errors or data loss
     int do_check();
     // Return 0 if success, otherwise error
-    int get_bucket_lifecycle(int* lifecycle);
+    int get_bucket_lifecycle(int64_t* lifecycle);
     void stop() { stopped_.store(true, std::memory_order_release); }
     bool stopped() const { return stopped_.load(std::memory_order_acquire); }
 

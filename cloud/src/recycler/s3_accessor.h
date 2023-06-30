@@ -45,7 +45,7 @@ public:
     virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
 
     // return 0 for success otherwise error
-    virtual int get_bucket_lifecycle(int* expiration_days) = 0;
+    virtual int get_bucket_lifecycle(int64_t* expiration_days) = 0;
 
     // returns 0 for enabling bucket versioning, otherwise error
     virtual int check_bucket_versioning() = 0;
@@ -99,7 +99,7 @@ public:
     int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override;
 
     // returns 0 for success otherwise error
-    int get_bucket_lifecycle(int* expiration_days) override;
+    int get_bucket_lifecycle(int64_t* expiration_days) override;
 
     // returns 0 for enabling bucket versioning, otherwise error
     int check_bucket_versioning() override;

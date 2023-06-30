@@ -234,9 +234,10 @@ void Checker::do_inspect(const InstanceInfoPB& instance) {
                                  << instance.instance_id();
         return;
     }
-    int bucket_lifecycle_days = 0;
+    int64_t bucket_lifecycle_days = 0;
     if (checker.get_bucket_lifecycle(&bucket_lifecycle_days) != 0) {
-        // no need to log, because S3Accessor has logged this error
+        LOG_CHECK_INTERVAL_ALARM << "failed to get bucket lifecycle, instance_id="
+                                 << instance.instance_id();
         return;
     }
     DCHECK(bucket_lifecycle_days > 0);
@@ -264,8 +265,8 @@ void Checker::do_inspect(const InstanceInfoPB& instance) {
     DCHECK(now - last_ctime_ms >= 0);
     int64_t expiration_ms =
             bucket_lifecycle_days > config::reserved_buffer_days
-                    ? (bucket_lifecycle_days - config::reserved_buffer_days) * 3600000
-                    : bucket_lifecycle_days * 3600000;
+                    ? (bucket_lifecycle_days - config::reserved_buffer_days) * 86400000
+                    : bucket_lifecycle_days * 86400000;
     TEST_SYNC_POINT_CALLBACK("Checker:do_inspect", &last_ctime_ms);
     if (now - last_ctime_ms >= expiration_ms) {
         TEST_SYNC_POINT("Checker.do_inspect1");
@@ -284,6 +285,7 @@ void Checker::inspect_instance_check_interval() {
         std::vector<InstanceInfoPB> instances;
         get_all_instances(txn_kv_.get(), instances);
         for (const auto& instance : instances) {
+            if (instance_filter_.filter_out(instance.instance_id())) continue;
             if (stopped()) return;
             if (instance.status() == InstanceInfoPB::DELETED) continue;
             do_inspect(instance);
@@ -462,14 +464,14 @@ int InstanceChecker::do_check() {
     return num_check_failed == 0 ? 0 : -2;
 }
 
-int InstanceChecker::get_bucket_lifecycle(int* lifecycle_days) {
+int InstanceChecker::get_bucket_lifecycle(int64_t* lifecycle_days) {
     // If there are multiple buckets, return the minimum lifecycle.
-    int min_lifecycle_days = std::numeric_limits<int>::max();
-    int tmp_liefcycle_days = 0;
+    int64_t min_lifecycle_days = std::numeric_limits<int64_t>::max();
+    int64_t tmp_liefcycle_days = 0;
     for (const auto& [obj_info, accessor] : accessor_map_) {
         if (accessor->check_bucket_versioning() != 0) { return -1; }
         if (accessor->get_bucket_lifecycle(&tmp_liefcycle_days) != 0) { return -1; }
-        if (tmp_liefcycle_days < min_lifecycle_days) min_lifecycle_days = tmp_liefcycle_days;
+        if (tmp_liefcycle_days < min_lifecycle_days) { min_lifecycle_days = tmp_liefcycle_days; }
     }
     *lifecycle_days = min_lifecycle_days;
     return 0;

@@ -114,7 +114,7 @@ CONF_mBool(split_tablet_stats, "false");
 CONF_mBool(snapshot_get_tablet_stats, "false");
 
 // For instance check interval
-CONF_Int32(reserved_buffer_days, "3");
+CONF_Int64(reserved_buffer_days, "3");
 
 // For recycler to do periodically log to detect alive
 CONF_Int32(periodically_log_ms, "5000");
