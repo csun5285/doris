@@ -603,8 +603,8 @@ Status TabletReader::init_reader_params_and_create_block(
                                 reader_params->delete_predicates.begin()));
     }
     // Merge the columns in delete predicate that not in latest schema in to current tablet schema
-    for (auto& del_pred_pb : reader_params->delete_predicates) {
-        merge_tablet_schema->merge_dropped_columns(tablet->tablet_schema(del_pred_pb->version()));
+    for (auto& del_pred_rs : reader_params->delete_predicates) {
+        merge_tablet_schema->merge_dropped_columns(del_pred_rs->tablet_schema());
     }
     reader_params->tablet_schema = merge_tablet_schema;
     if (tablet->enable_unique_key_merge_on_write()) {

@@ -2453,8 +2453,7 @@ Status SchemaChangeHandler::_do_process_alter_tablet_v2(const TAlterTabletReqV2&
                 if (delete_pred->version().first > end_version) {
                     continue;
                 }
-                base_tablet_schema->merge_dropped_columns(
-                        base_tablet->tablet_schema(delete_pred->version()));
+                base_tablet_schema->merge_dropped_columns(delete_pred->tablet_schema());
             }
             res = delete_handler.init(base_tablet_schema, all_del_preds, end_version);
             if (!res) {

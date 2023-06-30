@@ -76,8 +76,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     for (auto& rs_reader : rs_readers) {
         auto& rs_meta = rs_reader->rowset()->rowset_meta();
         if (rs_meta->has_delete_predicate()) {
-            base_tablet_schema->merge_dropped_columns(
-                    base_tablet->tablet_schema(rs_meta->version()));
+            base_tablet_schema->merge_dropped_columns(rs_meta->tablet_schema());
             delete_predicates.push_back(rs_meta);
         }
     }
@@ -479,7 +478,7 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
             if (delete_pred->version().first > request.alter_version) {
                 continue;
             }
-            tablet_schema->merge_dropped_columns(tablet->tablet_schema(delete_pred->version()));
+            tablet_schema->merge_dropped_columns(delete_pred->tablet_schema());
         }
         RETURN_IF_ERROR(delete_handler.init(tablet_schema, all_del_preds, request.alter_version));
     }
