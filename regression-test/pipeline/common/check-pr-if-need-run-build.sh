@@ -109,6 +109,19 @@ need_run_be_ut() {
     echo "return no need" && return 1
 }
 
+need_run_ms_ut() {
+    if ! _get_pr_changed_files "$1"; then echo "get pr changed files failed, return need" && return 0; fi
+    for af in ${all_files}; do
+        if [[ "${af}" == 'cloud/src'* ]] ||
+            [[ "${af}" == 'cloud/test'* ]] ||
+            [[ "${af}" == 'cloud/conf'* ]] ||
+            [[ "${af}" == 'cloud/script/run_all_test.sh' ]]; then
+            echo "cloud related file changed, return need" && return 0
+        fi
+    done
+    echo "return no need" && return 1
+}
+
 need_run_regression_p0() {
     if ! _get_pr_changed_files "$1"; then echo "get pr changed files failed, return need" && return 0; fi
     for af in ${all_files}; do
@@ -161,6 +174,8 @@ need_run_ckb() {
 
 if [[ -z "$1" ]]; then
     usage
+elif [[ "$2" == "ms-ut" ]]; then
+    need_run_ms_ut "$1"
 elif [[ "$2" == "be-ut" ]]; then
     need_run_be_ut "$1"
 elif [[ "$2" == "fe-ut" ]]; then
