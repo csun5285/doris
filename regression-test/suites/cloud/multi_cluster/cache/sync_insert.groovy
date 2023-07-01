@@ -59,7 +59,7 @@ suite("sync_insert") {
             sb.append(ipList[i])
             sb.append(":")
             sb.append(brpcPortList[i])
-            sb.append("/vars/*_file_cache_cur_size")
+            sb.append("/vars/*file_cache_cache_size")
             String command = sb.toString()
             logger.info(command);
             process = command.execute()

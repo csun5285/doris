@@ -327,14 +327,21 @@ Status SegmentIterator::_vec_init_prefetch_column_pages() {
         if (_ctx && _ctx->done()) [[unlikely]] {
             return Status::Error<ALREADY_CANCELLED>();
         }
-        _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
+        Status st = _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
+        if (!st.ok() && !st.is<NOT_IMPLEMENTED_ERROR>()) {
+            return st;
+        }
     }
     if (_lazy_materialization_read && (_is_need_vec_eval || _is_need_short_eval)) {
         for (auto cid : _non_predicate_columns) {
             if (_ctx && _ctx->done()) [[unlikely]] {
                 return Status::Error<ALREADY_CANCELLED>();
             }
-            _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
+            Status st =
+                    _column_iterators[_schema.unique_id(cid)]->get_all_contiguous_pages(_ranges);
+            if (!st.ok() && !st.is<NOT_IMPLEMENTED_ERROR>()) {
+                return st;
+            }
         }
     }
     return Status::OK();

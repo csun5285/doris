@@ -1697,23 +1697,33 @@ public class StmtExecutor implements ProfileWriter {
                                                             .collect(Collectors.toList());
                     List<Long> allTabletIds = ((OlapTable) insertStmt.getTargetTable()).getAllTabletIds();
                     backendsList.forEach(backends -> backends.forEach(backend -> {
-                        try {
-                            if (backend.isAlive()) {
-                                List<Long> tabletIdList = new ArrayList<Long>();
-                                Set<Long> beTabletIds = Env.getCurrentEnv()
-                                                            .getCloudTabletRebalancer()
-                                                            .getSnapshotTabletsByBeId(backend.getId());
-                                allTabletIds.forEach(tabletId -> {
-                                    if (beTabletIds.contains(tabletId)) {
-                                        tabletIdList.add(tabletId);
-                                    }
-                                });
-                                final Client client = ClientPool.backendPool.borrowObject(
-                                    new TNetworkAddress(backend.getHost(), backend.getBePort()));
+                        if (backend.isAlive()) {
+                            List<Long> tabletIdList = new ArrayList<Long>();
+                            Set<Long> beTabletIds = Env.getCurrentEnv()
+                                                        .getCloudTabletRebalancer()
+                                                        .getSnapshotTabletsByBeId(backend.getId());
+                            allTabletIds.forEach(tabletId -> {
+                                if (beTabletIds.contains(tabletId)) {
+                                    tabletIdList.add(tabletId);
+                                }
+                            });
+                            boolean ok = false;
+                            TNetworkAddress address = null;
+                            Client client = null;
+                            try {
+                                address = new TNetworkAddress(backend.getHost(), backend.getBePort());
+                                client = ClientPool.backendPool.borrowObject(address);
                                 client.syncLoadForTablets(new TSyncLoadForTabletsRequest(allTabletIds));
+                                ok = true;
+                            } catch (Exception e) {
+                                LOG.warn(e.getMessage());
+                            } finally {
+                                if (!ok) {
+                                    ClientPool.backendPool.invalidateObject(address, client);
+                                } else {
+                                    ClientPool.backendPool.returnObject(address, client);
+                                }
                             }
-                        } catch (Exception e) {
-                            LOG.warn(e.getMessage());
                         }
                     }));
                 }
