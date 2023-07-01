@@ -890,15 +890,15 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
             auto version_path = _timestamped_version_tracker.fetch_and_delete_path_by_id(path_id);
             for (auto& v_ts : version_path->timestamped_versions()) {
                 auto rs_it = _stale_rs_version_map.find(v_ts->version());
-                // clang-format off
-                DCHECK(rs_it != _stale_rs_version_map.end()) << [this, &wlock]() { wlock.unlock(); std::string json; get_compaction_status(&json); return json; }();
-                // clang-format on
                 if (rs_it != _stale_rs_version_map.end()) {
                     expired_rowsets.push_back(rs_it->second);
                     _stale_rs_version_map.erase(rs_it);
                 } else {
                     LOG(WARNING) << "cannot find stale rowset " << v_ts->version() << " in tablet "
                                  << tablet_id();
+                    // clang-format off
+                    DCHECK(false) << [this, &wlock]() { wlock.unlock(); std::string json; get_compaction_status(&json); return json; }();
+                    // clang-format on
                 }
                 _tablet_meta->delete_stale_rs_meta_by_version(v_ts->version());
                 VLOG_DEBUG << "delete stale rowset " << v_ts->version();
@@ -2741,7 +2741,6 @@ Status Tablet::cloud_update_delete_bitmap(int64_t transaction_id, const RowsetSh
     RowsetIdUnorderedSet rowset_ids_to_del;
     int64_t cur_version = version;
 
-
     SegmentCacheHandle segment_cache_handle;
     RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(
             std::static_pointer_cast<BetaRowset>(rowset), &segment_cache_handle, true));
@@ -2769,8 +2768,8 @@ Status Tablet::cloud_update_delete_bitmap(int64_t transaction_id, const RowsetSh
     DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
     for (auto iter = delete_bitmap->delete_bitmap.begin();
          iter != delete_bitmap->delete_bitmap.end(); ++iter) {
-        new_delete_bitmap->merge(
-                {std::get<0>(iter->first), std::get<1>(iter->first), cur_version}, iter->second);
+        new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
+                                 iter->second);
     }
     return cloud::meta_mgr()->update_delete_bitmap(this, transaction_id, -1, new_delete_bitmap);
 }
@@ -2868,7 +2867,6 @@ Status Tablet::cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
     return calc_delete_bitmap(rowset->rowset_id(), segments, &specified_rowset_ids, delete_bitmap,
                               cur_version - 1, check_pre_segments);
 }
-
 
 void Tablet::remove_self_owned_remote_rowsets() {
     DCHECK(_state == TABLET_SHUTDOWN);
