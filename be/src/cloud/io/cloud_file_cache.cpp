@@ -52,7 +52,8 @@ CloudFileCache::CloudFileCache(const std::string& cache_base_path,
                              24 * 60 * 60);
 
     LOG(INFO) << fmt::format(
-            "file cache path={}, disposable queue size={} elements={}, index queue size={} "
+            "file cache config: file cache path={}, disposable queue size={} elements={}, index "
+            "queue size={} "
             "elements={}, query queue "
             "size={} elements={}",
             cache_base_path, cache_settings.disposable_queue_size,
@@ -193,13 +194,25 @@ Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
     if (!_is_initialized) {
         std::error_code ec;
         if (bool is_exist = std::filesystem::exists(_cache_base_path, ec);  is_exist && !ec) {
-            _cache_background_load_thread = std::thread([&](){
+            _cache_background_load_thread = std::thread([&]() {
                 _lazy_open_done = false;
                 Status st = load_cache_info_into_memory();
                 if (!st) [[unlikely]] {
                     LOG(ERROR) << st;
                 }
                 _lazy_open_done = true;
+                LOG(INFO) << fmt::format(
+                        "file cache stat after load: file cache path={}, disposable queue size={} "
+                        "elements={}, index queue "
+                        "size={} "
+                        "elements={}, query queue "
+                        "size={} elements={}",
+                        _cache_base_path, _disposable_queue.get_total_cache_size(cache_lock),
+                        _disposable_queue.get_elements_num(cache_lock),
+                        _index_queue.get_total_cache_size(cache_lock),
+                        _index_queue.get_elements_num(cache_lock),
+                        _normal_queue.get_total_cache_size(cache_lock),
+                        _normal_queue.get_elements_num(cache_lock));
             });
         } else if (ec) [[unlikely]] {
             LOG(WARNING) << "fail to dir exists=" << std::strerror(ec.value());
@@ -215,21 +228,12 @@ Status CloudFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
             // when asynchronously loading, but not exist cache dir (such as ut)
             // it is necessary to set the flag to true here to end the asynchronous loading state
             _lazy_open_done = true;
+            LOG(INFO) << fmt::format("file cache stat after load: create new directory {}",
+                                     _cache_base_path);
         }
     }
     _is_initialized = true;
     _cache_background_thread = std::thread(&CloudFileCache::run_background_operation, this);
-    LOG(INFO) << fmt::format(
-            "file cache path={}, disposable queue size={} elements={}, index queue size={} "
-            "elements={}, query queue "
-            "size={} elements={}",
-            _cache_base_path, _disposable_queue.get_total_cache_size(cache_lock),
-            _disposable_queue.get_elements_num(cache_lock),
-            _index_queue.get_total_cache_size(cache_lock),
-            _index_queue.get_elements_num(cache_lock),
-            _normal_queue.get_total_cache_size(cache_lock),
-            _normal_queue.get_elements_num(cache_lock));
-
     return Status::OK();
 }
 
