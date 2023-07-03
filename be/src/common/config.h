@@ -982,6 +982,12 @@ CONF_String(tmp_file_dirs, "");
 CONF_String(cloud_unique_id, "");
 CONF_String(meta_service_endpoint, "");
 CONF_Bool(meta_service_use_load_balancer, "false");
+// Set the underlying connection type to pooled.
+//
+// Some releated flag:
+// - max_connection_pool_size (default 100): max number of pooled connections to a single endpoint.
+// - idle_timeout_second      (default  10): pooled connections without data transmission for so many seconds will be closed.
+CONF_Bool(meta_service_connection_pooled, "false");
 CONF_mInt32(meta_service_rpc_timeout_ms, "10000");
 CONF_Int64(tablet_cache_capacity, "10000");
 CONF_Int64(tablet_cache_shards, "16");
