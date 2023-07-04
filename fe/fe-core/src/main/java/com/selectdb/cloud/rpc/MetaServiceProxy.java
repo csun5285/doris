@@ -14,6 +14,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.Map;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class MetaServiceProxy {
@@ -41,11 +42,27 @@ public class MetaServiceProxy {
     }
 
     private static class SingletonHolder {
-        private static final MetaServiceProxy INSTANCE = new MetaServiceProxy();
+        private static AtomicInteger count = new AtomicInteger();
+        private static MetaServiceProxy[] proxies;
+
+        static {
+            if (Config.isCloudMode()) {
+                int size = Config.meta_service_connection_pooled
+                        ? Config.meta_service_connection_pool_size : 1;
+                proxies = new MetaServiceProxy[size];
+                for (int i = 0; i < size; ++i) {
+                    proxies[i] = new MetaServiceProxy();
+                }
+            }
+        }
+
+        static MetaServiceProxy get() {
+            return proxies[Math.abs(count.addAndGet(1) % proxies.length)];
+        }
     }
 
     public static MetaServiceProxy getInstance() {
-        return MetaServiceProxy.SingletonHolder.INSTANCE;
+        return MetaServiceProxy.SingletonHolder.get();
     }
 
     public void removeProxy(TNetworkAddress address) {
