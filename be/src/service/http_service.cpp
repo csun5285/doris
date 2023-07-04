@@ -223,6 +223,12 @@ Status HttpService::cloud_start() {
     HealthAction* health_action = _pool.add(new HealthAction());
     _ev_http_server->register_handler(HttpMethod::GET, "/api/health", health_action);
 
+    // register pprof actions
+    PprofActions::setup(_env, _ev_http_server.get(), _pool);
+
+    // register jeprof actions
+    JeprofileActions::setup(_env, _ev_http_server.get(), _pool);
+
     MetricsAction* metrics_action =
             _pool.add(new MetricsAction(DorisMetrics::instance()->metric_registry()));
     _ev_http_server->register_handler(HttpMethod::GET, "/metrics", metrics_action);
