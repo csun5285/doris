@@ -695,7 +695,7 @@ CONF_mInt32(zone_map_row_num_threshold, "20");
 CONF_Int32(aws_log_level, "0");
 
 // the buffer size when read data from remote storage like s3
-CONF_mInt32(remote_storage_read_buffer_mb, "16");
+CONF_Int64(remote_storage_read_buffer_mb, "16");
 
 // Whether Hook TCmalloc new/delete, currently consume/release tls mem tracker in Hook.
 CONF_Bool(enable_tcmalloc_hook, "true");
@@ -958,7 +958,7 @@ CONF_String(test_s3_prefix, "prefix");
 // reader prefetch
 CONF_Int32(max_column_reader_prefetch_size, "0");
 // buffered prefetch
-CONF_mInt32(prefetch_single_buffer_size_mb, "4");
+CONF_Int32(prefetch_single_buffer_size_mb, "4");
 
 // file cache
 // default enter disk resource limit mode 5%

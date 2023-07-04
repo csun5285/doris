@@ -65,26 +65,158 @@ public:
         std::unique_lock lck {_lock};
         return _reader->read_one_message(buf, length);
     }
-    int64_t size() override {
-        return _reader->size();
-    }
-    Status seek(int64_t position) override {
-        return _reader->seek(position);
-    }
-    Status tell(int64_t* position) override {
-        return _reader->tell(position);
-    }
-    void close() override {
-        return _reader->close();
-    }
-    bool closed() override {
-        return _reader->closed();
-    }
+    int64_t size() override { return _reader->size(); }
+    Status seek(int64_t position) override { return _reader->seek(position); }
+    Status tell(int64_t* position) override { return _reader->tell(position); }
+    void close() override { return _reader->close(); }
+    bool closed() override { return _reader->closed(); }
 
 private:
     std::unique_ptr<LocalFileReader> _reader;
     std::mutex _lock;
 };
+
+TEST_F(BufferedReaderTest, random_buffer_offset) {
+    {
+        auto file_reader =
+            new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", 0);
+        // 16MB buffer
+        BufferedReader reader(nullptr, file_reader);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 16 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(1, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(2, reader.get_buffer_pos(10765910));
+    }
+
+    {
+        auto file_reader =
+            new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", 0);
+        // pass 7MB would transform to 8MB
+        BufferedReader reader(nullptr, file_reader, 7 * 1024 * 1024);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 8 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(1, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(10765910));
+    }
+
+    {
+        auto file_reader =
+            new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", 0);
+        // pass 1MB would transform to 4MB
+        BufferedReader reader(nullptr, file_reader, 1 * 1024 * 1024);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 4 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(10765910));
+    }
+
+    {
+        int start_offset = 2765910;
+        // all_types_100000.txt 9303224 bytes
+        auto file_reader =
+                new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", start_offset);
+        // owned by the buffered reader
+        auto sync_local_reader = new SyncLocalFileReader(file_reader);
+        // with 8MB whole buffer
+        BufferedReader reader(nullptr, sync_local_reader, 8 * 1024 * 1024);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 8 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(1, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(10765910));
+        ASSERT_EQ(1, reader.get_buffer_pos(13765910));
+    }
+
+    {
+        int start_offset = 2765910;
+        // all_types_100000.txt 9303224 bytes
+        auto file_reader =
+                new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", start_offset);
+        // owned by the buffered reader
+        auto sync_local_reader = new SyncLocalFileReader(file_reader);
+        // with 16MB whole buffer
+        BufferedReader reader(nullptr, sync_local_reader);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 16 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(1, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(2, reader.get_buffer_pos(10765910));
+    }
+
+    {
+        int start_offset = 2765910;
+        // all_types_100000.txt 9303224 bytes
+        auto file_reader =
+                new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", start_offset);
+        // owned by the buffered reader
+        auto sync_local_reader = new SyncLocalFileReader(file_reader);
+        // with 4MB whole buffer
+        BufferedReader reader(nullptr, sync_local_reader, 3 * 1024 * 1024);
+        ASSERT_EQ(reader.get_whole_buffer_size(), 4 * 1024 * 1024);
+        ASSERT_EQ(0, reader.get_buffer_pos(2765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(6765910));
+        ASSERT_EQ(0, reader.get_buffer_pos(10765910));
+    }
+}
+
+TEST_F(BufferedReaderTest, random_start_offset) {
+    RuntimeProfile profile("test");
+    int start_offset = 2765910;
+    // all_types_100000.txt 9303224 bytes
+    auto file_reader =
+            new LocalFileReader("./be/test/olap/test_data/all_types_100000.txt", start_offset);
+    // owned by the buffered reader
+    auto sync_local_reader = new SyncLocalFileReader(file_reader);
+    // with 16MB whole buffer
+    BufferedReader reader(&profile, sync_local_reader);
+    bool eof;
+    auto st = reader.open();
+    std::cout << st << std::endl;
+    EXPECT_TRUE(st.ok());
+    {
+        // to test could we read all the data started from 2765910
+        std::unique_ptr<uint8_t[]> buf =
+                std::make_unique<uint8_t[]>(reader.size() - start_offset);
+        int64_t read_length = 0;
+        auto st = reader.read(buf.get(), reader.size(), &read_length, &eof);
+        EXPECT_TRUE(st.ok());
+        EXPECT_EQ(reader.size() - start_offset, read_length);
+    }
+
+    {
+        start_offset = 3765910;
+        reader.seek(start_offset);
+        // to test could we read all the data started from 3765910
+        std::unique_ptr<uint8_t[]> buf =
+                std::make_unique<uint8_t[]>(reader.size() - start_offset);
+        int64_t read_length = 0;
+        auto st = reader.read(buf.get(), reader.size(), &read_length, &eof);
+        EXPECT_TRUE(st.ok());
+        EXPECT_EQ(reader.size() - start_offset, read_length);
+    }
+
+    {
+        start_offset = 4765910;
+        reader.seek(start_offset);
+        // to test could we read all the data started from 4765910
+        std::unique_ptr<uint8_t[]> buf =
+                std::make_unique<uint8_t[]>(reader.size() - start_offset);
+        int64_t read_length = 0;
+        auto st = reader.read(buf.get(), reader.size(), &read_length, &eof);
+        EXPECT_TRUE(st.ok());
+        EXPECT_EQ(reader.size() - start_offset, read_length);
+    }
+
+    {
+        start_offset = 5765910;
+        reader.seek(start_offset);
+        // to test could we read all the data started from 5765910
+        std::unique_ptr<uint8_t[]> buf =
+                std::make_unique<uint8_t[]>(reader.size() - start_offset);
+        int64_t read_length = 0;
+        auto st = reader.read(buf.get(), reader.size(), &read_length, &eof);
+        EXPECT_TRUE(st.ok());
+        EXPECT_EQ(reader.size() - start_offset, read_length);
+    }
+}
 
 TEST_F(BufferedReaderTest, normal_use) {
     RuntimeProfile profile("test");
@@ -92,8 +224,9 @@ TEST_F(BufferedReaderTest, normal_use) {
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file", 0);
     auto sync_local_reader = new SyncLocalFileReader(file_reader);
-    config::prefetch_single_buffer_size_mb = 200;
     BufferedReader reader(&profile, sync_local_reader, 1024);
+    reader.set_s_max_pre_buffer_size(200);
+    reader.set_whole_pre_buffer_size(1024);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[1024];
@@ -112,8 +245,9 @@ TEST_F(BufferedReaderTest, test_validity) {
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
     auto sync_local_reader = new SyncLocalFileReader(file_reader);
-    config::prefetch_single_buffer_size_mb = 10;
     BufferedReader reader(&profile, sync_local_reader, 64);
+    reader.set_s_max_pre_buffer_size(10);
+    reader.set_whole_pre_buffer_size(64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[10];
@@ -157,8 +291,9 @@ TEST_F(BufferedReaderTest, test_seek) {
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
     auto sync_local_reader = new SyncLocalFileReader(file_reader);
-    config::prefetch_single_buffer_size_mb = 10;
     BufferedReader reader(&profile, sync_local_reader, 64);
+    reader.set_s_max_pre_buffer_size(10);
+    reader.set_whole_pre_buffer_size(64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[10];
@@ -211,8 +346,9 @@ TEST_F(BufferedReaderTest, test_miss) {
     auto file_reader = new LocalFileReader(
             "./be/test/exec/test_data/buffered_reader/buffered_reader_test_file.txt", 0);
     auto sync_local_reader = new SyncLocalFileReader(file_reader);
-    config::prefetch_single_buffer_size_mb = 10;
     BufferedReader reader(&profile, sync_local_reader, 64);
+    reader.set_s_max_pre_buffer_size(10);
+    reader.set_whole_pre_buffer_size(64);
     auto st = reader.open();
     EXPECT_TRUE(st.ok());
     uint8_t buf[128];

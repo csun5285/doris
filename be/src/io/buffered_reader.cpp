@@ -165,7 +165,12 @@ BufferedReader::BufferedReader(RuntimeProfile* profile, FileReader* reader, int6
     if (buffer_size <= 0) {
         buffer_size = config::remote_storage_read_buffer_mb * 1024 * 1024;
     }
-    _whole_pre_buffer_size = buffer_size;
+    // _whole_pre_buffer_size must meet _whole_pre_buffer_size % s_max_pre_buffer_size == 0
+    _whole_pre_buffer_size =
+            ((buffer_size / s_max_pre_buffer_size) + !!(buffer_size % s_max_pre_buffer_size)) *
+            s_max_pre_buffer_size;
+    _whole_pre_buffer_size =
+            std::min(_whole_pre_buffer_size, config::remote_storage_read_buffer_mb * 1024 * 1024);
 }
 
 BufferedReader::~BufferedReader() {
@@ -192,12 +197,15 @@ Status BufferedReader::open() {
 
     RETURN_IF_ERROR(_reader->open());
     _reader_size = _reader->size();
-
-    _whole_pre_buffer_size = std::min(_whole_pre_buffer_size, _reader->size());
+    // _whole_pre_buffer_size would be transformed to one num which meets num % 4MB = 0;
+    _whole_pre_buffer_size = std::min(
+            ((_reader_size / s_max_pre_buffer_size) + !!(_reader_size % s_max_pre_buffer_size)) *
+                    s_max_pre_buffer_size,
+            _whole_pre_buffer_size);
+    DCHECK(_whole_pre_buffer_size % s_max_pre_buffer_size == 0)
+            << "whole pre buffer " << _whole_pre_buffer_size << " max pre buffer "
+            << s_max_pre_buffer_size;
     auto buffer_size = _whole_pre_buffer_size;
-#ifdef BE_TEST
-    s_max_pre_buffer_size = config::prefetch_single_buffer_size_mb;
-#endif
     int64_t buffer_num = (buffer_size + s_max_pre_buffer_size - 1) / s_max_pre_buffer_size;
     // set the _cur_offset of this reader as same as the inner reader's,
     // to make sure the buffer reader will start to read at right position.
@@ -209,7 +217,7 @@ Status BufferedReader::open() {
     }
 
     // init all buffer and submit task
-    resetAllBuffer(_cur_offset);
+    reset_all_buffer(_cur_offset);
     return Status::OK();
 }
 

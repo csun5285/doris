@@ -117,14 +117,55 @@ public:
     virtual void close() override;
     virtual bool closed() override;
 
+#ifdef BE_TEST
+    // the following 3 functions are used for ut to set one buffer size less than 4MB
+public:
+    size_t get_whole_buffer_size() const { return _whole_pre_buffer_size; }
+
+    void set_s_max_pre_buffer_size(int64_t size) { s_max_pre_buffer_size = size; }
+
+    void set_whole_pre_buffer_size(int64_t size) { _whole_pre_buffer_size = size; }
+#else
 private:
+#endif
     size_t get_buffer_pos(int64_t position) const {
+        // The variable _whole_pre_buffer_size is guaranteed to be a multiple of 4MB,
+        // as indicated by the expression _whole_pre_buffer_size % 4MB = 0
+        // This means that the possible positions within the buffer can be described using an ASCII graph
+        // where - represents 1MB's data
+        // For example, if _whole_pre_buffer_size is 12MB which would take 12 - 
+        // and we are passing position 5.7M which can approximated as 5MB
+        // we can calculate the corresponding position in the buffer as follows
+        // -----------
+        //     ^
+        //     |
+        //     |
+        //     |
+        // -----
+        // So the position in the buffer would be 1. Similarly, if _whole_pre_buffer_size is 16MB
+        // and we are passing position 17.7M (which takes 17 -)
+        // and we can again calculate the corresponding position in the buffer as follows
+        // -----------------
+        //                   ^
+        //                   |
+        //                   |
+        //                   |
+        // ------------------
+        // after one mod operation it could be like
+        // -----------------
+        // ^
+        // |
+        // |
+        // |
+        // -
         return (position % _whole_pre_buffer_size) / s_max_pre_buffer_size;
     }
     size_t get_buffer_offset(int64_t position) const {
         return (position / s_max_pre_buffer_size) * s_max_pre_buffer_size;
     }
-    void resetAllBuffer(size_t position) {
+
+private:
+    void reset_all_buffer(size_t position) {
         for (int64_t i = 0; i < _pre_buffers.size(); i++) {
             int64_t cur_pos = position + i * s_max_pre_buffer_size;
             int cur_buf_pos = get_buffer_pos(cur_pos);
