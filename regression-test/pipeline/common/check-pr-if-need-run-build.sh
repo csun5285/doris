@@ -31,7 +31,7 @@ usage() {
 _get_pr_changed_files() {
     usage_str="Usage:
     _get_pr_changed_files <PULL_NUMBER> [OPTIONS]
-    note: https://github.com/apache/doris/pull/13259, PULL_NUMBER is 13259
+    note: https://github.com/apache/doris/pulls/13259, PULL_NUMBER is 13259
     OPTIONS can be one of [all|added|modified|removed], default is all
     "
     if [[ -z "$1" ]]; then echo -e "${usage_str}" && return 1; fi
@@ -40,19 +40,32 @@ _get_pr_changed_files() {
 
     PULL_NUMBER="$1"
     which_file="$2"
-    pr_url="https://github.com/${OWNER:=apache}/${REPO:=doris}/pull/${PULL_NUMBER}"
+    pr_url="https://github.com/${OWNER:=apache}/${REPO:=doris}/pulls/${PULL_NUMBER}"
     try_times=10
     # The number of results per page (max 100), Default 30.
     per_page=100
     file_name='pr_change_files'
     while [[ ${try_times} -gt 0 ]]; do
-        if curl \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/"${OWNER}"/"${REPO}"/pulls/"${PULL_NUMBER}"/files?per_page="${per_page}" \
-            2>/dev/null >"${file_name}"; then
-            break
+        if [[ ! -z "${GITHUB_TOKEN}" ]];then
+            if curl \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN:-}" \
+                https://api.github.com/repos/"${OWNER}"/"${REPO}"/pulls/"${PULL_NUMBER}"/files?per_page="${per_page}" \
+                2>/dev/null >"${file_name}"; then
+                break
+            else
+                try_times=$((try_times - 1))
+            fi
         else
-            try_times=$((try_times - 1))
+            if curl \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/"${OWNER}"/"${REPO}"/pulls/"${PULL_NUMBER}"/files?per_page="${per_page}" \
+                2>/dev/null >"${file_name}"; then
+                break
+            else
+                try_times=$((try_times - 1))
+            fi
+
         fi
     done
     if [[ ${try_times} = 0 ]]; then echo -e "\033[31m List pull request(${pr_url}) files FAIL... \033[0m" && return 255; fi
@@ -65,7 +78,7 @@ _get_pr_changed_files() {
     if [[ -z "${all_files}" ]]; then echo -e "\033[31m List pull request(${pr_url}) files FAIL... \033[0m" && return 255; fi
 
     echo -e "
-https://github.com/apache/doris/pull/${PULL_NUMBER}/files all change files:
+https://github.com/${OWNER}/${REPO}/pull/${PULL_NUMBER}/files all change files:
 ---------------------------------------------------------------"
     if [[ "${which_file:-all}" == "all" ]]; then
         echo -e "${all_files}\n" && export all_files
