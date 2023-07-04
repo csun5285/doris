@@ -46,7 +46,8 @@ class Stmt {
     String stmt
 }
 suite("test_readonly_stmt") {
-    def url= "/api/show/" + context.config.defaultDb
+    result = sql """ SELECT DATABASE(); """
+    def url= "/api/show/" + result[0][0]
 
 
     def tableName = "table_readonly"
