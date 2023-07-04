@@ -5,6 +5,7 @@ import com.selectdb.cloud.proto.SelectdbCloud;
 
 import com.google.gson.Gson;
 import com.google.gson.stream.JsonReader;
+import io.grpc.ConnectivityState;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.apache.doris.common.Config;
@@ -45,6 +46,14 @@ public class MetaServiceClient {
                         StandardCharsets.UTF_8)), Map.class);
         LOG.info("serviceConfig:{}", serviceConfig);
         return serviceConfig;
+    }
+
+    // Is the underlying channel in a normal state? (That means the RPC call will not fail immediately)
+    public boolean isNormalState() {
+        ConnectivityState state = channel.getState(false);
+        return state == ConnectivityState.CONNECTING
+                || state == ConnectivityState.IDLE
+                || state == ConnectivityState.READY;
     }
 
     public void shutdown() {

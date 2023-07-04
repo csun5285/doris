@@ -65,14 +65,23 @@ public class MetaServiceProxy {
 
     private MetaServiceClient getProxy(TNetworkAddress address) {
         MetaServiceClient service = serviceMap.get(address);
-        if (service != null) {
+        if (service != null && service.isNormalState()) {
             return service;
         }
 
         // not exist, create one and return.
+        MetaServiceClient removedClient = null;
         lock.lock();
         try {
             service = serviceMap.get(address);
+            if (service != null && !service.isNormalState()) {
+                // At this point we cannot judge the progress of reconnecting the underlying channel.
+                // In the worst case, it may take two minutes. But we can't stand the connection refused
+                // for two minutes, so rebuild the channel directly.
+                serviceMap.remove(address);
+                removedClient = service;
+                service = null;
+            }
             if (service == null) {
                 service = new MetaServiceClient(address);
                 serviceMap.put(address, service);
@@ -80,6 +89,9 @@ public class MetaServiceProxy {
             return service;
         } finally {
             lock.unlock();
+            if (removedClient != null) {
+                removedClient.shutdown();
+            }
         }
     }
 
