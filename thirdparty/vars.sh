@@ -54,11 +54,11 @@ export TP_JAR_DIR="${TP_INSTALL_DIR}/lib/jar"
 # of all thirdparties
 #####################################################
 
-CLUCENE_DOWNLOAD="https://doris-thirdparty-1308700295.cos.ap-beijing.myqcloud.com/thirdparty/clucene-v0.5.1.zip"
-CLUCENE_VERSION=v0.5.1
-CLUCENE_NAME=clucene-v0.5.1.zip
-CLUCENE_SOURCE=clucene-v0.5.1
-CLUCENE_MD5SUM="eed00cf53045acb2de9f0f9369d04bea"
+CLUCENE_DOWNLOAD="https://doris-thirdparty-1308700295.cos.ap-beijing.myqcloud.com/thirdparty/clucene-v0.5.2.zip"
+CLUCENE_VERSION=v0.5.2
+CLUCENE_NAME=clucene-v0.5.2.zip
+CLUCENE_SOURCE=clucene-v0.5.2
+CLUCENE_MD5SUM="f68c99df0bd2e310ea9351fc5fd9e715"
 
 # libevent
 LIBEVENT_DOWNLOAD="https://github.com/libevent/libevent/archive/release-2.1.12-stable.tar.gz"
