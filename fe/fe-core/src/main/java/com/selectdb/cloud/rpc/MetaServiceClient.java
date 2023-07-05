@@ -17,7 +17,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 public class MetaServiceClient {
     public static final Logger LOG = LogManager.getLogger(MetaServiceClient.class);
@@ -57,29 +56,8 @@ public class MetaServiceClient {
     }
 
     public void shutdown() {
-        if (!channel.isShutdown()) {
-            channel.shutdown();
-            try {
-                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
-                    LOG.warn("Timed out gracefully shutting down connection: {}. ", channel);
-                }
-            } catch (InterruptedException e) {
-                return;
-            }
-        }
-
-        if (!channel.isTerminated()) {
-            channel.shutdownNow();
-            try {
-                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
-                    LOG.warn("Timed out forcefully shutting down connection: {}. ", channel);
-                }
-            } catch (InterruptedException e) {
-                return;
-            }
-        }
-
-        LOG.warn("shut down backend service client: {}", address);
+        channel.shutdown();
+        LOG.warn("shut down meta service client: {}", address);
     }
 
     public Future<SelectdbCloud.GetVersionResponse>
