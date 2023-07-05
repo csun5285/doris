@@ -24,7 +24,7 @@ usage() {
     echo -e "Usage:
     bash $0 <PULL_NUMBER> <OPTIONS>
     note: https://github.com/apache/doris/pull/13259, PULL_NUMBER is 13259
-    OPTIONS should be one of [be-ut|fe-ut|ckb|regression-p0|regression-p1|arm-regression-p0]
+    OPTIONS should be one of [be-ut|fe-ut|ms-ut|ckb|regression-p0|regression-p1|arm-regression-p0]
     " && return 1
 }
 
@@ -151,6 +151,7 @@ need_run_regression_p0() {
             [[ "${af}" == 'webroot'* ]] ||
             [[ "${af}" == 'build.sh' ]] ||
             [[ "${af}" == 'env.sh' ]] ||
+	    [[ "${af}" == 'cloud'* ]]
             [[ "${af}" == 'run-regression-test.sh' ]]; then
             echo "regression related file changed, return need" && return 0
         fi

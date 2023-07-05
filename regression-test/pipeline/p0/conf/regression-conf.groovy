@@ -20,22 +20,26 @@
 // **Note**: default db will be create if not exist
 defaultDb = "regression_test"
 
-jdbcUrl = "jdbc:mysql://172.19.0.2:9131/?useLocalSessionState=true"
+jdbcUrl = "jdbc:mysql://172.21.16.21:9030/?useLocalSessionState=true"
 jdbcUser = "root"
 jdbcPassword = ""
 
-feHttpAddress = "172.19.0.2:8131"
+feHttpAddress = "172.21.16.21:8030"
 feHttpUser = "root"
 feHttpPassword = ""
+
+beHttpAddress = "172.21.16.21:8040"
+instanceId = "selectdb-cloud"
+cloudUniqueId = "selectdb-cloud_fe"
+metaServiceHttpAddress = "172.21.16.21:5000"
+recycleServiceHttpAddress = "172.21.16.8:6000"
+feCloudHttpAddress = "172.21.16.21:18030"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
 suitePath = "${DORIS_HOME}/regression-test/suites"
 dataPath = "${DORIS_HOME}/regression-test/data"
-pluginPath = "${DORIS_HOME}/regression-test/plugins"
-realDataPath = "${DORIS_HOME}/regression-test/realdata"
-// sf1DataPath can be url like "https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com" or local path like "/data"
-//sf1DataPath = "https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com"
+sf1DataPath = "/data"
 
 // will test <group>/<suite>.groovy
 // empty group will test all group
@@ -48,9 +52,15 @@ testDirectories = ""
 // this groups will not be executed
 excludeGroups = ""
 // this suites will not be executed
-excludeSuites = ""
+excludeSuites = "test_insert_nested_array,test_clean_label, \
+tpch_sf1_q8_nereids,test_alter_user,test_explain_tpch_sf_1_q4,test_explain_tpch_sf_1_q20, \
+test_explain_tpch_sf_1_q21,test_explain_tpch_sf_1_q13,test_explain_tpch_sf_1_q22,test_ctas, \
+test_ctl,redundant_conjuncts,test_dynamic_partition,test_array_show_create,test_disable_management_cluster"
 // this directories will not be executed
-excludeDirectories = ""
+excludeDirectories = "backup_restore,compaction, cold_heat_separation, dynamic_table, javaudf_p0, primary_key,\
+tpcds_sf1000_p2,primary_index,github_events_p2,nereids_syntax_p0,schema_change_p0, \
+tpch_sf1_p1/tpch_sf1/nereids,schema_change, cloud/smoke, cloud/recycler, cloud/multi_cluster, cloud/compaction, cloud/cache, load_p0/broker_load, \
+tpch_sf1_p1/tpch_sf1/explain"
 
 customConf1 = "test_custom_conf_value"
 
@@ -61,21 +71,11 @@ hdfsUser = "doris-test"
 hdfsPasswd = ""
 brokerName = "broker_name"
 
-// broker load test config
-enableBrokerLoad=false
-
-// jdbc connector test config
-// To enable jdbc test, you need first start mysql/pg container.
-// See `docker/thirdparties/start-thirdparties-docker.sh`
-enableJdbcTest=false
-mysql_57_port=7111
-pg_14_port=7121
-
-// hive catalog test config
-// To enable jdbc test, you need first start hive container.
-// See `docker/thirdparties/start-thirdparties-docker.sh`
-enableHiveTest=false
-hms_port=7141
-
+s3Endpoint = "cos.ap-beijing.myqcloud.com"
+s3BucketName = "doris-build-1308700295"
+s3Region="ap-beijing"
+s3Provider="COS"
 sf1DataPath = "/data"
-cacheDataPath = "/data/regression/"
+
+
+

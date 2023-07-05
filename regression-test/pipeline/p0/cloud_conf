@@ -1,0 +1,48 @@
+#!/bin/bash
+#===================================自定义配置区======================================================
+#一些通用配置
+#【必填配置】集群部署账户
+USER="root"
+#【必填配置】BUILD_TYPE目录同名，teamcity会用到
+BUILD_TYPE="asan"
+#【必填配置】warehouse名字
+INSTANCE="selectdb_cloud_${BUILD_TYPE}"
+
+#【必填配置】编译产出包的名字,用于编译部署时使用
+output="output"
+#【必填配置】集群部署路径
+ENV_INSTALL_PATH="/home/work/pipline/OpenSourceDoris/clusterEnv/selectdb-cloud-pr-commit"
+#【必填配置】JAVA_HOME
+JAVA_HOME=/usr/local/software/jdk1.8.0_131
+
+
+#集群节点配置
+#【必填配置】ms部署节点，多个ms用空格隔开
+ms_hosts=(172.30.32.17)
+#【必填配置】fe部署节点，多个ms用空格隔开,通常cloud集群只有一个fe
+fe_hosts=(172.30.32.17)
+#【必填配置】be可以有多个，多个be机器用空格隔开，同一个机器上部署多个be，在节点后指定部署be数量, 不加默认为1
+#比如在172.16.0.2上部署2个be，在172.16.0.3 上部署1个be
+#be_hosts=(172.16.0.2:2 172.16.0.3:1)
+be_hosts=(172.30.32.17:1)
+#【必填配置】recycler部署节点，多个recycler用空格隔开,如果不部署，括号里留空即可
+recycler_hosts=(172.30.32.17)
+
+#【必填配置】创建 Instance 会使用到的配置
+#be.conf 中会给base_cluster_name 和base_cluster_id 加上每个集群的index
+base_cluster_name="selectdb_cloud_name"
+base_cluster_id="selectdb_cloud_id"
+#cloud obejct config
+#ATTN: 阿里云的endpoint、external_endpoint规则不一样，其他云厂商一样的
+endpoint="cos.ap-hongkong.myqcloud.com"
+external_endpoint="cos.ap-hongkong.myqcloud.com"
+region="ap-hongkong"
+provider="COS"
+bucket="doris-build-hk-1308700295"
+prefix="selectdb-admission/selectdb-cloud-pr-commit"
+
+#【必填配置】是否需要add be cluster, true/false
+#默认为true，表示需要add be cluster, false表示不需要add cluster
+add_be_cluster="true"
+
+
