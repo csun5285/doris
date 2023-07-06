@@ -76,7 +76,7 @@ public class MetaServiceProxy {
         }
 
         if (service != null) {
-            service.shutdown();
+            service.shutdown(false);
         }
     }
 
@@ -99,6 +99,11 @@ public class MetaServiceProxy {
                 removedClient = service;
                 service = null;
             }
+            if (service != null && !service.isConnectionAgeExpired()) {
+                serviceMap.remove(address);
+                removedClient = service;
+                service = null;
+            }
             if (service == null) {
                 service = new MetaServiceClient(address);
                 serviceMap.put(address, service);
@@ -107,7 +112,7 @@ public class MetaServiceProxy {
         } finally {
             lock.unlock();
             if (removedClient != null) {
-                removedClient.shutdown();
+                removedClient.shutdown(true);
             }
         }
     }

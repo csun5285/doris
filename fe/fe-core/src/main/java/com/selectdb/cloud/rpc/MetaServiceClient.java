@@ -17,6 +17,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class MetaServiceClient {
     public static final Logger LOG = LogManager.getLogger(MetaServiceClient.class);
@@ -25,6 +26,7 @@ public class MetaServiceClient {
     private final MetaServiceGrpc.MetaServiceFutureStub stub;
     private final MetaServiceGrpc.MetaServiceBlockingStub blockingStub;
     private final ManagedChannel channel;
+    private final long expiredAt;
 
     public MetaServiceClient(TNetworkAddress address) {
         this.address = address;
@@ -36,6 +38,16 @@ public class MetaServiceClient {
             .usePlaintext().build();
         stub = MetaServiceGrpc.newFutureStub(channel);
         blockingStub = MetaServiceGrpc.newBlockingStub(channel);
+        expiredAt = connectionAgeExpiredAt();
+    }
+
+    private static long connectionAgeExpiredAt() {
+        long connectionAgeBase = Config.meta_service_connection_age_base_minutes;
+        if (connectionAgeBase > 0) {
+            long base = TimeUnit.MINUTES.toMillis(connectionAgeBase);
+            return base + System.currentTimeMillis() % base;
+        }
+        return Long.MAX_VALUE;
     }
 
     protected Map<String, ?> getRetryingServiceConfig() {
@@ -47,6 +59,12 @@ public class MetaServiceClient {
         return serviceConfig;
     }
 
+    // Is the connection age has expired?
+    public boolean isConnectionAgeExpired() {
+        return Config.meta_service_connection_age_base_minutes > 0
+                && expiredAt < System.currentTimeMillis();
+    }
+
     // Is the underlying channel in a normal state? (That means the RPC call will not fail immediately)
     public boolean isNormalState() {
         ConnectivityState state = channel.getState(false);
@@ -55,9 +73,13 @@ public class MetaServiceClient {
                 || state == ConnectivityState.READY;
     }
 
-    public void shutdown() {
+    public void shutdown(boolean debugLog) {
         channel.shutdown();
-        LOG.warn("shut down meta service client: {}", address);
+        if (debugLog) {
+            LOG.debug("shut down meta service client: {}", address);
+        } else {
+            LOG.warn("shut down meta service client: {}", address);
+        }
     }
 
     public Future<SelectdbCloud.GetVersionResponse>
