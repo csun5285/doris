@@ -20,20 +20,20 @@
 // **Note**: default db will be create if not exist
 defaultDb = "regression_test"
 
-jdbcUrl = "jdbc:mysql://172.21.16.21:9030/?useLocalSessionState=true"
+jdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true"
 jdbcUser = "root"
 jdbcPassword = ""
 
-feHttpAddress = "172.21.16.21:8030"
+feHttpAddress = "172.30.32.17:8030"
 feHttpUser = "root"
 feHttpPassword = ""
 
-beHttpAddress = "172.21.16.21:8040"
+beHttpAddress = "172.30.32.17:8040"
 instanceId = "selectdb-cloud"
 cloudUniqueId = "selectdb-cloud_fe"
-metaServiceHttpAddress = "172.21.16.21:5000"
-recycleServiceHttpAddress = "172.21.16.8:6000"
-feCloudHttpAddress = "172.21.16.21:18030"
+metaServiceHttpAddress = "172.30.32.17:5000"
+recycleServiceHttpAddress = "172.30.32.17:6000"
+feCloudHttpAddress = "172.30.32.17:18030"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
