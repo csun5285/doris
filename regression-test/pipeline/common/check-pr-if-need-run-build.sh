@@ -151,7 +151,7 @@ need_run_regression_p0() {
             [[ "${af}" == 'webroot'* ]] ||
             [[ "${af}" == 'build.sh' ]] ||
             [[ "${af}" == 'env.sh' ]] ||
-	    [[ "${af}" == 'cloud'* ]]
+	        [[ "${af}" == 'cloud'* ]]
             [[ "${af}" == 'run-regression-test.sh' ]]; then
             echo "regression related file changed, return need" && return 0
         fi
