@@ -183,7 +183,7 @@ if [[ -f version.txt && ${INCREMENTAL_BUILD} -eq 1 ]]; then
             set -x
             find src -maxdepth 1 -type d -iname "*${folder}*" -exec mv {} src/bak/{}-$(date +"%Y%m%d%H%M%S") \;
             if [[ "_${folder}" == "_clucene" ]];then
-                find installed/include/ -name "CLucene*" -exec rm -rf {} \;
+                find installed/include/ -name "CLucene*" -exec -exec mv {} src/bak/ \;
             fi
             set +x
         done
