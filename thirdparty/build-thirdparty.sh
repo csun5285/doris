@@ -182,6 +182,9 @@ if [[ -f version.txt && ${INCREMENTAL_BUILD} -eq 1 ]]; then
             folder=$(echo "${i}" | sed -r 's/[-_]/*/')
             set -x
             find src -maxdepth 1 -type d -iname "*${folder}*" -exec mv {} src/bak/{}-$(date +"%Y%m%d%H%M%S") \;
+            if [[ "_${folder}" == "_clucene" ]];then
+                find installed/include/ -name "CLucene*" -exec rm -rf {} \;
+            fi
             set +x
         done
     fi
