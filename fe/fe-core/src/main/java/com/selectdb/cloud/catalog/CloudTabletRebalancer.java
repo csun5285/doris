@@ -436,7 +436,12 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 for (Replica replica : tablet.getReplicas()) {
                     Map<String, List<Long>> clusterToBackends =
                             ((CloudReplica) replica).getClusterToBackends();
-                    for (List<Long> bes : clusterToBackends.values()) {
+                    for (Map.Entry<String, List<Long>> entry : clusterToBackends.entrySet()) {
+                        if (!clusterToBes.containsKey(entry.getKey())) {
+                            continue;
+                        }
+
+                        List<Long> bes = entry.getValue();
                         if (!allBes.contains(bes.get(0))) {
                             continue;
                         }
@@ -529,6 +534,9 @@ public class CloudTabletRebalancer extends MasterDaemon {
             }
         } catch (Exception e) {
             LOG.warn("send pre heating rpc error. backend[{}]", destBackend.getId(), e);
+            ClientPool.backendPool.invalidateObject(address, client);
+        } finally {
+            ClientPool.backendPool.returnObject(address, client);
         }
     }
 
@@ -552,6 +560,9 @@ public class CloudTabletRebalancer extends MasterDaemon {
             return result.getTaskDone();
         } catch (Exception e) {
             LOG.warn("send check pre cache rpc error. backend[{}]", destBackend.getId(), e);
+            ClientPool.backendPool.invalidateObject(address, client);
+        } finally {
+            ClientPool.backendPool.returnObject(address, client);
         }
         return null;
     }
