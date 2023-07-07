@@ -1055,6 +1055,8 @@ CONF_Int32(calc_delete_bitmap_worker_count, "8");
 // the count of tablet thread to calc delete bitmap
 CONF_Int32(tablet_calc_delete_bitmap_max_thread, "32");
 
+CONF_mBool(enable_parallel_cumu_compaction, "false");
+
 } // namespace config
 
 } // namespace doris

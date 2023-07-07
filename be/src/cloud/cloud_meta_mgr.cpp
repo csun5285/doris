@@ -9,18 +9,16 @@
 #include <random>
 #include <vector>
 
-#include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
-#include "common/status.h"
+#include "common/sync_point.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
-#include "gutil/integral_types.h"
 #include "olap/olap_common.h"
-#include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
+#include "runtime/stream_load/stream_load_context.h"
 #include "util/s3_util.h"
 
 namespace doris::cloud {
@@ -86,6 +84,8 @@ Status CloudMetaMgr::open() {
 
 Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tablet_meta) {
     VLOG_DEBUG << "send GetTabletRequest, tablet_id: " << tablet_id;
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::get_tablet_meta", Status::OK(), tablet_id,
+                                      tablet_meta);
     int tried = 0;
 TRY_AGAIN:
     brpc::Controller cntl;
@@ -98,18 +98,17 @@ TRY_AGAIN:
     int retry_times = config::meta_service_rpc_retry_times;
     if (cntl.Failed()) {
         if (tried++ < retry_times) {
-            auto rng = std::default_random_engine {
-                static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())
-            };
+            auto rng = std::default_random_engine {static_cast<uint32_t>(
+                    std::chrono::steady_clock::now().time_since_epoch().count())};
             std::uniform_int_distribution<uint32_t> u(20, 200);
             std::uniform_int_distribution<uint32_t> u1(500, 1000);
             uint32_t duration_ms = tried >= 100 ? u(rng) : u1(rng);
             std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
             LOG_INFO("failed to get tablet meta")
-                .tag("reason", cntl.ErrorText())
-                .tag("tablet_id", tablet_id)
-                .tag("tried", tried)
-                .tag("sleep", duration_ms);
+                    .tag("reason", cntl.ErrorText())
+                    .tag("tablet_id", tablet_id)
+                    .tag("tried", tried)
+                    .tag("sleep", duration_ms);
             goto TRY_AGAIN;
         }
         return Status::RpcError("failed to get tablet meta: {}", cntl.ErrorText());
@@ -124,6 +123,7 @@ TRY_AGAIN:
 }
 
 Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::sync_tablet_rowsets", Status::OK(), tablet);
     int tried = 0;
 
 TRY_AGAIN:
@@ -152,28 +152,26 @@ TRY_AGAIN:
     req.set_end_version(-1);
     VLOG_DEBUG << "send GetRowsetRequest: " << req.ShortDebugString();
 
-    _stub->get_rowset(&cntl, &req, &resp, brpc::DoNothing());
-    brpc::Join(cntl.call_id()); // to get more accurate latency
+    _stub->get_rowset(&cntl, &req, &resp, nullptr);
     int64_t latency = cntl.latency_us();
     g_get_rowset_latency << latency;
     int retry_times = config::meta_service_rpc_retry_times;
     if (cntl.Failed()) {
         if (tried++ < retry_times) {
-            auto rng = std::default_random_engine {
-                static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())
-            };
+            auto rng = std::default_random_engine {static_cast<uint32_t>(
+                    std::chrono::steady_clock::now().time_since_epoch().count())};
             std::uniform_int_distribution<uint32_t> u(20, 200);
             std::uniform_int_distribution<uint32_t> u1(500, 1000);
             uint32_t duration_ms = tried >= 100 ? u(rng) : u1(rng);
             std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
             LOG_INFO("failed to get rowset meta")
-                .tag("reason", cntl.ErrorText())
-                .tag("tablet_id", tablet_id)
-                .tag("table_id", table_id)
-                .tag("index_id", index_id)
-                .tag("partition_id", tablet->partition_id())
-                .tag("tried", tried)
-                .tag("sleep", duration_ms);
+                    .tag("reason", cntl.ErrorText())
+                    .tag("tablet_id", tablet_id)
+                    .tag("table_id", table_id)
+                    .tag("index_id", index_id)
+                    .tag("partition_id", tablet->partition_id())
+                    .tag("tried", tried)
+                    .tag("sleep", duration_ms);
             goto TRY_AGAIN;
         }
         return Status::RpcError("failed to get rowset meta: {}", cntl.ErrorText());
@@ -196,13 +194,12 @@ TRY_AGAIN:
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     tablet->set_last_sync_time(now);
 
-    DeleteBitmapPtr delete_bimap = nullptr;
     if (tablet->enable_unique_key_merge_on_write()) {
-        delete_bimap = std::make_shared<DeleteBitmap>(tablet_id);
+        DeleteBitmap delete_bitmap(tablet_id);
         int64_t old_max_version = req.start_version() - 1;
-        std::vector<RowsetMetaPB> rowset_metas(resp.rowset_meta().begin(), resp.rowset_meta().end());
-        RETURN_IF_ERROR(sync_tablet_delete_bitmap(tablet, old_max_version, rowset_metas, delete_bimap));
-        tablet->tablet_meta()->delete_bitmap().merge(*delete_bimap);
+        RETURN_IF_ERROR(
+                sync_tablet_delete_bitmap(tablet, old_max_version, resp.rowset_meta(), &delete_bitmap));
+        tablet->tablet_meta()->delete_bitmap().merge(delete_bitmap);
     }
 
     {
@@ -277,12 +274,12 @@ TRY_AGAIN:
 }
 
 Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old_max_version,
-                                               std::vector<RowsetMetaPB> rowset_metas,
-                                               DeleteBitmapPtr delete_bitmap) {
-    if (rowset_metas.empty()) {
+                                               const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
+                                               DeleteBitmap* delete_bitmap) {
+    if (rs_metas.empty()) {
         return Status::OK();
     }
-    int64_t new_max_version = std::max(old_max_version, rowset_metas.rbegin()->end_version());
+    int64_t new_max_version = std::max(old_max_version, rs_metas.rbegin()->end_version());
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::GetDeleteBitmapRequest req;
@@ -290,8 +287,8 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_tablet_id(tablet->tablet_id());
     // New rowset sync all versions of delete bitmap
-    for (auto& meta_pb : rowset_metas) {
-        req.add_rowset_ids(meta_pb.rowset_id_v2());
+    for (auto& rs_meta : rs_metas) {
+        req.add_rowset_ids(rs_meta.rowset_id_v2());
         req.add_begin_versions(0);
         req.add_end_versions(new_max_version);
     }
@@ -322,14 +319,13 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old
     for (size_t i = 0; i < rowset_ids.size(); i++) {
         RowsetId rst_id;
         rst_id.init(rowset_ids[i]);
-        delete_bitmap->merge(
-                {rst_id, segment_ids[i], vers[i]},
-                roaring::Roaring::read(delete_bitmaps[i].data()));
+        delete_bitmap->merge({rst_id, segment_ids[i], vers[i]},
+                             roaring::Roaring::read(delete_bitmaps[i].data()));
     }
     return Status::OK();
 }
 
-Status CloudMetaMgr::prepare_rowset(const RowsetMetaSharedPtr& rs_meta, bool is_tmp,
+Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                     RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "prepare rowset, tablet_id: " << rs_meta->tablet_id()
                << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
@@ -364,7 +360,7 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMetaSharedPtr& rs_meta, bool is_
     return Status::InternalError("failed to prepare rowset: {}", resp.status().msg());
 }
 
-Status CloudMetaMgr::commit_rowset(const RowsetMetaSharedPtr& rs_meta, bool is_tmp,
+Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                    RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "commit rowset, tablet_id: " << rs_meta->tablet_id()
                << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
@@ -465,10 +461,11 @@ Status CloudMetaMgr::get_s3_info(std::vector<std::tuple<std::string, S3Conf>>* s
     return Status::OK();
 }
 
-Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job) {
+Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job,
+                                        selectdb::StartTabletJobResponse* res) {
     VLOG_DEBUG << "prepare_tablet_job: " << job.ShortDebugString();
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::prepare_tablet_job", Status::OK(), job, res);
     selectdb::StartTabletJobRequest req;
-    selectdb::StartTabletJobResponse res;
     req.mutable_job()->CopyFrom(job);
     req.set_cloud_unique_id(config::cloud_unique_id);
     int retry_times = config::meta_service_rpc_retry_times;
@@ -476,31 +473,26 @@ Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job) {
         brpc::Controller cntl;
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
-        _stub->start_tablet_job(&cntl, &req, &res, nullptr);
+        res->Clear();
+        _stub->start_tablet_job(&cntl, &req, res, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to prepare_tablet_job: {}", cntl.ErrorText());
         }
-        if (res.status().code() == selectdb::MetaServiceCode::OK) {
+        if (res->status().code() == selectdb::MetaServiceCode::OK) {
             return Status::OK();
-        } else if (res.status().code() == selectdb::MetaServiceCode::JOB_ALREADY_SUCCESS) {
-            return Status::Error<JOB_ALREADY_SUCCESS>();
-        } else if (res.status().code() == selectdb::MetaServiceCode::STALE_TABLET_CACHE) {
-            return Status::Error<STALE_TABLET_CACHE>(res.status().msg());
-        } else if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
-            Status::NotFound("failed to prepare_tablet_job: {}", res.status().msg());
-        } else if (res.status().code() == selectdb::KV_TXN_CONFLICT) {
+        } else if (res->status().code() == selectdb::KV_TXN_CONFLICT) {
             continue;
         }
         break;
     } while (retry_times--);
-    return Status::InternalError("failed to prepare_tablet_job: {}", res.status().msg());
+    return Status::InternalError("failed to prepare_tablet_job: {}", res->status().msg());
 }
 
 Status CloudMetaMgr::commit_tablet_job(const selectdb::TabletJobInfoPB& job,
-                                       selectdb::TabletStatsPB* stats) {
+                                       selectdb::FinishTabletJobResponse* res) {
     VLOG_DEBUG << "commit_tablet_job: " << job.ShortDebugString();
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::commit_tablet_job", Status::OK(), job, res);
     selectdb::FinishTabletJobRequest req;
-    selectdb::FinishTabletJobResponse res;
     req.mutable_job()->CopyFrom(job);
     req.set_action(selectdb::FinishTabletJobRequest::COMMIT);
     req.set_cloud_unique_id(config::cloud_unique_id);
@@ -509,23 +501,19 @@ Status CloudMetaMgr::commit_tablet_job(const selectdb::TabletJobInfoPB& job,
         brpc::Controller cntl;
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
-        _stub->finish_tablet_job(&cntl, &req, &res, nullptr);
+        res->Clear();
+        _stub->finish_tablet_job(&cntl, &req, res, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to commit_tablet_job: {}", cntl.ErrorText());
         }
-        if (res.status().code() == selectdb::MetaServiceCode::OK) {
-            stats->CopyFrom(res.stats());
+        if (res->status().code() == selectdb::MetaServiceCode::OK) {
             return Status::OK();
-        } else if (res.status().code() == selectdb::MetaServiceCode::JOB_ALREADY_SUCCESS) {
-            return Status::Error<JOB_ALREADY_SUCCESS>();
-        } else if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
-            Status::NotFound("failed to commit_tablet_job: {}", res.status().msg());
-        } else if (res.status().code() == selectdb::KV_TXN_CONFLICT) {
+        } else if (res->status().code() == selectdb::MetaServiceCode::KV_TXN_CONFLICT) {
             continue;
         }
         break;
     } while (retry_times--);
-    return Status::InternalError("failed to commit_tablet_job: {}", res.status().msg());
+    return Status::InternalError("failed to commit_tablet_job: {}", res->status().msg());
 }
 
 Status CloudMetaMgr::abort_tablet_job(const selectdb::TabletJobInfoPB& job) {
@@ -548,7 +536,7 @@ Status CloudMetaMgr::lease_tablet_job(const selectdb::TabletJobInfoPB& job) {
     RETRY_RPC(finish_tablet_job);
 }
 
-Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, TabletSchemaSPtr tablet_schema) {
+Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, const TabletSchema* tablet_schema) {
     VLOG_DEBUG << "send UpdateTabletSchemaRequest, tablet_id: " << tablet_id;
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
@@ -572,7 +560,7 @@ Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, TabletSchemaSPtr ta
 }
 
 Status CloudMetaMgr::update_delete_bitmap(const Tablet* tablet, int64_t lock_id, int64_t initiator,
-                                          DeleteBitmapPtr delete_bitmap) {
+                                          DeleteBitmap* delete_bitmap) {
     VLOG_DEBUG << "update_delete_bitmpap , tablet_id: " << tablet->tablet_id();
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);

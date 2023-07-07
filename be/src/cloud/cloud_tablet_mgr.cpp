@@ -30,13 +30,13 @@ public:
     SingleFlight(const SingleFlight&) = delete;
     void operator=(const SingleFlight&) = delete;
 
-    using Loader = std::function<std::shared_ptr<Val>(const Key&)>;
+    using Loader = std::function<Val(const Key&)>;
 
     // Do executes and returns the results of the given function, making
     // sure that only one execution is in-flight for a given key at a
     // time. If a duplicate comes in, the duplicate caller waits for the
     // original to complete and receives the same results.
-    std::shared_ptr<Val> Do(const Key& key, Loader loader) {
+    Val load(const Key& key, Loader loader) {
         std::unique_lock lock(_call_map_mtx);
 
         auto it = _call_map.find(key);
@@ -64,17 +64,17 @@ public:
     }
 
 private:
-    // `Call` is an in-flight or completed `Do` call
+    // `Call` is an in-flight or completed `load` call
     struct Call {
         bthread::CountdownEvent event;
-        std::shared_ptr<Val> val;
+        Val val;
     };
 
     std::mutex _call_map_mtx;
     std::unordered_map<Key, std::shared_ptr<Call>> _call_map;
 };
 
-static SingleFlight<int64_t, std::variant<Status, TabletSharedPtr>> s_singleflight_load_tablet;
+static SingleFlight<int64_t, TabletSharedPtr> s_singleflight_load_tablet;
 
 // tablet_id -> cached tablet
 // This map owns all cached tablets. The lifetime of tablet can be longer than the LRU handle.
@@ -158,15 +158,12 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
     TEST_SYNC_POINT_CALLBACK("CloudTabletMgr::get_tablet", handle);
 
     if (handle == nullptr) {
-        auto load_tablet = [this, &key, sync_rowsets](int64_t tablet_id)
-                -> std::shared_ptr<std::variant<Status, TabletSharedPtr>> {
-            auto res = std::make_shared<std::variant<Status, TabletSharedPtr>>();
-
+        auto load_tablet = [this, &key, sync_rowsets](int64_t tablet_id) -> TabletSharedPtr {
             TabletMetaSharedPtr tablet_meta;
             auto st = meta_mgr()->get_tablet_meta(tablet_id, &tablet_meta);
             if (!st.ok()) {
-                *res = std::move(st);
-                return res;
+                LOG(WARNING) << "failed to tablet " << tablet_id << ": " << st;
+                return nullptr;
             }
             auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir());
             auto value = new Value();
@@ -175,8 +172,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
             if (sync_rowsets) {
                 st = meta_mgr()->sync_tablet_rowsets(tablet.get());
                 if (!st.ok()) {
-                    *res = std::move(st);
-                    return res;
+                    LOG(WARNING) << "failed to sync tablet " << tablet_id << ": " << st;
                 }
             }
             static auto deleter = [](const CacheKey& key, void* value) {
@@ -188,16 +184,14 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
 
             auto handle = _cache->insert(key, value, 1, deleter);
             _tablet_map->put(std::move(tablet));
-            *res = std::shared_ptr<Tablet>(value->tablet.get(),
+            return std::shared_ptr<Tablet>(value->tablet.get(),
                                            [this, handle](...) { _cache->release(handle); });
-            return res;
         };
 
-        auto res = s_singleflight_load_tablet.Do(tablet_id, std::move(load_tablet));
-        if (auto st = std::get_if<Status>(res.get())) {
-            return *st;
+        *tablet = s_singleflight_load_tablet.load(tablet_id, std::move(load_tablet));
+        if (*tablet == nullptr) {
+            return Status::InternalError("failed to get tablet {}", tablet_id);
         }
-        *tablet = std::get<TabletSharedPtr>(*res);
         return Status::OK();
     }
 
@@ -319,6 +313,8 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
                                                    const std::function<bool(Tablet*)>& filter_out,
                                                    std::vector<TabletSharedPtr>* tablets,
                                                    int64_t* max_score) {
+    DCHECK(compaction_type == CompactionType::BASE_COMPACTION ||
+           compaction_type == CompactionType::CUMULATIVE_COMPACTION);
     *max_score = 0;
     // clang-format off
     auto score = [compaction_type](Tablet* t) {
@@ -329,23 +325,14 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
 
     using namespace std::chrono;
     auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-
-    auto last_compaction_time_ms = [type = compaction_type](Tablet* t) {
-        return type == CompactionType::BASE_COMPACTION ? t->last_base_compaction_success_time()
-               : type == CompactionType::CUMULATIVE_COMPACTION ? t->last_cumu_compaction_success_time()
-               : 0;
-    };
-    auto skip = [&now, type = compaction_type, &last_compaction_time_ms](Tablet* t) {
-        // We don't schedule tablets that are recently successfully scheduled
-        int64_t last_operation_interval = type == CompactionType::BASE_COMPACTION ? config::base_compaction_interval_seconds_since_last_operation * 1000
-                           : type == CompactionType::CUMULATIVE_COMPACTION ? 1 * 1000
-                           : 0;
-        int64_t freeze_interval = config::enable_freeze_compaction ? type == CompactionType::BASE_COMPACTION ? config::base_compaction_freeze_interval_seconds * 1000
-                           : type == CompactionType::CUMULATIVE_COMPACTION ? config::cu_compaction_freeze_interval_seconds * 1000
-                           : 0 : INT64_MAX;
-        return  now - last_compaction_time_ms(t) < last_operation_interval
-                || StorageEngine::s_last_load_time == 0
-                || now - StorageEngine::s_last_load_time > freeze_interval;
+    auto skip = [&now, compaction_type](Tablet* t) {
+        if (compaction_type == CompactionType::BASE_COMPACTION) {
+            return now - t->last_base_compaction_success_time() < config::base_compaction_interval_seconds_since_last_operation * 1000 ||
+                   now - StorageEngine::s_last_load_time > config::base_compaction_freeze_interval_seconds * 1000;
+        }
+        // FIXME(plat1ko): If tablet has too many rowsets but not be compacted for a long time, compaction should be performed
+        return now - t->last_cumu_no_suitable_version_ms() < config::min_compaction_failure_interval_sec * 1000 ||
+               now - StorageEngine::s_last_load_time > config::cu_compaction_freeze_interval_seconds * 1000;
     };
     // We don't schedule tablets that are disabled for compaction
     auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };

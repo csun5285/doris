@@ -44,6 +44,8 @@
 #include "cloud/io/path.h"
 #include "cloud/io/remote_file_system.h"
 #include "cloud/io/s3_file_system.h"
+#include "cloud/meta_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -92,8 +94,7 @@ TabletSharedPtr Tablet::create_tablet_from_meta(TabletMetaSharedPtr tablet_meta,
     return std::make_shared<Tablet>(std::move(tablet_meta), data_dir);
 }
 
-Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
-               const std::string& cumulative_compaction_type)
+Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir)
         : BaseTablet(std::move(tablet_meta), data_dir),
           _is_bad(false),
           _last_cumu_compaction_failure_millis(0),
@@ -103,7 +104,6 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
           _cumulative_point(K_INVALID_CUMULATIVE_POINT),
           _newly_created_rowset_num(0),
           _last_checkpoint_time(0),
-          _cumulative_compaction_type(cumulative_compaction_type),
           _last_record_scan_count(0),
           _last_record_scan_count_timestamp(time(nullptr)),
           _is_clone_occurred(false),
@@ -133,12 +133,6 @@ Status Tablet::_init_once_action() {
     Status res = Status::OK();
     VLOG_NOTICE << "begin to load tablet. tablet=" << full_name()
                 << ", version_size=" << _tablet_meta->version_count();
-
-#ifdef BE_TEST
-    // init cumulative compaction policy by type
-    _cumulative_compaction_policy =
-            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy();
-#endif
 
     RowsetVector rowset_vec;
     for (const auto& rs_meta : _tablet_meta->all_rs_metas()) {
@@ -735,6 +729,14 @@ void Tablet::cloud_add_rowsets_async(RowsetSharedPtr to_add, std::lock_guard<std
     _timestamped_version_tracker.add_version(to_add->version());
     _max_version = std::max(to_add->end_version(), _max_version);
     _tablet_meta->cloud_add_rs_metas({to_add});
+    update_base_size(*to_add);
+}
+
+void Tablet::update_base_size(const Rowset& rs) {
+    // Define base rowset as the rowset of version [2-x]
+    if (rs.start_version() == 2) {
+        _base_size.store(rs.data_disk_size(), std::memory_order_relaxed);
+    }
 }
 
 void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
@@ -777,33 +779,31 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
             _rs_version_map.emplace(rs->version(), rs);
             _timestamped_version_tracker.add_version(rs->version());
             _max_version = std::max(rs->end_version(), _max_version);
+            update_base_size(*rs);
         }
         _tablet_meta->cloud_add_rs_metas(add_rowsets);
     };
     if (version_overlap) {
         std::vector<RowsetSharedPtr> to_add_directy;
         // Filter out existed rowsets
-        auto it = to_add.begin();
-        size_t num_filtered = 0;
-        while (it != to_add.end() - num_filtered) {
-            auto find_it = _rs_version_map.find((*it)->version());
-            if (find_it != _rs_version_map.end()) {
-                if (find_it->second->rowset_id() != (*it)->rowset_id()) {
+        auto remove_it =
+                std::remove_if(to_add.begin(), to_add.end(), [this](const RowsetSharedPtr& rs) {
+                    auto find_it = _rs_version_map.find(rs->version());
+                    if (find_it == _rs_version_map.end()) return false;
+                    if (find_it->second->rowset_id() == rs->rowset_id()) return true; // Same rowset
                     // If version of rowset in `to_add` is equal to rowset in tablet but rowset_id is not equal,
                     // replace existed rowset with `to_add` rowset. This may occur when:
                     //  1. schema change converts rowsets which have been double written to new tablet
                     //  2. cumu compaction picks single overlapping input rowset to perform compaction
-                    _tablet_meta->delete_rs_meta_by_version((*it)->version(), nullptr);
-                    _rs_version_map[(*it)->version()] = *it;
-                    _tablet_meta->cloud_add_rs_metas({*it});
-                }
-                std::swap(*it, *(to_add.end() - num_filtered - 1));
-                ++num_filtered;
-            } else {
-                ++it;
-            }
-        }
-        to_add.resize(to_add.size() - num_filtered);
+                    _tablet_meta->delete_rs_meta_by_version(rs->version(), nullptr);
+                    _rs_version_map[rs->version()] = rs;
+                    _tablet_meta->cloud_add_rs_metas({rs});
+                    update_base_size(*rs);
+                    return true;
+                });
+        to_add.erase(remove_it, to_add.end());
+        // delete rowsets with overlapped version
+        std::vector<RowsetSharedPtr> to_delete;
         for (auto& to_add_rs : to_add) {
             // delete rowsets with overlapped version
             std::vector<RowsetSharedPtr> to_delete;
@@ -1263,15 +1263,9 @@ uint32_t Tablet::calc_compaction_score(
 
 const uint32_t Tablet::_calc_cumulative_compaction_score(
         std::shared_ptr<CumulativeCompactionPolicy> cumulative_compaction_policy) {
-#ifndef BE_TEST
-    if (_cumulative_compaction_policy == nullptr ||
-        _cumulative_compaction_policy->name() != cumulative_compaction_policy->name()) {
-        _cumulative_compaction_policy = cumulative_compaction_policy;
-    }
-#endif
     uint32_t score = 0;
-    _cumulative_compaction_policy->calc_cumulative_compaction_score(
-            this, tablet_state(), _tablet_meta->all_rs_metas(), cumulative_layer_point(), &score);
+    cumulative_compaction_policy->calc_cumulative_compaction_score(
+            this, _tablet_meta->all_rs_metas(), cumulative_layer_point(), &score);
     return score;
 }
 
@@ -1375,7 +1369,7 @@ void Tablet::_max_continuous_version_from_beginning_unlocked(Version* version, V
 void Tablet::calculate_cumulative_point() {
     std::lock_guard<std::shared_mutex> wrlock(_meta_lock);
     int64_t ret_cumulative_point;
-    _cumulative_compaction_policy->calculate_cumulative_point(
+    StorageEngine::instance()->cumu_compaction_policy()->calculate_cumulative_point(
             this, _tablet_meta->all_rs_metas(), _cumulative_point, &ret_cumulative_point);
 
     if (ret_cumulative_point == K_INVALID_CUMULATIVE_POINT) {
@@ -1679,10 +1673,7 @@ void Tablet::get_compaction_status(std::string* json_result) {
         _timestamped_version_tracker.get_stale_version_path_json_doc(path_arr);
     }
     rapidjson::Value cumulative_policy_type;
-    std::string policy_type_str = "cumulative compaction policy not initializied";
-    if (_cumulative_compaction_policy != nullptr) {
-        policy_type_str = _cumulative_compaction_policy->name();
-    }
+    std::string policy_type_str = StorageEngine::instance()->cumu_compaction_policy()->name();
     cumulative_policy_type.SetString(policy_type_str.c_str(), policy_type_str.length(),
                                      root.GetAllocator());
     root.AddMember("cumulative policy type", cumulative_policy_type, root.GetAllocator());
@@ -1963,104 +1954,6 @@ double Tablet::calculate_scan_frequency() {
         _last_record_scan_count_timestamp = now;
     }
     return scan_frequency;
-}
-
-Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compaction_type,
-                                                        TabletSharedPtr tablet, int64_t* permits) {
-    std::vector<RowsetSharedPtr> compaction_rowsets;
-    if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-        StorageEngine::instance()->create_cumulative_compaction(tablet, _cumulative_compaction);
-        DorisMetrics::instance()->cumulative_compaction_request_total->increment(1);
-        Status res = _cumulative_compaction->prepare_compact();
-        if (!res.ok()) {
-            set_last_cumu_compaction_failure_time(UnixMillis());
-            *permits = 0;
-            if (!res.is<CUMULATIVE_NO_SUITABLE_VERSION>()) {
-                DorisMetrics::instance()->cumulative_compaction_request_failed->increment(1);
-                return Status::InternalError("prepare cumulative compaction with err: {}",
-                                             res.to_string());
-            }
-            // return OK if OLAP_ERR_CUMULATIVE_NO_SUITABLE_VERSION, so that we don't need to
-            // print too much useless logs.
-            // And because we set permits to 0, so even if we return OK here, nothing will be done.
-            return Status::OK();
-        }
-        compaction_rowsets = _cumulative_compaction->get_input_rowsets();
-    } else {
-        StorageEngine::instance()->create_base_compaction(tablet, _base_compaction);
-        DorisMetrics::instance()->base_compaction_request_total->increment(1);
-        Status res = _base_compaction->prepare_compact();
-        if (!res.ok()) {
-            set_last_base_compaction_failure_time(UnixMillis());
-            *permits = 0;
-            if (!res.is<BE_NO_SUITABLE_VERSION>()) {
-                DorisMetrics::instance()->base_compaction_request_failed->increment(1);
-                return Status::InternalError("prepare base compaction with err: {}",
-                                             res.to_string());
-            }
-            // return OK if OLAP_ERR_BE_NO_SUITABLE_VERSION, so that we don't need to
-            // print too much useless logs.
-            // And because we set permits to 0, so even if we return OK here, nothing will be done.
-            return Status::OK();
-        }
-        compaction_rowsets = _base_compaction->get_input_rowsets();
-    }
-    *permits = 0;
-    for (auto& rowset : compaction_rowsets) {
-        *permits += rowset->rowset_meta()->get_compaction_score();
-    }
-    return Status::OK();
-}
-
-void Tablet::execute_compaction(CompactionType compaction_type) {
-    scoped_refptr<Trace> trace;
-    if (!config::disable_compaction_trace_log) {
-        trace = new Trace;
-    }
-    ADOPT_TRACE(trace ? trace.get() : nullptr);
-    MonotonicStopWatch watch;
-    watch.start();
-    SCOPED_CLEANUP({
-        if (trace &&
-            watch.elapsed_time() / 1e9 > (compaction_type == CompactionType::CUMULATIVE_COMPACTION
-                                                  ? config::cumulative_compaction_trace_threshold
-                                                  : config::base_compaction_trace_threshold)) {
-            trace->DumpAccumulatedTime(&LOG(WARNING));
-            trace->Dump(&LOG(WARNING), Trace::INCLUDE_ALL);
-        }
-    });
-
-    if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-        TRACE("execute cumulative compaction");
-        Status res = _cumulative_compaction->execute_compact();
-        if (!res.ok()) {
-            set_last_cumu_compaction_failure_time(UnixMillis());
-            DorisMetrics::instance()->cumulative_compaction_request_failed->increment(1);
-            LOG(WARNING) << "failed to do cumulative compaction. res=" << res
-                         << ", tablet=" << full_name();
-            return;
-        }
-        set_last_cumu_compaction_failure_time(0);
-    } else {
-        TRACE("create base compaction");
-        Status res = _base_compaction->execute_compact();
-        if (!res.ok()) {
-            set_last_base_compaction_failure_time(UnixMillis());
-            DorisMetrics::instance()->base_compaction_request_failed->increment(1);
-            LOG(WARNING) << "failed to do base compaction. res=" << res
-                         << ", tablet=" << full_name();
-            return;
-        }
-        set_last_base_compaction_failure_time(0);
-    }
-}
-
-void Tablet::reset_compaction(CompactionType compaction_type) {
-    if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-        _cumulative_compaction.reset();
-    } else {
-        _base_compaction.reset();
-    }
 }
 
 Status Tablet::create_initial_rowset(const int64_t req_version) {
@@ -2771,7 +2664,7 @@ Status Tablet::cloud_update_delete_bitmap(int64_t transaction_id, const RowsetSh
         new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
                                  iter->second);
     }
-    return cloud::meta_mgr()->update_delete_bitmap(this, transaction_id, -1, new_delete_bitmap);
+    return cloud::meta_mgr()->update_delete_bitmap(this, transaction_id, -1, new_delete_bitmap.get());
 }
 
 RowsetIdUnorderedSet Tablet::all_rs_id(int64_t max_version) const {
@@ -2841,7 +2734,7 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
 
     // 3. store delete bitmap
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(this, -1, initiator,
-                                                            output_rowset_delete_bitmap));
+                                                            output_rowset_delete_bitmap.get()));
     return Status::OK();
 }
 

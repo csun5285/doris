@@ -82,7 +82,7 @@ Status CumulativeCompaction::execute_compact_impl() {
     _state = CompactionState::SUCCESS;
 
     // 5. set cumulative point
-    _tablet->cumulative_compaction_policy()->update_cumulative_point(
+    StorageEngine::instance()->cumu_compaction_policy()->update_cumulative_point(
             _tablet.get(), _input_rowsets, _output_rowset, _last_delete_version);
     VLOG_CRITICAL << "after cumulative compaction, current cumulative point is "
                   << _tablet->cumulative_layer_point() << ", tablet=" << _tablet->full_name();
@@ -116,7 +116,7 @@ Status CumulativeCompaction::pick_rowsets_to_compact() {
     }
 
     size_t compaction_score = 0;
-    _tablet->cumulative_compaction_policy()->pick_input_rowsets(
+    StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(
             _tablet.get(), candidate_rowsets,
             config::max_cumulative_compaction_num_singleton_deltas,
             config::min_cumulative_compaction_num_singleton_deltas, &_input_rowsets,

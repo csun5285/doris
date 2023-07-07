@@ -3,7 +3,6 @@
 #include <bthread/bthread.h>
 #include <bthread/condition_variable.h>
 
-#include "common/sync_point.h"
 #include "olap/storage_engine.h"
 
 namespace doris::cloud {
@@ -16,13 +15,11 @@ DataDir* cloud_data_dir() {
 }
 
 MetaMgr* meta_mgr() {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("meta_mgr", (MetaMgr*)nullptr);
     return StorageEngine::instance()->meta_mgr();
 }
 
 CloudTabletMgr* tablet_mgr() {
-    static CloudTabletMgr tablet_mgr;
-    return &tablet_mgr;
+    return StorageEngine::instance()->tablet_mgr();
 }
 
 io::FileSystemSPtr latest_fs() {

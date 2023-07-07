@@ -2605,7 +2605,7 @@ std::vector<std::pair<int64_t, int64_t>> calc_sync_versions(int64_t req_bc_cnt, 
 
     if (req_cc_cnt < cc_cnt) {
         Version cc_version;
-        if (req_cp < cp) {
+        if (req_cp < cp && req_cc_cnt + 1 == cc_cnt) {
             // * only one CC happened and CP changed
             // BE  [=][=][=][=][=====][=][=]
             //                  ^~~~~ req_cp
@@ -2613,14 +2613,15 @@ std::vector<std::pair<int64_t, int64_t>> calc_sync_versions(int64_t req_bc_cnt, 
             //                                  ^~~~~~~ ms_cp
             //                  ^____________^ related_versions: [req_cp, ms_cp - 1]
             //
+            cc_version = {req_cp, cp - 1};
+        } else {
             // * more than one CC happened and CP changed
             // BE  [=][=][=][=][=====][=][=]
             //                  ^~~~~ req_cp
             // MS  [=][=][=][=][xxxxxxxxxxxxxx][xxxxxxx][=][=]
-            //                                           ^~~~~~~ ms_cp
-            //                  ^_____________________^ related_versions: [req_cp, ms_cp - 1]
-            cc_version = {req_cp, cp - 1};
-        } else {
+            //                                  ^~~~~~~ ms_cp
+            //                  ^_____________________^ related_versions: [req_cp, max]
+            //
             // * more than one CC happened and CP remain unchanged
             // BE  [=][=][=][=][=====][=][=]
             //                  ^~~~~ req_cp

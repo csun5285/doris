@@ -891,6 +891,7 @@ message StartTabletJobRequest {
 
 message StartTabletJobResponse {
     optional MetaServiceResponseStatus status = 1;
+    repeated int64 version_in_compaction = 2;
 }
 
 message FinishTabletJobRequest {

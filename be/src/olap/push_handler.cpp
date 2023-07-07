@@ -23,6 +23,7 @@
 #include <memory>
 #include <sstream>
 
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/object_pool.h"
 #include "common/status.h"
@@ -78,7 +79,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
         return Status::InternalError("failed to build rowset");
     }
     rowset->rowset_meta()->set_delete_predicate(del_pred);
-    auto st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta(), true);
+    auto st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta().get(), true);
     if (!st.ok() && !st.is<ALREADY_EXIST>()) {
         return st;
     }
@@ -419,7 +420,7 @@ Status PushHandler::_convert(TabletSharedPtr cur_tablet, RowsetSharedPtr* cur_ro
         context.load_id = load_id;
         context.rowset_state = PREPARED;
         context.segments_overlap = OVERLAP_UNKNOWN;
-        context.tablet_schema = tablet_schema;        
+        context.tablet_schema = tablet_schema;
         res = cur_tablet->create_rowset_writer(context, &rowset_writer);
         if (!res.ok()) {
             LOG(WARNING) << "failed to init rowset writer, tablet=" << cur_tablet->full_name()

@@ -72,14 +72,15 @@ S3FileWriter::~S3FileWriter() {
     if (!_closed) {
         abort();
     }
-    s3_file_being_written << -1;
     _wait_until_finish("dtor");
+    s3_file_being_written << -1;
+    s3_bytes_written << _bytes_appended;
 }
 
-void S3FileWriter::_wait_until_finish(std::string task_name) {
+void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     auto msg =
             fmt::format("{} multipart upload already takes 5 min, bucket={}, key={}, upload_id={}",
-                        std::move(task_name), _bucket, _path.native(), _upload_id);
+                        task_name, _bucket, _path.native(), _upload_id);
     while (!_wait.wait(300)) {
         LOG(WARNING) << msg;
     }
@@ -260,10 +261,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
         return;
     }
 
-    s3_bytes_written << buf.get_size();
-
     std::unique_ptr<CompletedPart> completed_part = std::make_unique<CompletedPart>();
-
     completed_part->SetPartNumber(part_num);
     auto etag = upload_part_outcome.GetResult().GetETag();
     // DCHECK(etag.empty());

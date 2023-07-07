@@ -87,7 +87,7 @@ private:
 
     FileSegmentsHolderPtr _allocate_file_segments(size_t offset);
 
-    void _wait_until_finish(std::string task_name);
+    void _wait_until_finish(std::string_view task_name);
 
     Path _path;
     std::shared_ptr<S3FileSystem> _fs;
@@ -114,7 +114,7 @@ private:
     WaitGroup _wait;
 
     std::atomic_bool _failed = false;
-    Status _st = Status::OK();
+    Status _st;
     size_t _bytes_written = 0;
 
     std::shared_ptr<FileBuffer> _pending_buf = nullptr;

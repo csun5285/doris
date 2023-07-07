@@ -17,6 +17,8 @@ public:
     void do_lease();
 
 protected:
+    Status pick_rowsets_to_compact() override;
+
     std::string compaction_name() const override { return "CloudBaseCompaction"; }
 
     Status update_tablet_meta(const Merger::Statistics* stats = nullptr) override;
@@ -25,10 +27,9 @@ protected:
 private:
     std::string _uuid;
     int64_t _input_segments = 0;
+    // Snapshot values when pick input rowsets
+    int64_t _base_compaction_cnt = 0;
+    int64_t _cumulative_compaction_cnt = 0;
 };
-
-std::vector<std::shared_ptr<CloudBaseCompaction>> get_base_compactions();
-void push_base_compaction(std::shared_ptr<CloudBaseCompaction> compaction);
-void pop_base_compaction(CloudBaseCompaction* compaction);
 
 } // namespace doris

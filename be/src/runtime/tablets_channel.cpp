@@ -19,6 +19,7 @@
 
 #include <chrono>
 
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "exec/tablet_info.h"
 #include "olap/delta_writer.h"
@@ -195,7 +196,7 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished, const Request&
     tasks.reserve(rowsets_to_commit.size());
     for (auto& rs : rowsets_to_commit) {
         tasks.push_back([&rs_meta = rs->rowset_meta()] {
-            return cloud::meta_mgr()->commit_rowset(rs_meta, true);
+            return cloud::meta_mgr()->commit_rowset(rs_meta.get(), true);
         });
     }
     _close_status = cloud::bthread_fork_and_join(tasks, 10);

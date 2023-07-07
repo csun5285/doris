@@ -1,6 +1,7 @@
 
 // clang-format off
 #include <gen_cpp/selectdb_cloud.pb.h>
+#include <glog/logging.h>
 #include "common/stopwatch.h"
 #include "meta_service.h"
 
@@ -75,9 +76,9 @@ extern void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Tr
                            TabletIndexPB& tablet_idx);
 
 void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss, int& ret,
-                          std::unique_ptr<Transaction>& txn,
-                          const ::selectdb::StartTabletJobRequest* request,
-                          std::string& instance_id, bool& need_commit, ObjectPool& obj_pool) {
+                          std::unique_ptr<Transaction>& txn, const StartTabletJobRequest* request,
+                          StartTabletJobResponse* response, std::string& instance_id,
+                          bool& need_commit, ObjectPool& obj_pool) {
     auto& compaction = request->job().compaction(0);
     if (!compaction.has_id() || compaction.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -132,60 +133,78 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         code = MetaServiceCode::KV_TXN_GET_ERR;
         return;
     }
-    TabletCompactionJobPB* recorded_compaction = nullptr;
     while (ret == 0) {
         job_pb.ParseFromString(job_val);
         if (job_pb.compaction().empty()) {
             break;
         }
-        for (auto& c : *job_pb.mutable_compaction()) {
-            if (c.type() == compaction.type() ||
-                (c.type() == TabletCompactionJobPB::CUMULATIVE &&
-                 compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) ||
-                (c.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE &&
-                 compaction.type() == TabletCompactionJobPB::CUMULATIVE)) {
-                recorded_compaction = &c;
-                break;
+        auto& compactions = *job_pb.mutable_compaction();
+        // Remove expired compaction jobs
+        // clang-format off
+        int64_t now = time(nullptr);
+        compactions.erase(std::remove_if(compactions.begin(), compactions.end(), [&](auto& c) {
+            DCHECK(c.expiration() > 0 || c.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) << proto_to_json(c);
+            DCHECK(c.lease() > 0) << proto_to_json(c);
+            if (c.expiration() > 0 && c.expiration() < now) {
+                INSTANCE_LOG(INFO)
+                        << "got an expired job. job=" << proto_to_json(c) << " now=" << now;
+                return true;
+            }
+            if (c.lease() > 0 && c.lease() < now) {
+                INSTANCE_LOG(INFO)
+                        << "got a job exceeding lease. job=" << proto_to_json(c) << " now=" << now;
+                return true;
+            }
+            return false;
+        }), compactions.end());
+        // clang-format on
+        // Check conflict job
+        if (compaction.input_versions().empty()) {
+            // Unknown input version range, doesn't support parallel compaction of same type
+            for (auto& c : compactions) {
+                if (c.type() != compaction.type()) continue;
+                if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
+                msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,
+                                  proto_to_json(c));
+                code = MetaServiceCode::JOB_TABLET_BUSY;
+                return;
+            }
+        } else {
+            DCHECK_EQ(compaction.input_versions_size(), 2) << proto_to_json(compaction);
+            DCHECK_LE(compaction.input_versions(0), compaction.input_versions(1))
+                    << proto_to_json(compaction);
+            auto version_not_conflict = [](const TabletCompactionJobPB& a,
+                                           const TabletCompactionJobPB& b) {
+                return a.input_versions(0) > b.input_versions(1) ||
+                       a.input_versions(1) < b.input_versions(0);
+            };
+            for (auto& c : compactions) {
+                if (c.type() != compaction.type()) continue;
+                if (c.input_versions_size() > 0 && version_not_conflict(c, compaction)) continue;
+                if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
+                msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,
+                                  proto_to_json(c));
+                code = MetaServiceCode::JOB_TABLET_BUSY;
+                // Unknown version range of started compaction, BE should not retry other version range
+                if (c.input_versions_size() == 0) return;
+                // Notify version ranges in started compaction to BE, so BE can retry other version range
+                for (auto& c : compactions) {
+                    if (c.type() == compaction.type()) {
+                        // If there are multiple started compaction of same type, they all must has input version range
+                        DCHECK_EQ(c.input_versions_size(), 2) << proto_to_json(c);
+                        response->add_version_in_compaction(c.input_versions(0));
+                        response->add_version_in_compaction(c.input_versions(1));
+                    }
+                }
+                return;
             }
         }
-        if (recorded_compaction == nullptr) {
-            break; // no recorded compaction with required compaction type
-        }
-
-        using namespace std::chrono;
-        int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-        if (recorded_compaction->expiration() > 0 && recorded_compaction->expiration() < now) {
-            INSTANCE_LOG(INFO) << "got an expired job, continue to process. job="
-                               << proto_to_json(*recorded_compaction) << " now=" << now;
-            break;
-        }
-        if (recorded_compaction->lease() > 0 && recorded_compaction->lease() < now) {
-            INSTANCE_LOG(INFO) << "got a job exceeding lease, continue to process. job="
-                               << proto_to_json(*recorded_compaction) << " now=" << now;
-            break;
-        }
-
-        SS << "a tablet job has already started instance_id=" << instance_id
-           << " tablet_id=" << tablet_id << " job=" << proto_to_json(*recorded_compaction);
-        msg = ss.str();
-        // TODO(gavin): more condition to check
-        if (compaction.id() == recorded_compaction->id()) {
-            code = MetaServiceCode::OK; // Idempotency
-        } else if (compaction.initiator() == recorded_compaction->initiator()) {
-            INSTANCE_LOG(WARNING) << "preempt compaction job of same initiator. job="
-                                  << proto_to_json(*recorded_compaction);
-            break;
-        } else {
-            code = MetaServiceCode::JOB_TABLET_BUSY;
-        }
-        return;
+        break;
     }
-    job_pb.mutable_idx()->CopyFrom(request->job().idx());
-    if (recorded_compaction != nullptr) {
-        recorded_compaction->CopyFrom(compaction);
-    } else {
-        job_pb.add_compaction()->CopyFrom(compaction);
+    if (!job_pb.has_idx()) {
+        job_pb.mutable_idx()->CopyFrom(request->job().idx());
     }
+    job_pb.add_compaction()->CopyFrom(compaction);
     job_pb.SerializeToString(&job_val);
     if (job_val.empty()) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
@@ -199,8 +218,8 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
 
 void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
                              int& ret, std::unique_ptr<Transaction>& txn,
-                             const ::selectdb::StartTabletJobRequest* request,
-                             std::string& instance_id, bool& need_commit, ObjectPool& obj_pool) {
+                             const StartTabletJobRequest* request, std::string& instance_id,
+                             bool& need_commit, ObjectPool& obj_pool) {
     auto& schema_change = request->job().schema_change();
     if (!schema_change.has_id() || schema_change.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -355,7 +374,8 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
             });
 
     if (!request->job().compaction().empty()) {
-        start_compaction_job(code, msg, ss, ret, txn, request, instance_id, need_commit, obj_pool);
+        start_compaction_job(code, msg, ss, ret, txn, request, response, instance_id, need_commit,
+                             obj_pool);
         return;
     }
 
@@ -482,7 +502,11 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     } else if (compaction.type() == TabletCompactionJobPB::CUMULATIVE) {
         // clang-format off
         stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
-        stats->set_cumulative_point(compaction.output_cumulative_point());
+        if (compaction.output_cumulative_point() > stats->cumulative_point()) {
+            // After supporting parallel cumu compaction, compaction with older cumu point may be committed after
+            // new cumu point has been set, MUST NOT set cumu point back to old value
+            stats->set_cumulative_point(compaction.output_cumulative_point());
+        }
         stats->set_num_rows(stats->num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
         stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
         stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));

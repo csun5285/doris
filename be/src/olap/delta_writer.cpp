@@ -20,6 +20,7 @@
 #include <functional>
 
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -149,9 +150,19 @@ Status DeltaWriter::init() {
     // compaction task to reduce the load pressure each time we meet high load
     // pressure condition
     if (version_cnt > config::max_tablet_version_num / 2) {
-        // trigger compaction early to reduce -235
-        StorageEngine::instance()->submit_compaction_task(_tablet,
-                                                          CompactionType::CUMULATIVE_COMPACTION);
+        using namespace std::chrono;
+        auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        if (now - _tablet->last_cumu_no_suitable_version_ms() >
+            config::min_compaction_failure_interval_sec * 1000) {
+            // trigger compaction early to reduce -235
+            auto st = StorageEngine::instance()->submit_compaction_task(
+                    _tablet, CompactionType::CUMULATIVE_COMPACTION);
+            if (!st.ok()) {
+                LOG_WARNING("failed to trigger compaction early")
+                        .tag("tablet_id", _tablet->tablet_id())
+                        .error(st);
+            }
+        }
         if (version_cnt > config::max_tablet_version_num) {
             LOG_WARNING("tablet exceeds max version num limit")
                     .tag("limit", config::max_tablet_version_num)
@@ -201,7 +212,7 @@ Status DeltaWriter::init() {
     RETURN_NOT_OK(_tablet->create_rowset_writer(context, &_rowset_writer));
     _schema.reset(new Schema(_tablet_schema));
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_rowset_writer->rowset_meta(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_rowset_writer->rowset_meta().get(), true));
 #endif
     _reset_mem_table();
 

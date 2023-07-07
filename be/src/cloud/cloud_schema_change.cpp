@@ -1,6 +1,9 @@
 #include "cloud/cloud_schema_change.h"
 
+#include <gen_cpp/selectdb_cloud.pb.h>
+
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset_factory.h"
@@ -188,9 +191,10 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     new_tablet_idx->set_table_id(new_tablet->table_id());
     new_tablet_idx->set_index_id(new_tablet->index_id());
     new_tablet_idx->set_partition_id(new_tablet->partition_id());
-    auto st = cloud::meta_mgr()->prepare_tablet_job(job);
+    selectdb::StartTabletJobResponse start_resp;
+    auto st = cloud::meta_mgr()->prepare_tablet_job(job, &start_resp);
     if (!st.ok()) {
-        if (st.is<JOB_ALREADY_SUCCESS>()) {
+        if (start_resp.status().code() == selectdb::JOB_ALREADY_SUCCESS) {
             st = new_tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -222,7 +226,8 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         RETURN_IF_ERROR(new_tablet->create_rowset_writer(context, &rowset_writer));
 
         RowsetMetaSharedPtr existed_rs_meta;
-        auto st = meta_mgr()->prepare_rowset(rowset_writer->rowset_meta(), true, &existed_rs_meta);
+        auto st = meta_mgr()->prepare_rowset(rowset_writer->rowset_meta().get(), true,
+                                             &existed_rs_meta);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "
@@ -249,7 +254,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
                                          rs_reader->version().first, rs_reader->version().second);
         }
 
-        st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta(), true, &existed_rs_meta);
+        st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta().get(), true, &existed_rs_meta);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "
@@ -300,10 +305,10 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         sc_job->set_delete_bitmap_lock_initiator(initiator);
     }
 
-    selectdb::TabletStatsPB stats;
-    st = cloud::meta_mgr()->commit_tablet_job(job, &stats);
+    selectdb::FinishTabletJobResponse finish_resp;
+    st = cloud::meta_mgr()->commit_tablet_job(job, &finish_resp);
     if (!st.ok()) {
-        if (st.is<JOB_ALREADY_SUCCESS>()) {
+        if (finish_resp.status().code() == selectdb::JOB_ALREADY_SUCCESS) {
             st = new_tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -314,7 +319,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         }
         return st;
     }
-
+    auto& stats = finish_resp.stats();
     {
         std::lock_guard wlock(new_tablet->get_header_lock());
         // new_tablet's state MUST be `TABLET_NOTREADY`, because we won't sync a new tablet in schema change job
@@ -419,7 +424,7 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
 
     // step4, store delete bitmap
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(new_tablet.get(), -2, initiator,
-                                                            new_delete_bitmap));
+                                                            new_delete_bitmap.get()));
 
     new_tablet->merge_delete_bitmap(*new_delete_bitmap);
     return Status::OK();
@@ -432,18 +437,18 @@ Status CloudSchemaChange::process_alter_inverted_index(const TAlterInvertedIndex
     TabletSharedPtr tablet;
     RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(request.tablet_id, &tablet));
 
-    if (tablet->tablet_state() == TABLET_TOMBSTONED || 
-            tablet->tablet_state() == TABLET_STOPPED ||
-            tablet->tablet_state() == TABLET_SHUTDOWN) {
-        return Status::InternalError("tablet's state={} cannot alter inverted index", tablet->tablet_state());
+    if (tablet->tablet_state() == TABLET_TOMBSTONED || tablet->tablet_state() == TABLET_STOPPED ||
+        tablet->tablet_state() == TABLET_SHUTDOWN) {
+        return Status::InternalError("tablet's state={} cannot alter inverted index",
+                                     tablet->tablet_state());
     }
 
     std::unique_lock<std::mutex> schema_change_lock(tablet->get_schema_change_lock(),
                                                     std::try_to_lock);
     if (!schema_change_lock.owns_lock()) {
-        LOG(WARNING) << "failed to obtain schema change lock. tablet="
-                     << request.tablet_id;
-        return Status::Error<TRY_LOCK_FAILED>();;
+        LOG(WARNING) << "failed to obtain schema change lock. tablet=" << request.tablet_id;
+        return Status::Error<TRY_LOCK_FAILED>();
+        ;
     }
 
     Status res = _do_process_alter_inverted_index(tablet, request);
@@ -527,9 +532,11 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     new_tablet_idx->set_table_id(tablet->table_id());
     new_tablet_idx->set_index_id(tablet->index_id());
     new_tablet_idx->set_partition_id(tablet->partition_id());
-    auto st = cloud::meta_mgr()->prepare_tablet_job(job);
+
+    selectdb::StartTabletJobResponse start_resp;
+    auto st = cloud::meta_mgr()->prepare_tablet_job(job, &start_resp);
     if (!st.ok()) {
-        if (st.is<JOB_ALREADY_SUCCESS>()) {
+        if (start_resp.status().code() == selectdb::JOB_ALREADY_SUCCESS) {
             st = tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync new tablet")
@@ -576,10 +583,10 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
     _output_cumulative_point = std::min(_output_cumulative_point, sc_job->alter_version() + 1);
     sc_job->set_output_cumulative_point(_output_cumulative_point);
 
-    selectdb::TabletStatsPB stats;
-    st = cloud::meta_mgr()->commit_tablet_job(job, &stats);
+    selectdb::FinishTabletJobResponse finish_resp;
+    st = cloud::meta_mgr()->commit_tablet_job(job, &finish_resp);
     if (!st.ok()) {
-        if (st.is<JOB_ALREADY_SUCCESS>()) {
+        if (finish_resp.status().code() == selectdb::JOB_ALREADY_SUCCESS) {
             st = tablet->cloud_sync_rowsets();
             if (!st.ok()) {
                 LOG_WARNING("failed to sync tablet")
@@ -590,7 +597,7 @@ Status CloudSchemaChange::_do_process_alter_inverted_index(TabletSharedPtr table
         }
         return st;
     }
-
+    auto& stats = finish_resp.stats();
     {
         std::lock_guard wlock(tablet->get_header_lock());
         tablet->set_cumulative_layer_point(_output_cumulative_point);
@@ -634,8 +641,8 @@ Status CloudSchemaChange::_add_inverted_index(std::vector<RowsetReaderSharedPtr>
             auto new_tablet_schema = std::make_shared<TabletSchema>();
             new_tablet_schema->update_tablet_columns(*tablet->tablet_schema(), request.columns);
             new_tablet_schema->update_indexes_from_thrift(request.indexes);
-            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) !=
-                Status::OK()) {
+            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(),
+                                                        new_tablet_schema.get())) != Status::OK()) {
                 LOG(WARNING) << "failed to update tablet schema, tablet id: "
                              << tablet->tablet_id();
                 return res;
@@ -652,7 +659,7 @@ Status CloudSchemaChange::_add_inverted_index(std::vector<RowsetReaderSharedPtr>
             rowset_meta->set_tablet_schema(new_rs_tablet_schema);
         }
 
-        auto st = meta_mgr()->commit_rowset(rowset_meta, true, nullptr);
+        auto st = meta_mgr()->commit_rowset(rowset_meta.get(), true, nullptr);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "rowset " << rs_reader->version() << " has already existed in tablet "
@@ -727,8 +734,8 @@ Status CloudSchemaChange::_drop_inverted_index(std::vector<RowsetReaderSharedPtr
             auto new_tablet_schema = std::make_shared<TabletSchema>();
             new_tablet_schema->update_tablet_columns(*tablet->tablet_schema(), request.columns);
             new_tablet_schema->update_indexes_from_thrift(request.indexes);
-            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(), new_tablet_schema)) !=
-                Status::OK()) {
+            if ((res = meta_mgr()->update_tablet_schema(tablet->tablet_id(),
+                                                        new_tablet_schema.get())) != Status::OK()) {
                 LOG(WARNING) << "failed to update tablet schema, tablet id: "
                              << tablet->tablet_id();
                 return res;
@@ -745,7 +752,7 @@ Status CloudSchemaChange::_drop_inverted_index(std::vector<RowsetReaderSharedPtr
             rowset_meta->set_tablet_schema(new_rs_tablet_schema);
         }
 
-        auto st = meta_mgr()->commit_rowset(rowset_meta, true, nullptr);
+        auto st = meta_mgr()->commit_rowset(rowset_meta.get(), true, nullptr);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "rowset " << rs_reader->version() << " has already existed in tablet "

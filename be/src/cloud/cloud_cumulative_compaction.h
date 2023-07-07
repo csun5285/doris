@@ -25,13 +25,15 @@ protected:
     void garbage_collection() override;
 
 private:
-    void update_cumulative_point(int64_t base_compaction_cnt, int64_t cumulative_compaction_cnt);
+    void update_cumulative_point();
 
 private:
     std::string _uuid;
     int64_t _input_segments = 0;
+    int64_t _max_conflict_version = 0;
+    // Snapshot values when pick input rowsets
+    int64_t _base_compaction_cnt = 0;
+    int64_t _cumulative_compaction_cnt = 0;
 };
-
-std::vector<std::shared_ptr<CloudCumulativeCompaction>> get_cumu_compactions();
 
 } // namespace doris

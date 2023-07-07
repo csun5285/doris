@@ -19,11 +19,8 @@
 
 #include <string>
 
-#include "common/sync_point.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
-#include "olap/tablet.h"
-#include "olap/tablet_meta.h"
 
 namespace doris {
 
@@ -55,7 +52,7 @@ public:
     /// param current_cumulative_point, current cumulative point value.
     /// return score, the result score after calculate.
     virtual void calc_cumulative_compaction_score(
-            Tablet* tablet, TabletState state, const std::vector<RowsetMetaSharedPtr>& all_rowsets,
+            Tablet* tablet, const std::vector<RowsetMetaSharedPtr>& all_rowsets,
             int64_t current_cumulative_point, uint32_t* score) = 0;
 
     /// Pick input rowsets from candidate rowsets for compaction. This function is pure virtual function.
@@ -155,7 +152,7 @@ public:
 
     /// Num based cumulative compaction policy implements calc cumulative compaction score function.
     /// Its main policy is calculating the accumulative compaction score after current cumulative_point in tablet.
-    void calc_cumulative_compaction_score(Tablet* tablet, TabletState state,
+    void calc_cumulative_compaction_score(Tablet* tablet,
                                           const std::vector<RowsetMetaSharedPtr>& all_rowsets,
                                           int64_t current_cumulative_point,
                                           uint32_t* score) override;
@@ -174,6 +171,8 @@ private:
     /// when policy calculate cumulative_compaction_score, update promotion size at the same time
     void _refresh_tablet_size_based_promotion_size(Tablet* tablet, int64_t promotion_size);
 
+    int64_t cloud_promotion_size(Tablet* tablet) const;
+
 private:
     /// cumulative compaction promotion size, unit is byte.
     int64_t _size_based_promotion_size;
@@ -183,8 +182,6 @@ private:
     int64_t _size_based_promotion_min_size;
     /// lower bound size to do compaction compaction.
     int64_t _size_based_compaction_lower_bound_size;
-    /// levels division of disk size, same level rowsets can do compaction
-    std::vector<int64_t> _levels;
 };
 
 /// The factory of CumulativeCompactionPolicy, it can product different policy according to the `policy` parameter.

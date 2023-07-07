@@ -75,8 +75,7 @@ public:
     static TabletSharedPtr create_tablet_from_meta(TabletMetaSharedPtr tablet_meta,
                                                    DataDir* data_dir = nullptr);
 
-    Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
-           const std::string& cumulative_compaction_type = "");
+    Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir);
 
     Status init();
     bool init_succeeded();
@@ -200,6 +199,8 @@ public:
 
     bool has_stale_rowsets() const { return !_stale_rs_version_map.empty(); }
 
+    int64_t base_size() const { return _base_size.load(std::memory_order_relaxed); }
+
     // clang-format off
     int64_t fetch_add_approximate_num_rowsets (int64_t x) { return _approximate_num_rowsets .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_num_segments(int64_t x) { return _approximate_num_segments.fetch_add(x, std::memory_order_relaxed); }
@@ -285,6 +286,13 @@ public:
         _last_cumu_compaction_failure_millis = millis;
     }
 
+    int64_t last_cumu_no_suitable_version_ms() const {
+        return _last_cumu_no_suitable_version_millis.load(std::memory_order_relaxed);
+    }
+    void set_last_cumu_no_suitable_version_time(int64_t millis) {
+        _last_cumu_no_suitable_version_millis.store(millis, std::memory_order_relaxed);
+    }
+
     int64_t last_base_compaction_failure_time() { return _last_base_compaction_failure_millis; }
     void set_last_base_compaction_failure_time(int64_t millis) {
         _last_base_compaction_failure_millis = millis;
@@ -349,22 +357,8 @@ public:
 
     double calculate_scan_frequency();
 
-    Status prepare_compaction_and_calculate_permits(CompactionType compaction_type,
-                                                    TabletSharedPtr tablet, int64_t* permits);
-    void execute_compaction(CompactionType compaction_type);
-    void reset_compaction(CompactionType compaction_type);
-
     void set_clone_occurred(bool clone_occurred) { _is_clone_occurred = clone_occurred; }
     bool get_clone_occurred() { return _is_clone_occurred; }
-
-    void set_cumulative_compaction_policy(
-            std::shared_ptr<CumulativeCompactionPolicy> cumulative_compaction_policy) {
-        _cumulative_compaction_policy = cumulative_compaction_policy;
-    }
-
-    std::shared_ptr<CumulativeCompactionPolicy> get_cumulative_compaction_policy() {
-        return _cumulative_compaction_policy;
-    }
 
     inline bool all_beta() const {
         std::shared_lock rdlock(_meta_lock);
@@ -463,6 +457,13 @@ public:
 
     RowsetSharedPtr get_rowset(const RowsetId& rowset_id);
 
+    void traverse_rowsets(std::function<void(const RowsetSharedPtr&)> visitor) {
+        std::shared_lock rlock(_meta_lock);
+        for (auto& [_, rs] : _rs_version_map) {
+            visitor(rs);
+        }
+    }
+
     std::vector<RowsetSharedPtr> get_snapshot_rowset() const;
 
 private:
@@ -545,6 +546,8 @@ private:
     std::atomic<bool> _is_bad;
     // timestamp of last cumu compaction failure
     std::atomic<int64_t> _last_cumu_compaction_failure_millis;
+    // timestamp of last no suitable version for cumu compaction
+    std::atomic<int64_t> _last_cumu_no_suitable_version_millis;
     // timestamp of last base compaction failure
     std::atomic<int64_t> _last_base_compaction_failure_millis;
     // timestamp of last cumu compaction success
@@ -561,6 +564,9 @@ private:
     int64_t _base_compaction_cnt = 0;
     int64_t _cumulative_compaction_cnt = 0;
     int64_t _max_version = -1;
+    // FIXME(plat1ko): No need to record base size if rowsets are ordered by version
+    void update_base_size(const Rowset& rs);
+    std::atomic<int64_t> _base_size = 0;
     std::atomic<int64_t> _last_sync_time = 0;
     std::atomic<int64_t> _approximate_num_rowsets {-1};
     std::atomic<int64_t> _approximate_num_rows {-1};
@@ -568,10 +574,6 @@ private:
     std::atomic<int64_t> _approximate_data_size {-1};
     std::atomic<int64_t> _approximate_cumu_num_rowsets {-1};
     std::atomic<int64_t> _approximate_cumu_data_size {-1};
-
-    // cumulative compaction policy
-    std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
-    std::string _cumulative_compaction_type;
 
     // the value of metric 'query_scan_count' and timestamp will be recorded when every time
     // 'config::tablet_scan_frequency_time_node_interval_second' passed to calculate tablet
@@ -581,8 +583,6 @@ private:
     // the timestamp of the last record.
     time_t _last_record_scan_count_timestamp;
 
-    std::shared_ptr<CumulativeCompaction> _cumulative_compaction;
-    std::shared_ptr<BaseCompaction> _base_compaction;
     // whether clone task occurred during the tablet is in thread pool queue to wait for compaction
     std::atomic<bool> _is_clone_occurred;
 
@@ -602,10 +602,6 @@ public:
     IntCounter* flush_finish_count;
     std::atomic<int64_t> publised_count = 0;
 };
-
-inline CumulativeCompactionPolicy* Tablet::cumulative_compaction_policy() {
-    return _cumulative_compaction_policy.get();
-}
 
 inline bool Tablet::init_succeeded() {
     return _init_once.has_called() && _init_once.stored_result().ok();

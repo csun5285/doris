@@ -18,6 +18,7 @@
 #include "olap/task/engine_calc_delete_bitmap_task.h"
 
 #include "cloud/utils.h"
+#include "cloud/meta_mgr.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset.h"
 #include "util/defer_op.h"

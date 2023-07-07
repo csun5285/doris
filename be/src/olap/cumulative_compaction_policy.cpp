@@ -17,10 +17,11 @@
 
 #include "olap/cumulative_compaction_policy.h"
 
-#include <boost/algorithm/string.hpp>
 #include <string>
 
-#include "util/time.h"
+#include "common/sync_point.h"
+#include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 
 namespace doris {
 
@@ -150,7 +151,7 @@ void SizeBasedCumulativeCompactionPolicy::update_cumulative_point(
 }
 
 void SizeBasedCumulativeCompactionPolicy::calc_cumulative_compaction_score(
-        Tablet* tablet, TabletState state, const std::vector<RowsetMetaSharedPtr>& all_metas,
+        Tablet* tablet, const std::vector<RowsetMetaSharedPtr>& all_metas,
         int64_t current_cumulative_point, uint32_t* score) {
     bool base_rowset_exist = false;
     const int64_t point = current_cumulative_point;
@@ -195,7 +196,7 @@ void SizeBasedCumulativeCompactionPolicy::calc_cumulative_compaction_score(
 
     // If base version does not exist, but its state is RUNNING.
     // It is abnormal, do not select it and set *score = 0
-    if (!base_rowset_exist && state == TABLET_RUNNING) {
+    if (!base_rowset_exist && tablet->tablet_state() == TABLET_RUNNING) {
         LOG(WARNING) << "tablet state is running but have no base version";
         *score = 0;
         return;
@@ -232,17 +233,6 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         std::vector<RowsetSharedPtr>* input_rowsets, Version* last_delete_version,
         size_t* compaction_score) {
     int64_t promotion_size = tablet->cumulative_promotion_size();
-#ifdef CLOUD_MODE
-    {
-        std::shared_lock rlock(tablet->get_header_lock());
-        for (auto& rs_meta : tablet->tablet_meta()->all_rs_metas()) {
-            if (rs_meta->start_version() == 2) {
-                _calc_promotion_size(tablet, rs_meta, &promotion_size);
-                break;
-            }
-        }
-    }
-#endif
     auto max_version = tablet->max_version().first;
     int transient_size = 0;
     *compaction_score = 0;
@@ -372,6 +362,14 @@ int64_t SizeBasedCumulativeCompactionPolicy::_level_size(const int64_t size) {
     return (int64_t)1 << (sizeof(size) * 8 - 1 - __builtin_clzl(size));
 }
 
+int64_t SizeBasedCumulativeCompactionPolicy::cloud_promotion_size(Tablet* t) const {
+    int64_t promotion_size = t->base_size() * _size_based_promotion_ratio;
+    // promotion_size is between _size_based_promotion_size and _size_based_promotion_min_size
+    return promotion_size > _size_based_promotion_size       ? _size_based_promotion_size
+           : promotion_size < _size_based_promotion_min_size ? _size_based_promotion_min_size
+                                                             : promotion_size;
+}
+
 int64_t SizeBasedCumulativeCompactionPolicy::new_cumulative_point(
         Tablet* tablet, const RowsetSharedPtr& output_rowset, Version& last_delete_version,
         int64_t last_cumulative_point) {
@@ -379,16 +377,16 @@ int64_t SizeBasedCumulativeCompactionPolicy::new_cumulative_point(
                                            last_cumulative_point);
     // if rowsets have delete version, move to the last directly.
     // if rowsets have no delete version, check output_rowset total disk size satisfies promotion size.
-    return (output_rowset->start_version() == last_cumulative_point &&
-            (last_delete_version.first != -1 ||
-             output_rowset->data_disk_size() >= tablet->cumulative_promotion_size()))
+    return output_rowset->start_version() == last_cumulative_point &&
+                           (last_delete_version.first != -1 ||
+                            output_rowset->data_disk_size() >= cloud_promotion_size(tablet))
                    ? output_rowset->end_version() + 1
                    : last_cumulative_point;
 }
 
 std::shared_ptr<CumulativeCompactionPolicy>
 CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy() {
-    return std::unique_ptr<CumulativeCompactionPolicy>(new SizeBasedCumulativeCompactionPolicy());
+    return std::make_shared<SizeBasedCumulativeCompactionPolicy>();
 }
 
 } // namespace doris

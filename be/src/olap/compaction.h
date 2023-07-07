@@ -35,19 +35,16 @@ namespace doris {
 class DataDir;
 
 // This class is a base class for compaction.
-// The entrance of this class is compact()
 // Any compaction should go through four procedures.
 //  1. pick rowsets satisfied to compact
 //  2. do compaction
 //  3. modify rowsets
 //  4. gc output rowset if failed
-class Compaction : public std::enable_shared_from_this<Compaction> {
+class Compaction {
 public:
     Compaction(TabletSharedPtr tablet, const std::string& label);
     virtual ~Compaction();
 
-    // This is only for http CompactionAction
-    Status compact();
     Status quick_rowsets_compact();
 
     virtual Status prepare_compact() = 0;

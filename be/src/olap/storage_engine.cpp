@@ -29,6 +29,7 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <new>
 #include <queue>
 #include <random>
@@ -40,6 +41,7 @@
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
 #include "cloud/cloud_meta_mgr.h"
+#include "cloud/cloud_tablet_mgr.h"
 #include "cloud/io/file_system_map.h"
 #include "cloud/io/s3_file_system.h"
 #include "cloud/utils.h"
@@ -131,7 +133,11 @@ StorageEngine::StorageEngine(const EngineOptions& options)
           _memtable_flush_executor(nullptr),
           _default_rowset_type(BETA_ROWSET),
           _heartbeat_flags(nullptr),
-          _stream_load_recorder(nullptr) {
+          _stream_load_recorder(nullptr),
+          _cumulative_compaction_policy(
+                  CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy()),
+          _meta_mgr(std::make_unique<cloud::CloudMetaMgr>()),
+          _tablet_mgr(std::make_unique<cloud::CloudTabletMgr>()) {
     _s_instance = this;
     REGISTER_HOOK_METRIC(unused_rowsets_count, [this]() {
         // std::lock_guard<std::mutex> lock(_gc_mutex);
@@ -195,7 +201,6 @@ Status StorageEngine::_open() {
     auto dirs = get_stores<false>();
 #ifdef CLOUD_MODE
     CHECK(dirs.size() == 1);
-    _meta_mgr = std::make_unique<cloud::CloudMetaMgr>();
     RETURN_IF_ERROR(_meta_mgr->open());
     std::vector<std::tuple<std::string, S3Conf>> s3_infos;
 
@@ -1073,88 +1078,38 @@ bool StorageEngine::check_rowset_id_in_unused_rowsets(const RowsetId& rowset_id)
     return search != _unused_rowsets.end();
 }
 
-void StorageEngine::create_cumulative_compaction(
-        TabletSharedPtr best_tablet, std::shared_ptr<CumulativeCompaction>& cumulative_compaction) {
-#ifdef CLOUD_MODE
-    cumulative_compaction.reset(new CloudCumulativeCompaction(best_tablet));
-#else
-    cumulative_compaction.reset(new CumulativeCompaction(best_tablet));
-#endif
-}
-
-void StorageEngine::create_base_compaction(TabletSharedPtr best_tablet,
-                                           std::shared_ptr<BaseCompaction>& base_compaction) {
-#ifdef CLOUD_MODE
-    base_compaction.reset(new CloudBaseCompaction(best_tablet));
-#else
-    base_compaction.reset(new BaseCompaction(best_tablet));
-#endif
-}
-
 // Return json:
 // {
-//   "CumulativeCompaction": {
-//          "/home/disk1" : [10001, 10002],
-//          "/home/disk2" : [10003]
-//   },
-//   "BaseCompaction": {
-//          "/home/disk1" : [10001, 10002],
-//          "/home/disk2" : [10003]
-//   }
+//   "CumulativeCompaction": [10001, 10002],
+//   "BaseCompaction": [10001, 10002]
 // }
 Status StorageEngine::get_compaction_status_json(std::string* result) {
     rapidjson::Document root;
     root.SetObject();
 
-    std::unique_lock<std::mutex> lock(_tablet_submitted_compaction_mutex);
-    const std::string& cumu = "CumulativeCompaction";
-    rapidjson::Value cumu_key;
-    cumu_key.SetString(cumu.c_str(), cumu.length(), root.GetAllocator());
-
+    std::lock_guard lock(_compaction_mtx);
     // cumu
-    rapidjson::Document path_obj;
-    path_obj.SetObject();
-    for (auto& it : _tablet_submitted_cumu_compaction) {
-        const std::string& dir = it.first->path();
-        rapidjson::Value path_key;
-        path_key.SetString(dir.c_str(), dir.length(), path_obj.GetAllocator());
-
-        rapidjson::Document arr;
-        arr.SetArray();
-
-        for (auto& tablet_id : it.second) {
-            rapidjson::Value key;
-            const std::string& key_str = std::to_string(tablet_id);
-            key.SetString(key_str.c_str(), key_str.length(), path_obj.GetAllocator());
-            arr.PushBack(key, root.GetAllocator());
+    std::string_view cumu = "CumulativeCompaction";
+    rapidjson::Value cumu_key;
+    cumu_key.SetString(cumu.data(), cumu.length(), root.GetAllocator());
+    rapidjson::Document cumu_arr;
+    cumu_arr.SetArray();
+    for (auto& [tablet_id, v] : _submitted_cumu_compactions) {
+        for (int i = 0; i < v.size(); ++i) {
+            cumu_arr.PushBack(tablet_id, root.GetAllocator());
         }
-        path_obj.AddMember(path_key, arr, path_obj.GetAllocator());
     }
-    root.AddMember(cumu_key, path_obj, root.GetAllocator());
-
+    root.AddMember(cumu_key, cumu_arr, root.GetAllocator());
     // base
-    const std::string& base = "BaseCompaction";
+    std::string_view base = "BaseCompaction";
     rapidjson::Value base_key;
-    base_key.SetString(base.c_str(), base.length(), root.GetAllocator());
-    rapidjson::Document path_obj2;
-    path_obj2.SetObject();
-    for (auto& it : _tablet_submitted_base_compaction) {
-        const std::string& dir = it.first->path();
-        rapidjson::Value path_key;
-        path_key.SetString(dir.c_str(), dir.length(), path_obj2.GetAllocator());
-
-        rapidjson::Document arr;
-        arr.SetArray();
-
-        for (auto& tablet_id : it.second) {
-            rapidjson::Value key;
-            const std::string& key_str = std::to_string(tablet_id);
-            key.SetString(key_str.c_str(), key_str.length(), path_obj2.GetAllocator());
-            arr.PushBack(key, root.GetAllocator());
-        }
-        path_obj2.AddMember(path_key, arr, path_obj2.GetAllocator());
+    base_key.SetString(base.data(), base.length(), root.GetAllocator());
+    rapidjson::Document base_arr;
+    base_arr.SetArray();
+    for (auto& [tablet_id, _] : _submitted_base_compactions) {
+        base_arr.PushBack(tablet_id, root.GetAllocator());
     }
-    root.AddMember(base_key, path_obj2, root.GetAllocator());
+    root.AddMember(base_key, base_arr, root.GetAllocator());
 
     rapidjson::StringBuffer strbuf;
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(strbuf);

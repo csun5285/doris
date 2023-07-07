@@ -17,34 +17,6 @@
 
 #pragma once
 
-#include "cloud/io/file_system.h"
-#include "cloud/meta_mgr.h"
-#include "cloud/olap//delete_bitmap_txn_manager.h"
-#include "cloud/olap/segment.h"
-#include "common/status.h"
-#include "gen_cpp/AgentService_types.h"
-#include "gen_cpp/BackendService_types.h"
-#include "gen_cpp/MasterService_types.h"
-#include "gutil/ref_counted.h"
-#include "olap/compaction_permit_limiter.h"
-#include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "olap/olap_meta.h"
-#include "olap/options.h"
-#include "olap/rowset/rowset_id_generator.h"
-#include "olap/tablet_manager.h"
-#include "olap/task/engine_task.h"
-#include "olap/txn_manager.h"
-#include "runtime/heartbeat_flags.h"
-#include "runtime/stream_load/stream_load_recorder.h"
-#include "util/countdown_latch.h"
-#include "util/thread.h"
-#include "util/threadpool.h"
-
-#include "rapidjson/document.h"
-
-#include <pthread.h>
-
 #include <condition_variable>
 #include <ctime>
 #include <list>
@@ -55,8 +27,35 @@
 #include <thread>
 #include <vector>
 
+#include "cloud/io/file_system.h"
+#include "cloud/olap/delete_bitmap_txn_manager.h"
+#include "cloud/olap/segment.h"
+#include "common/status.h"
+#include "gen_cpp/AgentService_types.h"
+#include "gen_cpp/BackendService_types.h"
+#include "gen_cpp/MasterService_types.h"
+#include "gutil/ref_counted.h"
+#include "olap/olap_common.h"
+#include "olap/olap_define.h"
+#include "olap/olap_meta.h"
+#include "olap/options.h"
+#include "olap/rowset/rowset_id_generator.h"
+#include "olap/tablet.h"
+#include "olap/tablet_manager.h"
+#include "olap/task/engine_task.h"
+#include "olap/txn_manager.h"
+#include "rapidjson/document.h"
+#include "runtime/heartbeat_flags.h"
+#include "runtime/stream_load/stream_load_recorder.h"
+#include "util/countdown_latch.h"
+#include "util/thread.h"
+#include "util/threadpool.h"
 
 namespace doris {
+namespace cloud {
+class MetaMgr;
+class CloudTabletMgr;
+} // namespace cloud
 
 class DataDir;
 class EngineTask;
@@ -65,6 +64,9 @@ class MemTableFlushExecutor;
 class Tablet;
 class TaskWorkerPool;
 class BetaRowsetWriter;
+class CloudCumulativeCompaction;
+class CloudBaseCompaction;
+class CumulativeCompactionPolicy;
 
 using SegCompactionCandidates = std::vector<segment_v2::SegmentSharedPtr>;
 using SegCompactionCandidatesSharedPtr = std::shared_ptr<SegCompactionCandidates>;
@@ -158,6 +160,16 @@ public:
     MemTableFlushExecutor* memtable_flush_executor() { return _memtable_flush_executor.get(); }
 
     cloud::MetaMgr* meta_mgr() { return _meta_mgr.get(); }
+    cloud::CloudTabletMgr* tablet_mgr() { return _tablet_mgr.get(); }
+
+    CumulativeCompactionPolicy* cumu_compaction_policy() const {
+        return _cumulative_compaction_policy.get();
+    }
+
+    bool has_base_compaction(int64_t tablet_id) const;
+    bool has_cumu_compaction(int64_t tablet_id) const;
+    void get_cumu_compaction(int64_t tablet_id,
+                             std::vector<std::shared_ptr<CloudCumulativeCompaction>>& res);
 
     bool check_rowset_id_in_unused_rowsets(const RowsetId& rowset_id);
 
@@ -196,11 +208,6 @@ public:
 
     bool stopped() { return _stopped; }
 
-    void create_cumulative_compaction(TabletSharedPtr best_tablet,
-                                      std::shared_ptr<CumulativeCompaction>& cumulative_compaction);
-    void create_base_compaction(TabletSharedPtr best_tablet,
-                                std::shared_ptr<BaseCompaction>& base_compaction);
-
     std::shared_ptr<StreamLoadRecorder> get_stream_load_recorder() { return _stream_load_recorder; }
 
     Status get_compaction_status_json(std::string* result);
@@ -211,7 +218,7 @@ public:
     // check cumulative compaction config
     void check_cumulative_compaction_config();
 
-    Status submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type);
+    Status submit_compaction_task(const TabletSharedPtr& tablet, CompactionType compaction_type);
     Status submit_quick_compaction_task(TabletSharedPtr tablet);
     Status submit_seg_compaction_task(BetaRowsetWriter* writer,
                                       SegCompactionCandidatesSharedPtr segments);
@@ -298,26 +305,10 @@ private:
 
     void _compaction_tasks_producer_callback();
 
-    std::vector<TabletSharedPtr> _generate_compaction_tasks(CompactionType compaction_type,
-                                                            std::vector<DataDir*>& data_dirs,
-                                                            bool check_score);
-
     std::vector<TabletSharedPtr> _generate_cloud_compaction_tasks(CompactionType compaction_type,
-                                                                  std::vector<DataDir*>& data_dirs,
                                                                   bool check_score);
 
-    void _update_cumulative_compaction_policy();
-
-    bool _push_tablet_into_submitted_compaction(TabletSharedPtr tablet,
-                                                CompactionType compaction_type);
-    void _pop_tablet_from_submitted_compaction(TabletSharedPtr tablet,
-                                               CompactionType compaction_type);
-
     Status _init_stream_load_recorder(const std::string& stream_load_record_path);
-
-    Status _submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type);
-
-    Status _handle_quick_compaction(TabletSharedPtr);
 
     void _adjust_compaction_thread_num();
 
@@ -327,35 +318,6 @@ private:
                                   SegCompactionCandidatesSharedPtr segments);
 
 private:
-    struct CompactionCandidate {
-        CompactionCandidate(uint32_t nicumulative_compaction_, int64_t tablet_id_, uint32_t index_)
-                : nice(nicumulative_compaction_), tablet_id(tablet_id_), disk_index(index_) {}
-        uint32_t nice; // priority
-        int64_t tablet_id;
-        uint32_t disk_index = -1;
-    };
-
-    // In descending order
-    struct CompactionCandidateComparator {
-        bool operator()(const CompactionCandidate& a, const CompactionCandidate& b) {
-            return a.nice > b.nice;
-        }
-    };
-
-    struct CompactionDiskStat {
-        CompactionDiskStat(std::string path, uint32_t index, bool used)
-                : storage_path(path),
-                  disk_index(index),
-                  task_running(0),
-                  task_remaining(0),
-                  is_used(used) {}
-        const std::string storage_path;
-        const uint32_t disk_index;
-        uint32_t task_running;
-        uint32_t task_remaining;
-        bool is_used;
-    };
-
     EngineOptions _options;
     std::mutex _store_lock;
     std::mutex _trash_sweep_lock;
@@ -440,17 +402,14 @@ private:
 
     std::unique_ptr<ThreadPool> _tablet_calc_delete_bitmap_thread_pool;
 
-    CompactionPermitLimiter _permit_limiter;
-
-    std::mutex _tablet_submitted_compaction_mutex;
-    // a tablet can do base and cumulative compaction at same time
-    std::map<DataDir*, std::unordered_set<TTabletId>> _tablet_submitted_cumu_compaction;
-    std::map<DataDir*, std::unordered_set<TTabletId>> _tablet_submitted_base_compaction;
-
-    std::atomic<int32_t> _wakeup_producer_flag {0};
-
-    std::mutex _compaction_producer_sleep_mutex;
-    std::condition_variable _compaction_producer_sleep_cv;
+    mutable std::mutex _compaction_mtx;
+    // tablet_id -> submitted base compaction, guarded by `_compaction_mtx`
+    std::unordered_map<int64_t, std::shared_ptr<CloudBaseCompaction>> _submitted_base_compactions;
+    // Store tablets which are preparing cumu compaction, guarded by `_compaction_mtx`
+    std::unordered_set<int64_t> _tablet_preparing_cumu_compaction;
+    // tablet_id -> submitted cumu compactions, guarded by `_compaction_mtx`
+    std::unordered_map<int64_t, std::vector<std::shared_ptr<CloudCumulativeCompaction>>>
+            _submitted_cumu_compactions;
 
     std::shared_ptr<StreamLoadRecorder> _stream_load_recorder;
 
@@ -467,6 +426,7 @@ private:
     std::unordered_set<int64_t> _running_cooldown_tablets;
 
     std::unique_ptr<cloud::MetaMgr> _meta_mgr;
+    std::unique_ptr<cloud::CloudTabletMgr> _tablet_mgr;
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
 

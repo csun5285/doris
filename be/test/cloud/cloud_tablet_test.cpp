@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "cloud/olap/storage_engine.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/unique_rowset_id_generator.h"
 #include "olap/tablet.h"
@@ -67,6 +68,7 @@ TEST(CloudTabletTest, calc_missed_versions) {
 }
 
 TEST(CloudTabletTest, add_rowsets) {
+    StorageEngine storage_engine({});
     auto tablet_meta = std::make_shared<TabletMeta>();
     Tablet tablet(std::move(tablet_meta), nullptr);
     {

@@ -1767,8 +1767,7 @@ TEST(MetaServiceTest, CalcSyncVersionsTest) {
         auto [req_start, req_end] = std::tuple {8, 12};
         auto versions = calc_sync_versions(req_bc_cnt, bc_cnt, req_cc_cnt, cc_cnt, req_cp, cp,
                                            req_start, req_end);
-        ASSERT_EQ(versions,
-                  (Versions {{5, std::numeric_limits<int64_t>::max() - 1}})); // [5, max] v [8, 12]
+        ASSERT_EQ(versions, (Versions {{5, INT64_MAX - 1}})); // [5, max] v [8, 12]
     }
     // * more than one CC happened and CP remain unchanged
     // req_cc_cnt < ms_cc_cnt - 1 && req_bc_cnt == ms_bc_cnt && req_cp == ms_cp
@@ -1784,16 +1783,14 @@ TEST(MetaServiceTest, CalcSyncVersionsTest) {
         auto [req_start, req_end] = std::tuple {8, 12};
         auto versions = calc_sync_versions(req_bc_cnt, bc_cnt, req_cc_cnt, cc_cnt, req_cp, cp,
                                            req_start, req_end);
-        ASSERT_EQ(versions,
-                  (Versions {{5, std::numeric_limits<int64_t>::max() - 1}})); // [5, max] v [8, 12]
+        ASSERT_EQ(versions, (Versions {{5, INT64_MAX - 1}})); // [5, max] v [8, 12]
     }
     // * more than one CC happened and CP changed
-    // req_cc_cnt < ms_cc_cnt - 1 && req_bc_cnt == ms_bc_cnt && req_cp < ms_cp
-    // BE  [=][=][=][=][=====][=][=]<.......>
+    // BE  [=][=][=][=][=====][=][=]
     //                  ^~~~~ req_cp
     // MS  [=][=][=][=][xxxxxxxxxxxxxx][xxxxxxx][=][=]
-    //                                           ^~~~~~~ ms_cp
-    //                  ^_____________________^ versions_return: [req_cp, ms_cp - 1] v [req_start, req_end]
+    //                                  ^~~~~~~ ms_cp
+    //                  ^_____________________^ related_versions: [req_cp, max] v [req_start, req_end]
     {
         auto [req_bc_cnt, bc_cnt] = std::tuple {0, 0};
         auto [req_cc_cnt, cc_cnt] = std::tuple {1, 3};
@@ -1801,7 +1798,7 @@ TEST(MetaServiceTest, CalcSyncVersionsTest) {
         auto [req_start, req_end] = std::tuple {8, 12};
         auto versions = calc_sync_versions(req_bc_cnt, bc_cnt, req_cc_cnt, cc_cnt, req_cp, cp,
                                            req_start, req_end);
-        ASSERT_EQ(versions, (Versions {{5, 14}})); // [5, 14] v [8, 12]
+        ASSERT_EQ(versions, (Versions {{5, INT64_MAX - 1}})); // [5, max] v [8, 12]
     }
     // * for any BC happended
     // req_bc_cnt < ms_bc_cnt
@@ -1854,7 +1851,7 @@ TEST(MetaServiceTest, CalcSyncVersionsTest) {
         auto versions = calc_sync_versions(req_bc_cnt, bc_cnt, req_cc_cnt, cc_cnt, req_cp, cp,
                                            req_start, req_end);
         // [0, 4] v [5, max] v [8, 12]
-        ASSERT_EQ(versions, (Versions {{0, std::numeric_limits<int64_t>::max() - 1}}));
+        ASSERT_EQ(versions, (Versions {{0, INT64_MAX - 1}}));
     }
 }
 
@@ -2421,7 +2418,8 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     get_lock_req.set_lock_id(888);
     get_lock_req.set_initiator(-1);
     meta_service->get_delete_bitmap_update_lock(
-            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &get_lock_req, &get_lock_res, nullptr);
+            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &get_lock_req,
+            &get_lock_res, nullptr);
     ASSERT_EQ(get_lock_res.status().code(), MetaServiceCode::OK);
 
     // first update delete bitmap
@@ -2586,7 +2584,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         int64_t table_id = 123456; // same as table_id of tmp rowset
         int64_t db_id = 222;
         int64_t tablet_id_base = 8113;
-        int64_t partition_id =  1234;
+        int64_t partition_id = 1234;
         // begin txn
         {
             brpc::Controller cntl;
@@ -2651,14 +2649,14 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
                     reinterpret_cast<google::protobuf::RpcController*>(&cntl),
                     &update_delete_bitmap_req, &update_delete_bitmap_res, nullptr);
             ASSERT_EQ(update_delete_bitmap_res.status().code(), MetaServiceCode::OK);
-
         }
 
         // check delete bitmap update lock and pending delete bitmap
         {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-            std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+            std::string lock_key =
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 0);
@@ -2669,7 +2667,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
             ASSERT_EQ(ret, 0);
         }
 
-         // commit txn
+        // commit txn
         {
             brpc::Controller cntl;
             CommitTxnRequest req;
@@ -2687,7 +2685,8 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-            std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+            std::string lock_key =
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 1);

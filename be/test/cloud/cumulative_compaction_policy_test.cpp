@@ -23,6 +23,7 @@
 
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/rowset_meta.h"
+#include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 
 namespace doris {

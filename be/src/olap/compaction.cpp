@@ -22,6 +22,7 @@
 #include <chrono>
 
 #include "cloud/io/cloud_file_cache_factory.h"
+#include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/status.h"
 #include "common/sync_point.h"
@@ -51,12 +52,6 @@ Compaction::Compaction(TabletSharedPtr tablet, const std::string& label)
 }
 
 Compaction::~Compaction() {}
-
-Status Compaction::compact() {
-    RETURN_NOT_OK(prepare_compact());
-    RETURN_NOT_OK(execute_compact());
-    return Status::OK();
-}
 
 Status Compaction::execute_compact() {
     Status st = execute_compact_impl();
@@ -324,15 +319,12 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         } else {
             _tablet->set_last_base_compaction_success_time(now);
         }
-        auto cumu_policy = _tablet->cumulative_compaction_policy();
         LOG(INFO) << "succeed to do ordered data " << merge_type << compaction_name()
                   << ". tablet=" << _tablet->full_name() << ", output_version=" << _output_version
                   << ", disk=" << _tablet->data_dir()->path()
                   << ", segments=" << _input_num_segments << ", input_row_num=" << _input_row_num
                   << ", output_row_num=" << _output_rowset->num_rows()
-                  << ". elapsed time=" << watch.get_elapse_second()
-                  << "s. cumulative_compaction_policy="
-                  << (cumu_policy == nullptr ? "quick" : cumu_policy->name());
+                  << ". elapsed time=" << watch.get_elapse_second() << 's';
         return Status::OK();
     }
     build_basic_info();
@@ -378,7 +370,8 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         RETURN_IF_ERROR(_tablet->create_rowset_writer(context, &_output_rs_writer));
     }
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta(), true));
+    RETURN_IF_ERROR(
+            cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta().get(), true));
 #endif
 
     RETURN_NOT_OK(construct_input_rowset_readers());
@@ -425,7 +418,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         return Status::Error<ROWSET_BUILDER_INIT>();
     }
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get(), true));
 #endif
     TRACE_COUNTER_INCREMENT("output_rowset_data_size", _output_rowset->data_disk_size());
     TRACE_COUNTER_INCREMENT("output_row_num", _output_rowset->num_rows());
@@ -692,7 +685,7 @@ Status Compaction::check_correctness(const Merger::Statistics& stats) {
 
 int64_t Compaction::get_compaction_permits() {
     int64_t permits = 0;
-    for (auto rowset : _input_rowsets) {
+    for (auto& rowset : _input_rowsets) {
         permits += rowset->rowset_meta()->get_compaction_score();
     }
     return permits;
