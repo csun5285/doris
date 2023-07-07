@@ -540,7 +540,7 @@ void InvertedIndexVisitor::visit(std::vector<char>& docID, std::vector<uint8_t>&
     visit(roaring::Roaring::read(docID.data(), false));
 }
 
-void InvertedIndexVisitor::visit(Roaring* docID, std::vector<uint8_t>& packedValue) {
+void InvertedIndexVisitor::visit(roaring::Roaring* docID, std::vector<uint8_t>& packedValue) {
     if (!matches(packedValue.data())) {
         return;
     }
