@@ -18,12 +18,15 @@
 #include "util/trace.h"
 
 #include <glog/logging.h>
-#include <rapidjson/rapidjson.h>
+#include <rapidjson/encodings.h>
+#include <stdlib.h>
+#include <time.h>
 
-#include <cstdint>
+#include <algorithm>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <string>
@@ -31,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "gutil/stringprintf.h"
 #include "gutil/strings/substitute.h"
 //#include "util/memory/arena.h"
 
@@ -42,7 +46,7 @@ using strings::internal::SubstituteArg;
 namespace doris {
 
 // Format a timestamp in the same format as used by GLog.
-static std::string FormatTimestampForLog(MicrosecondsInt64 micros_since_epoch) {
+static std::string FormatTimestampForLog(int64_t micros_since_epoch) {
     time_t secs_since_epoch = micros_since_epoch / 1000000;
     int usecs = micros_since_epoch % 1000000;
     struct tm tm_time;
@@ -66,7 +70,7 @@ Trace::Trace()
 
 // Struct which precedes each entry in the trace.
 struct TraceEntry {
-    MicrosecondsInt64 timestamp_micros;
+    int64_t timestamp_micros;
 
     // The source file and line number which generated the trace message.
     const char* file_path;

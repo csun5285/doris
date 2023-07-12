@@ -17,27 +17,39 @@
 
 #pragma once
 
+#include <butil/macros.h>
+#include <fmt/format.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <gen_cpp/types.pb.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <ostream>
+#include <string>
 #include <vector>
 
-#include "cloud/io/remote_file_system.h"
-#include "env/env.h"
+#include "io/fs/remote_file_system.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gutil/macros.h"
+#include "common/logging.h"
+#include "common/status.h"
+#include "olap/olap_common.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet_schema.h"
 #include "util/lock.h"
 
 namespace doris {
 
-class DataDir;
-class OlapTuple;
-class RowCursor;
 class Rowset;
+
+namespace io {
+class RemoteFileSystem;
+} // namespace io
+
 using RowsetSharedPtr = std::shared_ptr<Rowset>;
-class RowsetFactory;
 class RowsetReader;
 
 // the rowset state transfer graph:
@@ -121,18 +133,6 @@ public:
     // returns Status::Error<ErrorCode::ROWSET_CREATE_READER>() when failed to create reader
     virtual Status create_reader(std::shared_ptr<RowsetReader>* result) = 0;
 
-    // Split range denoted by `start_key` and `end_key` into sub-ranges, each contains roughly
-    // `request_block_row_count` rows. Sub-range is represented by pair of OlapTuples and added to `ranges`.
-    //
-    // e.g., if the function generates 2 sub-ranges, the result `ranges` should contain 4 tuple: t1, t2, t2, t3.
-    // Note that the end tuple of sub-range i is the same as the start tuple of sub-range i+1.
-    //
-    // The first/last tuple must be start_key/end_key.to_tuple(). If we can't divide the input range,
-    // the result `ranges` should be [start_key.to_tuple(), end_key.to_tuple()]
-    virtual Status split_range(const RowCursor& start_key, const RowCursor& end_key,
-                               uint64_t request_block_row_count, size_t key_num,
-                               std::vector<OlapTuple>* ranges) = 0;
-
     const RowsetMetaSharedPtr& rowset_meta() const { return _rowset_meta; }
 
     bool is_pending() const { return _is_pending; }
@@ -162,7 +162,7 @@ public:
     int64_t num_segments() const { return rowset_meta()->num_segments(); }
     void to_rowset_pb(RowsetMetaPB* rs_meta) const { return rowset_meta()->to_rowset_pb(rs_meta); }
     RowsetMetaPB get_rowset_pb() const { return rowset_meta()->get_rowset_pb(); }
-    int64_t oldest_write_timestamp() const { return rowset_meta()->oldest_write_timestamp(); }
+    // The writing time of the newest data in rowset, to measure the freshness of a rowset.
     int64_t newest_write_timestamp() const { return rowset_meta()->newest_write_timestamp(); }
     bool is_segments_overlapping() const { return rowset_meta()->is_segments_overlapping(); }
     KeysType keys_type() { return _schema->keys_type(); }
@@ -171,6 +171,10 @@ public:
     // remove all files in this rowset
     // TODO should we rename the method to remove_files() to be more specific?
     virtual Status remove() = 0;
+
+    // used for partial update, when publish, partial update may add a new rowset
+    // and we should update rowset meta
+    void merge_rowset_meta(const RowsetMetaSharedPtr& other);
 
     // close to clear the resource owned by rowset
     // including: open files, indexes and so on
@@ -182,7 +186,7 @@ public:
         }
         Status st = Status::OK();
         {
-            std::lock_guard<doris::Mutex> close_lock(_lock);
+            std::lock_guard close_lock(_lock);
             uint64_t current_refs = _refs_by_reader;
             old_state = _rowset_state_machine.rowset_state();
             if (old_state != ROWSET_LOADED) {
@@ -204,7 +208,8 @@ public:
 
     // hard link all files in this rowset to `dir` to form a new rowset with id `new_rowset_id`.
     virtual Status link_files_to(const std::string& dir, RowsetId new_rowset_id,
-                                 size_t new_rowset_start_seg_id = 0) = 0;
+                                 size_t new_rowset_start_seg_id = 0,
+                                 std::set<int32_t>* without_index_column_uids = nullptr) = 0;
 
     // copy all files to `dir`
     virtual Status copy_files_to(const std::string& dir, const RowsetId& new_rowset_id) = 0;
@@ -249,7 +254,7 @@ public:
         uint64_t current_refs = --_refs_by_reader;
         if (current_refs == 0 && _rowset_state_machine.rowset_state() == ROWSET_UNLOADING) {
             {
-                std::lock_guard<doris::Mutex> release_lock(_lock);
+                std::lock_guard release_lock(_lock);
                 // rejudge _refs_by_reader because we do not add lock in create reader
                 if (_refs_by_reader == 0 &&
                     _rowset_state_machine.rowset_state() == ROWSET_UNLOADING) {
@@ -300,14 +305,15 @@ public:
                        atime >
                hot_interval;
     }
+    [[nodiscard]] virtual Status add_to_binlog() { return Status::OK(); }
 
 protected:
     friend class RowsetFactory;
 
     DISALLOW_COPY_AND_ASSIGN(Rowset);
     // this is non-public because all clients should use RowsetFactory to obtain pointer to initialized Rowset
-    Rowset(TabletSchemaSPtr schema, const std::string& tablet_path,
-           RowsetMetaSharedPtr rowset_meta);
+    Rowset(const TabletSchemaSPtr& schema, const std::string& tablet_path,
+           const RowsetMetaSharedPtr& rowset_meta);
 
     // this is non-public because all clients should use RowsetFactory to obtain pointer to initialized Rowset
     virtual Status init() = 0;
@@ -317,9 +323,6 @@ protected:
 
     // release resources in this api
     virtual void do_close() = 0;
-
-    // allow subclass to add custom logic when rowset is being published
-    virtual void make_visible_extra(Version version) {}
 
     virtual bool check_current_rowset_segment() = 0;
 

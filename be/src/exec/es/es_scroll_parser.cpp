@@ -17,21 +17,35 @@
 
 #include "exec/es/es_scroll_parser.h"
 
+#include <cctz/time_zone.h>
+#include <glog/logging.h>
 #include <gutil/strings/substitute.h>
+#include <rapidjson/allocators.h>
+#include <rapidjson/encodings.h>
+#include <stdint.h>
+#include <string.h>
 
-#include <boost/algorithm/string.hpp>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <cstdlib>
+#include <ostream>
 #include <string>
 
 #include "common/status.h"
+#include "gutil/integral_types.h"
 #include "rapidjson/document.h"
 #include "rapidjson/rapidjson.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
-#include "runtime/mem_pool.h"
-#include "runtime/memory/mem_tracker.h"
-#include "runtime/string_value.h"
+#include "runtime/decimalv2_value.h"
+#include "runtime/define_primitive_type.h"
+#include "runtime/descriptors.h"
+#include "runtime/primitive_type.h"
+#include "runtime/types.h"
+#include "util/binary_cast.hpp"
 #include "util/string_parser.hpp"
-#include "vec/columns/column_array.h"
+#include "vec/columns/column.h"
+#include "vec/columns/column_nullable.h"
 #include "vec/core/field.h"
 #include "vec/runtime/vdatetime_value.h"
 
@@ -138,17 +152,9 @@ static const std::string INVALID_NULL_VALUE =
         return Status::RuntimeError(ss.str());                           \
     } while (false)
 
-#define PARSE_DATE(dt_val, col, type, is_date_str)                                      \
-    if ((is_date_str &&                                                                 \
-         !dt_val.from_date_str(static_cast<const std::string>(col.GetString()).c_str(), \
-                               col.GetStringLength())) ||                               \
-        (!is_date_str && !dt_val.from_unixtime(col.GetInt64() / 1000, "+08:00"))) {     \
-        RETURN_ERROR_IF_CAST_FORMAT_ERROR(col, type);                                   \
-    }
-
 template <typename T>
-static Status get_int_value(const rapidjson::Value& col, PrimitiveType type, void* slot,
-                            bool pure_doc_value) {
+Status get_int_value(const rapidjson::Value& col, PrimitiveType type, void* slot,
+                     bool pure_doc_value) {
     if (col.IsNumber()) {
         *reinterpret_cast<T*>(slot) = (T)(sizeof(T) < 8 ? col.GetInt() : col.GetInt64());
         return Status::OK();
@@ -180,12 +186,58 @@ static Status get_int_value(const rapidjson::Value& col, PrimitiveType type, voi
 }
 
 template <typename T, typename RT>
-static Status get_date_value_int(const rapidjson::Value& col, PrimitiveType type, bool is_date_str,
-                                 RT* slot) {
+Status get_date_value_int(const rapidjson::Value& col, PrimitiveType type, bool is_date_str,
+                          RT* slot) {
     constexpr bool is_datetime_v1 = std::is_same_v<T, vectorized::VecDateTimeValue>;
     T dt_val;
-    PARSE_DATE(dt_val, col, type, is_date_str)
+    if (is_date_str) {
+        const std::string str_date = col.GetString();
+        int str_length = col.GetStringLength();
+        bool success = false;
+        // YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SS+08:00 or 2022-08-08T12:10:10.000Z
+        if (str_length > 19) {
+            std::chrono::system_clock::time_point tp;
+            const bool ok =
+                    cctz::parse("%Y-%m-%dT%H:%M:%E*S%Ez", str_date, cctz::utc_time_zone(), &tp);
+            if (ok) {
+                success = dt_val.from_unixtime(std::chrono::system_clock::to_time_t(tp),
+                                               cctz::local_time_zone().name());
+            }
+        } else if (str_length == 19) {
+            // YYYY-MM-DDTHH:MM:SS
+            if (*(str_date.c_str() + 10) == 'T') {
+                std::chrono::system_clock::time_point tp;
+                const bool ok =
+                        cctz::parse("%Y-%m-%dT%H:%M:%S", str_date, cctz::utc_time_zone(), &tp);
+                if (ok) {
+                    success = dt_val.from_unixtime(std::chrono::system_clock::to_time_t(tp),
+                                                   cctz::local_time_zone().name());
+                }
+            } else {
+                // YYYY-MM-DD HH:MM:SS
+                success = dt_val.from_date_str(str_date.c_str(), str_length);
+            }
 
+        } else if (str_length == 13) {
+            // string long like "1677895728000"
+            int64_t time_long = std::atol(str_date.c_str());
+            if (time_long > 0) {
+                success = dt_val.from_unixtime(time_long / 1000, cctz::local_time_zone().name());
+            }
+        } else {
+            // YYYY-MM-DD or others
+            success = dt_val.from_date_str(str_date.c_str(), str_length);
+        }
+
+        if (!success) {
+            RETURN_ERROR_IF_CAST_FORMAT_ERROR(col, type);
+        }
+
+    } else {
+        if (!dt_val.from_unixtime(col.GetInt64() / 1000, cctz::local_time_zone().name())) {
+            RETURN_ERROR_IF_CAST_FORMAT_ERROR(col, type);
+        }
+    }
     if constexpr (is_datetime_v1) {
         if (type == TYPE_DATE) {
             dt_val.cast_to_date();
@@ -199,8 +251,8 @@ static Status get_date_value_int(const rapidjson::Value& col, PrimitiveType type
 }
 
 template <typename T, typename RT>
-static Status get_date_int(const rapidjson::Value& col, PrimitiveType type, bool pure_doc_value,
-                           RT* slot) {
+Status get_date_int(const rapidjson::Value& col, PrimitiveType type, bool pure_doc_value,
+                    RT* slot) {
     // this would happend just only when `enable_docvalue_scan = false`, and field has timestamp format date from _source
     if (col.IsNumber()) {
         // ES process date/datetime field would use millisecond timestamp for index or docvalue
@@ -226,8 +278,8 @@ static Status get_date_int(const rapidjson::Value& col, PrimitiveType type, bool
     }
 }
 template <typename T, typename RT>
-static Status fill_date_int(const rapidjson::Value& col, PrimitiveType type, bool pure_doc_value,
-                            vectorized::IColumn* col_ptr) {
+Status fill_date_int(const rapidjson::Value& col, PrimitiveType type, bool pure_doc_value,
+                     vectorized::IColumn* col_ptr) {
     RT data;
     RETURN_IF_ERROR((get_date_int<T, RT>(col, type, pure_doc_value, &data)));
     col_ptr->insert_data(const_cast<const char*>(reinterpret_cast<char*>(&data)), 0);
@@ -235,8 +287,8 @@ static Status fill_date_int(const rapidjson::Value& col, PrimitiveType type, boo
 }
 
 template <typename T>
-static Status get_float_value(const rapidjson::Value& col, PrimitiveType type, void* slot,
-                              bool pure_doc_value) {
+Status get_float_value(const rapidjson::Value& col, PrimitiveType type, void* slot,
+                       bool pure_doc_value) {
     static_assert(sizeof(T) == 4 || sizeof(T) == 8);
     if (col.IsNumber()) {
         *reinterpret_cast<T*>(slot) = (T)(sizeof(T) == 4 ? col.GetFloat() : col.GetDouble());
@@ -262,8 +314,8 @@ static Status get_float_value(const rapidjson::Value& col, PrimitiveType type, v
 }
 
 template <typename T>
-static Status insert_float_value(const rapidjson::Value& col, PrimitiveType type,
-                                 vectorized::IColumn* col_ptr, bool pure_doc_value, bool nullable) {
+Status insert_float_value(const rapidjson::Value& col, PrimitiveType type,
+                          vectorized::IColumn* col_ptr, bool pure_doc_value, bool nullable) {
     static_assert(sizeof(T) == 4 || sizeof(T) == 8);
     if (col.IsNumber() && nullable) {
         T value = (T)(sizeof(T) == 4 ? col.GetFloat() : col.GetDouble());
@@ -292,8 +344,8 @@ static Status insert_float_value(const rapidjson::Value& col, PrimitiveType type
 }
 
 template <typename T>
-static Status insert_int_value(const rapidjson::Value& col, PrimitiveType type,
-                               vectorized::IColumn* col_ptr, bool pure_doc_value, bool nullable) {
+Status insert_int_value(const rapidjson::Value& col, PrimitiveType type,
+                        vectorized::IColumn* col_ptr, bool pure_doc_value, bool nullable) {
     if (col.IsNumber()) {
         T value = (T)(sizeof(T) < 8 ? col.GetInt() : col.GetInt64());
         col_ptr->insert_data(const_cast<const char*>(reinterpret_cast<char*>(&value)), 0);
@@ -321,9 +373,9 @@ static Status insert_int_value(const rapidjson::Value& col, PrimitiveType type,
     return Status::OK();
 }
 
-ScrollParser::ScrollParser(bool doc_value_mode) : _scroll_id(""), _size(0), _line_index(0) {}
+ScrollParser::ScrollParser(bool doc_value_mode) : _size(0), _line_index(0) {}
 
-ScrollParser::~ScrollParser() {}
+ScrollParser::~ScrollParser() = default;
 
 Status ScrollParser::parse(const std::string& scroll_result, bool exactly_once) {
     // rely on `_size !=0 ` to determine whether scroll ends
@@ -359,7 +411,7 @@ Status ScrollParser::parse(const std::string& scroll_result, bool exactly_once) 
     return Status::OK();
 }
 
-int ScrollParser::get_size() {
+int ScrollParser::get_size() const {
     return _size;
 }
 
@@ -369,7 +421,7 @@ const std::string& ScrollParser::get_scroll_id() {
 
 Status ScrollParser::fill_columns(const TupleDescriptor* tuple_desc,
                                   std::vector<vectorized::MutableColumnPtr>& columns,
-                                  MemPool* tuple_pool, bool* line_eof,
+                                  bool* line_eof,
                                   const std::map<std::string, std::string>& docvalue_context) {
     *line_eof = true;
 
@@ -435,7 +487,7 @@ Status ScrollParser::fill_columns(const TupleDescriptor* tuple_desc,
         case TYPE_STRING: {
             // sometimes elasticsearch user post some not-string value to Elasticsearch Index.
             // because of reading value from _source, we can not process all json type and then just transfer the value to original string representation
-            // this may be a tricky, but we can workaround this issue
+            // this may be a tricky, but we can work around this issue
             std::string val;
             if (pure_doc_value) {
                 if (!col[0].IsString()) {

@@ -17,26 +17,43 @@
 
 #pragma once
 
-#include <algorithm>
+#include <gen_cpp/AgentService_types.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <stdint.h>
+
 #include <atomic>
 #include <cstddef>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <ostream>
+#include <roaring/roaring.hh>
 #include <shared_mutex>
 #include <string>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/logging.h"
-#include "gen_cpp/olap_file.pb.h"
-#include "olap/delete_handler.h"
+#include "common/status.h"
+#include "gutil/stringprintf.h"
+#include "io/fs/file_system.h"
+#include "olap/binlog_config.h"
+#include "olap/lru_cache.h"
 #include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "olap/rowid_conversion.h"
-#include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet_schema.h"
 #include "util/uid_util.h"
 
+namespace json2pb {
+struct Pb2JsonOptions;
+} // namespace json2pb
+
 namespace doris {
+class Rowset;
+class TColumn;
 
 // Lifecycle states that a Tablet can be in. Legal state transitions for a
 // Tablet object:
@@ -65,11 +82,11 @@ enum TabletState {
     TABLET_SHUTDOWN
 };
 
-class RowsetMeta;
-class Rowset;
 class DataDir;
 class TabletMeta;
 class DeleteBitmap;
+class TBinlogConfig;
+
 using TabletMetaSharedPtr = std::shared_ptr<TabletMeta>;
 using DeleteBitmapPtr = std::shared_ptr<DeleteBitmap>;
 
@@ -83,16 +100,15 @@ public:
                          TabletMetaSharedPtr* tablet_meta);
 
     TabletMeta();
-    // Only remote_storage_name is needed in meta, it is a key used to get remote params from fe.
-    // The config of storage is saved in fe.
     TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id, int64_t replica_id,
                int32_t schema_hash, uint64_t shard_id, const TTabletSchema& tablet_schema,
                uint32_t next_unique_id,
                const std::unordered_map<uint32_t, uint32_t>& col_ordinal_to_unique_id,
                TabletUid tablet_uid, TTabletType::type tabletType,
                TCompressionType::type compression_type, bool is_in_memory, bool is_persistent,
-               const std::string& storage_policy = std::string(),
-               bool enable_unique_key_merge_on_write = false);
+               int64_t storage_policy_id = 0,
+               bool enable_unique_key_merge_on_write = false,
+               std::optional<TBinlogConfig> binlog_config = {});
     // If need add a filed in TableMeta, filed init copy in copy construct function
     TabletMeta(const TabletMeta& tablet_meta);
     TabletMeta(TabletMeta&& tablet_meta) = delete;
@@ -103,7 +119,6 @@ public:
     Status save(const std::string& file_path);
     Status save_as_json(const string& file_path, DataDir* dir);
     static Status save(const std::string& file_path, const TabletMetaPB& tablet_meta_pb);
-    static Status reset_tablet_uid(const std::string& file_path);
     static std::string construct_header_file_path(const std::string& schema_hash_path,
                                                   int64_t tablet_id);
     Status save_meta(DataDir* data_dir);
@@ -117,11 +132,11 @@ public:
     // CLOUD_MODE
     // `to_add` MUST NOT have overlapped version with `_rs_metas` in tablet meta.
     // MUST hold EXCLUSIVE `_meta_lock` in belonged Tablet.(WTF?)
-    void cloud_add_rs_metas(const std::vector<RowsetSharedPtr>& to_add);
+    void cloud_add_rs_metas(const std::vector<std::shared_ptr<Rowset>>& to_add);
 
     // CLOUD_MODE
     // MUST hold EXCLUSIVE `_meta_lock` in belonged Tablet.
-    void cloud_delete_rs_metas(const std::vector<RowsetSharedPtr>& to_delete);
+    void cloud_delete_rs_metas(const std::vector<std::shared_ptr<Rowset>>& to_delete);
 
     void to_meta_pb(TabletMetaPB* tablet_meta_pb);
     void to_json(std::string* json_string, json2pb::Pb2JsonOptions& options);
@@ -129,11 +144,13 @@ public:
 
     TabletTypePB tablet_type() const { return _tablet_type; }
     TabletUid tablet_uid() const;
+    void set_tablet_uid(TabletUid uid) { _tablet_uid = uid; }
     int64_t table_id() const;
     int64_t index_id() const;
     int64_t partition_id() const;
     int64_t tablet_id() const;
     int64_t replica_id() const;
+    void set_replica_id(int64_t replica_id) { _replica_id = replica_id; }
     int32_t schema_hash() const;
     int16_t shard_id() const;
     void set_shard_id(int32_t shard_id);
@@ -202,17 +219,16 @@ public:
 
     bool all_beta() const;
 
-    const std::string& storage_policy() const {
-        std::shared_lock<std::shared_mutex> rlock(_meta_lock);
-        return _storage_policy;
+    int64_t storage_policy_id() const { return _storage_policy_id; }
+
+    void set_storage_policy_id(int64_t id) {
+        VLOG_NOTICE << "set tablet_id : " << _table_id << " storage policy from "
+                    << _storage_policy_id << " to " << id;
+        _storage_policy_id = id;
     }
 
-    void set_storage_policy(const std::string& policy) {
-        std::unique_lock<std::shared_mutex> wlock(_meta_lock);
-        VLOG_NOTICE << "set tablet_id : " << _table_id << " storage policy from " << _storage_policy
-                    << " to " << policy;
-        _storage_policy = policy;
-    }
+    UniqueId cooldown_meta_id() const { return _cooldown_meta_id; }
+    void set_cooldown_meta_id(UniqueId uid) { _cooldown_meta_id = uid; }
 
     static void init_column_from_tcolumn(uint32_t unique_id, const TColumn& tcolumn,
                                          ColumnPB* column);
@@ -221,8 +237,11 @@ public:
 
     bool enable_unique_key_merge_on_write() const { return _enable_unique_key_merge_on_write; }
 
-    void update_delete_bitmap(const std::vector<RowsetSharedPtr>& input_rowsets,
-                              const Version& version, const RowIdConversion& rowid_conversion);
+    // TODO(Drogon): thread safety
+    const BinlogConfig& binlog_config() const { return _binlog_config; }
+    void set_binlog_config(BinlogConfig binlog_config) {
+        _binlog_config = std::move(binlog_config);
+    }
 
     bool is_in_memory() const { return _is_in_memory; }
 
@@ -287,7 +306,9 @@ private:
     bool _in_restore_mode = false;
     RowsetTypePB _preferred_rowset_type = BETA_ROWSET;
 
-    std::string _storage_policy;
+    // meta for cooldown
+    int64_t _storage_policy_id = 0; // <= 0 means no storage policy
+    UniqueId _cooldown_meta_id;
 
     // For unique key data model, the feature Merge-on-Write will leverage a primary
     // key index and a delete-bitmap to mark duplicate keys as deleted in load stage,
@@ -301,6 +322,8 @@ private:
     int64_t _ttl_seconds = 0;
 
     std::string _table_name;
+    // binlog config
+    BinlogConfig _binlog_config {};
 
     mutable std::shared_mutex _meta_lock;
 };

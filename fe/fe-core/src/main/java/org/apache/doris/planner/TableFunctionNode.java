@@ -50,6 +50,26 @@ public class TableFunctionNode extends PlanNode {
     // Only the slot whose id is in this list will be output by TableFunctionNode
     // private List<SlotId> outputSlotIds = Lists.newArrayList();
 
+    public TableFunctionNode(PlanNodeId id, PlanNode inputNode, TupleId lateralViewTupleId,
+            ArrayList<Expr> fnCallExprList, List<SlotId> outputSlotIds) {
+        super(id, "TABLE FUNCTION NODE", StatisticalType.TABLE_FUNCTION_NODE);
+        if (inputNode.outputTupleDesc != null) {
+            tupleIds.add(inputNode.outputTupleDesc.getId());
+        } else {
+            List<TupleId> childOutputTupleIds = inputNode.getOutputTupleIds();
+            if (childOutputTupleIds != null && !childOutputTupleIds.isEmpty()) {
+                tupleIds.addAll(childOutputTupleIds);
+            } else {
+                tupleIds.addAll(inputNode.getTupleIds());
+            }
+        }
+        tupleIds.add(lateralViewTupleId);
+        this.lateralViewTupleIds = Lists.newArrayList(lateralViewTupleId);
+        this.fnCallExprList = fnCallExprList;
+        this.outputSlotIds = outputSlotIds;
+        this.children.add(inputNode);
+    }
+
     protected TableFunctionNode(PlanNodeId id, PlanNode inputNode, List<LateralViewRef> lateralViewRefs) {
         super(id, "TABLE FUNCTION NODE", StatisticalType.TABLE_FUNCTION_NODE);
         tupleIds.addAll(inputNode.getOutputTupleIds());
@@ -61,6 +81,10 @@ public class TableFunctionNode extends PlanNode {
         tblRefIds.addAll(lateralViewTupleIds);
         children.add(inputNode);
         this.lateralViewRefs = lateralViewRefs;
+    }
+
+    public void setOutputSlotIds(List<SlotId> outputSlotIds) {
+        this.outputSlotIds = outputSlotIds;
     }
 
     /**

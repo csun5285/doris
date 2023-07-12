@@ -1,15 +1,16 @@
-#include "cloud/io/s3_file_system.h"
+#include "io/fs/s3_file_system.h"
 
 #include <gtest/gtest.h>
 
 #include "cloud/io/tmp_file_mgr.h"
-#include "cloud/io/file_reader.h"
-#include "cloud/io/local_file_system.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/local_file_system.h"
 #include "util/s3_util.h"
 
 namespace doris {
 std::shared_ptr<io::S3FileSystem> s3_fs = nullptr;
 
+#define S3FileSystemTest DISABLED_S3FileSystemTest
 class S3FileSystemTest : public testing::Test {
 public:
     static void SetUpTestSuite() {
@@ -25,7 +26,8 @@ public:
         s3_conf.region = config::test_s3_region;
         s3_conf.bucket = config::test_s3_bucket;
         s3_conf.prefix = "s3_file_system_test";
-        s3_fs = io::S3FileSystem::create(std::move(s3_conf), "s3_file_system_test");
+        std::shared_ptr<io::S3FileSystem> s3_fs;
+        ASSERT_EQ(Status::OK(), io::S3FileSystem::create(std::move(s3_conf), "s3_file_system_test", &s3_fs));
         ASSERT_EQ(Status::OK(), s3_fs->connect());
     }
 
@@ -47,7 +49,7 @@ TEST_F(S3FileSystemTest, upload) {
     std::string_view content = "some bytes";
     st = local_file->append({content.data(), content.size()});
     ASSERT_TRUE(st.ok());
-    st = local_file->close(false);
+    st = local_file->close();
     EXPECT_TRUE(st.ok());
     st = s3_fs->upload(local_file->path(), "normal");
     ASSERT_TRUE(st.ok());

@@ -21,6 +21,7 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.FunctionGenTable;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.exceptions.UnboundException;
+import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.TVFProperties;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
@@ -28,7 +29,7 @@ import org.apache.doris.nereids.trees.expressions.functions.CustomSignature;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.DataType;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.statistics.Statistics;
 import org.apache.doris.tablefunction.TableValuedFunctionIf;
 
 import com.google.common.base.Suppliers;
@@ -57,7 +58,7 @@ public abstract class TableValuedFunction extends BoundFunction implements Unary
 
     protected abstract TableValuedFunctionIf toCatalogFunction();
 
-    public abstract StatsDeriveResult computeStats(List<Slot> slots);
+    public abstract Statistics computeStats(List<Slot> slots);
 
     public TVFProperties getTVFProperties() {
         return (TVFProperties) child(0);
@@ -87,6 +88,10 @@ public abstract class TableValuedFunction extends BoundFunction implements Unary
     @Override
     public boolean nullable() {
         throw new UnboundException("TableValuedFunction can not compute nullable");
+    }
+
+    public PhysicalProperties getPhysicalProperties() {
+        return PhysicalProperties.ANY;
     }
 
     @Override

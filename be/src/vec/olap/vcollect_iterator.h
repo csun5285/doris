@@ -17,7 +17,16 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <list>
+#include <memory>
+#include <vector>
+
 #include "common/status.h"
+#include "olap/rowset/rowset_reader_context.h"
+#include "olap/utils.h"
 #ifdef USE_LIBCPP
 #include <queue>
 #else
@@ -28,9 +37,14 @@
 #include "olap/rowset/rowset_reader.h"
 #include "vec/core/block.h"
 
+namespace __gnu_pbds {
+struct pairing_heap_tag;
+} // namespace __gnu_pbds
+
 namespace doris {
 
 class TabletSchema;
+class RuntimeProfile;
 
 namespace vectorized {
 
@@ -39,11 +53,12 @@ public:
     // Hold reader point to get reader params
     ~VCollectIterator();
 
-    void init(TabletReader* reader, bool ori_data_overlapping, bool force_merge, bool is_reverse);
+    void init(TabletReader* reader, bool ori_data_overlapping, bool force_merge, bool is_reverse,
+              std::vector<std::pair<int, int>> rs_readers_segment_offsets);
 
     Status add_child(RowsetReaderSharedPtr rs_reader);
 
-    Status build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers, vectorized::ScannerContext* ctx = nullptr);
+    Status build_heap(std::vector<RowsetReaderSharedPtr>& rs_readers);
     // Get top row of the heap, nullptr if reach end.
     Status current_row(IteratorRowRef* ref) const;
 
@@ -104,12 +119,12 @@ private:
     public:
         LevelIterator(TabletReader* reader)
                 : _schema(reader->tablet_schema()),
-                  _compare_columns(reader->_reader_context.read_orderby_key_columns) {};
+                  _compare_columns(reader->_reader_context.read_orderby_key_columns) {}
 
         virtual Status init(bool get_data_by_ref = false) = 0;
         virtual Status init_for_union(bool is_first_child, bool get_data_by_ref = false) {
             return Status::OK();
-        };
+        }
 
         virtual int64_t version() const = 0;
 
@@ -125,9 +140,9 @@ private:
 
         virtual ~LevelIterator() = default;
 
-        const TabletSchema& tablet_schema() const { return _schema; };
+        const TabletSchema& tablet_schema() const { return _schema; }
 
-        const inline std::vector<uint32_t>* compare_columns() const { return _compare_columns; };
+        const inline std::vector<uint32_t>* compare_columns() const { return _compare_columns; }
 
         virtual RowLocation current_row_location() = 0;
 
@@ -268,7 +283,7 @@ private:
             return false;
         }
 
-        Status init_level0_iterators_for_union(vectorized::ScannerContext* ctx = nullptr);
+        Status init_level0_iterators_for_union();
 
     private:
         Status _merge_next(IteratorRowRef* ref);
@@ -300,9 +315,6 @@ private:
         // used when `_merge == true`
         std::unique_ptr<MergeHeap> _heap;
 
-        // batch size, get from TabletReader
-        int _batch_size;
-
         std::vector<RowLocation> _block_row_locations;
     };
 
@@ -318,7 +330,9 @@ private:
     // for topn next
     size_t _topn_limit = 0;
     bool _topn_eof = false;
+    // when we use scanner pooling + query with topn_with_limit, we use it.
     std::vector<RowsetReaderSharedPtr> _rs_readers;
+    std::vector<std::pair<int, int>> _rs_readers_segment_offsets;
 
     // Hold reader point to access read params, such as fetch conditions.
     TabletReader* _reader = nullptr;

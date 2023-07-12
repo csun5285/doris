@@ -22,20 +22,45 @@ set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/src/io")
 set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/src/io")
 
 set(IO_FILES
-    broker_reader.cpp
-    broker_writer.cpp
-    buffered_reader.cpp
     file_factory.cpp
     hdfs_builder.cpp
-    hdfs_file_reader.cpp
-    hdfs_reader_writer.cpp
-    hdfs_writer.cpp
-    local_file_reader.cpp
-    local_file_writer.cpp
-    s3_reader.cpp
-    s3_writer.cpp
+    fs/file_reader_options.cpp
+    fs/file_reader.cpp
+    fs/file_system.cpp
+    fs/remote_file_system.cpp
+    fs/local_file_system.cpp
+    fs/local_file_reader.cpp
+    fs/local_file_writer.cpp
+    fs/s3_file_system.cpp
+    fs/s3_file_reader.cpp
+    fs/s3_file_writer.cpp
+    fs/s3_file_bufferpool.cpp
+    fs/hdfs_file_system.cpp
+    fs/hdfs_file_reader.cpp
+    fs/hdfs_file_writer.cpp
+    fs/broker_file_system.cpp
+    fs/broker_file_reader.cpp
+    fs/broker_file_writer.cpp
+    fs/buffered_reader.cpp
+    fs/stream_load_pipe.cpp
+    fs/err_utils.cpp
+    fs/fs_utils.cpp
+    cache/dummy_file_cache.cpp
+    cache/file_cache.cpp
+    cache/file_cache_manager.cpp
+    cache/sub_file_cache.cpp
+    cache/whole_file_cache.cpp
+    cache/block/block_file_segment.cpp
+    cache/block/block_file_cache.cpp
+    cache/block/block_file_cache_profile.cpp
+    cache/block/block_file_cache_settings.cpp
+    cache/block/block_file_cache_factory.cpp
+    cache/block/block_file_cache_downloader.cpp
+    cache/block/cached_remote_file_reader.cpp
 )
 
 add_library(IO STATIC
     ${IO_FILES}
 )
+
+pch_reuse(IO)

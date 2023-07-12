@@ -19,46 +19,33 @@
 
 #include <cstddef>
 
+#include "common/status.h"
 #include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
+#include "io/fs/path.h"
+#include "util/slice.h"
 
 namespace doris {
 namespace io {
 
 class LocalFileWriter final : public FileWriter {
 public:
-    LocalFileWriter(Path path, FileSystem* fs);
-    LocalFileWriter(Path path);
+    LocalFileWriter(Path path, int fd, FileSystemSPtr fs);
+    LocalFileWriter(Path path, int fd);
     ~LocalFileWriter() override;
 
-    Status open() override;
-
-    Status close(bool sync = true) override;
-
+    Status close() override;
     Status abort() override;
-
-    Status append(const Slice& data) override;
-
     Status appendv(const Slice* data, size_t data_cnt) override;
-
     Status write_at(size_t offset, const Slice& data) override;
-
     Status finalize() override;
 
-    size_t bytes_appended() const override { return _bytes_appended; }
-
-    FileSystem* fs() const override { return _fs; }
-    const Path& path() const override { return _path; }
+private:
+    Status _close(bool sync);
 
 private:
-    int _fd = -1; // owned
-    FileSystem* _fs;
-
-    size_t _bytes_appended = 0;
+    int _fd; // owned
     bool _dirty = false;
-    bool _closed = true;
-
-    Path _path;
 };
 
 } // namespace io

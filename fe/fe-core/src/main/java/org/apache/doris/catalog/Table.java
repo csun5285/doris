@@ -27,8 +27,7 @@ import org.apache.doris.common.util.QueryableReentrantReadWriteLock;
 import org.apache.doris.common.util.SqlUtils;
 import org.apache.doris.common.util.Util;
 import org.apache.doris.external.hudi.HudiTable;
-import org.apache.doris.statistics.AnalysisTaskInfo;
-import org.apache.doris.statistics.AnalysisTaskScheduler;
+import org.apache.doris.statistics.AnalysisInfo;
 import org.apache.doris.statistics.BaseAnalysisTask;
 import org.apache.doris.thrift.TTableDescriptor;
 
@@ -36,8 +35,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.apache.commons.lang.NotImplementedException;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.NotImplementedException;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -124,7 +123,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
         this.nameToColumn = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
         if (this.fullSchema != null) {
             for (Column col : this.fullSchema) {
-                nameToColumn.put(col.getName(), col);
+                nameToColumn.put(col.getDefineName(), col);
             }
         } else {
             // Only view in with-clause have null base
@@ -268,6 +267,10 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
 
     void setQualifiedDbName(String qualifiedDbName) {
         this.qualifiedDbName = qualifiedDbName;
+    }
+
+    public String getQualifiedDbName() {
+        return qualifiedDbName;
     }
 
     public String getQualifiedName() {
@@ -483,7 +486,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
     }
 
     public CreateTableStmt toCreateTableStmt(String dbName) {
-        throw new NotImplementedException();
+        throw new NotImplementedException("toCreateTableStmt not implemented");
     }
 
     @Override
@@ -523,7 +526,25 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
     }
 
     @Override
-    public BaseAnalysisTask createAnalysisTask(AnalysisTaskScheduler scheduler, AnalysisTaskInfo info) {
-        throw new NotImplementedException();
+    public BaseAnalysisTask createAnalysisTask(AnalysisInfo info) {
+        throw new NotImplementedException("createAnalysisTask not implemented");
+    }
+
+    /**
+     * for NOT-ANALYZED Olap table, return estimated row count,
+     * for other table, return 1
+     * @return estimated row count
+     */
+    public long estimatedRowCount() {
+        long cardinality = 0;
+        if (this instanceof OlapTable) {
+            OlapTable table = (OlapTable) this;
+            for (long selectedPartitionId : table.getPartitionIds()) {
+                final Partition partition = table.getPartition(selectedPartitionId);
+                final MaterializedIndex baseIndex = partition.getBaseIndex();
+                cardinality += baseIndex.getRowCount();
+            }
+        }
+        return Math.max(cardinality, 1);
     }
 }

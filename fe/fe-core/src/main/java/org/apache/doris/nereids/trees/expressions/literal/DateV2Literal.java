@@ -20,9 +20,12 @@ package org.apache.doris.nereids.trees.expressions.literal;
 import org.apache.doris.analysis.LiteralExpr;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.exceptions.AnalysisException;
+import org.apache.doris.nereids.trees.expressions.Expression;
+import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.DateV2Type;
+import org.apache.doris.nereids.util.DateUtils;
 
-import org.joda.time.LocalDateTime;
+import java.time.LocalDateTime;
 
 /**
  * date v2 literal for nereids
@@ -42,8 +45,26 @@ public class DateV2Literal extends DateLiteral {
         return new org.apache.doris.analysis.DateLiteral(year, month, day, Type.DATEV2);
     }
 
-    public DateV2Literal plusDays(int days) {
-        LocalDateTime dateTime = LocalDateTime.parse(getStringValue(), DATE_FORMATTER).plusDays(days);
-        return new DateV2Literal(dateTime.getYear(), dateTime.getMonthOfYear(), dateTime.getDayOfMonth());
+    @Override
+    public <R, C> R accept(ExpressionVisitor<R, C> visitor, C context) {
+        return visitor.visitDateV2Literal(this, context);
+    }
+
+    public Expression plusDays(int days) {
+        return fromJavaDateType(DateUtils.getTime(DATE_FORMATTER, getStringValue()).plusDays(days));
+    }
+
+    public Expression plusMonths(int months) {
+        return fromJavaDateType(DateUtils.getTime(DATE_FORMATTER, getStringValue()).plusMonths(months));
+    }
+
+    public Expression plusYears(int years) {
+        return fromJavaDateType(DateUtils.getTime(DATE_FORMATTER, getStringValue()).plusYears(years));
+    }
+
+    public static Expression fromJavaDateType(LocalDateTime dateTime) {
+        return isDateOutOfRange(dateTime)
+                ? new NullLiteral(DateV2Type.INSTANCE)
+                : new DateV2Literal(dateTime.getYear(), dateTime.getMonthValue(), dateTime.getDayOfMonth());
     }
 }

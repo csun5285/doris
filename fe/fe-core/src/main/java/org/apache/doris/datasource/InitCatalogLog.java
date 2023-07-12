@@ -37,6 +37,10 @@ public class InitCatalogLog implements Writable {
         ES,
         JDBC,
         ICEBERG,
+        PAIMON,
+        MAX_COMPUTE,
+        HUDI,
+        TEST,
         UNKNOWN;
     }
 

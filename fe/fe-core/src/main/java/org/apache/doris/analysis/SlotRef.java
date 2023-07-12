@@ -21,6 +21,7 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.MaterializedIndexMeta;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
@@ -50,6 +51,8 @@ import java.util.TreeSet;
 public class SlotRef extends Expr {
     private static final Logger LOG = LogManager.getLogger(SlotRef.class);
     private TableName tblName;
+    private TableIf table = null;
+    private TupleId tupleId = null;
     private String col;
     // Used in toSql
     private String label;
@@ -85,7 +88,7 @@ public class SlotRef extends Expr {
         analysisDone();
     }
 
-    // nerieds use this constructor to build aggFnParam
+    // nereids use this constructor to build aggFnParam
     public SlotRef(Type type, boolean nullable) {
         super();
         // tuple id and slot id is meaningless here, nereids just use type and nullable
@@ -104,6 +107,7 @@ public class SlotRef extends Expr {
         col = other.col;
         label = other.label;
         desc = other.desc;
+        tupleId = other.tupleId;
     }
 
     @Override
@@ -112,8 +116,6 @@ public class SlotRef extends Expr {
     }
 
     public SlotDescriptor getDesc() {
-        Preconditions.checkState(isAnalyzed);
-        Preconditions.checkNotNull(desc);
         return desc;
     }
 
@@ -121,6 +123,14 @@ public class SlotRef extends Expr {
         Preconditions.checkState(isAnalyzed);
         Preconditions.checkNotNull(desc);
         return desc.getId();
+    }
+
+    public void setNeedMaterialize(boolean needMaterialize) {
+        this.desc.setNeedMaterialize(needMaterialize);
+    }
+
+    public boolean isInvalid() {
+        return this.desc.isInvalid();
     }
 
     public Column getColumn() {
@@ -222,12 +232,18 @@ public class SlotRef extends Expr {
 
     @Override
     public String toSqlImpl() {
+        if (disableTableName && label != null) {
+            return label;
+        }
+
         StringBuilder sb = new StringBuilder();
 
         if (tblName != null) {
             return tblName.toSql() + "." + label;
         } else if (label != null) {
             if (ConnectContext.get() != null
+                    && ConnectContext.get().getState().isNereids()
+                    && !ConnectContext.get().getState().isQuery()
                     && ConnectContext.get().getSessionVariable() != null
                     && ConnectContext.get().getSessionVariable().isEnableNereidsPlanner()
                     && desc != null) {
@@ -236,14 +252,16 @@ public class SlotRef extends Expr {
                 return label;
             }
         } else if (desc.getSourceExprs() != null) {
-            if (ToSqlContext.get() == null || ToSqlContext.get().isNeedSlotRefId()) {
+            if (!disableTableName && (ToSqlContext.get() == null || ToSqlContext.get().isNeedSlotRefId())) {
                 if (desc.getId().asInt() != 1) {
                     sb.append("<slot " + desc.getId().asInt() + ">");
                 }
             }
             for (Expr expr : desc.getSourceExprs()) {
-                sb.append(" ");
-                sb.append(expr.toSql());
+                if (!disableTableName) {
+                    sb.append(" ");
+                }
+                sb.append(disableTableName ? expr.toSqlWithoutTbl() : expr.toSql());
             }
             return sb.toString();
         } else {
@@ -283,11 +301,11 @@ public class SlotRef extends Expr {
         return col;
     }
 
-
     @Override
     protected void toThrift(TExprNode msg) {
         msg.node_type = TExprNodeType.SLOT_REF;
-        msg.slot_ref = new TSlotRef(desc.getId().asInt(), desc.getParent().getId().asInt(), desc.getUniqueId());
+        msg.slot_ref = new TSlotRef(desc.getId().asInt(), desc.getParent().getId().asInt());
+        msg.slot_ref.setColUniqueId(desc.getUniqueId());
         msg.setOutputColumn(outputColumn);
     }
 
@@ -318,6 +336,7 @@ public class SlotRef extends Expr {
         return notCheckDescIdEquals(obj);
     }
 
+    @Override
     public boolean notCheckDescIdEquals(Object obj) {
         if (!super.equals(obj)) {
             return false;
@@ -347,15 +366,36 @@ public class SlotRef extends Expr {
         return false;
     }
 
+    public void setTupleId(TupleId tupleId) {
+        this.tupleId = tupleId;
+    }
+
+    TupleId getTupleId() {
+        return tupleId;
+    }
+
     @Override
     public boolean isBoundByTupleIds(List<TupleId> tids) {
-        Preconditions.checkState(desc != null);
+        Preconditions.checkState(desc != null || tupleId != null);
+        if (desc != null) {
+            tupleId = desc.getParent().getId();
+        }
         for (TupleId tid : tids) {
-            if (tid.equals(desc.getParent().getId())) {
+            if (tid.equals(tupleId)) {
                 return true;
             }
         }
         return false;
+    }
+
+    @Override
+    public boolean hasAggregateSlot() {
+        return desc.getColumn().isAggregated();
+    }
+
+    @Override
+    public boolean isRelativedByTupleIds(List<TupleId> tids) {
+        return isBoundByTupleIds(tids);
     }
 
     @Override
@@ -407,10 +447,10 @@ public class SlotRef extends Expr {
 
     @Override
     public void getTableIdToColumnNames(Map<Long, Set<String>> tableIdToColumnNames) {
-        Preconditions.checkState(desc != null);
-        if (!desc.isMaterialized()) {
+        if (desc == null) {
             return;
         }
+
         if (col == null) {
             for (Expr expr : desc.getSourceExprs()) {
                 expr.getTableIdToColumnNames(tableIdToColumnNames);
@@ -431,7 +471,14 @@ public class SlotRef extends Expr {
         }
     }
 
+    public void setTable(TableIf table) {
+        this.table = table;
+    }
+
     public TableIf getTable() {
+        if (desc == null && table != null) {
+            return table;
+        }
         Preconditions.checkState(desc != null);
         return desc.getParent().getTable();
     }
@@ -490,8 +537,53 @@ public class SlotRef extends Expr {
     }
 
     @Override
-    public void finalizeImplForNereids() throws AnalysisException {
+    public boolean haveMvSlot(TupleId tid) {
+        if (!isBound(tid)) {
+            return false;
+        }
+        String name = MaterializedIndexMeta.normalizeName(toSqlWithoutTbl());
+        return CreateMaterializedViewStmt.isMVColumn(name);
+    }
 
+    @Override
+    public boolean matchExprs(List<Expr> exprs, SelectStmt stmt, boolean ignoreAlias, TupleDescriptor tuple)
+            throws AnalysisException {
+        Expr originExpr = stmt.getExprFromAliasSMap(this);
+        if (!(originExpr instanceof SlotRef)) {
+            return true; // means this is alias of other expr.
+        }
+
+        SlotRef aliasExpr = (SlotRef) originExpr;
+        if (aliasExpr.getColumnName() == null) {
+            if (desc.getSourceExprs() != null) {
+                for (Expr expr : desc.getSourceExprs()) {
+                    if (!expr.matchExprs(exprs, stmt, ignoreAlias, tuple)) {
+                        return false;
+                    }
+                }
+            }
+            return true; // means this is alias of other expr.
+        }
+
+        String name = MaterializedIndexMeta.normalizeName(aliasExpr.toSqlWithoutTbl());
+        if (aliasExpr.desc != null) {
+            if (!isBound(tuple.getId()) && !tuple.getColumnNames().contains(name)) {
+                return true; // means this from other scan node.
+            }
+
+            if (!aliasExpr.desc.isMaterialized()) {
+                return true; // means this is unused field after triming.
+            }
+        }
+
+        for (Expr expr : exprs) {
+            if (CreateMaterializedViewStmt.isMVColumnNormal(name)
+                    && MaterializedIndexMeta.normalizeName(expr.toSqlWithoutTbl()).equals(CreateMaterializedViewStmt
+                            .mvColumnBreaker(name))) {
+                return true;
+            }
+        }
+        return !CreateMaterializedViewStmt.isMVColumn(name) && exprs.isEmpty();
     }
 
     @Override

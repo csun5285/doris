@@ -412,7 +412,8 @@ public class DeleteHandler implements Writable {
             throws AnalysisException {
         ColumnRange result = ColumnRange.create();
         Type type =
-                table.getBaseSchema().stream().filter(c -> c.getName().equals(colName)).findFirst().get().getType();
+                table.getBaseSchema().stream().filter(c -> c.getName().equalsIgnoreCase(colName))
+                        .findFirst().get().getType();
 
         boolean hasRange = false;
         for (Predicate predicate : conditions) {
@@ -837,7 +838,20 @@ public class DeleteHandler implements Writable {
         }
 
         String dbName = db.getFullName();
-        List<DeleteInfo> deleteInfoList = dbToDeleteInfos.get(dbId);
+        List<DeleteInfo> deleteInfoList = new ArrayList<>();
+        if (dbId == -1) {
+            for (Long tempDbId : dbToDeleteInfos.keySet()) {
+                if (!Env.getCurrentEnv().getAccessManager().checkDbPriv(ConnectContext.get(),
+                        Env.getCurrentEnv().getCatalogMgr().getDbNullable(tempDbId).getFullName(),
+                        PrivPredicate.LOAD)) {
+                    continue;
+                }
+
+                deleteInfoList.addAll(dbToDeleteInfos.get(tempDbId));
+            }
+        } else {
+            deleteInfoList = dbToDeleteInfos.get(dbId);
+        }
 
         readLock();
         try {
@@ -846,7 +860,7 @@ public class DeleteHandler implements Writable {
             }
 
             for (DeleteInfo deleteInfo : deleteInfoList) {
-                if (!Env.getCurrentEnv().getAuth().checkTblPriv(ConnectContext.get(), dbName,
+                if (!Env.getCurrentEnv().getAccessManager().checkTblPriv(ConnectContext.get(), dbName,
                         deleteInfo.getTableName(),
                         PrivPredicate.LOAD)) {
                     continue;

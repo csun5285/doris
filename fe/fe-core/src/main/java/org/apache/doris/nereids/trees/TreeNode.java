@@ -97,6 +97,37 @@ public interface TreeNode<NODE_TYPE extends TreeNode<NODE_TYPE>> {
     }
 
     /**
+     * similar to rewriteDownShortCircuit, except that only subtrees, whose root satisfies
+     * border predicate are rewritten.
+     */
+    default NODE_TYPE rewriteDownShortCircuitDown(Function<NODE_TYPE, NODE_TYPE> rewriteFunction,
+            Predicate border, boolean aboveBorder) {
+        NODE_TYPE currentNode = (NODE_TYPE) this;
+        if (border.test(this)) {
+            aboveBorder = false;
+        }
+        if (!aboveBorder) {
+            currentNode = rewriteFunction.apply((NODE_TYPE) this);
+        }
+        if (currentNode == this) {
+            Builder<NODE_TYPE> newChildren = ImmutableList.builderWithExpectedSize(arity());
+            boolean changed = false;
+            for (NODE_TYPE child : children()) {
+                NODE_TYPE newChild = child.rewriteDownShortCircuitDown(rewriteFunction, border, aboveBorder);
+                if (child != newChild) {
+                    changed = true;
+                }
+                newChildren.add(newChild);
+            }
+
+            if (changed) {
+                currentNode = currentNode.withChildren(newChildren.build());
+            }
+        }
+        return currentNode;
+    }
+
+    /**
      * bottom-up rewrite.
      * @param rewriteFunction rewrite function.
      * @return rewritten result.
@@ -165,6 +196,19 @@ public interface TreeNode<NODE_TYPE extends TreeNode<NODE_TYPE>> {
     }
 
     /**
+     * Collect the nodes that satisfied the predicate to list.
+     */
+    default <T> List<T> collectToList(Predicate<TreeNode<NODE_TYPE>> predicate) {
+        ImmutableList.Builder<TreeNode<NODE_TYPE>> result = ImmutableList.builder();
+        foreach(node -> {
+            if (predicate.test(node)) {
+                result.add(node);
+            }
+        });
+        return (List<T>) result.build();
+    }
+
+    /**
      * iterate top down and test predicate if contains any instance of the classes
      * @param types classes array
      * @return true if it has any instance of the types
@@ -178,5 +222,22 @@ public interface TreeNode<NODE_TYPE extends TreeNode<NODE_TYPE>> {
             }
             return false;
         });
+    }
+
+    /**
+     * equals by the full tree nodes
+     * @param that other tree node
+     * @return true if all the tree is equals
+     */
+    default boolean deepEquals(TreeNode that) {
+        if (!equals(that)) {
+            return false;
+        }
+        for (int i = 0; i < arity(); i++) {
+            if (!child(i).deepEquals(that.child(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 }

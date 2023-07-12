@@ -17,10 +17,22 @@
 
 #include "vec/exec/scan/new_file_scan_node.h"
 
-#include "vec/columns/column_const.h"
-#include "vec/exec/scan/new_olap_scanner.h"
+#include <gen_cpp/PlanNodes_types.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <algorithm>
+#include <ostream>
+
+#include "common/config.h"
+#include "common/object_pool.h"
 #include "vec/exec/scan/vfile_scanner.h"
-#include "vec/functions/in.h"
+#include "vec/exec/scan/vscanner.h"
+
+namespace doris {
+class DescriptorTbl;
+class RuntimeState;
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -84,29 +96,27 @@ Status NewFileScanNode::_process_conjuncts() {
     return Status::OK();
 }
 
-Status NewFileScanNode::_init_scanners(std::list<VScanner*>* scanners) {
+Status NewFileScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
     if (_scan_ranges.empty()) {
         _eos = true;
         return Status::OK();
     }
 
+    // TODO: determine kv cache shard num
+    size_t shard_num =
+            std::min<size_t>(config::doris_scanner_thread_pool_thread_num, _scan_ranges.size());
+    _kv_cache.reset(new ShardedKVCache(shard_num));
     for (auto& scan_range : _scan_ranges) {
-        VScanner* scanner =
-                (VScanner*)_create_scanner(scan_range.scan_range.ext_scan_range.file_scan_range);
-        scanners->push_back(scanner);
+        std::unique_ptr<VFileScanner> scanner =
+                VFileScanner::create_unique(_state, this, _limit_per_scanner,
+                                            scan_range.scan_range.ext_scan_range.file_scan_range,
+                                            runtime_profile(), _kv_cache.get());
+        RETURN_IF_ERROR(
+                scanner->prepare(_conjuncts, &_colname_to_value_range, &_colname_to_slot_id));
+        scanners->push_back(std::move(scanner));
     }
 
     return Status::OK();
-}
-
-VScanner* NewFileScanNode::_create_scanner(const TFileScanRange& scan_range) {
-    VScanner* scanner = new VFileScanner(_state, this, _limit_per_scanner, scan_range,
-                                         runtime_profile(), _kv_cache);
-    ((VFileScanner*)scanner)->prepare(_vconjunct_ctx_ptr.get(), &_colname_to_value_range);
-    _scanner_pool.add(scanner);
-    // TODO: Can we remove _conjunct_ctxs and use _vconjunct_ctx_ptr instead?
-    scanner->reg_conjunct_ctxs(_conjunct_ctxs);
-    return scanner;
 }
 
 }; // namespace doris::vectorized

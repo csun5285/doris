@@ -19,19 +19,25 @@
 
 #include <fmt/format.h>
 #include <gen_cpp/Types_types.h>
+#include <stdint.h>
 
-#include <boost/format.hpp>
-#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "common/status.h"
-#include "exprs/expr_context.h"
-#include "runtime/descriptors.h"
-#include "runtime/row_batch.h"
-#include "vec/exprs/vexpr_context.h"
+#include "runtime/types.h"
+#include "util/runtime_profile.h"
+#include "vec/aggregate_functions/aggregate_function.h"
+#include "vec/data_types/data_type.h"
+#include "vec/exprs/vexpr_fwd.h"
 
 namespace doris {
+class RuntimeState;
+class TupleDescriptor;
+
+namespace vectorized {
+class Block;
+} // namespace vectorized
 
 // Table Connector for scan data from ODBC/JDBC
 class TableConnector {
@@ -48,17 +54,17 @@ public:
     virtual Status abort_trans() = 0;  // should be call after transaction abort
     virtual Status finish_trans() = 0; // should be call after transaction commit
 
+    virtual Status exec_stmt_write(vectorized::Block* block,
+                                   const vectorized::VExprContextSPtrs& _output_vexpr_ctxs,
+                                   uint32_t* num_rows_sent) = 0;
+
     virtual Status exec_write_sql(const std::u16string& insert_stmt,
                                   const fmt::memory_buffer& _insert_stmt_buffer) = 0;
-    //write data into table row batch
-    Status append(const std::string& table_name, RowBatch* batch,
-                  const std::vector<ExprContext*>& _output_expr_ctxs, uint32_t start_send_row,
-                  uint32_t* num_rows_sent);
 
     //write data into table vectorized
     Status append(const std::string& table_name, vectorized::Block* block,
-                  const std::vector<vectorized::VExprContext*>& _output_vexpr_ctxs,
-                  uint32_t start_send_row, uint32_t* num_rows_sent,
+                  const vectorized::VExprContextSPtrs& _output_vexpr_ctxs, uint32_t start_send_row,
+                  uint32_t* num_rows_sent, bool is_odbc,
                   TOdbcTableType::type table_type = TOdbcTableType::MYSQL);
 
     void init_profile(RuntimeProfile*);

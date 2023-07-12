@@ -15,14 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <glog/logging.h>
-#include <glog/vlog_is_on.h>
+#include <ctype.h>
+#include <stdint.h>
 
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #include "common/config.h"
 #include "common/logging.h"
@@ -68,8 +70,6 @@ bool init_glog(const char* basename) {
     FLAGS_logbufsecs = 30;
     // set roll num
     FLAGS_log_filenum_quota = config::sys_log_roll_num;
-    // set warn log roll num
-    FLAGS_warn_log_filenum_quota = config::sys_warn_log_roll_num;
 
     // set log level
     std::string& loglevel = config::sys_log_level;

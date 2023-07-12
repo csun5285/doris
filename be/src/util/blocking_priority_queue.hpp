@@ -27,6 +27,7 @@
 #include <queue>
 
 #include "common/config.h"
+#include "util/lock.h"
 #include "util/stopwatch.hpp"
 #include "util/lock.h"
 namespace doris {
@@ -50,9 +51,9 @@ public:
     bool blocking_get(T* out, uint32_t timeout_ms = 0) {
         MonotonicStopWatch timer;
         timer.start();
-        std::unique_lock<doris::Mutex> unique_lock(_lock);
+        std::unique_lock unique_lock(_lock);
         bool wait_successful = false;
-#if !defined (USE_BTHREAD_SCANNER)
+#if !defined(USE_BTHREAD_SCANNER)
         if (timeout_ms > 0) {
             wait_successful = _get_cv.wait_for(unique_lock, std::chrono::milliseconds(timeout_ms),
                                                [this] { return _shutdown || !_queue.empty(); });
@@ -110,7 +111,7 @@ public:
     bool non_blocking_get(T* out) {
         MonotonicStopWatch timer;
         timer.start();
-        std::unique_lock<doris::Mutex> unique_lock(_lock);
+        std::unique_lock unique_lock(_lock);
 
         if (!_queue.empty()) {
             // 定期提高队列中残留的任务优先级
@@ -142,7 +143,7 @@ public:
     bool blocking_put(const T& val) {
         MonotonicStopWatch timer;
         timer.start();
-        std::unique_lock<doris::Mutex> unique_lock(_lock);
+        std::unique_lock unique_lock(_lock);
         while (!(_shutdown || _queue.size() < _max_element)) {
             _put_cv.wait(unique_lock);
         }
@@ -157,10 +158,22 @@ public:
         return true;
     }
 
+    // Return false if queue full or has been shutdown.
+    bool try_put(const T& val) {
+        std::unique_lock unique_lock(_lock);
+        if (_queue.size() < _max_element && !_shutdown) {
+            _queue.push(val);
+            unique_lock.unlock();
+            _get_cv.notify_one();
+            return true;
+        }
+        return false;
+    }
+
     // Shut down the queue. Wakes up all threads waiting on blocking_get or blocking_put.
     void shutdown() {
         {
-            std::lock_guard<doris::Mutex> l(_lock);
+            std::lock_guard l(_lock);
             _shutdown = true;
         }
         _get_cv.notify_all();
@@ -168,7 +181,7 @@ public:
     }
 
     uint32_t get_size() const {
-        std::lock_guard<doris::Mutex> l(_lock);
+        std::lock_guard l(_lock);
         return _queue.size();
     }
 

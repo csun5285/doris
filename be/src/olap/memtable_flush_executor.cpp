@@ -17,12 +17,17 @@
 
 #include "olap/memtable_flush_executor.h"
 
-#include <functional>
+#include <gen_cpp/olap_file.pb.h>
+#include <stddef.h>
 
 #include "common/status.h"
+#include <algorithm>
+#include <ostream>
+
+#include "common/config.h"
+#include "common/logging.h"
 #include "olap/memtable.h"
-#include "runtime/thread_context.h"
-#include "util/scoped_cleanup.h"
+#include "util/stopwatch.hpp"
 #include "util/time.h"
 
 namespace doris {
@@ -81,7 +86,8 @@ Status FlushToken::wait() {
 }
 
 void FlushToken::_flush_memtable(MemTable* memtable, int64_t submit_task_time) {
-    _stats.flush_wait_time_ns += (MonotonicNanos() - submit_task_time);
+    uint64_t flush_wait_time_ns = MonotonicNanos() - submit_task_time;
+    _stats.flush_wait_time_ns += flush_wait_time_ns;
     // If previous flush has failed, return directly
     if (_flush_status.load() != OK) {
         return;
@@ -94,15 +100,15 @@ void FlushToken::_flush_memtable(MemTable* memtable, int64_t submit_task_time) {
     if (!s) {
         LOG(WARNING) << "Flush memtable failed with res = " << s;
         // If s is not ok, ignore the code, just use other code is ok
-        _flush_status.store(ErrorCode::INTERNAL_ERROR);
+        _flush_status.store(s.code());
     }
-
     if (_flush_status.load() != OK) {
         return;
     }
 
-    VLOG_CRITICAL << "flush memtable cost: " << timer.elapsed_time()
-                  << ", running count: " << _stats.flush_running_count
+    VLOG_CRITICAL << "flush memtable wait time:" << flush_wait_time_ns
+                  << "(ns), flush memtable cost: " << timer.elapsed_time()
+                  << "(ns), running count: " << _stats.flush_running_count
                   << ", finish count: " << _stats.flush_finish_count
                   << ", mem size: " << memory_usage << ", disk size: " << memtable->flush_size();
     _stats.flush_time_ns += timer.elapsed_time();

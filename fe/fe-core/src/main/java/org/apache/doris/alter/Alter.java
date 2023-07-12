@@ -18,8 +18,8 @@
 package org.apache.doris.alter;
 
 import org.apache.doris.analysis.AddPartitionClause;
+import org.apache.doris.analysis.AddPartitionLikeClause;
 import org.apache.doris.analysis.AlterClause;
-import org.apache.doris.analysis.AlterMaterializedViewStmt;
 import org.apache.doris.analysis.AlterSystemStmt;
 import org.apache.doris.analysis.AlterTableStmt;
 import org.apache.doris.analysis.AlterViewStmt;
@@ -28,7 +28,9 @@ import org.apache.doris.analysis.CreateMaterializedViewStmt;
 import org.apache.doris.analysis.CreateMultiTableMaterializedViewStmt;
 import org.apache.doris.analysis.DropMaterializedViewStmt;
 import org.apache.doris.analysis.DropPartitionClause;
+import org.apache.doris.analysis.DropPartitionFromIndexClause;
 import org.apache.doris.analysis.DropTableStmt;
+import org.apache.doris.analysis.MVRefreshInfo.RefreshMethod;
 import org.apache.doris.analysis.ModifyColumnCommentClause;
 import org.apache.doris.analysis.ModifyDistributionClause;
 import org.apache.doris.analysis.ModifyEngineClause;
@@ -46,23 +48,31 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.DataProperty;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.MaterializedView;
 import org.apache.doris.catalog.MysqlTable;
 import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.OlapTable.OlapTableState;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
+import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.ReplicaAllocation;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.TableIf.TableType;
+import org.apache.doris.catalog.Tablet;
 import org.apache.doris.catalog.View;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DynamicPartitionUtil;
 import org.apache.doris.common.util.MetaLockUtils;
 import org.apache.doris.common.util.PropertyAnalyzer;
+import org.apache.doris.mtmv.MTMVJobFactory;
+import org.apache.doris.mtmv.MTMVUtils.TaskSubmitStatus;
+import org.apache.doris.mtmv.metadata.MTMVJob;
+import org.apache.doris.persist.AlterMultiMaterializedView;
 import org.apache.doris.persist.AlterViewInfo;
 import org.apache.doris.persist.BatchModifyPartitionsInfo;
 import org.apache.doris.persist.ModifyCommentOperationLog;
@@ -112,7 +122,7 @@ public class Alter {
         String dbName = stmt.getDBName();
         Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
         // check cluster capacity
-        Env.getCurrentSystemInfo().checkClusterCapacity(stmt.getClusterName());
+        Env.getCurrentSystemInfo().checkAvailableCapacity();
         // check db quota
         db.checkQuota();
 
@@ -122,12 +132,6 @@ public class Alter {
 
     public void processCreateMultiTableMaterializedView(CreateMultiTableMaterializedViewStmt stmt)
             throws UserException {
-        // check db
-        Database db = stmt.getDatabase();
-        // check cluster capacity
-        Env.getCurrentSystemInfo().checkClusterCapacity(stmt.getClusterName());
-        // check db quota
-        db.checkQuota();
         ((MaterializedViewHandler) materializedViewHandler).processCreateMultiTablesMaterializedView(stmt);
     }
 
@@ -135,18 +139,17 @@ public class Alter {
         if (!stmt.isForMTMV() && stmt.getTableName() == null) {
             throw new DdlException("Drop materialized view without table name is unsupported : " + stmt.toSql());
         }
-        TableName tableName = !stmt.isForMTMV() ? stmt.getTableName() : stmt.getMTMVName();
-
-        // check db
-        String dbName = tableName.getDb();
-        Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
-
-        String name = tableName.getTbl();
-        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(name,
-                !stmt.isForMTMV() ? TableType.OLAP : TableType.MATERIALIZED_VIEW);
 
         // drop materialized view
         if (!stmt.isForMTMV()) {
+            TableName tableName = stmt.getTableName();
+
+            // check db
+            String dbName = tableName.getDb();
+            Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
+
+            String name = tableName.getTbl();
+            OlapTable olapTable = (OlapTable) db.getTableOrMetaException(name, TableType.OLAP);
             ((MaterializedViewHandler) materializedViewHandler).processDropMaterializedView(stmt, db, olapTable);
         } else {
             DropTableStmt dropTableStmt = new DropTableStmt(stmt.isIfExists(), stmt.getMTMVName(), false);
@@ -156,11 +159,19 @@ public class Alter {
     }
 
     public void processRefreshMaterializedView(RefreshMaterializedViewStmt stmt) throws DdlException {
-        throw new DdlException("Refresh materialized view is not implemented: " + stmt.toSql());
+        if (stmt.getRefreshMethod() != RefreshMethod.COMPLETE) {
+            throw new DdlException("Now only support REFRESH COMPLETE.");
+        }
+        String db = stmt.getMvName().getDb();
+        String tbl = stmt.getMvName().getTbl();
+        TaskSubmitStatus status = Env.getCurrentEnv().getMTMVJobManager().refreshMTMVTask(db, tbl);
+        if (status != TaskSubmitStatus.SUBMITTED) {
+            throw new DdlException("Refresh MaterializedView with " + status.toString());
+        }
     }
 
     private boolean processAlterOlapTable(AlterTableStmt stmt, OlapTable olapTable, List<AlterClause> alterClauses,
-                                         final String clusterName, Database db) throws UserException {
+                                          final String clusterName, Database db) throws UserException {
         if (olapTable.getDataSortInfo() != null
                 && olapTable.getDataSortInfo().getSortType() == TSortType.ZORDER) {
             throw new UserException("z-order table can not support schema change!");
@@ -174,7 +185,7 @@ public class Alter {
 
         // check cluster capacity and db quota, only need to check once.
         if (currentAlterOps.needCheckCapacity()) {
-            Env.getCurrentSystemInfo().checkClusterCapacity(clusterName);
+            Env.getCurrentSystemInfo().checkAvailableCapacity();
             db.checkQuota();
         }
 
@@ -186,9 +197,18 @@ public class Alter {
         boolean needProcessOutsideTableLock = false;
         if (currentAlterOps.checkTableStoragePolicy(alterClauses)) {
             String tableStoragePolicy = olapTable.getStoragePolicy();
-            if (!tableStoragePolicy.equals("")) {
-                throw new DdlException("Do not support alter table's storage policy , this table ["
-                        + olapTable.getName() + "] has storage policy " + tableStoragePolicy);
+            if (!tableStoragePolicy.isEmpty()) {
+                for (Partition partition : olapTable.getAllPartitions()) {
+                    for (Tablet tablet : partition.getBaseIndex().getTablets()) {
+                        for (Replica replica : tablet.getReplicas()) {
+                            if (replica.getRowCount() > 0 || replica.getDataSize() > 0) {
+                                throw new DdlException("Do not support alter table's storage policy , this table ["
+                                        + olapTable.getName() + "] has storage policy " + tableStoragePolicy
+                                        + ", the table need to be empty.");
+                            }
+                        }
+                    }
+                }
             }
             String currentStoragePolicy = currentAlterOps.getTableStoragePolicy(alterClauses);
             // check currentStoragePolicy resource exist.
@@ -196,6 +216,15 @@ public class Alter {
 
             olapTable.setStoragePolicy(currentStoragePolicy);
             needProcessOutsideTableLock = true;
+        } else if (currentAlterOps.checkCcrEnable(alterClauses)) {
+            olapTable.setCcrEnable(currentAlterOps.isCcrEnable(alterClauses));
+            needProcessOutsideTableLock = true;
+        } else if (currentAlterOps.checkBinlogConfigChange(alterClauses)) {
+            if (!Config.enable_feature_binlog) {
+                throw new DdlException("Binlog feature is not enabled");
+            }
+            // TODO(Drogon): check error
+            ((SchemaChangeHandler) schemaChangeHandler).updateBinlogConfig(db, olapTable, alterClauses);
         } else if (currentAlterOps.hasSchemaChangeOp()) {
             // if modify storage type to v2, do schema change to convert all related tablets to segment v2 format
             schemaChangeHandler.process(alterClauses, clusterName, db, olapTable);
@@ -226,16 +255,24 @@ public class Alter {
                     Map<String, String> properties = clause.getProperties();
                     if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
+                        boolean isInMemory = !properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY) ? false :
+                                Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+                        if (isInMemory == true) {
+                            throw new UserException("Not support set 'in_memory'='true' now!");
+                        }
                         needProcessOutsideTableLock = true;
                     } else {
                         List<String> partitionNames = clause.getPartitionNames();
                         if (!properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)) {
-                            modifyPartitionsProperty(db, olapTable, partitionNames, properties);
+                            modifyPartitionsProperty(db, olapTable, partitionNames, properties,
+                                    clause.isTempPartition());
                         } else {
                             needProcessOutsideTableLock = true;
                         }
                     }
-                } else if (alterClause instanceof AddPartitionClause) {
+                } else if (alterClause instanceof DropPartitionFromIndexClause) {
+                    // do nothing
+                } else if (alterClause instanceof AddPartitionClause || alterClause instanceof AddPartitionLikeClause) {
                     needProcessOutsideTableLock = true;
                 } else {
                     throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
@@ -387,7 +424,7 @@ public class Alter {
     }
 
     private void processModifyEngineInternal(Database db, Table externalTable,
-            Map<String, String> prop, boolean isReplay) {
+                                             Map<String, String> prop, boolean isReplay) {
         MysqlTable mysqlTable = (MysqlTable) externalTable;
         Map<String, String> newProp = Maps.newHashMap(prop);
         newProp.put(OdbcTable.ODBC_HOST, mysqlTable.getHost());
@@ -432,11 +469,14 @@ public class Alter {
         // some operations will take long time to process, need to be done outside the table lock
         boolean needProcessOutsideTableLock = false;
         switch (table.getType()) {
+            case MATERIALIZED_VIEW:
             case OLAP:
                 OlapTable olapTable = (OlapTable) table;
                 needProcessOutsideTableLock = processAlterOlapTable(stmt, olapTable, alterClauses, clusterName, db);
                 break;
             case ODBC:
+            case JDBC:
+            case HIVE:
             case MYSQL:
             case ELASTICSEARCH:
                 processAlterExternalTable(stmt, table, db);
@@ -456,6 +496,12 @@ public class Alter {
                             (OlapTable) db.getTableOrMetaException(tableName, TableType.OLAP));
                 }
                 Env.getCurrentEnv().addPartition(db, tableName, (AddPartitionClause) alterClause);
+            } else if (alterClause instanceof AddPartitionLikeClause) {
+                if (!((AddPartitionLikeClause) alterClause).getIsTempPartition()) {
+                    DynamicPartitionUtil.checkAlterAllowed(
+                            (OlapTable) db.getTableOrMetaException(tableName, TableType.OLAP));
+                }
+                Env.getCurrentEnv().addPartitionLike(db, tableName, (AddPartitionLikeClause) alterClause);
             } else if (alterClause instanceof ModifyPartitionClause) {
                 ModifyPartitionClause clause = ((ModifyPartitionClause) alterClause);
                 Map<String, String> properties = clause.getProperties();
@@ -464,35 +510,67 @@ public class Alter {
                 Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
-                ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsInMemoryMeta(
+                ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
                         db, tableName, partitionNames, properties);
-                ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsPersistentMeta(
-                        db, tableName, partitionNames, properties);
+                // ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsPersistentMeta(
+                //         db, tableName, partitionNames, properties);
                 OlapTable olapTable = (OlapTable) table;
                 olapTable.writeLockOrDdlException();
                 try {
-                    modifyPartitionsProperty(db, olapTable, partitionNames, properties);
+                    modifyPartitionsProperty(db, olapTable, partitionNames, properties, clause.isTempPartition());
                 } finally {
                     olapTable.writeUnlock();
                 }
             } else if (alterClause instanceof ModifyTablePropertiesClause) {
                 Map<String, String> properties = alterClause.getProperties();
-                // currently, only in memory and storage policy property could reach here
                 Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
+                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_CCR_ENABLE)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
-                ((SchemaChangeHandler) schemaChangeHandler).updateTableInMemoryMeta(db, tableName, properties);
-                ((SchemaChangeHandler) schemaChangeHandler).updateTablePersistentMeta(db, tableName, properties);
-                ((SchemaChangeHandler) schemaChangeHandler).updateTableTtlSecondsMeta(db, tableName, properties);
+                // ((SchemaChangeHandler) schemaChangeHandler).updateTableInMemoryMeta(db, tableName, properties);
+                // ((SchemaChangeHandler) schemaChangeHandler).updateTablePersistentMeta(db, tableName, properties);
+                // ((SchemaChangeHandler) schemaChangeHandler).updateTableTtlSecondsMeta(db, tableName, properties);
+                ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
             }
         }
     }
 
-    public void processAlterMaterializedView(AlterMaterializedViewStmt stmt) throws UserException {
-        throw new DdlException("ALTER MATERIALIZED VIEW is not implemented: " + stmt.toSql());
+    public void processAlterMaterializedView(AlterMultiMaterializedView alterView, boolean isReplay)
+            throws UserException {
+        TableName tbl = alterView.getMvName();
+        MaterializedView olapTable = null;
+        try {
+            // 1. check mv exist
+            Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(tbl.getDb());
+            olapTable = (MaterializedView) db.getTableOrMetaException(tbl.getTbl(), TableType.MATERIALIZED_VIEW);
+
+            // 2. drop old job and kill the associated tasks
+            Env.getCurrentEnv().getMTMVJobManager().dropJobByName(tbl.getDb(), tbl.getTbl(), isReplay);
+
+            // 3. overwrite the refresh info in the memory of fe.
+            olapTable.writeLock();
+            olapTable.setRefreshInfo(alterView.getInfo());
+
+            // 4. log it and replay it in the follower
+            if (!isReplay) {
+                Env.getCurrentEnv().getEditLog().logAlterMTMV(alterView);
+                // 5. master node generate new jobs
+                if (MTMVJobFactory.isGenerateJob(olapTable)) {
+                    List<MTMVJob> jobs = MTMVJobFactory.buildJob(olapTable, db.getFullName());
+                    for (MTMVJob job : jobs) {
+                        Env.getCurrentEnv().getMTMVJobManager().createJob(job, false);
+                    }
+                    LOG.info("Alter mv success with new mv job created.");
+                }
+            }
+        } finally {
+            if (olapTable != null) {
+                olapTable.writeUnlock();
+            }
+        }
     }
 
     // entry of processing replace table
@@ -503,7 +581,8 @@ public class Alter {
         boolean swapTable = clause.isSwapTable();
         db.writeLockOrDdlException();
         try {
-            Table newTbl = db.getTableOrMetaException(newTblName, TableType.OLAP);
+            List<TableType> tableTypes = Lists.newArrayList(TableType.OLAP, TableType.MATERIALIZED_VIEW);
+            Table newTbl = db.getTableOrMetaException(newTblName, tableTypes);
             OlapTable olapNewTbl = (OlapTable) newTbl;
             List<Table> tableList = Lists.newArrayList(origTable, newTbl);
             tableList.sort((Comparator.comparing(Table::getId)));
@@ -535,8 +614,9 @@ public class Alter {
         long newTblId = log.getNewTblId();
 
         Database db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
-        OlapTable origTable = (OlapTable) db.getTableOrMetaException(origTblId, TableType.OLAP);
-        OlapTable newTbl = (OlapTable) db.getTableOrMetaException(newTblId, TableType.OLAP);
+        List<TableType> tableTypes = Lists.newArrayList(TableType.OLAP, TableType.MATERIALIZED_VIEW);
+        OlapTable origTable = (OlapTable) db.getTableOrMetaException(origTblId, tableTypes);
+        OlapTable newTbl = (OlapTable) db.getTableOrMetaException(newTblId, tableTypes);
         List<Table> tableList = Lists.newArrayList(origTable, newTbl);
         tableList.sort((Comparator.comparing(Table::getId)));
         MetaLockUtils.writeLockTablesOrMetaException(tableList);
@@ -600,7 +680,7 @@ public class Alter {
     }
 
     private void modifyViewDef(Database db, View view, String inlineViewDef, long sqlMode,
-            List<Column> newFullSchema) throws DdlException {
+                               List<Column> newFullSchema) throws DdlException {
         db.writeLockOrDdlException();
         try {
             view.writeLockOrDdlException();
@@ -703,7 +783,8 @@ public class Alter {
     public void modifyPartitionsProperty(Database db,
                                          OlapTable olapTable,
                                          List<String> partitionNames,
-                                         Map<String, String> properties)
+                                         Map<String, String> properties,
+                                         boolean isTempPartition)
             throws DdlException, AnalysisException {
         Preconditions.checkArgument(olapTable.isWriteLockHeldByCurrentThread());
         List<ModifyPartitionInfo> modifyPartitionInfos = Lists.newArrayList();
@@ -712,7 +793,7 @@ public class Alter {
         }
 
         for (String partitionName : partitionNames) {
-            Partition partition = olapTable.getPartition(partitionName);
+            Partition partition = olapTable.getPartition(partitionName, isTempPartition);
             if (partition == null) {
                 throw new DdlException(
                         "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
@@ -732,7 +813,7 @@ public class Alter {
         // get value from properties here
         // 1. replica allocation
         ReplicaAllocation replicaAlloc = PropertyAnalyzer.analyzeReplicaAllocation(properties, "");
-        Env.getCurrentSystemInfo().checkReplicaAllocation(db.getClusterName(), replicaAlloc);
+        Env.getCurrentSystemInfo().checkReplicaAllocation(replicaAlloc);
         // 2. in memory
         boolean newInMemory = PropertyAnalyzer.analyzeBooleanProp(properties,
                 PropertyAnalyzer.PROPERTIES_INMEMORY, false);
@@ -746,7 +827,7 @@ public class Alter {
         // modify meta here
         PartitionInfo partitionInfo = olapTable.getPartitionInfo();
         for (String partitionName : partitionNames) {
-            Partition partition = olapTable.getPartition(partitionName);
+            Partition partition = olapTable.getPartition(partitionName, isTempPartition);
             // 4. data property
             // 4.1 get old data property from partition
             DataProperty dataProperty = partitionInfo.getDataProperty(partition.getId());
@@ -754,12 +835,7 @@ public class Alter {
             modifiedProperties.putAll(properties);
 
             // 4.3 modify partition storage policy
-            String partitionStoragePolicy = partitionInfo.getStoragePolicy(partition.getId());
-            if (!partitionStoragePolicy.equals("")) {
-                throw new DdlException("Do not support alter table's partition storage policy , this table ["
-                    + olapTable.getName() + "] and partition [" + partitionName
-                    + "] has storage policy " + partitionStoragePolicy);
-            }
+            // can set multi times storage policy
             String currentStoragePolicy = PropertyAnalyzer.analyzeStoragePolicy(properties);
             if (!currentStoragePolicy.equals("")) {
                 // check currentStoragePolicy resource exist.

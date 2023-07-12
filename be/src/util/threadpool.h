@@ -20,24 +20,31 @@
 
 #pragma once
 
+#include <limits.h>
+#include <stddef.h>
+
+#include <boost/intrusive/detail/algo_type.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/list_hook.hpp>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <iosfwd>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_set>
-#include <utility>
 
 #include "common/status.h"
-#include "gutil/ref_counted.h"
 
 namespace doris {
 
 class Thread;
 class ThreadPool;
 class ThreadPoolToken;
+class PriorityThreadPool;
 
 class Runnable {
 public:
@@ -105,7 +112,18 @@ public:
         return *this;
     }
     // Instantiate a new ThreadPool with the existing builder arguments.
-    Status build(std::unique_ptr<ThreadPool>* pool) const;
+    template <typename ThreadPoolType>
+    Status build(std::unique_ptr<ThreadPoolType>* pool) const {
+        if constexpr (std::is_same_v<ThreadPoolType, ThreadPool>) {
+            pool->reset(new ThreadPoolType(*this));
+            RETURN_IF_ERROR((*pool)->init());
+        } else if constexpr (std::is_same_v<ThreadPoolType, PriorityThreadPool>) {
+            pool->reset(new ThreadPoolType(_max_threads, _max_queue_size, _name));
+        } else {
+            static_assert(always_false_v<ThreadPoolType>, "Unsupported ThreadPoolType");
+        }
+        return Status::OK();
+    }
 
 private:
     friend class ThreadPool;
@@ -117,6 +135,9 @@ private:
 
     ThreadPoolBuilder(const ThreadPoolBuilder&) = delete;
     void operator=(const ThreadPoolBuilder&) = delete;
+
+    template <typename T>
+    static constexpr bool always_false_v = false;
 };
 
 // Thread pool with a variable number of threads.

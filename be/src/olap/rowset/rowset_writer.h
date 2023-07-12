@@ -17,18 +17,34 @@
 
 #pragma once
 
-#include "gen_cpp/olap_file.pb.h"
-#include "gen_cpp/types.pb.h"
+#include <gen_cpp/olap_file.pb.h>
+#include <gen_cpp/types.pb.h>
+
+#include <functional>
+#include <optional>
+
+#include "common/factory_creator.h"
 #include "gutil/macros.h"
 #include "olap/column_mapping.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_writer_context.h"
+#include "olap/tablet_schema.h"
 #include "vec/core/block.h"
 
 namespace doris {
 
-struct ContiguousRow;
 class MemTable;
+
+// Context for single memtable flush
+struct FlushContext {
+    ENABLE_FACTORY_CREATOR(FlushContext);
+    TabletSchemaSPtr flush_schema = nullptr;
+    const vectorized::Block* block = nullptr;
+    std::optional<int32_t> segment_id = std::nullopt;
+    std::function<Status(int32_t)> generate_delete_bitmap = [](int32_t segment_id) {
+        return Status::OK();
+    };
+};
 
 class RowsetWriter {
 public:
@@ -36,11 +52,6 @@ public:
     virtual ~RowsetWriter() = default;
 
     virtual Status init(const RowsetWriterContext& rowset_writer_context) = 0;
-
-    // Memory note: input `row` is guaranteed to be copied into writer's internal buffer, including all slice data
-    // referenced by `row`. That means callers are free to de-allocate memory for `row` after this method returns.
-    virtual Status add_row(const RowCursor& row) = 0;
-    virtual Status add_row(const ContiguousRow& row) = 0;
 
     virtual Status add_block(const vectorized::Block* block) {
         return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
@@ -62,12 +73,15 @@ public:
     virtual Status flush_columns(bool is_key) {
         return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
+
     virtual Status final_flush() { return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>(); }
 
     virtual Status flush_single_memtable(MemTable* memtable, int64_t* flush_size) {
         return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
-    virtual Status flush_single_memtable(const vectorized::Block* block, int64_t* flush_size) {
+
+    virtual Status flush_single_memtable(const vectorized::Block* block, int64_t* flush_size,
+                                         const FlushContext* ctx = nullptr) {
         return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
 
@@ -97,9 +111,16 @@ public:
 
     virtual const RowsetMetaSharedPtr& rowset_meta() const = 0;
 
-    // metrics 
-    virtual int64_t total_data_size() const = 0;
-    virtual int32_t get_atomic_num_segment() const = 0;
+    virtual int32_t allocate_segment_id() = 0;
+
+    virtual bool is_doing_segcompaction() const = 0;
+
+    virtual Status wait_flying_segcompaction() = 0;
+
+    virtual void set_segment_start_id(int num_segment) { LOG(FATAL) << "not supported!"; }
+
+    virtual vectorized::schema_util::LocalSchemaChangeRecorder*
+    mutable_schema_change_recorder() = 0;
 
 private:
     DISALLOW_COPY_AND_ASSIGN(RowsetWriter);

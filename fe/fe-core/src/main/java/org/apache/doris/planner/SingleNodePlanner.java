@@ -60,14 +60,22 @@ import org.apache.doris.catalog.MysqlTable;
 import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.Table;
+import org.apache.doris.catalog.TableIf;
+import org.apache.doris.catalog.external.HMSExternalTable;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Reference;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.VectorizedUtil;
-import org.apache.doris.planner.external.ExternalFileScanNode;
+import org.apache.doris.planner.external.FileQueryScanNode;
+import org.apache.doris.planner.external.HiveScanNode;
+import org.apache.doris.planner.external.HudiScanNode;
+import org.apache.doris.planner.external.MaxComputeScanNode;
+import org.apache.doris.planner.external.iceberg.IcebergScanNode;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.rewrite.mvrewrite.MVSelectFailedException;
+import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.thrift.TNullSide;
 import org.apache.doris.thrift.TPushAggOp;
 
@@ -457,8 +465,11 @@ public class SingleNodePlanner {
                                 break;
                             }
                         } else {
-                            aggExprValidate = false;
-                            break;
+                            // want to support the agg of count(const value) in dup table
+                            aggExprValidate = (aggOp == TPushAggOp.COUNT && child.isConstant() && !child.isNullable());
+                            if (!aggExprValidate) {
+                                break;
+                            }
                         }
                     } else {
                         returnColumns.add(((SlotRef) aggExpr.getChild(0)).getDesc().getColumn());
@@ -483,16 +494,13 @@ public class SingleNodePlanner {
                         // over the length: https://github.com/apache/doris/pull/6293
                         if (aggOp == TPushAggOp.MINMAX || aggOp == TPushAggOp.MIX) {
                             PrimitiveType colType = col.getDataType();
-                            if (colType.isArrayType() || colType.isComplexType()
-                                    || colType == PrimitiveType.HLL
-                                    || colType == PrimitiveType.BITMAP
+                            if (colType.isComplexType() || colType.isHllType() || colType.isBitmapType()
                                     || colType == PrimitiveType.STRING) {
                                 returnColumnValidate = false;
                                 break;
                             }
 
-                            if (colType.isCharFamily() && aggOp != TPushAggOp.COUNT
-                                    && col.getType().getLength() > 512) {
+                            if (colType.isCharFamily() && col.getType().getLength() > 512) {
                                 returnColumnValidate = false;
                                 break;
                             }
@@ -1204,7 +1212,7 @@ public class SingleNodePlanner {
             if (selectStmt.getResultExprs().size() == 1) {
                 final List<SlotId> slotIds = Lists.newArrayList();
                 final List<TupleId> tupleIds = Lists.newArrayList();
-                Expr resultExprSelected = selectStmt.getResultExprs().get(0);
+                Expr resultExprSelected =  selectStmt.getResultExprs().get(0);
                 if (resultExprSelected != null && resultExprSelected instanceof SlotRef) {
                     resultExprSelected.getIds(tupleIds, slotIds);
                     for (SlotId id : slotIds) {
@@ -1322,10 +1330,13 @@ public class SingleNodePlanner {
     }
 
     public boolean selectMaterializedView(QueryStmt queryStmt, Analyzer analyzer)
-            throws UserException {
+            throws UserException, MVSelectFailedException {
         boolean selectFailed = false;
+        boolean haveError = false;
+        String errorMsg = "select fail reason: ";
         if (queryStmt instanceof SelectStmt) {
             SelectStmt selectStmt = (SelectStmt) queryStmt;
+            Set<TupleId> disableTuplesMVRewriter = Sets.newHashSet();
             for (TableRef tableRef : selectStmt.getTableRefs()) {
                 if (tableRef instanceof InlineViewRef) {
                     selectFailed |= selectMaterializedView(((InlineViewRef) tableRef).getViewStmt(),
@@ -1345,32 +1356,59 @@ public class SingleNodePlanner {
                 if (olapScanNode.getSelectedPartitionIds().size() == 0 && !FeConstants.runningUnitTest) {
                     continue;
                 }
-                // select index by the old Rollup selector
-                olapScanNode.selectBestRollupByRollupSelector(analyzer);
-                // select index by the new Materialized selector
-                MaterializedViewSelector.BestIndexInfo bestIndexInfo
-                        = materializedViewSelector.selectBestMV(olapScanNode);
-                if (bestIndexInfo == null) {
-                    selectFailed = true;
-                    TupleId tupleId = olapScanNode.getTupleId();
-                    selectStmt.updateDisableTuplesMVRewriter(tupleId);
-                    LOG.debug("MV rewriter of tuple [] will be disable", tupleId);
-                    continue;
+
+                try {
+                    // select index by the old Rollup selector
+                    olapScanNode.selectBestRollupByRollupSelector(analyzer);
+                } catch (UserException e) {
+                    LOG.debug("May no rollup index matched");
                 }
-                // if the new selected index id is different from the old one, scan node will be updated.
-                olapScanNode.updateScanRangeInfoByNewMVSelector(bestIndexInfo.getBestIndexId(),
-                        bestIndexInfo.isPreAggregation(), bestIndexInfo.getReasonOfDisable());
-                if (selectStmt.getAggInfo() != null) {
-                    selectStmt.getAggInfo().updateTypeOfAggregateExprs();
+
+                // select index by the new Materialized selector
+                MaterializedViewSelector.BestIndexInfo bestIndexInfo = materializedViewSelector
+                        .selectBestMV(olapScanNode);
+                boolean tupleSelectFailed = false;
+                if (bestIndexInfo == null) {
+                    tupleSelectFailed = true;
+                } else {
+                    try {
+                        // if the new selected index id is different from the old one, scan node will be
+                        // updated.
+                        olapScanNode.updateScanRangeInfoByNewMVSelector(bestIndexInfo.getBestIndexId(),
+                                bestIndexInfo.isPreAggregation(), bestIndexInfo.getReasonOfDisable());
+
+                        // mv index have where clause, so where expr on scan node is unused.
+                        olapScanNode.ignoreConjuncts(olapScanNode.getOlapTable()
+                                .getIndexMetaByIndexId(bestIndexInfo.getBestIndexId())
+                                .getWhereClause());
+
+                        if (selectStmt.getAggInfo() != null) {
+                            selectStmt.getAggInfo().updateTypeOfAggregateExprs();
+                        }
+                    } catch (Exception e) {
+                        if (haveError) {
+                            errorMsg += ",";
+                        }
+                        errorMsg += e.getMessage();
+                        haveError = true;
+                        tupleSelectFailed = true;
+                    }
+                }
+                if (tupleSelectFailed) {
+                    selectFailed = true;
+                    disableTuplesMVRewriter.add(olapScanNode.getTupleId());
                 }
             }
-
+            selectStmt.updateDisableTuplesMVRewriter(disableTuplesMVRewriter);
         } else {
             Preconditions.checkState(queryStmt instanceof SetOperationStmt);
             SetOperationStmt unionStmt = (SetOperationStmt) queryStmt;
             for (SetOperationStmt.SetOperand unionOperand : unionStmt.getOperands()) {
                 selectFailed |= selectMaterializedView(unionOperand.getQueryStmt(), analyzer);
             }
+        }
+        if (haveError) {
+            throw new MVSelectFailedException(errorMsg);
         }
         return selectFailed;
     }
@@ -1948,22 +1986,14 @@ public class SingleNodePlanner {
                 }
                 break;
             case BROKER:
-                scanNode = new BrokerScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "BrokerScanNode",
-                        null, -1);
-                break;
+                throw new RuntimeException("Broker external table is not supported, try to use table function please");
             case ELASTICSEARCH:
                 scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "EsScanNode");
                 break;
             case HIVE:
-                scanNode = new HiveScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "HiveScanNode",
-                        null, -1);
-                break;
+                throw new RuntimeException("Hive external table is not supported, try to use hive catalog please");
             case ICEBERG:
-                scanNode = new ExternalFileScanNode(ctx.getNextNodeId(), tblRef.getDesc());
-                break;
-            case HUDI:
-                throw new UserException(
-                        "Hudi table is no longer supported. Use Multi Catalog feature to connect to Hudi");
+                throw new RuntimeException("Iceberg external table is not supported, use iceberg catalog please");
             case JDBC:
                 scanNode = new JdbcScanNode(ctx.getNextNodeId(), tblRef.getDesc(), false);
                 break;
@@ -1971,8 +2001,28 @@ public class SingleNodePlanner {
                 scanNode = ((TableValuedFunctionRef) tblRef).getScanNode(ctx.getNextNodeId());
                 break;
             case HMS_EXTERNAL_TABLE:
+                TableIf table = tblRef.getDesc().getTable();
+                switch (((HMSExternalTable) table).getDlaType()) {
+                    case HUDI:
+                        scanNode = new HudiScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
+                        break;
+                    case ICEBERG:
+                        scanNode = new IcebergScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
+                        break;
+                    case HIVE:
+                        scanNode = new HiveScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
+                        break;
+                    default:
+                        throw new UserException("Not supported table type" + table.getType());
+                }
+                break;
             case ICEBERG_EXTERNAL_TABLE:
-                scanNode = new ExternalFileScanNode(ctx.getNextNodeId(), tblRef.getDesc());
+                scanNode = new IcebergScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
+                break;
+            case MAX_COMPUTE_EXTERNAL_TABLE:
+                // TODO: support max compute scan node
+                scanNode = new MaxComputeScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "MCScanNode",
+                        StatisticalType.MAX_COMPUTE_SCAN_NODE, true);
                 break;
             case ES_EXTERNAL_TABLE:
                 scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "EsScanNode", true);
@@ -1980,11 +2030,14 @@ public class SingleNodePlanner {
             case JDBC_EXTERNAL_TABLE:
                 scanNode = new JdbcScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
                 break;
-            default:
+            case TEST_EXTERNAL_TABLE:
+                scanNode = new TestExternalTableScanNode(ctx.getNextNodeId(), tblRef.getDesc());
                 break;
+            default:
+                throw new UserException("Not supported table type" + tblRef.getTable().getType());
         }
-        if (scanNode instanceof OlapScanNode || scanNode instanceof EsScanNode || scanNode instanceof HiveScanNode
-                || scanNode instanceof ExternalFileScanNode) {
+        if (scanNode instanceof OlapScanNode || scanNode instanceof EsScanNode
+                || scanNode instanceof FileQueryScanNode) {
             if (analyzer.enableInferPredicate()) {
                 PredicatePushDown.visitScanNode(scanNode, tblRef.getJoinOp(), analyzer);
             }
@@ -2154,7 +2207,9 @@ public class SingleNodePlanner {
             Analyzer viewAnalyzer = inlineViewRef.getAnalyzer();
             Set<Expr> exprs = viewAnalyzer.findMigrateFailedConjuncts(inlineViewRef);
             if (CollectionUtils.isNotEmpty(exprs)) {
-                scanNode.setVConjunct(exprs);
+                for (Expr expr : exprs) {
+                    scanNode.addConjunct(expr);
+                }
             }
         }
         if (scanNode == null) {
@@ -2689,6 +2744,7 @@ public class SingleNodePlanner {
                     //eg: select distinct c from ( select distinct c from table) t where c > 1;
                     continue;
                 }
+
                 if (sourceExpr.getFn() instanceof AggregateFunction) {
                     isAllSlotReferToGroupBys = false;
                 } else if (stmt.getGroupByClause().isGroupByExtension()) {

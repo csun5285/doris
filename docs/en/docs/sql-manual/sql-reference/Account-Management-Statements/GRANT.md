@@ -32,12 +32,21 @@ GRANT
 
 ### Description
 
-The GRANT command is used to grant the specified user or role specified permissions
+The GRANT command has the following functions:
+
+1. Grant the specified permissions to a user or role.
+2. Grant the specified role to a user.
+
+>Note that.
+>
+>"Grant specified roles to user" is supported in versions 2.0 and later
 
 ```sql
 GRANT privilege_list ON priv_level TO user_identity [ROLE role_name]
 
 GRANT privilege_list ON RESOURCE resource_name TO user_identity [ROLE role_name]
+
+GRANT role_list TO user_identity
 ````
 
 privilege_list is a list of privileges to be granted, separated by commas. Currently Doris supports the following permissions:
@@ -64,9 +73,9 @@ Permission classification:
 Priv_level supports the following four forms:
 
     1. *.*.* permissions can be applied to all catalogs, all databases and all tables in them
-    2. ctl.*.* permissions can be applied to all databases and all tables in them
-    3. ctl.db.* permissions can be applied to all tables under the specified database
-    4. ctl.db.tbl permission can be applied to the specified table under the specified database
+    2. catalog_name.*.* permissions can be applied to all databases and all tables in them
+    3. catalog_name.db.* permissions can be applied to all tables under the specified database
+    4. catalog_name.db.tbl permission can be applied to the specified table under the specified database
     
     The catalog or database, table specified here may be not exist.
 
@@ -75,13 +84,15 @@ resource_name supports the following two forms:
     1. * Permissions apply to all resources
     2. The resource permission applies to the specified resource
     
-    The resource specified here can be a non-existing resource.
+    The resource specified here can be a non-existing resource. In addition, please distinguish the resources here from external tables, and use catalog as an alternative if you use external tables.
 
 user_identity:
 
     The user_identity syntax here is the same as CREATE USER. And must be a user_identity created with CREATE USER. The host in user_identity can be a domain name. If it is a domain name, the effective time of the authority may be delayed by about 1 minute.
     
     You can also assign permissions to the specified ROLE, if the specified ROLE does not exist, it will be created automatically.
+
+role_list is the list of roles to be assigned, separated by commas,the specified role must exist.
 
 ### Example
 
@@ -120,6 +131,14 @@ user_identity:
    ```sql
    GRANT USAGE_PRIV ON RESOURCE 'spark_resource' TO ROLE 'my_role';
    ````
+   
+<version since="2.0.0"></version>
+
+7. Grant the specified role to a user
+
+    ```sql
+    GRANT 'role1','role2' TO 'jack'@'%';
+    ```
 
 ### Keywords
 

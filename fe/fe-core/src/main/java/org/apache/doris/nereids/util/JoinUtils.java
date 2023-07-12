@@ -27,8 +27,9 @@ import org.apache.doris.nereids.properties.DistributionSpecReplicated;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
 import org.apache.doris.nereids.trees.expressions.Expression;
-import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Not;
 import org.apache.doris.nereids.trees.expressions.Slot;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapContains;
 import org.apache.doris.nereids.trees.plans.JoinType;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.algebra.Join;
@@ -51,8 +52,8 @@ import java.util.stream.Collectors;
  */
 public class JoinUtils {
     public static boolean couldShuffle(Join join) {
-        // Cross-join only can be broadcast join.
-        return !(join.getJoinType().isCrossJoin());
+        // Cross-join and Null-Aware-Left-Anti-Join only can be broadcast join.
+        return !(join.getJoinType().isCrossJoin()) && !(join.getJoinType().isNullAwareLeftAntiJoin());
     }
 
     public static boolean couldBroadcast(Join join) {
@@ -137,49 +138,48 @@ public class JoinUtils {
     }
 
     /**
-     * Get all used slots from onClause of join.
-     * Return pair of left used slots and right used slots.
+     * This is used for bitmap runtime filter only.
+     * Extract bitmap_contains conjunct:
+     * like: bitmap_contains(a, b) and ..., Not(bitmap_contains(a, b)) and ...,
+     * where `a` and `b` are from right child and left child, respectively.
+     *
+     * @return condition for bitmap runtime filter: bitmap_contains
      */
-    public static Pair<List<ExprId>, List<ExprId>> getOnClauseUsedSlots(
-            AbstractPhysicalJoin<? extends Plan, ? extends Plan> join) {
-
-        List<ExprId> exprIds1 = Lists.newArrayListWithCapacity(join.getHashJoinConjuncts().size());
-        List<ExprId> exprIds2 = Lists.newArrayListWithCapacity(join.getHashJoinConjuncts().size());
-
-        JoinSlotCoverageChecker checker = new JoinSlotCoverageChecker(
-                join.left().getOutputExprIdSet(),
-                join.right().getOutputExprIdSet());
-
-        for (Expression expr : join.getHashJoinConjuncts()) {
-            EqualTo equalTo = (EqualTo) expr;
-            if (!(equalTo.left() instanceof Slot) || !(equalTo.right() instanceof Slot)) {
+    public static List<Expression> extractBitmapRuntimeFilterConditions(List<Slot> leftSlots,
+            List<Slot> rightSlots, List<Expression> onConditions) {
+        List<Expression> result = Lists.newArrayList();
+        for (Expression expr : onConditions) {
+            BitmapContains bitmapContains = null;
+            if (expr instanceof Not) {
+                List<Expression> notChildren = ExpressionUtils.extractConjunction(expr.child(0));
+                if (notChildren.size() == 1 && notChildren.get(0) instanceof BitmapContains) {
+                    bitmapContains = (BitmapContains) notChildren.get(0);
+                }
+            } else if (expr instanceof BitmapContains) {
+                bitmapContains = (BitmapContains) expr;
+            }
+            if (bitmapContains == null) {
                 continue;
             }
-            ExprId leftExprId = ((Slot) equalTo.left()).getExprId();
-            ExprId rightExprId = ((Slot) equalTo.right()).getExprId();
-
-            if (checker.isCoveredByLeftSlots(leftExprId)
-                    && checker.isCoveredByRightSlots(rightExprId)) {
-                exprIds1.add(leftExprId);
-                exprIds2.add(rightExprId);
-            } else if (checker.isCoveredByLeftSlots(rightExprId)
-                    && checker.isCoveredByRightSlots(leftExprId)) {
-                exprIds1.add(rightExprId);
-                exprIds2.add(leftExprId);
-            } else {
-                throw new RuntimeException("Could not generate valid equal on clause slot pairs for join: " + join);
+            //first child in right, second child in left
+            if (leftSlots.containsAll(bitmapContains.child(1).collect(Slot.class::isInstance))
+                    && rightSlots.containsAll(bitmapContains.child(0).collect(Slot.class::isInstance))) {
+                result.add(expr);
             }
         }
-        return Pair.of(exprIds1, exprIds2);
+        return result;
     }
 
     public static boolean shouldNestedLoopJoin(Join join) {
-        JoinType joinType = join.getJoinType();
-        return (joinType.isInnerJoin() && join.getHashJoinConjuncts().isEmpty()) || joinType.isCrossJoin();
+        return join.getHashJoinConjuncts().isEmpty();
+    }
+
+    public static boolean shouldNestedLoopJoin(JoinType joinType, List<Expression> hashConjuncts) {
+        return hashConjuncts.isEmpty();
     }
 
     /**
-     * The left and right child of origin predicates need to be swap sometimes.
+     * The left and right child of origin predicates need to swap sometimes.
      * Case A:
      * select * from t1 join t2 on t2.id=t1.id
      * The left plan node is t1 and the right plan node is t2.
@@ -275,8 +275,13 @@ public class JoinUtils {
         final long rightTableId = rightHashSpec.getTableId();
         final Set<Long> leftTablePartitions = leftHashSpec.getPartitionIds();
         final Set<Long> rightTablePartitions = rightHashSpec.getPartitionIds();
-        boolean noNeedCheckColocateGroup = (leftTableId == rightTableId)
-                && (leftTablePartitions.equals(rightTablePartitions)) && (leftTablePartitions.size() <= 1);
+
+        // For UT or no partition is selected, getSelectedIndexId() == -1, see selectMaterializedView()
+        boolean hitSameIndex = (leftTableId == rightTableId)
+                && (leftHashSpec.getSelectedIndexId() != -1 && rightHashSpec.getSelectedIndexId() != -1)
+                && (leftHashSpec.getSelectedIndexId() == rightHashSpec.getSelectedIndexId());
+        boolean noNeedCheckColocateGroup = hitSameIndex && (leftTablePartitions.equals(rightTablePartitions))
+                && (leftTablePartitions.size() <= 1);
         ColocateTableIndex colocateIndex = Env.getCurrentColocateIndex();
         if (noNeedCheckColocateGroup
                 || (colocateIndex.isSameGroup(leftTableId, rightTableId)
@@ -286,44 +291,55 @@ public class JoinUtils {
         return false;
     }
 
-    /**
-     * replace JoinConjuncts by using slots map.
-     */
-    public static List<Expression> replaceJoinConjuncts(List<Expression> joinConjuncts,
-            Map<Slot, Slot> replaceMaps) {
-        return joinConjuncts.stream()
-                .map(expr ->
-                        expr.rewriteUp(e -> {
-                            if (e instanceof Slot && replaceMaps.containsKey(e)) {
-                                return replaceMaps.get(e);
-                            } else {
-                                return e;
-                            }
-                        })
-                ).collect(Collectors.toList());
+    public static Set<ExprId> getJoinOutputExprIdSet(Plan left, Plan right) {
+        Set<ExprId> joinOutputExprIdSet = new HashSet<>();
+        joinOutputExprIdSet.addAll(left.getOutputExprIdSet());
+        joinOutputExprIdSet.addAll(right.getOutputExprIdSet());
+        return joinOutputExprIdSet;
+    }
+
+    private static List<Slot> applyNullable(List<Slot> slots, boolean nullable) {
+        return slots.stream().map(o -> o.withNullable(nullable))
+                .collect(ImmutableList.toImmutableList());
     }
 
     /**
-     * When project not empty, we add all slots used by hashOnCondition into projects.
+     * calculate the output slot of a join operator according join type and its children
+     *
+     * @param joinType the type of join operator
+     * @param left left child
+     * @param right right child
+     * @return return the output slots
      */
-    public static void addSlotsUsedByOn(Set<Slot> usedSlots, List<NamedExpression> projects) {
-        if (projects.isEmpty()) {
-            return;
+    public static List<Slot> getJoinOutput(JoinType joinType, Plan left, Plan right) {
+        switch (joinType) {
+            case LEFT_SEMI_JOIN:
+            case LEFT_ANTI_JOIN:
+            case NULL_AWARE_LEFT_ANTI_JOIN:
+                return ImmutableList.copyOf(left.getOutput());
+            case RIGHT_SEMI_JOIN:
+            case RIGHT_ANTI_JOIN:
+                return ImmutableList.copyOf(right.getOutput());
+            case LEFT_OUTER_JOIN:
+                return ImmutableList.<Slot>builder()
+                        .addAll(left.getOutput())
+                        .addAll(applyNullable(right.getOutput(), true))
+                        .build();
+            case RIGHT_OUTER_JOIN:
+                return ImmutableList.<Slot>builder()
+                        .addAll(applyNullable(left.getOutput(), true))
+                        .addAll(right.getOutput())
+                        .build();
+            case FULL_OUTER_JOIN:
+                return ImmutableList.<Slot>builder()
+                        .addAll(applyNullable(left.getOutput(), true))
+                        .addAll(applyNullable(right.getOutput(), true))
+                        .build();
+            default:
+                return ImmutableList.<Slot>builder()
+                        .addAll(left.getOutput())
+                        .addAll(right.getOutput())
+                        .build();
         }
-        Set<ExprId> projectExprIdSet = projects.stream()
-                .map(NamedExpression::getExprId)
-                .collect(Collectors.toSet());
-        usedSlots.forEach(slot -> {
-            if (!projectExprIdSet.contains(slot.getExprId())) {
-                projects.add(slot);
-            }
-        });
-    }
-
-    public static Set<Slot> getJoinOutputSet(Plan left, Plan right) {
-        HashSet<Slot> joinOutput = new HashSet<>();
-        joinOutput.addAll(left.getOutput());
-        joinOutput.addAll(right.getOutput());
-        return joinOutput;
     }
 }

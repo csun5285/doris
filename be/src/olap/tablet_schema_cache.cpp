@@ -32,8 +32,11 @@ void TabletSchemaCache::create_global_schema_cache() {
 }
 
 TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaPB& schema) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert1",
-                                      std::make_shared<TabletSchema>());
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert1", [&schema] {
+        auto tablet_schema = std::make_shared<TabletSchema>();
+        tablet_schema->init_from_pb(schema);
+        return tablet_schema;
+    }());
     DCHECK(_s_instance != nullptr);
     DCHECK(index_id > 0);
     std::lock_guard guard(_mtx);
@@ -48,8 +51,7 @@ TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaP
 }
 
 TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaSPtr& schema) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert2",
-                                      std::make_shared<TabletSchema>());
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("TabletSchemaCache::insert2", schema);
     DCHECK(_s_instance != nullptr);
     DCHECK(index_id > 0);
     std::lock_guard guard(_mtx);
@@ -57,22 +59,45 @@ TabletSchemaSPtr TabletSchemaCache::insert(int64_t index_id, const TabletSchemaS
     return it->second;
 }
 
+void TabletSchemaCache::stop() {
+    _should_stop = true;
+    while (!_is_stopped) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    LOG(INFO) << "TabletSchemaCache stopped";
+}
+
 /**
  * @brief recycle when TabletSchemaSPtr use_count equals 1.
  */
 void TabletSchemaCache::_recycle() {
     int64_t tablet_schema_cache_recycle_interval = 86400; // s, one day
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::seconds(tablet_schema_cache_recycle_interval));
+    int64_t check_interval = 5;
+    int64_t left_second = tablet_schema_cache_recycle_interval;
+    while (!_should_stop) {
+        if (left_second > 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(check_interval));
+            left_second -= check_interval;
+            continue;
+        } else {
+            left_second = tablet_schema_cache_recycle_interval;
+        }
+
         std::lock_guard guard(_mtx);
+        LOG(INFO) << "Tablet Schema Cache Capacity " << _cache.size();
         for (auto iter = _cache.begin(), last = _cache.end(); iter != last;) {
             if (iter->second.unique()) {
+                DorisMetrics::instance()->tablet_schema_cache_memory_bytes->increment(
+                        -iter->second->mem_size());
+                DorisMetrics::instance()->tablet_schema_cache_count->increment(-1);
                 iter = _cache.erase(iter);
             } else {
                 ++iter;
             }
         }
     }
+    _is_stopped = true;
+    LOG(INFO) << "TabletSchemaCache stopped ";
 }
 
 } // namespace doris

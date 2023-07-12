@@ -18,6 +18,11 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite ("test_agg_keys_schema_change") {
+    def getJobState = { tableName ->
+         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
+         return jobStateResult[0][9]
+    }
+    
     def tableName = "schema_change_agg_keys_regression_test"
 
     def getJobState = { tbName ->
@@ -25,29 +30,20 @@ suite ("test_agg_keys_schema_change") {
          return jobStateResult[0][9]
     }
 
+<<<<<<< HEAD
     try {
         String[][] backends = sql """ show backends; """
         assertTrue(backends.size() > 0)
+=======
+>>>>>>> doris/branch-2.0-beta
         String backend_id;
         def backendId_to_backendIP = [:]
         def backendId_to_backendHttpPort = [:]
-        for (String[] backend in backends) {
-            backendId_to_backendIP.put(backend[0], backend[2])
-            backendId_to_backendHttpPort.put(backend[0], backend[5])
-        }
+        getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
 
         backend_id = backendId_to_backendIP.keySet()[0]
-        StringBuilder showConfigCommand = new StringBuilder();
-        showConfigCommand.append("curl -X GET http://")
-        showConfigCommand.append(backendId_to_backendIP.get(backend_id))
-        showConfigCommand.append(":")
-        showConfigCommand.append(backendId_to_backendHttpPort.get(backend_id))
-        showConfigCommand.append("/api/show_config")
-        logger.info(showConfigCommand.toString())
-        def process = showConfigCommand.toString().execute()
-        int code = process.waitFor()
-        String err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        String out = process.getText()
+        def (code, out, err) = show_be_config(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id))
+        
         logger.info("Show config: code=" + code + ", out=" + out + ", err=" + err)
         assertEquals(code, 0)
         def configList = parseJson(out.trim())
@@ -77,7 +73,7 @@ suite ("test_agg_keys_schema_change") {
                     `bitmap_col` Bitmap BITMAP_UNION NOT NULL COMMENT "bitmap列")
                 AGGREGATE KEY(`user_id`, `date`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`)
                 BUCKETS 1
-                PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true" );
+                PROPERTIES ( "replication_num" = "1", "light_schema_change" = "false" );
             """
 
         sql """ INSERT INTO schema_change_agg_keys_regression_test VALUES
@@ -86,6 +82,11 @@ suite ("test_agg_keys_schema_change") {
         sql """ INSERT INTO ${tableName} VALUES
                 (1, '2017-10-01', 'Beijing', 10, 1, 1, 31, 19, hll_hash(2), to_bitmap(2))
             """
+        qt_sc """ select * from schema_change_agg_keys_regression_test order by user_id"""
+
+        // alter and test light schema change
+        sql """ALTER TABLE ${tableName} SET ("light_schema_change" = "true");"""
+
         sql """ INSERT INTO ${tableName} VALUES
                 (2, '2017-10-01', 'Beijing', 10, 1, 1, 31, 21, hll_hash(2), to_bitmap(2))
             """
@@ -100,6 +101,7 @@ suite ("test_agg_keys_schema_change") {
             ALTER table ${tableName} ADD COLUMN new_key_column INT default "2" 
             """
 
+<<<<<<< HEAD
         int max_try_time = 600
         while(max_try_time--){
             String result = getJobState(tableName)
@@ -110,6 +112,18 @@ suite ("test_agg_keys_schema_change") {
                 if (max_try_time < 1){
                     println "test timeout," + "state:" + result
                     assertEquals("FINISHED", result)
+=======
+        int max_try_time = 3000
+        while (max_try_time--){
+            String result = getJobState(tableName)
+            if (result == "FINISHED") {
+                sleep(3000)
+                break
+            } else {
+                sleep(100)
+                if (max_try_time < 1){
+                    assertEquals(1,2)
+>>>>>>> doris/branch-2.0-beta
                 }
             }
         }
@@ -155,21 +169,19 @@ suite ("test_agg_keys_schema_change") {
         sql """
             ALTER TABLE ${tableName} DROP COLUMN new_key_column
             """
-
-        max_try_time = 600
-        while(max_try_time--){
+        max_try_time = 3000
+        while (max_try_time--){
             String result = getJobState(tableName)
             if (result == "FINISHED") {
+                sleep(3000)
                 break
             } else {
-                sleep(1000)
+                sleep(100)
                 if (max_try_time < 1){
-                    println "test timeout," + "state:" + result
-                    assertEquals("FINISHED", result)
+                    assertEquals(1,2)
                 }
             }
         }
-
         qt_sc """ select * from ${tableName} where user_id = 3 """
 
 
@@ -198,6 +210,7 @@ suite ("test_agg_keys_schema_change") {
             """
 
         // compaction
+<<<<<<< HEAD
         // String[][] tablets = sql """ show tablets from ${tableName}; """
         // for (String[] tablet in tablets) {
         //         String tablet_id = tablet[0]
@@ -247,6 +260,32 @@ suite ("test_agg_keys_schema_change") {
         //             running = compactionStatus.run_status
         //         } while (running)
         // }
+=======
+        String[][] tablets = sql """ show tablets from ${tableName}; """
+        for (String[] tablet in tablets) {
+                String tablet_id = tablet[0]
+                backend_id = tablet[2]
+                logger.info("run compaction:" + tablet_id)
+                (code, out, err) = be_run_cumulative_compaction(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
+                logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
+        }
+
+        // wait for all compactions done
+        for (String[] tablet in tablets) {
+                boolean running = true
+                do {
+                    Thread.sleep(100)
+                    String tablet_id = tablet[0]
+                    backend_id = tablet[2]
+                    (code, out, err) = be_get_compaction_status(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
+                    logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
+                    assertEquals(code, 0)
+                    def compactionStatus = parseJson(out.trim())
+                    assertEquals("success", compactionStatus.status.toLowerCase())
+                    running = compactionStatus.run_status
+                } while (running)
+        }
+>>>>>>> doris/branch-2.0-beta
          
         qt_sc """ select count(*) from ${tableName} """
 

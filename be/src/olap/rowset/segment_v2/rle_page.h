@@ -56,7 +56,7 @@ public:
     RlePageBuilder(const PageBuilderOptions& options)
             : _options(options), _count(0), _finished(false), _bit_width(0), _rle_encoder(nullptr) {
         switch (Type) {
-        case OLAP_FIELD_TYPE_BOOL: {
+        case FieldType::OLAP_FIELD_TYPE_BOOL: {
             _bit_width = 1;
             break;
         }
@@ -167,7 +167,7 @@ public:
         _parsed = true;
 
         switch (Type) {
-        case OLAP_FIELD_TYPE_BOOL: {
+        case FieldType::OLAP_FIELD_TYPE_BOOL: {
             _bit_width = 1;
             break;
         }
@@ -208,29 +208,6 @@ public:
         return Status::OK();
     }
 
-    Status next_batch(size_t* n, ColumnBlockView* dst) override {
-        DCHECK(_parsed);
-        if (PREDICT_FALSE(*n == 0 || _cur_index >= _num_elements)) {
-            *n = 0;
-            return Status::OK();
-        }
-
-        size_t to_fetch = std::min(*n, static_cast<size_t>(_num_elements - _cur_index));
-        size_t remaining = to_fetch;
-        uint8_t* data_ptr = dst->data();
-        bool result = false;
-        while (remaining > 0) {
-            result = _rle_decoder.Get(reinterpret_cast<CppType*>(data_ptr));
-            DCHECK(result);
-            remaining--;
-            data_ptr += SIZE_OF_TYPE;
-        }
-
-        _cur_index += to_fetch;
-        *n = to_fetch;
-        return Status::OK();
-    }
-
     Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst) override {
         DCHECK(_parsed);
         if (PREDICT_FALSE(*n == 0 || _cur_index >= _num_elements)) {
@@ -252,7 +229,7 @@ public:
         _cur_index += to_fetch;
         *n = to_fetch;
         return Status::OK();
-    };
+    }
 
     Status read_by_rowids(const rowid_t* rowids, ordinal_t page_first_ordinal, size_t* n,
                           vectorized::MutableColumnPtr& dst) override {

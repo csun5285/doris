@@ -29,7 +29,7 @@ import org.apache.doris.persist.HbPackage;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.system.HeartbeatResponse.HbStatus;
-import org.apache.doris.system.HeartbeatResponse.Type;
+import org.apache.doris.system.SystemInfoService.HostInfo;
 import org.apache.doris.thrift.FrontendService;
 import org.apache.doris.thrift.HeartbeatService;
 import org.apache.doris.thrift.TBackendInfo;
@@ -53,7 +53,6 @@ import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -61,7 +60,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 /**
  * Heartbeat manager run as a daemon at a fix interval.
@@ -72,7 +70,6 @@ public class HeartbeatMgr extends MasterDaemon {
 
     private final ExecutorService executor;
 
-    private final ExecutorService executorCheckBe;
     private SystemInfoService nodeMgr;
     private HeartbeatFlags heartbeatFlags;
 
@@ -83,8 +80,6 @@ public class HeartbeatMgr extends MasterDaemon {
         this.nodeMgr = nodeMgr;
         this.executor = ThreadPoolManager.newDaemonFixedThreadPool(Config.heartbeat_mgr_threads_num,
                 Config.heartbeat_mgr_blocking_queue_size, "heartbeat-mgr-pool", needRegisterMetric);
-        this.executorCheckBe = ThreadPoolManager.newDaemonFixedThreadPool(Config.heartbeat_mgr_check_be_mgr_threads_num,
-            Config.heartbeat_mgr_blocking_queue_size, "heartbeat-mgr-check-be-pool", needRegisterMetric);
         this.heartbeatFlags = new HeartbeatFlags();
     }
 
@@ -193,7 +188,7 @@ public class HeartbeatMgr extends MasterDaemon {
                     boolean isChanged = broker.handleHbResponse(hbResponse);
                     if (hbResponse.getStatus() != HbStatus.OK) {
                         // invalid all connections cached in ClientPool
-                        ClientPool.brokerPool.clearPool(new TNetworkAddress(broker.ip, broker.port));
+                        ClientPool.brokerPool.clearPool(new TNetworkAddress(broker.host, broker.port));
                     }
                     return isChanged;
                 }
@@ -256,9 +251,7 @@ public class HeartbeatMgr extends MasterDaemon {
                     if (tBackendInfo.isSetVersion()) {
                         version = tBackendInfo.getVersion();
                     }
-                    long beStartTime = tBackendInfo.isSetBeStartTime()
-                            ? tBackendInfo.getBeStartTime() : System.currentTimeMillis();
-                    // backend.updateOnce(bePort, httpPort, beRpcPort, brpcPort);
+                    long beStartTime = tBackendInfo.getBeStartTime();
                     String nodeRole = Tag.VALUE_MIX;
                     if (tBackendInfo.isSetBeNodeRole()) {
                         nodeRole = tBackendInfo.getBeNodeRole();
@@ -305,7 +298,8 @@ public class HeartbeatMgr extends MasterDaemon {
 
         @Override
         public HeartbeatResponse call() {
-            if (fe.getHost().equals(Env.getCurrentEnv().getSelfNode().getHost())) {
+            HostInfo selfNode = Env.getCurrentEnv().getSelfNode();
+            if (fe.getHost().equals(selfNode.getHost())) {
                 // heartbeat to self
                 if (Env.getCurrentEnv().isReady()) {
                     return new FrontendHbResponse(fe.getNodeName(), Config.query_port, Config.rpc_port,
@@ -364,7 +358,7 @@ public class HeartbeatMgr extends MasterDaemon {
         @Override
         public HeartbeatResponse call() {
             TPaloBrokerService.Client client = null;
-            TNetworkAddress addr = new TNetworkAddress(broker.ip, broker.port);
+            TNetworkAddress addr = new TNetworkAddress(broker.host, broker.port);
             boolean ok = false;
             try {
                 client = ClientPool.brokerPool.borrowObject(addr);
@@ -374,13 +368,13 @@ public class HeartbeatMgr extends MasterDaemon {
                 ok = true;
 
                 if (status.getStatusCode() != TBrokerOperationStatusCode.OK) {
-                    return new BrokerHbResponse(brokerName, broker.ip, broker.port, status.getMessage());
+                    return new BrokerHbResponse(brokerName, broker.host, broker.port, status.getMessage());
                 } else {
-                    return new BrokerHbResponse(brokerName, broker.ip, broker.port, System.currentTimeMillis());
+                    return new BrokerHbResponse(brokerName, broker.host, broker.port, System.currentTimeMillis());
                 }
 
             } catch (Exception e) {
-                return new BrokerHbResponse(brokerName, broker.ip, broker.port,
+                return new BrokerHbResponse(brokerName, broker.host, broker.port,
                         Strings.isNullOrEmpty(e.getMessage()) ? "got exception" : e.getMessage());
             } finally {
                 if (ok) {
@@ -396,37 +390,6 @@ public class HeartbeatMgr extends MasterDaemon {
         for (HeartbeatResponse hbResult : hbPackage.getHbResults()) {
             handleHbResponse(hbResult, true);
         }
-    }
-
-    public List<Backend> checkBeStatus(List<Backend> bes) {
-        List<Future<HeartbeatResponse>> hbResponses = Lists.newArrayList();
-
-        // send backend heartbeat
-        for (Backend backend : bes) {
-            BackendHeartbeatHandler handler = new BackendHeartbeatHandler(backend);
-            hbResponses.add(executorCheckBe.submit(handler));
-        }
-
-        List<Long> statusOkBackends = new ArrayList<>();
-        for (Future<HeartbeatResponse> future : hbResponses) {
-            try {
-                // the check status rpc's timeout is 1 seconds, so we will not be blocked here very long.
-                HeartbeatResponse response = future.get();
-                if (response.getType() == Type.BACKEND) {
-                    BackendHbResponse hbResponse = (BackendHbResponse) response;
-                    if (response.getStatus() != HbStatus.OK) {
-                        LOG.warn("get bad check status response: {}", response);
-                        ClientPool.checkBackendPool
-                            .clearPool(new TNetworkAddress(hbResponse.getHost(), hbResponse.getBePort()));
-                        continue;
-                    }
-                    statusOkBackends.add(hbResponse.getBeId());
-                }
-            } catch (InterruptedException | ExecutionException e) {
-                LOG.warn("got exception when doing check backend status", e);
-            }
-        } // end for all results
-        return bes.stream().filter(backend -> statusOkBackends.contains(backend.getId())).collect(Collectors.toList());
     }
 
 }

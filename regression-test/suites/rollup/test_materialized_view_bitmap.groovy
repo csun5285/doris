@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 suite("test_materialized_view_bitmap", "rollup") {
+
+    // because nereids cannot support rollup correctly forbid it temporary
+    sql """set enable_nereids_planner=false"""
+
     def tbName1 = "test_materialized_view_bitmap"
 
     def getJobState = { tableName ->
@@ -36,6 +40,7 @@ suite("test_materialized_view_bitmap", "rollup") {
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)
@@ -46,27 +51,13 @@ suite("test_materialized_view_bitmap", "rollup") {
         }
     }
 
-    sql "set enable_vectorized_engine=true"
-    explain {
-        sql "insert into ${tbName1} values(1,1,1);"
-        contains "to_bitmap_with_check"
-    }
-    sql "set enable_vectorized_engine=true"
     explain {
         sql "insert into ${tbName1} values(1,1,1);"
         contains "to_bitmap_with_check"
     }
     sql "insert into ${tbName1} values(1,1,1);"
-    sql "set enable_vectorized_engine=true"
     sql "insert into ${tbName1} values(0,1,1);"
-    sql "set enable_vectorized_engine=true"
 
-    test {
-        sql "insert into ${tbName1} values(1,-1,-1);"
-        // check exception message contains
-        exception "The input: -1 is not valid, to_bitmap only support bigint value from 0 to 18446744073709551615 currently"
-    }
-    sql "set enable_vectorized_engine=true"
     test {
         sql "insert into ${tbName1} values(1,-1,-1);"
         // check exception message contains

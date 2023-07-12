@@ -21,19 +21,20 @@
 #include "util/perf_counters.h"
 
 #include <linux/perf_event.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 
 #include <boost/algorithm/string/trim.hpp>
-#include <fstream>
+#include <fstream> // IWYU pragma: keep
 #include <iomanip>
 #include <iostream>
-#include <sstream>
+#include <unordered_map>
+#include <utility>
 
+#include "gutil/stringprintf.h"
 #include "gutil/strings/substitute.h"
-#include "util/debug_util.h"
 #include "util/pretty_printer.h"
 #include "util/string_parser.hpp"
 #include "util/string_util.h"
@@ -41,7 +42,6 @@
 namespace doris {
 
 #define COUNTER_SIZE (sizeof(void*))
-#define BUFFER_SIZE 256
 #define PRETTY_PRINT_WIDTH 13
 
 static std::unordered_map<std::string, std::string> _process_state;

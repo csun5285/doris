@@ -783,9 +783,9 @@ public class RestoreJob extends AbstractJob {
             }
             AgentTaskExecutor.submit(batchTask);
 
-            // estimate timeout, at most 10 min
+            // estimate timeout
             long timeout = Config.tablet_create_timeout_second * 1000L * batchTask.getTaskNum();
-            timeout = Math.min(10 * 60 * 1000, timeout);
+            timeout = Math.min(timeout, Config.max_create_table_timeout_second * 1000);
             try {
                 LOG.info("begin to send create replica tasks to BE for restore. total {} tasks. timeout: {}",
                         batchTask.getTaskNum(), timeout);
@@ -825,7 +825,8 @@ public class RestoreJob extends AbstractJob {
                         localPartitionInfo.addPartition(restoredPart.getId(), false, remoteItem,
                                 remoteDataProperty, restoreReplicaAlloc,
                                 remotePartitionInfo.getIsInMemory(remotePartId),
-                                remotePartitionInfo.getIsPersistent(remotePartId));
+                                remotePartitionInfo.getIsPersistent(remotePartId),
+                                remotePartitionInfo.getIsMutable(remotePartId));
                     }
                     localTbl.addPartition(restoredPart);
                 } finally {
@@ -987,9 +988,9 @@ public class RestoreJob extends AbstractJob {
         double bfFpp = localTbl.getBfFpp();
         for (MaterializedIndex restoredIdx : restorePart.getMaterializedIndices(IndexExtState.VISIBLE)) {
             MaterializedIndexMeta indexMeta = localTbl.getIndexMetaByIndexId(restoredIdx.getId());
-            TabletMeta tabletMeta = new TabletMeta(db.getId(), localTbl.getId(), restorePart.getId(),
-                    restoredIdx.getId(), indexMeta.getSchemaHash(), TStorageMedium.HDD);
             for (Tablet restoreTablet : restoredIdx.getTablets()) {
+                TabletMeta tabletMeta = new TabletMeta(db.getId(), localTbl.getId(), restorePart.getId(),
+                        restoredIdx.getId(), indexMeta.getSchemaHash(), TStorageMedium.HDD);
                 Env.getCurrentInvertedIndex().addTablet(restoreTablet.getId(), tabletMeta);
                 for (Replica restoreReplica : restoreTablet.getReplicas()) {
                     Env.getCurrentInvertedIndex().addReplica(restoreTablet.getId(), restoreReplica);
@@ -1006,7 +1007,12 @@ public class RestoreJob extends AbstractJob {
                             null,
                             localTbl.getCompressionType(),
                             localTbl.getEnableUniqueKeyMergeOnWrite(), localTbl.getStoragePolicy(),
-                            localTbl.disableAutoCompaction(), localTbl.isPersistent(), localTbl.isDynamicSchema());
+                            localTbl.disableAutoCompaction(),
+                            localTbl.enableSingleReplicaCompaction(),
+                            localTbl.skipWriteIndexOnLoad(),
+                            localTbl.storeRowColumn(),
+                            localTbl.isDynamicSchema(), localTbl.isPersistent());
+
                     task.setInRestoreMode(true);
                     batchTask.addTask(task);
                 }
@@ -1062,7 +1068,7 @@ public class RestoreJob extends AbstractJob {
                 // replicas
                 try {
                     Map<Tag, List<Long>> beIds = Env.getCurrentSystemInfo()
-                            .selectBackendIdsForReplicaCreation(replicaAlloc, clusterName, null);
+                            .selectBackendIdsForReplicaCreation(replicaAlloc, null);
                     for (Map.Entry<Tag, List<Long>> entry : beIds.entrySet()) {
                         for (Long beId : entry.getValue()) {
                             long newReplicaId = env.getNextId();
@@ -1168,15 +1174,16 @@ public class RestoreJob extends AbstractJob {
             localPartitionInfo.addPartition(restorePart.getId(), false, remotePartitionInfo.getItem(remotePartId),
                     remoteDataProperty, restoreReplicaAlloc,
                     remotePartitionInfo.getIsInMemory(remotePartId),
-                    remotePartitionInfo.getIsPersistent(remotePartId));
+                    remotePartitionInfo.getIsPersistent(remotePartId),
+                    remotePartitionInfo.getIsMutable(remotePartId));
             localTbl.addPartition(restorePart);
 
             // modify tablet inverted index
             for (MaterializedIndex restoreIdx : restorePart.getMaterializedIndices(IndexExtState.VISIBLE)) {
                 int schemaHash = localTbl.getSchemaHashByIndexId(restoreIdx.getId());
-                TabletMeta tabletMeta = new TabletMeta(db.getId(), localTbl.getId(), restorePart.getId(),
-                        restoreIdx.getId(), schemaHash, TStorageMedium.HDD);
                 for (Tablet restoreTablet : restoreIdx.getTablets()) {
+                    TabletMeta tabletMeta = new TabletMeta(db.getId(), localTbl.getId(), restorePart.getId(),
+                            restoreIdx.getId(), schemaHash, TStorageMedium.HDD);
                     Env.getCurrentInvertedIndex().addTablet(restoreTablet.getId(), tabletMeta);
                     for (Replica restoreReplica : restoreTablet.getReplicas()) {
                         Env.getCurrentInvertedIndex().addReplica(restoreTablet.getId(), restoreReplica);
@@ -1206,9 +1213,9 @@ public class RestoreJob extends AbstractJob {
                 for (Partition restorePart : olapRestoreTbl.getPartitions()) {
                     for (MaterializedIndex restoreIdx : restorePart.getMaterializedIndices(IndexExtState.VISIBLE)) {
                         int schemaHash = olapRestoreTbl.getSchemaHashByIndexId(restoreIdx.getId());
-                        TabletMeta tabletMeta = new TabletMeta(db.getId(), restoreTbl.getId(), restorePart.getId(),
-                                restoreIdx.getId(), schemaHash, TStorageMedium.HDD);
                         for (Tablet restoreTablet : restoreIdx.getTablets()) {
+                            TabletMeta tabletMeta = new TabletMeta(db.getId(), restoreTbl.getId(), restorePart.getId(),
+                                    restoreIdx.getId(), schemaHash, TStorageMedium.HDD);
                             Env.getCurrentInvertedIndex().addTablet(restoreTablet.getId(), tabletMeta);
                             for (Replica restoreReplica : restoreTablet.getReplicas()) {
                                 Env.getCurrentInvertedIndex().addReplica(restoreTablet.getId(), restoreReplica);
@@ -1373,8 +1380,8 @@ public class RestoreJob extends AbstractJob {
                         }
                         long signature = env.getNextId();
                         DownloadTask task = new DownloadTask(null, beId, signature, jobId, dbId, srcToDest,
-                                brokerAddrs.get(0), repo.getStorage().getProperties(),
-                                repo.getStorage().getStorageType());
+                                brokerAddrs.get(0), repo.getRemoteFileSystem().getProperties(),
+                                repo.getRemoteFileSystem().getStorageType(), repo.getLocation());
                         batchTask.addTask(task);
                         unfinishedSignatureToId.put(signature, beId);
                     }
@@ -1461,7 +1468,7 @@ public class RestoreJob extends AbstractJob {
 
         // set all restored partition version and version hash
         // set all tables' state to NORMAL
-        setTableStateToNormal(db, true);
+        setTableStateToNormal(db, true, isReplay);
         for (long tblId : restoredVersionInfo.rowKeySet()) {
             Table tbl = db.getTableNullable(tblId);
             if (tbl == null) {
@@ -1629,7 +1636,7 @@ public class RestoreJob extends AbstractJob {
         Database db = env.getInternalCatalog().getDbNullable(dbId);
         if (db != null) {
             // rollback table's state to NORMAL
-            setTableStateToNormal(db, false);
+            setTableStateToNormal(db, false, isReplay);
 
             // remove restored tbls
             for (Table restoreTbl : restoredTbls) {
@@ -1706,7 +1713,7 @@ public class RestoreJob extends AbstractJob {
         LOG.info("finished to cancel restore job. is replay: {}. {}", isReplay, this);
     }
 
-    private void setTableStateToNormal(Database db, boolean committed) {
+    private void setTableStateToNormal(Database db, boolean committed, boolean isReplay) {
         for (String tableName : jobInfo.backupOlapTableObjects.keySet()) {
             Table tbl = db.getTableNullable(jobInfo.getAliasByOriginNameIfSet(tableName));
             if (tbl == null) {
@@ -1740,7 +1747,7 @@ public class RestoreJob extends AbstractJob {
                 }
                 if (committed && reserveDynamicPartitionEnable) {
                     if (DynamicPartitionUtil.isDynamicPartitionTable(tbl)) {
-                        DynamicPartitionUtil.registerOrRemoveDynamicPartitionTable(db.getId(), olapTbl, false);
+                        DynamicPartitionUtil.registerOrRemoveDynamicPartitionTable(db.getId(), olapTbl, isReplay);
                         Env.getCurrentEnv().getDynamicPartitionScheduler().createOrUpdateRuntimeInfo(tbl.getId(),
                                 DynamicPartitionScheduler.LAST_UPDATE_TIME, TimeUtils.getCurrentFormatTime());
                     }

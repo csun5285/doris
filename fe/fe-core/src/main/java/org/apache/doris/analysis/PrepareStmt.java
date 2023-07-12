@@ -21,13 +21,21 @@ package org.apache.doris.analysis;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.UserException;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.thrift.TDescriptorTable;
+import org.apache.doris.thrift.TExpr;
+import org.apache.doris.thrift.TExprList;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TException;
+import org.apache.thrift.TSerializer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class PrepareStmt extends StatementBase {
@@ -46,17 +54,24 @@ public class PrepareStmt extends StatementBase {
     // outputExprs are heavy work
     private ByteString serializedDescTable;
     private ByteString serializedOutputExpr;
+    private TDescriptorTable descTable;
 
     private UUID id;
-    private int schemaVersion = -1;
-    private OlapTable tbl;
-    private ConnectContext context;
+    // whether return binary protocol mysql row or not
+    private boolean binaryRowFormat;
+    int schemaVersion = -1;
+    OlapTable tbl;
     private PreparedType preparedType = PreparedType.STATEMENT;
+    ConnectContext context;
+    // Serialized mysql Field, this could avoid serialize mysql field each time sendFields.
+    // Since, serialize fields is too heavy when table is wide
+    Map<String, byte[]> serializedFields =  Maps.newHashMap();
 
-    public PrepareStmt(StatementBase stmt, String name) {
+    public PrepareStmt(StatementBase stmt, String name, boolean binaryRowFormat) {
         this.inner = stmt;
         this.stmtName = name;
         this.id = UUID.randomUUID();
+        this.binaryRowFormat = binaryRowFormat;
     }
 
     public void setContext(ConnectContext ctx) {
@@ -70,6 +85,10 @@ public class PrepareStmt extends StatementBase {
         }
         reset();
         return true;
+    }
+
+    public TDescriptorTable getDescTable() {
+        return descTable;
     }
 
     public UUID getID() {
@@ -96,6 +115,52 @@ public class PrepareStmt extends StatementBase {
         return slots;
     }
 
+    public boolean isBinaryProtocol() {
+        return binaryRowFormat;
+    }
+
+    public byte[] getSerializedField(String colName) {
+        return serializedFields.getOrDefault(colName, null);
+    }
+
+    public void setSerializedField(String colName, byte[] serializedField) {
+        serializedFields.put(colName, serializedField);
+    }
+
+    public void cacheSerializedDescriptorTable(DescriptorTable desctbl) {
+        try {
+            descTable = desctbl.toThrift();
+            serializedDescTable = ByteString.copyFrom(
+                    new TSerializer().serialize(descTable));
+        } catch (TException e) {
+            LOG.warn("failed to serilize DescriptorTable, {}", e.getMessage());
+            Preconditions.checkState(false, e.getMessage());
+        }
+    }
+
+    public void cacheSerializedOutputExprs(List<Expr> outExprs) {
+        List<TExpr> exprs = new ArrayList<>();
+        for (Expr expr : outExprs) {
+            exprs.add(expr.treeToThrift());
+        }
+        TExprList exprList = new TExprList(exprs);
+        try {
+            serializedOutputExpr = ByteString.copyFrom(
+                        new TSerializer().serialize(exprList));
+        } catch (TException e) {
+            LOG.warn("failed to serilize TExprList, {}", e.getMessage());
+            Preconditions.checkState(false, e.getMessage());
+        }
+    }
+
+    public ByteString getSerializedDescTable() {
+        return serializedDescTable;
+    }
+
+    public ByteString getSerializedOutputExprs() {
+        return serializedOutputExpr;
+    }
+
     public List<String> getColLabelsOfPlaceHolders() {
         ArrayList<String> lables = new ArrayList<>();
         for (int i = 0; i < inner.getPlaceHolders().size(); ++i) {
@@ -110,30 +175,29 @@ public class PrepareStmt extends StatementBase {
         if (!(inner instanceof SelectStmt) && !(inner instanceof InsertStmt)) {
             throw new UserException("Only support prepare SelectStmt or InsertStmt");
         }
-        analyzer.setPrepareStmt(this);
-        // if (inner instanceof SelectStmt) {
-        //     // Try to use FULL_PREPARED to increase performance
-        //     SelectStmt selectStmt = (SelectStmt) inner;
-        //     try {
-        //         // Use tmpAnalyzer since selectStmt will be reAnalyzed
-        //         Analyzer tmpAnalyzer = new Analyzer(context.getEnv(), context);
-        //         inner.analyze(tmpAnalyzer);
-        //         // Case 1 short circuit point query
-        //         if (selectStmt.checkAndSetPointQuery()) {
-        //             tbl = (OlapTable) selectStmt.getTableRefs().get(0).getTable();
-        //             schemaVersion = tbl.getBaseSchemaVersion();
-        //             preparedType = PreparedType.FULL_PREPARED;
-        //             LOG.debug("using FULL_PREPARED prepared");
-        //             return;
-        //         }
-        //     } catch (UserException e) {
-        //         LOG.debug("fallback to STATEMENT prepared, {}", e);
-        //     } finally {
-        //         // will be reanalyzed
-        //         selectStmt.reset();
-        //     }
-        // }
         preparedType = PreparedType.STATEMENT;
+        analyzer.setPrepareStmt(this);
+        if (inner instanceof SelectStmt) {
+            // Try to use FULL_PREPARED to increase performance
+            SelectStmt selectStmt = (SelectStmt) inner;
+            try {
+                // Use tmpAnalyzer since selectStmt will be reAnalyzed
+                Analyzer tmpAnalyzer = new Analyzer(context.getEnv(), context);
+                inner.analyze(tmpAnalyzer);
+                // Case 1 short circuit point query
+                if (selectStmt.checkAndSetPointQuery()) {
+                    tbl = (OlapTable) selectStmt.getTableRefs().get(0).getTable();
+                    schemaVersion = tbl.getBaseSchemaVersion();
+                    preparedType = PreparedType.FULL_PREPARED;
+                    // will be reanalyzed
+                    selectStmt.reset();
+                    LOG.debug("using FULL_PREPARED prepared");
+                    return;
+                }
+            } catch (UserException e) {
+                LOG.debug("fallback to STATEMENT prepared, {}", e);
+            }
+        }
         LOG.debug("using STATEMENT prepared");
     }
 
@@ -156,9 +220,12 @@ public class PrepareStmt extends StatementBase {
         if (inner instanceof SelectStmt) {
             return new SelectStmt((SelectStmt) inner);
         }
+        /*
+        TODO(lihangyu) fix it after compile succ
         if (inner instanceof InsertStmt) {
-            return new InsertStmt((InsertStmt) inner);
+            return new NativeInsertStmt((NativeInsertStmt) inner);
         }
+         */
         // Other statement could reuse the inner statement
         return inner;
     }
@@ -184,8 +251,9 @@ public class PrepareStmt extends StatementBase {
     public void reset() {
         serializedDescTable = null;
         serializedOutputExpr = null;
-        // descTable = null;
+        descTable = null;
         this.id = UUID.randomUUID();
         inner.reset();
+        serializedFields.clear();
     }
 }

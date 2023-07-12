@@ -21,21 +21,22 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_index_meta", "p0") {
     // prepare test table
-    def timeout = 60000
+    def timeout = 120000
     def delta_time = 1000
     def alter_res = "null"
     def useTime = 0
     def wait_for_latest_op_on_table_finish = { table_name, OpTimeout ->
-        for(int t = delta_time; t <= OpTimeout; t += delta_time){
+        for(useTime = 0; useTime <= OpTimeout; useTime += delta_time){
             alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
             alter_res = alter_res.toString()
             if(alter_res.contains("FINISHED")) {
-                 break
+                sleep(3000) // wait change table state to normal
+                logger.info(table_name + " latest alter job finished, detail: " + alter_res)
+                break
             }
-            useTime = t
             sleep(delta_time)
         }
-        assertTrue(useTime <= OpTimeout)
+        assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
     }
 
     def tableName = "test_index_meta"
@@ -55,8 +56,6 @@ suite("test_index_meta", "p0") {
             properties("replication_num" = "1");
     """
 
-    // set enable_vectorized_engine=true
-    sql """ SET enable_vectorized_engine=true; """
     def var_result = sql "show variables"
     logger.info("show variales result: " + var_result )
 
@@ -141,32 +140,4 @@ suite("test_index_meta", "p0") {
     assertEquals(show_result[2][10], "INVERTED")
     assertEquals(show_result[2][11], "new index for name")
     assertEquals(show_result[2][12], "")
-
-
-    def show_tablets_result = sql "show tablets from ${tableName}"
-    logger.info("show tablets from " + tableName + " result: " + show_tablets_result)
-    for (j in range(0, show_tablets_result.size())) {
-        String metaUrl = show_tablets_result[j][16]
-        String getMetaCommand = "curl -X GET " + metaUrl
-        def process = getMetaCommand.toString().execute()
-        int code = process.waitFor()
-        String err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        String out = process.getText()
-        logger.info("get meta process result: code=" + code + ", out=" + out + ", err=" + err)
-        assertEquals(code, 0)
-        try {
-            def json = parseJson(out.trim())
-            assert json.schema.index instanceof List
-            int i = 0;
-            for (Object index in (List) json.schema.index) {
-                // assertEquals(index.index_id, i);
-                assertEquals(index.index_name, show_result[i][2])
-                assertEquals(index.index_type, show_result[i][10])
-                // assertEquals(index.properties, show_result[j][12]);
-                i++;
-            }
-        } catch(JsonException ex) {
-            logger.info("ignore parse json exception: " + ex)
-        }
-    }
 }

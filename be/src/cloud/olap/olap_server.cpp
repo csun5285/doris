@@ -26,25 +26,22 @@
 #include <random>
 #include <string>
 
-#include "agent/cgroups_mgr.h"
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
-#include "cloud/io/s3_file_system.h"
-#include "cloud/meta_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/status.h"
 #include "gutil/strings/substitute.h"
+#include "io/fs/s3_file_system.h"
 #include "olap/cumulative_compaction.h"
+#include "olap/cumulative_compaction_policy.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/rowset/beta_rowset_writer.h"
-#include "olap/storage_engine.h"
+#include "olap/storage_policy.h"
 #include "olap/tablet.h"
-#include "util/file_utils.h"
 #include "util/time.h"
-
-using std::string;
 
 namespace doris {
 using namespace ErrorCode;
@@ -65,12 +62,6 @@ Status StorageEngine::start_bg_threads() {
             [this]() { this->_garbage_sweeper_thread_callback(); }, &_garbage_sweeper_thread));
     LOG(INFO) << "garbage sweeper thread started";
 
-    // start thread for monitoring the tablet with io error
-    RETURN_IF_ERROR(Thread::create(
-            "StorageEngine", "disk_stat_monitor_thread",
-            [this]() { this->_disk_stat_monitor_thread_callback(); }, &_disk_stat_monitor_thread));
-    LOG(INFO) << "disk stat monitor thread started";
-
     // convert store map to vector
     std::vector<DataDir*> data_dirs;
     for (auto& tmp_store : _store_map) {
@@ -85,16 +76,6 @@ Status StorageEngine::start_bg_threads() {
             .set_min_threads(config::max_cumu_compaction_threads)
             .set_max_threads(config::max_cumu_compaction_threads)
             .build(&_cumu_compaction_thread_pool);
-    ThreadPoolBuilder("SmallCompactionTaskThreadPool")
-            .set_min_threads(config::quick_compaction_max_threads)
-            .set_max_threads(config::quick_compaction_max_threads)
-            .build(&_quick_compaction_thread_pool);
-    if (config::enable_segcompaction && config::enable_storage_vectorization) {
-        ThreadPoolBuilder("SegCompactionTaskThreadPool")
-                .set_min_threads(config::seg_compaction_max_threads)
-                .set_max_threads(config::seg_compaction_max_threads)
-                .build(&_seg_compaction_thread_pool);
-    }
 
     // compaction tasks producer thread
     RETURN_IF_ERROR(Thread::create(
@@ -200,7 +181,8 @@ Status StorageEngine::cloud_start_bg_threads() {
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "check_bucket_enable_versioning_thread",
-            [this]() { this->_check_bucket_enable_versioning_callback(); }, &_check_bucket_enable_versioning_thread));
+            [this]() { this->_check_bucket_enable_versioning_callback(); },
+            &_check_bucket_enable_versioning_thread));
     LOG(INFO) << "check bucket enable versioning thread started";
 
     // compaction tasks producer thread
@@ -238,35 +220,43 @@ void StorageEngine::_refresh_s3_info_thread_callback() {
             continue;
         }
         CHECK(!s3_infos.empty()) << "no s3 infos";
-        auto fs_map = io::FileSystemMap::instance();
         for (auto& [id, s3_conf] : s3_infos) {
-            auto fs = fs_map->get(id);
+            auto fs = get_filesystem(id);
             if (fs == nullptr) {
-                auto s3_fs = io::S3FileSystem::create(std::move(s3_conf), id);
+                std::shared_ptr<io::S3FileSystem> s3_fs;
+                auto st = io::S3FileSystem::create(std::move(s3_conf), id, &s3_fs);
+                if (!st.ok()) {
+                    LOG(WARNING) << "failed to create s3 fs. id=" << id;
+                    continue;
+                }
                 st = s3_fs->connect();
                 if (!st.ok()) {
                     LOG(WARNING) << "failed to connect s3 fs. id=" << id;
                     continue;
                 }
-                fs_map->insert(id, std::move(s3_fs));
+                put_storage_resource(std::atol(id.c_str()), {s3_fs, 0});
             } else {
                 auto s3_fs = std::reinterpret_pointer_cast<io::S3FileSystem>(fs);
                 if (s3_fs->s3_conf().ak != s3_conf.ak) {
-                    s3_fs->set_ak(s3_conf.ak);
-                    s3_fs->set_sk(s3_conf.sk);
+                    auto cur_s3_conf = s3_fs->s3_conf();
+                    cur_s3_conf.ak = s3_conf.ak;
+                    cur_s3_conf.sk = s3_conf.sk;
+                    s3_fs->set_conf(std::move(cur_s3_conf));
                     st = s3_fs->connect();
                     if (!st.ok()) {
                         LOG(WARNING) << "failed to connect s3 fs. id=" << id;
                     }
                 }
-                if (s3_conf.sse_enabled != s3_fs->sse_enabled()) {
-                    s3_fs->set_sse_enabled(s3_conf.sse_enabled);
+                if (s3_conf.sse_enabled != s3_fs->s3_conf().sse_enabled) {
+                    auto cur_s3_conf = s3_fs->s3_conf();
+                    cur_s3_conf.sse_enabled = s3_conf.sse_enabled;
+                    s3_fs->set_conf(std::move(cur_s3_conf));
                     s3_fs->reset_transfer_manager();
                 }
             }
         }
-        if (auto& id = std::get<0>(s3_infos.back()); latest_fs()->resource_id() != id) {
-            set_latest_fs(fs_map->get(id));
+        if (auto& id = std::get<0>(s3_infos.back()); latest_fs()->id() != id) {
+            set_latest_fs(get_filesystem(id));
         }
     }
 }
@@ -393,41 +383,20 @@ void StorageEngine::_garbage_sweeper_thread_callback() {
     }
 }
 
-void StorageEngine::_disk_stat_monitor_thread_callback() {
-#ifdef GOOGLE_PROFILER
-    ProfilerRegisterThread();
-#endif
-
-    int32_t interval = config::disk_stat_monitor_interval;
-    do {
-        _start_disk_stat_monitor();
-
-        interval = config::disk_stat_monitor_interval;
-        if (interval <= 0) {
-            LOG(WARNING) << "disk_stat_monitor_interval config is illegal: " << interval
-                         << ", force set to 1";
-            interval = 1;
-        }
-    } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));
-}
-
 void StorageEngine::check_cumulative_compaction_config() {
-    int64_t size_based_promotion_size = config::cumulative_size_based_promotion_size_mbytes;
-    int64_t size_based_promotion_min_size = config::cumulative_size_based_promotion_min_size_mbytes;
-    int64_t size_based_compaction_lower_bound_size =
-            config::cumulative_size_based_compaction_lower_size_mbytes;
+    int64_t promotion_size = config::compaction_promotion_size_mbytes;
+    int64_t promotion_min_size = config::compaction_promotion_min_size_mbytes;
+    int64_t compaction_min_size = config::compaction_min_size_mbytes;
 
     // check size_based_promotion_size must be greater than size_based_promotion_min_size and 2 * size_based_compaction_lower_bound_size
-    int64_t should_min_size_based_promotion_size =
-            std::max(size_based_promotion_min_size, 2 * size_based_compaction_lower_bound_size);
+    int64_t should_min_promotion_size = std::max(promotion_min_size, 2 * compaction_min_size);
 
-    if (size_based_promotion_size < should_min_size_based_promotion_size) {
-        size_based_promotion_size = should_min_size_based_promotion_size;
-        LOG(WARNING) << "the config size_based_promotion_size is adjusted to "
-                        "size_based_promotion_min_size or  2 * "
-                        "size_based_compaction_lower_bound_size "
-                     << should_min_size_based_promotion_size
-                     << ", because size_based_promotion_size is small";
+    if (promotion_size < should_min_promotion_size) {
+        promotion_size = should_min_promotion_size;
+        LOG(WARNING) << "the config promotion_size is adjusted to "
+                        "promotion_min_size or  2 * "
+                        "compaction_min_size "
+                     << should_min_promotion_size << ", because size_based_promotion_size is small";
     }
 }
 
@@ -491,18 +460,12 @@ void StorageEngine::_path_scan_thread_callback(DataDir* data_dir) {
 }
 
 void StorageEngine::_tablet_checkpoint_callback(const std::vector<DataDir*>& data_dirs) {
-#ifdef GOOGLE_PROFILER
-    ProfilerRegisterThread();
-#endif
-
     int64_t interval = config::generate_tablet_meta_checkpoint_tasks_interval_secs;
     do {
         LOG(INFO) << "begin to produce tablet meta checkpoint tasks.";
         for (auto data_dir : data_dirs) {
-            auto st = _tablet_meta_checkpoint_thread_pool->submit_func([=]() {
-                CgroupsMgr::apply_system_cgroup();
-                _tablet_manager->do_tablet_meta_checkpoint(data_dir);
-            });
+            auto st = _tablet_meta_checkpoint_thread_pool->submit_func(
+                    [data_dir, this]() { _tablet_manager->do_tablet_meta_checkpoint(data_dir); });
             if (!st.ok()) {
                 LOG(WARNING) << "submit tablet checkpoint tasks failed.";
             }
@@ -569,7 +532,7 @@ void StorageEngine::_compaction_tasks_producer_callback() {
     int64_t last_base_score_update_time = 0;
     static const int64_t check_score_interval_ms = 5000; // 5 secs
 
-    int64_t interval = config::generate_compaction_tasks_min_interval_ms;
+    int64_t interval = config::generate_compaction_tasks_interval_ms;
     do {
         if (!config::disable_auto_compaction) {
             _adjust_compaction_thread_num();
@@ -620,7 +583,7 @@ void StorageEngine::_compaction_tasks_producer_callback() {
                                  << tablet->tablet_id() << ", err: " << st;
                 }
             }
-            interval = config::generate_compaction_tasks_min_interval_ms;
+            interval = config::generate_compaction_tasks_interval_ms;
         } else {
             interval = config::check_auto_compaction_interval_seconds * 1000;
         }
@@ -762,7 +725,6 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
             _submitted_base_compactions[tablet->tablet_id()] = compaction;
         }
         st = _base_compaction_thread_pool->submit_func([=, compaction = std::move(compaction)]() {
-            CgroupsMgr::apply_system_cgroup();
             auto st = compaction->execute_compact();
             if (!st.ok()) {
                 // Error log has been output in `execute_compact`
@@ -832,7 +794,6 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
         }
     };
     st = _cumu_compaction_thread_pool->submit_func([=, compaction = std::move(compaction)]() {
-        CgroupsMgr::apply_system_cgroup();
         auto st = compaction->execute_compact();
         if (!st.ok()) {
             // Error log has been output in `execute_compact`
@@ -849,84 +810,11 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
     return st;
 }
 
-Status StorageEngine::submit_quick_compaction_task(TabletSharedPtr tablet) {
-    CHECK(false) << "MUST NOT call submit_quick_compaction_task";
-    return Status::OK();
-}
-
 Status StorageEngine::_handle_seg_compaction(BetaRowsetWriter* writer,
                                              SegCompactionCandidatesSharedPtr segments) {
-    writer->compact_segments(segments);
-    // return OK here. error will be reported via BetaRowsetWriter::_segcompaction_status
     return Status::OK();
 }
 
-Status StorageEngine::submit_seg_compaction_task(BetaRowsetWriter* writer,
-                                                 SegCompactionCandidatesSharedPtr segments) {
-    return _seg_compaction_thread_pool->submit_func(
-            std::bind<void>(&StorageEngine::_handle_seg_compaction, this, writer, segments));
-}
-
-void StorageEngine::_cooldown_tasks_producer_callback() {
-    int64_t interval = config::generate_cooldown_task_interval_sec;
-    do {
-        if (_cooldown_thread_pool->get_queue_size() > 0) {
-            continue;
-        }
-        std::vector<TabletSharedPtr> tablets;
-        // TODO(luwei) : a more efficient way to get cooldown tablets
-        _tablet_manager->get_cooldown_tablets(&tablets);
-        LOG(INFO) << "cooldown producer get tablet num: " << tablets.size();
-        for (const auto& tablet : tablets) {
-            Status st = _cooldown_thread_pool->submit_func([=]() {
-                {
-                    // Cooldown tasks on the same tablet cannot be executed concurrently
-                    std::lock_guard<std::mutex> lock(_running_cooldown_mutex);
-                    auto it = _running_cooldown_tablets.find(tablet->tablet_id());
-                    if (it != _running_cooldown_tablets.end()) {
-                        return;
-                    }
-
-                    // the number of concurrent cooldown tasks in each directory
-                    // cannot exceed the configured value
-                    auto dir_it = _running_cooldown_tasks_cnt.find(tablet->data_dir());
-                    if (dir_it != _running_cooldown_tasks_cnt.end() &&
-                        dir_it->second >= config::concurrency_per_dir) {
-                        return;
-                    }
-
-                    _running_cooldown_tablets.insert(tablet->tablet_id());
-                    dir_it = _running_cooldown_tasks_cnt.find(tablet->data_dir());
-                    if (dir_it != _running_cooldown_tasks_cnt.end()) {
-                        _running_cooldown_tasks_cnt[tablet->data_dir()]++;
-                    } else {
-                        _running_cooldown_tasks_cnt[tablet->data_dir()] = 1;
-                    }
-                }
-
-                Status st = tablet->cooldown();
-                if (!st.ok()) {
-                    LOG(WARNING) << "failed to cooldown, tablet: " << tablet->tablet_id()
-                                 << " err: " << st.to_string();
-                } else {
-                    LOG(INFO) << "succeed to cooldown, tablet: " << tablet->tablet_id()
-                              << " cooldown progress ("
-                              << tablets.size() - _cooldown_thread_pool->get_queue_size() << "/"
-                              << tablets.size() << ")";
-                }
-
-                {
-                    std::lock_guard<std::mutex> lock(_running_cooldown_mutex);
-                    _running_cooldown_tasks_cnt[tablet->data_dir()]--;
-                    _running_cooldown_tablets.erase(tablet->tablet_id());
-                }
-            });
-
-            if (!st.ok()) {
-                LOG(INFO) << "failed to submit cooldown task, err msg: " << st;
-            }
-        }
-    } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));
-}
+void StorageEngine::_cooldown_tasks_producer_callback() {}
 
 } // namespace doris

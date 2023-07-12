@@ -50,6 +50,7 @@ public class QueryState {
 
     private ShowResultSet rs = null;
     public int serverStatus = 0;
+    public boolean isNereids = false;
 
     public QueryState() {
     }
@@ -64,6 +65,7 @@ public class QueryState {
         affectedRows = 0;
         warningRows = 0;
         rs = null;
+        isNereids = false;
     }
 
     public MysqlStateType getStateType() {
@@ -145,6 +147,14 @@ public class QueryState {
 
     public ShowResultSet getResultSet() {
         return this.rs;
+    }
+
+    public void setNereids(boolean nereids) {
+        isNereids = nereids;
+    }
+
+    public boolean isNereids() {
+        return isNereids;
     }
 
     public MysqlPacket toResponsePacket() {

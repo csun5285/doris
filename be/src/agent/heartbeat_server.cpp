@@ -17,19 +17,32 @@
 
 #include "agent/heartbeat_server.h"
 
-#include <thrift/TProcessor.h>
+#include <gen_cpp/HeartbeatService.h>
+#include <gen_cpp/HeartbeatService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <glog/logging.h>
 
+#include <memory>
+#include <ostream>
+#include <string>
+
+#include "common/config.h"
 #include "common/status.h"
-#include "gen_cpp/HeartbeatService.h"
-#include "gen_cpp/Status_types.h"
-#include "olap/storage_engine.h"
+#include "cloud/olap/storage_engine.h"
 #include "runtime/fragment_mgr.h"
+#include "runtime/exec_env.h"
 #include "runtime/heartbeat_flags.h"
 #include "service/backend_options.h"
 #include "util/debug_util.h"
 #include "util/network_util.h"
 #include "util/thrift_server.h"
 #include "util/time.h"
+
+namespace apache {
+namespace thrift {
+class TProcessor;
+} // namespace thrift
+} // namespace apache
 
 namespace doris {
 
@@ -50,7 +63,7 @@ void HeartbeatServer::heartbeat(THeartbeatResult& heartbeat_result,
                           << "host:" << master_info.network_address.hostname
                           << ", port:" << master_info.network_address.port
                           << ", cluster id:" << master_info.cluster_id
-                          << ", counter:" << google::COUNTER;
+                          << ", counter:" << google::COUNTER << ", BE start time: " << _be_epoch;
 
     // do heartbeat
     Status st = _heartbeat(master_info);
@@ -112,10 +125,10 @@ Status HeartbeatServer::_heartbeat(const TMasterInfo& master_info) {
 
                 //step3: get all ips of the interfaces on this machine
                 std::vector<InetAddress> hosts;
-                status = get_hosts_v4(&hosts);
+                status = get_hosts(&hosts);
                 if (!status.ok() || hosts.empty()) {
                     std::stringstream ss;
-                    ss << "the status was not ok when get_hosts_v4, error is " << status.to_string();
+                    ss << "the status was not ok when get_hosts, error is " << status.to_string();
                     LOG(WARNING) << ss.str();
                     return Status::InternalError(ss.str());
                 }
@@ -123,7 +136,7 @@ Status HeartbeatServer::_heartbeat(const TMasterInfo& master_info) {
                 //step4: check if the IP of FQDN belongs to the current machine and update BackendOptions._s_localhost
                 bool set_new_localhost = false;
                 for (auto& addr : hosts) {
-                    if (addr.get_host_address_v4() == ip) {
+                    if (addr.get_host_address() == ip) {
                         BackendOptions::set_localhost(master_info.backend_ip);
                         set_new_localhost = true;
                         break;

@@ -20,17 +20,27 @@
 
 #pragma once
 
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/segment_v2.pb.h>
+#include <stdint.h>
+
+#include <atomic>
 #include <fstream>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "cctz/time_zone.h"
-#include "cloud/io/cloud_file_cache.h"
-#include "cloud/io/file_system.h"
-#include "common/global_types.h"
-#include "common/object_pool.h"
-#include "gen_cpp/PaloInternalService_types.h" // for TQueryOptions
-#include "gen_cpp/Types_types.h"               // for TUniqueId
-#include "runtime/query_fragments_ctx.h"
-#include "runtime/thread_resource_mgr.h"
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/factory_creator.h"
+#include "common/status.h"
+#include "io/cache/block/block_file_cache.h"
+#include "io/fs/file_system.h"
 #include "util/runtime_profile.h"
 #include "util/telemetry/telemetry.h"
 
@@ -38,30 +48,26 @@ namespace doris {
 
 class DescriptorTbl;
 class ObjectPool;
-class Status;
 class ExecEnv;
-class Expr;
-class DateTimeValue;
-class MemTracker;
-class DataStreamRecvr;
-class ResultBufferMgr;
-class DiskIoMgrs;
-class TmpFileMgr;
-class BufferedBlockMgr;
-class BufferedBlockMgr2;
-class LoadErrorHub;
-class RowDescriptor;
 class RuntimeFilterMgr;
+class MemTrackerLimiter;
+class QueryContext;
 
 // A collection of items that are part of the global state of a
 // query and shared across all execution nodes of that query.
 class RuntimeState {
+    ENABLE_FACTORY_CREATOR(RuntimeState);
+
 public:
     // for ut only
     RuntimeState(const TUniqueId& fragment_instance_id, const TQueryOptions& query_options,
                  const TQueryGlobals& query_globals, ExecEnv* exec_env);
 
     RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
+                 const TQueryOptions& query_options, const TQueryGlobals& query_globals,
+                 ExecEnv* exec_env);
+
+    RuntimeState(const TPipelineInstanceParams& pipeline_params, const TUniqueId& query_id,
                  const TQueryOptions& query_options, const TQueryGlobals& query_globals,
                  ExecEnv* exec_env);
 
@@ -81,13 +87,12 @@ public:
     // for ut and non-query.
     Status init_mem_trackers(const TUniqueId& query_id = TUniqueId());
 
-    // Gets/Creates the query wide block mgr.
-    Status create_block_mgr();
-
     const TQueryOptions& query_options() const { return _query_options; }
+    int64_t scan_queue_mem_limit() const {
+        return _query_options.__isset.scan_queue_mem_limit ? _query_options.scan_queue_mem_limit
+                                                           : _query_options.mem_limit / 20;
+    }
     ObjectPool* obj_pool() const { return _obj_pool.get(); }
-
-    std::shared_ptr<ObjectPool> obj_pool_ptr() const { return _obj_pool; }
 
     const DescriptorTbl& desc_tbl() const { return *_desc_tbl; }
     void set_desc_tbl(const DescriptorTbl* desc_tbl) { _desc_tbl = desc_tbl; }
@@ -96,8 +101,12 @@ public:
     bool abort_on_default_limit_exceeded() const {
         return _query_options.abort_on_default_limit_exceeded;
     }
+    int query_parallel_instance_num() const { return _query_options.parallel_instance; }
     int max_errors() const { return _query_options.max_errors; }
-    int query_timeout() const { return _query_options.query_timeout; }
+    int execution_timeout() const {
+        return _query_options.__isset.execution_timeout ? _query_options.execution_timeout
+                                                        : _query_options.query_timeout;
+    }
     int max_io_buffers() const { return _query_options.max_io_buffers; }
     int num_scanner_threads() const { return _query_options.num_scanner_threads; }
     TQueryType::type query_type() const { return _query_options.query_type; }
@@ -106,27 +115,14 @@ public:
     const std::string& timezone() const { return _timezone; }
     const cctz::time_zone& timezone_obj() const { return _timezone_obj; }
     const std::string& user() const { return _user; }
-    const std::vector<std::string>& error_log() const { return _error_log; }
     const TUniqueId& query_id() const { return _query_id; }
     const TUniqueId& fragment_instance_id() const { return _fragment_instance_id; }
     ExecEnv* exec_env() { return _exec_env; }
     std::shared_ptr<MemTrackerLimiter> query_mem_tracker() { return _query_mem_tracker; }
-    ThreadResourceMgr::ResourcePool* resource_pool() { return _resource_pool; }
-
-    void set_fragment_root_id(PlanNodeId id) {
-        DCHECK(_root_node_id == -1) << "Should not set this twice.";
-        _root_node_id = id;
-    }
-
-    // The seed value to use when hashing tuples.
-    // See comment on _root_node_id. We add one to prevent having a hash seed of 0.
-    uint32_t fragment_hash_seed() const { return _root_node_id + 1; }
 
     // Returns runtime state profile
     RuntimeProfile* runtime_profile() { return &_profile; }
-
-    // Returns true if codegen is enabled for this query.
-    bool codegen_enabled() const { return !_query_options.disable_codegen; }
+    RuntimeProfile* load_channel_profile() { return &_load_channel_profile; }
 
     bool enable_function_pushdown() const {
         return _query_options.__isset.enable_function_pushdown &&
@@ -138,26 +134,15 @@ public:
                _query_options.check_overflow_for_decimal;
     }
 
-    // Create a codegen object in _codegen. No-op if it has already been called.
-    // If codegen is enabled for the query, this is created when the runtime
-    // state is created. If codegen is disabled for the query, this is created
-    // on first use.
-    Status create_codegen();
-
-    BufferedBlockMgr2* block_mgr2() {
-        DCHECK(_block_mgr2.get() != nullptr);
-        return _block_mgr2.get();
-    }
-
-    bool mysql_row_binary_format() const {
-        return _query_options.__isset.mysql_row_binary_format &&
-               _query_options.mysql_row_binary_format;
+    bool enable_common_expr_pushdown() const {
+        return _query_options.__isset.enable_common_expr_pushdown &&
+               _query_options.enable_common_expr_pushdown;
     }
 
     Status query_status() {
         std::lock_guard<std::mutex> l(_process_status_lock);
         return _process_status;
-    };
+    }
 
     // Appends error to the _error_log if there is space
     bool log_error(const std::string& error);
@@ -168,19 +153,18 @@ public:
         return _error_log.size() < _query_options.max_errors;
     }
 
-    // Return true if error log is empty.
-    bool error_log_is_empty();
-
-    // Returns the error log lines as a string joined with '\n'.
-    std::string error_log();
-
     // Append all _error_log[_unreported_error_idx+] to new_errors and set
     // _unreported_error_idx to _errors_log.size()
     void get_unreported_errors(std::vector<std::string>* new_errors);
 
-    bool is_cancelled() const { return _is_cancelled; }
+    bool is_cancelled() const { return _is_cancelled.load(); }
     int codegen_level() const { return _query_options.codegen_level; }
-    void set_is_cancelled(bool v) { _is_cancelled = v; }
+    void set_is_cancelled(bool v) {
+        _is_cancelled.store(v);
+        // Create a error status, so that we could print error stack, and
+        // we could know which path call cancel.
+        LOG(INFO) << "task is cancelled, st = " << Status::Error<ErrorCode::CANCELLED>();
+    }
 
     void set_backend_id(int64_t backend_id) { _backend_id = backend_id; }
     int64_t backend_id() const { return _backend_id; }
@@ -223,8 +207,6 @@ public:
 
     void set_import_label(const std::string& import_label) { _import_label = import_label; }
 
-    const std::string& import_label() { return _import_label; }
-
     const std::vector<std::string>& export_output_files() const { return _export_output_files; }
 
     void add_export_output_file(const std::string& file) { _export_output_files.push_back(file); }
@@ -237,29 +219,9 @@ public:
 
     void set_load_job_id(int64_t job_id) { _load_job_id = job_id; }
 
-    const int64_t load_job_id() const { return _load_job_id; }
+    int64_t load_job_id() const { return _load_job_id; }
 
-    // we only initialize object for load jobs
-    void set_load_error_hub_info(const TLoadErrorHubInfo& hub_info) {
-        TLoadErrorHubInfo* info = new TLoadErrorHubInfo(hub_info);
-        _load_error_hub_info.reset(info);
-    }
-
-    // only can be invoded after set its value
-    const TLoadErrorHubInfo* load_error_hub_info() {
-        // DCHECK(_load_error_hub_info != nullptr);
-        return _load_error_hub_info.get();
-    }
-
-    const int64_t get_normal_row_number() const { return _normal_row_number; }
-
-    const void set_normal_row_number(int64_t number) { _normal_row_number = number; }
-
-    const int64_t get_error_row_number() const { return _error_row_number; }
-
-    const void set_error_row_number(int64_t number) { _error_row_number = number; }
-
-    const std::string get_error_log_file_path() const;
+    const std::string get_error_log_file_path() const { return _error_log_file_path; }
 
     // append error msg and error line to file when loading data.
     // is_summary is true, means we are going to write the summary line
@@ -269,6 +231,8 @@ public:
                                     bool is_summary = false);
 
     int64_t num_bytes_load_total() { return _num_bytes_load_total.load(); }
+
+    int64_t num_finished_range() { return _num_finished_scan_range.load(); }
 
     int64_t num_rows_load_total() { return _num_rows_load_total.load(); }
 
@@ -288,6 +252,10 @@ public:
         _num_bytes_load_total.fetch_add(bytes_load);
     }
 
+    void update_num_finished_scan_range(int64_t finished_range) {
+        _num_finished_scan_range.fetch_add(finished_range);
+    }
+
     void update_num_rows_load_filtered(int64_t num_rows) {
         _num_rows_load_filtered.fetch_add(num_rows);
     }
@@ -295,8 +263,6 @@ public:
     void update_num_rows_load_unselected(int64_t num_rows) {
         _num_rows_load_unselected.fetch_add(num_rows);
     }
-
-    void export_load_error(const std::string& error_msg);
 
     void set_per_fragment_instance_idx(int idx) { _per_fragment_instance_idx = idx; }
 
@@ -320,13 +286,15 @@ public:
 
     int32_t runtime_filter_max_in_num() const { return _query_options.runtime_filter_max_in_num; }
 
-    bool enable_vectorized_exec() const { return _query_options.enable_vectorized_engine; }
-
     int be_exec_version() const {
         if (!_query_options.__isset.be_exec_version) {
             return 0;
         }
         return _query_options.be_exec_version;
+    }
+    bool enable_pipeline_exec() const {
+        return _query_options.__isset.enable_pipeline_engine &&
+               _query_options.enable_pipeline_engine;
     }
 
     bool trim_tailing_spaces_for_external_table_query() const {
@@ -370,6 +338,13 @@ public:
         return _query_options.partitioned_hash_join_rows_threshold;
     }
 
+    int partitioned_hash_agg_rows_threshold() const {
+        if (!_query_options.__isset.partitioned_hash_agg_rows_threshold) {
+            return 0;
+        }
+        return _query_options.partitioned_hash_agg_rows_threshold;
+    }
+
     const std::vector<TTabletCommitInfo>& tablet_commit_infos() const {
         return _tablet_commit_infos;
     }
@@ -380,18 +355,15 @@ public:
 
     std::vector<TErrorTabletInfo>& error_tablet_infos() { return _error_tablet_infos; }
 
-    /// Helper to call QueryState::StartSpilling().
-    Status StartSpilling(MemTracker* mem_tracker);
-
     // get mem limit for load channel
     // if load mem limit is not set, or is zero, using query mem limit instead.
     int64_t get_load_mem_limit();
 
     RuntimeFilterMgr* runtime_filter_mgr() { return _runtime_filter_mgr.get(); }
 
-    void set_query_fragments_ctx(QueryFragmentsCtx* ctx) { _query_ctx = ctx; }
+    void set_query_ctx(QueryContext* ctx) { _query_ctx = ctx; }
 
-    QueryFragmentsCtx* get_query_fragments_ctx() { return _query_ctx; }
+    QueryContext* get_query_ctx() { return _query_ctx; }
 
     void set_query_mem_tracker(const std::shared_ptr<MemTrackerLimiter>& tracker) {
         _query_mem_tracker = tracker;
@@ -403,17 +375,47 @@ public:
 
     bool enable_profile() const { return _query_options.is_report_success; }
 
+    bool enable_scan_node_run_serial() const {
+        return _query_options.__isset.enable_scan_node_run_serial &&
+               _query_options.enable_scan_node_run_serial;
+    }
+
     bool enable_share_hash_table_for_broadcast_join() const {
         return _query_options.__isset.enable_share_hash_table_for_broadcast_join &&
                _query_options.enable_share_hash_table_for_broadcast_join;
     }
 
-private:
-    // Use a custom block manager for the query for testing purposes.
-    void set_block_mgr2(const std::shared_ptr<BufferedBlockMgr2>& block_mgr) {
-        _block_mgr2 = block_mgr;
+    int repeat_max_num() const {
+#ifndef BE_TEST
+        if (!_query_options.__isset.repeat_max_num) {
+            return 10000;
+        }
+        return _query_options.repeat_max_num;
+#else
+        return 10;
+#endif
     }
 
+    int64_t external_sort_bytes_threshold() const {
+        if (_query_options.__isset.external_sort_bytes_threshold) {
+            return _query_options.external_sort_bytes_threshold;
+        }
+        return 0;
+    }
+
+    void set_be_exec_version(int32_t version) noexcept { _query_options.be_exec_version = version; }
+
+    int64_t external_agg_bytes_threshold() const {
+        return _query_options.__isset.external_agg_bytes_threshold
+                       ? _query_options.external_agg_bytes_threshold
+                       : 0;
+    }
+
+    bool enable_insert_strict() const {
+        return _query_options.__isset.enable_insert_strict && _query_options.enable_insert_strict;
+    }
+
+private:
     Status create_error_log_file();
 
     static const int DEFAULT_BATCH_SIZE = 2048;
@@ -423,6 +425,7 @@ private:
     // put runtime state before _obj_pool, so that it will be deconstructed after
     // _obj_pool. Because some of object in _obj_pool will use profile when deconstructing.
     RuntimeProfile _profile;
+    RuntimeProfile _load_channel_profile;
 
     const DescriptorTbl* _desc_tbl;
     std::shared_ptr<ObjectPool> _obj_pool;
@@ -459,17 +462,13 @@ private:
     cctz::time_zone _timezone_obj;
 
     TUniqueId _query_id;
-    std::vector<io::CloudFileCache::QueryContextHolderPtr> _query_contexts;
+    std::vector<io::BlockFileCache::QueryFileCacheContextHolderPtr> _query_contexts;
     TUniqueId _fragment_instance_id;
     TQueryOptions _query_options;
     ExecEnv* _exec_env = nullptr;
 
-    // Thread resource management object for this fragment's execution.  The runtime
-    // state is responsible for returning this pool to the thread mgr.
-    ThreadResourceMgr::ResourcePool* _resource_pool;
-
     // if true, execution should stop with a CANCELLED status
-    bool _is_cancelled;
+    std::atomic<bool> _is_cancelled;
 
     int _per_fragment_instance_idx;
     int _num_per_fragment_instances = 0;
@@ -485,21 +484,6 @@ private:
     // will not necessarily be set in all error cases.
     std::mutex _process_status_lock;
     Status _process_status;
-    //std::unique_ptr<MemPool> _udf_pool;
-
-    // BufferedBlockMgr object used to allocate and manage blocks of input data in memory
-    // with a fixed memory budget.
-    // The block mgr is shared by all fragments for this query.
-    std::shared_ptr<BufferedBlockMgr2> _block_mgr2;
-
-    // This is the node id of the root node for this plan fragment. This is used as the
-    // hash seed and has two useful properties:
-    // 1) It is the same for all exec nodes in a fragment, so the resulting hash values
-    // can be shared (i.e. for _slot_bitmap_filters).
-    // 2) It is different between different fragments, so we do not run into hash
-    // collisions after data partitioning (across fragments). See IMPALA-219 for more
-    // details.
-    PlanNodeId _root_node_id;
 
     // put here to collect files??
     std::vector<std::string> _output_files;
@@ -509,14 +493,13 @@ private:
     std::atomic<int64_t> _num_print_error_rows;
 
     std::atomic<int64_t> _num_bytes_load_total; // total bytes read from source
+    std::atomic<int64_t> _num_finished_scan_range;
 
     std::vector<std::string> _export_output_files;
-
     std::string _import_label;
     std::string _db_name;
     std::string _load_dir;
     int64_t _load_job_id;
-    std::unique_ptr<TLoadErrorHubInfo> _load_error_hub_info;
 
     // mini load
     int64_t _normal_row_number;
@@ -529,12 +512,10 @@ private:
     // error file path on s3, ${bucket}/${prefix}/error_log/${label}_${fragment_instance_id}
     std::string _s3_error_log_file_path;
 #endif
-    std::unique_ptr<LoadErrorHub> _error_hub;
-    std::mutex _create_error_hub_lock;
     std::vector<TTabletCommitInfo> _tablet_commit_infos;
     std::vector<TErrorTabletInfo> _error_tablet_infos;
 
-    QueryFragmentsCtx* _query_ctx;
+    QueryContext* _query_ctx;
 
     // true if max_filter_ratio is 0
     bool _load_zero_tolerance = false;

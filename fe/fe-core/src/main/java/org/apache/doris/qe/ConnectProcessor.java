@@ -57,7 +57,10 @@ import org.apache.doris.mysql.MysqlProto;
 import org.apache.doris.mysql.MysqlSerializer;
 import org.apache.doris.mysql.MysqlServerStatusFlag;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
+import org.apache.doris.nereids.minidump.MinidumpUtils;
 import org.apache.doris.nereids.parser.NereidsParser;
+import org.apache.doris.nereids.stats.StatsErrorEstimator;
+import org.apache.doris.nereids.trees.plans.commands.CreatePolicyCommand;
 import org.apache.doris.plugin.AuditEvent.EventType;
 import org.apache.doris.proto.Data;
 import org.apache.doris.qe.QueryState.MysqlStateType;
@@ -225,6 +228,7 @@ public class ConnectProcessor {
         packetBuf.get();
         // iteration_count always 1,
         packetBuf.getInt();
+        LOG.debug("execute prepared statement {}", stmtId);
         PrepareStmtContext prepareCtx = ctx.getPreparedStmt(String.valueOf(stmtId));
         if (prepareCtx == null) {
             LOG.warn("No such statement in context, stmtId:{}", stmtId);
@@ -365,6 +369,7 @@ public class ConnectProcessor {
         } else {
             ctx.getAuditEventBuilder().setIsQuery(false);
         }
+        ctx.getAuditEventBuilder().setIsNereids(ctx.getState().isNereids);
 
         ctx.getAuditEventBuilder().setFeIp(FrontendOptions.getLocalHostAddress());
 
@@ -372,7 +377,8 @@ public class ConnectProcessor {
         if (!ctx.getState().isQuery() && (parsedStmt != null && parsedStmt.needAuditEncryption())) {
             ctx.getAuditEventBuilder().setStmt(parsedStmt.toSql());
         } else {
-            if (parsedStmt instanceof InsertStmt && ((InsertStmt) parsedStmt).isValuesOrConstantSelect()) {
+            if (parsedStmt instanceof InsertStmt && !((InsertStmt) parsedStmt).needLoadManager()
+                    && ((InsertStmt) parsedStmt).isValuesOrConstantSelect()) {
                 // INSERT INTO VALUES may be very long, so we only log at most 1K bytes.
                 int length = Math.min(1024, origStmt.length());
                 ctx.getAuditEventBuilder().setStmt(origStmt.substring(0, length));
@@ -430,11 +436,19 @@ public class ConnectProcessor {
         if (ctx.getSessionVariable().isEnableNereidsPlanner()) {
             try {
                 stmts = new NereidsParser().parseSQL(originStmt);
+                for (StatementBase stmt : stmts) {
+                    LogicalPlanAdapter logicalPlanAdapter = (LogicalPlanAdapter) stmt;
+                    // TODO: remove this after we could process CreatePolicyCommand
+                    if (logicalPlanAdapter.getLogicalPlan() instanceof CreatePolicyCommand) {
+                        stmts = null;
+                        break;
+                    }
+                }
             } catch (Exception e) {
                 // TODO: We should catch all exception here until we support all query syntax.
                 nereidsParseException = e;
-                LOG.info(" Fallback to stale planner."
-                        + " Nereids cannot process this statement: \"{}\".", originStmt);
+                LOG.info("Nereids parse sql failed. Reason: {}. Statement: \"{}\".",
+                        e.getMessage(), originStmt);
             }
         }
 
@@ -473,8 +487,8 @@ public class ConnectProcessor {
                     && ctx.getSessionVariable().isEnableNereidsPlanner()
                     && !ctx.getSessionVariable().enableFallbackToOriginalPlanner) {
                 Exception exception = new Exception(
-                        String.format("nereids cannot anaylze sql, and fall-back disabled: %s",
-                        parsedStmt.toSql()), nereidsParseException);
+                        String.format("Nereids cannot parse the SQL, and fallback disabled. caused by: \n\n%s",
+                                nereidsParseException.getMessage()), nereidsParseException);
                 // audit it and break
                 handleQueryException(exception, auditStmt, null, null);
                 break;
@@ -514,6 +528,9 @@ public class ConnectProcessor {
     // Use a handler for exception to avoid big try catch block which is a little hard to understand
     private void handleQueryException(Throwable throwable, String origStmt,
                                       StatementBase parsedStmt, Data.PQueryStatistics statistics) {
+        if (ctx.getMinidump() != null) {
+            MinidumpUtils.saveMinidumpString(ctx.getMinidump(), DebugUtil.printId(ctx.queryId()));
+        }
         if (throwable instanceof IOException) {
             // Client failed.
             LOG.warn("Process one query failed because IOException: ", throwable);
@@ -628,7 +645,7 @@ public class ConnectProcessor {
             case COM_QUERY:
             case COM_STMT_PREPARE:
                 ctx.initTracer("trace");
-                Span rootSpan = ctx.getTracer().spanBuilder("handleQuery").startSpan();
+                Span rootSpan = ctx.getTracer().spanBuilder("handleQuery").setNoParent().startSpan();
                 try (Scope scope = rootSpan.makeCurrent()) {
                     handleQuery();
                 } catch (Exception e) {
@@ -706,11 +723,15 @@ public class ConnectProcessor {
         // note(wb) we should write profile after return result to mysql client
         // because write profile maybe take too much time
         // explain query stmt do not have profile
-        if (executor != null && !executor.getParsedStmt().isExplain()
+        if (executor != null && executor.getParsedStmt() != null && !executor.getParsedStmt().isExplain()
                 && (executor.getParsedStmt() instanceof QueryStmt // currently only QueryStmt and insert need profile
                 || executor.getParsedStmt() instanceof LogicalPlanAdapter
                 || executor.getParsedStmt() instanceof InsertStmt)) {
-            executor.writeProfile(true);
+            executor.updateProfile(true);
+            StatsErrorEstimator statsErrorEstimator = ConnectContext.get().getStatsErrorEstimator();
+            if (statsErrorEstimator != null) {
+                statsErrorEstimator.updateProfile(ConnectContext.get().queryId());
+            }
         }
     }
 
@@ -721,9 +742,6 @@ public class ConnectProcessor {
         ctx.getState().reset();
         if (request.isSetCluster()) {
             ctx.setCluster(request.cluster);
-        }
-        if (request.isSetResourceInfo()) {
-            ctx.getSessionVariable().setResourceGroup(request.getResourceInfo().getGroup());
         }
         if (request.isSetUserIp()) {
             ctx.setRemoteIP(request.getUserIp());

@@ -7,13 +7,13 @@
 #include <sstream>
 #include <variant>
 
-#include "cloud/io/cloud_file_cache_downloader.h"
-#include "cloud/io/s3_file_system.h"
 #include "cloud/meta_mgr.h"
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/sync_point.h"
+#include "io/cache/block/block_file_cache_downloader.h"
+#include "io/fs/s3_file_system.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "util/wait_group.h"

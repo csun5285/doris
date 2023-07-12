@@ -22,33 +22,19 @@ suite ("test_varchar_schema_change") {
          def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
          return jobStateResult[0][9]
     }
-
+    
     def tableName = "varchar_schema_change_regression_test"
 
     try {
 
-        String[][] backends = sql """ show backends """
-        assertTrue(backends.size() > 0)
         String backend_id;
         def backendId_to_backendIP = [:]
         def backendId_to_backendHttpPort = [:]
-        for (String[] backend in backends) {
-            backendId_to_backendIP.put(backend[0], backend[2])
-            backendId_to_backendHttpPort.put(backend[0], backend[5])
-        }
+        getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
 
         backend_id = backendId_to_backendIP.keySet()[0]
-        StringBuilder showConfigCommand = new StringBuilder();
-        showConfigCommand.append("curl -X GET http://")
-        showConfigCommand.append(backendId_to_backendIP.get(backend_id))
-        showConfigCommand.append(":")
-        showConfigCommand.append(backendId_to_backendHttpPort.get(backend_id))
-        showConfigCommand.append("/api/show_config")
-        logger.info(showConfigCommand.toString())
-        def process = showConfigCommand.toString().execute()
-        int code = process.waitFor()
-        String err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        String out = process.getText()
+        def (code, out, err) = show_be_config(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id))
+        
         logger.info("Show config: code=" + code + ", out=" + out + ", err=" + err)
         assertEquals(code, 0)
         def configList = parseJson(out.trim())
@@ -85,7 +71,7 @@ suite ("test_varchar_schema_change") {
                 """
             exception "Cannot shorten string length"
         }
-
+        
         // test {//为什么第一次改没发生Nothing is changed错误？查看branch-1.2-lts代码
         //     sql """ alter table ${tableName} modify column c2 varchar(20)
         //             """
@@ -111,7 +97,7 @@ suite ("test_varchar_schema_change") {
         logger.info(res[2][1])
         assertEquals(res[2][1].toLowerCase(),"varchar(30)")
 
-        qt_sc """ select * from ${tableName} """
+        qt_sc " select * from ${tableName} order by 1,2; "
 
         // test { //没捕获到异常
         //     sql """ insert into ${tableName} values(92,'2017-12-01',483647,'sdafdsaf') """
@@ -140,7 +126,7 @@ suite ("test_varchar_schema_change") {
         logger.info(res[2][1])
         assertEquals(res[2][1].toLowerCase(),"varchar(30)")
 
-        qt_sc """ select * from ${tableName} where c2 like '%1%' """
+        qt_sc " select * from ${tableName} where c2 like '%1%' order by 1,2; "
 
         sql """ insert into ${tableName} values(22,'2011-12-01','12f2','fdsaf') """
         sql """ insert into ${tableName} values(55,'2009-11-21','12d1d113','123aa') """
@@ -151,20 +137,7 @@ suite ("test_varchar_schema_change") {
                 String tablet_id = tablet[0]
                 backend_id = tablet[2]
                 logger.info("run compaction:" + tablet_id)
-                StringBuilder sb = new StringBuilder();
-                sb.append("curl -X POST http://")
-                sb.append(backendId_to_backendIP.get(backend_id))
-                sb.append(":")
-                sb.append(backendId_to_backendHttpPort.get(backend_id))
-                sb.append("/api/compaction/run?tablet_id=")
-                sb.append(tablet_id)
-                sb.append("&compact_type=cumulative")
-
-                String command = sb.toString()
-                process = command.execute()
-                code = process.waitFor()
-                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-                out = process.getText()
+                (code, out, err) = be_run_cumulative_compaction(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
                 logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
         }
 
@@ -175,19 +148,7 @@ suite ("test_varchar_schema_change") {
                     Thread.sleep(100)
                     String tablet_id = tablet[0]
                     backend_id = tablet[2]
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X GET http://")
-                    sb.append(backendId_to_backendIP.get(backend_id))
-                    sb.append(":")
-                    sb.append(backendId_to_backendHttpPort.get(backend_id))
-                    sb.append("/api/compaction/run_status?tablet_id=")
-                    sb.append(tablet_id)
-
-                    String command = sb.toString()
-                    process = command.execute()
-                    code = process.waitFor()
-                    err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-                    out = process.getText()
+                    (code, out, err) = be_get_compaction_status(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
                     logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
                     assertEquals(code, 0)
                     def compactionStatus = parseJson(out.trim())
@@ -196,10 +157,11 @@ suite ("test_varchar_schema_change") {
                 } while (running)
         }
 
-        qt_sc """ select * from ${tableName} """
-        qt_sc """ select min(c2),max(c2) from ${tableName} """
-        qt_sc """ select min(c2),max(c2) from ${tableName} group by c0 """
+        qt_sc " select * from ${tableName} order by 1,2; "
+        qt_sc " select min(c2),max(c2) from ${tableName} order by 1,2; "
+        qt_sc " select min(c2),max(c2) from ${tableName} group by c0 order by 1,2; "
 
+        sleep(5000)
         sql """ alter table ${tableName} 
         modify column c2 varchar(40), 
         modify column c3 varchar(6) DEFAULT '0'
@@ -221,7 +183,7 @@ suite ("test_varchar_schema_change") {
         logger.info(res[2][1])
         assertEquals(res[2][1].toLowerCase(),"varchar(40)")
 
-        qt_sc """ select * from ${tableName} """
+        qt_sc " select * from ${tableName} order by 1,2; "
 
         // test{
         //     sql """ alter table t0 modify column c1 varchar(20) NOT NULL """

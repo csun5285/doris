@@ -17,15 +17,11 @@
 
 suite("test_dynamic_table", "dynamic_table"){
     // prepare test table
-
-    sql """ SET enable_vectorized_engine=true; """
-
     def load_json_data = {table_name, vec_flag, format_flag, read_flag, file_name, expect_success ->
         // load the json data
         streamLoad {
             table "${table_name}"
             // set http request header params
-            set 'enable_vectorized_engine', vec_flag
             set 'read_json_by_line', read_flag
             set 'format', format_flag
             set 'read_json_by_line', read_flag
@@ -106,10 +102,6 @@ suite("test_dynamic_table", "dynamic_table"){
         //check data in table and check table schema
         def select_res_now = "true"
         for(i = 0; i < 5; i++){
-            if( i == 3 ){
-                logger.info("open vectorized after ${i}".toString())
-                sql "SET enable_vectorized_engine=true;"
-            }
             //select_res_now = sql "select * from ${table_name} order by `${columes[0]}`"
             select_res_now = sql "select `${columes[0]}` from ${table_name} order by `${columes[0]}`"
             //logger.info("after alter schema, it's ${i} time select,  select result: ${select_res}".toString())
@@ -127,7 +119,9 @@ suite("test_dynamic_table", "dynamic_table"){
             alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
             alter_res = alter_res.toString()
             if(alter_res.contains("FINISHED")) {
-                 break
+                sleep(3000) // wait change table state to normal
+                logger.info(table_name + " latest alter job finished, detail: " + alter_res)
+                break
             }
             useTime = t
             sleep(delta_time)
@@ -135,9 +129,31 @@ suite("test_dynamic_table", "dynamic_table"){
         assertTrue(useTime <= OpTimeout)
     }
 
+    def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
+        for(int t = delta_time; t <= OpTimeout; t += delta_time){
+            alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
+            expected_finished_num = alter_res.size();
+            finished_num = 0;
+            for (int i = 0; i < expected_finished_num; i++) {
+                logger.info(table_name + " build index job state: " + alter_res[i][7] + i)
+                if (alter_res[i][7] == "FINISHED") {
+                    ++finished_num;
+                }
+            }
+            if (finished_num == expected_finished_num) {
+                logger.info(table_name + " all build index jobs finished, detail: " + alter_res)
+                break
+            } else {
+                finished_num = 0;
+            }
+            useTime = t
+            sleep(delta_time)
+        }
+        assertTrue(useTime <= OpTimeout, "wait_for_latest_build_index_on_partition_finish timeout")
+    }
+
     def index_res = ""
     def create_index = { table_name, colume_name, index_name, index_type, expect_success ->
-        sql "SET enable_vectorized_engine=true;"
         // create index
         try{
             real_res = "success"
@@ -153,6 +169,10 @@ suite("test_dynamic_table", "dynamic_table"){
             logger.info("create index res: ${index_res} \n".toString())
             wait_for_latest_op_on_table_finish(table_name, timeout)
 
+            index_res = sql """ build index ${index_name} on ${table_name} """
+            logger.info("build index res: ${index_res} \n".toString())
+            wait_for_build_index_on_partition_finish(table_name, timeout)
+
         }catch(Exception ex){
             logger.info("create create index ${index_name} on ${table_name}(`${colume_name}`) using inverted(${index_type}) fail, catch exception: ${ex} \n".toString())
             real_res = "false"
@@ -166,7 +186,6 @@ suite("test_dynamic_table", "dynamic_table"){
     }
 
     def drop_index = { table_name, colume_name, index_name, expect_success ->
-        sql "SET enable_vectorized_engine=true;"
         // create index
         try{
             sql """
@@ -188,7 +207,7 @@ suite("test_dynamic_table", "dynamic_table"){
 
     //start test
     String[] data_models = ["DUPLICATE"]
-    int[] replica_num = [3]
+    int[] replica_num = [1]
     def expect_success = "true"
     def feishu_fix_columes = ["id", "content.post.zh_cn.title", "msg_type"]
     def feishu_fix_columes_type = ["BIGINT", "VARCHAR(100)", "CHAR(50)"]

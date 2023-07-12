@@ -17,7 +17,16 @@
 
 #include "olap/rowset/segment_v2/bitmap_index_reader.h"
 
+#include <gen_cpp/segment_v2.pb.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <roaring/roaring.hh>
+
 #include "olap/types.h"
+#include "vec/columns/column.h"
+#include "vec/common/string_ref.h"
+#include "vec/data_types/data_type.h"
 #include "vec/data_types/data_type_factory.hpp"
 
 namespace doris {
@@ -60,7 +69,6 @@ Status BitmapIndexIterator::read_bitmap(rowid_t ordinal, roaring::Roaring* resul
     DCHECK(num_to_read == num_read);
 
     *result = roaring::Roaring::read(column->get_data_at(0).data, false);
-    _pool->clear();
     return Status::OK();
 }
 

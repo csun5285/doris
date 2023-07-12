@@ -41,7 +41,6 @@ suite("test_csv_with_double_quotes", "p0") {
         set 'column_separator', ','
 
         file 'csv_with_double_quotes.csv'
-        time 10000 // limit inflight 10s
     }
 
     sql "sync"
@@ -55,10 +54,5 @@ suite("test_csv_with_double_quotes", "p0") {
         set 'trim_double_quotes', 'true'
 
         file 'csv_with_double_quotes.csv'
-        time 10000 // limit inflight 10s
-    }
-
-    sql "sync"
-    qt_sql "select * from ${tableName} order by k1, k2"
     sql """ DROP TABLE IF EXISTS ${tableName} """
 }

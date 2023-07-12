@@ -17,40 +17,88 @@
 
 #include "io/file_factory.h"
 
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/PlanNodes_types.h>
 #include <gen_cpp/Types_types.h>
 
-#include "io/broker_reader.h"
-#include "io/broker_writer.h"
-#include "io/buffered_reader.h"
-#include "io/hdfs_reader_writer.h"
-#include "io/local_file_reader.h"
-#include "io/local_file_writer.h"
-#include "io/s3_reader.h"
-#include "io/s3_writer.h"
-#include "runtime/exec_env.h"
-#include "runtime/stream_load/load_stream_mgr.h"
+#include <utility>
 
-doris::Status doris::FileFactory::create_file_writer(
-        TFileType::type type, doris::ExecEnv* env,
-        const std::vector<TNetworkAddress>& broker_addresses,
-        const std::map<std::string, std::string>& properties, const std::string& path,
-        int64_t start_offset, std::unique_ptr<FileWriter>& file_writer) {
+#include "common/config.h"
+#include "common/status.h"
+#include "io/fs/broker_file_system.h"
+#include "io/fs/file_reader_options.h"
+#include "io/fs/hdfs_file_system.h"
+#include "io/fs/local_file_system.h"
+#include "io/fs/s3_file_system.h"
+#include "io/fs/stream_load_pipe.h"
+#include "io/hdfs_builder.h"
+#include "runtime/exec_env.h"
+#include "runtime/runtime_state.h"
+#include "runtime/stream_load/new_load_stream_mgr.h"
+#include "runtime/stream_load/stream_load_context.h"
+#include "util/s3_uri.h"
+#include "util/s3_util.h"
+#include "util/uid_util.h"
+
+namespace doris {
+namespace io {
+class FileWriter;
+} // namespace io
+
+static io::FileBlockCachePathPolicy BLOCK_CACHE_POLICY;
+static std::string RANDOM_CACHE_BASE_PATH = "random";
+
+io::FileReaderOptions FileFactory::get_reader_options(RuntimeState* state) {
+    io::FileCachePolicy cache_policy = io::FileCachePolicy::NO_CACHE;
+    if (config::enable_file_cache && state != nullptr &&
+        state->query_options().__isset.enable_file_cache &&
+        state->query_options().enable_file_cache) {
+        cache_policy = io::FileCachePolicy::FILE_BLOCK_CACHE;
+    }
+    io::FileReaderOptions reader_options(cache_policy, BLOCK_CACHE_POLICY);
+    reader_options.is_doris_table = false;
+    if (state != nullptr && state->query_options().__isset.file_cache_base_path &&
+        state->query_options().file_cache_base_path != RANDOM_CACHE_BASE_PATH) {
+        reader_options.specify_cache_path(state->query_options().file_cache_base_path);
+    }
+    return reader_options;
+}
+
+io::FileReaderOptions FileFactory::NO_CACHE_READER_OPTIONS =
+        FileFactory::get_reader_options(nullptr);
+
+Status FileFactory::create_file_writer(TFileType::type type, ExecEnv* env,
+                                       const std::vector<TNetworkAddress>& broker_addresses,
+                                       const std::map<std::string, std::string>& properties,
+                                       const std::string& path, int64_t start_offset,
+                                       std::unique_ptr<io::FileWriter>& file_writer) {
     switch (type) {
     case TFileType::FILE_LOCAL: {
-        file_writer.reset(new LocalFileWriter(path, start_offset));
+        RETURN_IF_ERROR(io::global_local_filesystem()->create_file(path, &file_writer));
         break;
     }
     case TFileType::FILE_BROKER: {
-        file_writer.reset(new BrokerWriter(env, broker_addresses, properties, path, start_offset));
+        std::shared_ptr<io::BrokerFileSystem> fs;
+        RETURN_IF_ERROR(io::BrokerFileSystem::create(broker_addresses[0], properties, &fs));
+        RETURN_IF_ERROR(fs->create_file(path, &file_writer));
         break;
     }
     case TFileType::FILE_S3: {
-        file_writer.reset(new S3Writer(properties, path, start_offset));
+        S3URI s3_uri(path);
+        RETURN_IF_ERROR(s3_uri.parse());
+        S3Conf s3_conf;
+        RETURN_IF_ERROR(
+                S3ClientFactory::convert_properties_to_s3_conf(properties, s3_uri, &s3_conf));
+        std::shared_ptr<io::S3FileSystem> fs;
+        RETURN_IF_ERROR(io::S3FileSystem::create(s3_conf, "", &fs));
+        RETURN_IF_ERROR(fs->create_file(path, &file_writer));
         break;
     }
     case TFileType::FILE_HDFS: {
-        RETURN_IF_ERROR(HdfsReaderWriter::create_writer(
-                const_cast<std::map<std::string, std::string>&>(properties), path, file_writer));
+        THdfsParams hdfs_params = parse_properties(properties);
+        std::shared_ptr<io::HdfsFileSystem> fs;
+        RETURN_IF_ERROR(io::HdfsFileSystem::create(hdfs_params, "", &fs));
+        RETURN_IF_ERROR(fs->create_file(path, &file_writer));
         break;
     }
     default:
@@ -60,99 +108,89 @@ doris::Status doris::FileFactory::create_file_writer(
     return Status::OK();
 }
 
-// ============================
-// broker scan node/unique ptr
-doris::Status doris::FileFactory::create_file_reader(
-        doris::TFileType::type type, doris::ExecEnv* env, RuntimeProfile* profile,
-        const std::vector<TNetworkAddress>& broker_addresses,
-        const std::map<std::string, std::string>& properties, const doris::TBrokerRangeDesc& range,
-        int64_t start_offset, std::unique_ptr<FileReader>& file_reader) {
-    FileReader* file_reader_ptr;
+Status FileFactory::create_file_reader(RuntimeProfile* profile,
+                                       const FileSystemProperties& system_properties,
+                                       const FileDescription& file_description,
+                                       std::shared_ptr<io::FileSystem>* file_system,
+                                       io::FileReaderSPtr* file_reader,
+                                       io::FileReaderOptions reader_options) {
+    TFileType::type type = system_properties.system_type;
+    reader_options.file_size = file_description.file_size;
     switch (type) {
     case TFileType::FILE_LOCAL: {
-        file_reader_ptr = new LocalFileReader(range.path, start_offset);
-        break;
-    }
-    case TFileType::FILE_BROKER: {
-        file_reader_ptr = new BufferedReader(
-                profile,
-                new BrokerReader(env, broker_addresses, properties, range.path, start_offset,
-                                 range.__isset.file_size ? range.file_size : 0));
+        RETURN_IF_ERROR(io::global_local_filesystem()->open_file(file_description.path,
+                                                                 file_reader));
         break;
     }
     case TFileType::FILE_S3: {
-        file_reader_ptr =
-                new BufferedReader(profile, new S3Reader(properties, range.path, start_offset));
+        RETURN_IF_ERROR(create_s3_reader(system_properties.properties, file_description.path,
+                                         file_system, file_reader, reader_options));
         break;
     }
     case TFileType::FILE_HDFS: {
-        FileReader* hdfs_reader = nullptr;
-        RETURN_IF_ERROR(HdfsReaderWriter::create_reader(range.hdfs_params, range.path, start_offset,
-                                                        &hdfs_reader));
-        // temporarily hdfs reader is not thread safe, shouldn't use buffered reader
-        file_reader_ptr = hdfs_reader;
-        break;
-    }
-    default:
-        return Status::InternalError("unsupported file reader type: " + std::to_string(type));
-    }
-    file_reader.reset(file_reader_ptr);
-
-    return Status::OK();
-}
-
-// ============================
-// file scan node/unique ptr
-doris::Status doris::FileFactory::create_file_reader(RuntimeProfile* profile,
-                                                     const TFileScanRangeParams& params,
-                                                     const std::string& path, int64_t start_offset,
-                                                     int64_t file_size, int64_t buffer_size,
-                                                     std::unique_ptr<FileReader>& file_reader) {
-    FileReader* file_reader_ptr;
-    doris::TFileType::type type = params.file_type;
-    switch (type) {
-    case TFileType::FILE_LOCAL: {
-        file_reader_ptr = new LocalFileReader(path, start_offset);
-        break;
-    }
-    case TFileType::FILE_S3: {
-        file_reader_ptr = new S3Reader(params.properties, path, start_offset);
-        break;
-    }
-    case TFileType::FILE_HDFS: {
-        RETURN_IF_ERROR(HdfsReaderWriter::create_reader(params.hdfs_params, path, start_offset,
-                                                        &file_reader_ptr));
+        RETURN_IF_ERROR(create_hdfs_reader(system_properties.hdfs_params, file_description.path,
+                                           file_system, file_reader, reader_options));
         break;
     }
     case TFileType::FILE_BROKER: {
-        file_reader_ptr = new BrokerReader(ExecEnv::GetInstance(), params.broker_addresses,
-                                           params.properties, path, start_offset, file_size);
+        RETURN_IF_ERROR(create_broker_reader(system_properties.broker_addresses[0],
+                                             system_properties.properties, file_description,
+                                             file_system, file_reader, reader_options));
         break;
     }
     default:
-        return Status::InternalError("unsupported file reader type: {}", std::to_string(type));
-    }
-
-    // if the buffer size is 0, we would set it as the dafault whole remote buffer size
-    // local file reader is not thread safe, temporatily we don't support it
-    // only S3 reader is thread safe so we only allow s3 reader to be accelerate
-    if (buffer_size >= 0 && type == TFileType::FILE_S3 && profile != nullptr) {
-        file_reader.reset(new BufferedReader(
-                profile, file_reader_ptr,
-                buffer_size == 0 ? config::remote_storage_read_buffer_mb * 1024 * 1024
-                                 : buffer_size));
-    } else {
-        file_reader.reset(file_reader_ptr);
+        return Status::NotSupported("unsupported file reader type: {}", std::to_string(type));
     }
     return Status::OK();
 }
 
 // file scan node/stream load pipe
-doris::Status doris::FileFactory::create_pipe_reader(const TUniqueId& load_id,
-                                                     std::shared_ptr<FileReader>& file_reader) {
-    file_reader = ExecEnv::GetInstance()->load_stream_mgr()->get(load_id);
-    if (!file_reader) {
+Status FileFactory::create_pipe_reader(const TUniqueId& load_id, io::FileReaderSPtr* file_reader) {
+    auto stream_load_ctx = ExecEnv::GetInstance()->new_load_stream_mgr()->get(load_id);
+    if (!stream_load_ctx) {
         return Status::InternalError("unknown stream load id: {}", UniqueId(load_id).to_string());
     }
+    *file_reader = stream_load_ctx->pipe;
     return Status::OK();
 }
+
+Status FileFactory::create_hdfs_reader(const THdfsParams& hdfs_params, const std::string& path,
+                                       std::shared_ptr<io::FileSystem>* hdfs_file_system,
+                                       io::FileReaderSPtr* reader,
+                                       const io::FileReaderOptions& reader_options) {
+    std::shared_ptr<io::HdfsFileSystem> fs;
+    RETURN_IF_ERROR(io::HdfsFileSystem::create(hdfs_params, "", &fs));
+    RETURN_IF_ERROR(fs->open_file(path, reader, &reader_options));
+    *hdfs_file_system = std::move(fs);
+    return Status::OK();
+}
+
+Status FileFactory::create_s3_reader(const std::map<std::string, std::string>& prop,
+                                     const std::string& path,
+                                     std::shared_ptr<io::FileSystem>* s3_file_system,
+                                     io::FileReaderSPtr* reader,
+                                     const io::FileReaderOptions& reader_options) {
+    S3URI s3_uri(path);
+    RETURN_IF_ERROR(s3_uri.parse());
+    S3Conf s3_conf;
+    RETURN_IF_ERROR(S3ClientFactory::convert_properties_to_s3_conf(prop, s3_uri, &s3_conf));
+    std::shared_ptr<io::S3FileSystem> fs;
+    RETURN_IF_ERROR(io::S3FileSystem::create(std::move(s3_conf), "", &fs));
+    RETURN_IF_ERROR(fs->open_file(path, reader, &reader_options));
+    *s3_file_system = std::move(fs);
+    return Status::OK();
+}
+
+Status FileFactory::create_broker_reader(const TNetworkAddress& broker_addr,
+                                         const std::map<std::string, std::string>& prop,
+                                         const FileDescription& file_description,
+                                         std::shared_ptr<io::FileSystem>* broker_file_system,
+                                         io::FileReaderSPtr* reader,
+                                         const io::FileReaderOptions& reader_options) {
+    std::shared_ptr<io::BrokerFileSystem> fs;
+    RETURN_IF_ERROR(io::BrokerFileSystem::create(broker_addr, prop, &fs));
+    RETURN_IF_ERROR(fs->open_file(file_description.path, reader, &reader_options));
+    *broker_file_system = std::move(fs);
+    return Status::OK();
+}
+} // namespace doris

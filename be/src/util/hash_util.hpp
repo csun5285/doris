@@ -20,25 +20,19 @@
 
 #pragma once
 
-#include <functional>
-
-#include "common/compiler_util.h"
-
-// For cross compiling with clang, we need to be able to generate an IR file with
-// no sse instructions.  Attempting to load a precompiled IR file that contains
-// unsupported instructions causes llvm to fail.  We need to use #defines to control
-// the code that is built and the runtime checks to control what code is run.
-#ifdef __SSE4_2__
-#include <nmmintrin.h>
-#elif __aarch64__
-#include <sse2neon.h>
-#endif
+#include <gen_cpp/Types_types.h>
 #include <xxh3.h>
 #include <zlib.h>
 
-#include "gen_cpp/Types_types.h"
+#include <functional>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "gutil/hash/hash.h"      // IWYU pragma: keep
+#include "runtime/define_primitive_type.h"
 #include "util/cpu_info.h"
 #include "util/murmur_hash3.h"
+#include "util/sse_util.hpp"
 
 namespace doris {
 
@@ -169,16 +163,22 @@ public:
         switch (len & 7) {
         case 7:
             h ^= uint64_t(data2[6]) << 48;
+            [[fallthrough]];
         case 6:
             h ^= uint64_t(data2[5]) << 40;
+            [[fallthrough]];
         case 5:
             h ^= uint64_t(data2[4]) << 32;
+            [[fallthrough]];
         case 4:
             h ^= uint64_t(data2[3]) << 24;
+            [[fallthrough]];
         case 3:
             h ^= uint64_t(data2[2]) << 16;
+            [[fallthrough]];
         case 2:
             h ^= uint64_t(data2[1]) << 8;
+            [[fallthrough]];
         case 1:
             h ^= uint64_t(data2[0]);
             h *= MURMUR_PRIME;
@@ -261,20 +261,26 @@ public:
         switch (len & 7) {
         case 7:
             h ^= (uint64_t)data[6] << 48;
+            [[fallthrough]];
         case 6:
             h ^= (uint64_t)data[5] << 40;
+            [[fallthrough]];
         case 5:
             h ^= (uint64_t)data[4] << 32;
+            [[fallthrough]];
         case 4:
             h ^= (uint64_t)data[3] << 24;
+            [[fallthrough]];
         case 3:
             h ^= (uint64_t)data[2] << 16;
+            [[fallthrough]];
         case 2:
             h ^= (uint64_t)data[1] << 8;
+            [[fallthrough]];
         case 1:
             h ^= (uint64_t)data[0];
             h *= m;
-        };
+        }
 
         h ^= h >> r;
         h *= m;

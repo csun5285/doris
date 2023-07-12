@@ -130,13 +130,14 @@ if [[ -z "${PARALLEL}" ]]; then
     PARALLEL="$(($(nproc) / 5 + 1))"
 fi
 
-CMAKE_BUILD_TYPE="${BUILD_TYPE:-ASAN}"
+CMAKE_BUILD_TYPE="${BUILD_TYPE_UT:-ASAN}"
 CMAKE_BUILD_TYPE="$(echo "${CMAKE_BUILD_TYPE}" | awk '{ print(toupper($0)) }')"
 
 echo "Get params:
     PARALLEL            -- ${PARALLEL}
     CLEAN               -- ${CLEAN}
     CLOUD_MODE          -- ${CLOUD_MODE}
+    ENABLE_PCH          -- ${ENABLE_PCH}
 "
 echo "Build Backend UT"
 
@@ -189,7 +190,7 @@ if [[ -z "${USE_DWARF}" ]]; then
     USE_DWARF='OFF'
 fi
 
-MAKE_PROGRAM="$(which "${BUILD_SYSTEM}")"
+MAKE_PROGRAM="$(command -v "${BUILD_SYSTEM}")"
 echo "-- Make program: ${MAKE_PROGRAM}"
 echo "-- Use ccache: ${CMAKE_USE_CCACHE}"
 echo "-- Extra cxx flags: ${EXTRA_CXX_FLAGS:-}"
@@ -210,10 +211,11 @@ cd "${CMAKE_BUILD_DIR}"
     -DUSE_DWARF="${USE_DWARF}" \
     -DUSE_MEM_TRACKER="${USE_MEM_TRACKER}" \
     -DUSE_JEMALLOC=OFF \
-    -DSTRICT_MEMORY_USE=OFF \
     -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
     -DENABLE_CLANG_COVERAGE="${DENABLE_CLANG_COVERAGE}" \
     ${CMAKE_USE_CCACHE:+${CMAKE_USE_CCACHE}} \
+    -DENABLE_PCH="${ENABLE_PCH}" \
+    -DDORIS_JAVA_HOME="${JAVA_HOME}" \
     "${DORIS_HOME}/be"
 "${BUILD_SYSTEM}" -j "${PARALLEL}"
 "${BUILD_SYSTEM}" install
@@ -240,7 +242,7 @@ export UDF_RUNTIME_DIR="${DORIS_HOME}/lib/udf-runtime"
 export LOG_DIR="${DORIS_HOME}/log"
 while read -r variable; do
     eval "export ${variable}"
-done < <(sed 's/ //g' "${DORIS_HOME}/conf/be.conf" | grep -E "^[[:upper:]]([[:upper:]]|_|[[:digit:]])*=")
+done < <(sed 's/[[:space:]]*\(=\)[[:space:]]*/\1/' "${DORIS_HOME}/conf/be.conf" | grep -E "^[[:upper:]]([[:upper:]]|_|[[:digit:]])*=")
 
 mkdir -p "${LOG_DIR}"
 mkdir -p "${UDF_RUNTIME_DIR}"
@@ -295,7 +297,7 @@ mkdir "${UT_TMP_DIR}"
 touch "${UT_TMP_DIR}/tmp_file"
 
 # set asan and ubsan env to generate core file
-export ASAN_OPTIONS=symbolize=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1
+export ASAN_OPTIONS=symbolize=1:abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1:detect_container_overflow=0
 export UBSAN_OPTIONS=print_stacktrace=1
 export LSAN_OPTIONS=suppressions=${DORIS_TEST_BINARY_DIR}/asan_suppr.conf
 

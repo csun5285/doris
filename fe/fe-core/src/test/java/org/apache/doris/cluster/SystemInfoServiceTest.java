@@ -109,10 +109,6 @@ public class SystemInfoServiceTest {
                 minTimes = 0;
                 result = table;
 
-                env.getCluster(anyString);
-                minTimes = 0;
-                result = new Cluster("cluster", 1);
-
                 env.clear();
                 minTimes = 0;
 
@@ -232,8 +228,8 @@ public class SystemInfoServiceTest {
         Assert.assertNotNull(Env.getCurrentSystemInfo().getBackend(backendId));
         Assert.assertNotNull(Env.getCurrentSystemInfo().getBackendWithHeartbeatPort("192.168.0.1", 1234));
 
-        Assert.assertTrue(Env.getCurrentSystemInfo().getBackendIds(false).size() == 1);
-        Assert.assertTrue(Env.getCurrentSystemInfo().getBackendIds(false).get(0) == backendId);
+        Assert.assertTrue(Env.getCurrentSystemInfo().getAllBackendIds(false).size() == 1);
+        Assert.assertTrue(Env.getCurrentSystemInfo().getAllBackendIds(false).get(0) == backendId);
 
         Assert.assertTrue(Env.getCurrentSystemInfo().getBackendReportVersion(backendId) == 0L);
 
@@ -290,7 +286,7 @@ public class SystemInfoServiceTest {
         Assert.assertEquals(checksum1, checksum2);
         Assert.assertEquals(1, systemInfoService.getIdToBackend().size());
         Backend back2 = systemInfoService.getBackend(1);
-        Assert.assertTrue(back1.equals(back2));
+        Assert.assertEquals(back1, back2);
         dis.close();
 
         deleteDir(dir);

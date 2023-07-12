@@ -20,7 +20,7 @@
 
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
-#include "olap/storage_engine.h"
+#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "olap/txn_manager.h"
 #include "util/doris_metrics.h"
@@ -31,6 +31,7 @@ namespace doris {
 // add "Engine" as task prefix to prevent duplicate name with agent task
 class EngineTask {
 public:
+    virtual ~EngineTask() = default;
     virtual Status execute() { return Status::OK(); }
     virtual Status finish() { return Status::OK(); }
 };

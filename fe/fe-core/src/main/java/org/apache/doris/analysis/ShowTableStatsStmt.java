@@ -18,84 +18,91 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.DatabaseIf;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.TableIf;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.Util;
+import org.apache.doris.datasource.CatalogIf;
+import org.apache.doris.mysql.privilege.PrivPredicate;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.ShowResultSet;
 import org.apache.doris.qe.ShowResultSetMetaData;
-import org.apache.doris.statistics.TableStats;
+import org.apache.doris.statistics.TableStatistic;
+import org.apache.doris.statistics.util.StatisticsUtil;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 
-import java.util.Collections;
 import java.util.List;
 
 public class ShowTableStatsStmt extends ShowStmt {
 
+    // TODO add more columns
     private static final ImmutableList<String> TITLE_NAMES =
             new ImmutableList.Builder<String>()
-                    .add("table_name")
-                    .add(TableStats.ROW_COUNT.getValue())
-                    .add(TableStats.DATA_SIZE.getValue())
+                    .add("row_count")
+                    .add("update_time")
+                    .add("last_analyze_time")
                     .build();
 
     private final TableName tableName;
 
-    // after analyzed
-    // There is only on attribute for both @tableName and @dbName at the same time.
-    private String dbName;
-
     private final PartitionNames partitionNames;
+
+    private TableIf table;
 
     public ShowTableStatsStmt(TableName tableName, PartitionNames partitionNames) {
         this.tableName = tableName;
         this.partitionNames = partitionNames;
     }
 
-    public String getTableName() {
-        Preconditions.checkArgument(isAnalyzed(), "The db name must be obtained after the parsing is complete");
-        if (tableName == null) {
-            return null;
-        }
-        return tableName.getTbl();
-    }
-
-    public String getDbName() {
-        Preconditions.checkArgument(isAnalyzed(), "The db name must be obtained after the parsing is complete");
-        if (tableName == null) {
-            return dbName;
-        }
-        return tableName.getDb();
-    }
-
-    public List<String> getPartitionNames() {
-        if (partitionNames == null) {
-            return Collections.emptyList();
-        }
-        return partitionNames.getPartitionNames();
+    public TableName getTableName() {
+        return tableName;
     }
 
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
-        if (tableName == null) {
-            dbName = analyzer.getDefaultDb();
-            if (Strings.isNullOrEmpty(dbName)) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR);
-            }
-            return;
-        }
         tableName.analyze(analyzer);
-
         if (partitionNames != null) {
             partitionNames.analyze(analyzer);
+            if (partitionNames.getPartitionNames().size() > 1) {
+                throw new AnalysisException("Only one partition name could be specified");
+            }
         }
-
         // disallow external catalog
         Util.prohibitExternalCatalog(tableName.getCtl(), this.getClass().getSimpleName());
+        CatalogIf<DatabaseIf> catalog = Env.getCurrentEnv().getCatalogMgr().getCatalog(tableName.getCtl());
+        if (catalog == null) {
+            ErrorReport.reportAnalysisException("Catalog: {} not exists", tableName.getCtl());
+        }
+        DatabaseIf<TableIf> db = catalog.getDb(tableName.getDb()).orElse(null);
+        if (db == null) {
+            ErrorReport.reportAnalysisException("DB: {} not exists", tableName.getDb());
+        }
+        table = db.getTable(tableName.getTbl()).orElse(null);
+        if (table == null) {
+            ErrorReport.reportAnalysisException("Table: {} not exists", tableName.getTbl());
+        }
+        if (partitionNames != null) {
+            String partitionName = partitionNames.getPartitionNames().get(0);
+            Partition partition = table.getPartition(partitionName);
+            if (partition == null) {
+                ErrorReport.reportAnalysisException("Partition: {} not exists", partitionName);
+            }
+        }
+        if (!Env.getCurrentEnv().getAccessManager()
+                .checkTblPriv(ConnectContext.get(), tableName.getDb(), tableName.getTbl(), PrivPredicate.SHOW)) {
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_TABLEACCESS_DENIED_ERROR, "Permission denied",
+                    ConnectContext.get().getQualifiedUser(), ConnectContext.get().getRemoteIP(),
+                    tableName.getDb() + ": " + tableName.getTbl());
+        }
     }
 
     @Override
@@ -106,5 +113,27 @@ public class ShowTableStatsStmt extends ShowStmt {
             builder.addColumn(new Column(title, ScalarType.createVarchar(30)));
         }
         return builder.build();
+    }
+
+    public TableIf getTable() {
+        return table;
+    }
+
+    public long getPartitionId() {
+        if (partitionNames == null) {
+            return 0;
+        }
+        String partitionName = partitionNames.getPartitionNames().get(0);
+        return table.getPartition(partitionName).getId();
+    }
+
+    public ShowResultSet constructResultSet(TableStatistic tableStatistic) {
+        List<List<String>> result = Lists.newArrayList();
+        List<String> row = Lists.newArrayList();
+        row.add(String.valueOf(tableStatistic.rowCount));
+        row.add(String.valueOf(tableStatistic.updateTime));
+        row.add(StatisticsUtil.getReadableTime(tableStatistic.lastAnalyzeTimeInMs));
+        result.add(row);
+        return new ShowResultSet(getMetaData(), result);
     }
 }

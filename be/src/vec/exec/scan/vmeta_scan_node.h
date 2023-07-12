@@ -17,8 +17,25 @@
 
 #pragma once
 
-#include "runtime/runtime_state.h"
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/PlanNodes_types.h>
+
+#include <list>
+#include <vector>
+
+#include "common/global_types.h"
+#include "common/status.h"
 #include "vec/exec/scan/vscan_node.h"
+
+namespace doris {
+class DescriptorTbl;
+class ObjectPool;
+class RuntimeState;
+
+namespace vectorized {
+class VScanner;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -30,11 +47,11 @@ public:
     Status init(const TPlanNode& tnode, RuntimeState* state = nullptr) override;
     Status prepare(RuntimeState* state) override;
     void set_scan_ranges(const std::vector<TScanRangeParams>& scan_ranges) override;
-    const TMetaScanNode& scan_params() { return _scan_params; };
+    const TMetaScanNode& scan_params() { return _scan_params; }
 
 private:
     Status _init_profile() override;
-    Status _init_scanners(std::list<VScanner*>* scanners) override;
+    Status _init_scanners(std::list<VScannerSPtr>* scanners) override;
     Status _process_conjuncts() override;
 
     TupleId _tuple_id;

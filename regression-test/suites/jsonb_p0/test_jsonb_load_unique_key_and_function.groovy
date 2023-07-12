@@ -20,8 +20,6 @@ suite("test_jsonb_unique_load_and_function", "p0") {
     def testTable = "tbl_test_jsonb_unique"
     def dataFile = "test_jsonb_unique_key.csv"
 
-    sql """ set enable_vectorized_engine = true """
-
     sql "DROP TABLE IF EXISTS ${testTable}"
 
     sql """
@@ -52,7 +50,7 @@ suite("test_jsonb_unique_load_and_function", "p0") {
             log.info("Stream load result: ${result}".toString())
             def json = parseJson(result)
             assertEquals("fail", json.Status.toLowerCase())
-            assertEquals("[INTERNAL_ERROR]too many filtered rows", json.Message)
+            assertTrue(json.Message.contains("too many filtered rows"))
             assertEquals(75, json.NumberTotalRows)
             assertEquals(54, json.NumberLoadedRows)
             assertEquals(21, json.NumberFilteredRows)
@@ -87,12 +85,14 @@ suite("test_jsonb_unique_load_and_function", "p0") {
         }
     }
 
+    sql "sync"
     // check result
     qt_select "SELECT * FROM ${testTable} ORDER BY id"
 
     // insert into valid json rows
     sql """INSERT INTO ${testTable} VALUES(26, NULL)"""
     sql """INSERT INTO ${testTable} VALUES(27, '{"k1":"v1", "k2": 200}')"""
+    sql """INSERT INTO ${testTable} VALUES(28, '{"a.b.c":{"k1.a1":"v31", "k2": 300},"a":"niu"}')"""
 
     // insert into invalid json rows with enable_insert_strict=true
     // expect excepiton and no rows not changed
@@ -138,8 +138,11 @@ suite("test_jsonb_unique_load_and_function", "p0") {
 
     // jsonb_extract
     qt_select "SELECT id, j, jsonb_extract(j, '\$') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.*') FROM ${testTable} ORDER BY id"
 
     qt_select "SELECT id, j, jsonb_extract(j, '\$.k1') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.\"a.b.c\"') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.\"a.b.c\".\"k1.a1\"') FROM ${testTable} ORDER BY id"
     qt_select "SELECT id, j, jsonb_extract(j, '\$.k2') FROM ${testTable} ORDER BY id"
 
     qt_select "SELECT id, j, jsonb_extract(j, '\$[0]') FROM ${testTable} ORDER BY id"
@@ -159,6 +162,10 @@ suite("test_jsonb_unique_load_and_function", "p0") {
     qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[3]') FROM ${testTable} ORDER BY id"
     qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[4]') FROM ${testTable} ORDER BY id"
     qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[10]') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[last]') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[last-1]') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[last-2]') FROM ${testTable} ORDER BY id"
+    qt_select "SELECT id, j, jsonb_extract(j, '\$.a1[last-10]') FROM ${testTable} ORDER BY id"
 
     // jsonb_extract_string
     qt_select "SELECT id, j, jsonb_extract_string(j, '\$') FROM ${testTable} ORDER BY id"

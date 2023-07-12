@@ -19,7 +19,10 @@ package org.apache.doris.nereids.types;
 
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.nereids.exceptions.AnalysisException;
+import org.apache.doris.nereids.types.coercion.AbstractDataType;
 import org.apache.doris.nereids.types.coercion.DateLikeType;
+import org.apache.doris.nereids.types.coercion.IntegralType;
 
 import com.google.common.base.Preconditions;
 
@@ -30,23 +33,54 @@ import java.util.Objects;
  */
 public class DateTimeV2Type extends DateLikeType {
     public static final int MAX_SCALE = 6;
-    public static final DateTimeV2Type INSTANCE = new DateTimeV2Type(0);
+    public static final DateTimeV2Type SYSTEM_DEFAULT = new DateTimeV2Type(0);
+    public static final DateTimeV2Type MAX = new DateTimeV2Type(MAX_SCALE);
 
     private static final int WIDTH = 8;
 
-    private int scale;
+    private final int scale;
 
     private DateTimeV2Type(int scale) {
         Preconditions.checkArgument(0 <= scale && scale <= MAX_SCALE);
         this.scale = scale;
     }
 
+    /**
+     * create DateTimeV2Type from scale
+     */
     public static DateTimeV2Type of(int scale) {
-        if (scale == INSTANCE.scale) {
-            return INSTANCE;
+        if (scale == SYSTEM_DEFAULT.scale) {
+            return SYSTEM_DEFAULT;
+        } else if (scale > MAX_SCALE || scale < 0) {
+            throw new AnalysisException("Scale of Datetime/Time must between 0 and 6. Scale was set to: " + scale);
         } else {
             return new DateTimeV2Type(scale);
         }
+    }
+
+    public static DateTimeV2Type getWiderDatetimeV2Type(DateTimeV2Type t1, DateTimeV2Type t2) {
+        if (t1.scale > t2.scale) {
+            return t1;
+        }
+        return t2;
+    }
+
+    /**
+     * return proper type of datetimev2 for other type
+     */
+    public static DateTimeV2Type forType(DataType dataType) {
+        if (dataType instanceof DateTimeV2Type) {
+            return (DateTimeV2Type) dataType;
+        }
+        if (dataType instanceof IntegralType || dataType instanceof BooleanType || dataType instanceof NullType) {
+            return SYSTEM_DEFAULT;
+        }
+        return MAX;
+    }
+
+    @Override
+    public String toSql() {
+        return super.toSql() + "(" + scale + ")";
     }
 
     @Override
@@ -67,6 +101,11 @@ public class DateTimeV2Type extends DateLikeType {
         }
         DateTimeV2Type that = (DateTimeV2Type) o;
         return Objects.equals(scale, that.scale);
+    }
+
+    @Override
+    public boolean acceptsType(AbstractDataType other) {
+        return other instanceof DateTimeV2Type;
     }
 
     @Override

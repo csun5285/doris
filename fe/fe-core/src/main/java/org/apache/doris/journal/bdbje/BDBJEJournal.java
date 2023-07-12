@@ -120,7 +120,7 @@ public class BDBJEJournal implements Journal { // CHECKSTYLE IGNORE THIS LINE: B
     }
 
     @Override
-    public synchronized void write(short op, Writable writable) throws IOException {
+    public synchronized long write(short op, Writable writable) throws IOException {
         JournalEntity entity = new JournalEntity();
         entity.setOpCode(op);
         entity.setData(writable);
@@ -139,6 +139,7 @@ public class BDBJEJournal implements Journal { // CHECKSTYLE IGNORE THIS LINE: B
         DatabaseEntry theData = new DatabaseEntry(buffer.getData());
         if (MetricRepo.isInit) {
             MetricRepo.COUNTER_EDIT_LOG_SIZE_BYTES.increase((long) theData.getSize());
+            MetricRepo.COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES.increase((long) theData.getSize());
         }
         LOG.debug("opCode = {}, journal size = {}", op, theData.getSize());
         // Write the key value pair to bdb.
@@ -174,7 +175,7 @@ public class BDBJEJournal implements Journal { // CHECKSTYLE IGNORE THIS LINE: B
                  */
                 nextJournalId.set(id);
                 LOG.warn("master can not achieve quorum. write timestamp fail. but will not exit.");
-                return;
+                return -1;
             }
             String msg = "write bdb failed. will exit. journalId: " + id + ", bdb database Name: "
                     + currentJournalDB.getDatabaseName();
@@ -182,6 +183,7 @@ public class BDBJEJournal implements Journal { // CHECKSTYLE IGNORE THIS LINE: B
             Util.stdoutWithTime(msg);
             System.exit(-1);
         }
+        return id;
     }
 
     @Override

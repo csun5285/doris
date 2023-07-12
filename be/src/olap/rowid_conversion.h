@@ -49,7 +49,8 @@ public:
     // set dst rowset id
     void set_dst_rowset_id(const RowsetId& dst_rowset_id) { _dst_rowst_id = dst_rowset_id; }
     // get dst rowset id
-    const RowsetId get_dst_rowset_id() { return _dst_rowst_id;}
+    const RowsetId get_dst_rowset_id() { return _dst_rowst_id; }
+
     // add row id to the map
     void add(const std::vector<RowLocation>& rss_row_ids,
              const std::vector<uint32_t>& dst_segments_num_row) {

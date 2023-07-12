@@ -17,12 +17,33 @@
 
 #pragma once
 
-#include "runtime/result_file_sink.h"
+#include <gen_cpp/Types_types.h>
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/status.h"
+#include "exec/data_sink.h"
+#include "runtime/descriptors.h"
+#include "vec/core/block.h"
 #include "vec/sink/vdata_stream_sender.h"
+#include "vec/sink/vresult_sink.h"
 
 namespace doris {
+class BufferControlBlock;
+class ObjectPool;
+class QueryStatistics;
+class RuntimeProfile;
+class RuntimeState;
+class TDataSink;
+class TExpr;
+class TPlanFragmentDestination;
+class TResultFileSink;
+
 namespace vectorized {
 class VResultWriter;
+class VExprContext;
 
 class VResultFileSink : public DataSink {
 public:
@@ -40,8 +61,7 @@ public:
     Status open(RuntimeState* state) override;
     // send data in 'batch' to this backend stream mgr
     // Blocks until all rows in batch are placed in the buffer
-    Status send(RuntimeState* state, RowBatch* batch) override;
-    Status send(RuntimeState* state, Block* block) override;
+    Status send(RuntimeState* state, Block* block, bool eos = false) override;
     // Flush all buffered data and close all existing channels to destination
     // hosts. Further send() calls are illegal after calling close().
     Status close(RuntimeState* state, Status exec_status) override;
@@ -58,7 +78,7 @@ private:
 
     // Owned by the RuntimeState.
     const std::vector<TExpr>& _t_output_expr;
-    std::vector<vectorized::VExprContext*> _output_vexpr_ctxs;
+    VExprContextSPtrs _output_vexpr_ctxs;
     RowDescriptor _output_row_descriptor;
 
     std::unique_ptr<Block> _output_block = nullptr;

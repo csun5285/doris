@@ -58,9 +58,9 @@ class Config {
     public String suitePath
     public String dataPath
     public String realDataPath
-    public String sf1DataPath
     public String cacheDataPath
     public String pluginPath
+    public String sslCertificatePath
 
     public String testGroups
     public String excludeGroups
@@ -120,7 +120,7 @@ class Config {
            String cloudUniqueId, String metaServiceHttpAddress, String recycleServiceHttpAddress, String suitePath,
            String dataPath, String realDataPath, String sf1DataPath, String cacheDataPath, String testGroups,
            String excludeGroups, String testSuites, String excludeSuites, String testDirectories, String excludeDirectories,
-           String pluginPath, String multiClusterBes, String metaServiceToken, String multiClusterInstance,
+           String pluginPath, String sslCertificatePath, String multiClusterBes, String metaServiceToken, String multiClusterInstance,
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
            String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId) {
@@ -141,7 +141,6 @@ class Config {
         this.suitePath = suitePath
         this.dataPath = dataPath
         this.realDataPath = realDataPath
-        this.sf1DataPath = sf1DataPath
         this.cacheDataPath = cacheDataPath
         this.testGroups = testGroups
         this.excludeGroups = excludeGroups
@@ -150,6 +149,7 @@ class Config {
         this.testDirectories = testDirectories
         this.excludeDirectories = excludeDirectories
         this.pluginPath = pluginPath
+        this.sslCertificatePath = sslCertificatePath
         this.multiClusterBes = multiClusterBes
         this.metaServiceToken = metaServiceToken
         this.multiClusterInstance = multiClusterInstance
@@ -191,9 +191,9 @@ class Config {
         config.suitePath = FileUtils.getCanonicalPath(cmd.getOptionValue(pathOpt, config.suitePath))
         config.dataPath = FileUtils.getCanonicalPath(cmd.getOptionValue(dataOpt, config.dataPath))
         config.realDataPath = FileUtils.getCanonicalPath(cmd.getOptionValue(realDataOpt, config.realDataPath))
-        config.sf1DataPath = cmd.getOptionValue(sf1DataOpt, config.sf1DataPath)
         config.cacheDataPath = cmd.getOptionValue(cacheDataOpt, config.cacheDataPath)
         config.pluginPath = FileUtils.getCanonicalPath(cmd.getOptionValue(pluginOpt, config.pluginPath))
+        config.sslCertificatePath = FileUtils.getCanonicalPath(cmd.getOptionValue(sslCertificateOpt, config.sslCertificatePath))
         config.suiteWildcard = cmd.getOptionValue(suiteOpt, config.testSuites)
                 .split(",")
                 .collect({s -> s.trim()})
@@ -369,7 +369,6 @@ class Config {
             configToString(obj.suitePath),
             configToString(obj.dataPath),
             configToString(obj.realDataPath),
-            configToString(obj.sf1DataPath),
             configToString(obj.cacheDataPath),
             configToString(obj.testGroups),
             configToString(obj.excludeGroups),
@@ -378,6 +377,7 @@ class Config {
             configToString(obj.testDirectories),
             configToString(obj.excludeDirectories),
             configToString(obj.pluginPath),
+            configToString(obj.sslCertificatePath)
             configToString(obj.multiClusterBes),
             configToString(obj.metaServiceToken),
             configToString(obj.multiClusterInstance),
@@ -463,7 +463,7 @@ class Config {
 
         if (config.jdbcUrl == null) {
             //jdbcUrl needs parameter here. Refer to function: buildUrl(String dbName)
-            config.jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true"
+            config.jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
             log.info("Set jdbcUrl to '${config.jdbcUrl}' because not specify.".toString())
         }
 
@@ -542,11 +542,6 @@ class Config {
             log.info("Set realDataPath to '${config.realDataPath}' because not specify.".toString())
         }
 
-        if (config.sf1DataPath == null) {
-            config.sf1DataPath = "regression-test/sf1Data"
-            log.info("Set sf1DataPath to '${config.sf1DataPath}' because not specify.".toString())
-        }
-
         if (config.cacheDataPath == null) {
             config.cacheDataPath = "regression-test/cacheData"
             log.info("Set cacheDataPath to '${config.cacheDataPath}' because not specify.".toString())
@@ -555,6 +550,11 @@ class Config {
         if (config.pluginPath == null) {
             config.pluginPath = "regression-test/plugins"
             log.info("Set dataPath to '${config.pluginPath}' because not specify.".toString())
+        }
+
+        if (config.sslCertificatePath == null) {
+            config.sslCertificatePath = "regression-test/ssl_default_certificate"
+            log.info("Set sslCertificatePath to '${config.sslCertificatePath}' because not specify.".toString())
         }
 
         if (config.testGroups == null) {
@@ -718,7 +718,7 @@ class Config {
             urlWithDb += ("/" + dbName)
         }
         urlWithDb = addSslUrl(urlWithDb);
-
+        urlWithDb = addTimeoutUrl(urlWithDb);
         return urlWithDb
     }
 
@@ -731,10 +731,7 @@ class Config {
         String useSslConfig = "verifyServerCertificate=false&useSSL=" + useSsl + "&requireSSL=false"
         String tlsVersion = "TLSv1.2"
         String tlsVersionConfig = "&enabledTLSProtocols=" + tlsVersion
-        String keyStoreFile = "file:regression-test/certificate.p12"
-        String keyStoreFileConfig = "&trustCertificateKeyStoreUrl=" + keyStoreFile + "&clientCertificateKeyStoreUrl=" + keyStoreFile
-        String password = "&trustCertificateKeyStorePassword=doris&clientCertificateKeyStorePassword=doris"
-        String sslUrl = useSslConfig + tlsVersionConfig + keyStoreFileConfig + password
+        String sslUrl = useSslConfig + tlsVersionConfig
         // e.g: jdbc:mysql://locahost:8080/dbname?
         if (url.charAt(url.length() - 1) == '?') {
             return url + sslUrl
@@ -744,6 +741,26 @@ class Config {
             // e.g: jdbc:mysql://locahost:8080/dbname
         } else {
             return url + '?' + sslUrl
+        }
+    }
+
+    private String addTimeoutUrl(String url) {
+        if (url.contains("connectTimeout=") || url.contains("socketTimeout="))
+        {
+            return url
+        }
+
+        Integer connectTimeout = 5000
+        Integer socketTimeout = 1000 * 60 * 30
+        String s = String.format("connectTimeout=%d&socketTimeout=%d", connectTimeout, socketTimeout)
+        if (url.charAt(url.length() - 1) == '?') {
+            return url + s
+            // e.g: jdbc:mysql://locahost:8080/dbname?a=b
+        } else if (url.contains('?')) {
+            return url + '&' + s
+            // e.g: jdbc:mysql://locahost:8080/dbname
+        } else {
+            return url + '?' + s
         }
     }
 }

@@ -17,18 +17,27 @@
 
 #include "olap/options.h"
 
+#include <ctype.h>
 #include <rapidjson/document.h>
+#include <rapidjson/encodings.h>
+#include <rapidjson/rapidjson.h>
+#include <stdlib.h>
 
 #include <algorithm>
+#include <memory>
+#include <ostream>
 
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
-#include "env/env.h"
 #include "gutil/strings/split.h"
-#include "gutil/strings/substitute.h"
+#include "gutil/strings/strip.h"
+#include "io/fs/local_file_system.h"
+#include "olap/olap_define.h"
 #include "olap/utils.h"
 #include "util/path_util.h"
+#include "util/string_util.h"
+#include "io/cache/block/block_file_cache_settings.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -47,11 +56,11 @@ static std::string CACHE_TOTAL_SIZE = "total_size";
 static std::string CACHE_QUERY_LIMIT_SIZE = "query_limit";
 
 // TODO: should be a general util method
-static std::string to_upper(const std::string& str) {
-    std::string out = str;
-    std::transform(out.begin(), out.end(), out.begin(), [](auto c) { return std::toupper(c); });
-    return out;
-}
+// static std::string to_upper(const std::string& str) {
+//     std::string out = str;
+//     std::transform(out.begin(), out.end(), out.begin(), [](auto c) { return std::toupper(c); });
+//     return out;
+// }
 
 // Currently, both of three following formats are supported(see be.conf), remote cache is the
 // local cache path for remote storage.
@@ -70,11 +79,7 @@ Status parse_root_path(const string& root_path, StorePath* path) {
     }
 
     string canonicalized_path;
-    Status status = Env::Default()->canonicalize(tmp_vec[0], &canonicalized_path);
-    if (!status.ok()) {
-        LOG(WARNING) << "path can not be canonicalized. may be not exist. path=" << tmp_vec[0];
-        return Status::Error<INVALID_ARGUMENT>();
-    }
+    RETURN_IF_ERROR(io::global_local_filesystem()->canonicalize(tmp_vec[0], &canonicalized_path));
     path->path = tmp_vec[0];
 
     // parse root path capacity and storage medium
@@ -183,7 +188,7 @@ Status parse_conf_cache_paths(const std::string& config_path, std::vector<CacheP
             if (value.IsInt64()) {
                 total_size = value.GetInt64();
             } else {
-                return Status::InvalidArgument("normal should be int64");
+                return Status::InvalidArgument("total_size should be int64");
             }
         }
         if (config::enable_file_cache_query_limit) {
@@ -197,12 +202,14 @@ Status parse_conf_cache_paths(const std::string& config_path, std::vector<CacheP
             }
         }
         if (total_size <= 0 || (config::enable_file_cache_query_limit && query_limit_bytes <= 0)) {
-            return Status::InvalidArgument("total_size or query_limit should not less than or equal to zero");
+            return Status::InvalidArgument(
+                    "total_size or query_limit should not less than or equal to zero");
         }
         paths.emplace_back(std::move(path), total_size, query_limit_bytes);
     }
     if (paths.empty()) {
-        return Status::InvalidArgument("fail to parse storage_root_path config. value={}", config_path);
+        return Status::InvalidArgument("fail to parse storage_root_path config. value={}",
+                                       config_path);
     }
     return Status::OK();
 }

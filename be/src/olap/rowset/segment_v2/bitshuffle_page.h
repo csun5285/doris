@@ -18,13 +18,15 @@
 #pragma once
 
 #include <glog/logging.h>
-#include <sys/types.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <ostream>
 
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/status.h"
 #include "gutil/port.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/bitshuffle_wrapper.h"
@@ -33,12 +35,12 @@
 #include "olap/rowset/segment_v2/page_builder.h"
 #include "olap/rowset/segment_v2/page_decoder.h"
 #include "olap/types.h"
-#include "runtime/memory/chunk_allocator.h"
+#include "util/alignment.h"
 #include "util/coding.h"
 #include "util/faststring.h"
 #include "util/slice.h"
-#include "vec/columns/column_nullable.h"
-#include "vec/runtime/vdatetime_value.h"
+#include "vec/columns/column.h"
+#include "vec/data_types/data_type.h"
 
 namespace doris {
 namespace segment_v2 {
@@ -300,7 +302,8 @@ public:
         }
 
         // Currently, only the UINT32 block encoder supports expanding size:
-        if (UNLIKELY(Type != OLAP_FIELD_TYPE_UNSIGNED_INT && _size_of_element != SIZE_OF_TYPE)) {
+        if (UNLIKELY(Type != FieldType::OLAP_FIELD_TYPE_UNSIGNED_INT &&
+                     _size_of_element != SIZE_OF_TYPE)) {
             return Status::InternalError(
                     "invalid size info. size of element:{}, SIZE_OF_TYPE:{}, type:{}",
                     _size_of_element, SIZE_OF_TYPE, Type);
@@ -363,27 +366,8 @@ public:
         return Status::OK();
     }
 
-    Status next_batch(size_t* n, ColumnBlockView* dst) override { return next_batch<true>(n, dst); }
-
-    template <bool forward_index>
-    Status next_batch(size_t* n, ColumnBlockView* dst) {
-        DCHECK(_parsed);
-        if (PREDICT_FALSE(*n == 0 || _cur_index >= _num_elements)) {
-            *n = 0;
-            return Status::OK();
-        }
-
-        size_t max_fetch = std::min(*n, static_cast<size_t>(_num_elements - _cur_index));
-        _copy_next_values(max_fetch, dst->data());
-        *n = max_fetch;
-        if (forward_index) {
-            _cur_index += max_fetch;
-        }
-
-        return Status::OK();
-    }
-
-    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst) override {
+    template <bool forward_index = true>
+    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst) {
         DCHECK(_parsed);
         if (PREDICT_FALSE(*n == 0 || _cur_index >= _num_elements)) {
             *n = 0;
@@ -393,12 +377,17 @@ public:
         size_t max_fetch = std::min(*n, static_cast<size_t>(_num_elements - _cur_index));
 
         dst->insert_many_fix_len_data(get_data(_cur_index), max_fetch);
-
         *n = max_fetch;
-        _cur_index += max_fetch;
+        if constexpr (forward_index) {
+            _cur_index += max_fetch;
+        }
 
         return Status::OK();
-    };
+    }
+
+    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst) override {
+        return next_batch<>(n, dst);
+    }
 
     Status read_by_rowids(const rowid_t* rowids, ordinal_t page_first_ordinal, size_t* n,
                           vectorized::MutableColumnPtr& dst) override {
@@ -426,7 +415,7 @@ public:
         return Status::OK();
     }
 
-    Status peek_next_batch(size_t* n, ColumnBlockView* dst) override {
+    Status peek_next_batch(size_t* n, vectorized::MutableColumnPtr& dst) override {
         return next_batch<false>(n, dst);
     }
 

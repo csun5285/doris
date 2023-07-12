@@ -17,15 +17,34 @@
 
 #include "vec/common/sort/heap_sorter.h"
 
+#include <glog/logging.h>
+
+#include <algorithm>
+
+#include "runtime/thread_context.h"
 #include "util/defer_op.h"
+#include "vec/columns/column.h"
+#include "vec/columns/column_nullable.h"
+#include "vec/common/sort/vsort_exec_exprs.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/core/sort_description.h"
+#include "vec/data_types/data_type_nullable.h"
+#include "vec/exprs/vexpr_context.h"
+
+namespace doris {
+class ObjectPool;
+class RowDescriptor;
+class RuntimeState;
+} // namespace doris
 
 namespace doris::vectorized {
 HeapSorter::HeapSorter(VSortExecExprs& vsort_exec_exprs, int limit, int64_t offset,
                        ObjectPool* pool, std::vector<bool>& is_asc_order,
                        std::vector<bool>& nulls_first, const RowDescriptor& row_desc)
         : Sorter(vsort_exec_exprs, limit, offset, pool, is_asc_order, nulls_first),
+          _data_size(0),
           _heap_size(limit + offset),
-          _heap(std::make_unique<SortingHeap>()),
+          _heap(SortingHeap::create_unique()),
           _topn_filter_rows(0),
           _init_sort_descs(false) {}
 
@@ -44,7 +63,10 @@ Status HeapSorter::append_block(Block* block) {
             int i = 0;
             const auto& convert_nullable_flags = _vsort_exec_exprs.get_convert_nullable_flags();
             for (auto column_id : valid_column_ids) {
-                if (convert_nullable_flags[i]) {
+                if (column_id < 0) {
+                    continue;
+                }
+                if (i < convert_nullable_flags.size() && convert_nullable_flags[i]) {
                     auto column_ptr = make_nullable(block->get_by_position(column_id).column);
                     new_block.insert({column_ptr,
                                       make_nullable(block->get_by_position(column_id).type), ""});
@@ -92,6 +114,9 @@ Status HeapSorter::append_block(Block* block) {
             HeapSortCursorImpl cursor(i, block_view);
             _heap->replace_top_if_less(std::move(cursor));
         }
+    }
+    if (block_view->ref_count() > 1) {
+        _data_size += block_view->value().block.allocated_bytes();
     }
     return Status::OK();
 }
@@ -141,13 +166,14 @@ Field HeapSorter::get_top_value() {
     Field field {Field::Types::Null};
     // get field from first sort column of top row
     if (_heap->size() >= _heap_size) {
-        auto & top = _heap->top();
+        auto& top = _heap->top();
         top.sort_columns()[0]->get(top.row_id(), field);
     }
 
     return field;
 }
 
+// need exception safety
 void HeapSorter::_do_filter(HeapSortCursorBlockView& block_view, size_t num_rows) {
     const auto& top_cursor = _heap->top();
     const int cursor_rid = top_cursor.row_id();
@@ -180,6 +206,10 @@ Status HeapSorter::_prepare_sort_descs(Block* block) {
     }
     _init_sort_descs = true;
     return Status::OK();
+}
+
+size_t HeapSorter::data_size() const {
+    return _data_size;
 }
 
 } // namespace doris::vectorized

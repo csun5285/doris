@@ -17,27 +17,60 @@
 
 #pragma once
 
+#include <gen_cpp/parquet_types.h>
+#include <stddef.h>
 #include <stdint.h>
 
-#include <queue>
+#include <list>
+#include <map>
+#include <memory>
 #include <string>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/status.h"
 #include "exec/olap_common.h"
-#include "gen_cpp/parquet_types.h"
-#include "io/file_reader.h"
-#include "vec/core/block.h"
+#include "io/file_factory.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "util/runtime_profile.h"
 #include "vec/exec/format/generic_reader.h"
-#include "vec/exprs/vexpr_context.h"
+#include "vec/exec/format/parquet/parquet_common.h"
 #include "vparquet_column_reader.h"
-#include "vparquet_file_metadata.h"
 #include "vparquet_group_reader.h"
-#include "vparquet_page_index.h"
+
+namespace cctz {
+class time_zone;
+} // namespace cctz
+namespace doris {
+class RowDescriptor;
+class RuntimeState;
+class SlotDescriptor;
+class TFileRangeDesc;
+class TFileScanRangeParams;
+class TupleDescriptor;
+
+namespace io {
+class FileSystem;
+class IOContext;
+} // namespace io
+namespace vectorized {
+class Block;
+class FileMetaData;
+class PageIndex;
+class ShardedKVCache;
+class VExprContext;
+} // namespace vectorized
+struct TypeDescriptor;
+} // namespace doris
 
 namespace doris::vectorized {
 
 class ParquetReader : public GenericReader {
+    ENABLE_FACTORY_CREATOR(ParquetReader);
+
 public:
     struct Statistics {
         int32_t filtered_row_groups = 0;
@@ -50,18 +83,24 @@ public:
         int64_t read_bytes = 0;
         int64_t column_read_time = 0;
         int64_t parse_meta_time = 0;
+        int64_t parse_footer_time = 0;
+        int64_t open_file_time = 0;
+        int64_t open_file_num = 0;
         int64_t row_group_filter_time = 0;
         int64_t page_index_filter_time = 0;
     };
 
     ParquetReader(RuntimeProfile* profile, const TFileScanRangeParams& params,
-                  const TFileRangeDesc& range, size_t batch_size, cctz::time_zone* ctz);
+                  const TFileRangeDesc& range, size_t batch_size, cctz::time_zone* ctz,
+                  io::IOContext* io_ctx, RuntimeState* state, ShardedKVCache* kv_cache = nullptr,
+                  bool enable_lazy_mat = true);
 
-    ParquetReader(const TFileScanRangeParams& params, const TFileRangeDesc& range);
+    ParquetReader(const TFileScanRangeParams& params, const TFileRangeDesc& range,
+                  io::IOContext* io_ctx, RuntimeState* state, bool enable_lazy_mat = true);
 
     ~ParquetReader() override;
     // for test
-    void set_file_reader(FileReader* file_reader) { _file_reader.reset(file_reader); }
+    void set_file_reader(io::FileReaderSPtr file_reader) { _file_reader = file_reader; }
 
     Status open();
 
@@ -69,7 +108,12 @@ public:
             const std::vector<std::string>& all_column_names,
             const std::vector<std::string>& missing_column_names,
             std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range,
-            VExprContext* vconjunct_ctx, bool filter_groups = true);
+            const VExprContextSPtrs& conjuncts, const TupleDescriptor* tuple_descriptor,
+            const RowDescriptor* row_descriptor,
+            const std::unordered_map<std::string, int>* colname_to_slot_id,
+            const VExprContextSPtrs* not_single_slot_filter_conjuncts,
+            const std::unordered_map<int, VExprContextSPtrs>* slot_id_to_filter_conjuncts,
+            bool filter_groups = true);
 
     Status get_next_block(Block* block, size_t* read_rows, bool* eof) override;
 
@@ -96,7 +140,7 @@ public:
     Status set_fill_columns(
             const std::unordered_map<std::string, std::tuple<std::string, const SlotDescriptor*>>&
                     partition_columns,
-            const std::unordered_map<std::string, VExprContext*>& missing_columns) override;
+            const std::unordered_map<std::string, VExprContextSPtr>& missing_columns) override;
 
     std::vector<tparquet::KeyValue> get_metadata_key_values();
     void set_table_to_file_col_map(std::unordered_map<std::string, std::string>& map) {
@@ -115,6 +159,9 @@ private:
         RuntimeProfile::Counter* to_read_bytes;
         RuntimeProfile::Counter* column_read_time;
         RuntimeProfile::Counter* parse_meta_time;
+        RuntimeProfile::Counter* parse_footer_time;
+        RuntimeProfile::Counter* open_file_time;
+        RuntimeProfile::Counter* open_file_num;
         RuntimeProfile::Counter* row_group_filter_time;
         RuntimeProfile::Counter* page_index_filter_time;
 
@@ -138,6 +185,8 @@ private:
             const RowGroupReader::RowGroupIndex& row_group_index);
     Status _init_read_columns();
     Status _init_row_groups(const bool& is_filter_groups);
+    void _init_system_properties();
+    void _init_file_description();
     // Page Index Filter
     bool _has_page_index(const std::vector<tparquet::ColumnChunk>& columns, PageIndex& page_index);
     Status _process_page_index(const tparquet::RowGroup& row_group,
@@ -153,12 +202,21 @@ private:
     void _init_bloom_filter();
     Status _process_bloom_filter(bool* filter_group);
     int64_t _get_column_start_offset(const tparquet::ColumnMetaData& column_init_column_readers);
+    std::string _meta_cache_key(const std::string& path) { return "meta_" + path; }
+    std::vector<io::PrefetchRange> _generate_random_access_ranges(
+            const RowGroupReader::RowGroupIndex& group, size_t* avg_io_size);
 
     RuntimeProfile* _profile;
     const TFileScanRangeParams& _scan_params;
     const TFileRangeDesc& _scan_range;
-    std::unique_ptr<FileReader> _file_reader = nullptr;
-    std::shared_ptr<FileMetaData> _file_metadata;
+    FileSystemProperties _system_properties;
+    FileDescription _file_description;
+    std::shared_ptr<io::FileSystem> _file_system = nullptr;
+    io::FileReaderSPtr _file_reader = nullptr;
+    FileMetaData* _file_metadata = nullptr;
+    // set to true if _file_metadata is owned by this reader.
+    // otherwise, it is owned by someone else, such as _kv_cache
+    bool _is_file_metadata_owned = false;
     const tparquet::FileMetaData* _t_metadata;
     std::unique_ptr<RowGroupReader> _current_group_reader = nullptr;
     // read to the end of current reader
@@ -172,6 +230,8 @@ private:
     RowRange _whole_range = RowRange(0, 0);
     const std::vector<int64_t>* _delete_rows = nullptr;
     int64_t _delete_rows_index = 0;
+    // should turn off filtering by page index and lazy read if having complex type
+    bool _has_complex_type = false;
 
     // Used for column lazy read.
     RowGroupReader::LazyReadContext _lazy_read_ctx;
@@ -191,5 +251,17 @@ private:
     ParquetColumnReader::Statistics _column_statistics;
     ParquetProfile _parquet_profile;
     bool _closed = false;
+    io::IOContext* _io_ctx;
+    RuntimeState* _state;
+    // Cache to save some common part such as file footer.
+    // Owned by scan node and shared by all parquet readers of this scan node.
+    // Maybe null if not used
+    ShardedKVCache* _kv_cache = nullptr;
+    bool _enable_lazy_mat = true;
+    const TupleDescriptor* _tuple_descriptor;
+    const RowDescriptor* _row_descriptor;
+    const std::unordered_map<std::string, int>* _colname_to_slot_id;
+    const VExprContextSPtrs* _not_single_slot_filter_conjuncts;
+    const std::unordered_map<int, VExprContextSPtrs>* _slot_id_to_filter_conjuncts;
 };
 } // namespace doris::vectorized

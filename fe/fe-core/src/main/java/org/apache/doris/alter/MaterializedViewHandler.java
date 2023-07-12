@@ -41,6 +41,7 @@ import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.Replica.ReplicaState;
 import org.apache.doris.catalog.Table;
+import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.Tablet;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.catalog.TabletMeta;
@@ -65,6 +66,7 @@ import org.apache.doris.thrift.TStorageMedium;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -95,8 +97,10 @@ public class MaterializedViewHandler extends AlterHandler {
     private static final Logger LOG = LogManager.getLogger(MaterializedViewHandler.class);
     public static final String NEW_STORAGE_FORMAT_INDEX_NAME_PREFIX = "__v2_";
 
+    public static int scheduler_interval_millisecond = 333;
+
     public MaterializedViewHandler() {
-        super("materialized view");
+        super("materialized view", scheduler_interval_millisecond);
     }
 
     // for batch submit rollup job, tableId -> jobId
@@ -207,6 +211,7 @@ public class MaterializedViewHandler extends AlterHandler {
 
             // Step2: create mv job
             RollupJobV2 rollupJobV2 = createMaterializedViewJob(mvIndexName, baseIndexName, mvColumns,
+                    addMVClause.getWhereClauseItemExpr(olapTable),
                     addMVClause.getProperties(), olapTable, db, baseIndexId,
                     addMVClause.getMVKeysType(), addMVClause.getOrigStmt());
 
@@ -281,7 +286,7 @@ public class MaterializedViewHandler extends AlterHandler {
                         addRollupClause, olapTable, baseIndexId, changeStorageFormat);
 
                 // step 3 create rollup job
-                RollupJobV2 alterJobV2 = createMaterializedViewJob(rollupIndexName, baseIndexName, rollupSchema,
+                RollupJobV2 alterJobV2 = createMaterializedViewJob(rollupIndexName, baseIndexName, rollupSchema, null,
                         addRollupClause.getProperties(), olapTable, db, baseIndexId, olapTable.getKeysType(), null);
 
                 rollupNameJobMap.put(addRollupClause.getRollupName(), alterJobV2);
@@ -332,7 +337,7 @@ public class MaterializedViewHandler extends AlterHandler {
      * @throws AnalysisException
      */
     private RollupJobV2 createMaterializedViewJob(String mvName, String baseIndexName,
-            List<Column> mvColumns, Map<String, String> properties,
+            List<Column> mvColumns, Column whereColumn, Map<String, String> properties,
             OlapTable olapTable, Database db, long baseIndexId, KeysType mvKeysType,
             OriginStatement origStmt) throws DdlException, AnalysisException {
         if (mvKeysType == null) {
@@ -342,7 +347,12 @@ public class MaterializedViewHandler extends AlterHandler {
         // get rollup schema hash
         int mvSchemaHash = Util.generateSchemaHash();
         // get short key column count
-        short mvShortKeyColumnCount = Env.calcShortKeyColumnCount(mvColumns, properties);
+        boolean isKeysRequired = !(mvKeysType == KeysType.DUP_KEYS);
+        short mvShortKeyColumnCount = Env.calcShortKeyColumnCount(mvColumns, properties, isKeysRequired);
+        if (mvShortKeyColumnCount <= 0 && olapTable.isDuplicateWithoutKey()) {
+            throw new DdlException("Not support create duplicate materialized view without order "
+                            + "by based on a duplicate table without keys");
+        }
         // get timeout
         long timeoutMs = PropertyAnalyzer.analyzeTimeout(properties, Config.alter_table_timeout_second) * 1000;
 
@@ -357,7 +367,7 @@ public class MaterializedViewHandler extends AlterHandler {
         long mvIndexId = idGeneratorBuffer.getNextId();
         RollupJobV2 mvJob = new RollupJobV2(jobId, dbId, tableId, olapTable.getName(), timeoutMs,
                 baseIndexId, mvIndexId, baseIndexName, mvName,
-                mvColumns, baseSchemaHash, mvSchemaHash,
+                mvColumns, whereColumn, baseSchemaHash, mvSchemaHash,
                 mvKeysType, mvShortKeyColumnCount, origStmt);
         String newStorageFormatIndexName = NEW_STORAGE_FORMAT_INDEX_NAME_PREFIX + olapTable.getName();
         if (mvName.equals(newStorageFormatIndexName)) {
@@ -378,9 +388,10 @@ public class MaterializedViewHandler extends AlterHandler {
             // index state is SHADOW
             MaterializedIndex mvIndex = new MaterializedIndex(mvIndexId, IndexState.SHADOW);
             MaterializedIndex baseIndex = partition.getIndex(baseIndexId);
-            TabletMeta mvTabletMeta = new TabletMeta(dbId, tableId, partitionId, mvIndexId, mvSchemaHash, medium);
             short replicationNum = olapTable.getPartitionInfo().getReplicaAllocation(partitionId).getTotalReplicaNum();
             for (Tablet baseTablet : baseIndex.getTablets()) {
+                TabletMeta mvTabletMeta = new TabletMeta(
+                        dbId, tableId, partitionId, mvIndexId, mvSchemaHash, medium);
                 long baseTabletId = baseTablet.getId();
                 long mvTabletId = idGeneratorBuffer.getNextId();
 
@@ -451,6 +462,9 @@ public class MaterializedViewHandler extends AlterHandler {
         if (olapTable.hasMaterializedIndex(addMVClause.getMVName())) {
             throw new DdlException("Materialized view[" + addMVClause.getMVName() + "] already exists");
         }
+        if (olapTable.getEnableUniqueKeyMergeOnWrite()) {
+            throw new DdlException("MergeOnWrite table can't create materialized view.");
+        }
         // check if mv columns are valid
         // a. Aggregate or Unique table:
         //     1. For aggregate table, mv columns with aggregate function should be same as base schema
@@ -467,19 +481,21 @@ public class MaterializedViewHandler extends AlterHandler {
                         + " or unique table must has grouping columns");
             }
             for (MVColumnItem mvColumnItem : mvColumnItemList) {
-                String mvColumnName = mvColumnItem.getName();
-                Column baseColumn = olapTable.getColumn(mvColumnName);
+                if (mvColumnItem.getBaseColumnNames().size() != 1) {
+                    throw new DdlException(
+                            "mvColumnItem.getBaseColumnNames().size() != 1, mvColumnItem.getBaseColumnNames().size() = "
+                                    + mvColumnItem.getBaseColumnNames().size());
+                }
+
+                String mvColumnName = mvColumnItem.getBaseColumnNames().iterator().next();
+                Column mvColumn = mvColumnItem.toMVColumn(olapTable);
                 if (mvColumnItem.isKey()) {
                     ++numOfKeys;
                 }
-                if (baseColumn == null) {
-                    throw new DdlException("The mv column of agg or uniq table cannot be transformed "
-                            + "from original column[" + mvColumnItem.getBaseColumnName() + "]");
-                }
-                Preconditions.checkNotNull(baseColumn, "Column[" + mvColumnName + "] does not exist");
-                AggregateType baseAggregationType = baseColumn.getAggregationType();
+
+                AggregateType baseAggregationType = mvColumn.getAggregationType();
                 AggregateType mvAggregationType = mvColumnItem.getAggregationType();
-                if (baseColumn.isKey() && !mvColumnItem.isKey()) {
+                if (mvColumn.isKey() && !mvColumnItem.isKey()) {
                     throw new DdlException("The column[" + mvColumnName + "] must be the key of materialized view");
                 }
                 if (baseAggregationType != mvAggregationType) {
@@ -495,25 +511,75 @@ public class MaterializedViewHandler extends AlterHandler {
                 }
                 newMVColumns.add(mvColumnItem.toMVColumn(olapTable));
             }
+            // check useless rollup of same key columns and same order with base table
+            if (numOfKeys == olapTable.getBaseSchemaKeyColumns().size() && !addMVClause.isReplay()) {
+                boolean allKeysMatch = true;
+                for (int i = 0; i < numOfKeys; i++) {
+                    if (!CreateMaterializedViewStmt.mvColumnBreaker(newMVColumns.get(i).getName())
+                            .equalsIgnoreCase(olapTable.getBaseSchemaKeyColumns().get(i).getName())) {
+                        allKeysMatch = false;
+                        break;
+                    }
+                }
+                if (allKeysMatch) {
+                    throw new DdlException("MV contains all keys in base table with same order for "
+                            + "aggregation or unique table is useless.");
+                }
+            }
         } else {
             Set<String> partitionOrDistributedColumnName = olapTable.getPartitionColumnNames();
             partitionOrDistributedColumnName.addAll(olapTable.getDistributionColumnNames());
+            boolean hasNewColumn = false;
             for (MVColumnItem mvColumnItem : mvColumnItemList) {
-                if (partitionOrDistributedColumnName.contains(mvColumnItem.getBaseColumnName().toLowerCase())
-                        && mvColumnItem.getAggregationType() != null) {
-                    throw new DdlException("The partition and distributed columns " + mvColumnItem.getBaseColumnName()
-                            + " must be key column in mv");
+                Set<String> names = mvColumnItem.getBaseColumnNames();
+                if (names == null) {
+                    throw new DdlException("Base columns is null");
                 }
+                for (String str : names) {
+                    if (partitionOrDistributedColumnName.contains(str)
+                            && mvColumnItem.getAggregationType() != null) {
+                        throw new DdlException("The partition and distributed columns " + str
+                                + " must be key column in mv");
+                    }
+                }
+
                 newMVColumns.add(mvColumnItem.toMVColumn(olapTable));
+                if (mvColumnItem.isKey()) {
+                    ++numOfKeys;
+                }
+                if (olapTable
+                        .getBaseColumn(CreateMaterializedViewStmt.mvColumnBreaker(mvColumnItem.getName())) == null) {
+                    hasNewColumn = true;
+                }
+            }
+            // check useless rollup of same key columns and same order with base table
+            if (!addMVClause.isReplay() && addMVClause.getMVKeysType() == KeysType.DUP_KEYS && !hasNewColumn) {
+                boolean allKeysMatch = true;
+                for (int i = 0; i < numOfKeys; i++) {
+                    if (!CreateMaterializedViewStmt.mvColumnBreaker(newMVColumns.get(i).getName())
+                            .equalsIgnoreCase(olapTable.getBaseSchema().get(i).getName())
+                            && olapTable.getBaseSchema().get(i).isKey()) {
+                        allKeysMatch = false;
+                        break;
+                    }
+                }
+                if (allKeysMatch && !olapTable.isDuplicateWithoutKey()) {
+                    throw new DdlException("MV contain the columns of the base table in prefix order for "
+                            + "duplicate table is useless.");
+                }
             }
         }
         if (KeysType.UNIQUE_KEYS == olapTable.getKeysType() && olapTable.hasDeleteSign()) {
-            newMVColumns.add(new Column(olapTable.getDeleteSignColumn()));
+            Column newColumn = new Column(olapTable.getDeleteSignColumn());
+            newColumn.setAggregationType(AggregateType.REPLACE, true);
+            newMVColumns.add(newColumn);
         }
         if (KeysType.UNIQUE_KEYS == olapTable.getKeysType() && olapTable.hasSequenceCol()) {
-            newMVColumns.add(new Column(olapTable.getSequenceCol()));
+            Column newColumn = new Column(olapTable.getSequenceCol());
+            newColumn.setAggregationType(AggregateType.REPLACE, true);
+            newMVColumns.add(newColumn);
         }
-        // if the column is array type, we forbid to create materialized view
+        // if the column is complex type, we forbid to create materialized view
         for (Column column : newMVColumns) {
             if (column.getDataType().isComplexType() || column.getDataType().isJsonbType()) {
                 throw new DdlException("The " + column.getDataType() + " column[" + column + "] not support "
@@ -541,8 +607,11 @@ public class MaterializedViewHandler extends AlterHandler {
     }
 
     public List<Column> checkAndPrepareMaterializedView(AddRollupClause addRollupClause, OlapTable olapTable,
-                                                        long baseIndexId, boolean changeStorageFormat)
+            long baseIndexId, boolean changeStorageFormat)
             throws DdlException {
+        if (olapTable.getEnableUniqueKeyMergeOnWrite()) {
+            throw new DdlException("MergeOnWrite table can't create materialized view.");
+        }
         String rollupIndexName = addRollupClause.getRollupName();
         List<String> rollupColumnNames = addRollupClause.getColumnNames();
         if (changeStorageFormat) {
@@ -624,12 +693,33 @@ public class MaterializedViewHandler extends AlterHandler {
                     rollupSchema.add(new Column(olapTable.getSequenceCol()));
                 }
             }
+
+            // check useless rollup of same key columns and same order with base table
+            if (keysNumOfRollup == olapTable.getKeysNum()) {
+                boolean allKeysMatch = true;
+                for (int i = 0; i < keysNumOfRollup; i++) {
+                    if (!rollupSchema.get(i).getName()
+                            .equalsIgnoreCase(olapTable.getSchemaByIndexId(baseIndexId, true).get(i).getName())) {
+                        allKeysMatch = false;
+                        break;
+                    }
+                }
+                if (allKeysMatch) {
+                    throw new DdlException("Rollup contains all keys in base table with same order for "
+                            + "aggregation or unique table is useless.");
+                }
+            }
         } else if (KeysType.DUP_KEYS == keysType) {
             // supplement the duplicate key
             if (addRollupClause.getDupKeys() == null || addRollupClause.getDupKeys().isEmpty()) {
                 // check the column meta
+                boolean allColumnsMatch = true;
                 for (int i = 0; i < rollupColumnNames.size(); i++) {
                     String columnName = rollupColumnNames.get(i);
+                    if (!columnName.equalsIgnoreCase(olapTable.getSchemaByIndexId(baseIndexId, true).get(i).getName())
+                            && olapTable.getSchemaByIndexId(baseIndexId, true).get(i).isKey()) {
+                        allColumnsMatch = false;
+                    }
                     Column baseColumn = baseColumnNameToColumn.get(columnName);
                     if (baseColumn == null) {
                         throw new DdlException("Column[" + columnName + "] does not exist in base index");
@@ -673,26 +763,33 @@ public class MaterializedViewHandler extends AlterHandler {
                     rollupColumn.setIsKey(false);
                     rollupColumn.setAggregationType(AggregateType.NONE, true);
                 }
+                if (allColumnsMatch) {
+                    throw new DdlException("Rollup contain the columns of the base table in prefix order for "
+                            + "duplicate table is useless.");
+                }
             } else {
                 /*
                  * eg.
                  * Base Table's schema is (k1,k2,k3,k4,k5) dup key (k1,k2,k3).
                  * The following rollup is allowed:
                  * 1. (k1) dup key (k1)
-                 * 2. (k2,k3) dup key (k2)
-                 * 3. (k1,k2,k3) dup key (k1,k2)
                  *
                  * The following rollup is forbidden:
                  * 1. (k1) dup key (k2)
                  * 2. (k2,k3) dup key (k3,k2)
                  * 3. (k1,k2,k3) dup key (k2,k3)
+                 *
+                 * The following rollup is useless so forbidden too:
+                 * 1. (k1,k2,k3) dup key (k1,k2,k3)
+                 * 3. (k1,k2,k3) dup key (k1,k2)
+                 * 1. (k1) dup key (k1)
                  */
                 // user specify the duplicate keys for rollup index
                 List<String> dupKeys = addRollupClause.getDupKeys();
                 if (dupKeys.size() > rollupColumnNames.size()) {
                     throw new DdlException("Num of duplicate keys should less than or equal to num of rollup columns.");
                 }
-
+                boolean allColumnsMatch = true;
                 for (int i = 0; i < rollupColumnNames.size(); i++) {
                     String rollupColName = rollupColumnNames.get(i);
                     boolean isKey = false;
@@ -703,7 +800,11 @@ public class MaterializedViewHandler extends AlterHandler {
                         }
                         isKey = true;
                     }
-
+                    if (!rollupColName.equalsIgnoreCase(
+                            olapTable.getSchemaByIndexId(baseIndexId, true).get(i).getName())
+                            && olapTable.getSchemaByIndexId(baseIndexId, true).get(i).isKey()) {
+                        allColumnsMatch = false;
+                    }
                     Column baseColumn = baseColumnNameToColumn.get(rollupColName);
                     if (baseColumn == null) {
                         throw new DdlException("Column[" + rollupColName + "] does not exist");
@@ -724,6 +825,10 @@ public class MaterializedViewHandler extends AlterHandler {
                         oneColumn.setAggregationType(AggregateType.NONE, true);
                     }
                     rollupSchema.add(oneColumn);
+                }
+                if (allColumnsMatch) {
+                    throw new DdlException("Rollup contain the columns of the base table in prefix order for "
+                            + "duplicate table is useless.");
                 }
             }
         }
@@ -902,6 +1007,13 @@ public class MaterializedViewHandler extends AlterHandler {
             }
         }
         olapTable.deleteIndexInfo(mvName);
+        try {
+            Env.getCurrentEnv().getQueryStats().clear(Env.getCurrentInternalCatalog().getId(),
+                    Env.getCurrentInternalCatalog().getDbOrDdlException(olapTable.getQualifiedDbName()).getId(),
+                    olapTable.getId(), mvIndexId);
+        } catch (DdlException e) {
+            LOG.info("failed to clean stats for mv {} from {}", mvName, olapTable.getName(), e);
+        }
         return mvIndexId;
     }
 
@@ -927,6 +1039,9 @@ public class MaterializedViewHandler extends AlterHandler {
             }
             String rollupIndexName = olapTable.getIndexNameById(rollupIndexId);
             olapTable.deleteIndexInfo(rollupIndexName);
+
+            env.getQueryStats().clear(env.getCurrentCatalog().getId(), db.getId(),
+                    olapTable.getId(), rollupIndexId);
         } finally {
             olapTable.writeUnlock();
         }
@@ -1069,9 +1184,6 @@ public class MaterializedViewHandler extends AlterHandler {
             changeTableStatus(alterJob.getDbId(), alterJob.getTableId(), OlapTableState.NORMAL);
             LOG.info("set table's state to NORMAL, table id: {}, job id: {}", alterJob.getTableId(),
                     alterJob.getJobId());
-        } else {
-            LOG.debug("not set table's state, table id: {}, is job done: {}, job id: {}", alterJob.getTableId(),
-                    alterJob.isDone(), alterJob.getJobId());
         }
     }
 
@@ -1089,6 +1201,18 @@ public class MaterializedViewHandler extends AlterHandler {
         return rollupJobInfos;
     }
 
+    public List<List<Comparable>> getAllAlterJobInfos() {
+        List<List<Comparable>> rollupJobInfos = new LinkedList<List<Comparable>>();
+
+        for (AlterJobV2 alterJob : ImmutableList.copyOf(alterJobsV2.values())) {
+            // no need to check priv here. This method is only called in show proc stmt,
+            // which already check the ADMIN priv.
+            alterJob.getInfo(rollupJobInfos);
+        }
+
+        return rollupJobInfos;
+    }
+
     private void getAlterJobV2Infos(Database db, List<List<Comparable>> rollupJobInfos) {
         ConnectContext ctx = ConnectContext.get();
         for (AlterJobV2 alterJob : alterJobsV2.values()) {
@@ -1096,7 +1220,7 @@ public class MaterializedViewHandler extends AlterHandler {
                 continue;
             }
             if (ctx != null) {
-                if (!Env.getCurrentEnv().getAuth().checkTblPriv(ctx, db.getFullName(),
+                if (!Env.getCurrentEnv().getAccessManager().checkTblPriv(ctx, db.getFullName(),
                         alterJob.getTableName(), PrivPredicate.ALTER)) {
                     continue;
                 }
@@ -1108,6 +1232,9 @@ public class MaterializedViewHandler extends AlterHandler {
     @Override
     public void process(List<AlterClause> alterClauses, String clusterName, Database db, OlapTable olapTable)
             throws DdlException, AnalysisException, MetaNotFoundException {
+        if (olapTable.isDuplicateWithoutKey()) {
+            throw new DdlException("Duplicate table without keys do not support alter rollup!");
+        }
         Optional<AlterClause> alterClauseOptional = alterClauses.stream().findAny();
         if (alterClauseOptional.isPresent()) {
             if (alterClauseOptional.get() instanceof AddRollupClause) {
@@ -1185,12 +1312,12 @@ public class MaterializedViewHandler extends AlterHandler {
 
     public void processCreateMultiTablesMaterializedView(CreateMultiTableMaterializedViewStmt addMVClause)
             throws UserException {
-        Map<String, OlapTable> olapTables = addMVClause.getOlapTables();
+        Map<String, TableIf> olapTables = addMVClause.getTables();
         try {
-            olapTables.values().forEach(Table::writeLock);
+            olapTables.values().forEach(TableIf::readLock);
             Env.getCurrentEnv().createTable(addMVClause);
         } finally {
-            olapTables.values().forEach(Table::writeUnlock);
+            olapTables.values().forEach(TableIf::readUnlock);
         }
     }
 

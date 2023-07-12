@@ -67,7 +67,7 @@ public:
         if (val == nullptr) { // Renew if needed, put a new Value to cache
             val = new TabletTxnInfo(rowset, delete_bitmap, rowset_ids);
             static auto deleter = [](const CacheKey&, void* value) {
-                delete (Value*)value; // Just delete to reclaim
+                delete (TabletTxnInfo*)value; // Just delete to reclaim
             };
             size_t charge = sizeof(TabletTxnInfo);
             for (auto& [k, v] : val->delete_bitmap->delete_bitmap) {

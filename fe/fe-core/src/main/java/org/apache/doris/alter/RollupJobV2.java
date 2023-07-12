@@ -82,9 +82,12 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -113,6 +116,8 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
     @SerializedName(value = "rollupSchema")
     private List<Column> rollupSchema = Lists.newArrayList();
+    @SerializedName(value = "whereColumn")
+    private Column whereColumn;
     @SerializedName(value = "baseSchemaHash")
     private int baseSchemaHash;
     @SerializedName(value = "rollupSchemaHash")
@@ -138,14 +143,17 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
     // save failed task after retry three times, tabletId -> agentTask
     private Map<Long, List<AgentTask>> failedAgentTasks = Maps.newHashMap();
 
+    private Analyzer analyzer;
+
     private RollupJobV2() {
         super(JobType.ROLLUP);
     }
 
     public RollupJobV2(long jobId, long dbId, long tableId, String tableName, long timeoutMs, long baseIndexId,
             long rollupIndexId, String baseIndexName, String rollupIndexName, List<Column> rollupSchema,
+            Column whereColumn,
             int baseSchemaHash, int rollupSchemaHash, KeysType rollupKeysType, short rollupShortKeyColumnCount,
-            OriginStatement origStmt) {
+            OriginStatement origStmt) throws AnalysisException {
         super(jobId, JobType.ROLLUP, dbId, tableId, tableName, timeoutMs);
         if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
@@ -162,6 +170,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         this.rollupIndexName = rollupIndexName;
 
         this.rollupSchema = rollupSchema;
+        this.whereColumn = whereColumn;
 
         this.baseSchemaHash = baseSchemaHash;
         this.rollupSchemaHash = rollupSchemaHash;
@@ -169,6 +178,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         this.rollupShortKeyColumnCount = rollupShortKeyColumnCount;
 
         this.origStmt = origStmt;
+        initAnalyzer();
     }
 
     public void addTabletIdMap(long partitionId, long rollupTabletId, long baseTabletId) {
@@ -183,6 +193,27 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
     public void setStorageFormat(TStorageFormat storageFormat) {
         this.storageFormat = storageFormat;
+    }
+
+    private void initAnalyzer() throws AnalysisException {
+        ConnectContext connectContext = new ConnectContext();
+        Database db;
+        try {
+            db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
+        } catch (MetaNotFoundException e) {
+            throw new AnalysisException("error happens when parsing create materialized view stmt: " + origStmt, e);
+        }
+        String clusterName = db.getClusterName();
+        // It's almost impossible that db's cluster name is null, just in case
+        // because before user want to create database, he must first enter a cluster
+        // which means that cluster is set to current ConnectContext
+        // then when createDBStmt is executed, cluster name is set to Database
+        if (clusterName == null || clusterName.length() == 0) {
+            clusterName = SystemInfoService.DEFAULT_CLUSTER;
+        }
+        connectContext.setCluster(clusterName);
+        connectContext.setDatabase(db.getFullName());
+        analyzer = new Analyzer(Env.getCurrentEnv(), connectContext);
     }
 
     private void createRollupReplica() throws AlterCancelException {
@@ -236,13 +267,17 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 Partition.PARTITION_INIT_VERSION,
                                 rollupKeysType, TStorageType.COLUMN, storageMedium,
                                 rollupSchema, tbl.getCopiedBfColumns(), tbl.getBfFpp(), countDownLatch,
-                                tbl.getCopiedIndexes(),
+                                null, // do not copy indexes of base tablet to ROLLUP tablet
                                 tbl.isInMemory(),
                                 tabletType,
                                 null,
                                 tbl.getCompressionType(),
                                 tbl.getEnableUniqueKeyMergeOnWrite(), tbl.getStoragePolicy(),
-                                tbl.disableAutoCompaction(), tbl.isPersistent(), tbl.isDynamicSchema());
+                                tbl.disableAutoCompaction(), tbl.isPersistent(),
+                                tbl.enableSingleReplicaCompaction(),
+                                tbl.skipWriteIndexOnLoad(),
+                                tbl.storeRowColumn(),
+                                tbl.isDynamicSchema());
                         createReplicaTask.setBaseTablet(tabletIdMap.get(rollupTabletId), baseSchemaHash);
                         if (this.storageFormat != null) {
                             createReplicaTask.setStorageFormat(this.storageFormat);
@@ -411,7 +446,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
         tbl.setIndexMeta(rollupIndexId, rollupIndexName, rollupSchema, 0 /* init schema version */,
                 rollupSchemaHash, rollupShortKeyColumnCount, TStorageType.COLUMN,
-                rollupKeysType, origStmt);
+                rollupKeysType, origStmt, analyzer != null ? new Analyzer(analyzer) : analyzer, null);
         tbl.rebuildFullSchema();
     }
 
@@ -467,8 +502,23 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
                     DescriptorTable descTable = new DescriptorTable();
                     TupleDescriptor destTupleDesc = descTable.createTupleDescriptor();
-                    Map<String, SlotDescriptor> descMap = Maps.newHashMap();
-                    for (Column column : tbl.getFullSchema()) {
+                    Map<String, SlotDescriptor> descMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+                    List<Column> rollupColumns = new ArrayList<Column>();
+                    Set<String> columnNames = new HashSet<String>();
+                    for (Column column : tbl.getBaseSchema()) {
+                        rollupColumns.add(column);
+                        columnNames.add(column.getName());
+                    }
+
+                    for (Column column : rollupSchema) {
+                        if (columnNames.contains(column.getName())) {
+                            continue;
+                        }
+                        rollupColumns.add(column);
+                    }
+
+                    for (Column column : rollupColumns) {
                         SlotDescriptor destSlotDesc = descTable.addSlotDescriptor(destTupleDesc);
                         destSlotDesc.setIsMaterialized(true);
                         destSlotDesc.setColumn(column);
@@ -477,18 +527,31 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                         descMap.put(column.getName(), destSlotDesc);
                     }
 
-                    for (Column column : tbl.getFullSchema()) {
+                    for (Column column : rollupColumns) {
                         if (column.getDefineExpr() != null) {
                             defineExprs.put(column.getName(), column.getDefineExpr());
-
                             List<SlotRef> slots = new ArrayList<>();
                             column.getDefineExpr().collect(SlotRef.class, slots);
-                            Preconditions.checkArgument(slots.size() == 1);
-                            slots.get(0).setDesc(descMap.get(slots.get(0).getColumnName()));
+
+                            for (SlotRef slot : slots) {
+                                SlotDescriptor slotDesc = descMap.get(slot.getColumnName());
+                                if (slotDesc == null) {
+                                    slotDesc = descMap.get(column.getName());
+                                }
+                                if (slotDesc == null) {
+                                    throw new AlterCancelException("slotDesc is null, slot=" + slot.getColumnName()
+                                            + ", column=" + column.getName());
+                                }
+                                slot.setDesc(slotDesc);
+                            }
                         }
                     }
 
                     List<Replica> rollupReplicas = rollupTablet.getReplicas();
+                    Expr whereClause = null;
+                    if (whereColumn != null) {
+                        whereClause = whereColumn.getDefineExpr();
+                    }
                     for (Replica rollupReplica : rollupReplicas) {
                         if (rollupReplica.getBackendId() < 0) {
                             LOG.warn("replica:{}, backendId: {}", rollupReplica, rollupReplica.getBackendId());
@@ -499,7 +562,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 partitionId, rollupIndexId, baseIndexId, rollupTabletId, baseTabletId,
                                 rollupReplica.getId(), rollupSchemaHash, baseSchemaHash, visibleVersion, jobId,
                                 JobType.ROLLUP, defineExprs, descTable, tbl.getSchemaByIndexId(baseIndexId, true),
-                                expiration);
+                                whereClause, expiration);
                         rollupBatchTask.addTask(rollupTask);
                     }
                 }
@@ -748,10 +811,10 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         for (Long partitionId : partitionIdToRollupIndex.keySet()) {
             MaterializedIndex rollupIndex = partitionIdToRollupIndex.get(partitionId);
             TStorageMedium medium = tbl.getPartitionInfo().getDataProperty(partitionId).getStorageMedium();
-            TabletMeta rollupTabletMeta = new TabletMeta(dbId, tableId, partitionId, rollupIndexId,
-                    rollupSchemaHash, medium);
 
             for (Tablet rollupTablet : rollupIndex.getTablets()) {
+                TabletMeta rollupTabletMeta = new TabletMeta(dbId, tableId, partitionId, rollupIndexId,
+                        rollupSchemaHash, medium);
                 invertedIndex.addTablet(rollupTablet.getId(), rollupTabletMeta);
                 for (Replica rollupReplica : rollupTablet.getReplicas()) {
                     invertedIndex.addReplica(rollupTablet.getId(), rollupReplica);
@@ -921,26 +984,9 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         // parse the define stmt to schema
         SqlParser parser = new SqlParser(new SqlScanner(
                 new StringReader(origStmt.originStmt), SqlModeHelper.MODE_DEFAULT));
-        ConnectContext connectContext = new ConnectContext();
-        Database db;
-        try {
-            db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
-        } catch (MetaNotFoundException e) {
-            throw new IOException("error happens when parsing create materialized view stmt: " + origStmt, e);
-        }
-        String clusterName = db.getClusterName();
-        // It's almost impossible that db's cluster name is null, just in case
-        // because before user want to create database, he must first enter a cluster
-        // which means that cluster is set to current ConnectContext
-        // then when createDBStmt is executed, cluster name is set to Database
-        if (clusterName == null || clusterName.length() == 0) {
-            clusterName = SystemInfoService.DEFAULT_CLUSTER;
-        }
-        connectContext.setCluster(clusterName);
-        connectContext.setDatabase(db.getFullName());
-        Analyzer analyzer = new Analyzer(Env.getCurrentEnv(), connectContext);
         CreateMaterializedViewStmt stmt = null;
         try {
+            initAnalyzer();
             stmt = (CreateMaterializedViewStmt) SqlParserUtils.getStmt(parser, origStmt.idx);
             stmt.setIsReplay(true);
             stmt.analyze(analyzer);

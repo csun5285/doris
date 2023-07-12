@@ -17,15 +17,23 @@
 
 #pragma once
 
-#include <future>
-#include <memory>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <filesystem>
+#include <queue>
+#include <vector>
 
 #include "common/status.h"
 #include "io/cache/file_cache.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_system.h"
 #include "io/fs/path.h"
+#include "util/slice.h"
 
 namespace doris {
 namespace io {
+class IOContext;
 
 // Only used for GC
 class DummyFileCache final : public FileCache {
@@ -35,11 +43,6 @@ public:
     ~DummyFileCache() override;
 
     Status close() override { return Status::OK(); }
-
-    Status read_at(size_t offset, Slice result, const IOContext& io_ctx,
-                   size_t* bytes_read) override {
-        return Status::NotSupported("dummy file cache only used for GC");
-    }
 
     const Path& path() const override { return _cache_dir; }
 
@@ -55,23 +58,44 @@ public:
 
     Status clean_all_cache() override;
 
+    Status clean_one_cache(size_t* cleaned_size) override;
+
     Status load_and_clean();
 
     bool is_dummy_file_cache() override { return true; }
 
-private:
-    Status _clean_unfinished_cache();
-    void _update_last_mtime(const Path& done_file);
-    void _add_file_cache(const Path& data_file);
-    void _load();
-    Status _clean_cache_internal();
+    int64_t get_oldest_match_time() const override {
+        return _gc_lru_queue.empty() ? 0 : _gc_lru_queue.top().last_match_time;
+    }
+
+    bool is_gc_finish() const override { return _gc_lru_queue.empty(); }
+
+    FileSystemSPtr fs() const override { return nullptr; }
+
+protected:
+    Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                        const IOContext* io_ctx) override {
+        return Status::NotSupported("dummy file cache only used for GC");
+    }
 
 private:
+    void _add_file_cache(const Path& data_file);
+    void _load();
+    Status _clean_cache_internal(const Path&, size_t*);
+
+private:
+    struct DummyFileInfo {
+        Path file;
+        int64_t last_match_time;
+    };
+    using DummyGcQueue = std::priority_queue<DummyFileInfo, std::vector<DummyFileInfo>,
+                                             SubFileLRUComparator<DummyFileInfo>>;
+    DummyGcQueue _gc_lru_queue;
+
     Path _cache_dir;
     int64_t _alive_time_sec;
 
-    std::map<Path, int64_t> _file_sizes;
-    std::list<Path> _unfinished_files;
+    std::vector<Path> _unfinished_files;
 };
 
 } // namespace io

@@ -13,8 +13,8 @@ static RowsetMetaSharedPtr create_rowset_meta(Version version) {
     auto rs_meta = std::make_shared<RowsetMeta>();
     rs_meta->set_rowset_id(id_generator.next_id());
     rs_meta->set_rowset_type(BETA_ROWSET);
-    rs_meta->set_start_version(version.first);
-    rs_meta->set_end_version(version.second);
+    rs_meta->_rowset_meta_pb.set_start_version(version.first);
+    rs_meta->_rowset_meta_pb.set_end_version(version.second);
     return rs_meta;
 }
 

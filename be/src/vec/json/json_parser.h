@@ -21,14 +21,24 @@
 #pragma once
 
 #include <parallel_hashmap/phmap.h>
-#include <vec/common/hash_table/hash_map.h>
-#include <vec/core/types.h>
-#include <vec/json/path_in_data.h>
+#include <stddef.h>
+
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "vec/columns/column.h"
+#include "vec/common/string_ref.h"
+#include "vec/common/uint128.h"
+#include "vec/core/field.h"
+#include "vec/json/path_in_data.h"
+#include "vec/json/simd_json_parser.h"
 
 namespace doris::vectorized {
 
 template <typename Element>
-static Field getValueAsField(const Element& element) {
+Field getValueAsField(const Element& element) {
     // bool will convert to type FiledType::UInt64
     if (element.isBool()) {
         return element.getBool();
@@ -53,7 +63,7 @@ static Field getValueAsField(const Element& element) {
 }
 
 template <typename Element>
-static std::string castValueAsString(const Element& element) {
+std::string castValueAsString(const Element& element) {
     if (element.isBool()) {
         return element.getBool() ? "1" : "0";
     }

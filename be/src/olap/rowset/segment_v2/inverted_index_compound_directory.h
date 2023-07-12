@@ -17,16 +17,27 @@
 
 #pragma once
 
-#include <CLucene.h>
+#include <CLucene.h> // IWYU pragma: keep
+#include <CLucene/store/Directory.h>
+#include <CLucene/store/IndexInput.h>
+#include <CLucene/store/IndexOutput.h>
+#include <stdint.h>
 
-#include <iostream>
-#include <map>
-#include <memory>
-#include <mutex>
+#include <string>
 #include <vector>
 
-#include "cloud/io/file_system.h"
+#include "CLucene/SharedHeader.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_system.h"
 #include "util/lock.h"
+
+class CLuceneError;
+
+namespace lucene {
+namespace store {
+class LockFactory;
+} // namespace store
+} // namespace lucene
 
 namespace doris {
 
@@ -76,6 +87,7 @@ protected:
 public:
     class FSIndexOutput;
     class FSIndexInput;
+
     friend class DorisCompoundDirectory::FSIndexOutput;
     friend class DorisCompoundDirectory::FSIndexInput;
 
@@ -116,7 +128,7 @@ class DorisCompoundDirectory::FSIndexInput : public lucene::store::BufferedIndex
         io::FileReaderSPtr _reader;
         uint64_t _length;
         int64_t _fpos;
-        doris::Mutex _shared_lock;
+        doris::Mutex* _shared_lock;
         char path[4096];
         SharedHandle(const char* path);
         ~SharedHandle() override;
@@ -128,7 +140,7 @@ class DorisCompoundDirectory::FSIndexInput : public lucene::store::BufferedIndex
     FSIndexInput(SharedHandle* handle, int32_t buffer_size) : BufferedIndexInput(buffer_size) {
         this->_pos = 0;
         this->_handle = handle;
-    };
+    }
 
 protected:
     FSIndexInput(const FSIndexInput& clone);

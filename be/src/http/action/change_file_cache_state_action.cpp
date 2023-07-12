@@ -19,7 +19,7 @@
 
 #include <fmt/core.h>
 
-#include "cloud/io/cloud_file_cache_factory.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "http/http_channel.h"
 #include "http/http_request.h"
 

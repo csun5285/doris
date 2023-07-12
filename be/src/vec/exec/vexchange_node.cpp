@@ -17,20 +17,30 @@
 
 #include "vec/exec/vexchange_node.h"
 
+#include <gen_cpp/PlanNodes_types.h>
+#include <glog/logging.h>
+#include <opentelemetry/nostd/shared_ptr.h>
+
+#include "common/object_pool.h"
+#include "exec/rowid_fetcher.h"
+#include "exec/tablet_info.h"
 #include "runtime/exec_env.h"
+#include "runtime/query_statistics.h"
 #include "runtime/runtime_state.h"
-#include "runtime/thread_context.h"
+#include "util/runtime_profile.h"
+#include "util/telemetry/telemetry.h"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/exprs/vexpr_context.h"
 #include "vec/runtime/vdata_stream_mgr.h"
 #include "vec/runtime/vdata_stream_recvr.h"
-#include "exec/rowid_fetcher.h"
-#include "common/consts.h"
-#include "util/defer_op.h"
 
 namespace doris::vectorized {
 VExchangeNode::VExchangeNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
         : ExecNode(pool, tnode, descs),
           _num_senders(0),
           _is_merging(tnode.exchange_node.__isset.sort_info),
+          _is_ready(false),
           _stream_recvr(nullptr),
           _input_row_desc(descs, tnode.exchange_node.input_row_tuples,
                           std::vector<bool>(tnode.nullable_tuples.begin(),
@@ -44,15 +54,10 @@ Status VExchangeNode::init(const TPlanNode& tnode, RuntimeState* state) {
     if (!_is_merging) {
         return Status::OK();
     }
-
     RETURN_IF_ERROR(_vsort_exec_exprs.init(tnode.exchange_node.sort_info, _pool));
     _is_asc_order = tnode.exchange_node.sort_info.is_asc_order;
     _nulls_first = tnode.exchange_node.sort_info.nulls_first;
 
-    if (tnode.exchange_node.__isset.nodes_info) {
-        _nodes_info = _pool->add(new DorisNodesInfo(tnode.exchange_node.nodes_info));
-    }
-    _use_two_phase_read = tnode.exchange_node.sort_info.use_two_phase_read;
     return Status::OK();
 }
 
@@ -62,68 +67,48 @@ Status VExchangeNode::prepare(RuntimeState* state) {
     _sub_plan_query_statistics_recvr.reset(new QueryStatisticsRecvr());
     _stream_recvr = state->exec_env()->vstream_mgr()->create_recvr(
             state, _input_row_desc, state->fragment_instance_id(), _id, _num_senders,
-            config::exchg_node_buffer_size_bytes, _runtime_profile.get(), _is_merging,
-            _sub_plan_query_statistics_recvr);
+            _runtime_profile.get(), _is_merging, _sub_plan_query_statistics_recvr);
 
     if (_is_merging) {
         RETURN_IF_ERROR(_vsort_exec_exprs.prepare(state, _row_descriptor, _row_descriptor));
     }
     return Status::OK();
 }
+
+Status VExchangeNode::alloc_resource(RuntimeState* state) {
+    RETURN_IF_ERROR(ExecNode::alloc_resource(state));
+    if (_is_merging) {
+        RETURN_IF_ERROR(_vsort_exec_exprs.open(state));
+        if (!state->enable_pipeline_exec()) {
+            RETURN_IF_ERROR(_stream_recvr->create_merger(_vsort_exec_exprs.lhs_ordering_expr_ctxs(),
+                                                         _is_asc_order, _nulls_first,
+                                                         state->batch_size(), _limit, _offset));
+        }
+    }
+    return Status::OK();
+}
+
 Status VExchangeNode::open(RuntimeState* state) {
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VExchangeNode::open");
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::open(state));
 
-    if (_is_merging) {
-        RETURN_IF_ERROR(_vsort_exec_exprs.open(state));
+    return Status::OK();
+}
+
+Status VExchangeNode::get_next(RuntimeState* state, Block* block, bool* eos) {
+    SCOPED_TIMER(runtime_profile()->total_time_counter());
+    if (_is_merging && state->enable_pipeline_exec() && !_is_ready) {
         RETURN_IF_ERROR(_stream_recvr->create_merger(_vsort_exec_exprs.lhs_ordering_expr_ctxs(),
                                                      _is_asc_order, _nulls_first,
                                                      state->batch_size(), _limit, _offset));
-    }
-
-    return Status::OK();
-}
-Status VExchangeNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
-    return Status::NotSupported("Not Implemented VExchange Node::get_next scalar");
-}
-
-Status VExchangeNode::second_phase_fetch_data(RuntimeState* state, Block* final_block) {
-    if (!_use_two_phase_read) {
+        _is_ready = true;
         return Status::OK();
     }
-    if (final_block->rows() == 0) {
-        return Status::OK();
-    }
-    auto row_id_col = final_block->get_by_position(final_block->columns() - 1);
-    MonotonicStopWatch watch;
-    watch.start();
-    auto tuple_desc = _row_descriptor.tuple_descriptors()[0];
-    RowIDFetcher id_fetcher(tuple_desc, state);
-    RETURN_IF_ERROR(id_fetcher.init(_nodes_info));
-    vectorized::Block materialized_block(tuple_desc->slots(), final_block->rows());
-    auto tmp_block = MutableBlock::build_mutable_block(&materialized_block);
-    // fetch will sort block by sequence of ROWID_COL
-    RETURN_IF_ERROR(id_fetcher.fetch(row_id_col.column, &tmp_block));
-    materialized_block.swap(tmp_block.to_block());
-
-    // materialize by name
-    for (auto& column_type_name : *final_block) {
-        auto materialized_column = materialized_block.try_get_by_name(column_type_name.name);
-        if (materialized_column != nullptr) {
-            column_type_name.column = std::move(materialized_column->column);
-        }
-    }
-    LOG(INFO) << "fetch_id finished, cost(ms):" << watch.elapsed_time() / 1000 / 1000;
-    return Status::OK();
-}
-
-
-Status VExchangeNode::get_next(RuntimeState* state, Block* block, bool* eos) {
-    INIT_AND_SCOPE_GET_NEXT_SPAN(state->get_tracer(), _get_next_span, "VExchangeNode::get_next");
-    SCOPED_TIMER(runtime_profile()->total_time_counter());
     auto status = _stream_recvr->get_next(block, eos);
-    if (block != nullptr) {
+    RETURN_IF_ERROR(VExprContext::filter_block(_conjuncts, block, block->columns()));
+    // In vsortrunmerger, it will set eos=true, and block not empty
+    // so that eos==true, could not make sure that block not have valid data
+    if (!*eos || block->rows() > 0) {
         if (!_is_merging) {
             if (_num_rows_skipped + block->rows() < _offset) {
                 _num_rows_skipped += block->rows();
@@ -144,8 +129,17 @@ Status VExchangeNode::get_next(RuntimeState* state, Block* block, bool* eos) {
         }
         COUNTER_SET(_rows_returned_counter, _num_rows_returned);
     }
-    RETURN_IF_ERROR(second_phase_fetch_data(state, block)); 
     return status;
+}
+
+void VExchangeNode::release_resource(RuntimeState* state) {
+    if (_stream_recvr != nullptr) {
+        _stream_recvr->close();
+    }
+    if (_is_merging) {
+        _vsort_exec_exprs.close(state);
+    }
+    ExecNode::release_resource(state);
 }
 
 Status VExchangeNode::collect_query_statistics(QueryStatistics* statistics) {
@@ -158,13 +152,6 @@ Status VExchangeNode::close(RuntimeState* state) {
     if (is_closed()) {
         return Status::OK();
     }
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VExchangeNode::close");
-
-    if (_stream_recvr != nullptr) {
-        _stream_recvr->close();
-    }
-    if (_is_merging) _vsort_exec_exprs.close(state);
-
     return ExecNode::close(state);
 }
 

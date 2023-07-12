@@ -81,11 +81,6 @@ public:
     RowsetId rowset_id() const { return _rowset_id; }
 
     uint32_t num_rows() {
-        if (try_lazy_open_and_load_index() != Status::OK()) {
-            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
-            // Todo: What value should be returned when open failed?
-            return 0;
-        }
         return _footer.num_rows();
     }
 
@@ -98,11 +93,6 @@ public:
                                        const TabletIndex* index_meta, InvertedIndexIterator** iter);
 
     const ShortKeyIndexDecoder* get_short_key_index() {
-        if (try_lazy_open_and_load_index() != Status::OK()) {
-            LOG(WARNING) << "failed to lazy open segment, segment id: " << _segment_id;
-            // Todo: What value should be returned when open failed?
-            return nullptr;
-        }
         DCHECK(_load_index_once.has_called() && _load_index_once.stored_result().ok());
         return _sk_index_decoder.get();
     }

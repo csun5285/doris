@@ -121,6 +121,10 @@ public abstract class SetOperationNode extends PlanNode {
         constExprLists.add(exprs);
     }
 
+    public void addResultExprLists(List<Expr> exprs) {
+        resultExprLists.add(exprs);
+    }
+
     /**
      * Returns true if this UnionNode has only constant exprs.
      */
@@ -488,7 +492,7 @@ public abstract class SetOperationNode extends PlanNode {
     /**
      * just for Nereids.
      */
-    public void finalizeForNereids(TupleDescriptor tupleDescriptor, List<SlotDescriptor> constExprSlots) {
+    public void finalizeForNereids(List<SlotDescriptor> constExprSlots, List<SlotDescriptor> resultExprSlots) {
         materializedConstExprLists.clear();
         for (List<Expr> exprList : constExprLists) {
             Preconditions.checkState(exprList.size() == constExprSlots.size());
@@ -500,5 +504,24 @@ public abstract class SetOperationNode extends PlanNode {
             }
             materializedConstExprLists.add(newExprList);
         }
+
+        materializedResultExprLists.clear();
+        Preconditions.checkState(resultExprLists.size() == children.size());
+        for (int i = 0; i < resultExprLists.size(); ++i) {
+            List<Expr> exprList = resultExprLists.get(i);
+            List<Expr> newExprList = Lists.newArrayList();
+            Preconditions.checkState(exprList.size() == resultExprSlots.size());
+            for (int j = 0; j < exprList.size(); ++j) {
+                if (resultExprSlots.get(j).isMaterialized()) {
+                    newExprList.add(exprList.get(j));
+                    // TODO: reconsider this, we may change nullable info in previous nereids rules not here.
+                    resultExprSlots.get(j)
+                            .setIsNullable(resultExprSlots.get(j).getIsNullable() || exprList.get(j).isNullable());
+                }
+            }
+            materializedResultExprLists.add(newExprList);
+        }
+        Preconditions.checkState(
+                materializedResultExprLists.size() == getChildren().size());
     }
 }

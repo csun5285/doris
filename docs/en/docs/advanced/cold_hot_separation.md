@@ -1,7 +1,7 @@
 ---
 {
-    "title": "cold hot separation",
-    "language": "en"
+"title": "Cold hot separation",
+"language": "en"
 }
 ---
 
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# cold hot separation
+# [Experimental] Cold hot separation
 
 ## Demand scenario
 
@@ -46,10 +46,15 @@ The cold and hot separation supports all doris functions, but only places some d
 - Remote object space recycling recycler. If the table and partition are deleted, or the space is wasted due to abnormal conditions in the cold and hot separation process, the recycler thread will periodically recycle, saving storage resources
 - Cache optimization, which caches the accessed cold data to be local, achieving the query performance of non cold and hot separation
 - Be thread pool optimization, distinguish whether the data source is local or object storage, and prevent the delay of reading objects from affecting query performance
+- newly created materialized view would inherit storage policy from it's base table's correspoding partition
 
 ## Storage policy
 
 The storage policy is the entry to use the cold and hot separation function. Users only need to associate a storage policy with a table or partition during table creation or doris use. that is, they can use the cold and hot separation function.
+
+<version since="dev"></version> When creating an S3 RESOURCE, the S3 remote link verification will be performed to ensure that the RESOURCE is created correctly.
+
+In addition, fe configuration needs to be added: `enable_storage_policy=true`
 
 For example:
 
@@ -58,15 +63,15 @@ CREATE RESOURCE "remote_s3"
 PROPERTIES
 (
     "type" = "s3",
-    "AWS_ENDPOINT" = "bj.s3.com",
-    "AWS_REGION" = "bj",
-    "AWS_BUCKET" = "test-bucket",
-    "AWS_ROOT_PATH" = "path/to/root",
-    "AWS_ACCESS_KEY" = "bbb",
-    "AWS_SECRET_KEY" = "aaaa",
-    "AWS_MAX_CONNECTIONS" = "50",
-    "AWS_REQUEST_TIMEOUT_MS" = "3000",
-    "AWS_CONNECTION_TIMEOUT_MS" = "1000"
+    "s3.endpoint" = "bj.s3.com",
+    "s3.region" = "bj",
+    "s3.bucket" = "test-bucket",
+    "s3.root.path" = "path/to/root",
+    "s3.access_key" = "bbb",
+    "s3.secret_key" = "aaaa",
+    "s3.connection.maximum" = "50",
+    "s3.connection.request.timeout" = "3000",
+    "s3.connection.timeout" = "1000"
 );
 
 CREATE STORAGE POLICY test_policy
@@ -95,23 +100,56 @@ Or associate a storage policy with an existing partition
 ```
 ALTER TABLE create_table_partition MODIFY PARTITION (*) SET("storage_policy"="test_policy");
 ```
-For details, please refer to the resource, policy, create table, alter and other documents in the docs directory
+For details, please refer to the [resource](../sql-manual/sql-reference/Data-Definition-Statements/Create/CREATE-RESOURCE.md), [policy](../sql-manual/sql-reference/Data-Definition-Statements/Create/CREATE-POLICY.md), create table, alter and other documents in the docs directory
 
 ### Some restrictions
 
-- A single table or a single partition can only be associated with one storage policy. After association, the storage policy cannot be dropped
+- A single table or a single partition can only be associated with one storage policy. After association, the storage policy cannot be dropped，need to solve the relationship between the two.
 - The object information associated with the storage policy does not support modifying the data storage path information, such as bucket, endpoint, and root_ Path and other information
-- Currently, the storage policy only supports creation, not deletion
+- Currently, the storage policy only supports creation,modification and deletion. before deleting, you need to ensure that no table uses this storage policy.
 
 ## Show size of objects occupied by cold data
-方式一：
-Through show proc '/backends', you can view the size of each object being uploaded to, and the RemoteUsedCapacity item.
+1. Through show proc '/backends', you can view the size of each object being uploaded to, and the RemoteUsedCapacity item.There is a slight delay in this method
 
-方式二：
-Through show tables from tableName, you can view the object size occupied by each table, and the RemoteDataSize item.
+2. Through show tables from tableName, you can view the object size occupied by each table, and the RemoteDataSize item.
+
+## cold data cache
+
+As above, cold data introduces the cache in order to optimize query performance. After the first hit after cooling, Doris will reload the cooled data to be's local disk. The cache has the following characteristics:
+- The cache is actually stored on the be local disk and does not occupy memory.
+- the cache can limit expansion and clean up data through LRU
+- The be parameter `file_cache_alive_time_sec` can set the maximum storage time of the cache data after it has not been accessed. The default is 604800, which is one week.
+- The be parameter `file_cache_max_size_per_disk` can set the disk size occupied by the cache. Once this setting is exceeded, the cache that has not been accessed for the longest time will be deleted. The default is 0, means no limit to the size, unit: byte.
+- The be parameter `file_cache_type` is optional `sub_file_cache` (segment the remote file for local caching) and `whole_file_cache` (the entire remote file for local caching), the default is "", means no file is cached, please set it when caching is required this parameter.
+
+
+
+## cold data compaction
+The time when cold data is imported is from the moment when the data rowset file is written to the local disk, plus the cooling time. Since the data is not written and cooled at one time, to avoid the problem of small files in the object storage, doris will also perform compaction of cold data.
+However, the frequency of cold data compaction and the priority of resource occupation are not very high. Specifically, it can be adjusted by the following be parameters:
+- The be parameter `cold_data_compaction_thread_num` can set the concurrency of executing cold data compaction, the default is 2.
+- The be parameter `cold_data_compaction_interval_sec` can set the time interval for executing cold data compaction, the default is 1800, unit: second, that is, half an hour.
+
+
+## cold data schema change
+The supported schema change types after data cooling are as follows:
+* Add and delete columns
+* Modify column type
+* Adjust column order
+* Add and modify Bloom Filter
+* Add and delete bitmap index
+
+## cold data Garbage collection
+The garbage data of cold data refers to the data that is not used by any Replica. Object storage may have garbage data generated by the following situations:
+1. Failed to upload rowset but uploaded some segments successfully.
+2. After the FE re-selects the CooldownReplica, the rowset versions of the old and new CooldownReplicas are inconsistent, and the FollowerReplicas synchronize the CooldownMeta of the new CooldownReplica. The rowsets with inconsistent versions in the old CooldownReplica are not used by the Replica and become garbage data.
+3. After the cold data compaction, the rowset before the merge cannot be deleted immediately because it may be used by other Replicas, but in the end FollowerReplicas all use the latest merged rowset, and the rowset before the merge becomes garbage data.
+
+In addition, the garbage data on the object will not be cleaned up immediately.
+The be parameter `remove_unused_remote_files_interval_sec` can set the garbage collection interval of cold data, the default is 21600, unit: second, that is, 6 hours.
 
 
 ## Unfinished Matters
 
-- After the data is frozen, there are new data updates or imports, etc. The compression has not been processed at present.
-- The schema change operation after the data is frozen is not supported at present.
+- Currently, there is no way to query the tables associated with a specific storage policy.
+- The acquisition of some remote occupancy indicators is not perfect enough.

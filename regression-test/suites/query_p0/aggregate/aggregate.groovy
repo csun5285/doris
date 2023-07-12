@@ -36,7 +36,7 @@ suite("aggregate") {
                 c_timestamp_3 datetimev2(6),
                 c_boolean boolean,
                 c_short_decimal decimal(5,2),
-                c_long_decimal decimal(27,9)
+                c_long_decimal decimal(38,10)
             )
             DUPLICATE KEY(c_bigint)
             DISTRIBUTED BY HASH(c_bigint) BUCKETS 1
@@ -61,7 +61,7 @@ suite("aggregate") {
                 c_timestamp_3 datetimev2(6),
                 c_boolean boolean,
                 c_short_decimal decimal(5,2),
-                c_long_decimal decimal(27,9)
+                c_long_decimal decimal(38,11)
             )
             DUPLICATE KEY(c_bigint)
             DISTRIBUTED BY HASH(c_bigint) BUCKETS 1
@@ -291,6 +291,11 @@ suite("aggregate") {
     sql""" DROP TABLE IF EXISTS tempbaseall """
     sql"""create table tempbaseall PROPERTIES("replication_num" = "1")  as select k1, k2 from baseall where k1 is not null;"""
     qt_aggregate32"select k1, k2 from (select k1, max(k2) as k2 from tempbaseall where k1 > 0 group by k1 order by k1)a where k1 > 0 and k1 < 10 order by k1;"
+
+    sql 'set enable_fallback_to_original_planner=false'
+    sql 'set enable_nereids_planner=true'
+    qt_aggregate """ select avg(distinct c_bigint), avg(distinct c_double) from regression_test_query_p0_aggregate.${tableName} """
+    qt_aggregate """ select count(distinct c_bigint),count(distinct c_double),count(distinct c_string),count(distinct c_date_1),count(distinct c_timestamp_1),count(distinct c_timestamp_2),count(distinct c_timestamp_3),count(distinct c_boolean) from regression_test_query_p0_aggregate.${tableName} """
 
     qt_subquery_with_inner_predicate """
         select count(*) from (select t2.c_bigint, t2.c_double, t2.c_string from (select c_bigint, c_double, c_string, c_date,c_timestamp, c_short_decimal from regression_test_query_p0_aggregate.${tableName}) t2)t1

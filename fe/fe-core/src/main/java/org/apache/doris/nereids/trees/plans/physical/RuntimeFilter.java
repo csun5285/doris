@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.plans.physical;
 
+import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.planner.RuntimeFilterId;
 import org.apache.doris.thrift.TRuntimeFilterType;
@@ -26,34 +27,47 @@ import org.apache.doris.thrift.TRuntimeFilterType;
  */
 public class RuntimeFilter {
 
-    private final Slot srcSlot;
-
-    private Slot targetSlot;
-
     private final RuntimeFilterId id;
-
     private final TRuntimeFilterType type;
-
+    private final Expression srcSlot;
+    //bitmap filter support target expression like  k1+1, abs(k1)
+    //targetExpression is an expression on targetSlot, in which there is only one non-const slot
+    private final Expression targetExpression;
+    private final Slot targetSlot;
     private final int exprOrder;
+    private final AbstractPhysicalJoin builderNode;
 
-    private boolean finalized = false;
+    private final boolean bitmapFilterNotIn;
 
-    private PhysicalHashJoin builderNode;
+    private final long buildSideNdv;
 
     /**
      * constructor
      */
-    public RuntimeFilter(RuntimeFilterId id, Slot src, Slot target, TRuntimeFilterType type,
-            int exprOrder, PhysicalHashJoin builderNode) {
+    public RuntimeFilter(RuntimeFilterId id, Expression src, Slot target, TRuntimeFilterType type,
+            int exprOrder, AbstractPhysicalJoin builderNode, long buildSideNdv) {
+        this(id, src, target, target, type, exprOrder, builderNode, false, buildSideNdv);
+    }
+
+    /**
+     * constructor
+     */
+    public RuntimeFilter(RuntimeFilterId id, Expression src, Slot target, Expression targetExpression,
+            TRuntimeFilterType type, int exprOrder, AbstractPhysicalJoin builderNode, boolean bitmapFilterNotIn,
+            long buildSideNdv) {
         this.id = id;
         this.srcSlot = src;
         this.targetSlot = target;
+        this.targetExpression = targetExpression;
         this.type = type;
         this.exprOrder = exprOrder;
         this.builderNode = builderNode;
+        this.bitmapFilterNotIn = bitmapFilterNotIn;
+        this.buildSideNdv = buildSideNdv <= 0 ? -1L : buildSideNdv;
+        builderNode.addRuntimeFilter(this);
     }
 
-    public Slot getSrcExpr() {
+    public Expression getSrcExpr() {
         return srcSlot;
     }
 
@@ -73,11 +87,30 @@ public class RuntimeFilter {
         return exprOrder;
     }
 
-    public PhysicalHashJoin getBuilderNode() {
+    public AbstractPhysicalJoin getBuilderNode() {
         return builderNode;
     }
 
-    public void setFinalized() {
-        this.finalized = true;
+    public boolean isBitmapFilterNotIn() {
+        return bitmapFilterNotIn;
+    }
+
+    public Expression getTargetExpression() {
+        return targetExpression;
+    }
+
+    public long getBuildSideNdv() {
+        return buildSideNdv;
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("RF").append(id.asInt())
+                .append("[").append(getSrcExpr()).append("->").append(targetSlot)
+                .append("(ndv/size = ").append(buildSideNdv).append("/")
+                .append(org.apache.doris.planner.RuntimeFilter.expectRuntimeFilterSize(buildSideNdv))
+                .append(")");
+        return sb.toString();
     }
 }

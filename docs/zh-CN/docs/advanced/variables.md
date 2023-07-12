@@ -71,6 +71,7 @@ SET GLOBAL exec_mem_limit = 137438953472
 - `sql_mode`
 - `enable_profile`
 - `query_timeout`
+- `insert_timeout`<version since="dev"></version>
 - `exec_mem_limit`
 - `batch_size`
 - `allow_partition_column_nullable`
@@ -104,459 +105,1751 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 ## 支持的变量
 
-- `SQL_AUTO_IS_NULL`
+> 注：
+> 
+> 以下内容由 `docs/generate-config-and-variable-doc.sh` 自动生成。
+> 
+> 如需修改，请修改 `fe/fe-core/src/main/java/org/apache/doris/qe/SessionVariable.java` 和 `fe/fe-core/src/main/java/org/apache/doris/qe/GlobalVariable.java` 中的描述信息。
 
-  用于兼容 JDBC 连接池 C3P0。 无实际作用。
+### `SQL_AUTO_IS_NULL`
 
-- `auto_increment_increment`
+待补充
 
-  用于兼容 MySQL 客户端。无实际作用。
+类型：`boolean`
 
-- `autocommit`
+默认值：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+只读变量：`false`
 
-- `auto_broadcast_join_threshold`
+仅全局变量：`false`
 
-  执行连接时将向所有节点广播的表的最大字节大小，通过将此值设置为 -1 可以禁用广播。
+### `allow_partition_column_nullable`
 
-  系统提供了两种 Join 的实现方式，`broadcast join` 和 `shuffle join`。
+待补充
 
-  `broadcast join` 是指将小表进行条件过滤后，将其广播到大表所在的各个节点上，形成一个内存 Hash 表，然后流式读出大表的数据进行 Hash Join。
+类型：`boolean`
 
-  `shuffle join` 是指将小表和大表都按照 Join 的 key 进行 Hash，然后进行分布式的 Join。
+默认值：`true`
 
-  当小表的数据量较小时，`broadcast join` 拥有更好的性能。反之，则shuffle join拥有更好的性能。
+只读变量：`false`
 
-  系统会自动尝试进行 Broadcast Join，也可以显式指定每个join算子的实现方式。系统提供了可配置的参数 `auto_broadcast_join_threshold`，指定使用 `broadcast join` 时，hash table 使用的内存占整体执行内存比例的上限，取值范围为0到1，默认值为0.8。当系统计算hash table使用的内存会超过此限制时，会自动转换为使用 `shuffle join`
+仅全局变量：`false`
 
-  这里的整体执行内存是：查询优化器做估算的一个比例
+### `auto_broadcast_join_threshold`
 
-  >注意：
-  >
-  >不建议用这个参数来调整，如果必须要使用某一种join，建议使用hint，比如 join[shuffle]
+待补充
 
-- `batch_size`
+类型：`double`
 
-  用于指定在查询执行过程中，各个节点传输的单个数据包的行数。默认一个数据包的行数为 1024 行，即源端节点每产生 1024 行数据后，打包发给目的节点。
+默认值：`0.8`
 
-  较大的行数，会在扫描大数据量场景下提升查询的吞吐，但可能会在小查询场景下增加查询延迟。同时，也会增加查询的内存开销。建议设置范围 1024 至 4096。
+只读变量：`false`
 
-- `character_set_client`
+仅全局变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+### `auto_increment_increment`
 
-- `character_set_connection`
+待补充
 
-  用于兼容 MySQL 客户端。无实际作用。
+类型：`int`
 
-- `character_set_results`
+默认值：`1`
 
-  用于兼容 MySQL 客户端。无实际作用。
+只读变量：`false`
 
-- `character_set_server`
+仅全局变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+### `autocommit`
 
-- `codegen_level`
+待补充
 
-  用于设置 LLVM codegen 的等级。（当前未生效）。
+类型：`boolean`
 
-- `collation_connection`
+默认值：`true`
 
-  用于兼容 MySQL 客户端。无实际作用。
+只读变量：`false`
 
-- `collation_database`
+仅全局变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+### `batch_size`
 
-- `collation_server`
+待补充
 
-  用于兼容 MySQL 客户端。无实际作用。
+类型：`int`
 
-- `default_order_by_limit`
+默认值：`4064`
 
-  用于控制 OrderBy 以后返回的默认条数。默认值为 -1，默认返回查询后的最大条数，上限为 long 数据类型的 MAX_VALUE 值。
+只读变量：`false`
 
-- `delete_without_partition`
+仅全局变量：`false`
 
-  设置为 true 时。当使用 delete 命令删除分区表数据时，可以不指定分区。delete 操作将会自动应用到所有分区。
+### `character_set_client`
 
-  但注意，自动应用到所有分区可能到导致 delete 命令耗时触发大量子任务导致耗时较长。如无必要，不建议开启。
+待补充
 
-- `disable_colocate_join`
+类型：`String`
 
-  控制是否启用 [Colocation Join](./join-optimization/colocation-join.md) 功能。默认为 false，表示启用该功能。true 表示禁用该功能。当该功能被禁用后，查询规划将不会尝试执行 Colocation Join。
+默认值：`utf8`
 
-- `enable_bucket_shuffle_join`
+只读变量：`false`
 
-  控制是否启用 [Bucket Shuffle Join](./join-optimization/bucket-shuffle-join.md) 功能。默认为 true，表示启用该功能。false 表示禁用该功能。当该功能被禁用后，查询规划将不会尝试执行 Bucket Shuffle Join。
+仅全局变量：`false`
 
-- `disable_streaming_preaggregations`
+### `character_set_connection`
 
-  控制是否开启流式预聚合。默认为 false，即开启。当前不可设置，且默认开启。
+待补充
 
-- `enable_insert_strict`
+类型：`String`
 
-  用于设置通过 INSERT 语句进行数据导入时，是否开启 `strict` 模式。默认为 false，即不开启 `strict` 模式。关于该模式的介绍，可以参阅 [这里](../data-operate/import/import-way/insert-into-manual.md)。
+默认值：`utf8`
 
-- `enable_spilling`
+只读变量：`false`
 
-  用于设置是否开启大数据量落盘排序。默认为 false，即关闭该功能。当用户未指定 ORDER BY 子句的 LIMIT 条件，同时设置 `enable_spilling` 为 true 时，才会开启落盘排序。该功能启用后，会使用 BE 数据目录下 `doris-scratch/` 目录存放临时的落盘数据，并在查询结束后，清空临时数据。
+仅全局变量：`false`
 
-  该功能主要用于使用有限的内存进行大数据量的排序操作。
+### `character_set_results`
 
-  注意，该功能为实验性质，不保证稳定性，请谨慎开启。
+待补充
 
-- `exec_mem_limit`
+类型：`String`
 
-  用于设置单个查询的内存限制。默认为 2GB，单位为B/K/KB/M/MB/G/GB/T/TB/P/PB, 默认为B。
+默认值：`utf8`
 
-  该参数用于限制一个查询计划中，单个查询计划的实例所能使用的内存。一个查询计划可能有多个实例，一个 BE 节点可能执行一个或多个实例。所以该参数并不能准确限制一个查询在整个集群的内存使用，也不能准确限制一个查询在单一 BE 节点上的内存使用。具体需要根据生成的查询计划判断。
+只读变量：`false`
 
-  通常只有在一些阻塞节点（如排序节点、聚合节点、Join 节点）上才会消耗较多的内存，而其他节点（如扫描节点）中，数据为流式通过，并不会占用较多的内存。
+仅全局变量：`false`
 
-  当出现 `Memory Exceed Limit` 错误时，可以尝试指数级增加该参数，如 4G、8G、16G 等。
+### `character_set_server`
 
-- `forward_to_master`
+待补充
 
-  用户设置是否将一些show 类命令转发到 Master FE 节点执行。默认为 `true`，即转发。Doris 中存在多个 FE 节点，其中一个为 Master 节点。通常用户可以连接任意 FE 节点进行全功能操作。但部分信息查看指令，只有从 Master FE 节点才能获取详细信息。
+类型：`String`
 
-  如 `SHOW BACKENDS;` 命令，如果不转发到 Master FE 节点，则仅能看到节点是否存活等一些基本信息，而转发到 Master FE 则可以获取包括节点启动时间、最后一次心跳时间等更详细的信息。
+默认值：`utf8`
 
-  当前受该参数影响的命令如下：
+只读变量：`false`
 
-  1. `SHOW FRONTENDS;`
+仅全局变量：`false`
 
-     转发到 Master 可以查看最后一次心跳信息。
+### `cloud_cluster`
 
-  2. `SHOW BACKENDS;`
+待补充
 
-     转发到 Master 可以查看启动时间、最后一次心跳信息、磁盘容量信息。
+类型：`String`
 
-  3. `SHOW BROKER;`
+默认值：``
 
-     转发到 Master 可以查看启动时间、最后一次心跳信息。
+只读变量：`false`
 
-  4. `SHOW TABLET;`/`ADMIN SHOW REPLICA DISTRIBUTION;`/`ADMIN SHOW REPLICA STATUS;`
+仅全局变量：`false`
 
-     转发到 Master 可以查看 Master FE 元数据中存储的 tablet 信息。正常情况下，不同 FE 元数据中 tablet 信息应该是一致的。当出现问题时，可以通过这个方法比较当前 FE 和 Master FE 元数据的差异。
+### `codegen_level`
 
-  5. `SHOW PROC;`
+待补充
 
-     转发到 Master 可以查看 Master FE 元数据中存储的相关 PROC 的信息。主要用于元数据比对。
+类型：`int`
 
-- `init_connect`
+默认值：`0`
 
-  用于兼容 MySQL 客户端。无实际作用。
+只读变量：`false`
 
-- `interactive_timeout`
+仅全局变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+### `collation_connection`
 
-- `enable_profile`
+待补充
 
-  用于设置是否需要查看查询的 profile。默认为 false，即不需要 profile。
+类型：`String`
 
-  默认情况下，只有在查询发生错误时，BE 才会发送 profile 给 FE，用于查看错误。正常结束的查询不会发送 profile。发送 profile 会产生一定的网络开销，对高并发查询场景不利。 当用户希望对一个查询的 profile 进行分析时，可以将这个变量设为 true 后，发送查询。查询结束后，可以通过在当前连接的 FE 的 web 页面查看到 profile：
+默认值：`utf8_general_ci`
 
-  `fe_host:fe_http_port/query`
+只读变量：`false`
 
-  其中会显示最近100条，开启 `enable_profile` 的查询的 profile。
+仅全局变量：`false`
 
-- `language`
+### `collation_database`
 
-  用于兼容 MySQL 客户端。无实际作用。
+待补充
 
-- `license`
+类型：`String`
 
-  显示 Doris 的 License。无其他作用。
+默认值：`utf8_general_ci`
 
-- `lower_case_table_names`
+只读变量：`false`
 
-  用于控制用户表表名大小写是否敏感。
+仅全局变量：`false`
 
-  值为 0 时，表名大小写敏感。默认为0。
+### `collation_server`
 
-  值为 1 时，表名大小写不敏感，doris在存储和查询时会将表名转换为小写。
-  优点是在一条语句中可以使用表名的任意大小写形式，下面的sql是正确的：
+待补充
 
-  ```sql
-  mysql> show tables;  
-  +------------------+
-  | Tables_in_testdb |
-  +------------------+
-  | cost             |
-  +------------------+
-  
-  mysql> select * from COST where COst.id < 100 order by cost.id;
-  ```
+类型：`String`
 
-  缺点是建表后无法获得建表语句中指定的表名，`show tables` 查看的表名为指定表名的小写。
+默认值：`utf8_general_ci`
 
-  值为 2 时，表名大小写不敏感，doris存储建表语句中指定的表名，查询时转换为小写进行比较。 优点是`show tables` 查看的表名为建表语句中指定的表名；
-  缺点是同一语句中只能使用表名的一种大小写形式，例如对`cost` 表使用表名 `COST` 进行查询：
+只读变量：`false`
 
-  ```sql
-  mysql> select * from COST where COST.id < 100 order by COST.id;
-  ```
+仅全局变量：`false`
 
-  该变量兼容MySQL。需在集群初始化时通过fe.conf 指定 `lower_case_table_names=`进行配置，集群初始化完成后无法通过`set` 语句修改该变量，也无法通过重启、升级集群修改该变量。
+### `cpu_resource_limit`
 
-  information_schema中的系统视图表名不区分大小写，当`lower_case_table_names`值为 0 时，表现为 2。
+待补充
 
-- `max_allowed_packet`
+类型：`int`
 
-  用于兼容 JDBC 连接池 C3P0。 无实际作用。
+默认值：`-1`
 
-- `max_pushdown_conditions_per_column`
+只读变量：`false`
 
-  该变量的具体含义请参阅 [BE 配置项](../admin-manual/config/be-config.md) 中 `max_pushdown_conditions_per_column` 的说明。该变量默认置为 -1，表示使用 `be.conf` 中的配置值。如果设置大于 0，则当前会话中的查询会使用该变量值，而忽略 `be.conf` 中的配置值。
+仅全局变量：`false`
 
-- `max_scan_key_num`
+### `default_order_by_limit`
 
-  该变量的具体含义请参阅 [BE 配置项](../admin-manual/config/be-config.md) 中 `doris_max_scan_key_num` 的说明。该变量默认置为 -1，表示使用 `be.conf` 中的配置值。如果设置大于 0，则当前会话中的查询会使用该变量值，而忽略 `be.conf` 中的配置值。
+待补充
 
-- `net_buffer_length`
+类型：`long`
 
-  用于兼容 MySQL 客户端。无实际作用。
+默认值：`-1`
 
-- `net_read_timeout`
+只读变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+仅全局变量：`false`
 
-- `net_write_timeout`
+### `default_password_lifetime`
 
-  用于兼容 MySQL 客户端。无实际作用。
+待补充
 
-- `parallel_exchange_instance_num`
+类型：`int`
 
-  用于设置执行计划中，一个上层节点接收下层节点数据所使用的 exchange node 数量。默认为 -1，即表示 exchange node 数量等于下层节点执行实例的个数（默认行为）。当设置大于0，并且小于下层节点执行实例的个数，则 exchange node 数量等于设置值。
+默认值：`0`
 
-  在一个分布式的查询执行计划中，上层节点通常有一个或多个 exchange node 用于接收来自下层节点在不同 BE 上的执行实例的数据。通常 exchange node 数量等于下层节点执行实例数量。
+只读变量：`false`
 
-  在一些聚合查询场景下，如果底层需要扫描的数据量较大，但聚合之后的数据量很小，则可以尝试修改此变量为一个较小的值，可以降低此类查询的资源开销。如在 DUPLICATE KEY 明细模型上进行聚合查询的场景。
+仅全局变量：`true`
 
-- `parallel_fragment_exec_instance_num`
+### `default_rowset_type`
 
-  针对扫描节点，设置其在每个 BE 节点上，执行实例的个数。默认为 1。
+待补充
 
-  一个查询计划通常会产生一组 scan range，即需要扫描的数据范围。这些数据分布在多个 BE 节点上。一个 BE 节点会有一个或多个 scan range。默认情况下，每个 BE 节点的一组 scan range 只由一个执行实例处理。当机器资源比较充裕时，可以将增加该变量，让更多的执行实例同时处理一组 scan range，从而提升查询效率。
+类型：`String`
 
-  而 scan 实例的数量决定了上层其他执行节点，如聚合节点，join 节点的数量。因此相当于增加了整个查询计划执行的并发度。修改该参数会对大查询效率提升有帮助，但较大数值会消耗更多的机器资源，如CPU、内存、磁盘IO。
+默认值：`beta`
 
-- `query_cache_size`
+只读变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+仅全局变量：`true`
 
-- `query_cache_type`
+### `default_storage_engine`
 
-  用于兼容 JDBC 连接池 C3P0。 无实际作用。
+待补充
 
-- `query_timeout`
+类型：`String`
 
-  用于设置查询超时。该变量会作用于当前连接中所有的查询语句，以及 INSERT 语句。默认为 5 分钟，单位为秒。
+默认值：`olap`
 
-- `resource_group`
+只读变量：`false`
 
-  暂不使用。
+仅全局变量：`false`
 
-- `send_batch_parallelism`
+### `default_tmp_storage_engine`
 
-  用于设置执行 InsertStmt 操作时发送批处理数据的默认并行度，如果并行度的值超过 BE 配置中的 `max_send_batch_parallelism_per_job`，那么作为协调点的 BE 将使用 `max_send_batch_parallelism_per_job` 的值。
+待补充
 
-- `sql_mode`
+类型：`String`
 
-  用于指定 SQL 模式，以适应某些 SQL 方言，关于 SQL 模式，可参阅[这里](./sql-mode.md)。
+默认值：`olap`
 
-- `sql_safe_updates`
+只读变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+仅全局变量：`false`
 
-- `sql_select_limit`
+### `delete_without_partition`
 
-  用于兼容 MySQL 客户端。无实际作用。
+待补充
 
-- `system_time_zone`
+类型：`boolean`
 
-  显示当前系统时区。不可更改。
+默认值：`false`
 
-- `time_zone`
+只读变量：`false`
 
-  用于设置当前会话的时区。时区会对某些时间函数的结果产生影响。关于时区，可以参阅 [这里](./time-zone.md)。
+仅全局变量：`false`
 
-- `tx_isolation`
+### `disable_colocate_plan`
 
-  用于兼容 MySQL 客户端。无实际作用。
+待补充
 
-- `tx_read_only`
+类型：`boolean`
 
-  用于兼容 MySQL 客户端。无实际作用。
+默认值：`false`
 
-- `transaction_read_only`
+只读变量：`false`
 
-  用于兼容 MySQL 客户端。无实际作用。
+仅全局变量：`false`
 
-- `transaction_isolation`
+### `disable_file_cache`
 
-  用于兼容 MySQL 客户端。无实际作用。
+待补充
 
-- `version`
+类型：`boolean`
 
-  用于兼容 MySQL 客户端。无实际作用。
+默认值：`false`
 
-- `performance_schema`
+只读变量：`false`
 
-  用于兼容 8.0.16及以上版本的MySQL JDBC。无实际作用。
+仅全局变量：`false`
 
-- `version_comment`
+### `disable_streaming_preaggregations`
 
-  用于显示 Doris 的版本。不可更改。
+待补充
 
-- `wait_timeout`
+类型：`boolean`
 
-  用于设置空闲连接的连接时长。当一个空闲连接在该时长内与 Doris 没有任何交互，则 Doris 会主动断开这个链接。默认为 8 小时，单位为秒。
+默认值：`false`
 
-- `default_rowset_type`
+只读变量：`false`
 
-  用于设置计算节点存储引擎默认的存储格式。当前支持的存储格式包括：alpha/beta。
+仅全局变量：`false`
 
-- `use_v2_rollup`
+### `div_precision_increment`
 
-  用于控制查询使用segment v2存储格式的rollup索引获取数据。该变量用于上线segment v2的时候，进行验证使用；其他情况，不建议使用。
+待补充
 
-- `rewrite_count_distinct_to_bitmap_hll`
+类型：`int`
 
-  是否将 bitmap 和 hll 类型的 count distinct 查询重写为 bitmap_union_count 和 hll_union_agg 。
+默认值：`4`
 
-- `prefer_join_method`
+只读变量：`false`
 
-  在选择join的具体实现方式是broadcast join还是shuffle join时，如果broadcast join cost和shuffle join cost相等时，优先选择哪种join方式。
+仅全局变量：`false`
 
-  目前该变量的可选值为"broadcast" 或者 "shuffle"。
+### `drop_table_if_ctas_failed`
 
-- `allow_partition_column_nullable`
+待补充
 
-  建表时是否允许分区列为NULL。默认为true，表示允许为NULL。false 表示分区列必须被定义为NOT NULL
+类型：`boolean`
 
-- `insert_visible_timeout_ms`
+默认值：`true`
 
-  在执行insert语句时，导入动作(查询和插入)完成后，还需要等待事务提交，使数据可见。此参数控制等待数据可见的超时时间，默认为10000，最小为1000。
+只读变量：`false`
 
-- `enable_exchange_node_parallel_merge`
+仅全局变量：`false`
 
-  在一个排序的查询之中，一个上层节点接收下层节点有序数据时，会在exchange node上进行对应的排序来保证最终的数据是有序的。但是单线程进行多路数据归并时，如果数据量过大，会导致exchange node的单点的归并瓶颈。
+### `dry_run_query`
 
-  Doris在这部分进行了优化处理，如果下层的数据节点过多。exchange node会启动多线程进行并行归并来加速排序过程。该参数默认为False，即表示 exchange node 不采取并行的归并排序，来减少额外的CPU和内存消耗。
+待补充
 
-- `extract_wide_range_expr`
+类型：`boolean`
 
-  用于控制是否开启 「宽泛公因式提取」的优化。取值有两种：true 和 false 。默认情况下开启。
+默认值：`false`
 
-- `enable_fold_constant_by_be`
+只读变量：`false`
 
-  用于控制常量折叠的计算方式。默认是 `false`，即在 `FE` 进行计算；若设置为 `true`，则通过 `RPC` 请求经 `BE` 计算。
+仅全局变量：`false`
 
-- `cpu_resource_limit`
+### `dump_nereids_memo`
 
-  用于限制一个查询的资源开销。这是一个实验性质的功能。目前的实现是限制一个查询在单个节点上的scan线程数量。限制了scan线程数，从底层返回的数据速度变慢，从而限制了查询整体的计算资源开销。假设设置为 2，则一个查询在单节点上最多使用2个scan线程。
+待补充
 
-  该参数会覆盖 `parallel_fragment_exec_instance_num` 的效果。即假设 `parallel_fragment_exec_instance_num` 设置为4，而该参数设置为2。则单个节点上的4个执行实例会共享最多2个扫描线程。
+类型：`boolean`
 
-  该参数会被 user property 中的 `cpu_resource_limit` 配置覆盖。
+默认值：`false`
 
-  默认 -1，即不限制。
+只读变量：`false`
 
-- `disable_join_reorder`
+仅全局变量：`false`
 
-  用于关闭所有系统自动的 join reorder 算法。取值有两种：true 和 false。默认行况下关闭，也就是采用系统自动的 join reorder 算法。设置为 true 后，系统会关闭所有自动排序的算法，采用 SQL 原始的表顺序，执行 join
+### `enable_bucket_shuffle_join`
 
-- `return_object_data_as_binary` 用于标识是否在select 结果中返回bitmap/hll 结果。在 select into outfile 语句中，如果导出文件格式为csv 则会将 bimap/hll 数据进行base64编码，如果是parquet 文件格式 将会把数据作为byte array 存储
+待补充
 
-- `block_encryption_mode` 可以通过block_encryption_mode参数，控制块加密模式，默认值为：空。当使用AES算法加密时相当于`AES_128_ECB`, 当时用SM3算法加密时相当于`SM3_128_ECB` 可选值：
+类型：`boolean`
 
-```text
-  AES_128_ECB,
-  AES_192_ECB,
-  AES_256_ECB,
-  AES_128_CBC,
-  AES_192_CBC,
-  AES_256_CBC,
-  AES_128_CFB,
-  AES_192_CFB,
-  AES_256_CFB,
-  AES_128_CFB1,
-  AES_192_CFB1,
-  AES_256_CFB1,
-  AES_128_CFB8,
-  AES_192_CFB8,
-  AES_256_CFB8,
-  AES_128_CFB128,
-  AES_192_CFB128,
-  AES_256_CFB128,
-  AES_128_CTR,
-  AES_192_CTR,
-  AES_256_CTR,
-  AES_128_OFB,
-  AES_192_OFB,
-  AES_256_OFB,
-  SM4_128_ECB,
-  SM4_128_CBC,
-  SM4_128_CFB128,
-  SM4_128_OFB,
-  SM4_128_CTR,
-```
+默认值：`true`
 
-- `enable_infer_predicate`
+只读变量：`false`
 
-  用于控制是否进行谓词推导。取值有两种：true 和 false。默认情况下关闭，系统不在进行谓词推导，采用原始的谓词进行相关操作。设置为 true 后，进行谓词扩展。
+仅全局变量：`false`
 
-- `trim_tailing_spaces_for_external_table_query`
+### `enable_cbo_statistics`
 
-  用于控制查询Hive外表时是否过滤掉字段末尾的空格。默认为false。
+待补充
 
-* `skip_storage_engine_merge`
-  用于调试目的。在向量化执行引擎中，当发现读取Aggregate Key模型或者Unique Key模型的数据结果有问题的时候，把此变量的值设置为`true`，将会把Aggregate Key模型或者Unique Key模型的数据当成Duplicate Key模型读取。
+类型：`boolean`
 
-* `skip_delete_predicate`
+默认值：`false`
 
-	用于调试目的。在向量化执行引擎中，当发现读取表的数据结果有误的时候，把此变量的值设置为`true`，将会把被删除的数据当成正常数据读取。
+只读变量：`false`
 
-* `skip_delete_bitmap`
+仅全局变量：`false`
 
-    用于调试目的。在Unique Key MoW表中，当发现读取表的数据结果有误的时候，把此变量的值设置为`true`，将会把被delete bitmap标记删除的数据当成正常数据读取。
+### `enable_colocate_scan`
 
-* `default_password_lifetime`
+待补充
 
- 	默认的密码过期时间。默认值为 0，即表示不过期。单位为天。该参数只有当用户的密码过期属性为 DEFAULT 值时，才启用。如：
- 	
- 	```
- 	CREATE USER user1 IDENTIFIED BY "12345" PASSWORD_EXPIRE DEFAULT;
- 	ALTER USER user1 PASSWORD_EXPIRE DEFAULT;
-	```
-* `password_history`
+类型：`boolean`
 
-	默认的历史密码次数。默认值为0，即不做限制。该参数只有当用户的历史密码次数属性为 DEFAULT 值时，才启用。如：
+默认值：`false`
 
-	```
- 	CREATE USER user1 IDENTIFIED BY "12345" PASSWORD_HISTORY DEFAULT;
- 	ALTER USER user1 PASSWORD_HISTORY DEFAULT;
-	```
-	
-* `validate_password_policy`
+只读变量：`false`
 
-	密码强度校验策略。默认为 `NONE` 或 `0`，即不做校验。可以设置为 `STRONG` 或 `2`。当设置为 `STRONG` 或 `2` 时，通过 `ALTER USER` 或 `SET PASSWORD` 命令设置密码时，密码必须包含“大写字母”，“小写字母”，“数字”和“特殊字符”中的3项，并且长度必须大于等于8。特殊字符包括：`~!@#$%^&*()_+|<>,.?/:;'[]{}"`。
+仅全局变量：`false`
 
-* `group_concat_max_len`
-    为了兼容某些BI工具能正确获取和设置该变量，变量值实际并没有作用。
+### `enable_common_expr_pushdown`
 
-* `group_by_and_having_use_alias_first`
+待补充
 
-       指定group by和having语句是否优先使用列的别名，而非从From语句里寻找列的名字。默认为false。
+类型：`boolean`
 
-* `topn_opt_limit_threshold`
+默认值：`true`
 
-    设置topn优化的limit阈值 (例如：SELECT * FROM t ORDER BY k LIMIT n). 如果limit的n小于等于阈值，topn相关优化（动态过滤下推、两阶段获取结果、按key的顺序读数据）会自动启用，否则会禁用。默认值是1024。
-* `use_fix_replica`
+只读变量：`false`
 
-    使用固定的replica进行查询，该值表示固定使用第几小的replica，默认为-1表示不启用。
+仅全局变量：`false`
+
+### `enable_cte_materialize`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_dphyp_optimizer`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_dphyp_trace`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_eliminate_sort_node`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_exchange_node_parallel_merge`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_fallback_to_original_planner`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_file_cache`
+
+是否启用file cache。该变量只有在be.conf中enable_file_cache=true时才有效，如果be.conf中enable_file_cache=false，该BE节点的file cache处于禁用状态。
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_function_pushdown`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_insert_strict`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_local_exchange`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_minidump`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_nereids_dml`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_nereids_timeout`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_new_shuffle_hash_method`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_odbc_transcation`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_orc_lazy_materialization`
+
+控制 orc reader 是否启用延迟物化技术。默认为 true。
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_parallel_outfile`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_parquet_lazy_materialization`
+
+控制 parquet reader 是否启用延迟物化技术。默认为 true。
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_partition_cache`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `experimental_enable_pipeline_engine`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_profile`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_push_down_no_group_agg`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_runtime_filter_prune`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_scan_node_run_serial`
+
+是否开启ScanNode串行读，以避免limit较小的情况下的读放大，可以提高查询的并发能力
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_share_hash_table_for_broadcast_join`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_single_distinct_column_opt`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `experimental_enable_single_replica_insert`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_spilling`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_sql_cache`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_two_phase_read_opt`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_unicode_name_support`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_unified_load`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_vectorized_engine`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `event_scheduler`
+
+待补充
+
+类型：`String`
+
+默认值：`OFF`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `exec_mem_limit`
+
+待补充
+
+类型：`long`
+
+默认值：`2147483648`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `external_agg_bytes_threshold`
+
+待补充
+
+类型：`long`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `external_agg_partition_bits`
+
+待补充
+
+类型：`int`
+
+默认值：`8`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `external_sort_bytes_threshold`
+
+待补充
+
+类型：`long`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `extract_wide_range_expr`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `file_cache_base_path`
+
+指定block file cache在BE上的存储路径，默认 'random'，随机选择BE配置的存储路径。
+
+类型：`String`
+
+默认值：`random`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `file_split_size`
+
+待补充
+
+类型：`long`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `forbid_unknown_col_stats`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `forward_to_master`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `fragment_transmission_compression_codec`
+
+待补充
+
+类型：`String`
+
+默认值：`lz4`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `group_by_and_having_use_alias_first`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `group_concat_max_len`
+
+待补充
+
+类型：`long`
+
+默认值：`2147483646`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `init_connect`
+
+待补充
+
+类型：`String`
+
+默认值：``
+
+只读变量：`false`
+
+仅全局变量：`true`
+
+### `inline_cte_referenced_threshold`
+
+待补充
+
+类型：`int`
+
+默认值：`1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `insert_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`14400`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `insert_visible_timeout_ms`
+
+待补充
+
+类型：`long`
+
+默认值：`10000`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `interactive_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`3600`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `internal_session`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `language`
+
+待补充
+
+类型：`String`
+
+默认值：`/selectdb_cloud/share/english/`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `license`
+
+待补充
+
+类型：`String`
+
+默认值：`Apache License, Version 2.0`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `lower_case_table_names`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `max_allowed_packet`
+
+待补充
+
+类型：`int`
+
+默认值：`1048576`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `max_execution_time`
+
+待补充
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `max_filter_ratio`
+
+待补充
+
+类型：`double`
+
+默认值：`0.0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `max_pushdown_conditions_per_column`
+
+待补充
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `max_scan_key_num`
+
+待补充
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `max_table_count_use_cascades_join_reorder`
+
+待补充
+
+类型：`int`
+
+默认值：`10`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `memo_max_group_expression_size`
+
+待补充
+
+类型：`int`
+
+默认值：`40000`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `nereids_trace_event_mode`
+
+待补充
+
+类型：`String`
+
+默认值：`all`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `net_buffer_length`
+
+待补充
+
+类型：`int`
+
+默认值：`16384`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `net_read_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`60`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `net_write_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`60`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `parallel_exchange_instance_num`
+
+待补充
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `parallel_fragment_exec_instance_num`
+
+待补充
+
+类型：`int`
+
+默认值：`1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `partition_pruning_expand_threshold`
+
+待补充
+
+类型：`int`
+
+默认值：`10`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `partitioned_hash_agg_rows_threshold`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `partitioned_hash_join_rows_threshold`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `password_history`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`true`
+
+### `performance_schema`
+
+待补充
+
+类型：`String`
+
+默认值：`OFF`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `plan_nereids_dump`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `prefer_join_method`
+
+待补充
+
+类型：`String`
+
+默认值：`broadcast`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `query_cache_size`
+
+待补充
+
+类型：`long`
+
+默认值：`1048576`
+
+只读变量：`false`
+
+仅全局变量：`true`
+
+### `query_cache_type`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `query_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`1800`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `repeat_max_num`
+
+待补充
+
+类型：`int`
+
+默认值：`10000`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `resource_group`
+
+待补充
+
+类型：`String`
+
+默认值：``
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `rewrite_count_distinct_to_bitmap_hll`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `scan_queue_mem_limit`
+
+待补充
+
+类型：`long`
+
+默认值：`107374182`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `send_batch_parallelism`
+
+待补充
+
+类型：`int`
+
+默认值：`1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `session_context`
+
+待补充
+
+类型：`String`
+
+默认值：``
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `show_hidden_columns`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `show_user_default_role`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `skip_delete_bitmap`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `skip_delete_predicate`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `skip_delete_sign`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `skip_storage_engine_merge`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `sql_mode`
+
+待补充
+
+类型：`long`
+
+默认值：`1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `sql_quote_show_create`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `sql_safe_updates`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `sql_select_limit`
+
+待补充
+
+类型：`long`
+
+默认值：`9223372036854775807`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `storage_engine`
+
+待补充
+
+类型：`String`
+
+默认值：`olap`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `strict_mode`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `system_time_zone`
+
+待补充
+
+类型：`String`
+
+默认值：`Asia/Shanghai`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `time_zone`
+
+待补充
+
+类型：`String`
+
+默认值：`Asia/Shanghai`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `topn_opt_limit_threshold`
+
+待补充
+
+类型：`long`
+
+默认值：`1024`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `trace_nereids`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `transaction_isolation`
+
+待补充
+
+类型：`String`
+
+默认值：`REPEATABLE-READ`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `transaction_read_only`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `trim_tailing_spaces_for_external_table_query`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `tx_isolation`
+
+待补充
+
+类型：`String`
+
+默认值：`REPEATABLE-READ`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `tx_read_only`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `use_fix_replica`
+
+待补充
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `use_rf_default`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `use_v2_rollup`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `version`
+
+待补充
+
+类型：`String`
+
+默认值：`5.7.99`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `version_comment`
+
+待补充
+
+类型：`String`
+
+默认值：`SelectDB Core version: 2.0.0`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
+### `wait_timeout`
+
+待补充
+
+类型：`int`
+
+默认值：`28800`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `workload_group`
+
+待补充
+
+类型：`String`
+
+默认值：``
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+
+

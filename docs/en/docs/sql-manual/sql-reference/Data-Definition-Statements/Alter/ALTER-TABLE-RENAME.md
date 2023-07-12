@@ -68,6 +68,12 @@ RENAME PARTITION old_partition_name new_partition_name;
 
 4. Modify the column name
 
+<version since="1.2">
+
+Modify the column name
+ 
+</version>
+
 grammar:
 
 ```sql
@@ -75,7 +81,7 @@ RENAME COLUMN old_column_name new_column_name;
 ```
 
 Notice:
-- Currently only tables with column unique id are supported, which are created with property 'light_schema_change'.
+- Currently only tables of the unique model are supported, which are created with property 'light_schema_change=true'.
 
 
 ### Example

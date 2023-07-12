@@ -18,21 +18,24 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
+#include "common/global_types.h"
 #include "exec/scan_node.h"
-#include "runtime/descriptors.h"
-#include "vec/exec/data_gen_functions/vdata_gen_function_inf.h"
 
 namespace doris {
 
-class TextConverter;
-class Tuple;
 class TupleDescriptor;
 class RuntimeState;
-class MemPool;
 class Status;
+class DescriptorTbl;
+class ObjectPool;
+class TPlanNode;
+class TScanRangeParams;
 
 namespace vectorized {
+class Block;
+class VDataGenFunctionInf;
 
 class VDataGenFunctionScanNode : public ScanNode {
 public:
@@ -44,10 +47,6 @@ public:
 
     // Start MySQL scan using _mysql_scanner.
     Status open(RuntimeState* state) override;
-
-    // Fill the next row batch by calling next() on the _mysql_scanner,
-    // converting text data in MySQL cells to binary data.
-    Status get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) override;
 
     Status get_next(RuntimeState* state, vectorized::Block* block, bool* eos) override;
 

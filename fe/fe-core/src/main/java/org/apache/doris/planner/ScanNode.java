@@ -37,9 +37,18 @@ import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.analysis.TupleId;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.NotImplementedException;
 import org.apache.doris.common.UserException;
+import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.planner.external.FederationBackendPolicy;
+import org.apache.doris.spi.Split;
 import org.apache.doris.statistics.StatisticalType;
+import org.apache.doris.statistics.query.StatsDelta;
+import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TScanRange;
+import org.apache.doris.thrift.TScanRangeLocation;
 import org.apache.doris.thrift.TScanRangeLocations;
 
 import com.google.common.base.MoreObjects;
@@ -63,12 +72,13 @@ import java.util.stream.Collectors;
 public abstract class ScanNode extends PlanNode {
     private static final Logger LOG = LogManager.getLogger(ScanNode.class);
     protected final TupleDescriptor desc;
-    // Use this if partition_prune_algorithm_version is 1.
+    // for distribution prunner
     protected Map<String, PartitionColumnFilter> columnFilters = Maps.newHashMap();
     // Use this if partition_prune_algorithm_version is 2.
     protected Map<String, ColumnRange> columnNameToRange = Maps.newHashMap();
     protected String sortColumn = null;
     protected Analyzer analyzer;
+    protected List<TScanRangeLocations> scanRangeLocations = Lists.newArrayList();
 
     public ScanNode(PlanNodeId id, TupleDescriptor desc, String planNodeName, StatisticalType statisticalType) {
         super(id, desc.getId().asList(), planNodeName, statisticalType);
@@ -103,6 +113,10 @@ public abstract class ScanNode extends PlanNode {
         sortColumn = column;
     }
 
+    protected List<Split> getSplits() throws UserException {
+        throw new NotImplementedException("Scan node sub class need to implement getSplits interface.");
+    }
+
     /**
      * cast expr to SlotDescriptor type
      */
@@ -119,6 +133,8 @@ public abstract class ScanNode extends PlanNode {
         }
     }
 
+    protected abstract void createScanRangeLocations() throws UserException;
+
     /**
      * Returns all scan ranges plus their locations. Needs to be preceded by a call to
      * finalize().
@@ -129,9 +145,18 @@ public abstract class ScanNode extends PlanNode {
      */
     public abstract List<TScanRangeLocations> getScanRangeLocations(long maxScanRangeLength);
 
+    /**
+     * Update required_slots in scan node contexts. This is called after Nereids planner do the projection.
+     * In the projection process, some slots may be removed. So call this to update the slots info.
+     * Currently, it is only used by ExternalFileScanNode, add the interface here to keep the Nereids code clean.
+     */
+    public void updateRequiredSlots(PlanTranslatorContext context,
+            Set<SlotId> requiredByProjectSlotIdSet) throws UserException {
+    }
+
     // TODO(ML): move it into PrunerOptimizer
-    public void computeColumnFilter() {
-        for (Column column : desc.getTable().getBaseSchema()) {
+    public void computeColumnFilter(List<Column> columns) {
+        for (Column column : columns) {
             SlotDescriptor slotDesc = desc.getColumnSlot(column.getName());
             if (null == slotDesc) {
                 continue;
@@ -144,17 +169,22 @@ public abstract class ScanNode extends PlanNode {
                 columnFilters.put(column.getName(), keyFilter);
             }
 
-            if (analyzer.partitionPruneV2Enabled()) {
-                ColumnRange columnRange = createColumnRange(slotDesc, conjuncts);
-                if (columnRange != null) {
-                    columnNameToRange.put(column.getName(), columnRange);
-                }
+            ColumnRange columnRange = createColumnRange(slotDesc, conjuncts);
+            if (columnRange != null) {
+                columnNameToRange.put(column.getName(), columnRange);
             }
         }
     }
 
-    private ColumnRange createColumnRange(SlotDescriptor desc,
-                                          List<Expr> conjuncts) {
+    public void computeColumnFilter() {
+        // for load scan node, table is null
+        if (desc.getTable() != null) {
+            computeColumnFilter(desc.getTable().getBaseSchema());
+        }
+    }
+
+    public static ColumnRange createColumnRange(SlotDescriptor desc,
+            List<Expr> conjuncts) {
         ColumnRange result = ColumnRange.create();
         for (Expr expr : conjuncts) {
             if (!expr.isBound(desc.getId())) {
@@ -209,8 +239,8 @@ public abstract class ScanNode extends PlanNode {
         return result;
     }
 
-    private ColumnRanges expressionToRanges(Expr expr,
-                                            SlotDescriptor desc) {
+    public static ColumnRanges expressionToRanges(Expr expr,
+            SlotDescriptor desc) {
         if (expr instanceof IsNullPredicate) {
             IsNullPredicate isNullPredicate = (IsNullPredicate) expr;
             if (isNullPredicate.isSlotRefChildren() && !isNullPredicate.isNotNull()) {
@@ -483,6 +513,13 @@ public abstract class ScanNode extends PlanNode {
                 super.debugString()).toString();
     }
 
+    // Some of scan node(eg, DataGenScanNode) does not need to check column priv
+    // (because the it has no corresponding catalog/db/table info)
+    // Subclass may override this method.
+    public boolean needToCheckColumnPriv() {
+        return true;
+    }
+
     public void setOutputSmap(ExprSubstitutionMap smap, Analyzer analyzer) {
         outputSmap = smap;
         if (smap.getRhs().stream().anyMatch(expr -> !(expr instanceof SlotRef))) {
@@ -497,7 +534,7 @@ public abstract class ScanNode extends PlanNode {
             // create a tmpSmap for the later setOutputSmap call
             ExprSubstitutionMap tmpSmap = new ExprSubstitutionMap(
                     Lists.newArrayList(outputTupleDesc.getSlots().stream().map(slot -> new SlotRef(slot)).collect(
-                            Collectors.toList())), Lists.newArrayList(projectList));
+                    Collectors.toList())), Lists.newArrayList(projectList));
             Set<SlotId> allOutputSlotIds = outputTupleDesc.getSlots().stream().map(slot -> slot.getId())
                     .collect(Collectors.toSet());
             List<Expr> newRhs = Lists.newArrayList();
@@ -511,10 +548,14 @@ public abstract class ScanNode extends PlanNode {
                         slotDesc.initFromExpr(rhsExpr);
                         if (rhsExpr instanceof SlotRef) {
                             slotDesc.setSrcColumn(((SlotRef) rhsExpr).getColumn());
+                            slotDesc.setIsMaterialized(((SlotRef) rhsExpr).getDesc().isMaterialized());
+                        } else {
+                            slotDesc.setIsMaterialized(true);
                         }
-                        slotDesc.setIsMaterialized(true);
-                        slotDesc.materializeSrcExpr();
-                        projectList.add(rhsExpr);
+                        if (slotDesc.isMaterialized()) {
+                            slotDesc.materializeSrcExpr();
+                            projectList.add(rhsExpr);
+                        }
                         newRhs.add(new SlotRef(slotDesc));
                         allOutputSlotIds.add(slotDesc.getId());
                     } else {
@@ -533,5 +574,46 @@ public abstract class ScanNode extends PlanNode {
             return Lists.newArrayList(outputTupleDesc.getId());
         }
         return tupleIds;
+    }
+
+    public StatsDelta genStatsDelta() throws AnalysisException {
+        return null;
+    }
+
+    public StatsDelta genQueryStats() throws UserException {
+        StatsDelta delta = genStatsDelta();
+        if (delta == null) {
+            return null;
+        }
+        for (SlotDescriptor slot : desc.getMaterializedSlots()) {
+            if (slot.isScanSlot() && slot.getColumn() != null) {
+                delta.addQueryStats(slot.getColumn().getName());
+            }
+        }
+
+        for (Expr expr : conjuncts) {
+            List<SlotId> slotIds = Lists.newArrayList();
+            expr.getIds(null, slotIds);
+            for (SlotId slotId : slotIds) {
+                SlotDescriptor slot = desc.getSlot(slotId.asInt());
+                if (slot.getColumn() != null) {
+                    delta.addFilterStats(slot.getColumn().getName());
+                }
+            }
+        }
+        return delta;
+    }
+
+    // Create a single scan range locations for the given backend policy.
+    // Used for those scan nodes which do not require data location.
+    public static TScanRangeLocations createSingleScanRangeLocations(FederationBackendPolicy backendPolicy) {
+        TScanRangeLocations scanRangeLocation = new TScanRangeLocations();
+        scanRangeLocation.setScanRange(new TScanRange());
+        TScanRangeLocation location = new TScanRangeLocation();
+        Backend be = backendPolicy.getNextBe();
+        location.setServer(new TNetworkAddress(be.getHost(), be.getBePort()));
+        location.setBackendId(be.getId());
+        scanRangeLocation.addToLocations(location);
+        return scanRangeLocation;
     }
 }

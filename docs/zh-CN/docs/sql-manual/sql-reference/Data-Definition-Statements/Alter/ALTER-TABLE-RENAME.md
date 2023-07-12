@@ -66,7 +66,13 @@ RENAME ROLLUP old_rollup_name new_rollup_name;
 RENAME PARTITION old_partition_name new_partition_name;    
 ```
 
-4. <version since="1.2" type="inline"> 修改 column 名称 </version>
+4.  修改 column 名称
+
+<version since="1.2">
+  
+修改 column 名称
+
+</version>
 
 语法：
 
@@ -75,7 +81,7 @@ RENAME COLUMN old_column_name new_column_name;
 ```
 
 注意：
-- 目前仅支持有 column unique id 的表, 通过 'light_schema_change' 属性创建。
+- 目前仅支持unique模型的表，并且建表时需要在property中设置light_schema_change=true
 
 
 ### Example

@@ -19,15 +19,30 @@
 
 #include "bthread/bthread.h"
 #include "bthread/task_group.h"
+#include <stdint.h>
+
+#include <algorithm>
+#include <vector>
+
 #include "common/status.h"
-#include "exprs/expr_context.h"
 #include "olap/tablet.h"
+#include "runtime/exec_env.h"
 #include "runtime/runtime_state.h"
-#include "vec/exprs/vexpr_context.h"
+#include "util/stopwatch.hpp"
+#include "vec/core/block.h"
+#include "vec/exprs/vexpr_fwd.h"
+
+namespace doris {
+class RuntimeProfile;
+class TupleDescriptor;
+
+namespace vectorized {
+class VExprContext;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
-class Block;
 class VScanNode;
 
 // Counter for load
@@ -42,7 +57,9 @@ class VScanner {
 public:
     VScanner(RuntimeState* state, VScanNode* parent, int64_t limit, RuntimeProfile* profile);
 
-    virtual ~VScanner() {}
+    virtual ~VScanner() = default;
+
+    virtual Status init() { return Status::OK(); }
 
     virtual Status open(RuntimeState* state) { return Status::OK(); }
 
@@ -50,8 +67,11 @@ public:
 
     virtual Status close(RuntimeState* state);
 
-    // Subclass must implement this to return the current rows read
-    virtual int64_t raw_rows_read() { return 0; }
+    virtual std::string get_name() { return ""; }
+
+    // return the readable name of current scan range.
+    // eg, for file scanner, return the current file path.
+    virtual std::string get_current_scan_range_name() { return "not implemented"; }
 
 protected:
     // Subclass should implement this to return data.
@@ -63,8 +83,17 @@ protected:
     // Filter the output block finally.
     Status _filter_output_block(Block* block);
 
+    // Not virtual, all child will call this method explictly
+    Status prepare(RuntimeState* state, const VExprContextSPtrs& conjuncts);
+
 public:
     VScanNode* get_parent() { return _parent; }
+
+    int64_t get_time_cost_ns() const { return _per_scanner_timer; }
+
+    int64_t get_rows_read() const { return _num_rows_read; }
+
+    bool is_init() const { return _is_init; }
 
     Status try_append_late_arrival_runtime_filter();
 
@@ -123,12 +152,6 @@ public:
 
     void set_status_on_failure(const Status& st) { _status = st; }
 
-    VExprContext** vconjunct_ctx_ptr() { return &_vconjunct_ctx; }
-
-    void reg_conjunct_ctxs(const std::vector<ExprContext*>& conjunct_ctxs) {
-        _conjunct_ctxs = conjunct_ctxs;
-    }
-
     // return false if _is_counted_down is already true,
     // otherwise, set _is_counted_down to true and return true.
     bool set_counted_down() {
@@ -141,11 +164,10 @@ public:
 
 protected:
     void _discard_conjuncts() {
-        if (_vconjunct_ctx) {
-            _vconjunct_ctx->mark_as_stale();
-            _stale_vexpr_ctxs.push_back(_vconjunct_ctx);
-            _vconjunct_ctx = nullptr;
+        for (auto& conjunct : _conjuncts) {
+            _stale_expr_ctxs.emplace_back(conjunct);
         }
+        _conjuncts.clear();
     }
 
 protected:
@@ -163,9 +185,6 @@ protected:
     // If _input_tuple_desc is set, the scanner will read data into
     // this _input_block first, then convert to the output block.
     Block _input_block;
-    // If _input_tuple_desc is set, this will point to _input_block,
-    // otherwise, it will point to the output block.
-    Block* _input_block_ptr;
 
     bool _is_open = false;
     bool _is_closed = false;
@@ -176,13 +195,15 @@ protected:
     // means all runtime filters are arrived and applied.
     int _applied_rf_num = 0;
     int _total_rf_num = 0;
-    // Cloned from _vconjunct_ctx of scan node.
+    // Cloned from _conjuncts of scan node.
     // It includes predicate in SQL and runtime filters.
-    VExprContext* _vconjunct_ctx = nullptr;
-    // Late arriving runtime filters will update _vconjunct_ctx.
-    // The old _vconjunct_ctx will be temporarily placed in _stale_vexpr_ctxs
+    VExprContextSPtrs _conjuncts;
+
+    VExprContextSPtrs _common_expr_ctxs_push_down;
+    // Late arriving runtime filters will update _conjuncts.
+    // The old _conjuncts will be temporarily placed in _stale_expr_ctxs
     // and will be destroyed at the end.
-    std::vector<VExprContext*> _stale_vexpr_ctxs;
+    VExprContextSPtrs _stale_expr_ctxs;
 
     // num of rows read from scanner
     int64_t _num_rows_read = 0;
@@ -200,14 +221,16 @@ protected:
     int64_t _scanner_wait_worker_timer = 0;
     int64_t _scan_cpu_timer = 0;
 
-    // File formats based push down predicate
-    std::vector<ExprContext*> _conjunct_ctxs;
-
     bool _is_load = false;
     // set to true after decrease the "_num_unfinished_scanners" in scanner context
     bool _is_counted_down = false;
 
+    bool _is_init = true;
+
     ScannerCounter _counter;
+    int64_t _per_scanner_timer = 0;
 };
+
+using VScannerSPtr = std::shared_ptr<VScanner>;
 
 } // namespace doris::vectorized

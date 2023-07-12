@@ -12,6 +12,12 @@ doris
 \N
 
 -- !sql --
+1	varchar	varchar
+2	varchar	\N
+3	varchar	\N
+4	varchar	\N
+
+-- !sql --
 ac
 
 -- !sql --
@@ -116,17 +122,23 @@ A
 -- !sql --
 AB
 
--- !sql --
+-- !sql_instr --
 2
 
--- !sql --
+-- !sql_instr --
 0
 
--- !sql --
+-- !sql_instr --
 \N
 
--- !sql --
+-- !sql_instr --
 \N
+
+-- !sql_instr --
+1
+
+-- !sql_instr --
+5
 
 -- !sql --
 abc123
@@ -146,11 +158,17 @@ doris
 -- !sql --
 3
 
--- !sql --
+-- !sql_locate --
 4
 
--- !sql --
+-- !sql_locate --
 0
+
+-- !sql_locate --
+1
+
+-- !sql_locate --
+5
 
 -- !sql --
 xyxhi
@@ -175,6 +193,9 @@ ab d
 
 -- !sql --
 1,123.40
+
+-- !sql --
+1,000.00
 
 -- !sql --
 true
@@ -225,7 +246,7 @@ hello
 world
 
 -- !sql --
-\\N
+\N
 
 -- !sql --
 world
@@ -234,10 +255,10 @@ world
 hello
 
 -- !sql --
-\\N
+\N
 
 -- !sql --
-\\N
+\N
 
 -- !sql --
 abc
@@ -246,7 +267,7 @@ abc
 #xyz
 
 -- !sql --
-\\N
+\N
 
 -- !sql --
 xyz
@@ -255,7 +276,7 @@ xyz
 123#
 
 -- !sql --
-\\N
+\N
 
 -- !sql --
 true
@@ -283,6 +304,25 @@ c1
 
 -- !sql --
 bc
+
+-- !sql_substring1 --
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
+\N
 
 -- !sql --
 
@@ -349,3 +389,117 @@ prefix_string2
 
 -- !sql --
 prefix_string
+
+-- !sql --
+\N
+
+-- !sql --
+hello
+
+-- !sql --
+doris
+
+-- !sql --
+\N
+
+-- !sql --
+tNEW-STRorigin str
+
+-- !sql --
+d***is
+
+-- !sql_func_char_const1 --
+D
+
+-- !sql_func_char_const2 --
+Doris
+
+-- !sql_func_char_const3 --
+ Doris
+
+-- !sql_func_char_const4 --
+Doris 
+
+-- !sql_func_char_const5 --
+6
+
+-- !sql_func_char_const6 --
+Dor is
+
+-- !sql_func_char_const7 --
+多
+
+-- !sql_func_char_const8 --
+3
+
+-- !sql_func_char_const9 --
+多睿丝
+
+-- !sql_func_char1 --
+ 
+a
+a
+a
+a
+a
+a
+a
+
+-- !sql_func_char2 --
+ bcd
+acd
+a cd
+abd
+ab d
+abc
+abc 
+abcd
+
+-- !sql_func_char3 --
+A bcd
+Aacd
+Aa cd
+Aabd
+Aab d
+Aabc
+Aabc 
+Aabcd
+
+-- !sql_func_char4 --
+ 多bcd
+a多cd
+a多 cd
+a多bd
+a多b d
+a多bc
+a多bc 
+a多bcd
+
+-- !sql_func_char5 --
+ bcd多
+acd多
+a cd多
+abd多
+ab d多
+abc多
+abc 多
+abcd多
+
+-- !sql_func_char6 --
+\N
+多
+多
+多
+
+-- !sql_func_char7 --
+多 
+多睿丝
+多睿丝
+多睿丝
+
+-- !sql_func_char8 --
+多 A
+多睿丝A
+多睿丝A
+多睿丝A
+

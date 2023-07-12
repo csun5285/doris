@@ -17,11 +17,12 @@
 
 #pragma once
 
-#include <glog/logging.h>
-
+// IWYU pragma: no_include <bits/chrono.h>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+
+#include "common/logging.h"
 
 namespace doris {
 

@@ -34,7 +34,7 @@ import org.apache.doris.qe.ShowResultSetMetaData;
 import com.google.common.collect.Lists;
 import com.google.gson.annotations.SerializedName;
 import lombok.Data;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -142,7 +142,7 @@ public class RowPolicy extends Policy {
 
     @Override
     public RowPolicy clone() {
-        return new RowPolicy(this.policyId, this.policyName, this.dbId, this.user, this.originStmt, this.tableId,
+        return new RowPolicy(this.id, this.policyName, this.dbId, this.user, this.originStmt, this.tableId,
                 this.filterType, this.wherePredicate);
     }
 

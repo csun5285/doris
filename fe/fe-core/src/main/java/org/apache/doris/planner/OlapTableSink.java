@@ -23,6 +23,7 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.DistributionInfo;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.HashDistributionInfo;
+import org.apache.doris.catalog.Index;
 import org.apache.doris.catalog.ListPartitionItem;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
@@ -37,7 +38,6 @@ import org.apache.doris.catalog.RandomDistributionInfo;
 import org.apache.doris.catalog.RangePartitionItem;
 import org.apache.doris.catalog.Tablet;
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
@@ -54,6 +54,7 @@ import org.apache.doris.thrift.TDataSinkType;
 import org.apache.doris.thrift.TExplainLevel;
 import org.apache.doris.thrift.TExprNode;
 import org.apache.doris.thrift.TNodeInfo;
+import org.apache.doris.thrift.TOlapTableIndex;
 import org.apache.doris.thrift.TOlapTableIndexSchema;
 import org.apache.doris.thrift.TOlapTableIndexTablets;
 import org.apache.doris.thrift.TOlapTableLocationParam;
@@ -65,8 +66,6 @@ import org.apache.doris.thrift.TPaloNodesInfo;
 import org.apache.doris.thrift.TStorageFormat;
 import org.apache.doris.thrift.TTabletLocation;
 import org.apache.doris.thrift.TUniqueId;
-import org.apache.doris.transaction.DatabaseTransactionMgr;
-import org.apache.doris.transaction.GlobalTransactionMgr;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
@@ -74,12 +73,13 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -93,6 +93,9 @@ public class OlapTableSink extends DataSink {
     private TupleDescriptor tupleDescriptor;
     // specified partition ids.
     private List<Long> partitionIds;
+    // partial update input columns
+    private boolean isPartialUpdate = false;
+    private HashSet<String> partialUpdateInputColumns;
 
     // set after init called
     private TDataSink tDataSink;
@@ -146,6 +149,11 @@ public class OlapTableSink extends DataSink {
             singleReplicaLoad = false;
             LOG.warn("Single replica load not supported by TStorageFormat.V1. table: {}", dstTable.getName());
         }
+    }
+
+    public void setPartialUpdateInputColumns(boolean isPartialUpdate, HashSet<String> columns) {
+        this.isPartialUpdate = isPartialUpdate;
+        this.partialUpdateInputColumns = columns;
     }
 
     public void updateLoadId(TUniqueId newLoadId) {
@@ -219,16 +227,31 @@ public class OlapTableSink extends DataSink {
             MaterializedIndexMeta indexMeta = pair.getValue();
             List<String> columns = Lists.newArrayList();
             List<TColumn> columnsDesc = Lists.newArrayList();
-            columns.addAll(indexMeta.getSchema().stream().map(Column::getName).collect(Collectors.toList()));
+            List<TOlapTableIndex> indexDesc = Lists.newArrayList();
+            columns.addAll(indexMeta.getSchema().stream().map(Column::getNonShadowName).collect(Collectors.toList()));
             for (Column column : indexMeta.getSchema()) {
                 TColumn tColumn = column.toThrift();
                 column.setIndexFlag(tColumn, table);
                 columnsDesc.add(tColumn);
             }
+            for (Index index : indexMeta.getIndexes()) {
+                TOlapTableIndex tIndex = index.toThrift();
+                indexDesc.add(tIndex);
+            }
             TOlapTableIndexSchema indexSchema = new TOlapTableIndexSchema(pair.getKey(), columns,
                     indexMeta.getSchemaHash());
+            if (indexMeta.getWhereClause() != null) {
+                indexSchema.setWhereClause(indexMeta.getWhereClause().treeToThrift());
+            }
             indexSchema.setColumnsDesc(columnsDesc);
+            indexSchema.setIndexesDesc(indexDesc);
             schemaParam.addToIndexes(indexSchema);
+        }
+        schemaParam.setIsPartialUpdate(isPartialUpdate);
+        if (isPartialUpdate) {
+            for (String s : partialUpdateInputColumns) {
+                schemaParam.addToPartialUpdateInputColumns(s);
+            }
         }
         return schemaParam;
     }
@@ -283,6 +306,7 @@ public class OlapTableSink extends DataSink {
                                 index.getTablets().stream().map(Tablet::getId).collect(Collectors.toList()))));
                         tPartition.setNumBuckets(index.getTablets().size());
                     }
+                    tPartition.setIsMutable(table.getPartitionInfo().getIsMutable(partitionId));
                     partitionParam.addToPartitions(tPartition);
 
                     DistributionInfo distInfo = partition.getDistributionInfo();
@@ -307,6 +331,7 @@ public class OlapTableSink extends DataSink {
 
                 TOlapTablePartition tPartition = new TOlapTablePartition();
                 tPartition.setId(partition.getId());
+                tPartition.setIsMutable(table.getPartitionInfo().getIsMutable(partition.getId()));
                 // No lowerBound and upperBound for this range
                 for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.ALL)) {
                     tPartition.addToIndexes(new TOlapTableIndexTablets(index.getId(), Lists.newArrayList(
@@ -348,6 +373,7 @@ public class OlapTableSink extends DataSink {
                     tExprNodes.add(partitionKey.getKeys().get(i).treeToThrift().getNodes().get(0));
                 }
                 tPartition.addToInKeys(tExprNodes);
+                tPartition.setIsDefaultPartition(partitionItem.isDefaultPartition());
             }
         }
     }
@@ -357,7 +383,6 @@ public class OlapTableSink extends DataSink {
         TOlapTableLocationParam slaveLocationParam = new TOlapTableLocationParam();
         // BE id -> path hash
         Multimap<Long, Long> allBePathsMap = HashMultimap.create();
-        int replicaNum = 0;
         for (Long partitionId : partitionIds) {
             Partition partition = table.getPartition(partitionId);
             int quorum = table.getPartitionInfo().getReplicaAllocation(partition.getId()).getTotalReplicaNum() / 2 + 1;
@@ -387,7 +412,6 @@ public class OlapTableSink extends DataSink {
                                 Lists.newArrayList(bePathsMap.keySet())));
                     }
                     allBePathsMap.putAll(bePathsMap);
-                    replicaNum += bePathsMap.size();
                 }
             }
         }
@@ -398,27 +422,13 @@ public class OlapTableSink extends DataSink {
         if (!st.ok()) {
             throw new DdlException(st.getErrorMsg());
         }
-
-        if (Config.isCloudMode()) {
-            return Arrays.asList(locationParam, slaveLocationParam);
-        }
-
-        long dbId = tDataSink.getOlapTableSink().getDbId();
-        long txnId = tDataSink.getOlapTableSink().getTxnId();
-        try {
-            DatabaseTransactionMgr mgr = ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr())
-                    .getDatabaseTransactionMgr(dbId);
-            mgr.registerTxnReplicas(txnId, replicaNum);
-        } catch (Exception e) {
-            LOG.error("register txn replica failed, txnId={}, dbId={}", txnId, dbId);
-        }
         return Arrays.asList(locationParam, slaveLocationParam);
     }
 
     private TPaloNodesInfo createPaloNodesInfo() {
         TPaloNodesInfo nodesInfo = new TPaloNodesInfo();
         SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
-        for (Long id : systemInfoService.getBackendIds(false)) {
+        for (Long id : systemInfoService.getAllBackendIds(false)) {
             Backend backend = systemInfoService.getBackend(id);
             nodesInfo.addToNodes(new TNodeInfo(backend.getId(), 0, backend.getHost(), backend.getBrpcPort()));
         }

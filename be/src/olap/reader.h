@@ -17,33 +17,67 @@
 
 #pragma once
 
-#include <thrift/protocol/TDebugProtocol.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/PlanNodes_types.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "exprs/bitmapfilter_predicate.h"
-#include "exprs/bloomfilter_predicate.h"
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "common/status.h"
 #include "exprs/function_filter.h"
-#include "exprs/hybrid_set.h"
+#include "gutil/strings/substitute.h"
+#include "io/io_common.h"
 #include "olap/delete_handler.h"
+#include "olap/iterators.h"
+#include "olap/olap_common.h"
+#include "olap/olap_tuple.h"
 #include "olap/row_cursor.h"
+#include "olap/rowset/rowset.h"
+#include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_reader.h"
+#include "olap/rowset/rowset_reader_context.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
-#include "util/runtime_profile.h"
-#include "vec/exprs/vexpr_context.h"
 
 namespace doris {
 
-class Tablet;
-class RowCursor;
-class RowBlock;
-class CollectIterator;
 class RuntimeState;
+class BitmapFilterFuncBase;
+class BloomFilterFuncBase;
+class ColumnPredicate;
+class DeleteBitmap;
+class HybridSetBase;
+class RuntimeProfile;
 
 namespace vectorized {
 class VCollectIterator;
 class Block;
 class VExpr;
+class Arena;
+class VExprContext;
 } // namespace vectorized
+
+// Used to compare row with input scan key. Scan key only contains key columns,
+// row contains all key columns, which is superset of key columns.
+// So we should compare the common prefix columns of lhs and rhs.
+//
+// NOTE: if you are not sure if you can use it, please don't use this function.
+inline int compare_row_key(const RowCursor& lhs, const RowCursor& rhs) {
+    auto cmp_cids = std::min(lhs.schema()->num_column_ids(), rhs.schema()->num_column_ids());
+    for (uint32_t cid = 0; cid < cmp_cids; ++cid) {
+        auto res = lhs.schema()->column(cid)->compare_cell(lhs.cell(cid), rhs.cell(cid));
+        if (res != 0) {
+            return res;
+        }
+    }
+    return 0;
+}
 
 class TabletReader {
     struct KeysParam {
@@ -61,7 +95,7 @@ public:
     struct ReaderParams {
         TabletSharedPtr tablet;
         TabletSchemaSPtr tablet_schema;
-        ReaderType reader_type = READER_QUERY;
+        ReaderType reader_type = ReaderType::READER_QUERY;
         bool direct_mode = false;
         bool aggregation = false;
         bool need_agg_finalize = true;
@@ -78,10 +112,8 @@ public:
         std::vector<TCondition> conditions;
         std::vector<std::pair<string, std::shared_ptr<BloomFilterFuncBase>>> bloom_filters;
         std::vector<std::pair<string, std::shared_ptr<BitmapFilterFuncBase>>> bitmap_filters;
-
-        std::vector<std::vector<TCondition>> compound_conditions;
-
         std::vector<std::pair<string, std::shared_ptr<HybridSetBase>>> in_filters;
+        std::vector<TCondition> conditions_except_leafnode_of_andnode;
         std::vector<FunctionFilter> function_filters;
         std::vector<RowsetMetaSharedPtr> delete_predicates;
 
@@ -89,7 +121,14 @@ public:
         DeleteBitmap* delete_bitmap {nullptr};
 
         std::vector<RowsetReaderSharedPtr> rs_readers;
+        // if rs_readers_segment_offsets is not empty, means we only scan
+        // [pair.first, pair.second) segment in rs_reader, only effective in dup key
+        // and pipeline
+        std::vector<std::pair<int, int>> rs_readers_segment_offsets;
+
+        // return_columns is init from query schema
         std::vector<uint32_t> return_columns;
+        // output_columns only contain columns in OrderByExprs and outputExprs
         std::set<int32_t> output_columns;
         RuntimeProfile* profile = nullptr;
         RuntimeState* runtime_state = nullptr;
@@ -99,6 +138,8 @@ public:
         std::unordered_set<uint32_t>* tablet_columns_convert_to_null_set = nullptr;
         TPushAggOp::type push_down_agg_type_opt = TPushAggOp::NONE;
         vectorized::VExpr* remaining_vconjunct_root = nullptr;
+        std::vector<vectorized::VExprSPtr> remaining_conjunct_roots;
+        vectorized::VExprContextSPtrs common_expr_ctxs_push_down;
 
         // used for compaction to record row ids
         bool record_rowids = false;
@@ -113,17 +154,14 @@ public:
         // limit of rows for read_orderby_key
         size_t read_orderby_key_limit = 0;
         // filter_block arguments
-        vectorized::VExprContext** filter_block_vconjunct_ctx_ptr = nullptr;
+        vectorized::VExprContextSPtrs filter_block_conjuncts;
+
         // for vertical compaction
-        bool is_key_column_group = false; 
+        bool is_key_column_group = false;
 
-        bool lazy_open_segment = false;
+        bool is_segcompaction = false;
 
-        bool no_need_to_read_index = false;
-
-        bool enable_limit_optimize = false;
-
-        size_t limit_row_nums = 0;
+        std::vector<RowwiseIteratorUPtr>* segment_iters_ptr = nullptr;
 
         void check_validation() const;
 
@@ -140,20 +178,11 @@ public:
     // Initialize TabletReader with tablet, data version and fetch range.
     virtual Status init(const ReaderParams& read_params);
 
-    // Read next row with aggregation.
-    // Return OK and set `*eof` to false when next row is read into `row_cursor`.
-    // Return OK and set `*eof` to true when no more rows can be read.
-    // Return others when unexpected error happens.
-    virtual Status next_row_with_aggregation(RowCursor* row_cursor, MemPool* mem_pool,
-                                             ObjectPool* agg_pool, bool* eof) = 0;
-
     // Read next block with aggregation.
     // Return OK and set `*eof` to false when next block is read
     // Return OK and set `*eof` to true when no more rows can be read.
     // Return others when unexpected error happens.
-    // TODO: Rethink here we still need mem_pool and agg_pool?
-    virtual Status next_block_with_aggregation(vectorized::Block* block, MemPool* mem_pool,
-                                               ObjectPool* agg_pool, bool* eof) {
+    virtual Status next_block_with_aggregation(vectorized::Block* block, bool* eof) {
         return Status::Error<ErrorCode::READER_INITIALIZE_ERROR>();
     }
 
@@ -165,7 +194,9 @@ public:
                _stats.rows_vec_cond_filtered + _stats.rows_short_circuit_cond_filtered;
     }
 
-    void set_batch_size(int batch_size) { _batch_size = batch_size; }
+    void set_batch_size(int batch_size) { _reader_context.batch_size = batch_size; }
+
+    int batch_size() const { return _reader_context.batch_size; }
 
     const OlapReaderStatistics& stats() const { return _stats; }
     OlapReaderStatistics* mutable_stats() { return &_stats; }
@@ -176,17 +207,13 @@ public:
             const std::vector<RowsetSharedPtr>& input_rowsets,
             TabletReader::ReaderParams* reader_params, vectorized::Block* block);
 
-    void set_ctx(vectorized::ScannerContext* ctx) { _ctx = ctx; }
-
 protected:
-    friend class CollectIterator;
     friend class vectorized::VCollectIterator;
     friend class DeleteHandler;
 
     Status _init_params(const ReaderParams& read_params);
 
-    Status _capture_rs_readers(const ReaderParams& read_params,
-                               std::vector<RowsetReaderSharedPtr>* valid_rs_readers);
+    Status _capture_rs_readers(const ReaderParams& read_params);
 
     bool _optimize_for_single_rowset(const std::vector<RowsetReaderSharedPtr>& rs_readers);
 
@@ -194,9 +221,9 @@ protected:
 
     Status _init_orderby_keys_param(const ReaderParams& read_params);
 
-    void _init_conditions_param(const ReaderParams& read_params);
+    Status _init_conditions_param(const ReaderParams& read_params);
 
-    void _init_compound_conditions_param(const ReaderParams& read_params);
+    void _init_conditions_param_except_leafnode_of_andnode(const ReaderParams& read_params);
 
     ColumnPredicate* _parse_to_predicate(
             const std::pair<std::string, std::shared_ptr<BloomFilterFuncBase>>& bloom_filter);
@@ -216,7 +243,7 @@ protected:
     TabletSharedPtr tablet() { return _tablet; }
     const TabletSchema& tablet_schema() { return *_tablet_schema; }
 
-    std::unique_ptr<MemPool> _predicate_mem_pool;
+    std::unique_ptr<vectorized::Arena> _predicate_arena;
     std::vector<uint32_t> _return_columns;
     // used for special optimization for query : ORDER BY key [ASC|DESC] LIMIT n
     // columns for orderby keys
@@ -232,27 +259,24 @@ protected:
     std::vector<bool> _is_lower_keys_included;
     std::vector<bool> _is_upper_keys_included;
     std::vector<ColumnPredicate*> _col_predicates;
-    std::vector<ColumnPredicate*> _all_compound_col_predicates;
+    std::vector<ColumnPredicate*> _col_preds_except_leafnode_of_andnode;
     std::vector<ColumnPredicate*> _value_col_predicates;
     DeleteHandler _delete_handler;
 
     bool _aggregation = false;
     // for agg query, we don't need to finalize when scan agg object data
     bool _need_agg_finalize = true;
-    ReaderType _reader_type = READER_QUERY;
+    ReaderType _reader_type = ReaderType::READER_QUERY;
     bool _next_delete_flag = false;
     bool _filter_delete = false;
     int32_t _sequence_col_idx = -1;
     bool _direct_mode = false;
-    int _batch_size = 1024;
 
     std::vector<uint32_t> _key_cids;
     std::vector<uint32_t> _value_cids;
 
     uint64_t _merged_rows = 0;
     OlapReaderStatistics _stats;
-
-    vectorized::ScannerContext* _ctx = nullptr;
 };
 
 } // namespace doris

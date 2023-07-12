@@ -20,11 +20,23 @@
 
 #include "vec/data_types/data_type_decimal.h"
 
-#include "gen_cpp/data.pb.h"
+#include <fmt/format.h>
+#include <gen_cpp/data.pb.h>
+#include <string.h>
+
+#include <utility>
+
+#include "runtime/decimalv2_value.h"
+#include "util/string_parser.hpp"
+#include "vec/columns/column.h"
+#include "vec/columns/column_const.h"
+#include "vec/columns/columns_number.h"
 #include "vec/common/assert_cast.h"
 #include "vec/common/int_exp.h"
+#include "vec/common/string_buffer.hpp"
 #include "vec/common/typeid_cast.h"
 #include "vec/io/io_helper.h"
+#include "vec/io/reader_buffer.h"
 
 namespace doris::vectorized {
 
@@ -45,29 +57,29 @@ bool DataTypeDecimal<T>::equals(const IDataType& rhs) const {
 
 template <typename T>
 std::string DataTypeDecimal<T>::to_string(const IColumn& column, size_t row_num) const {
-    T value = assert_cast<const ColumnType&>(*column.convert_to_full_column_if_const().get())
-                      .get_data()[row_num];
-    std::ostringstream buf;
-    write_text(value, scale, buf);
-    return buf.str();
+    auto result = check_column_const_set_readability(column, row_num);
+    ColumnPtr ptr = result.first;
+    row_num = result.second;
+
+    auto value = assert_cast<const ColumnType&>(*ptr).get_element(row_num);
+    return value.to_string(scale);
 }
 
 template <typename T>
 void DataTypeDecimal<T>::to_string(const IColumn& column, size_t row_num,
                                    BufferWritable& ostr) const {
-    // TODO: Reduce the copy in std::string mem to ostr, like DataTypeNumber
+    auto result = check_column_const_set_readability(column, row_num);
+    ColumnPtr ptr = result.first;
+    row_num = result.second;
+
     if constexpr (!IsDecimalV2<T>) {
-        T value = assert_cast<const ColumnType&>(*column.convert_to_full_column_if_const().get())
-                          .get_data()[row_num];
-        std::ostringstream buf;
-        write_text(value, scale, buf);
-        std::string str = buf.str();
+        T value = assert_cast<const ColumnType&>(*ptr).get_element(row_num);
+        auto str = value.to_string(scale);
         ostr.write(str.data(), str.size());
     } else {
-        DecimalV2Value value = (DecimalV2Value)assert_cast<const ColumnType&>(
-                                       *column.convert_to_full_column_if_const().get())
-                                       .get_data()[row_num];
-        auto str = value.to_string();
+        DecimalV2Value value =
+                (DecimalV2Value)assert_cast<const ColumnType&>(*ptr).get_element(row_num);
+        auto str = value.to_string(scale);
         ostr.write(str.data(), str.size());
     }
 }
@@ -130,14 +142,6 @@ template <typename T>
 Field DataTypeDecimal<T>::get_default() const {
     return DecimalField(T(0), scale);
 }
-
-template <typename T>
-DataTypePtr DataTypeDecimal<T>::promote_numeric_type() const {
-    using PromotedType = std::conditional_t<IsDecimalV2<T>, DataTypeDecimal<Decimal128>,
-                                            DataTypeDecimal<Decimal128I>>;
-    return std::make_shared<PromotedType>(PromotedType::max_precision(), scale);
-}
-
 template <typename T>
 MutableColumnPtr DataTypeDecimal<T>::create_column() const {
     if constexpr (IsDecimalV2<T>) {

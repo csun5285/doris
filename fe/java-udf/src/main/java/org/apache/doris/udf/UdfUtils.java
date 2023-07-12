@@ -17,6 +17,7 @@
 
 package org.apache.doris.udf;
 
+import org.apache.doris.catalog.ArrayType;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
@@ -28,6 +29,9 @@ import org.apache.doris.thrift.TTypeNode;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
+import com.vesoft.nebula.client.graph.data.DateTimeWrapper;
+import com.vesoft.nebula.client.graph.data.DateWrapper;
+import com.vesoft.nebula.client.graph.data.ValueWrapper;
 import org.apache.log4j.Logger;
 import sun.misc.Unsafe;
 
@@ -89,13 +93,15 @@ public class UdfUtils {
         DATETIMEV2("DATETIMEV2", TPrimitiveType.DATETIMEV2, 8),
         DECIMAL32("DECIMAL32", TPrimitiveType.DECIMAL32, 4),
         DECIMAL64("DECIMAL64", TPrimitiveType.DECIMAL64, 8),
-        DECIMAL128("DECIMAL128", TPrimitiveType.DECIMAL128I, 16);
+        DECIMAL128("DECIMAL128", TPrimitiveType.DECIMAL128I, 16),
+        ARRAY_TYPE("ARRAY_TYPE", TPrimitiveType.ARRAY, 0);
 
         private final String description;
         private final TPrimitiveType thriftType;
         private final int len;
         private int precision;
         private int scale;
+        private Type itemType;
 
         JavaUdfDataType(String description, TPrimitiveType thriftType, int len) {
             this.description = description;
@@ -144,6 +150,8 @@ public class UdfUtils {
             } else if (c == BigDecimal.class) {
                 return Sets.newHashSet(JavaUdfDataType.DECIMALV2, JavaUdfDataType.DECIMAL32, JavaUdfDataType.DECIMAL64,
                         JavaUdfDataType.DECIMAL128);
+            } else if (c == java.util.ArrayList.class) {
+                return Sets.newHashSet(JavaUdfDataType.ARRAY_TYPE);
             }
             return Sets.newHashSet(JavaUdfDataType.INVALID_TYPE);
         }
@@ -175,6 +183,14 @@ public class UdfUtils {
         public void setScale(int scale) {
             this.scale = scale;
         }
+
+        public Type getItemType() {
+            return itemType;
+        }
+
+        public void setItemType(Type type) {
+            this.itemType = type;
+        }
     }
 
     protected static Pair<Type, Integer> fromThrift(TTypeDesc typeDesc, int nodeIdx) throws InternalException {
@@ -195,12 +211,27 @@ public class UdfUtils {
                             && scalarType.isSetScale());
                     type = ScalarType.createDecimalType(scalarType.getPrecision(),
                             scalarType.getScale());
+                } else if (scalarType.getType() == TPrimitiveType.DECIMAL32
+                        || scalarType.getType() == TPrimitiveType.DECIMAL64
+                        || scalarType.getType() == TPrimitiveType.DECIMAL128I) {
+                    Preconditions.checkState(scalarType.isSetPrecision()
+                            && scalarType.isSetScale());
+                    type = ScalarType.createDecimalV3Type(scalarType.getPrecision(),
+                            scalarType.getScale());
                 } else {
                     type = ScalarType.createType(
                             PrimitiveType.fromThrift(scalarType.getType()));
                 }
                 break;
             }
+            case ARRAY: {
+                Preconditions.checkState(nodeIdx + 1 < typeDesc.getTypesSize());
+                Pair<Type, Integer> childType = fromThrift(typeDesc, nodeIdx + 1);
+                type = new ArrayType(childType.first);
+                nodeIdx = childType.second;
+                break;
+            }
+
             default:
                 throw new InternalException("Return type " + node.getType() + " is not supported now!");
         }
@@ -238,7 +269,7 @@ public class UdfUtils {
     }
 
     public static URLClassLoader getClassLoader(String jarPath, ClassLoader parent)
-                                    throws MalformedURLException, FileNotFoundException {
+            throws MalformedURLException, FileNotFoundException {
         File file = new File(jarPath);
         if (!file.exists()) {
             throw new FileNotFoundException("Can not find local file: " + jarPath);
@@ -264,10 +295,17 @@ public class UdfUtils {
         Object[] res = javaTypes.stream().filter(
                 t -> t.getPrimitiveType() == retType.getPrimitiveType().toThrift()).toArray();
 
-        JavaUdfDataType result = res.length == 0 ? (JavaUdfDataType) javaTypes.toArray()[0] : (JavaUdfDataType) res[0];
+        JavaUdfDataType result = res.length == 0 ? javaTypes.iterator().next() : (JavaUdfDataType) res[0];
         if (retType.isDecimalV3() || retType.isDatetimeV2()) {
             result.setPrecision(retType.getPrecision());
             result.setScale(((ScalarType) retType).getScalarScale());
+        } else if (retType.isArrayType()) {
+            ArrayType arrType = (ArrayType) retType;
+            result.setItemType(arrType.getItemType());
+            if (arrType.getItemType().isDatetimeV2() || arrType.getItemType().isDecimalV3()) {
+                result.setPrecision(arrType.getItemType().getPrecision());
+                result.setScale(((ScalarType) arrType.getItemType()).getScalarScale());
+            }
         }
         return Pair.of(res.length != 0, result);
     }
@@ -286,10 +324,13 @@ public class UdfUtils {
             int finalI = i;
             Object[] res = javaTypes.stream().filter(
                     t -> t.getPrimitiveType() == parameterTypes[finalI].getPrimitiveType().toThrift()).toArray();
-            inputArgTypes[i] = res.length == 0 ? (JavaUdfDataType) javaTypes.toArray()[0] : (JavaUdfDataType) res[0];
+            inputArgTypes[i] = res.length == 0 ? javaTypes.iterator().next() : (JavaUdfDataType) res[0];
             if (parameterTypes[finalI].isDecimalV3() || parameterTypes[finalI].isDatetimeV2()) {
                 inputArgTypes[i].setPrecision(parameterTypes[finalI].getPrecision());
                 inputArgTypes[i].setScale(((ScalarType) parameterTypes[finalI]).getScalarScale());
+            } else if (parameterTypes[finalI].isArrayType()) {
+                ArrayType arrType = (ArrayType) parameterTypes[finalI];
+                inputArgTypes[i].setItemType(arrType.getItemType());
             }
             if (res.length == 0) {
                 return Pair.of(false, inputArgTypes);
@@ -504,6 +545,12 @@ public class UdfUtils {
                 | (long) day << 37 | (long) month << 42 | (long) year << 46;
     }
 
+    public static long convertToDateTimeV2(
+            int year, int month, int day, int hour, int minute, int second, int microsecond) {
+        return (long) microsecond | (long) second << 20 | (long) minute << 26 | (long) hour << 32
+                | (long) day << 37 | (long) month << 42 | (long) year << 46;
+    }
+
     public static long convertToDateTimeV2(Object obj, Class clz) {
         if (LocalDateTime.class.equals(clz)) {
             LocalDateTime date = (LocalDateTime) obj;
@@ -512,11 +559,11 @@ public class UdfUtils {
         } else if (org.joda.time.DateTime.class.equals(clz)) {
             org.joda.time.DateTime date = (org.joda.time.DateTime) obj;
             return convertToDateTimeV2(date.getYear(), date.getMonthOfYear(), date.getDayOfMonth(), date.getHourOfDay(),
-                    date.getMinuteOfHour(), date.getSecondOfMinute());
+                    date.getMinuteOfHour(), date.getSecondOfMinute(), date.getMillisOfSecond() * 1000);
         } else if (org.joda.time.LocalDateTime.class.equals(clz)) {
             org.joda.time.LocalDateTime date = (org.joda.time.LocalDateTime) obj;
             return convertToDateTimeV2(date.getYear(), date.getMonthOfYear(), date.getDayOfMonth(), date.getHourOfDay(),
-                    date.getMinuteOfHour(), date.getSecondOfMinute());
+                    date.getMinuteOfHour(), date.getSecondOfMinute(), date.getMillisOfSecond() * 1000);
         } else {
             return 0;
         }
@@ -552,5 +599,57 @@ public class UdfUtils {
             bytes[length - 1 - i] = temp;
         }
         return bytes;
+    }
+
+    // only used by nebula-graph
+    // transfer to an object that can copy to the block
+    public static Object convertObject(ValueWrapper value) {
+        try {
+            if (value.isLong()) {
+                return value.asLong();
+            }
+            if (value.isBoolean()) {
+                return value.asBoolean();
+            }
+            if (value.isDouble()) {
+                return value.asDouble();
+            }
+            if (value.isString()) {
+                return value.asString();
+            }
+            if (value.isTime()) {
+                return value.asTime().toString();
+            }
+            if (value.isDate()) {
+                DateWrapper date = value.asDate();
+                return LocalDate.of(date.getYear(), date.getMonth(), date.getDay());
+            }
+            if (value.isDateTime()) {
+                DateTimeWrapper dateTime = value.asDateTime();
+                return LocalDateTime.of(dateTime.getYear(), dateTime.getMonth(), dateTime.getDay(),
+                        dateTime.getHour(), dateTime.getMinute(), dateTime.getSecond(), dateTime.getMicrosec() * 1000);
+            }
+            if (value.isVertex()) {
+                return value.asNode().toString();
+            }
+            if (value.isEdge()) {
+                return value.asRelationship().toString();
+            }
+            if (value.isPath()) {
+                return value.asPath().toString();
+            }
+            if (value.isList()) {
+                return value.asList().toString();
+            }
+            if (value.isSet()) {
+                return value.asSet().toString();
+            }
+            if (value.isMap()) {
+                return value.asMap().toString();
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

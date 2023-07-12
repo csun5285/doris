@@ -22,7 +22,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.UserException;
-import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.Auth;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 
@@ -43,12 +43,13 @@ public class AlterSystemStmt extends DdlStmt {
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
         if (Config.isCloudMode()
-                && !ConnectContext.get().getCurrentUserIdentity().getUser().equals(PaloAuth.ROOT_USER)) {
+                && !ConnectContext.get().getCurrentUserIdentity().getUser().equals(Auth.ROOT_USER)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_UNSUPPORTED_OPERATION_ERROR);
         }
 
-        if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
-            ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "NODE");
+        if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,
+                                                "NODE");
         }
 
         Preconditions.checkState((alterClause instanceof AddBackendClause)
@@ -60,7 +61,10 @@ public class AlterSystemStmt extends DdlStmt {
                 || (alterClause instanceof DropFollowerClause)
                 || (alterClause instanceof ModifyBrokerClause)
                 || (alterClause instanceof AlterLoadErrorUrlClause)
-                || (alterClause instanceof ModifyBackendClause));
+                || (alterClause instanceof ModifyBackendClause)
+                || (alterClause instanceof ModifyBackendHostNameClause)
+                || (alterClause instanceof ModifyFrontendHostNameClause)
+        );
 
         alterClause.analyze(analyzer);
     }

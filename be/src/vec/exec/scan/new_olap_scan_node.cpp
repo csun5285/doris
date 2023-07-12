@@ -17,17 +17,56 @@
 
 #include "vec/exec/scan/new_olap_scan_node.h"
 
-#include <bthread/bthread.h>
+#include <fmt/format.h>
+#include <gen_cpp/Exprs_types.h>
+#include <gen_cpp/Metrics_types.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <opentelemetry/trace/tracer.h>
+#include <stdio.h>
 
+#include <algorithm>
+#include <charconv>
+#include <ostream>
+#include <shared_mutex>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+
+#include "cloud/cloud_tablet_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
+#include "common/logging.h"
+#include "common/object_pool.h"
 #include "common/status.h"
-#include "olap/storage_engine.h"
+#include "exec/exec_node.h"
+#include "olap/rowset/rowset.h"
+#include "olap/rowset/rowset_reader.h"
 #include "olap/tablet.h"
+#include "olap/tablet_manager.h"
+#include "runtime/decimalv2_value.h"
+#include "runtime/query_statistics.h"
+#include "runtime/runtime_state.h"
+#include "runtime/types.h"
+#include "service/backend_options.h"
+#include "util/time.h"
 #include "util/to_string.h"
+#include "vec/columns/column.h"
 #include "vec/columns/column_const.h"
+#include "vec/common/string_ref.h"
 #include "vec/exec/scan/new_olap_scanner.h"
-#include "vec/exprs/vslot_ref.h"
+#include "vec/exprs/vectorized_fn_call.h"
+#include "vec/exprs/vexpr.h"
+#include "vec/exprs/vexpr_context.h"
+
+namespace doris {
+class DescriptorTbl;
+class FunctionContext;
+namespace vectorized {
+class VScanner;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -35,126 +74,32 @@ NewOlapScanNode::NewOlapScanNode(ObjectPool* pool, const TPlanNode& tnode,
                                  const DescriptorTbl& descs)
         : VScanNode(pool, tnode, descs), _olap_scan_node(tnode.olap_scan_node) {
     _output_tuple_id = tnode.olap_scan_node.tuple_id;
+    _col_distribute_ids = tnode.olap_scan_node.distribute_column_ids;
     if (_olap_scan_node.__isset.sort_info && _olap_scan_node.__isset.sort_limit) {
         _limit_per_scanner = _olap_scan_node.sort_limit;
     }
 }
 
-// SELECTDB_CODE_BEGIN
-std::unique_ptr<vectorized::Block> NewOlapScanNode::_allocate_block(const TupleDescriptor* desc,
-                                                                    size_t sz) {
-    vectorized::Block* block = new vectorized::Block;
-    for (auto slot : desc->slots()) {
-        // avoid allocate pruned columns
-        if (_pruned_column_ids.count(slot->col_unique_id())) {
-            continue;
-        }
-        auto column_ptr = slot->get_empty_mutable_column();
-        column_ptr->reserve(sz);
-        block->insert(ColumnWithTypeAndName(std::move(column_ptr), slot->get_data_type_ptr(),
-                                            slot->col_name()));
-    }
-    return std::unique_ptr<vectorized::Block>(block);
-}
-
-bool NewOlapScanNode::is_pruned_column(int32_t col_unique_id) {
-    return _pruned_column_ids.find(col_unique_id) != _pruned_column_ids.end();
-}
-
-bool NewOlapScanNode::_maybe_prune_columns() {
-    // an id collection of ordering column id, key column id, conjuncts column id
-    std::set<int32_t> output_columns;
-    // ordering column ids
-    if (!_olap_scan_node.ordering_exprs.empty()) {
-        for (auto i = 0; i < _olap_scan_node.ordering_exprs.size(); ++i) {
-            auto t_orderby_expr = _olap_scan_node.ordering_exprs[i];
-            for (TExprNode& t_orderby_expr_node : t_orderby_expr.nodes) {
-                auto col_id = t_orderby_expr_node.slot_ref.col_unique_id;
-                if (col_id < 0) {
-                    continue;
-                }
-                _maybe_read_column_ids.emplace(col_id);
-                output_columns.emplace(col_id);
-            }
-        }
-    }
-
-    // When tow phase read enabled, those from output_column_unique_ids which is in select expr list,
-    // should avoid to read actual column data from segment iterator, since it will be read in
-    // second phase fetch.But we still need the column in reading schema for index filtering,
-    // so we don't need to put them into _maybe_read_column_ids.
-    // In SegmentIterator, these column may be filled with default values(see SegmentIterator::_need_read_data).
-    // Otherwise we, need to put them into _maybe_read_column_ids.
-    if (_output_tuple_desc->slots().back()->col_name() != BeConsts::ROWID_COL) {
-        if (!_olap_scan_node.output_column_unique_ids.empty()) {
-            for (auto uid : _olap_scan_node.output_column_unique_ids) {
-                if (uid < 0) {
-                    continue;
-                }
-                _maybe_read_column_ids.emplace(uid);
-            }
-        }
-        return false;
-    }
-    // If last column is rowid column, we should try our best to prune seeking columns
-
-    std::set<int32_t> output_tuple_column_unique_ids;
-    for (auto slot : _output_tuple_desc->slots()) {
-        if (slot->col_unique_id() < 0) {
-            continue;
-        }
-        if (slot->is_key()) {
-            // must include key columns
-            output_columns.emplace(slot->col_unique_id());
-        }
-        output_tuple_column_unique_ids.emplace(slot->col_unique_id());
-    }
-
-    for (int32_t cid : _conjuct_column_unique_ids) {
-        output_columns.emplace(cid);
-    }
-
-    // get pruned column ids
-    std::set_difference(output_tuple_column_unique_ids.begin(),
-                        output_tuple_column_unique_ids.end(), output_columns.begin(),
-                        output_columns.end(),
-                        std::inserter(_pruned_column_ids, _pruned_column_ids.end()));
-    if (!_pruned_column_ids.empty()) {
-        // Since some columns are pruned, the indexes of columns in the block
-        // maybe change. In order to find proper column id for VSlotRef,
-        // record the real column-id for the slot
-        size_t x = 0;
-        if (_vconjunct_ctx_ptr) {
-            for (auto slot : _output_tuple_desc->slots()) {
-                if (_pruned_column_ids.count(slot->col_unique_id())) {
-                    continue;
-                }
-                (*_vconjunct_ctx_ptr)->set_slot_id_mapping(slot->id(), x++);
-            }
-        }
-    }
-    return !_pruned_column_ids.empty();
-}
-// SELECTDB_CODE_END
-
 Status NewOlapScanNode::collect_query_statistics(QueryStatistics* statistics) {
     RETURN_IF_ERROR(ExecNode::collect_query_statistics(statistics));
-    statistics->add_scan_bytes(_read_compressed_counter->value());
-    statistics->add_scan_rows(_raw_rows_counter->value());
-    statistics->add_cpu_ms(_scan_cpu_timer->value() / NANOS_PER_MILLIS);
+    if (!_is_pipeline_scan || _should_create_scanner) {
+        statistics->add_scan_bytes(_read_compressed_counter->value());
+        statistics->add_scan_rows(_raw_rows_counter->value());
+        statistics->add_cpu_ms(_scan_cpu_timer->value() / NANOS_PER_MILLIS);
+    }
     return Status::OK();
 }
 
 Status NewOlapScanNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(VScanNode::prepare(state));
+    // if you want to add some profile in scan node, even it have not new VScanner object
+    // could add here, not in the _init_profile() function
+    _tablet_counter = ADD_COUNTER(_runtime_profile, "TabletNum", TUnit::UNIT);
     return Status::OK();
 }
 
 Status NewOlapScanNode::_init_profile() {
-    VScanNode::_init_profile();
-
-    _num_disks_accessed_counter = ADD_COUNTER(_runtime_profile, "NumDiskAccess", TUnit::UNIT);
-    _tablet_counter = ADD_COUNTER(_runtime_profile, "TabletNum", TUnit::UNIT);
+    RETURN_IF_ERROR(VScanNode::_init_profile());
 
     // 1. init segment profile
     _segment_profile.reset(new RuntimeProfile("SegmentIterator"));
@@ -189,7 +134,9 @@ Status NewOlapScanNode::_init_profile() {
             ADD_COUNTER(_segment_profile, "RowsShortCircuitPredInput", TUnit::UNIT);
     _vec_cond_timer = ADD_TIMER(_segment_profile, "VectorPredEvalTime");
     _short_cond_timer = ADD_TIMER(_segment_profile, "ShortPredEvalTime");
+    _expr_filter_timer = ADD_TIMER(_segment_profile, "ExprFilterEvalTime");
     _first_read_timer = ADD_TIMER(_segment_profile, "FirstReadTime");
+    _second_read_timer = ADD_TIMER(_segment_profile, "SecondReadTime");
     _first_read_seek_timer = ADD_TIMER(_segment_profile, "FirstReadSeekTime");
     _first_read_seek_counter = ADD_COUNTER(_segment_profile, "FirstReadSeekCount", TUnit::UNIT);
 
@@ -219,52 +166,26 @@ Status NewOlapScanNode::_init_profile() {
 
     _inverted_index_filter_counter =
             ADD_COUNTER(_segment_profile, "RowsInvertedIndexFiltered", TUnit::UNIT);
-    _inverted_index_filter_timer = ADD_TIMER(_segment_profile, "InvertedIndexFilterTimer");
+    _inverted_index_filter_timer = ADD_TIMER(_segment_profile, "InvertedIndexFilterTime");
+    _inverted_index_query_cache_hit_counter =
+            ADD_COUNTER(_segment_profile, "InvertedIndexQueryCacheHit", TUnit::UNIT);
+    _inverted_index_query_cache_miss_counter =
+            ADD_COUNTER(_segment_profile, "InvertedIndexQueryCacheMiss", TUnit::UNIT);
+    _inverted_index_query_timer = ADD_TIMER(_segment_profile, "InvertedIndexQueryTime");
+    _inverted_index_query_bitmap_copy_timer =
+            ADD_TIMER(_segment_profile, "InvertedIndexQueryBitmapCopyTime");
+    _inverted_index_query_bitmap_op_timer =
+            ADD_TIMER(_segment_profile, "InvertedIndexQueryBitmapOpTime");
+    _inverted_index_searcher_open_timer =
+            ADD_TIMER(_segment_profile, "InvertedIndexSearcherOpenTime");
+    _inverted_index_searcher_search_timer =
+            ADD_TIMER(_segment_profile, "InvertedIndexSearcherSearchTime");
 
-    _output_index_return_column_timer = ADD_TIMER(_segment_profile, "OutputIndexReturnColumnTimer");
+    _output_index_result_column_timer = ADD_TIMER(_segment_profile, "OutputIndexResultColumnTimer");
 
     _filtered_segment_counter = ADD_COUNTER(_segment_profile, "NumSegmentFiltered", TUnit::UNIT);
     _total_segment_counter = ADD_COUNTER(_segment_profile, "NumSegmentTotal", TUnit::UNIT);
 
-    _num_local_io_total = ADD_COUNTER(_segment_profile, "NumLocalIOTotal", TUnit::UNIT);
-    _num_remote_io_total = ADD_COUNTER(_segment_profile, "NumRemoteIOTotal", TUnit::UNIT);
-    _local_io_timer = ADD_TIMER(_segment_profile, "LocalIOUseTimer");
-    _remote_io_timer = ADD_TIMER(_segment_profile, "RemoteIOUseTimer");
-    _write_cache_io_timer = ADD_TIMER(_segment_profile, "WriteCacheIOUseTimer");
-    _bytes_write_into_cache = ADD_COUNTER(_segment_profile, "BytesWriteIntoCache", TUnit::BYTES);
-    _num_skip_cache_io_total = ADD_COUNTER(_segment_profile, "NumSkipCacheIOTotal", TUnit::UNIT);
-    _bytes_scanned_from_cache =
-            ADD_COUNTER(_segment_profile, "BytesScannedFromCache", TUnit::BYTES);
-    _bytes_scanned_from_remote =
-            ADD_COUNTER(_segment_profile, "BytesScannedFromRemote", TUnit::BYTES);
-    _load_segments_timer = ADD_TIMER(_segment_profile, "LoadSegmentUseTimer");
-    _cloud_get_rowset_version_timer = ADD_TIMER(_scanner_profile, "CloudGetVersionTime");
-
-    _async_remote_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTotalUseTimer");
-    _async_remote_task_wait_worker_timer_ns =
-            ADD_TIMER(_segment_profile, "AsyncRemoteTaskWaitTimer");
-    _async_remote_task_wake_up_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskWakeUpTimer");
-    _async_remote_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncRemoteTaskExecTimer");
-    _async_remote_task_total = ADD_COUNTER(_segment_profile, "AsyncRemoteTaskTotal", TUnit::UNIT);
-    _async_remote_wait_for_putting_queue =
-            ADD_TIMER(_segment_profile, "AsyncRemoteWaitPuttingQueue");
-
-    _async_local_total_use_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTotalUseTimer");
-    _async_local_task_wait_worker_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskWaitTimer");
-    _async_local_task_wake_up_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskWakeUpTimer");
-    _async_local_task_exec_timer_ns = ADD_TIMER(_segment_profile, "AsyncLocalTaskExecTimer");
-    _async_local_task_total = ADD_COUNTER(_segment_profile, "AsyncLocalTaskTotal", TUnit::UNIT);
-    _async_local_wait_for_putting_queue = ADD_TIMER(_segment_profile, "AsyncLocalWaitPuttingQueue");
-
-    _lazy_open_segment_timer = ADD_TIMER(_segment_profile, "LazyOpenSegmentTime");
-    _lazy_open_segment_counter = ADD_COUNTER(_segment_profile, "LazyOpenSegmentCounter", TUnit::UNIT);
-
-    // for the purpose of debugging or profiling
-    for (int i = 0; i < GENERAL_DEBUG_COUNT; ++i) {
-        char name[64];
-        snprintf(name, sizeof(name), "GeneralDebugTimer%d", i);
-        _general_debug_timer[i] = ADD_TIMER(_segment_profile, name);
-    }
     return Status::OK();
 }
 
@@ -292,33 +213,6 @@ static std::string olap_filters_to_string(const std::vector<doris::TCondition>& 
     }
     filters_string += "]";
     return filters_string;
-}
-
-// iterate through conjuncts tree
-void NewOlapScanNode::_iterate_conjuncts_tree(const VExpr* conjunct_expr_root,
-                                              std::function<void(const VExpr*)> fn) {
-    if (!conjunct_expr_root) {
-        return;
-    }
-    fn(conjunct_expr_root);
-    for (const VExpr* child : conjunct_expr_root->children()) {
-        _iterate_conjuncts_tree(child, fn);
-    }
-    return;
-}
-
-// get all slot ref column unique ids
-void NewOlapScanNode::_collect_conjuncts_slot_column_unique_ids(const VExpr* expr) {
-    if (!expr->is_slot_ref()) {
-        return;
-    }
-    auto slot_ref = reinterpret_cast<const VSlotRef*>(expr);
-    for (const auto* slot_desc : _output_tuple_desc->slots()) {
-        if (slot_desc->id() == slot_ref->slot_id() && slot_desc->col_unique_id() > 0) {
-            _conjuct_column_unique_ids.emplace(slot_desc->col_unique_id());
-        }
-    }
-    return;
 }
 
 inline std::string push_down_agg_to_string(const TPushAggOp::type& op) {
@@ -354,12 +248,6 @@ Status NewOlapScanNode::_process_conjuncts() {
         return Status::OK();
     }
     RETURN_IF_ERROR(_build_key_ranges_and_filters());
-    auto collect_fn = [this](const VExpr* expr) {
-        _collect_conjuncts_slot_column_unique_ids(expr);
-    };
-    if (_vconjunct_ctx_ptr && *_vconjunct_ctx_ptr) {
-        _iterate_conjuncts_tree((*_vconjunct_ctx_ptr)->root(), collect_fn);
-    }
     return Status::OK();
 }
 
@@ -419,27 +307,19 @@ Status NewOlapScanNode::_build_key_ranges_and_filters() {
             }
         }
 
-        for (auto i = 0; i < _compound_value_ranges.size(); ++i) {
-            std::vector<TCondition> conditions;
-            for (auto& iter : _compound_value_ranges[i]) {
-                std::vector<TCondition> filters;
-                std::visit(
-                        [&](auto&& range) {
-                            if (range.is_boundary_value_range()) {
-                                range.to_boundary_condition(filters);
-                            } else {
-                                range.to_olap_filter(filters);
-                            }
-                        },
-                        iter);
-
-                for (const auto& filter : filters) {
-                    conditions.push_back(std::move(filter));
-                }
-            }
-
-            if (!conditions.empty()) {
-                _compound_filters.emplace_back(conditions);
+        for (auto& iter : _compound_value_ranges) {
+            std::vector<TCondition> filters;
+            std::visit(
+                    [&](auto&& range) {
+                        if (range.is_in_compound_value_range()) {
+                            range.to_condition_in_compound(filters);
+                        } else if (range.is_match_value_range()) {
+                            range.to_match_condition(filters);
+                        }
+                    },
+                    iter);
+            for (const auto& filter : filters) {
+                _compound_filters.push_back(filter);
             }
         }
 
@@ -467,8 +347,8 @@ Status NewOlapScanNode::_build_key_ranges_and_filters() {
 
 Status NewOlapScanNode::_should_push_down_function_filter(VectorizedFnCall* fn_call,
                                                           VExprContext* expr_ctx,
-                                                          StringVal* constant_str,
-                                                          doris_udf::FunctionContext** fn_ctx,
+                                                          StringRef* constant_str,
+                                                          doris::FunctionContext** fn_ctx,
                                                           VScanNode::PushDownType& pdt) {
     // Now only `like` function filters is supported to push down
     if (fn_call->fn().name.function_name != "like") {
@@ -477,7 +357,7 @@ Status NewOlapScanNode::_should_push_down_function_filter(VectorizedFnCall* fn_c
     }
 
     const auto& children = fn_call->children();
-    doris_udf::FunctionContext* func_cxt = expr_ctx->fn_context(fn_call->fn_context_index());
+    doris::FunctionContext* func_cxt = expr_ctx->fn_context(fn_call->fn_context_index());
     DCHECK(func_cxt != nullptr);
     DCHECK(children.size() == 2);
     for (size_t i = 0; i < children.size(); i++) {
@@ -491,11 +371,11 @@ Status NewOlapScanNode::_should_push_down_function_filter(VectorizedFnCall* fn_c
             return Status::OK();
         } else {
             DCHECK(children[1 - i]->type().is_string_type());
-            ColumnPtrWrapper* const_col_wrapper = nullptr;
+            std::shared_ptr<ColumnPtrWrapper> const_col_wrapper;
             RETURN_IF_ERROR(children[1 - i]->get_const_col(expr_ctx, &const_col_wrapper));
             if (const ColumnConst* const_column =
                         check_and_get_column<ColumnConst>(const_col_wrapper->column_ptr)) {
-                *constant_str = const_column->get_data_at(0).to_string_val();
+                *constant_str = const_column->get_data_at(0);
             } else {
                 pdt = PushDownType::UNACCEPTABLE;
                 return Status::OK();
@@ -505,6 +385,14 @@ Status NewOlapScanNode::_should_push_down_function_filter(VectorizedFnCall* fn_c
     *fn_ctx = func_cxt;
     pdt = PushDownType::ACCEPTABLE;
     return Status::OK();
+}
+
+bool NewOlapScanNode::_should_push_down_common_expr() {
+    return _state->enable_common_expr_pushdown() &&
+           (_olap_scan_node.keyType == TKeysType::DUP_KEYS ||
+            (_olap_scan_node.keyType == TKeysType::UNIQUE_KEYS &&
+             _olap_scan_node.__isset.enable_unique_key_merge_on_write &&
+             _olap_scan_node.enable_unique_key_merge_on_write));
 }
 
 // PlanFragmentExecutor will call this method to set scan range
@@ -527,15 +415,13 @@ void NewOlapScanNode::set_scan_ranges(const std::vector<TScanRangeParams>& scan_
         COUNTER_UPDATE(_tablet_counter, 1);
     }
     // telemetry::set_current_span_attribute(_tablet_counter);
-
-    return;
 }
 
 std::string NewOlapScanNode::get_name() {
     return fmt::format("VNewOlapScanNode({0})", _olap_scan_node.table_name);
 }
 
-Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
+Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
     if (_scan_ranges.empty()) {
         _eos = true;
         return Status::OK();
@@ -543,142 +429,218 @@ Status NewOlapScanNode::_init_scanners(std::list<VScanner*>* scanners) {
     SCOPED_TIMER(_scanner_init_timer);
     auto span = opentelemetry::trace::Tracer::GetCurrentSpan();
 
-    // prune some columns, some of them will be fetched
-    // in exchanged node, may seem trick here?
-    _maybe_prune_columns();
+    if (!_conjuncts.empty()) {
+        std::string message;
+        for (auto& conjunct : _conjuncts) {
+            if (conjunct->root()) {
+                if (!message.empty()) {
+                    message += ", ";
+                }
+                message += conjunct->root()->debug_string();
+            }
+        }
+        _runtime_profile->add_info_string("RemainedDownPredicates", message);
+    }
 
-    if (_vconjunct_ctx_ptr && (*_vconjunct_ctx_ptr)->root()) {
-        _runtime_profile->add_info_string("RemainedDownPredicates",
-                                          (*_vconjunct_ctx_ptr)->root()->debug_string());
+    if (!_olap_scan_node.output_column_unique_ids.empty()) {
+        for (auto uid : _olap_scan_node.output_column_unique_ids) {
+            if (uid < 0) {
+                continue;
+            }
+            _maybe_read_column_ids.emplace(uid);
+        }
     }
 
     // ranges constructed from scan keys
-    std::vector<std::unique_ptr<doris::OlapScanRange>> cond_ranges;
-    RETURN_IF_ERROR(_scan_keys.get_key_range(&cond_ranges));
+    RETURN_IF_ERROR(_scan_keys.get_key_range(&_cond_ranges));
     // if we can't get ranges from conditions, we give it a total range
-    if (cond_ranges.empty()) {
-        cond_ranges.emplace_back(new doris::OlapScanRange());
+    if (_cond_ranges.empty()) {
+        _cond_ranges.emplace_back(new doris::OlapScanRange());
     }
     int scanners_per_tablet = std::max(1, 64 / (int)_scan_ranges.size());
 
-    std::unordered_set<std::string> disk_set;
+    bool is_duplicate_key = false;
+    int segment_count = 0;
+    std::vector<std::vector<RowsetReaderSharedPtr>> rowset_readers_vector(_scan_ranges.size());
+    std::vector<std::vector<int>> tablet_rs_seg_count(_scan_ranges.size());
 
-    std::deque<std::pair<TabletSharedPtr, int64_t /* version */>> tablets_to_scan;
+    // TODO(plat1ko): Warm up tablet meta cache
+
+    // Split tablet segment by scanner, only use in pipeline in duplicate key
+    // 1. if tablet count lower than scanner thread num, count segment num of all tablet ready for scan
+    // TODO: some tablet may do not have segment, may need split segment all case
+    if (_shared_scan_opt && _scan_ranges.size() < config::doris_scanner_thread_pool_thread_num) {
+        for (int i = 0; i < _scan_ranges.size(); ++i) {
+            auto& scan_range = _scan_ranges[i];
+            auto tablet_id = scan_range->tablet_id;
 #ifdef CLOUD_MODE
-    std::vector<std::function<Status()>> tasks;
-    tasks.reserve(_scan_ranges.size());
-    for (auto& scan_range : _scan_ranges) {
-        tablets_to_scan.emplace_back();
-        tasks.push_back([range = scan_range.get(), &tablet = tablets_to_scan.back()]{
-            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(range->tablet_id, &tablet.first));
-            tablet.second = std::atol(range->version.c_str());
-            // Try to warm up rowset metas with version
-            tablet.first->cloud_sync_rowsets(tablet.second);
-            return Status::OK();
-        });
-    }
-    RETURN_IF_ERROR(cloud::bthread_fork_and_join(tasks, 10));
+            TabletSharedPtr tablet;
+            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &tablet));
 #else
-    for (auto& scan_range : _scan_ranges) {
-        std::string err;
-        TabletSharedPtr tablet =
-                StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id, true, &err);
-        if (tablet == nullptr) {
-            std::stringstream ss;
-            ss << "failed to get tablet: " << tablet_id << ", reason: " << err;
-            LOG(WARNING) << ss.str();
-            return Status::InternalError(ss.str());
-        }
-        int64_t version = std::atol(scan_range->version.c_str());
-        tablets_to_scan.emplace_back(std::move(tablet), version);
-    }
+            auto [tablet, status] =
+                    StorageEngine::instance()->tablet_manager()->get_tablet_and_status(tablet_id,
+                                                                                       true);
+            RETURN_IF_ERROR(status);
 #endif
-    for (auto& [tablet, version] : tablets_to_scan) {
-        if (config::enable_limit_optimize && _limit_query_without_conjuncts && !_enable_limit_optimize) {
-            // just for dup tables
-            if (tablet->keys_type() == DUP_KEYS) {
-                _enable_limit_optimize = true;
-            }
-        }
-        std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &cond_ranges;
-        int size_based_scanners_per_tablet = 1;
-
-        if (config::doris_scan_range_max_mb > 0) {
-            size_based_scanners_per_tablet = std::max(
-                    1, (int)(tablet->tablet_footprint() / (config::doris_scan_range_max_mb << 20)));
-        }
-
-        int ranges_per_scanner =
-                std::max(1, (int)ranges->size() /
-                                    std::min(scanners_per_tablet, size_based_scanners_per_tablet));
-        int num_ranges = ranges->size();
-        for (int i = 0; i < num_ranges;) {
-            std::vector<doris::OlapScanRange*> scanner_ranges;
-            scanner_ranges.push_back((*ranges)[i].get());
-            ++i;
-            for (int j = 1; i < num_ranges && j < ranges_per_scanner &&
-                            (*ranges)[i]->end_include == (*ranges)[i - 1]->end_include;
-                 ++j, ++i) {
-                scanner_ranges.push_back((*ranges)[i].get());
-            }
-
-            NewOlapScanner* scanner = new NewOlapScanner(
-                    tablet, version, _state, this, _limit_per_scanner,
-                    _olap_scan_node.is_preaggregation, _need_agg_finalize, _scanner_profile.get());
-
-            scanner->set_compound_filters(_compound_filters);
-            // add scanner to pool before doing prepare.
-            // so that scanner can be automatically deconstructed if prepare failed.
-            _scanner_pool.add(scanner);
-            auto st = scanner->prepare(scanner_ranges, _vconjunct_ctx_ptr.get(), _olap_filters,
-                                       _filter_predicates, _push_down_functions);
-            if (!st.ok()) {
-                // during prepare, scanner already cloned vexpr_context, should call close to release it.
-                scanner->close(_state);
-                return st;
-            }
-            scanners->push_back((VScanner*)scanner);
-            disk_set.insert(scanner->scan_disk());
-        }
-    }
-
-    COUNTER_SET(_num_disks_accessed_counter, static_cast<int64_t>(disk_set.size()));
-    // telemetry::set_span_attribute(span, _num_disks_accessed_counter);
-    // telemetry::set_span_attribute(span, _num_scanners);
-    if (_enable_limit_optimize) {
-        // // Sort by rows and whether it contains delete_predicates.
-        // // Scanner with more rows and no delete_predicates should be ranked higher.
-        // scanners->sort([](const VScanner* vs1, const VScanner* vs2) {
-        //     auto s1 = dynamic_cast<const NewOlapScanner*>(vs1);
-        //     auto s2 = dynamic_cast<const NewOlapScanner*>(vs2);
-
-        //     bool s1_has_delete_predicates = !s1->get_tablet()->delete_predicates().empty();
-        //     bool s2_has_delete_predicates = !s2->get_tablet()->delete_predicates().empty();
-        //     if (!s1_has_delete_predicates && s2_has_delete_predicates) {
-        //         return true;
-        //     }
-        //     if (s1_has_delete_predicates && !s2_has_delete_predicates) {
-        //         return false;
-        //     }
-        //     if (!s1_has_delete_predicates && !s2_has_delete_predicates) {
-        //         return s1->get_tablet()->num_rows() > s2->get_tablet()->num_rows();
-        //     }
-        //     return true;
-        // });
-
-        size_t reached_limit_rows = 0;
-        _hint_max_scanner_concurrency = 0;
-        for (const auto s: *scanners) {
-            _hint_max_scanner_concurrency += 1;
-            auto olap_scanner = dynamic_cast<const NewOlapScanner*>(s);
-            if (!olap_scanner->has_delete_predicate()) {
-                reached_limit_rows += olap_scanner->get_tablet()->num_rows();
-            }
-            if (reached_limit_rows >= limit()) {
+            is_duplicate_key = tablet->keys_type() == DUP_KEYS;
+            if (!is_duplicate_key) {
                 break;
             }
+
+            int64_t version = 0;
+            std::from_chars(scan_range->version.c_str(),
+                            scan_range->version.c_str() + scan_range->version.size(), version);
+#ifdef CLOUD_MODE
+            RETURN_IF_ERROR(tablet->cloud_sync_rowsets(version));
+            Status acquire_reader_st =
+                    tablet->cloud_capture_rs_readers({0, version}, &rowset_readers_vector[i]);
+#else
+            std::shared_lock rdlock(tablet->get_header_lock());
+            // acquire tablet rowset readers at the beginning of the scan node
+            // to prevent this case: when there are lots of olap scanners to run for example 10000
+            // the rowsets maybe compacted when the last olap scanner starts
+            Status acquire_reader_st =
+                    tablet->capture_rs_readers({0, version}, &rowset_readers_vector[i]);
+#endif
+            if (!acquire_reader_st.ok()) {
+                LOG(WARNING) << "fail to init reader.res=" << acquire_reader_st;
+                std::stringstream ss;
+                ss << "failed to initialize storage reader. tablet=" << tablet->full_name()
+                   << ", res=" << acquire_reader_st
+                   << ", backend=" << BackendOptions::get_localhost();
+                return Status::InternalError(ss.str());
+            }
+
+            for (const auto& rowset_reader : rowset_readers_vector[i]) {
+                auto num_segments = rowset_reader->rowset()->num_segments();
+                tablet_rs_seg_count[i].emplace_back(num_segments);
+                segment_count += num_segments;
+            }
         }
     }
+
+    auto build_new_scanner = [&](const TPaloScanRange& scan_range,
+                                 const std::vector<OlapScanRange*>& key_ranges,
+                                 const std::vector<RowsetReaderSharedPtr>& rs_readers,
+                                 const std::vector<std::pair<int, int>>& rs_reader_seg_offsets) {
+        std::shared_ptr<NewOlapScanner> scanner = NewOlapScanner::create_shared(
+                _state, this, _limit_per_scanner, _olap_scan_node.is_preaggregation, scan_range,
+                key_ranges, rs_readers, rs_reader_seg_offsets, _need_agg_finalize,
+                _scanner_profile.get());
+
+        scanner->set_compound_filters(_compound_filters);
+        scanners->push_back(scanner);
+        return Status::OK();
+    };
+    if (is_duplicate_key) {
+        // 2. Split by segment count, each scanner need scan avg segment count
+        auto avg_segment_count =
+                std::max(segment_count / config::doris_scanner_thread_pool_thread_num, 1);
+        for (int i = 0; i < _scan_ranges.size(); ++i) {
+            auto& scan_range = _scan_ranges[i];
+            std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &_cond_ranges;
+            int num_ranges = ranges->size();
+            std::vector<doris::OlapScanRange*> scanner_ranges(num_ranges);
+            for (int j = 0; j < num_ranges; ++j) {
+                scanner_ranges[j] = (*ranges)[j].get();
+            }
+
+            const auto& rs_seg_count = tablet_rs_seg_count[i];
+            int rs_seg_count_index = 0;
+            int rs_seg_start_scan = 0;
+            int scanner_seg_occupy = 0;
+            std::vector<RowsetReaderSharedPtr> rs_readers;
+            std::vector<std::pair<int, int>> rs_reader_seg_offsets;
+
+            while (rs_seg_count_index < rs_seg_count.size()) {
+                // do not generator range of segment (0, 0)
+                if (rs_seg_count[rs_seg_count_index] == 0) {
+                    rs_seg_start_scan = 0;
+                    rs_seg_count_index++;
+                    continue;
+                }
+
+                auto max_add_seg_nums = rs_seg_count[rs_seg_count_index] - rs_seg_start_scan;
+                rs_readers.emplace_back(rowset_readers_vector[i][rs_seg_count_index]->clone());
+
+                if (scanner_seg_occupy + max_add_seg_nums > avg_segment_count) {
+                    auto need_add_seg_nums = avg_segment_count - scanner_seg_occupy;
+                    rs_reader_seg_offsets.emplace_back(
+                            rs_seg_start_scan,
+                            rs_seg_start_scan + need_add_seg_nums); // only scan need_add_seg_nums
+                    RETURN_IF_ERROR(build_new_scanner(*scan_range, scanner_ranges, rs_readers,
+                                                      rs_reader_seg_offsets));
+
+                    rs_seg_start_scan += need_add_seg_nums;
+                    scanner_seg_occupy = 0;
+                    rs_readers.clear();
+                    rs_reader_seg_offsets.clear();
+                } else if (scanner_seg_occupy + max_add_seg_nums == avg_segment_count) {
+                    rs_reader_seg_offsets.emplace_back(rs_seg_start_scan,
+                                                       rs_seg_count[rs_seg_count_index]);
+                    RETURN_IF_ERROR(build_new_scanner(*scan_range, scanner_ranges, rs_readers,
+                                                      rs_reader_seg_offsets));
+
+                    rs_seg_start_scan = 0;
+                    scanner_seg_occupy = 0;
+                    rs_readers.clear();
+                    rs_reader_seg_offsets.clear();
+                    rs_seg_count_index++;
+                } else {
+                    rs_reader_seg_offsets.emplace_back(rs_seg_start_scan,
+                                                       rs_seg_count[rs_seg_count_index]);
+
+                    rs_seg_start_scan = 0;
+                    scanner_seg_occupy += max_add_seg_nums;
+                    rs_seg_count_index++;
+                }
+            }
+
+#ifndef NDEBUG
+            for (const auto& offset : rs_reader_seg_offsets) {
+                DCHECK_NE(offset.first, offset.second);
+            }
+#endif
+
+            // dispose some segment tail
+            if (!rs_readers.empty()) {
+                build_new_scanner(*scan_range, scanner_ranges, rs_readers, rs_reader_seg_offsets);
+            }
+        }
+    } else {
+        for (auto& scan_range : _scan_ranges) {
+            auto tablet_id = scan_range->tablet_id;
+            auto [tablet, status] =
+                    StorageEngine::instance()->tablet_manager()->get_tablet_and_status(tablet_id,
+                                                                                       true);
+            RETURN_IF_ERROR(status);
+
+            std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &_cond_ranges;
+            int size_based_scanners_per_tablet = 1;
+
+            if (config::doris_scan_range_max_mb > 0) {
+                size_based_scanners_per_tablet =
+                        std::max(1, (int)(tablet->tablet_footprint() /
+                                          (config::doris_scan_range_max_mb << 20)));
+            }
+            int ranges_per_scanner =
+                    std::max(1, (int)ranges->size() / std::min(scanners_per_tablet,
+                                                               size_based_scanners_per_tablet));
+            int num_ranges = ranges->size();
+            for (int i = 0; i < num_ranges;) {
+                std::vector<doris::OlapScanRange*> scanner_ranges;
+                scanner_ranges.push_back((*ranges)[i].get());
+                ++i;
+                for (int j = 1; i < num_ranges && j < ranges_per_scanner &&
+                                (*ranges)[i]->end_include == (*ranges)[i - 1]->end_include;
+                     ++j, ++i) {
+                    scanner_ranges.push_back((*ranges)[i].get());
+                }
+                RETURN_IF_ERROR(build_new_scanner(*scan_range, scanner_ranges, {}, {}));
+            }
+        }
+    }
+
     return Status::OK();
 }
 
@@ -695,6 +657,25 @@ bool NewOlapScanNode::_is_key_column(const std::string& key_name) {
     auto res = std::find(_olap_scan_node.key_column_name.begin(),
                          _olap_scan_node.key_column_name.end(), key_name);
     return res != _olap_scan_node.key_column_name.end();
+}
+
+void NewOlapScanNode::add_filter_info(int id, const PredicateFilterInfo& update_info) {
+    // update
+    _filter_info[id].filtered_row += update_info.filtered_row;
+    _filter_info[id].input_row += update_info.input_row;
+    _filter_info[id].type = update_info.type;
+    // to string
+    auto& info = _filter_info[id];
+    std::string filter_name = "RuntimeFilterInfo id ";
+    filter_name += std::to_string(id);
+    std::string info_str;
+    info_str += "type = " + type_to_string(static_cast<PredicateType>(info.type)) + ", ";
+    info_str += "input = " + std::to_string(info.input_row) + ", ";
+    info_str += "filtered = " + std::to_string(info.filtered_row);
+    info_str = "[" + info_str + "]";
+
+    // add info
+    _segment_profile->add_info_string(filter_name, info_str);
 }
 
 }; // namespace doris::vectorized

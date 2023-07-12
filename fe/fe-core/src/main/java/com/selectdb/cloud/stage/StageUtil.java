@@ -58,7 +58,7 @@ public class StageUtil {
             return stagePBs.get(0);
         } else {
             // check stage permission
-            if (checkAuth && !Env.getCurrentEnv().getAuth()
+            if (checkAuth && !Env.getCurrentEnv().getAccessManager()
                     .checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(), stage, PrivPredicate.USAGE,
                             ResourceTypeEnum.STAGE)) {
                 throw new AnalysisException("USAGE denied to user '" + ConnectContext.get().getQualifiedUser()

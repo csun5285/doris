@@ -15,27 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <vec/olap/vgeneric_iterators.h>
+#include "vec/olap/vgeneric_iterators.h"
 
+#include <algorithm>
 #include <memory>
-#include <queue>
 #include <utility>
 
 #include "common/status.h"
+#include "olap/field.h"
 #include "olap/iterators.h"
+#include "olap/olap_common.h"
+#include "olap/rowset/segment_v2/column_reader.h"
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/schema.h"
+#include "olap/schema_cache.h"
+#include "olap/tablet_schema.h"
+#include "vec/columns/column.h"
 #include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/data_types/data_type.h"
 
 namespace doris {
+class RuntimeProfile;
+
 using namespace ErrorCode;
 
 namespace vectorized {
-VStatisticsIterator::~VStatisticsIterator() {
-    for (auto& pair : _column_iterators_map) {
-        delete pair.second;
-    }
-}
 
 Status VStatisticsIterator::init(const StorageReadOptions& opts) {
     if (!_init) {
@@ -48,7 +53,7 @@ Status VStatisticsIterator::init(const StorageReadOptions& opts) {
                 RETURN_IF_ERROR(_segment->new_column_iterator(opts.tablet_schema->column(cid),
                                                               &_column_iterators_map[unique_id]));
             }
-            _column_iterators.push_back(_column_iterators_map[unique_id]);
+            _column_iterators.push_back(_column_iterators_map[unique_id].get());
         }
 
         _target_rows = _push_down_agg_type_opt == TPushAggOp::MINMAX ? 2 : _segment->num_rows();
@@ -176,7 +181,7 @@ void VMergeIteratorContext::copy_rows(BlockView* view, bool advanced) {
 //      VAutoIncrementIterator iter(schema, 1000);
 //      StorageReadOptions opts;
 //      RETURN_IF_ERROR(iter.init(opts));
-//      RowBlockV2 block;
+//      Block block;
 //      do {
 //          st = iter.next_batch(&block);
 //      } while (st.ok());
@@ -201,23 +206,23 @@ public:
                 size_t data_len = 0;
                 const auto* col_schema = _schema.column(j);
                 switch (col_schema->type()) {
-                case OLAP_FIELD_TYPE_SMALLINT:
+                case FieldType::OLAP_FIELD_TYPE_SMALLINT:
                     *(int16_t*)data = _rows_returned + j;
                     data_len = sizeof(int16_t);
                     break;
-                case OLAP_FIELD_TYPE_INT:
+                case FieldType::OLAP_FIELD_TYPE_INT:
                     *(int32_t*)data = _rows_returned + j;
                     data_len = sizeof(int32_t);
                     break;
-                case OLAP_FIELD_TYPE_BIGINT:
+                case FieldType::OLAP_FIELD_TYPE_BIGINT:
                     *(int64_t*)data = _rows_returned + j;
                     data_len = sizeof(int64_t);
                     break;
-                case OLAP_FIELD_TYPE_FLOAT:
+                case FieldType::OLAP_FIELD_TYPE_FLOAT:
                     *(float*)data = _rows_returned + j;
                     data_len = sizeof(float);
                     break;
-                case OLAP_FIELD_TYPE_DOUBLE:
+                case FieldType::OLAP_FIELD_TYPE_DOUBLE:
                     *(double*)data = _rows_returned + j;
                     data_len = sizeof(double);
                     break;
@@ -317,12 +322,13 @@ Status VMergeIterator::init(const StorageReadOptions& opts) {
     if (_origin_iters.empty()) {
         return Status::OK();
     }
-    _schema = &(*_origin_iters.begin())->schema();
+    _schema = &(_origin_iters[0]->schema());
     _record_rowids = opts.record_rowids;
 
-    for (auto iter : _origin_iters) {
-        auto ctx = std::make_unique<VMergeIteratorContext>(
-                iter, _sequence_id_idx, _is_unique, _is_reverse, opts.read_orderby_key_columns);
+    for (auto& iter : _origin_iters) {
+        auto ctx = std::make_unique<VMergeIteratorContext>(std::move(iter), _sequence_id_idx,
+                                                           _is_unique, _is_reverse,
+                                                           opts.read_orderby_key_columns);
         RETURN_IF_ERROR(ctx->init(opts));
         if (!ctx->valid()) {
             continue;
@@ -343,12 +349,9 @@ public:
     // Iterators' ownership it transferred to this class.
     // This class will delete all iterators when destructs
     // Client should not use iterators anymore.
-    VUnionIterator(std::vector<RowwiseIterator*>& v) : _origin_iters(v.begin(), v.end()) {}
+    VUnionIterator(std::vector<RowwiseIteratorUPtr>&& v) : _origin_iters(std::move(v)) {}
 
-    ~VUnionIterator() override {
-        std::for_each(_origin_iters.begin(), _origin_iters.end(),
-                      std::default_delete<RowwiseIterator>());
-    }
+    ~VUnionIterator() override = default;
 
     Status init(const StorageReadOptions& opts) override;
 
@@ -367,8 +370,8 @@ public:
 
 private:
     const Schema* _schema = nullptr;
-    RowwiseIterator* _cur_iter = nullptr;
-    std::deque<RowwiseIterator*> _origin_iters;
+    RowwiseIteratorUPtr _cur_iter = nullptr;
+    std::vector<RowwiseIteratorUPtr> _origin_iters;
 };
 
 Status VUnionIterator::init(const StorageReadOptions& opts) {
@@ -376,10 +379,15 @@ Status VUnionIterator::init(const StorageReadOptions& opts) {
         return Status::OK();
     }
 
-    for (auto iter : _origin_iters) {
+    // we use back() and pop_back() of std::vector to handle each iterator,
+    // so reverse the vector here to keep result block of next_batch to be
+    // in the same order as the original segments.
+    std::reverse(_origin_iters.begin(), _origin_iters.end());
+
+    for (auto& iter : _origin_iters) {
         RETURN_IF_ERROR(iter->init(opts));
     }
-    _cur_iter = *(_origin_iters.begin());
+    _cur_iter = std::move(_origin_iters.back());
     _schema = &_cur_iter->schema();
     return Status::OK();
 }
@@ -388,10 +396,9 @@ Status VUnionIterator::next_batch(Block* block) {
     while (_cur_iter != nullptr) {
         auto st = _cur_iter->next_batch(block);
         if (st.is<END_OF_FILE>()) {
-            delete _cur_iter;
-            _origin_iters.pop_front();
+            _origin_iters.pop_back();
             if (!_origin_iters.empty()) {
-                _cur_iter = *(_origin_iters.begin());
+                _cur_iter = std::move(_origin_iters.back());
             } else {
                 _cur_iter = nullptr;
             }
@@ -410,27 +417,29 @@ Status VUnionIterator::current_block_row_locations(std::vector<RowLocation>* loc
     return _cur_iter->current_block_row_locations(locations);
 }
 
-RowwiseIterator* new_merge_iterator(std::vector<RowwiseIterator*>& inputs, int sequence_id_idx,
-                                    bool is_unique, bool is_reverse, uint64_t* merged_rows) {
+RowwiseIteratorUPtr new_merge_iterator(std::vector<RowwiseIteratorUPtr>&& inputs,
+                                       int sequence_id_idx, bool is_unique, bool is_reverse,
+                                       uint64_t* merged_rows) {
     if (inputs.size() == 1) {
-        return *(inputs.begin());
+        return std::move(inputs[0]);
     }
-    return new VMergeIterator(inputs, sequence_id_idx, is_unique, is_reverse, merged_rows);
+    return std::make_unique<VMergeIterator>(std::move(inputs), sequence_id_idx, is_unique,
+                                            is_reverse, merged_rows);
 }
 
-RowwiseIterator* new_union_iterator(std::vector<RowwiseIterator*>& inputs) {
+RowwiseIteratorUPtr new_union_iterator(std::vector<RowwiseIteratorUPtr>&& inputs) {
     if (inputs.size() == 1) {
-        return *(inputs.begin());
+        return std::move(inputs[0]);
     }
-    return new VUnionIterator(inputs);
+    return std::make_unique<VUnionIterator>(std::move(inputs));
 }
 
 RowwiseIterator* new_vstatistics_iterator(std::shared_ptr<Segment> segment, const Schema& schema) {
     return new VStatisticsIterator(segment, schema);
 }
 
-RowwiseIterator* new_auto_increment_iterator(const Schema& schema, size_t num_rows) {
-    return new VAutoIncrementIterator(schema, num_rows);
+RowwiseIteratorUPtr new_auto_increment_iterator(const Schema& schema, size_t num_rows) {
+    return std::make_unique<VAutoIncrementIterator>(schema, num_rows);
 }
 
 } // namespace vectorized

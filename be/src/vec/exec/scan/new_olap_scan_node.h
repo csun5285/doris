@@ -17,16 +17,50 @@
 
 #pragma once
 
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/PlanNodes_types.h>
+#include <stdint.h>
+
+#include <cstdint>
+#include <list>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "common/status.h"
+#include "exec/olap_common.h"
+#include "exec/olap_utils.h"
+#include "olap/olap_common.h"
 #include "util/runtime_profile.h"
 #include "vec/exec/scan/vscan_node.h"
 
+namespace doris {
+class DescriptorTbl;
+class FunctionContext;
+class ObjectPool;
+class QueryStatistics;
+class RuntimeState;
+
+namespace vectorized {
+class VExprContext;
+class VScanner;
+class VectorizedFnCall;
+} // namespace vectorized
+struct StringRef;
+} // namespace doris
+
+namespace doris::pipeline {
+class OlapScanOperator;
+}
+
 namespace doris::vectorized {
 
-class NewOlapScanner;
 class NewOlapScanNode : public VScanNode {
 public:
     NewOlapScanNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs);
     friend class NewOlapScanner;
+    friend class doris::pipeline::OlapScanOperator;
 
     Status prepare(RuntimeState* state) override;
     Status collect_query_statistics(QueryStatistics* statistics) override;
@@ -41,8 +75,8 @@ protected:
     bool _is_key_column(const std::string& col_name) override;
 
     Status _should_push_down_function_filter(VectorizedFnCall* fn_call, VExprContext* expr_ctx,
-                                             StringVal* constant_str,
-                                             doris_udf::FunctionContext** fn_ctx,
+                                             StringRef* constant_str,
+                                             doris::FunctionContext** fn_ctx,
                                              PushDownType& pdt) override;
 
     PushDownType _should_push_down_bloom_filter() override { return PushDownType::ACCEPTABLE; }
@@ -51,31 +85,24 @@ protected:
 
     PushDownType _should_push_down_is_null_predicate() override { return PushDownType::ACCEPTABLE; }
 
-    Status _init_scanners(std::list<VScanner*>* scanners) override;
+    bool _should_push_down_common_expr() override;
 
-    std::unique_ptr<vectorized::Block> _allocate_block(const TupleDescriptor* desc, size_t sz) override;
+    Status _init_scanners(std::list<VScannerSPtr>* scanners) override;
+
+    void add_filter_info(int id, const PredicateFilterInfo& info);
+
 private:
     Status _build_key_ranges_and_filters();
-
-    bool _maybe_prune_columns();
-
-    bool is_pruned_column(int32_t col_unique_id);
-
-    // iterate through conjuncts tre
-    void _iterate_conjuncts_tree(const VExpr* conjunct_expr_root, std::function<void(const VExpr*)> fn);
-
-    // get all slot ref column unique ids
-    void _collect_conjuncts_slot_column_unique_ids(const VExpr* expr);
 
 private:
     TOlapScanNode _olap_scan_node;
     std::vector<std::unique_ptr<TPaloScanRange>> _scan_ranges;
+    std::vector<std::unique_ptr<doris::OlapScanRange>> _cond_ranges;
     OlapScanKeys _scan_keys;
     std::vector<TCondition> _olap_filters;
-    // compound filters in every conjunct, like: "(a or b) and (c or d)", (a or b) in conjuct[0], (c or d) in conjuct[1]
-    std::vector<std::vector<TCondition>> _compound_filters;
-
-    std::set<int32_t> _pruned_column_ids;
+    // _compound_filters store conditions in the one compound relationship in conjunct expr tree except leaf node of `and` node,
+    // such as: "(a or b) and (c or d)", conditions for a,b,c,d will be stored
+    std::vector<TCondition> _compound_filters;
     // If column id in this set, indicate that we need to read data after index filtering
     std::set<int32_t> _maybe_read_column_ids;
 
@@ -102,7 +129,9 @@ private:
     RuntimeProfile::Counter* _rows_short_circuit_cond_input_counter = nullptr;
     RuntimeProfile::Counter* _vec_cond_timer = nullptr;
     RuntimeProfile::Counter* _short_cond_timer = nullptr;
+    RuntimeProfile::Counter* _expr_filter_timer = nullptr;
     RuntimeProfile::Counter* _output_col_timer = nullptr;
+    std::map<int, PredicateFilterInfo> _filter_info;
 
     RuntimeProfile::Counter* _stats_filtered_counter = nullptr;
     RuntimeProfile::Counter* _bf_filtered_counter = nullptr;
@@ -122,6 +151,7 @@ private:
     RuntimeProfile::Counter* _block_init_iters_timer = nullptr;
     RuntimeProfile::Counter* _block_init_prefetch_timer = nullptr;
     RuntimeProfile::Counter* _first_read_timer = nullptr;
+    RuntimeProfile::Counter* _second_read_timer = nullptr;
     RuntimeProfile::Counter* _first_read_seek_timer = nullptr;
     RuntimeProfile::Counter* _first_read_seek_counter = nullptr;
     RuntimeProfile::Counter* _lazy_read_timer = nullptr;
@@ -144,8 +174,15 @@ private:
 
     RuntimeProfile::Counter* _inverted_index_filter_counter = nullptr;
     RuntimeProfile::Counter* _inverted_index_filter_timer = nullptr;
+    RuntimeProfile::Counter* _inverted_index_query_cache_hit_counter = nullptr;
+    RuntimeProfile::Counter* _inverted_index_query_cache_miss_counter = nullptr;
+    RuntimeProfile::Counter* _inverted_index_query_timer = nullptr;
+    RuntimeProfile::Counter* _inverted_index_query_bitmap_copy_timer = nullptr;
+    RuntimeProfile::Counter* _inverted_index_query_bitmap_op_timer = nullptr;
+    RuntimeProfile::Counter* _inverted_index_searcher_open_timer = nullptr;
+    RuntimeProfile::Counter* _inverted_index_searcher_search_timer = nullptr;
 
-    RuntimeProfile::Counter* _output_index_return_column_timer = nullptr;
+    RuntimeProfile::Counter* _output_index_result_column_timer = nullptr;
 
     // number of created olap scanners
     RuntimeProfile::Counter* _num_scanners = nullptr;
@@ -154,42 +191,6 @@ private:
     RuntimeProfile::Counter* _filtered_segment_counter = nullptr;
     // total number of segment related to this scan node
     RuntimeProfile::Counter* _total_segment_counter = nullptr;
-
-    // for debugging or profiling, record any info as you want
-    RuntimeProfile::Counter* _general_debug_timer[GENERAL_DEBUG_COUNT] = {};
-
-    // file cache
-    RuntimeProfile::Counter* _num_local_io_total = nullptr;
-    RuntimeProfile::Counter* _num_remote_io_total = nullptr;
-    RuntimeProfile::Counter* _local_io_timer = nullptr;
-    RuntimeProfile::Counter* _bytes_scanned_from_cache = nullptr;
-    RuntimeProfile::Counter* _bytes_scanned_from_remote = nullptr;
-    RuntimeProfile::Counter* _remote_io_timer = nullptr;
-    RuntimeProfile::Counter* _write_cache_io_timer = nullptr;
-    RuntimeProfile::Counter* _bytes_write_into_cache = nullptr;
-    RuntimeProfile::Counter* _num_skip_cache_io_total = nullptr;
-
-    RuntimeProfile::Counter* _cloud_get_rowset_version_timer = nullptr;
-    RuntimeProfile::Counter* _load_segments_timer = nullptr;
-
-    // Async io
-    RuntimeProfile::Counter* _async_remote_total_use_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_remote_task_wait_worker_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_remote_task_wake_up_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_remote_task_exec_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_remote_task_total = nullptr;
-    RuntimeProfile::Counter* _async_remote_wait_for_putting_queue = nullptr;
-
-    RuntimeProfile::Counter* _async_local_total_use_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_local_task_wait_worker_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_local_task_wake_up_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_local_task_exec_timer_ns = nullptr;
-    RuntimeProfile::Counter* _async_local_task_total = nullptr;
-    RuntimeProfile::Counter* _async_local_wait_for_putting_queue = nullptr;
-
-    RuntimeProfile::Counter* _lazy_open_segment_timer = nullptr;
-    RuntimeProfile::Counter* _lazy_open_segment_counter = nullptr;
-
 };
 
 } // namespace doris::vectorized

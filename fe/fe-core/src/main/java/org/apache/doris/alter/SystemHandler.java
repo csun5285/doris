@@ -21,7 +21,6 @@ import org.apache.doris.analysis.AddBackendClause;
 import org.apache.doris.analysis.AddFollowerClause;
 import org.apache.doris.analysis.AddObserverClause;
 import org.apache.doris.analysis.AlterClause;
-import org.apache.doris.analysis.AlterLoadErrorUrlClause;
 import org.apache.doris.analysis.CancelAlterSystemStmt;
 import org.apache.doris.analysis.CancelStmt;
 import org.apache.doris.analysis.DecommissionBackendClause;
@@ -29,15 +28,15 @@ import org.apache.doris.analysis.DropBackendClause;
 import org.apache.doris.analysis.DropFollowerClause;
 import org.apache.doris.analysis.DropObserverClause;
 import org.apache.doris.analysis.ModifyBackendClause;
+import org.apache.doris.analysis.ModifyBackendHostNameClause;
 import org.apache.doris.analysis.ModifyBrokerClause;
+import org.apache.doris.analysis.ModifyFrontendHostNameClause;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
-import org.apache.doris.common.ErrorCode;
-import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.UserException;
 import org.apache.doris.ha.FrontendNodeType;
 import org.apache.doris.system.Backend;
@@ -45,9 +44,8 @@ import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.system.SystemInfoService.HostInfo;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
-import org.apache.commons.lang.NotImplementedException;
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -79,7 +77,7 @@ public class SystemHandler extends AlterHandler {
         SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
         TabletInvertedIndex invertedIndex = Env.getCurrentInvertedIndex();
         // check if decommission is finished
-        for (Long beId : systemInfoService.getBackendIds(false)) {
+        for (Long beId : systemInfoService.getAllBackendIds(false)) {
             Backend backend = systemInfoService.getBackend(beId);
             if (backend == null || !backend.isDecommissioned()) {
                 continue;
@@ -104,7 +102,7 @@ public class SystemHandler extends AlterHandler {
 
     @Override
     public List<List<Comparable>> getAlterJobInfosByDb(Database db) {
-        throw new NotImplementedException();
+        throw new NotImplementedException("getAlterJobInfosByDb is not supported in SystemHandler");
     }
 
     @Override
@@ -117,18 +115,7 @@ public class SystemHandler extends AlterHandler {
         if (alterClause instanceof AddBackendClause) {
             // add backend
             AddBackendClause addBackendClause = (AddBackendClause) alterClause;
-            final String destClusterName = addBackendClause.getDestCluster();
-
-            if ((!Strings.isNullOrEmpty(destClusterName) || addBackendClause.isFree())
-                    && Config.disable_cluster_feature) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_INVALID_OPERATION, "ADD BACKEND TO CLUSTER");
-            }
-
-            if (!Strings.isNullOrEmpty(destClusterName) && Env.getCurrentEnv().getCluster(destClusterName) == null) {
-                throw new DdlException("Cluster: " + destClusterName + " does not exist.");
-            }
-            Env.getCurrentSystemInfo().addBackends(addBackendClause.getHostInfos(), addBackendClause.isFree(),
-                    addBackendClause.getDestCluster(), addBackendClause.getTagMap());
+            Env.getCurrentSystemInfo().addBackends(addBackendClause.getHostInfos(), addBackendClause.getTagMap());
         } else if (alterClause instanceof DropBackendClause) {
             // drop backend
             DropBackendClause dropBackendClause = (DropBackendClause) alterClause;
@@ -156,24 +143,30 @@ public class SystemHandler extends AlterHandler {
 
         } else if (alterClause instanceof AddObserverClause) {
             AddObserverClause clause = (AddObserverClause) alterClause;
-            Env.getCurrentEnv().addFrontend(FrontendNodeType.OBSERVER, clause.getHost(), clause.getPort(), "");
+            Env.getCurrentEnv().addFrontend(FrontendNodeType.OBSERVER, clause.getHost(),
+                    clause.getPort(), "");
         } else if (alterClause instanceof DropObserverClause) {
             DropObserverClause clause = (DropObserverClause) alterClause;
-            Env.getCurrentEnv().dropFrontend(FrontendNodeType.OBSERVER, clause.getHost(), clause.getPort());
+            Env.getCurrentEnv().dropFrontend(FrontendNodeType.OBSERVER, clause.getHost(),
+                    clause.getPort());
         } else if (alterClause instanceof AddFollowerClause) {
             AddFollowerClause clause = (AddFollowerClause) alterClause;
-            Env.getCurrentEnv().addFrontend(FrontendNodeType.FOLLOWER, clause.getHost(), clause.getPort(), "");
+            Env.getCurrentEnv().addFrontend(FrontendNodeType.FOLLOWER, clause.getHost(),
+                    clause.getPort(), "");
         } else if (alterClause instanceof DropFollowerClause) {
             DropFollowerClause clause = (DropFollowerClause) alterClause;
-            Env.getCurrentEnv().dropFrontend(FrontendNodeType.FOLLOWER, clause.getHost(), clause.getPort());
+            Env.getCurrentEnv().dropFrontend(FrontendNodeType.FOLLOWER, clause.getHost(),
+                    clause.getPort());
         } else if (alterClause instanceof ModifyBrokerClause) {
             ModifyBrokerClause clause = (ModifyBrokerClause) alterClause;
             Env.getCurrentEnv().getBrokerMgr().execute(clause);
-        } else if (alterClause instanceof AlterLoadErrorUrlClause) {
-            AlterLoadErrorUrlClause clause = (AlterLoadErrorUrlClause) alterClause;
-            Env.getCurrentEnv().getLoadInstance().setLoadErrorHubInfo(clause.getProperties());
         } else if (alterClause instanceof ModifyBackendClause) {
             Env.getCurrentSystemInfo().modifyBackends(((ModifyBackendClause) alterClause));
+        } else if (alterClause instanceof ModifyFrontendHostNameClause) {
+            ModifyFrontendHostNameClause clause = (ModifyFrontendHostNameClause) alterClause;
+            Env.getCurrentEnv().modifyFrontendHostName(clause.getHost(), clause.getPort(), clause.getNewHost());
+        } else if (alterClause instanceof ModifyBackendHostNameClause) {
+            Env.getCurrentSystemInfo().modifyBackendHost((ModifyBackendHostNameClause) alterClause);
         } else {
             Preconditions.checkState(false, alterClause.getClass());
         }
@@ -237,22 +230,22 @@ public class SystemHandler extends AlterHandler {
     @Override
     public synchronized void cancel(CancelStmt stmt) throws DdlException {
         CancelAlterSystemStmt cancelAlterSystemStmt = (CancelAlterSystemStmt) stmt;
-        cancelAlterSystemStmt.getHostInfos();
-
         SystemInfoService infoService = Env.getCurrentSystemInfo();
         // check if backends is under decommission
         List<Backend> backends = Lists.newArrayList();
         List<HostInfo> hostInfos = cancelAlterSystemStmt.getHostInfos();
         for (HostInfo hostInfo : hostInfos) {
             // check if exist
-            Backend backend = infoService.getBackendWithHeartbeatPort(hostInfo.getHost(), hostInfo.getPort());
+            Backend backend = infoService.getBackendWithHeartbeatPort(hostInfo.getHost(),
+                    hostInfo.getPort());
             if (backend == null) {
-                throw new DdlException("Backend does not exists[" + hostInfo.getHost() + "]");
+                throw new DdlException("Backend does not exist["
+                        + hostInfo.getHost() + ":" + hostInfo.getPort() + "]");
             }
 
             if (!backend.isDecommissioned()) {
                 // it's ok. just log
-                LOG.info("backend is not decommissioned[{}]", hostInfo.getHost());
+                LOG.info("backend is not decommissioned[{}]", backend.getId());
                 continue;
             }
 

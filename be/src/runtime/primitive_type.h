@@ -17,12 +17,20 @@
 
 #pragma once
 
+#include <gen_cpp/Opcodes_types.h>
+#include <gen_cpp/Types_types.h>
+#include <glog/logging.h>
+#include <stdint.h>
+
 #include <string>
 
+#include "olap/decimal12.h"
 #include "runtime/define_primitive_type.h"
 #include "vec/columns/column_decimal.h"
+#include "vec/columns/column_vector.h"
 #include "vec/columns/columns_number.h"
 #include "vec/core/types.h"
+#include "vec/runtime/vdatetime_value.h"
 
 namespace doris {
 
@@ -30,12 +38,9 @@ namespace vectorized {
 class ColumnString;
 } // namespace vectorized
 
-class DateTimeValue;
 class DecimalV2Value;
-struct StringValue;
+struct StringRef;
 struct JsonBinaryValue;
-
-PrimitiveType convert_type_to_primitive(FunctionContext::Type type);
 
 constexpr bool is_enumeration_type(PrimitiveType type) {
     switch (type) {
@@ -54,6 +59,8 @@ constexpr bool is_enumeration_type(PrimitiveType type) {
     case TYPE_DECIMAL128I:
     case TYPE_BOOLEAN:
     case TYPE_ARRAY:
+    case TYPE_STRUCT:
+    case TYPE_MAP:
     case TYPE_HLL:
         return false;
     case TYPE_TINYINT:
@@ -96,11 +103,6 @@ constexpr bool has_variable_type(PrimitiveType type) {
            type == TYPE_QUANTILE_STATE || type == TYPE_STRING;
 }
 
-// Returns the byte size of 'type'  Returns 0 for variable length types.
-int get_byte_size(PrimitiveType type);
-// Returns the byte size of type when in a tuple
-int get_slot_size(PrimitiveType type);
-
 bool is_type_compatible(PrimitiveType lhs, PrimitiveType rhs);
 
 PrimitiveType get_primitive_type(vectorized::TypeIndex v_type);
@@ -108,7 +110,6 @@ PrimitiveType get_primitive_type(vectorized::TypeIndex v_type);
 TExprOpcode::type to_in_opcode(PrimitiveType t);
 PrimitiveType thrift_to_type(TPrimitiveType::type ttype);
 TPrimitiveType::type to_thrift(PrimitiveType ptype);
-TColumnType to_tcolumn_type_thrift(TPrimitiveType::type ttype);
 std::string type_to_string(PrimitiveType t);
 std::string type_to_odbc_string(PrimitiveType t);
 TTypeDesc gen_type_desc(const TPrimitiveType::type val);
@@ -167,12 +168,12 @@ struct PrimitiveTypeTraits<TYPE_DOUBLE> {
 };
 template <>
 struct PrimitiveTypeTraits<TYPE_DATE> {
-    using CppType = doris::DateTimeValue;
+    using CppType = doris::vectorized::VecDateTimeValue;
     using ColumnType = vectorized::ColumnVector<vectorized::DateTime>;
 };
 template <>
 struct PrimitiveTypeTraits<TYPE_DATETIME> {
-    using CppType = doris::DateTimeValue;
+    using CppType = doris::vectorized::VecDateTimeValue;
     using ColumnType = vectorized::ColumnVector<vectorized::DateTime>;
 };
 template <>
@@ -212,24 +213,24 @@ struct PrimitiveTypeTraits<TYPE_LARGEINT> {
 };
 template <>
 struct PrimitiveTypeTraits<TYPE_CHAR> {
-    using CppType = StringValue;
+    using CppType = StringRef;
     using ColumnType = vectorized::ColumnString;
 };
 template <>
 struct PrimitiveTypeTraits<TYPE_VARCHAR> {
-    using CppType = StringValue;
+    using CppType = StringRef;
     using ColumnType = vectorized::ColumnString;
 };
 
 template <>
 struct PrimitiveTypeTraits<TYPE_STRING> {
-    using CppType = StringValue;
+    using CppType = StringRef;
     using ColumnType = vectorized::ColumnString;
 };
 
 template <>
 struct PrimitiveTypeTraits<TYPE_HLL> {
-    using CppType = StringValue;
+    using CppType = StringRef;
     using ColumnType = vectorized::ColumnString;
 };
 
@@ -274,16 +275,19 @@ struct PredicatePrimitiveTypeTraits<TYPE_DATETIMEV2> {
 template <PrimitiveType type>
 struct VecPrimitiveTypeTraits {
     using CppType = typename PrimitiveTypeTraits<type>::CppType;
+    using ColumnType = typename PrimitiveTypeTraits<type>::ColumnType;
 };
 
 template <>
 struct VecPrimitiveTypeTraits<TYPE_DATE> {
     using CppType = vectorized::VecDateTimeValue;
+    using ColumnType = vectorized::ColumnVector<vectorized::DateTime>;
 };
 
 template <>
 struct VecPrimitiveTypeTraits<TYPE_DATETIME> {
     using CppType = vectorized::VecDateTimeValue;
+    using ColumnType = vectorized::ColumnVector<vectorized::DateTime>;
 };
 
 } // namespace doris

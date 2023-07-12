@@ -17,15 +17,28 @@
 
 #pragma once
 
+#include <gen_cpp/olap_file.pb.h>
+#include <stdint.h>
+
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "common/status.h"
 #include "olap/iterators.h"
-#include "olap/row_block.h"
-#include "olap/row_block2.h"
-#include "olap/row_cursor.h"
+#include "olap/olap_common.h"
 #include "olap/rowset/beta_rowset.h"
+#include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_reader.h"
+#include "olap/schema.h"
 #include "olap/segment_loader.h"
+#include "vec/core/block.h"
 
 namespace doris {
+class RuntimeProfile;
+class Schema;
+struct RowLocation;
+struct RowsetReaderContext;
 
 class BetaRowsetReader : public RowsetReader {
 public:
@@ -33,15 +46,14 @@ public:
 
     ~BetaRowsetReader() override { _rowset->release(); }
 
-    Status init(RowsetReaderContext* read_context) override;
+    Status init(RowsetReaderContext* read_context,
+                const std::pair<int, int>& segment_offset) override;
 
     Status get_segment_iterators(RowsetReaderContext* read_context,
-                                 std::vector<RowwiseIterator*>* out_iters,
+                                 std::vector<RowwiseIteratorUPtr>* out_iters,
+                                 const std::pair<int, int>& segment_offset,
                                  bool use_cache = false) override;
     void reset_read_options() override;
-
-    // It's ok, because we only get ref here, the block's owner is this reader.
-    Status next_block(RowBlock** block) override;
     Status next_block(vectorized::Block* block) override;
     Status next_block_view(vectorized::BlockView* block_view) override;
     bool support_return_data_by_ref() override { return _iterator->support_return_data_by_ref(); }
@@ -50,7 +62,6 @@ public:
 
     Version version() override { return _rowset->version(); }
 
-    int64_t oldest_write_timestamp() override { return _rowset->oldest_write_timestamp(); }
     int64_t newest_write_timestamp() override { return _rowset->newest_write_timestamp(); }
 
     RowsetSharedPtr rowset() override { return std::dynamic_pointer_cast<Rowset>(_rowset); }
@@ -70,17 +81,14 @@ public:
 
     Status get_segment_num_rows(std::vector<uint32_t>* segment_num_rows) override;
 
-    bool update_profile(RuntimeProfile* profile) override {
-        if (_iterator != nullptr) {
-            return _iterator->update_profile(profile);
-        }
-        return false;
-    }
+    bool update_profile(RuntimeProfile* profile) override;
+
+    RowsetReaderSharedPtr clone() override;
 
 private:
     bool _should_push_down_value_predicates() const;
 
-    std::shared_ptr<Schema> _input_schema;
+    SchemaSPtr _input_schema;
     RowsetReaderContext* _context;
     BetaRowsetSharedPtr _rowset;
 
@@ -89,16 +97,13 @@ private:
 
     std::unique_ptr<RowwiseIterator> _iterator;
 
-    std::shared_ptr<RowBlockV2> _input_block;
-    std::unique_ptr<RowBlock> _output_block;
-    std::unique_ptr<RowCursor> _row;
-
     // make sure this handle is initialized and valid before
     // reading data.
     SegmentCacheHandle _segment_cache_handle;
 
     StorageReadOptions _read_options;
-    bool _can_reuse_schema = true;
+
+    bool _empty = false;
 };
 
 } // namespace doris

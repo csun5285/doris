@@ -17,11 +17,21 @@
 
 #include "io/fs/s3_file_reader.h"
 
+#include <aws/core/http/URI.h>
+#include <aws/core/utils/Outcome.h>
 #include <aws/s3/S3Client.h>
+#include <aws/s3/S3Errors.h>
 #include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/GetObjectResult.h>
+#include <fmt/format.h>
+#include <glog/logging.h>
 
 #include "common/config.h"
-#include "io/cloud/tmp_file_mgr.h"
+#include <algorithm>
+#include <utility>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
 #include "io/fs/s3_common.h"
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
@@ -30,23 +40,29 @@
 
 namespace doris {
 namespace io {
+class IOContext;
+bvar::Adder<uint64_t> s3_file_reader_counter("s3_file_reader", "read_at");
+bvar::Adder<uint64_t> s3_file_reader("s3_file_reader", "total_num");
+bvar::Adder<uint64_t> s3_bytes_read("s3_file_reader", "bytes_read");
+bvar::Adder<uint64_t> s3_file_being_read("s3_file_reader", "file_being_read");
 
-S3FileReader::S3FileReader(Path path, size_t file_size, std::string key, std::string bucket,
-                           S3FileSystem* fs)
-        : _path(std::move(path)),
+S3FileReader::S3FileReader(size_t file_size, std::string key, std::shared_ptr<S3FileSystem> fs)
+        : _path(fmt::format("s3://{}/{}", fs->s3_conf().bucket, key)),
           _file_size(file_size),
-          _fs(fs),
-          _bucket(std::move(bucket)),
-          _key(std::move(key)) {
-    auto tmp_file_name = _key;
-    std::replace(tmp_file_name.begin(), tmp_file_name.end(), '/', '_');
-    _local_path = Path(TmpFileMgr::instance()->get_tmp_file_dir(tmp_file_name)) / tmp_file_name;
+          _bucket(fs->s3_conf().bucket),
+          _key(std::move(key)),
+          _fs(std::move(fs)) {
     DorisMetrics::instance()->s3_file_open_reading->increment(1);
     DorisMetrics::instance()->s3_file_reader_total->increment(1);
+    s3_file_reader << 1;
+    s3_file_being_read << 1;
+
+    Aws::Http::SetCompliantRfc3986Encoding(true);
 }
 
 S3FileReader::~S3FileReader() {
     close();
+    s3_file_being_read << -1;
 }
 
 Status S3FileReader::close() {
@@ -57,16 +73,8 @@ Status S3FileReader::close() {
     return Status::OK();
 }
 
-Status S3FileReader::read_at(size_t offset, Slice result, const IOContext& io_ctx,
-                             size_t* bytes_read) {
+Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read, const IOContext*) {
     DCHECK(!closed());
-    FileReaderSPtr _cache_file_reader = TmpFileMgr::instance()->lookup_tmp_file(_local_path);
-    if (_cache_file_reader) {
-        if (state) {
-            state->stats->file_cache_stats.num_io_bytes_read_from_write_cache += result.size;
-        }
-        return _cache_file_reader->read_at(offset, result, bytes_read, state);
-    }
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
                                offset, _file_size, _path.native());
@@ -88,9 +96,8 @@ Status S3FileReader::read_at(size_t offset, Slice result, const IOContext& io_ct
     if (!client) {
         return Status::InternalError("init s3 client error");
     }
-    TRACE_START("read s3");
+    s3_file_reader_counter << 1;
     auto outcome = client->GetObject(request);
-    TRACE_FINISH("read s3");
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", _path.native(),
                                outcome.GetError().GetMessage());
@@ -101,6 +108,7 @@ Status S3FileReader::read_at(size_t offset, Slice result, const IOContext& io_ct
                                _path.native(), *bytes_read, bytes_req);
     }
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
+    s3_bytes_read << *bytes_read;
     return Status::OK();
 }
 

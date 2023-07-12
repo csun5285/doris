@@ -45,7 +45,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -58,6 +57,7 @@ public abstract class JoinNodeBase extends PlanNode {
 
     protected final TableRef innerRef;
     protected final JoinOperator joinOp;
+    protected final boolean isMark;
     protected TupleDescriptor vOutputTupleDesc;
     protected ExprSubstitutionMap vSrcToOutputSMap;
     protected List<TupleDescriptor> vIntermediateTupleDescList;
@@ -85,10 +85,11 @@ public abstract class JoinNodeBase extends PlanNode {
         } else if (joinOp.equals(JoinOperator.RIGHT_OUTER_JOIN)) {
             nullableTupleIds.addAll(outer.getTupleIds());
         }
+        this.isMark = this.innerRef != null && innerRef.isMark();
     }
 
     public boolean isMarkJoin() {
-        return innerRef != null && innerRef.isMark();
+        return isMark;
     }
 
     public JoinOperator getJoinOp() {
@@ -428,9 +429,6 @@ public abstract class JoinNodeBase extends PlanNode {
         // 4. replace other conjuncts and conjuncts
         computeOtherConjuncts(analyzer, originToIntermediateSmap);
         conjuncts = Expr.substituteList(conjuncts, originToIntermediateSmap, analyzer, false);
-        if (vconjunct != null) {
-            vconjunct = Expr.substituteList(Arrays.asList(vconjunct), originToIntermediateSmap, analyzer, false).get(0);
-        }
         // 5. replace tuple is null expr
         TupleIsNullPredicate.substitueListForTupleIsNull(vSrcToOutputSMap.getLhs(), originTidsToIntermediateTidMap);
     }
@@ -474,10 +472,12 @@ public abstract class JoinNodeBase extends PlanNode {
     /**
      * Only for Nereids.
      */
-    public JoinNodeBase(PlanNodeId id, String planNodeName, StatisticalType statisticalType, JoinOperator joinOp) {
+    public JoinNodeBase(PlanNodeId id, String planNodeName,
+                        StatisticalType statisticalType, JoinOperator joinOp, boolean isMark) {
         super(id, planNodeName, statisticalType);
         this.innerRef = null;
         this.joinOp = joinOp;
+        this.isMark = isMark;
     }
 
     public TableRef getInnerRef() {

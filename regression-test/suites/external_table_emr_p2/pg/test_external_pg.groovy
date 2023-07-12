@@ -29,7 +29,6 @@ suite("test_external_pg", "p2") {
         String pgTableNameCustomer = "jdbc_pg_14_customer"
         String pgTableNameSupplier = "jdbc_pg_14_supplier"
 
-
         sql """drop database if exists ${jdbcPg14Database1};"""
         sql """drop resource if exists ${jdbcResourcePg14};"""
 
@@ -42,8 +41,8 @@ suite("test_external_pg", "p2") {
                 "type"="jdbc",
                 "user"="${extPgUser}",
                 "password"="${extPgPassword}",
-                "driver_url"="https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com/jdbc_driver/postgresql-42.5.0.jar",
                 "jdbc_url"="jdbc:postgresql://${extPgHost}:${extPgPort}/ssb?currentSchema=ssb&useCursorFetch=true",
+                "driver_url"="https://doris-community-bj-1308700295.cos.ap-beijing.myqcloud.com/jdbc_drivers/postgresql-42.5.0.jar",
                 "driver_class"="org.postgresql.Driver"
             );
             """
@@ -126,5 +125,9 @@ suite("test_external_pg", "p2") {
 
         def res4 = sql """select * from ${pgTableNameCustomer} a  join ${pgTableNameSupplier} b on a.c_nation =b.s_nation limit 5;"""
         logger.info("recoding select: " + res4.toString())
+<<<<<<< HEAD
+=======
+
+>>>>>>> doris/branch-2.0-beta
     }
 }

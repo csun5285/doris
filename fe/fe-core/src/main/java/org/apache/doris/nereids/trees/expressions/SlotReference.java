@@ -43,15 +43,15 @@ public class SlotReference extends Slot {
     private final Column column;
 
     public SlotReference(String name, DataType dataType) {
-        this(NamedExpressionUtil.newExprId(), name, dataType, true, ImmutableList.of(), null);
+        this(StatementScopeIdGenerator.newExprId(), name, dataType, true, ImmutableList.of(), null);
     }
 
     public SlotReference(String name, DataType dataType, boolean nullable) {
-        this(NamedExpressionUtil.newExprId(), name, dataType, nullable, ImmutableList.of(), null);
+        this(StatementScopeIdGenerator.newExprId(), name, dataType, nullable, ImmutableList.of(), null);
     }
 
     public SlotReference(String name, DataType dataType, boolean nullable, List<String> qualifier) {
-        this(NamedExpressionUtil.newExprId(), name, dataType, nullable, qualifier, null);
+        this(StatementScopeIdGenerator.newExprId(), name, dataType, nullable, qualifier, null);
     }
 
     public SlotReference(ExprId exprId, String name, DataType dataType, boolean nullable, List<String> qualifier) {
@@ -73,7 +73,7 @@ public class SlotReference extends Slot {
         this.exprId = exprId;
         this.name = name;
         this.dataType = dataType;
-        this.qualifier = qualifier;
+        this.qualifier = ImmutableList.copyOf(Objects.requireNonNull(qualifier, "qualifier can not be null"));
         this.nullable = nullable;
         this.column = column;
     }
@@ -83,9 +83,15 @@ public class SlotReference extends Slot {
     }
 
     public static SlotReference fromColumn(Column column, List<String> qualifier) {
-        DataType dataType = DataType.convertFromCatalogDataType(column.getType());
-        return new SlotReference(NamedExpressionUtil.newExprId(), column.getName(), dataType,
+        DataType dataType = DataType.fromCatalogType(column.getType());
+        return new SlotReference(StatementScopeIdGenerator.newExprId(), column.getName(), dataType,
                 column.isAllowNull(), qualifier, column);
+    }
+
+    public static SlotReference fromColumn(Column column, String name, List<String> qualifier) {
+        DataType dataType = DataType.fromCatalogType(column.getType());
+        return new SlotReference(StatementScopeIdGenerator.newExprId(), name, dataType,
+            column.isAllowNull(), qualifier, column);
     }
 
     @Override
@@ -125,6 +131,15 @@ public class SlotReference extends Slot {
     }
 
     @Override
+    public String shapeInfo() {
+        if (qualifier.isEmpty()) {
+            return name;
+        } else {
+            return qualifier.get(qualifier.size() - 1) + "." + name;
+        }
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -148,7 +163,8 @@ public class SlotReference extends Slot {
     // The contains method needs to use hashCode, so similar to equals, it only compares exprId
     @Override
     public int hashCode() {
-        return Objects.hash(exprId);
+        // direct return exprId to speed up
+        return exprId.asInt();
     }
 
     public Optional<Column> getColumn() {
@@ -166,10 +182,6 @@ public class SlotReference extends Slot {
         return this;
     }
 
-    public SlotReference withDataType(DataType dataType) {
-        return new SlotReference(exprId, name, dataType, nullable, qualifier, column);
-    }
-
     public SlotReference withNullable(boolean newNullable) {
         if (this.nullable == newNullable) {
             return this;
@@ -182,16 +194,12 @@ public class SlotReference extends Slot {
         return new SlotReference(exprId, name, dataType, nullable, qualifiers, column);
     }
 
+    public boolean isVisible() {
+        return column == null || column.isVisible();
+    }
+
     @Override
     public Slot withName(String name) {
         return new SlotReference(exprId, name, dataType, nullable, qualifier, column);
-    }
-
-    /** withCommonGroupingSetExpression */
-    public Slot withCommonGroupingSetExpression(boolean isCommonGroupingSetExpression) {
-        if (!isCommonGroupingSetExpression) {
-            return withNullable(true);
-        }
-        return this;
     }
 }

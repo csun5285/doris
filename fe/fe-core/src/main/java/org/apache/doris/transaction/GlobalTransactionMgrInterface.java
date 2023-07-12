@@ -29,6 +29,7 @@ import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
+import org.apache.doris.persist.BatchRemoveTransactionsOperationV2;
 import org.apache.doris.persist.EditLog;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.thrift.TWaitingTxnStatusRequest;
@@ -116,7 +117,7 @@ public interface GlobalTransactionMgrInterface extends Writable {
 
     public void addTableIndexes(long dbId, long transactionId, OlapTable table) throws UserException;
 
-    public List<List<Comparable>> getDbInfo() throws AnalysisException;
+    public List<List<String>> getDbInfo() throws AnalysisException;
 
     public List<List<String>> getDbTransStateInfo(long dbId) throws AnalysisException;
 
@@ -148,8 +149,6 @@ public interface GlobalTransactionMgrInterface extends Writable {
 
     public long getAllRunningTxnNum();
 
-    public long getAllRunningTxnReplicaNum();
-
     public long getAllPublishTxnNum();
 
     public void readFields(DataInput in) throws IOException;
@@ -163,5 +162,8 @@ public interface GlobalTransactionMgrInterface extends Writable {
     public void replayDeleteTransactionState(TransactionState transactionState) throws MetaNotFoundException;
 
     public void replayBatchRemoveTransactions(BatchRemoveTransactionsOperation operation) throws MetaNotFoundException;
+
+    public void replayBatchRemoveTransactionV2(BatchRemoveTransactionsOperationV2 operation)
+            throws MetaNotFoundException;
 }
 

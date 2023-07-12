@@ -1654,9 +1654,15 @@ webserver默认工作线程数
 * 描述: 是否在导入json数据时用simdjson来解析。
 * 默认值: false
 
+#### `enable_query_memory_overcommit`
+
+* 描述: 如果为true，则当内存未超过 exec_mem_limit 时，查询内存将不受限制；当进程内存超过 exec_mem_limit 且大于 2GB 时，查询会被取消。如果为false，则在使用的内存超过 exec_mem_limit 时取消查询。
+* 默认值: true
+
 #### `enable_parse_multi_dimession_array`
 
 * 描述: 在动态表中是否解析多维数组，如果是false遇到多维数组则会报错。
 * 默认值: true
 
 </version>
+

@@ -17,21 +17,22 @@
 
 package org.apache.doris.nereids.trees.plans.logical;
 
-import org.apache.doris.catalog.Table;
+import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.catalog.TableIf;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.plans.ObjectId;
 import org.apache.doris.nereids.trees.plans.PlanType;
-import org.apache.doris.nereids.trees.plans.RelationId;
 import org.apache.doris.nereids.trees.plans.algebra.Scan;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.nereids.util.Utils;
 
 import com.google.common.collect.ImmutableList;
+import org.json.JSONObject;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -41,14 +42,17 @@ import java.util.Optional;
  */
 public abstract class LogicalRelation extends LogicalLeaf implements Scan {
 
-    protected final Table table;
+    protected final ObjectId id;
+    protected final TableIf table;
     protected final ImmutableList<String> qualifier;
-    protected final ImmutableList<Long> selectedPartitionIds;
 
-    protected final RelationId id;
+    public LogicalRelation(ObjectId id, PlanType type, TableIf table, List<String> qualifier) {
+        this(id, type, table, qualifier, Optional.empty(), Optional.empty());
+    }
 
-    public LogicalRelation(RelationId id, PlanType type, Table table, List<String> qualifier) {
-        this(id, type, table, qualifier, Optional.empty(), Optional.empty(), Collections.emptyList());
+    public LogicalRelation(ObjectId id, PlanType type, Optional<GroupExpression> groupExpression,
+            Optional<LogicalProperties> logicalProperties) {
+        this(id, type, new OlapTable(), ImmutableList.of(), groupExpression, logicalProperties);
     }
 
     /**
@@ -57,19 +61,16 @@ public abstract class LogicalRelation extends LogicalLeaf implements Scan {
      * @param table Doris table
      * @param qualifier qualified relation name
      */
-    public LogicalRelation(RelationId id, PlanType type, Table table, List<String> qualifier,
-            Optional<GroupExpression> groupExpression, Optional<LogicalProperties> logicalProperties,
-            List<Long> selectedPartitionIds) {
+    public LogicalRelation(ObjectId id, PlanType type, TableIf table, List<String> qualifier,
+            Optional<GroupExpression> groupExpression, Optional<LogicalProperties> logicalProperties) {
         super(type, groupExpression, logicalProperties);
+        this.id = id;
         this.table = Objects.requireNonNull(table, "table can not be null");
         this.qualifier = ImmutableList.copyOf(Objects.requireNonNull(qualifier, "qualifier can not be null"));
-        this.selectedPartitionIds = ImmutableList.copyOf(
-                Objects.requireNonNull(selectedPartitionIds, "selectedPartitionIds can not be null"));
-        this.id = id;
     }
 
     @Override
-    public Table getTable() {
+    public TableIf getTable() {
         return table;
     }
 
@@ -128,11 +129,18 @@ public abstract class LogicalRelation extends LogicalLeaf implements Scan {
         return Utils.qualifiedName(qualifier, table.getName());
     }
 
-    public List<Long> getSelectedPartitionIds() {
-        return selectedPartitionIds;
+    public ObjectId getId() {
+        return id;
     }
 
-    public RelationId getId() {
-        return id;
+    @Override
+    public JSONObject toJson() {
+        JSONObject logicalRelation = super.toJson();
+        JSONObject properties = new JSONObject();
+        properties.put("ObjectId", id.toString());
+        properties.put("Table", table.toString());
+        properties.put("Qualifier", qualifier.toString());
+        logicalRelation.put("Properties", properties);
+        return logicalRelation;
     }
 }

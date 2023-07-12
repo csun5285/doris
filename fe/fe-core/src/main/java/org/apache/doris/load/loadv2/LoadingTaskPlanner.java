@@ -35,14 +35,13 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.mysql.privilege.PrivPredicate;
-import org.apache.doris.planner.BrokerScanNode;
 import org.apache.doris.planner.DataPartition;
+import org.apache.doris.planner.FileLoadScanNode;
 import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.planner.PlanNodeId;
 import org.apache.doris.planner.ScanNode;
-import org.apache.doris.planner.external.ExternalFileScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TUniqueId;
@@ -101,7 +100,7 @@ public class LoadingTaskPlanner {
         this.sendBatchParallelism = sendBatchParallelism;
         this.useNewLoadScanNode = useNewLoadScanNode;
         this.userInfo = userInfo;
-        if (Env.getCurrentEnv().getAuth()
+        if (Env.getCurrentEnv().getAccessManager()
                 .checkDbPriv(userInfo, Env.getCurrentInternalCatalog().getDbNullable(dbId).getFullName(),
                         PrivPredicate.SELECT)) {
             this.analyzer.setUDFAllowed(true);
@@ -125,32 +124,28 @@ public class LoadingTaskPlanner {
         // Generate tuple descriptor
         TupleDescriptor destTupleDesc = descTable.createTupleDescriptor();
         TupleDescriptor scanTupleDesc = destTupleDesc;
-        if (Config.enable_vectorized_load) {
-            scanTupleDesc = descTable.createTupleDescriptor("ScanTuple");
-        }
+        scanTupleDesc = descTable.createTupleDescriptor("ScanTuple");
         // use full schema to fill the descriptor table
         for (Column col : table.getFullSchema()) {
             SlotDescriptor slotDesc = descTable.addSlotDescriptor(destTupleDesc);
             slotDesc.setIsMaterialized(true);
             slotDesc.setColumn(col);
             slotDesc.setIsNullable(col.isAllowNull());
-            if (Config.enable_vectorized_load) {
-                SlotDescriptor scanSlotDesc = descTable.addSlotDescriptor(scanTupleDesc);
-                scanSlotDesc.setIsMaterialized(true);
-                scanSlotDesc.setColumn(col);
-                scanSlotDesc.setIsNullable(col.isAllowNull());
-                if (fileGroups.size() > 0) {
-                    for (ImportColumnDesc importColumnDesc : fileGroups.get(0).getColumnExprList()) {
-                        try {
-                            if (!importColumnDesc.isColumn() && importColumnDesc.getColumnName() != null
-                                    && importColumnDesc.getColumnName().equals(col.getName())) {
-                                scanSlotDesc.setIsNullable(importColumnDesc.getExpr().isNullable());
-                                break;
-                            }
-                        } catch (Exception e) {
-                            // An exception may be thrown here because the `importColumnDesc.getExpr()` is not analyzed
-                            // now. We just skip this case here.
+            SlotDescriptor scanSlotDesc = descTable.addSlotDescriptor(scanTupleDesc);
+            scanSlotDesc.setIsMaterialized(true);
+            scanSlotDesc.setColumn(col);
+            scanSlotDesc.setIsNullable(col.isAllowNull());
+            if (fileGroups.size() > 0) {
+                for (ImportColumnDesc importColumnDesc : fileGroups.get(0).getColumnExprList()) {
+                    try {
+                        if (!importColumnDesc.isColumn() && importColumnDesc.getColumnName() != null
+                                && importColumnDesc.getColumnName().equals(col.getName())) {
+                            scanSlotDesc.setIsNullable(importColumnDesc.getExpr().isNullable());
+                            break;
                         }
+                    } catch (Exception e) {
+                        // An exception may be thrown here because the `importColumnDesc.getExpr()` is not analyzed
+                        // now. We just skip this case here.
                     }
                 }
             }
@@ -161,7 +156,6 @@ public class LoadingTaskPlanner {
             descTable.addReferencedTable(table);
             // For reference table
             scanTupleDesc.setTableId((int) table.getId());
-            scanTupleDesc.setTable(table);
             // Add a implict container column "DORIS_DYNAMIC_COL" for dynamic columns
             SlotDescriptor slotDesc = descTable.addSlotDescriptor(scanTupleDesc);
             Column col = new Column(Column.DYNAMIC_COLUMN_NAME, Type.VARIANT, false, null, false, "",
@@ -178,61 +172,21 @@ public class LoadingTaskPlanner {
         // Generate plan trees
         // 1. Broker scan node
         ScanNode scanNode;
-        boolean useNewScanNode = Config.enable_new_load_scan_node || useNewLoadScanNode;
-        if (useNewScanNode) {
-            if (Config.isNotCloudMode()) {
-                scanNode = new ExternalFileScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc);
-            } else {
-                scanNode = new ExternalFileScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc,
-                                                    cluster);
-            }
-            ((ExternalFileScanNode) scanNode).setLoadInfo(loadJobId, txnId, table, brokerDesc, fileGroups,
-                    fileStatusesList, filesAdded, strictMode, loadParallelism, userInfo);
-        } else {
-            if (Config.isNotCloudMode()) {
-                scanNode = new BrokerScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc, "BrokerScanNode",
-                        fileStatusesList, filesAdded);
-            } else {
-                scanNode = new BrokerScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc, "BrokerScanNode",
-                        fileStatusesList, filesAdded, cluster);
-            }
-            ((BrokerScanNode) scanNode).setLoadInfo(loadJobId, txnId, table, brokerDesc, fileGroups, strictMode,
-                    loadParallelism, userInfo);
-        }
+        scanNode = new FileLoadScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc);
+        ((FileLoadScanNode) scanNode).setLoadInfo(loadJobId, txnId, table, brokerDesc, fileGroups,
+                fileStatusesList, filesAdded, strictMode, loadParallelism, userInfo);
+        scanNode.init(analyzer);
+        scanNode.finalize(analyzer);
+        scanNodes.add(scanNode);
+        descTable.computeStatAndMemLayout();
 
-        OlapTableSink olapTableSink = null;
-        try {
-            scanNode.init(analyzer);
-            scanNode.finalize(analyzer);
-            if (Config.enable_vectorized_load) {
-                scanNode.convertToVectoriezd();
-            }
-            scanNodes.add(scanNode);
-            descTable.computeStatAndMemLayout();
-
-            // 2. Olap table sink
-            List<Long> partitionIds = getAllPartitionIds();
-            olapTableSink = new OlapTableSink(table, destTupleDesc, partitionIds,
-                    Config.enable_single_replica_load);
-            olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, timeoutS);
-            olapTableSink.complete();
-        } catch (UserException e) {
-            throw e;
-        } finally {
-            // connectContext is a thread local variable, so you must claar
-            // context to avoid it from containing old cluster information
-            if (Config.isCloudMode()) {
-                if (scanNode instanceof BrokerScanNode) {
-                    if (((BrokerScanNode) scanNode).needClearContext()) {
-                        ConnectContext.remove();
-                    }
-                } else if (scanNode instanceof ExternalFileScanNode) {
-                    if (((ExternalFileScanNode) scanNode).needClearContext()) {
-                        ConnectContext.remove();
-                    }
-                }
-            }
-        }
+        // 2. Olap table sink
+        List<Long> partitionIds = getAllPartitionIds();
+        OlapTableSink olapTableSink = new OlapTableSink(table, destTupleDesc, partitionIds,
+                Config.enable_single_replica_load);
+        int timeout = timeoutS == 0 ? ConnectContext.get().getExecTimeout() : (int) timeoutS;
+        olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, timeout);
+        olapTableSink.complete();
 
         // 3. Plan fragment
         PlanFragment sinkFragment = new PlanFragment(new PlanFragmentId(0), scanNode, DataPartition.RANDOM);
@@ -268,6 +222,12 @@ public class LoadingTaskPlanner {
         Set<Long> specifiedPartitionIds = Sets.newHashSet();
         for (BrokerFileGroup brokerFileGroup : fileGroups) {
             if (brokerFileGroup.getPartitionIds() != null) {
+                for (long partitionId : brokerFileGroup.getPartitionIds()) {
+                    if (!table.getPartitionInfo().getIsMutable(partitionId)) {
+                        throw new LoadException("Can't load data to immutable partition, table: "
+                            + table.getName() + ", partition: " + table.getPartition(partitionId));
+                    }
+                }
                 specifiedPartitionIds.addAll(brokerFileGroup.getPartitionIds());
             }
             // all file group in fileGroups should have same partitions, so only need to get partition ids

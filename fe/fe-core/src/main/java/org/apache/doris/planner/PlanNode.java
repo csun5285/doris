@@ -20,6 +20,7 @@
 
 package org.apache.doris.planner;
 
+import org.apache.doris.analysis.AggregateInfo;
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.BitmapFilterPredicate;
 import org.apache.doris.analysis.CompoundPredicate;
@@ -100,8 +101,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
 
     protected List<Expr> conjuncts = Lists.newArrayList();
 
-    protected Expr vconjunct = null;
-
     // Conjuncts used to filter the original load file.
     // In the load execution plan, the difference between "preFilterConjuncts" and "conjuncts" is that
     // conjuncts are used to filter the data after column conversion and mapping,
@@ -123,6 +122,8 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     // estimate of the output cardinality of this node; set in computeStats();
     // invalid: -1
     protected long cardinality;
+
+    protected long cardinalityAfterFilter = -1;
 
     // number of nodes on which the plan tree rooted at this node would execute;
     // set in computeStats(); invalid: -1
@@ -291,6 +292,13 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         this.offset = offset;
     }
 
+    /**
+     * Used by new optimizer only.
+     */
+    public void setOffSetDirectly(long offset) {
+        this.offset = offset;
+    }
+
     public boolean hasLimit() {
         return limit > -1;
     }
@@ -305,6 +313,14 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
 
     public long getCardinality() {
         return cardinality;
+    }
+
+    public long getCardinalityAfterFilter() {
+        if (cardinalityAfterFilter < 0) {
+            return cardinality;
+        } else {
+            return cardinalityAfterFilter;
+        }
     }
 
     public int getNumNodes() {
@@ -444,9 +460,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     }
 
     public void transferConjuncts(PlanNode recipient) {
-        recipient.vconjunct = vconjunct;
-        vconjunct = null;
-
         recipient.conjuncts.addAll(conjuncts);
         conjuncts.clear();
     }
@@ -466,9 +479,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
             analyzer.getDescTbl().getTupleDesc(id).computeStatAndMemLayout();
         }
     }
-
-
-
 
     public String getExplainString() {
         return getExplainString("", "", TExplainLevel.VERBOSE);
@@ -569,9 +579,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
             msg.addToRowTuples(tid.asInt());
             msg.addToNullableTuples(nullableTupleIds.contains(tid));
         }
-        // `conjuncts` is never needed on vectorized engine except scan nodes which use them as push-down predicates.
-        if (this instanceof ScanNode || !VectorizedUtil.isVectorized()) {
-            for (Expr e : conjuncts) {
+
+        for (Expr e : conjuncts) {
+            if  (!(e instanceof BitmapFilterPredicate)) {
                 msg.addToConjuncts(e.treeToThrift());
             }
         }
@@ -579,10 +589,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         // Serialize any runtime filters
         for (RuntimeFilter filter : runtimeFilters) {
             msg.addToRuntimeFilters(filter.toThrift());
-        }
-
-        if (vconjunct != null) {
-            msg.vconjunct = vconjunct.treeToThrift();
         }
 
         msg.compact_data = compactData;
@@ -628,7 +634,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
                 analyzer.getTupleDesc(tupleId).computeMemLayout();
             }
         }
-
         for (PlanNode child : children) {
             child.finalize(analyzer);
         }
@@ -830,6 +835,16 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         return numInstances;
     }
 
+    public boolean shouldColoAgg(AggregateInfo aggregateInfo) {
+        return false;
+    }
+
+    public void setShouldColoScan() {}
+
+    public boolean getShouldColoScan() {
+        return false;
+    }
+
     public void setNumInstances(int numInstances) {
         this.numInstances = numInstances;
     }
@@ -1013,6 +1028,9 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
                 if (isBuildNode) {
                     filterStr.append(" <- ");
                     filterStr.append(filter.getSrcExpr().toSql());
+                    filterStr.append("(").append(filter.getEstimateNdv()).append("/")
+                            .append(filter.getExpectFilterSizeBytes()).append("/")
+                            .append(filter.getFilterSizeBytes()).append(")");
                 } else {
                     filterStr.append(" -> ");
                     filterStr.append(filter.getTargetExpr(getId()).toSql());
@@ -1025,28 +1043,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
 
     protected String getRuntimeFilterExplainString(boolean isBuildNode) {
         return getRuntimeFilterExplainString(isBuildNode, false);
-    }
-
-    public void convertToVectoriezd() {
-        List<Expr> conjunctsExcludeBitmapFilter = Lists.newArrayList();
-        for (Expr expr : conjuncts) {
-            if (!(expr instanceof BitmapFilterPredicate)) {
-                conjunctsExcludeBitmapFilter.add(expr);
-            }
-        }
-        if (!conjunctsExcludeBitmapFilter.isEmpty()) {
-            vconjunct = convertConjunctsToAndCompoundPredicate(conjunctsExcludeBitmapFilter);
-            initCompoundPredicate(vconjunct);
-        }
-
-        if (!preFilterConjuncts.isEmpty()) {
-            vpreFilterConjunct = convertConjunctsToAndCompoundPredicate(preFilterConjuncts);
-            initCompoundPredicate(vpreFilterConjunct);
-        }
-
-        for (PlanNode child : children) {
-            child.convertToVectoriezd();
-        }
     }
 
     /**
@@ -1117,7 +1113,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     /**
      * Supplement the information be needed for nodes generated by the new optimizer.
      */
-    public void finalizeForNereids() {
+    public void finalizeForNereids() throws UserException {
 
     }
 
@@ -1141,7 +1137,11 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         return outputSlotIds;
     }
 
-    public void setVConjunct(Set<Expr> exprs) {
-        vconjunct = convertConjunctsToAndCompoundPredicate(new ArrayList<>(exprs));
+    public void setConjuncts(Set<Expr> exprs) {
+        conjuncts = new ArrayList<>(exprs);
+    }
+
+    public void setCardinalityAfterFilter(long cardinalityAfterFilter) {
+        this.cardinalityAfterFilter = cardinalityAfterFilter;
     }
 }

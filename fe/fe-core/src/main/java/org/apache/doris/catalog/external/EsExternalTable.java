@@ -26,9 +26,6 @@ import org.apache.doris.thrift.TEsTable;
 import org.apache.doris.thrift.TTableDescriptor;
 import org.apache.doris.thrift.TTableType;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import java.util.List;
 
 /**
@@ -36,7 +33,6 @@ import java.util.List;
  */
 public class EsExternalTable extends ExternalTable {
 
-    private static final Logger LOG = LogManager.getLogger(EsExternalTable.class);
     private EsTable esTable;
 
     /**
@@ -67,13 +63,6 @@ public class EsExternalTable extends ExternalTable {
     @Override
     public String getMysqlType() {
         return type.name();
-    }
-
-    /**
-     * get database name of es table.
-     */
-    public String getDbName() {
-        return dbName;
     }
 
     @Override

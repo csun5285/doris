@@ -37,22 +37,8 @@ suite ("test_rollup_uni_fail") {
             BUCKETS 1
             PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true");
     """
-
-    result = "null"
-    rollupName = "rollup_cost"
-    def cnt = 0
-    sql "ALTER TABLE ${tableName} ADD ROLLUP ${rollupName}(`user_id`,`date`,`age`, `sex`, cost);"
-    while (!result.contains("CANCELLED")){
-        result = sql "SHOW ALTER TABLE ROLLUP WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1;"
-        result = result.toString()
-        logger.info("result: ${result}")
-        if(result.contains("FINISHED")){
-            assertTrue(false);
-        }
-        if (++cnt > 60) {
-            // timeout
-            assertTrue(false)
-        }
-        Thread.sleep(1000)
+    test {
+        sql "ALTER TABLE ${tableName} ADD ROLLUP r1 (`user_id`,`date`,`age`, `sex`, cost);"
+        exception "errCode = 2"
     }
 }

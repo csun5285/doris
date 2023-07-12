@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "vec/core/types.h"
+#include "vec/data_types/data_type_time.h"
 
 namespace doris::vectorized {
 
@@ -92,7 +93,7 @@ bool call_on_basic_type(TypeIndex number, F&& f) {
 
 /// Unroll template using TypeIndex
 template <bool _int, bool _float, bool _decimal, bool _datetime, typename F>
-inline bool call_on_basic_types(TypeIndex type_num1, TypeIndex type_num2, F&& f) {
+bool call_on_basic_types(TypeIndex type_num1, TypeIndex type_num2, F&& f) {
     if constexpr (_int) {
         switch (type_num1) {
         case TypeIndex::UInt8:
@@ -202,7 +203,8 @@ bool call_on_index_and_data_type(TypeIndex number, F&& f) {
         return f(TypePair<DataTypeNumber<Float32>, T>());
     case TypeIndex::Float64:
         return f(TypePair<DataTypeNumber<Float64>, T>());
-
+    case TypeIndex::Time:
+        return f(TypePair<DataTypeTime, T>());
     case TypeIndex::Decimal32:
         return f(TypePair<DataTypeDecimal<Decimal32>, T>());
     case TypeIndex::Decimal64:

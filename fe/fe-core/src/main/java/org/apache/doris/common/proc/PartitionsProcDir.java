@@ -33,7 +33,6 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.PartitionType;
-import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.ErrorCode;
@@ -69,6 +68,7 @@ public class PartitionsProcDir implements ProcDirInterface {
             .add("State").add("PartitionKey").add("Range").add("DistributionKey")
             .add("Buckets").add("ReplicationNum").add("StorageMedium").add("CooldownTime").add("RemoteStoragePolicy")
             .add("LastConsistencyCheckTime").add("DataSize").add("IsInMemory").add("ReplicaAllocation")
+            .add("IsMutable")
             .build();
 
     private Database db;
@@ -218,7 +218,7 @@ public class PartitionsProcDir implements ProcDirInterface {
     private List<List<Comparable>> getPartitionInfos() {
         Preconditions.checkNotNull(db);
         Preconditions.checkNotNull(olapTable);
-        Preconditions.checkState(olapTable.getType() == TableType.OLAP);
+        Preconditions.checkState(olapTable.isManagedTable());
 
         // get info
         List<List<Comparable>> partitionInfos = new ArrayList<List<Comparable>>();
@@ -300,6 +300,8 @@ public class PartitionsProcDir implements ProcDirInterface {
                 partitionInfo.add(tblPartitionInfo.getIsInMemory(partitionId));
                 // replica allocation
                 partitionInfo.add(tblPartitionInfo.getReplicaAllocation(partitionId).toCreateStmt());
+
+                partitionInfo.add(tblPartitionInfo.getIsMutable(partitionId));
 
                 partitionInfos.add(partitionInfo);
             }

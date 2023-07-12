@@ -21,13 +21,14 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.nereids.rules.analysis.LogicalSubQueryAliasToLogicalProject;
 import org.apache.doris.nereids.rules.rewrite.logical.MergeProjects;
 import org.apache.doris.nereids.trees.plans.PreAggStatus;
-import org.apache.doris.nereids.util.PatternMatchSupported;
+import org.apache.doris.nereids.util.MemoPatternMatchSupported;
 import org.apache.doris.nereids.util.PlanChecker;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements PatternMatchSupported {
+class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements MemoPatternMatchSupported {
 
     @Override
     protected void beforeCreatingConnectContext() throws Exception {
@@ -78,7 +79,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
                 + ");");
         addRollup("alter table t1 add rollup r1(k1)");
         addRollup("alter table t1 add rollup r2(k2, v1)");
-        addRollup("alter table t1 add rollup r3(k1, k2)");
+        addRollup("alter table t1 add rollup r3(k2, k1)");
 
         createTable("CREATE TABLE `duplicate_tbl` (\n"
                 + "  `k1` int(11) NULL,\n"
@@ -97,6 +98,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
                 + ");");
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testAggMatching() {
         singleTableTest("select k2, sum(v1) from t group by k2", "r1", true);
@@ -131,6 +133,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
         PlanChecker.from(connectContext).checkPlannerResult("select k2, sum(v1) from t group by k2");
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testTranslateWhenPreAggIsOff() {
         singleTableTest("select k2, min(v1) from t group by k2", scan -> {
@@ -168,11 +171,11 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
     @Test
     public void testWithFilter() {
         PlanChecker.from(connectContext)
-                .analyze("select k2, sum(v1) from t where k2>3 group by k3")
+                .analyze("select k2, sum(v1) from t where k2>3 group by k2")
                 .applyTopDown(new SelectMaterializedIndexWithAggregate())
                 .matches(logicalOlapScan().when(scan -> {
                     Assertions.assertTrue(scan.getPreAggStatus().isOn());
-                    Assertions.assertEquals("r2", scan.getSelectedMaterializedIndexName().get());
+                    Assertions.assertEquals("r1", scan.getSelectedMaterializedIndexName().get());
                     return true;
                 }));
     }
@@ -237,7 +240,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
                 .matches(logicalOlapScan().when(scan -> {
                     PreAggStatus preAgg = scan.getPreAggStatus();
                     Assertions.assertTrue(preAgg.isOff());
-                    Assertions.assertEquals("Input of aggregate function sum((v1 + 1)) should be slot or cast on slot.",
+                    Assertions.assertEquals("Slot((v1 + 1)) in sum((v1 + 1)) is neither key column nor value column.",
                             preAgg.getOffReason());
                     return true;
                 }));
@@ -312,6 +315,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
                 }));
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testKeysOnlyQuery() throws Exception {
         singleTableTest("select k1 from t1", "r3", false);
@@ -325,6 +329,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
     /**
      * Rollup with all the keys should be used.
      */
+    //@Disabled //ISSUE #18263
     @Test
     public void testRollupWithAllTheKeys() throws Exception {
         createTable(" CREATE TABLE `t4` (\n"
@@ -342,7 +347,7 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
                 + "\"storage_format\" = \"V2\",\n"
                 + "\"disable_auto_compaction\" = \"false\"\n"
                 + ");");
-        addRollup("alter table t4 add rollup r1(k1, k2, v1)");
+        addRollup("alter table t4 add rollup r1(k2, k1, v1)");
 
         singleTableTest("select k1, k2, v1 from t4", "r1", false);
         singleTableTest("select k1, k2, sum(v1) from t4 group by k1, k2", "r1", true);
@@ -350,26 +355,30 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
         singleTableTest("select k1, sum(v1) from t4 group by k1", "r1", true);
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testComplexGroupingExpr() throws Exception {
         singleTableTest("select k2 + 1, sum(v1) from t group by k2 + 1", "r1", true);
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testCountDistinctKeyColumn() {
         singleTableTest("select k2, count(distinct k3) from t group by k2", "r4", true);
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testCountDistinctValueColumn() {
-        singleTableTest("select k1, count(distinct v1) from from t group by k1", scan -> {
+        singleTableTest("select k1, count(distinct v1) from t group by k1", scan -> {
             Assertions.assertFalse(scan.isPreAggregation());
-            Assertions.assertEquals("Count distinct is only valid for key columns, but meet count(distinct v1).",
+            Assertions.assertEquals("Count distinct is only valid for key columns, but meet count(DISTINCT v1).",
                     scan.getReasonOfPreAggregation());
             Assertions.assertEquals("t", scan.getSelectedIndexName());
         });
     }
 
+    //@Disabled //ISSUE #18263
     @Test
     public void testOnlyValueColumn1() throws Exception {
         singleTableTest("select sum(v1) from t", "r1", true);
@@ -378,5 +387,65 @@ class SelectRollupIndexTest extends BaseMaterializedIndexSelectTest implements P
     @Test
     public void testOnlyValueColumn2() throws Exception {
         singleTableTest("select v1 from t", "t", false);
+    }
+
+    @Disabled
+    @Test
+    public void testPreAggHint() throws Exception {
+        createTable(" CREATE TABLE `test_preagg_hint` (\n"
+                + "  `k1` int(11) NULL,\n"
+                + "  `k2` int(11) NULL,\n"
+                + "  `v1` int(11) SUM NULL,\n"
+                + "  `v2` int(11) SUM NULL\n"
+                + ") ENGINE=OLAP\n"
+                + "AGGREGATE KEY(`k1`, `k2`)\n"
+                + "COMMENT 'OLAP'\n"
+                + "DISTRIBUTED BY HASH(`k1`) BUCKETS 3\n"
+                + "PROPERTIES (\n"
+                + "\"replication_allocation\" = \"tag.location.default: 1\",\n"
+                + "\"in_memory\" = \"false\",\n"
+                + "\"storage_format\" = \"V2\",\n"
+                + "\"disable_auto_compaction\" = \"false\"\n"
+                + ");");
+
+        addRollup("alter table test_preagg_hint add rollup r1(k1, k2, v1)");
+
+        // no pre-agg hint
+        String queryWithoutHint = "select k1, v1 from test_preagg_hint";
+        // legacy planner
+        Assertions.assertTrue(getSQLPlanOrErrorMsg(queryWithoutHint).contains(
+                "TABLE: default_cluster:test.test_preagg_hint(r1), PREAGGREGATION: OFF. Reason: No AggregateInfo"));
+        // nereids planner
+        PlanChecker.from(connectContext)
+                .analyze(queryWithoutHint)
+                .rewrite()
+                .matches(logicalOlapScan().when(scan -> {
+                    Assertions.assertTrue(scan.getHints().isEmpty());
+                    Assertions.assertEquals("r1", scan.getSelectedMaterializedIndexName().get());
+                    PreAggStatus preAggStatus = scan.getPreAggStatus();
+                    Assertions.assertTrue(preAggStatus.isOff());
+                    Assertions.assertEquals("No aggregate on scan.", preAggStatus.getOffReason());
+                    return true;
+                }));
+
+        // has pre-agg hint
+        String queryWithHint = "select k1, v1 from test_preagg_hint /*+ PREAGGOPEN*/";
+        // legacy planner
+        Assertions.assertTrue(getSQLPlanOrErrorMsg(queryWithHint).contains(
+                "TABLE: default_cluster:test.test_preagg_hint(r1), PREAGGREGATION: ON"));
+        // nereids planner
+        PlanChecker.from(connectContext)
+                .analyze(queryWithHint)
+                .rewrite()
+                .matches(logicalOlapScan().when(scan -> {
+                    Assertions.assertEquals(1, scan.getHints().size());
+                    Assertions.assertEquals("PREAGGOPEN", scan.getHints().get(0));
+                    Assertions.assertEquals("r1", scan.getSelectedMaterializedIndexName().get());
+                    PreAggStatus preAggStatus = scan.getPreAggStatus();
+                    Assertions.assertTrue(preAggStatus.isOn());
+                    return true;
+                }));
+
+        dropTable("test_preagg_hint", true);
     }
 }

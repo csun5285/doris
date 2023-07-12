@@ -23,8 +23,10 @@ import com.google.common.util.concurrent.MoreExecutors
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import com.google.common.collect.ImmutableList
+import org.apache.doris.regression.action.BenchmarkAction
 import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.OutputUtils
+import org.apache.doris.regression.action.CreateMVAction
 import org.apache.doris.regression.action.ExplainAction
 import org.apache.doris.regression.action.RestoreAction
 import org.apache.doris.regression.action.StreamLoadAction
@@ -33,6 +35,7 @@ import org.apache.doris.regression.action.TestAction
 import org.apache.doris.regression.action.HttpCliAction
 import org.apache.doris.regression.util.JdbcUtils
 import org.apache.doris.regression.util.Hdfs
+import org.apache.doris.regression.util.SuiteUtils
 import org.junit.jupiter.api.Assertions
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -41,8 +44,10 @@ import groovy.util.logging.Slf4j
 import java.util.concurrent.Callable
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Map;
 import java.util.stream.Collectors
 import java.util.stream.LongStream
+<<<<<<< HEAD
 
 import java.math.BigDecimal;
 import static org.apache.doris.regression.util.DataUtils.sortByToString
@@ -50,6 +55,13 @@ import static org.apache.doris.regression.util.DataUtils.sortByToString
 import java.io.File
 import java.sql.PreparedStatement
 import java.sql.ResultSetMetaData
+=======
+import static org.apache.doris.regression.util.DataUtils.sortByToString
+
+import java.sql.PreparedStatement
+import java.sql.ResultSetMetaData
+import org.junit.Assert
+>>>>>>> doris/branch-2.0-beta
 
 @Slf4j
 class Suite implements GroovyInterceptable {
@@ -143,10 +155,7 @@ class Suite implements GroovyInterceptable {
     }
 
     public <T> Tuple2<T, Long> timer(Closure<T> actionSupplier) {
-        long startTime = System.currentTimeMillis()
-        T result = actionSupplier.call()
-        long endTime = System.currentTimeMillis()
-        return [result, endTime - startTime]
+        return SuiteUtils.timer(actionSupplier)
     }
 
     public <T> ListenableFuture<T> thread(String threadName = null, Closure<T> actionSupplier) {
@@ -202,6 +211,7 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
+<<<<<<< HEAD
     List<List<Object>> exec(Object stmt) {
         logger.info("Execute sql: ${stmt}".toString())
         def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
@@ -212,6 +222,8 @@ class Suite implements GroovyInterceptable {
         return JdbcUtils.prepareStatement(context.getConnection(), sql)
     } 
 
+=======
+>>>>>>> doris/branch-2.0-beta
     List<List<String>> sql_meta(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (tmp, rsmd) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -284,8 +296,20 @@ class Suite implements GroovyInterceptable {
         runAction(new ExplainAction(context), actionSupplier)
     }
 
+    void createMV(String sql) {
+        (new CreateMVAction(context, sql)).run()
+    }
+
+    void createMV(String sql, String expection) {
+        (new CreateMVAction(context, sql, expection)).run()
+    }
+
     void test(Closure actionSupplier) {
         runAction(new TestAction(context), actionSupplier)
+    }
+
+    void benchmark(Closure actionSupplier) {
+        runAction(new BenchmarkAction(context), actionSupplier)
     }
 
     String getBrokerName() {
@@ -339,6 +363,20 @@ class Suite implements GroovyInterceptable {
         return remotePath;
     }
 
+    String getLoalFilePath(String fileName) {
+        if (!new File(fileName).isAbsolute()) {
+            fileName = new File(context.dataPath, fileName).getAbsolutePath()
+        }
+        def file = new File(fileName)
+        if (!file.exists()) {
+            log.warn("Stream load input file not exists: ${file}".toString())
+            throw new IllegalStateException("Stream load input file not exists: ${file}");
+        }
+        def localFile = file.canonicalPath
+        log.info("Set stream load input: ${file.canonicalPath}".toString())
+        return localFile;
+    }
+
     boolean enableBrokerLoad() {
         String enableBrokerLoad = context.config.otherConfigs.get("enableBrokerLoad");
         return (enableBrokerLoad != null && enableBrokerLoad.equals("true"));
@@ -384,6 +422,40 @@ class Suite implements GroovyInterceptable {
         String s3Url = "http://${s3BucketName}.${s3Endpoint}"
         return s3Url
     }
+    
+    void scpFiles(String username, String host, String files, String filePath, boolean fromDst=true) {
+        String cmd = "scp -r ${username}@${host}:${files} ${filePath}"
+        if (!fromDst) {
+            cmd = "scp -r ${files} ${username}@${host}:${filePath}"
+        }
+        logger.info("Execute: ${cmd}".toString())
+        Process process = cmd.execute()
+        def code = process.waitFor()
+        Assert.assertEquals(0, code)
+    }
+    
+    void sshExec(String username, String host, String cmd) {
+        String command = "ssh ${username}@${host} '${cmd}'"
+        def cmds = ["/bin/bash", "-c", command]
+        logger.info("Execute: ${cmds}".toString())
+        Process p = cmds.execute()
+        def errMsg = new StringBuilder()
+        def msg = new StringBuilder()
+        p.waitForProcessOutput(msg, errMsg)
+        assert errMsg.length() == 0: "error occurred!" + errMsg
+        assert p.exitValue() == 0
+    }
+    
+
+    void getBackendIpHttpPort(Map<String, String> backendId_to_backendIP, Map<String, String> backendId_to_backendHttpPort) {
+        List<List<Object>> backends = sql("show backends");
+        String backend_id;
+        for (List<Object> backend : backends) {
+            backendId_to_backendIP.put(String.valueOf(backend[0]), String.valueOf(backend[1]));
+            backendId_to_backendHttpPort.put(String.valueOf(backend[0]), String.valueOf(backend[4]));
+        }
+        return;
+    } 
 
     String getProvider() {
         String s3Endpoint = context.config.otherConfigs.get("s3Endpoint")
@@ -414,6 +486,29 @@ class Suite implements GroovyInterceptable {
         file.delete()
     }
 
+    void waitingMTMVTaskFinished(String mvName) {
+        String showTasks = "SHOW MTMV TASK ON " + mvName
+        List<List<String>> showTaskMetaResult = sql_meta(showTasks)
+        int index = showTaskMetaResult.indexOf(['State', 'CHAR'])
+        String status = "PENDING"
+        List<List<Object>> result
+        long startTime = System.currentTimeMillis()
+        long timeoutTimestamp = startTime + 30 * 60 * 1000 // 30 min
+        do {
+            result = sql(showTasks)
+            if (!result.isEmpty()) {
+                status = result.last().get(index)
+            }
+            println "The state of ${showTasks} is ${status}"
+            Thread.sleep(1000);
+        } while (timeoutTimestamp > System.currentTimeMillis() && (status == 'PENDING' || status == 'RUNNING'))
+        if (status != "SUCCESS") {
+            println "status is not success"
+            println result.toString()
+        }
+        Assert.assertEquals("SUCCESS", status)
+    }
+
     List<String> downloadExportFromHdfs(String label) {
         String dataDir = context.config.dataPath + "/" + group + "/"
         String hdfsFs = context.config.otherConfigs.get("hdfsFs")
@@ -441,9 +536,16 @@ class Suite implements GroovyInterceptable {
         action.run()
     }
 
+<<<<<<< HEAD
     void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
+=======
+    PreparedStatement prepareStatement(String sql) {
+        return JdbcUtils.prepareStatement(context.getConnection(), sql)
+    } 
+>>>>>>> doris/branch-2.0-beta
 
+    void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         if (context.config.generateOutputFile || context.config.forceGenerateOutputFile) {
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
@@ -451,7 +553,11 @@ class Suite implements GroovyInterceptable {
             } else {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
             }
+<<<<<<< HEAD
             def (result, meta) = tupleResult;
+=======
+            def (result, meta) = tupleResult
+>>>>>>> doris/branch-2.0-beta
             if (isOrder) {
                 result = sortByToString(result)
             }
@@ -469,7 +575,10 @@ class Suite implements GroovyInterceptable {
             }
 
             OutputUtils.TagBlockIterator expectCsvResults = context.getOutputIterator().next()
+<<<<<<< HEAD
 
+=======
+>>>>>>> doris/branch-2.0-beta
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)

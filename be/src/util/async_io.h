@@ -6,8 +6,8 @@
 #include <chrono>
 #include <cstddef>
 
-#include "cloud/io/file_reader.h"
-#include "cloud/io/file_system.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_system.h"
 #include "common/logging.h"
 #include "common/signal_handler.h"
 #include "olap/olap_define.h"
@@ -51,9 +51,17 @@ public:
     // This function should run on the bthread, and it will put the task into
     // thread_pool and release the bthread_worker at cv.wait. When the task is completed,
     // the bthread will continue to execute.
-    static void run_task(const std::function<void()>& fn, io::FileSystemType file_type, io::IOState* state = nullptr) {
+    static void run_task(const std::function<void()>& fn, io::FileSystemType file_type, io::AsyncIOStatistics* stats = nullptr) {
         DCHECK(bthread_self() != 0);
-        AsyncIOStatisticsTemplete task_stats;
+        struct TaskStats {
+            int64_t total_use_timer_ns = 0;
+            int64_t task_wait_worker_timer_ns = 0;
+            int64_t task_wake_up_timer_ns = 0;
+            int64_t task_exec_timer_ns = 0;
+            int64_t task_total = 0;
+            int64_t wait_for_putting_queue = 0;
+        };
+        TaskStats task_stats;
         ++task_stats.task_total;
         {
             SCOPED_RAW_TIMER(&task_stats.total_use_timer_ns);
@@ -84,10 +92,10 @@ public:
                 event.signal();
             };
             auto wait_for_putting_queue = std::chrono::steady_clock::now();
-            if (file_type == io::FileSystemType::S3) {
-                AsyncIO::instance().remote_io_thread_pool()->offer(task);
-            } else {
+            if (file_type == io::FileSystemType::LOCAL) {
                 AsyncIO::instance().local_io_thread_pool()->offer(task);
+            } else {
+                AsyncIO::instance().remote_io_thread_pool()->offer(task);
             }
             task_stats.wait_for_putting_queue = 
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - wait_for_putting_queue).count(); 
@@ -97,21 +105,21 @@ public:
             task_stats.task_wake_up_timer_ns =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - task_wake_up_time).count();
         }
-        if (state && state->stats) {
-            if (file_type == io::FileSystemType::S3) {
-                state->stats->async_io_stat.remote_total_use_timer_ns += task_stats.total_use_timer_ns;
-                state->stats->async_io_stat.remote_task_exec_timer_ns += task_stats.task_exec_timer_ns;
-                state->stats->async_io_stat.remote_task_wait_worker_timer_ns += task_stats.task_wait_worker_timer_ns;
-                state->stats->async_io_stat.remote_task_wake_up_timer_ns += task_stats.task_wake_up_timer_ns;
-                state->stats->async_io_stat.remote_task_total += task_stats.task_total;
-                state->stats->async_io_stat.remote_wait_for_putting_queue += task_stats.wait_for_putting_queue;
+        if (stats) {
+            if (file_type != io::FileSystemType::LOCAL) {
+                stats->remote_total_use_timer_ns += task_stats.total_use_timer_ns;
+                stats->remote_task_exec_timer_ns += task_stats.task_exec_timer_ns;
+                stats->remote_task_wait_worker_timer_ns += task_stats.task_wait_worker_timer_ns;
+                stats->remote_task_wake_up_timer_ns += task_stats.task_wake_up_timer_ns;
+                stats->remote_task_total += task_stats.task_total;
+                stats->remote_wait_for_putting_queue += task_stats.wait_for_putting_queue;
             } else {
-                state->stats->async_io_stat.local_total_use_timer_ns += task_stats.total_use_timer_ns;
-                state->stats->async_io_stat.local_task_exec_timer_ns += task_stats.task_exec_timer_ns;
-                state->stats->async_io_stat.local_task_wait_worker_timer_ns += task_stats.task_wait_worker_timer_ns;
-                state->stats->async_io_stat.local_task_wake_up_timer_ns += task_stats.task_wake_up_timer_ns;
-                state->stats->async_io_stat.local_task_total += task_stats.task_total;
-                state->stats->async_io_stat.local_wait_for_putting_queue += task_stats.wait_for_putting_queue;
+                stats->local_total_use_timer_ns += task_stats.total_use_timer_ns;
+                stats->local_task_exec_timer_ns += task_stats.task_exec_timer_ns;
+                stats->local_task_wait_worker_timer_ns += task_stats.task_wait_worker_timer_ns;
+                stats->local_task_wake_up_timer_ns += task_stats.task_wake_up_timer_ns;
+                stats->local_task_total += task_stats.task_total;
+                stats->local_wait_for_putting_queue += task_stats.wait_for_putting_queue;
             }
         }
 

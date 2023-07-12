@@ -17,10 +17,20 @@
 
 #include "runtime/buffer_control_block.h"
 
-#include "gen_cpp/PaloInternalService_types.h"
-#include "gen_cpp/internal_service.pb.h"
-#include "runtime/raw_value.h"
-#include "service/brpc.h"
+#include <gen_cpp/Data_types.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/internal_service.pb.h>
+#include <glog/logging.h>
+#include <google/protobuf/stubs/callback.h>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "runtime/exec_env.h"
+#include "runtime/thread_context.h"
 #include "util/thrift_util.h"
 
 namespace doris {
@@ -95,6 +105,11 @@ Status BufferControlBlock::init() {
     return Status::OK();
 }
 
+bool BufferControlBlock::can_sink() {
+    std::unique_lock<std::mutex> l(_lock);
+    return _get_batch_queue_empty() || _buffer_rows < _buffer_limit || _is_cancelled;
+}
+
 Status BufferControlBlock::add_batch(std::unique_ptr<TFetchDataResult>& result) {
     std::unique_lock<std::mutex> l(_lock);
 
@@ -104,7 +119,7 @@ Status BufferControlBlock::add_batch(std::unique_ptr<TFetchDataResult>& result) 
 
     int num_rows = result->result_batch.rows.size();
 
-    while ((!_batch_queue.empty() && (num_rows + _buffer_rows) > _buffer_limit) && !_is_cancelled) {
+    while ((!_batch_queue.empty() && _buffer_rows > _buffer_limit) && !_is_cancelled) {
         _data_removal.wait_for(l, std::chrono::seconds(1));
     }
 
@@ -113,8 +128,18 @@ Status BufferControlBlock::add_batch(std::unique_ptr<TFetchDataResult>& result) 
     }
 
     if (_waiting_rpc.empty()) {
+        // Merge result into batch to reduce rpc times
+        if (!_batch_queue.empty() &&
+            ((_batch_queue.back()->result_batch.rows.size() + num_rows) < _buffer_limit) &&
+            !result->eos) {
+            std::vector<std::string>& back_rows = _batch_queue.back()->result_batch.rows;
+            std::vector<std::string>& result_rows = result->result_batch.rows;
+            back_rows.insert(back_rows.end(), std::make_move_iterator(result_rows.begin()),
+                             std::make_move_iterator(result_rows.end()));
+        } else {
+            _batch_queue.push_back(std::move(result));
+        }
         _buffer_rows += num_rows;
-        _batch_queue.push_back(std::move(result));
         _data_arrival.notify_one();
     } else {
         auto ctx = _waiting_rpc.front();
@@ -122,45 +147,6 @@ Status BufferControlBlock::add_batch(std::unique_ptr<TFetchDataResult>& result) 
         ctx->on_data(result, _packet_num);
         _packet_num++;
     }
-    return Status::OK();
-}
-
-Status BufferControlBlock::get_batch(TFetchDataResult* result) {
-    std::unique_lock<std::mutex> l(_lock);
-
-    while (_batch_queue.empty() && !_is_close && !_is_cancelled) {
-        _data_arrival.wait(l);
-    }
-
-    // if Status has been set, return fail;
-    RETURN_IF_ERROR(_status);
-
-    // cancelled
-    if (_is_cancelled) {
-        return Status::Cancelled("Cancelled");
-    }
-
-    if (_batch_queue.empty()) {
-        if (_is_close) {
-            // no result, normal end
-            result->eos = true;
-            result->__set_packet_num(_packet_num);
-            _packet_num++;
-            return Status::OK();
-        } else {
-            // can not get here
-            return Status::InternalError("Internal error, can not Get here!");
-        }
-    }
-
-    // get result
-    std::unique_ptr<TFetchDataResult> item = std::move(_batch_queue.front());
-    _batch_queue.pop_front();
-    _buffer_rows -= item->result_batch.rows.size();
-    _data_removal.notify_one();
-    *result = *(item.get());
-    result->__set_packet_num(_packet_num);
-    _packet_num++;
     return Status::OK();
 }
 

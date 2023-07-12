@@ -23,11 +23,14 @@
 #include <cstdint>
 #include <memory>
 
+#include "common/compiler_util.h"
+#include "common/exception.h"
 #include "common/status.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/user_function_cache.h"
 #include "util/jni-util.h"
 #include "vec/aggregate_functions/aggregate_function.h"
+#include "vec/columns/column_array.h"
 #include "vec/columns/column_string.h"
 #include "vec/common/string_ref.h"
 #include "vec/core/field.h"
@@ -44,6 +47,7 @@ const char* UDAF_EXECUTOR_ADD_SIGNATURE = "(ZJJ)V";
 const char* UDAF_EXECUTOR_SERIALIZE_SIGNATURE = "(J)[B";
 const char* UDAF_EXECUTOR_MERGE_SIGNATURE = "(J[B)V";
 const char* UDAF_EXECUTOR_RESULT_SIGNATURE = "(JJ)Z";
+const char* UDAF_EXECUTOR_RESET_SIGNATURE = "(J)V";
 // Calling Java method about those signature means: "(argument-types)return-type"
 // https://www.iitk.ac.in/esc101/05Aug/tutorial/native1.1/implementing/method.html
 
@@ -52,14 +56,18 @@ public:
     AggregateJavaUdafData() = default;
     AggregateJavaUdafData(int64_t num_args) {
         argument_size = num_args;
-        input_values_buffer_ptr.reset(new int64_t[num_args]);
-        input_nulls_buffer_ptr.reset(new int64_t[num_args]);
-        input_offsets_ptrs.reset(new int64_t[num_args]);
-        input_place_ptrs.reset(new int64_t);
-        output_value_buffer.reset(new int64_t);
-        output_null_value.reset(new int64_t);
-        output_offsets_ptr.reset(new int64_t);
-        output_intermediate_state_ptr.reset(new int64_t);
+        input_values_buffer_ptr = std::make_unique<int64_t[]>(num_args);
+        input_nulls_buffer_ptr = std::make_unique<int64_t[]>(num_args);
+        input_offsets_ptrs = std::make_unique<int64_t[]>(num_args);
+        input_array_nulls_buffer_ptr = std::make_unique<int64_t[]>(num_args);
+        input_array_string_offsets_ptrs = std::make_unique<int64_t[]>(num_args);
+        input_place_ptrs = std::make_unique<int64_t>(0);
+        output_value_buffer = std::make_unique<int64_t>(0);
+        output_null_value = std::make_unique<int64_t>(0);
+        output_offsets_ptr = std::make_unique<int64_t>(0);
+        output_intermediate_state_ptr = std::make_unique<int64_t>(0);
+        output_array_null_ptr = std::make_unique<int64_t>(0);
+        output_array_string_offsets_ptr = std::make_unique<int64_t>(0);
     }
 
     ~AggregateJavaUdafData() {
@@ -72,7 +80,7 @@ public:
         env->DeleteGlobalRef(executor_obj);
     }
 
-    Status init_udaf(const TFunction& fn) {
+    Status init_udaf(const TFunction& fn, const std::string& local_location) {
         JNIEnv* env = nullptr;
         RETURN_NOT_OK_STATUS_WITH_WARN(JniUtil::GetJNIEnv(&env), "Java-Udaf init_udaf function");
         RETURN_IF_ERROR(JniUtil::GetGlobalClassRef(env, UDAF_EXECUTOR_CLASS, &executor_cl));
@@ -82,16 +90,17 @@ public:
         // Add a scoped cleanup jni reference object. This cleans up local refs made below.
         JniLocalFrame jni_frame;
         {
-            std::string local_location;
-            auto function_cache = UserFunctionCache::instance();
-            RETURN_IF_ERROR(function_cache->get_jarpath(fn.id, fn.hdfs_location, fn.checksum,
-                                                        &local_location));
             TJavaUdfExecutorCtorParams ctor_params;
             ctor_params.__set_fn(fn);
             ctor_params.__set_location(local_location);
             ctor_params.__set_input_offsets_ptrs((int64_t)input_offsets_ptrs.get());
             ctor_params.__set_input_buffer_ptrs((int64_t)input_values_buffer_ptr.get());
             ctor_params.__set_input_nulls_ptrs((int64_t)input_nulls_buffer_ptr.get());
+            ctor_params.__set_input_array_nulls_buffer_ptr(
+                    (int64_t)input_array_nulls_buffer_ptr.get());
+            ctor_params.__set_input_array_string_offsets_ptrs(
+                    (int64_t)input_array_string_offsets_ptrs.get());
+
             ctor_params.__set_output_buffer_ptr((int64_t)output_value_buffer.get());
             ctor_params.__set_input_places_ptr((int64_t)input_place_ptrs.get());
 
@@ -99,6 +108,9 @@ public:
             ctor_params.__set_output_offsets_ptr((int64_t)output_offsets_ptr.get());
             ctor_params.__set_output_intermediate_state_ptr(
                     (int64_t)output_intermediate_state_ptr.get());
+            ctor_params.__set_output_array_null_ptr((int64_t)output_array_null_ptr.get());
+            ctor_params.__set_output_array_string_offsets_ptr(
+                    (int64_t)output_array_string_offsets_ptr.get());
 
             jbyteArray ctor_params_bytes;
 
@@ -140,6 +152,30 @@ public:
             } else if (data_col->is_numeric() || data_col->is_column_decimal()) {
                 input_values_buffer_ptr.get()[arg_idx] =
                         reinterpret_cast<int64_t>(data_col->get_raw_data().data);
+            } else if (data_col->is_column_array()) {
+                const ColumnArray* array_col = assert_cast<const ColumnArray*>(data_col);
+                input_offsets_ptrs.get()[arg_idx] = reinterpret_cast<int64_t>(
+                        array_col->get_offsets_column().get_raw_data().data);
+                const ColumnNullable& array_nested_nullable =
+                        assert_cast<const ColumnNullable&>(array_col->get_data());
+                auto data_column_null_map = array_nested_nullable.get_null_map_column_ptr();
+                auto data_column = array_nested_nullable.get_nested_column_ptr();
+                input_array_nulls_buffer_ptr.get()[arg_idx] = reinterpret_cast<int64_t>(
+                        check_and_get_column<ColumnVector<UInt8>>(data_column_null_map)
+                                ->get_data()
+                                .data());
+
+                //need pass FE, nullamp and offset, chars
+                if (data_column->is_column_string()) {
+                    const ColumnString* col = assert_cast<const ColumnString*>(data_column.get());
+                    input_values_buffer_ptr.get()[arg_idx] =
+                            reinterpret_cast<int64_t>(col->get_chars().data());
+                    input_array_string_offsets_ptrs.get()[arg_idx] =
+                            reinterpret_cast<int64_t>(col->get_offsets().data());
+                } else {
+                    input_values_buffer_ptr.get()[arg_idx] =
+                            reinterpret_cast<int64_t>(data_column->get_raw_data().data);
+                }
             } else {
                 return Status::InvalidArgument(
                         strings::Substitute("Java UDAF doesn't support type is $0 now !",
@@ -173,6 +209,7 @@ public:
         // save it in BE, Because i'm not sure there is a way to use the byte[] not allocate again.
         jbyteArray arr = (jbyteArray)(env->CallNonvirtualObjectMethod(
                 executor_obj, executor_cl, executor_serialize_id, place));
+        RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));
         int len = env->GetArrayLength(arr);
         serialize_data.resize(len);
         env->GetByteArrayRegion(arr, 0, len, reinterpret_cast<jbyte*>(serialize_data.data()));
@@ -180,6 +217,13 @@ public:
         jbyte* pBytes = env->GetByteArrayElements(arr, nullptr);
         env->ReleaseByteArrayElements(arr, pBytes, JNI_ABORT);
         env->DeleteLocalRef(arr);
+        return JniUtil::GetJniExceptionMsg(env);
+    }
+
+    Status reset(int64_t place) {
+        JNIEnv* env = nullptr;
+        RETURN_NOT_OK_STATUS_WITH_WARN(JniUtil::GetJNIEnv(&env), "Java-Udaf reset function");
+        env->CallNonvirtualVoidMethod(executor_obj, executor_cl, executor_reset_id, place);
         return JniUtil::GetJniExceptionMsg(env);
     }
 
@@ -210,7 +254,7 @@ public:
         ColumnString::Offsets& offsets =                                                           \
                 const_cast<ColumnString::Offsets&>(str_col->get_offsets());                        \
         int increase_buffer_size = 0;                                                              \
-        int32_t buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);           \
+        int64_t buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);           \
         chars.resize(buffer_size);                                                                 \
         *output_value_buffer = reinterpret_cast<int64_t>(chars.data());                            \
         *output_offsets_ptr = reinterpret_cast<int64_t>(offsets.data());                           \
@@ -218,9 +262,17 @@ public:
         jboolean res = env->CallNonvirtualBooleanMethod(executor_obj, executor_cl,                 \
                                                         executor_result_id, to.size() - 1, place); \
         while (res != JNI_TRUE) {                                                                  \
+            RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));                                     \
             increase_buffer_size++;                                                                \
-            int32_t buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);       \
-            chars.resize(buffer_size);                                                             \
+            buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);               \
+            try {                                                                                  \
+                chars.resize(buffer_size);                                                         \
+            } catch (std::bad_alloc const& e) {                                                    \
+                throw doris::Exception(                                                            \
+                        ErrorCode::INTERNAL_ERROR,                                                 \
+                        "memory allocate failed in column string, buffer:{},size:{}",              \
+                        increase_buffer_size, buffer_size);                                        \
+            }                                                                                      \
             *output_value_buffer = reinterpret_cast<int64_t>(chars.data());                        \
             *output_intermediate_state_ptr = chars.size();                                         \
             res = env->CallNonvirtualBooleanMethod(executor_obj, executor_cl, executor_result_id,  \
@@ -230,6 +282,79 @@ public:
         *output_value_buffer = reinterpret_cast<int64_t>(data_col.get_raw_data().data);            \
         env->CallNonvirtualBooleanMethod(executor_obj, executor_cl, executor_result_id,            \
                                          to.size() - 1, place);                                    \
+    } else if (data_col.is_column_array()) {                                                       \
+        ColumnArray& array_col = assert_cast<ColumnArray&>(data_col);                              \
+        ColumnNullable& array_nested_nullable =                                                    \
+                assert_cast<ColumnNullable&>(array_col.get_data());                                \
+        auto data_column_null_map = array_nested_nullable.get_null_map_column_ptr();               \
+        auto data_column = array_nested_nullable.get_nested_column_ptr();                          \
+        auto& offset_column = array_col.get_offsets_column();                                      \
+        int increase_buffer_size = 0;                                                              \
+        int64_t buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);           \
+        *output_offsets_ptr = reinterpret_cast<int64_t>(offset_column.get_raw_data().data);        \
+        data_column_null_map->resize(buffer_size);                                                 \
+        auto& null_map_data =                                                                      \
+                assert_cast<ColumnVector<UInt8>*>(data_column_null_map.get())->get_data();         \
+        *output_array_null_ptr = reinterpret_cast<int64_t>(null_map_data.data());                  \
+        *output_intermediate_state_ptr = buffer_size;                                              \
+        if (data_column->is_column_string()) {                                                     \
+            ColumnString* str_col = assert_cast<ColumnString*>(data_column.get());                 \
+            ColumnString::Chars& chars = assert_cast<ColumnString::Chars&>(str_col->get_chars());  \
+            ColumnString::Offsets& offsets =                                                       \
+                    assert_cast<ColumnString::Offsets&>(str_col->get_offsets());                   \
+            chars.resize(buffer_size);                                                             \
+            offsets.resize(buffer_size);                                                           \
+            *output_value_buffer = reinterpret_cast<int64_t>(chars.data());                        \
+            *output_array_string_offsets_ptr = reinterpret_cast<int64_t>(offsets.data());          \
+            jboolean res = env->CallNonvirtualBooleanMethod(                                       \
+                    executor_obj, executor_cl, executor_result_id, to.size() - 1, place);          \
+            while (res != JNI_TRUE) {                                                              \
+                RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));                                 \
+                increase_buffer_size++;                                                            \
+                buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);           \
+                try {                                                                              \
+                    null_map_data.resize(buffer_size);                                             \
+                    chars.resize(buffer_size);                                                     \
+                    offsets.resize(buffer_size);                                                   \
+                } catch (std::bad_alloc const& e) {                                                \
+                    throw doris::Exception(                                                        \
+                            ErrorCode::INTERNAL_ERROR,                                             \
+                            "memory allocate failed in array column string, buffer:{},size:{}",    \
+                            increase_buffer_size, buffer_size);                                    \
+                }                                                                                  \
+                *output_array_null_ptr = reinterpret_cast<int64_t>(null_map_data.data());          \
+                *output_value_buffer = reinterpret_cast<int64_t>(chars.data());                    \
+                *output_array_string_offsets_ptr = reinterpret_cast<int64_t>(offsets.data());      \
+                *output_intermediate_state_ptr = buffer_size;                                      \
+                res = env->CallNonvirtualBooleanMethod(executor_obj, executor_cl,                  \
+                                                       executor_result_id, to.size() - 1, place);  \
+            }                                                                                      \
+        } else {                                                                                   \
+            data_column->resize(buffer_size);                                                      \
+            *output_value_buffer = reinterpret_cast<int64_t>(data_column->get_raw_data().data);    \
+            jboolean res = env->CallNonvirtualBooleanMethod(                                       \
+                    executor_obj, executor_cl, executor_result_id, to.size() - 1, place);          \
+            while (res != JNI_TRUE) {                                                              \
+                RETURN_IF_ERROR(JniUtil::GetJniExceptionMsg(env));                                 \
+                increase_buffer_size++;                                                            \
+                buffer_size = JniUtil::IncreaseReservedBufferSize(increase_buffer_size);           \
+                try {                                                                              \
+                    null_map_data.resize(buffer_size);                                             \
+                    data_column->resize(buffer_size);                                              \
+                } catch (std::bad_alloc const& e) {                                                \
+                    throw doris::Exception(                                                        \
+                            ErrorCode::INTERNAL_ERROR,                                             \
+                            "memory allocate failed in array number column, buffer:{},size:{}",    \
+                            increase_buffer_size, buffer_size);                                    \
+                }                                                                                  \
+                *output_array_null_ptr = reinterpret_cast<int64_t>(null_map_data.data());          \
+                *output_value_buffer =                                                             \
+                        reinterpret_cast<int64_t>(data_column->get_raw_data().data);               \
+                *output_intermediate_state_ptr = buffer_size;                                      \
+                res = env->CallNonvirtualBooleanMethod(executor_obj, executor_cl,                  \
+                                                       executor_result_id, to.size() - 1, place);  \
+            }                                                                                      \
+        }                                                                                          \
     } else {                                                                                       \
         return Status::InvalidArgument(strings::Substitute(                                        \
                 "Java UDAF doesn't support return type is $0 now !", result_type->get_name()));    \
@@ -258,6 +383,7 @@ private:
 
         RETURN_IF_ERROR(register_id("<init>", UDAF_EXECUTOR_CTOR_SIGNATURE, executor_ctor_id));
         RETURN_IF_ERROR(register_id("add", UDAF_EXECUTOR_ADD_SIGNATURE, executor_add_id));
+        RETURN_IF_ERROR(register_id("reset", UDAF_EXECUTOR_RESET_SIGNATURE, executor_reset_id));
         RETURN_IF_ERROR(register_id("close", UDAF_EXECUTOR_CLOSE_SIGNATURE, executor_close_id));
         RETURN_IF_ERROR(register_id("merge", UDAF_EXECUTOR_MERGE_SIGNATURE, executor_merge_id));
         RETURN_IF_ERROR(
@@ -280,17 +406,22 @@ private:
     jmethodID executor_merge_id;
     jmethodID executor_serialize_id;
     jmethodID executor_result_id;
+    jmethodID executor_reset_id;
     jmethodID executor_close_id;
     jmethodID executor_destroy_id;
 
     std::unique_ptr<int64_t[]> input_values_buffer_ptr;
     std::unique_ptr<int64_t[]> input_nulls_buffer_ptr;
     std::unique_ptr<int64_t[]> input_offsets_ptrs;
+    std::unique_ptr<int64_t[]> input_array_nulls_buffer_ptr;
+    std::unique_ptr<int64_t[]> input_array_string_offsets_ptrs;
     std::unique_ptr<int64_t> input_place_ptrs;
     std::unique_ptr<int64_t> output_value_buffer;
     std::unique_ptr<int64_t> output_null_value;
     std::unique_ptr<int64_t> output_offsets_ptr;
     std::unique_ptr<int64_t> output_intermediate_state_ptr;
+    std::unique_ptr<int64_t> output_array_null_ptr;
+    std::unique_ptr<int64_t> output_array_string_offsets_ptr;
 
     int argument_size = 0;
     std::string serialize_data;
@@ -299,31 +430,37 @@ private:
 class AggregateJavaUdaf final
         : public IAggregateFunctionDataHelper<AggregateJavaUdafData, AggregateJavaUdaf> {
 public:
-    AggregateJavaUdaf(const TFunction& fn, const DataTypes& argument_types, const Array& parameters,
+    ENABLE_FACTORY_CREATOR(AggregateJavaUdaf);
+    AggregateJavaUdaf(const TFunction& fn, const DataTypes& argument_types,
                       const DataTypePtr& return_type)
-            : IAggregateFunctionDataHelper(argument_types, parameters),
+            : IAggregateFunctionDataHelper(argument_types),
               _fn(fn),
               _return_type(return_type),
               _first_created(true),
               _exec_place(nullptr) {}
-    ~AggregateJavaUdaf() = default;
+    ~AggregateJavaUdaf() override = default;
 
     static AggregateFunctionPtr create(const TFunction& fn, const DataTypes& argument_types,
-                                       const Array& parameters, const DataTypePtr& return_type) {
-        return std::make_shared<AggregateJavaUdaf>(fn, argument_types, parameters, return_type);
+                                       const DataTypePtr& return_type) {
+        return std::make_shared<AggregateJavaUdaf>(fn, argument_types, return_type);
     }
     //Note: The condition is added because maybe the BE can't find java-udaf impl jar
     //So need to check as soon as possible, before call Data function
     Status check_udaf(const TFunction& fn) {
         auto function_cache = UserFunctionCache::instance();
-        return function_cache->check_jar(fn.id, fn.hdfs_location, fn.checksum);
+        return function_cache->get_jarpath(fn.id, fn.hdfs_location, fn.checksum, &_local_location);
     }
 
     void create(AggregateDataPtr __restrict place) const override {
         if (_first_created) {
             new (place) Data(argument_types.size());
             Status status = Status::OK();
-            RETURN_IF_STATUS_ERROR(status, this->data(place).init_udaf(_fn));
+            SAFE_CREATE(RETURN_IF_STATUS_ERROR(status,
+                                               this->data(place).init_udaf(_fn, _local_location)),
+                        {
+                            this->data(place).destroy();
+                            this->data(place).~Data();
+                        });
             _first_created = false;
             _exec_place = place;
         }
@@ -334,6 +471,7 @@ public:
         if (place == _exec_place) {
             this->data(_exec_place).destroy();
             this->data(_exec_place).~Data();
+            _first_created = true;
         }
     }
 
@@ -345,6 +483,7 @@ public:
              Arena*) const override {
         LOG(WARNING) << " shouldn't going add function, there maybe some error about function "
                      << _fn.name.function_name;
+        throw doris::Exception(ErrorCode::INTERNAL_ERROR, "shouldn't going add function");
     }
 
     void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
@@ -353,7 +492,11 @@ public:
         for (size_t i = 0; i < batch_size; ++i) {
             places_address[i] = reinterpret_cast<int64_t>(places[i] + place_offset);
         }
-        this->data(_exec_place).add(places_address, false, columns, 0, batch_size, argument_types);
+        Status st = this->data(_exec_place)
+                            .add(places_address, false, columns, 0, batch_size, argument_types);
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
     // TODO: Here we calling method by jni, And if we get a thrown from FE,
@@ -362,23 +505,50 @@ public:
                                 Arena* /*arena*/) const override {
         int64_t places_address[1];
         places_address[0] = reinterpret_cast<int64_t>(place);
-        this->data(_exec_place).add(places_address, true, columns, 0, batch_size, argument_types);
+        Status st = this->data(_exec_place)
+                            .add(places_address, true, columns, 0, batch_size, argument_types);
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
-    // TODO: reset function should be implement also in struct data
-    void reset(AggregateDataPtr /*place*/) const override {
-        LOG(WARNING) << " shouldn't going reset function, there maybe some error about function "
-                     << _fn.name.function_name;
+    void add_range_single_place(int64_t partition_start, int64_t partition_end, int64_t frame_start,
+                                int64_t frame_end, AggregateDataPtr place, const IColumn** columns,
+                                Arena* arena) const override {
+        frame_start = std::max<int64_t>(frame_start, partition_start);
+        frame_end = std::min<int64_t>(frame_end, partition_end);
+        int64_t places_address[1];
+        places_address[0] = reinterpret_cast<int64_t>(place);
+        Status st =
+                this->data(_exec_place)
+                        .add(places_address, true, columns, frame_start, frame_end, argument_types);
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
+    }
+
+    void reset(AggregateDataPtr place) const override {
+        Status st = this->data(_exec_place).reset(reinterpret_cast<int64_t>(place));
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
     void merge(AggregateDataPtr __restrict place, ConstAggregateDataPtr rhs,
                Arena*) const override {
-        this->data(_exec_place).merge(this->data(rhs), reinterpret_cast<int64_t>(place));
+        Status st =
+                this->data(_exec_place).merge(this->data(rhs), reinterpret_cast<int64_t>(place));
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
     void serialize(ConstAggregateDataPtr __restrict place, BufferWritable& buf) const override {
-        this->data(const_cast<AggregateDataPtr&>(_exec_place))
-                .write(buf, reinterpret_cast<int64_t>(place));
+        Status st = this->data(const_cast<AggregateDataPtr&>(_exec_place))
+                            .write(buf, reinterpret_cast<int64_t>(place));
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
     // during merge-finalized phase, for deserialize and merge firstly,
@@ -393,7 +563,10 @@ public:
     }
 
     void insert_result_into(ConstAggregateDataPtr __restrict place, IColumn& to) const override {
-        this->data(_exec_place).get(to, _return_type, reinterpret_cast<int64_t>(place));
+        Status st = this->data(_exec_place).get(to, _return_type, reinterpret_cast<int64_t>(place));
+        if (UNLIKELY(st != Status::OK())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR, st.to_string());
+        }
     }
 
 private:
@@ -401,6 +574,7 @@ private:
     DataTypePtr _return_type;
     mutable bool _first_created;
     mutable AggregateDataPtr _exec_place;
+    std::string _local_location;
 };
 
 } // namespace doris::vectorized

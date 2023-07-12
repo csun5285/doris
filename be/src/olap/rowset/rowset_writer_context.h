@@ -17,14 +17,9 @@
 
 #pragma once
 
-#include "cloud/io/file_system.h"
-#include "gen_cpp/olap_file.pb.h"
-#include "olap/data_dir.h"
-#ifdef CLOUD_MODE
-#include "cloud/olap/storage_engine.h"
-#else
-#include "olap/storage_engine.h"
-#endif
+#include <gen_cpp/olap_file.pb.h>
+
+#include "io/fs/file_system.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
 
@@ -33,6 +28,8 @@ namespace doris {
 using TabletSharedPtr = std::shared_ptr<Tablet>;
 class RowsetWriterContextBuilder;
 using RowsetWriterContextBuilderSharedPtr = std::shared_ptr<RowsetWriterContextBuilder>;
+class DataDir;
+class Tablet;
 namespace vectorized::schema_util {
 class LocalSchemaChangeRecorder;
 }
@@ -45,7 +42,6 @@ struct RowsetWriterContext {
               index_id(0),
               partition_id(0),
               rowset_type(BETA_ROWSET),
-              tablet_schema(nullptr),
               rowset_state(PREPARED),
               version(Version(0, 0)),
               txn_id(0),
@@ -62,7 +58,8 @@ struct RowsetWriterContext {
     int64_t index_id;
     int64_t partition_id;
     RowsetTypePB rowset_type;
-    std::string rowset_dir = "";
+    io::FileSystemSPtr fs;
+    std::string rowset_dir;
     TabletSchemaSPtr tablet_schema;
     // PREPARED/COMMITTED for pending rowset
     // VISIBLE for non-pending rowset
@@ -88,25 +85,21 @@ struct RowsetWriterContext {
     // (because it hard to refactor, and RowsetConvertor will be deprecated in future)
     DataDir* data_dir = nullptr;
 
-    // If `fs == nullptr`, use `global_local_filesystem` as default fs to perform IO operation.
-    // (see `RowsetMeta::fs()`)
-    io::FileSystemSPtr fs;
-
-    int64_t oldest_write_timestamp = -1;
-    int64_t newest_write_timestamp = -1;
+    int64_t newest_write_timestamp;
     bool enable_unique_key_merge_on_write = false;
-    int64_t ttl_seconds {0};
-    bool is_hot_data {false};
-    bool is_persistent {false};
     std::set<int32_t> skip_inverted_index;
-
-    TabletSharedPtr tablet = nullptr;
     // If it is directly write from load procedure, else
     // it could be compaction or schema change etc..
     bool is_direct_write = false;
+    std::shared_ptr<Tablet> tablet = nullptr;
     // for tracing local schema change record
     std::shared_ptr<vectorized::schema_util::LocalSchemaChangeRecorder> schema_change_recorder =
             nullptr;
+
+    std::shared_ptr<MowContext> mow_context;
+    int64_t ttl_seconds {0};
+    bool is_hot_data {false};
+    bool is_persistent {false};
     // If it is true the content would also write into file cache
     // it would be only written into s3 if it's false
     bool disable_file_cache = false;

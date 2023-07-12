@@ -20,13 +20,21 @@
 
 #include "vec/columns/column_nullable.h"
 
+#include <string.h>
+
+#include <algorithm>
+
+#include "util/hash_util.hpp"
 #include "util/simd/bits.h"
 #include "vec/columns/column_const.h"
 #include "vec/common/arena.h"
 #include "vec/common/assert_cast.h"
 #include "vec/common/nan_utils.h"
+#include "vec/common/sip_hash.h"
 #include "vec/common/typeid_cast.h"
 #include "vec/core/sort_block.h"
+#include "vec/data_types/data_type.h"
+#include "vec/utils/util.hpp"
 
 namespace doris::vectorized {
 
@@ -268,7 +276,7 @@ void ColumnNullable::insert(const Field& x) {
         _has_null = true;
     } else {
         get_nested_column().insert(x);
-        get_null_map_data().push_back(0);
+        _get_null_map_data().push_back(0);
     }
 }
 
@@ -288,8 +296,7 @@ void ColumnNullable::insert_from_not_nullable(const IColumn& src, size_t n) {
 void ColumnNullable::insert_range_from_not_nullable(const IColumn& src, size_t start,
                                                     size_t length) {
     get_nested_column().insert_range_from(src, start, length);
-    _get_null_map_data().resize_fill(get_null_map_data().size() + length, 0);
-    _need_update_has_null = true;
+    _get_null_map_data().resize_fill(_get_null_map_data().size() + length, 0);
 }
 
 void ColumnNullable::insert_many_from_not_nullable(const IColumn& src, size_t position,
@@ -309,6 +316,13 @@ ColumnPtr ColumnNullable::filter(const Filter& filt, ssize_t result_size_hint) c
     ColumnPtr filtered_data = get_nested_column().filter(filt, result_size_hint);
     ColumnPtr filtered_null_map = get_null_map_column().filter(filt, result_size_hint);
     return ColumnNullable::create(filtered_data, filtered_null_map);
+}
+
+size_t ColumnNullable::filter(const Filter& filter) {
+    const auto data_result_size = get_nested_column().filter(filter);
+    const auto map_result_size = get_null_map_column().filter(filter);
+    CHECK_EQ(data_result_size, map_result_size);
+    return data_result_size;
 }
 
 Status ColumnNullable::filter_by_selector(const uint16_t* sel, size_t sel_size, IColumn* col_ptr) {
@@ -419,7 +433,7 @@ void ColumnNullable::get_permutation(bool reverse, size_t limit, int null_direct
 
 void ColumnNullable::reserve(size_t n) {
     get_nested_column().reserve(n);
-    get_null_map_data().reserve(n);
+    _get_null_map_data().reserve(n);
 }
 
 void ColumnNullable::resize(size_t n) {
@@ -646,6 +660,18 @@ ColumnPtr ColumnNullable::create_with_offsets(const IColumn::Offsets64& offsets,
         new_null_map = null_map->create_with_offsets(offsets, Field(0u), total_rows, shift);
     }
     return ColumnNullable::create(new_values, new_null_map);
+}
+
+void check_set_nullable(ColumnPtr& argument_column, ColumnVector<UInt8>::MutablePtr& null_map,
+                        bool is_single) {
+    if (auto* nullable = check_and_get_column<ColumnNullable>(*argument_column)) {
+        // Danger: Here must dispose the null map data first! Because
+        // argument_columns[i]=nullable->get_nested_column_ptr(); will release the mem
+        // of column nullable mem of null map
+        VectorizedUtils::update_null_map(null_map->get_data(), nullable->get_null_map_data(),
+                                         is_single);
+        argument_column = nullable->get_nested_column_ptr();
+    }
 }
 
 } // namespace doris::vectorized

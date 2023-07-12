@@ -26,11 +26,10 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.LoadException;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.profile.Profile;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.LogBuilder;
 import org.apache.doris.common.util.LogKey;
-import org.apache.doris.common.util.RuntimeProfile;
-import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.FailMsg;
 import org.apache.doris.qe.ConnectContext;
@@ -77,7 +76,7 @@ public class LoadLoadingTask extends LoadTask {
 
     private LoadingTaskPlanner planner;
 
-    private RuntimeProfile jobProfile;
+    private Profile jobProfile;
     private long beginTime;
     private String clusterId;
 
@@ -86,7 +85,7 @@ public class LoadLoadingTask extends LoadTask {
             long jobDeadlineMs, long execMemLimit, boolean strictMode,
             long txnId, LoadTaskCallback callback, String timezone,
             long timeoutS, int loadParallelism, int sendBatchParallelism,
-            boolean loadZeroTolerance, RuntimeProfile profile, boolean singleTabletLoadPerSink,
+            boolean loadZeroTolerance, Profile jobProfile, boolean singleTabletLoadPerSink,
             boolean useNewLoadScanNode) {
         super(callback, TaskType.LOADING);
         this.db = db;
@@ -106,7 +105,7 @@ public class LoadLoadingTask extends LoadTask {
         this.loadParallelism = loadParallelism;
         this.sendBatchParallelism = sendBatchParallelism;
         this.loadZeroTolerance = loadZeroTolerance;
-        this.jobProfile = profile;
+        this.jobProfile = jobProfile;
         this.singleTabletLoadPerSink = singleTabletLoadPerSink;
         this.useNewLoadScanNode = useNewLoadScanNode;
     }
@@ -123,12 +122,36 @@ public class LoadLoadingTask extends LoadTask {
     public void init(TUniqueId loadId, List<List<TBrokerFileStatus>> fileStatusList,
             int fileNum, UserIdentity userInfo, String clusterId) throws UserException {
         this.loadId = loadId;
-        String clusterName = Env.getCurrentSystemInfo().getClusterNameByClusterId(clusterId);
         planner = new LoadingTaskPlanner(callback.getCallbackId(), txnId, db.getId(), table, brokerDesc, fileGroups,
                 strictMode, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
-                this.useNewLoadScanNode, userInfo, clusterName);
-        planner.plan(loadId, fileStatusList, fileNum);
-        this.clusterId = clusterId;
+                this.useNewLoadScanNode, userInfo);
+        boolean needCleanCtx = false;
+        try {
+            if (Config.isCloudMode()) {
+                String clusterName = Env.getCurrentSystemInfo().getClusterNameByClusterId(clusterId);
+                if (Strings.isNullOrEmpty(clusterName)) {
+                    LOG.warn("cluster name is empty, cluster id is {}", clusterId);
+                    throw new UserException("cluster name is empty, cluster id is {}", clusterId);
+                }
+
+                if (ConnectContext.get() == null) {
+                    ConnectContext ctx = new ConnectContext();
+                    ctx.setThreadLocalInfo();
+                    ctx.setCloudCluster(clusterName);
+                    needCleanCtx = true;
+                } else {
+                    ConnectContext.get().setCloudCluster(clusterName);
+                }
+            }
+            planner.plan(loadId, fileStatusList, fileNum);
+            this.clusterId = clusterId;
+        } catch (Exception e) {
+            throw e;
+        } finally {
+            if (Config.isCloudMode() && needCleanCtx) {
+                ConnectContext.remove();
+            }
+        }
     }
 
     public TUniqueId getLoadId() {
@@ -157,7 +180,7 @@ public class LoadLoadingTask extends LoadTask {
         }
 
         retryTime--;
-        beginTime = System.nanoTime();
+        beginTime = System.currentTimeMillis();
         if (!((BrokerLoadJob) callback).updateState(JobState.LOADING)) {
             // job may already be cancelled
             return;
@@ -173,9 +196,13 @@ public class LoadLoadingTask extends LoadTask {
         // New one query id,
         Coordinator curCoordinator = new Coordinator(callback.getCallbackId(), loadId, planner.getDescTable(),
                 planner.getFragments(), planner.getScanNodes(), planner.getTimezone(), loadZeroTolerance);
+        if (this.jobProfile != null) {
+            this.jobProfile.addExecutionProfile(curCoordinator.getExecutionProfile());
+        }
         curCoordinator.setQueryType(TQueryType.LOAD);
         curCoordinator.setExecMemoryLimit(execMemLimit);
-        curCoordinator.setExecVecEngine(Config.enable_vectorized_load);
+        curCoordinator.setExecPipEngine(Config.enable_pipeline_load);
+
         /*
          * For broker load job, user only need to set mem limit by 'exec_mem_limit' property.
          * And the variable 'load_mem_limit' does not make any effect.
@@ -238,9 +265,7 @@ public class LoadLoadingTask extends LoadTask {
             return;
         }
         // Summary profile
-        coord.getQueryProfile().getCounterTotalTime().setValue(TimeUtils.getEstimatedTime(beginTime));
-        coord.endProfile();
-        jobProfile.addChild(coord.getQueryProfile());
+        coord.getExecutionProfile().update(beginTime, true);
     }
 
     @Override

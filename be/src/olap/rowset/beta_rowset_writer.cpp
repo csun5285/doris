@@ -17,39 +17,53 @@
 
 #include "olap/rowset/beta_rowset_writer.h"
 
+#include <assert.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <stdio.h>
+
 #include <ctime> // time
+#include <filesystem>
 #include <memory>
 #include <sstream>
+#include <utility>
 
-#include "cloud/io/file_system.h"
-#include "cloud/io/file_writer.h"
-#include "cloud/io/s3_file_system.h"
-#include "cloud/io/s3_file_writer.h"
 #include "cloud/io/tmp_file_mgr.h"
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
 #include "common/logging.h"
-#include "env/env.h"
+#include "gutil/integral_types.h"
 #include "gutil/strings/substitute.h"
-#include "olap/memtable.h"
+#include "io/fs/file_reader_options.h"
+#include "io/fs/file_system.h"
+#include "io/fs/file_writer.h"
+#include "olap/data_dir.h"
 #include "olap/olap_define.h"
-#include "olap/row.h"        // ContiguousRow
-#include "olap/row_cursor.h" // RowCursor
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset_factory.h"
+#include "olap/rowset/rowset_writer.h"
+#include "olap/rowset/segment_v2/inverted_index_cache.h"
+#include "olap/rowset/segment_v2/inverted_index_desc.h"
+#include "olap/rowset/segment_v2/segment.h"
 #include "olap/rowset/segment_v2/segment_writer.h"
-//#include "olap/storage_engine.h"
-#include "runtime/exec_env.h"
-#include "runtime/memory/mem_tracker_limiter.h"
+#include "cloud/olap/storage_engine.h"
+#include "olap/tablet.h"
+#include "olap/tablet_schema.h"
+#include "segcompaction.h"
+#include "util/slice.h"
+#include "util/time.h"
 #include "vec/common/schema_util.h" // LocalSchemaChangeRecorder
+#include "vec/core/block.h"
 
 namespace doris {
 using namespace ErrorCode;
 
-class StorageEngine;
-
 BetaRowsetWriter::BetaRowsetWriter()
         : _rowset_meta(nullptr),
+          _next_segment_id(0),
           _num_segment(0),
+          _segment_start_id(0),
           _segcompacted_point(0),
           _num_segcompacted(0),
           _segment_writer(nullptr),
@@ -57,22 +71,29 @@ BetaRowsetWriter::BetaRowsetWriter()
           _total_data_size(0),
           _total_index_size(0),
           _raw_num_rows_written(0),
+          _segcompaction_worker(this),
           _is_doing_segcompaction(false) {
     _segcompaction_status.store(OK);
 }
 
 BetaRowsetWriter::~BetaRowsetWriter() {
-    if (_already_built || !_rowset_meta) {
-        return;
-    }
-    _segment_writer.reset(); // ensure all files are closed
-    if (_rowset_meta->is_local()) {
-        // abnormal exit, remove all files generated
-        OLAP_UNUSED_ARG(_wait_flying_segcompaction());
+    /* Note that segcompaction is async and in parallel with load job. So we should handle carefully
+     * when the job is cancelled. Although it is meaningless to continue segcompaction when the job
+     * is cancelled, the objects involved in the job should be preserved during segcompaction to
+     * avoid crashs for memory issues. */
+    wait_flying_segcompaction();
+
+    // TODO(lingbin): Should wrapper exception logic, no need to know file ops directly.
+    if (!_already_built) {       // abnormal exit, remove all files generated
+        _segment_writer.reset(); // ensure all files are closed
         auto fs = _rowset_meta->fs();
-        for (int i = 0; i < _num_segment; ++i) {
-            std::string seg_path =
-                    BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, i);
+        if (!fs) {
+            return;
+        }
+        auto max_segment_id = std::max(_num_segment.load(), _next_segment_id.load());
+        for (int i = 0; i < max_segment_id; ++i) {
+            std::string seg_path = BetaRowset::segment_file_path(
+                    _context.rowset_dir, _context.rowset_id, _segment_start_id + i);
             // Even if an error is encountered, these files that have not been cleaned up
             // will be cleaned up by the GC background. So here we only print the error
             // message when we encounter an error.
@@ -84,8 +105,7 @@ BetaRowsetWriter::~BetaRowsetWriter() {
 
 Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) {
     _context = rowset_writer_context;
-    _rowset_meta.reset(
-            new RowsetMeta(rowset_writer_context.table_id, rowset_writer_context.index_id));
+    _rowset_meta.reset(new RowsetMeta);
 #ifdef CLOUD_MODE
     if (_context.fs) {
         _rowset_meta->set_fs(_context.fs);
@@ -97,8 +117,6 @@ Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) 
 #else
     _rowset_meta->set_fs(_context.fs);
 #endif
-    _context.schema_change_recorder =
-            std::make_shared<vectorized::schema_util::LocalSchemaChangeRecorder>();
     _rowset_meta->set_rowset_id(_context.rowset_id);
     _rowset_meta->set_partition_id(_context.partition_id);
     _rowset_meta->set_tablet_id(_context.tablet_id);
@@ -108,13 +126,16 @@ Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) 
     _rowset_meta->set_segments_overlap(_context.segments_overlap);
     _rowset_meta->set_txn_id(_context.txn_id);
     _rowset_meta->set_txn_expiration(_context.txn_expiration);
+    _file_cache_ttl_seconds = _context.ttl_seconds;
+    _file_cache_is_persistent = _context.is_persistent;
+    _is_hot_data = _context.is_hot_data;
     if (_context.rowset_state == PREPARED || _context.rowset_state == COMMITTED) {
         _is_pending = true;
         _rowset_meta->set_load_id(_context.load_id);
     } else {
         _rowset_meta->set_version(_context.version);
-        _rowset_meta->set_oldest_write_timestamp(_context.oldest_write_timestamp);
         _rowset_meta->set_newest_write_timestamp(_context.newest_write_timestamp);
+        _create_time = _context.newest_write_timestamp;
     }
     _rowset_meta->set_tablet_uid(_context.tablet_uid);
     _rowset_meta->set_tablet_schema(_context.tablet_schema);
@@ -129,76 +150,96 @@ Status BetaRowsetWriter::add_block(const vectorized::Block* block) {
         return Status::OK();
     }
     if (UNLIKELY(_segment_writer == nullptr)) {
-        RETURN_NOT_OK(_create_segment_writer(&_segment_writer, block));
+        FlushContext ctx;
+        ctx.block = block;
+        RETURN_IF_ERROR(_create_segment_writer(&_segment_writer, &ctx));
     }
     return _add_block(block, &_segment_writer);
 }
 
-vectorized::VMergeIterator* BetaRowsetWriter::_get_segcompaction_reader(
-        SegCompactionCandidatesSharedPtr segments, std::shared_ptr<Schema> schema,
-        OlapReaderStatistics* stat, uint64_t* merged_row_stat) {
-    StorageReadOptions read_options;
-    read_options.stats = stat;
-    read_options.use_page_cache = false;
-    read_options.tablet_schema = _context.tablet_schema;
-    std::vector<std::unique_ptr<RowwiseIterator>> seg_iterators;
-    for (auto& seg_ptr : *segments) {
-        std::unique_ptr<RowwiseIterator> iter;
-        auto s = seg_ptr->new_iterator(*schema, read_options, &iter);
-        if (!s.ok()) {
-            LOG(WARNING) << "failed to create iterator[" << seg_ptr->id() << "]: " << s.to_string();
-            return nullptr;
-        }
-        seg_iterators.push_back(std::move(iter));
-    }
-    std::vector<RowwiseIterator*> iterators;
-    for (auto& owned_it : seg_iterators) {
-        // transfer ownership
-        iterators.push_back(owned_it.release());
-    }
-    bool is_unique = (_context.tablet_schema->keys_type() == UNIQUE_KEYS);
-    bool is_reverse = false;
-    auto merge_itr =
-            vectorized::new_merge_iterator(iterators, -1, is_unique, is_reverse, merged_row_stat);
-    DCHECK(merge_itr);
-    auto s = merge_itr->init(read_options);
-    if (!s.ok()) {
-        LOG(WARNING) << "failed to init iterator: " << s.to_string();
-        for (auto& itr : iterators) {
-            delete itr;
-        }
-        return nullptr;
-    }
-
-    return (vectorized::VMergeIterator*)merge_itr;
-}
-
-std::unique_ptr<segment_v2::SegmentWriter> BetaRowsetWriter::_create_segcompaction_writer(
-        uint64_t begin, uint64_t end) {
-    Status status;
-    std::unique_ptr<segment_v2::SegmentWriter> writer = nullptr;
-    status = _create_segment_writer_for_segcompaction(&writer, begin, end);
-    if (status != Status::OK() || writer == nullptr) {
-        LOG(ERROR) << "failed to create segment writer for begin:" << begin << " end:" << end
-                   << " path:" << writer->get_data_dir()->path() << " status:" << status;
-        return nullptr;
-    } else {
-        return writer;
-    }
-}
-
-Status BetaRowsetWriter::_delete_original_segments(uint32_t begin, uint32_t end) {
+Status BetaRowsetWriter::_load_noncompacted_segments(
+        std::vector<segment_v2::SegmentSharedPtr>* segments, size_t num) {
     auto fs = _rowset_meta->fs();
     if (!fs) {
         return Status::Error<INIT_FAILED>();
     }
-    for (uint32_t i = begin; i <= end; ++i) {
-        auto seg_path = BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, i);
-        // Even if an error is encountered, these files that have not been cleaned up
-        // will be cleaned up by the GC background. So here we only print the error
-        // message when we encounter an error.
-        RETURN_NOT_OK_LOG(fs->delete_file(seg_path),
-                          strings::Substitute("Failed to delete file=$0", seg_path));
+    for (int seg_id = _segcompacted_point; seg_id < num; ++seg_id) {
+        auto seg_path =
+                BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, seg_id);
+        std::shared_ptr<segment_v2::Segment> segment;
+        auto type = config::enable_file_cache ? config::file_cache_type : "";
+        io::FileReaderOptions reader_options(io::cache_type_from_string(type),
+                                             io::SegmentCachePathPolicy());
+        auto s = segment_v2::Segment::open(fs, seg_path, seg_id, rowset_id(),
+                                           _context.tablet_schema, reader_options, &segment);
+        if (!s.ok()) {
+            LOG(WARNING) << "failed to open segment. " << seg_path << ":" << s.to_string();
+            return s;
+        }
+        segments->push_back(std::move(segment));
+    }
+    return Status::OK();
+}
+
+/* policy of segcompaction target selection:
+ *  1. skip big segments
+ *  2. if the consecutive smalls end up with a big, compact the smalls, except
+ *     single small
+ *  3. if the consecutive smalls end up with small, compact the smalls if the
+ *     length is beyond (config::segcompaction_threshold_segment_num / 2)
+ */
+Status BetaRowsetWriter::_find_longest_consecutive_small_segment(
+        SegCompactionCandidatesSharedPtr segments) {
+    std::vector<segment_v2::SegmentSharedPtr> all_segments;
+    // subtract one to skip last (maybe active) segment
+    RETURN_IF_ERROR(_load_noncompacted_segments(&all_segments, _num_segment - 1));
+
+    if (VLOG_DEBUG_IS_ON) {
+        vlog_buffer.clear();
+        for (auto& segment : all_segments) {
+            fmt::format_to(vlog_buffer, "[id:{} num_rows:{}]", segment->id(), segment->num_rows());
+        }
+        VLOG_DEBUG << "all noncompacted segments num:" << all_segments.size()
+                   << " list of segments:" << fmt::to_string(vlog_buffer);
+    }
+
+    bool is_terminated_by_big = false;
+    bool let_big_terminate = false;
+    size_t small_threshold = config::segcompaction_small_threshold;
+    for (int64_t i = 0; i < all_segments.size(); ++i) {
+        segment_v2::SegmentSharedPtr seg = all_segments[i];
+        if (seg->num_rows() > small_threshold) {
+            if (let_big_terminate) {
+                is_terminated_by_big = true;
+                break;
+            } else {
+                RETURN_IF_ERROR(_rename_compacted_segment_plain(_segcompacted_point++));
+            }
+        } else {
+            let_big_terminate = true; // break if find a big after small
+            segments->push_back(seg);
+        }
+    }
+    size_t s = segments->size();
+    if (!is_terminated_by_big && s <= (config::segcompaction_threshold_segment_num / 2)) {
+        // start with big segments and end with small, better to do it in next
+        // round to compact more at once
+        segments->clear();
+        return Status::OK();
+    }
+    if (s == 1) { // poor bachelor, let it go
+        VLOG_DEBUG << "only one candidate segment";
+        RETURN_IF_ERROR(_rename_compacted_segment_plain(_segcompacted_point++));
+        segments->clear();
+        return Status::OK();
+    }
+    if (VLOG_DEBUG_IS_ON) {
+        vlog_buffer.clear();
+        for (auto& segment : (*segments.get())) {
+            fmt::format_to(vlog_buffer, "[id:{} num_rows:{}]", segment->id(), segment->num_rows());
+        }
+        VLOG_DEBUG << "candidate segments num:" << s
+                   << " list of candidates:" << fmt::to_string(vlog_buffer);
     }
     return Status::OK();
 }
@@ -208,14 +249,27 @@ Status BetaRowsetWriter::_rename_compacted_segments(int64_t begin, int64_t end) 
     auto src_seg_path = BetaRowset::local_segment_path_segcompacted(_context.rowset_dir,
                                                                     _context.rowset_id, begin, end);
     auto dst_seg_path = BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id,
-                                                      _num_segcompacted++);
+                                                      _num_segcompacted);
     ret = rename(src_seg_path.c_str(), dst_seg_path.c_str());
     if (ret) {
         LOG(WARNING) << "failed to rename " << src_seg_path << " to " << dst_seg_path
                      << ". ret:" << ret << " errno:" << errno;
         return Status::Error<ROWSET_RENAME_FILE_FAILED>();
     }
+
+    // rename inverted index files
+    RETURN_IF_ERROR(_rename_compacted_indices(begin, end, 0));
+
+    _num_segcompacted++;
     return Status::OK();
+}
+
+void BetaRowsetWriter::_clear_statistics_for_deleting_segments_unsafe(uint64_t begin,
+                                                                      uint64_t end) {
+    VLOG_DEBUG << "_segid_statistics_map clear record segid range from:" << begin << " to:" << end;
+    for (int i = begin; i <= end; ++i) {
+        _segid_statistics_map.erase(i);
+    }
 }
 
 Status BetaRowsetWriter::_rename_compacted_segment_plain(uint64_t seg_id) {
@@ -240,243 +294,46 @@ Status BetaRowsetWriter::_rename_compacted_segment_plain(uint64_t seg_id) {
         _segid_statistics_map.emplace(_num_segcompacted, org);
         _clear_statistics_for_deleting_segments_unsafe(seg_id, seg_id);
     }
-    ++_num_segcompacted;
     ret = rename(src_seg_path.c_str(), dst_seg_path.c_str());
     if (ret) {
         LOG(WARNING) << "failed to rename " << src_seg_path << " to " << dst_seg_path
                      << ". ret:" << ret << " errno:" << errno;
         return Status::Error<ROWSET_RENAME_FILE_FAILED>();
     }
+    // rename remaining inverted index files
+    RETURN_IF_ERROR(_rename_compacted_indices(-1, -1, seg_id));
+
+    ++_num_segcompacted;
     return Status::OK();
 }
 
-void BetaRowsetWriter::_clear_statistics_for_deleting_segments_unsafe(uint64_t begin,
-                                                                      uint64_t end) {
-    VLOG_DEBUG << "_segid_statistics_map clear record segid range from:" << begin << " to:" << end;
-    for (int i = begin; i <= end; ++i) {
-        _segid_statistics_map.erase(i);
-    }
-}
-
-Status BetaRowsetWriter::_check_correctness(std::unique_ptr<OlapReaderStatistics> stat,
-                                            uint64_t merged_row_stat, uint64_t row_count,
-                                            uint64_t begin, uint64_t end) {
-    uint64_t stat_read_row = stat->raw_rows_read;
-    uint64_t sum_target_row = 0;
-
-    {
-        std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
-        for (int i = begin; i <= end; ++i) {
-            sum_target_row += _segid_statistics_map[i].row_num;
-        }
-    }
-
-    if (sum_target_row != stat_read_row) {
-        LOG(WARNING) << "read row_num does not match. expect read row:" << sum_target_row
-                     << " actual read row:" << stat_read_row;
-        return Status::Error<CHECK_LINES_ERROR>();
-    }
-
-    uint64_t total_row = row_count + merged_row_stat;
-    if (stat_read_row != total_row) {
-        LOG(WARNING) << "total row_num does not match. expect total row:" << total_row
-                     << " actual total row:" << stat_read_row;
-        return Status::Error<CHECK_LINES_ERROR>();
-    }
-    return Status::OK();
-}
-
-Status BetaRowsetWriter::_do_compact_segments(SegCompactionCandidatesSharedPtr segments) {
-    SCOPED_CONSUME_MEM_TRACKER(StorageEngine::instance()->segcompaction_mem_tracker());
-    // throttle segcompaction task if memory depleted.
-    if (MemTrackerLimiter::sys_mem_exceed_limit_check(GB_EXCHANGE_BYTE)) {
-        LOG(WARNING) << "skip segcompaction due to memory shortage";
-        return Status::Error<FETCH_MEMORY_EXCEEDED>();
-    }
-    uint64_t begin = (*(segments->begin()))->id();
-    uint64_t end = (*(segments->end() - 1))->id();
-    uint64_t begin_time = GetCurrentTimeMicros();
-
-    auto schema = std::make_shared<Schema>(_context.tablet_schema->columns(),
-                                           _context.tablet_schema->columns().size());
-    std::unique_ptr<OlapReaderStatistics> stat(new OlapReaderStatistics());
-    uint64_t merged_row_stat = 0;
-    vectorized::VMergeIterator* reader =
-            _get_segcompaction_reader(segments, schema, stat.get(), &merged_row_stat);
-    if (UNLIKELY(reader == nullptr)) {
-        LOG(WARNING) << "failed to get segcompaction reader";
-        return Status::Error<SEGCOMPACTION_INIT_READER>();
-    }
-    std::unique_ptr<vectorized::VMergeIterator> reader_ptr;
-    reader_ptr.reset(reader);
-    auto writer = _create_segcompaction_writer(begin, end);
-    if (UNLIKELY(writer == nullptr)) {
-        LOG(WARNING) << "failed to get segcompaction writer";
-        return Status::Error<SEGCOMPACTION_INIT_WRITER>();
-    }
-    uint64_t row_count = 0;
-    vectorized::Block block = _context.tablet_schema->create_block();
-    while (true) {
-        auto status = reader_ptr->next_batch(&block);
-        row_count += block.rows();
-        if (status != Status::OK()) {
-            if (LIKELY(status.is<END_OF_FILE>())) {
-                RETURN_NOT_OK_LOG(_add_block_for_segcompaction(&block, &writer),
-                                  "write block failed");
-                break;
-            } else {
-                LOG(WARNING) << "read block failed: " << status.to_string();
-                return status;
+Status BetaRowsetWriter::_rename_compacted_indices(int64_t begin, int64_t end, uint64_t seg_id) {
+    int ret;
+    // rename remaining inverted index files
+    for (auto column : _context.tablet_schema->columns()) {
+        if (_context.tablet_schema->has_inverted_index(column.unique_id())) {
+            auto index_id =
+                    _context.tablet_schema->get_inverted_index(column.unique_id())->index_id();
+            auto src_idx_path =
+                    begin < 0 ? InvertedIndexDescriptor::inverted_index_file_path(
+                                        _context.rowset_dir, _context.rowset_id, seg_id, index_id)
+                              : InvertedIndexDescriptor::local_inverted_index_path_segcompacted(
+                                        _context.rowset_dir, _context.rowset_id, begin, end,
+                                        index_id);
+            auto dst_idx_path = InvertedIndexDescriptor::inverted_index_file_path(
+                    _context.rowset_dir, _context.rowset_id, _num_segcompacted, index_id);
+            VLOG_DEBUG << "segcompaction skip this index. rename " << src_idx_path << " to "
+                       << dst_idx_path;
+            ret = rename(src_idx_path.c_str(), dst_idx_path.c_str());
+            if (ret) {
+                LOG(WARNING) << "failed to rename " << src_idx_path << " to " << dst_idx_path
+                             << ". ret:" << ret << " errno:" << errno;
+                return Status::Error<INVERTED_INDEX_RENAME_FILE_FAILED>();
             }
+            // Erase the origin index file cache
+            InvertedIndexSearcherCache::instance()->erase(src_idx_path);
+            InvertedIndexSearcherCache::instance()->erase(dst_idx_path);
         }
-        RETURN_NOT_OK_LOG(_add_block_for_segcompaction(&block, &writer), "write block failed");
-        block.clear_column_data();
-    }
-    RETURN_NOT_OK_LOG(_check_correctness(std::move(stat), merged_row_stat, row_count, begin, end),
-                      "check correctness failed");
-    {
-        std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
-        _clear_statistics_for_deleting_segments_unsafe(begin, end);
-    }
-    RETURN_NOT_OK(_flush_segment_writer(&writer));
-
-    if (_segcompaction_file_writer != nullptr) {
-        _segcompaction_file_writer->close();
-    }
-
-    RETURN_NOT_OK(_delete_original_segments(begin, end));
-    RETURN_NOT_OK(_rename_compacted_segments(begin, end));
-
-    if (VLOG_DEBUG_IS_ON) {
-        vlog_buffer.clear();
-        for (const auto& entry : std::filesystem::directory_iterator(_context.rowset_dir)) {
-            fmt::format_to(vlog_buffer, "[{}]", string(entry.path()));
-        }
-        VLOG_DEBUG << "tablet_id:" << _context.tablet_id << " rowset_id:" << _context.rowset_id
-                   << "_segcompacted_point:" << _segcompacted_point
-                   << " _num_segment:" << _num_segment << " _num_segcompacted:" << _num_segcompacted
-                   << " list directory:" << fmt::to_string(vlog_buffer);
-    }
-
-    _segcompacted_point += (end - begin + 1);
-
-    uint64_t elapsed = GetCurrentTimeMicros() - begin_time;
-    LOG(INFO) << "segcompaction completed. tablet_id:" << _context.tablet_id
-              << " rowset_id:" << _context.rowset_id << " elapsed time:" << elapsed
-              << "us. update segcompacted_point:" << _segcompacted_point
-              << " segment num:" << segments->size() << " begin:" << begin << " end:" << end;
-
-    return Status::OK();
-}
-
-void BetaRowsetWriter::compact_segments(SegCompactionCandidatesSharedPtr segments) {
-    Status status = _do_compact_segments(segments);
-    if (!status.ok()) {
-        int16_t errcode = status.code();
-        switch (errcode) {
-        case FETCH_MEMORY_EXCEEDED:
-        case SEGCOMPACTION_INIT_READER:
-        case SEGCOMPACTION_INIT_WRITER:
-            LOG(WARNING) << "segcompaction failed, try next time:" << status;
-            return;
-        default:
-            LOG(WARNING) << "segcompaction fatal, terminating the write job."
-                         << " tablet_id:" << _context.tablet_id
-                         << " rowset_id:" << _context.rowset_id << " status:" << status;
-            // status will be checked by the next trigger of segcompaction or the final wait
-            _segcompaction_status.store(ErrorCode::INTERNAL_ERROR);
-        }
-    }
-    DCHECK_EQ(_is_doing_segcompaction, true);
-    {
-        std::lock_guard lk(_is_doing_segcompaction_lock);
-        _is_doing_segcompaction = false;
-        _segcompacting_cond.notify_all();
-    }
-}
-
-Status BetaRowsetWriter::_load_noncompacted_segments(
-        std::vector<segment_v2::SegmentSharedPtr>* segments, size_t num) {
-    auto fs = _rowset_meta->fs();
-    if (!fs) {
-        return Status::Error<INIT_FAILED>();
-    }
-    for (int seg_id = _segcompacted_point; seg_id < num; ++seg_id) {
-        auto seg_path =
-                BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, seg_id);
-        auto cache_path =
-                BetaRowset::segment_cache_path(_context.rowset_dir, _context.rowset_id, seg_id);
-        std::shared_ptr<segment_v2::Segment> segment;
-        auto s = segment_v2::Segment::open(fs, seg_path, cache_path, seg_id, rowset_id(),
-                                           _context.tablet_schema, &segment);
-        if (!s.ok()) {
-            LOG(WARNING) << "failed to open segment. " << seg_path << ":" << s.to_string();
-            return Status::Error<ROWSET_LOAD_FAILED>();
-        }
-        segments->push_back(std::move(segment));
-    }
-    return Status::OK();
-}
-
-/* policy of segcompaction target selection:
- *  1. skip big segments
- *  2. if the consecutive smalls end up with a big, compact the smalls, except
- *     single small
- *  3. if the consecutive smalls end up with small, compact the smalls if the
- *     length is beyond (config::segcompaction_threshold_segment_num / 2)
- */
-Status BetaRowsetWriter::_find_longest_consecutive_small_segment(
-        SegCompactionCandidatesSharedPtr segments) {
-    std::vector<segment_v2::SegmentSharedPtr> all_segments;
-    // subtract one to skip last (maybe active) segment
-    RETURN_NOT_OK(_load_noncompacted_segments(&all_segments, _num_segment - 1));
-
-    if (VLOG_DEBUG_IS_ON) {
-        vlog_buffer.clear();
-        for (auto& segment : all_segments) {
-            fmt::format_to(vlog_buffer, "[id:{} num_rows:{}]", segment->id(), segment->num_rows());
-        }
-        VLOG_DEBUG << "all noncompacted segments num:" << all_segments.size()
-                   << " list of segments:" << fmt::to_string(vlog_buffer);
-    }
-
-    bool is_terminated_by_big = false;
-    bool let_big_terminate = false;
-    size_t small_threshold = config::segcompaction_small_threshold;
-    for (int64_t i = 0; i < all_segments.size(); ++i) {
-        segment_v2::SegmentSharedPtr seg = all_segments[i];
-        if (seg->num_rows() > small_threshold) {
-            if (let_big_terminate) {
-                is_terminated_by_big = true;
-                break;
-            } else {
-                RETURN_NOT_OK(_rename_compacted_segment_plain(_segcompacted_point++));
-            }
-        } else {
-            let_big_terminate = true; // break if find a big after small
-            segments->push_back(seg);
-        }
-    }
-    size_t s = segments->size();
-    if (!is_terminated_by_big && s <= (config::segcompaction_threshold_segment_num / 2)) {
-        // start with big segments and end with small, better to do it in next
-        // round to compact more at once
-        segments->clear();
-        return Status::OK();
-    }
-    if (s == 1) { // poor bachelor, let it go
-        VLOG_DEBUG << "only one candidate segment";
-        RETURN_NOT_OK(_rename_compacted_segment_plain(_segcompacted_point++));
-        segments->clear();
-        return Status::OK();
-    }
-    if (VLOG_DEBUG_IS_ON) {
-        vlog_buffer.clear();
-        for (auto& segment : (*segments.get())) {
-            fmt::format_to(vlog_buffer, "[id:{} num_rows:{}]", segment->id(), segment->num_rows());
-        }
-        VLOG_DEBUG << "candidate segments num:" << s
-                   << " list of candidates:" << fmt::to_string(vlog_buffer);
     }
     return Status::OK();
 }
@@ -487,13 +344,13 @@ Status BetaRowsetWriter::_get_segcompaction_candidates(SegCompactionCandidatesSh
         VLOG_DEBUG << "segcompaction last few segments";
         // currently we only rename remaining segments to reduce wait time
         // so that transaction can be committed ASAP
-        RETURN_NOT_OK(_load_noncompacted_segments(segments.get(), _num_segment));
+        RETURN_IF_ERROR(_load_noncompacted_segments(segments.get(), _num_segment));
         for (int i = 0; i < segments->size(); ++i) {
-            RETURN_NOT_OK(_rename_compacted_segment_plain(_segcompacted_point++));
+            RETURN_IF_ERROR(_rename_compacted_segment_plain(_segcompacted_point++));
         }
         segments->clear();
     } else {
-        RETURN_NOT_OK(_find_longest_consecutive_small_segment(segments));
+        RETURN_IF_ERROR(_find_longest_consecutive_small_segment(segments));
     }
     return Status::OK();
 }
@@ -509,9 +366,12 @@ bool BetaRowsetWriter::_check_and_set_is_doing_segcompaction() {
 }
 
 Status BetaRowsetWriter::_segcompaction_if_necessary() {
+#ifdef CLOUD_MODE
+    return Status::OK();
+#else
     Status status = Status::OK();
-    if (!config::enable_segcompaction || !config::enable_storage_vectorization ||
-        _context.tablet_schema->is_dynamic_schema() || !_check_and_set_is_doing_segcompaction()) {
+    if (!config::enable_segcompaction || _context.tablet_schema->is_dynamic_schema() ||
+        !_check_and_set_is_doing_segcompaction()) {
         return status;
     }
     if (_segcompaction_status.load() != OK) {
@@ -536,12 +396,16 @@ Status BetaRowsetWriter::_segcompaction_if_necessary() {
         _segcompacting_cond.notify_all();
     }
     return status;
+#endif
 }
 
 Status BetaRowsetWriter::_segcompaction_ramaining_if_necessary() {
+#ifdef CLOUD_MODE
+    return Status::OK();
+#else
     Status status = Status::OK();
     DCHECK_EQ(_is_doing_segcompaction, false);
-    if (!config::enable_segcompaction || !config::enable_storage_vectorization) {
+    if (!config::enable_segcompaction) {
         return Status::OK();
     }
     if (_segcompaction_status.load() != OK) {
@@ -565,42 +429,13 @@ Status BetaRowsetWriter::_segcompaction_ramaining_if_necessary() {
     }
     _is_doing_segcompaction = false;
     return status;
+#endif
 }
 
-Status BetaRowsetWriter::_add_block(const vectorized::Block* block,
-                                    std::unique_ptr<segment_v2::SegmentWriter>* segment_writer) {
-    size_t block_size_in_bytes = block->bytes();
-    size_t block_row_num = block->rows();
-    size_t row_avg_size_in_bytes = std::max((size_t)1, block_size_in_bytes / block_row_num);
-    size_t row_offset = 0;
-
-    do {
-        auto max_row_add = (*segment_writer)->max_row_to_add(row_avg_size_in_bytes);
-        if (UNLIKELY(max_row_add < 1)) {
-            // no space for another signle row, need flush now
-            RETURN_NOT_OK(_flush_segment_writer(segment_writer));
-            RETURN_NOT_OK(_create_segment_writer(segment_writer, block));
-            max_row_add = (*segment_writer)->max_row_to_add(row_avg_size_in_bytes);
-            DCHECK(max_row_add > 0);
-        }
-
-        size_t input_row_num = std::min(block_row_num - row_offset, size_t(max_row_add));
-        auto s = (*segment_writer)->append_block(block, row_offset, input_row_num);
-        if (UNLIKELY(!s.ok())) {
-            LOG(WARNING) << "failed to append block: " << s.to_string();
-            return Status::Error<WRITER_DATA_WRITE_ERROR>();
-        }
-        row_offset += input_row_num;
-    } while (row_offset < block_row_num);
-
-    _raw_num_rows_written += block_row_num;
-    return Status::OK();
-}
-
-Status BetaRowsetWriter::_add_block_for_segcompaction(
-        const vectorized::Block* block,
-        std::unique_ptr<segment_v2::SegmentWriter>* segment_writer) {
-    auto s = (*segment_writer)->append_block(block, 0, block->rows());
+Status BetaRowsetWriter::_do_add_block(const vectorized::Block* block,
+                                       std::unique_ptr<segment_v2::SegmentWriter>* segment_writer,
+                                       size_t row_offset, size_t input_row_num) {
+    auto s = (*segment_writer)->append_block(block, row_offset, input_row_num);
     if (UNLIKELY(!s.ok())) {
         LOG(WARNING) << "failed to append block: " << s.to_string();
         return Status::Error<WRITER_DATA_WRITE_ERROR>();
@@ -608,35 +443,49 @@ Status BetaRowsetWriter::_add_block_for_segcompaction(
     return Status::OK();
 }
 
-template <typename RowType>
-Status BetaRowsetWriter::_add_row(const RowType& row) {
-    if (PREDICT_FALSE(_segment_writer == nullptr)) {
-        RETURN_NOT_OK(_create_segment_writer(&_segment_writer));
+Status BetaRowsetWriter::_add_block(const vectorized::Block* block,
+                                    std::unique_ptr<segment_v2::SegmentWriter>* segment_writer,
+                                    const FlushContext* flush_ctx) {
+    size_t block_size_in_bytes = block->bytes();
+    size_t block_row_num = block->rows();
+    size_t row_avg_size_in_bytes = std::max((size_t)1, block_size_in_bytes / block_row_num);
+    size_t row_offset = 0;
+
+    if (flush_ctx != nullptr && flush_ctx->segment_id.has_value()) {
+        // the entire block (memtable) should be flushed into single segment
+        RETURN_IF_ERROR(_do_add_block(block, segment_writer, 0, block_row_num));
+        _raw_num_rows_written += block_row_num;
+        return Status::OK();
     }
-    // TODO update rowset zonemap
-    auto s = _segment_writer->append_row(row);
-    if (PREDICT_FALSE(!s.ok())) {
-        LOG(WARNING) << "failed to append row: " << s.to_string();
-        return Status::Error<WRITER_DATA_WRITE_ERROR>();
-    }
-    if (PREDICT_FALSE(_segment_writer->estimate_segment_size() >= MAX_SEGMENT_SIZE ||
-                      _segment_writer->num_rows_written() >= _context.max_rows_per_segment)) {
-        RETURN_NOT_OK(_flush_segment_writer(&_segment_writer));
-    }
-    ++_raw_num_rows_written;
+
+    do {
+        auto max_row_add = (*segment_writer)->max_row_to_add(row_avg_size_in_bytes);
+        if (UNLIKELY(max_row_add < 1)) {
+            // no space for another single row, need flush now
+            RETURN_IF_ERROR(_flush_segment_writer(segment_writer));
+            RETURN_IF_ERROR(_create_segment_writer(segment_writer, flush_ctx));
+            max_row_add = (*segment_writer)->max_row_to_add(row_avg_size_in_bytes);
+            DCHECK(max_row_add > 0);
+        }
+        size_t input_row_num = std::min(block_row_num - row_offset, size_t(max_row_add));
+        RETURN_IF_ERROR(_do_add_block(block, segment_writer, row_offset, input_row_num));
+        row_offset += input_row_num;
+    } while (row_offset < block_row_num);
+
+    _raw_num_rows_written += block_row_num;
     return Status::OK();
 }
 
-template Status BetaRowsetWriter::_add_row(const RowCursor& row);
-template Status BetaRowsetWriter::_add_row(const ContiguousRow& row);
-
 Status BetaRowsetWriter::add_rowset(RowsetSharedPtr rowset) {
     assert(rowset->rowset_meta()->rowset_type() == BETA_ROWSET);
-    RETURN_NOT_OK(rowset->link_files_to(_context.rowset_dir, _context.rowset_id));
+    RETURN_IF_ERROR(rowset->link_files_to(_context.rowset_dir, _context.rowset_id));
     _num_rows_written += rowset->num_rows();
     _total_data_size += rowset->rowset_meta()->data_disk_size();
     _total_index_size += rowset->rowset_meta()->index_disk_size();
     _num_segment += rowset->num_segments();
+    // _next_segment_id is not used in this code path,
+    // just to make sure it matches with _num_segment
+    _next_segment_id = _num_segment.load();
     // append key_bounds to current rowset
     rowset->get_segments_key_bounds(&_segments_encoded_key_bounds);
     // TODO update zonemap
@@ -653,69 +502,28 @@ Status BetaRowsetWriter::add_rowset_for_linked_schema_change(RowsetSharedPtr row
 
 Status BetaRowsetWriter::flush() {
     if (_segment_writer != nullptr) {
-        RETURN_NOT_OK(_flush_segment_writer(&_segment_writer));
-        RETURN_NOT_OK(_segcompaction_if_necessary());
+        RETURN_IF_ERROR(_flush_segment_writer(&_segment_writer));
     }
     return Status::OK();
 }
 
-Status BetaRowsetWriter::flush_single_memtable(MemTable* memtable, int64_t* flush_size) {
-    int64_t size = 0;
-    int64_t sum_size = 0;
-    // Create segment writer for each memtable, so that
-    // all memtables can be flushed in parallel.
-    std::unique_ptr<segment_v2::SegmentWriter> writer;
-
-    MemTable::Iterator it(memtable);
-    for (it.seek_to_first(); it.valid(); it.next()) {
-        if (PREDICT_FALSE(writer == nullptr)) {
-            RETURN_NOT_OK(_segcompaction_if_necessary());
-            RETURN_NOT_OK(_create_segment_writer(&writer));
-        }
-        ContiguousRow dst_row = it.get_current_row();
-        auto s = writer->append_row(dst_row);
-        _raw_num_rows_written++;
-        if (PREDICT_FALSE(!s.ok())) {
-            LOG(WARNING) << "failed to append row: " << s.to_string();
-            return Status::Error<WRITER_DATA_WRITE_ERROR>();
-        }
-
-        if (PREDICT_FALSE(writer->estimate_segment_size() >= MAX_SEGMENT_SIZE ||
-                          writer->num_rows_written() >= _context.max_rows_per_segment)) {
-            auto s = _flush_segment_writer(&writer, &size);
-            sum_size += size;
-            if (OLAP_UNLIKELY(!s.ok())) {
-                *flush_size = sum_size;
-                return s;
-            }
-        }
-    }
-
-    if (writer != nullptr) {
-        auto s = _flush_segment_writer(&writer, &size);
-        sum_size += size;
-        *flush_size = sum_size;
-        if (OLAP_UNLIKELY(!s.ok())) {
-            return s;
-        }
-    }
-
-    return Status::OK();
-}
-
-Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, int64* flush_size) {
+Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, int64* flush_size,
+                                               const FlushContext* ctx) {
     if (block->rows() == 0) {
         return Status::OK();
     }
-    RETURN_NOT_OK(_segcompaction_if_necessary());
+
     std::unique_ptr<segment_v2::SegmentWriter> writer;
-    RETURN_NOT_OK(_create_segment_writer(&writer, block));
-    RETURN_NOT_OK(_add_block(block, &writer));
-    RETURN_NOT_OK(_flush_segment_writer(&writer, flush_size));
+    RETURN_IF_ERROR(_create_segment_writer(&writer, ctx));
+    int32_t segment_id = writer->get_segment_id();
+    RETURN_IF_ERROR(_add_block(block, &writer));
+    RETURN_IF_ERROR(_flush_segment_writer(&writer, flush_size));
+    RETURN_IF_ERROR(ctx->generate_delete_bitmap(segment_id));
+    RETURN_IF_ERROR(_segcompaction_if_necessary());
     return Status::OK();
 }
 
-Status BetaRowsetWriter::_wait_flying_segcompaction() {
+Status BetaRowsetWriter::wait_flying_segcompaction() {
     std::unique_lock<std::mutex> l(_is_doing_segcompaction_lock);
     uint64_t begin_wait = GetCurrentTimeMicros();
     while (_is_doing_segcompaction) {
@@ -733,10 +541,6 @@ Status BetaRowsetWriter::_wait_flying_segcompaction() {
 }
 
 RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_rowset_meta) {
-    if (_rowset_meta->oldest_write_timestamp() == -1) {
-        _rowset_meta->set_oldest_write_timestamp(UnixSeconds());
-    }
-
     if (_rowset_meta->newest_write_timestamp() == -1) {
         _rowset_meta->set_newest_write_timestamp(UnixSeconds());
     }
@@ -755,8 +559,9 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
 
 RowsetSharedPtr BetaRowsetWriter::build() {
     Status status;
-    // TODO(lingbin): move to more better place, or in a CreateBlockBatch?
-    for (auto& file_writer : _file_writers) {
+    // make sure all segments are flushed
+    DCHECK_EQ(_num_segment, _next_segment_id);
+    for (auto& [_, file_writer] : _file_writers) {
         status = file_writer->close();
         if (!status.ok()) {
             LOG(WARNING) << "failed to close file writer, path=" << file_writer->path()
@@ -764,7 +569,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
             return nullptr;
         }
     }
-    status = _wait_flying_segcompaction();
+    status = wait_flying_segcompaction();
     if (!status.ok()) {
         LOG(WARNING) << "segcompaction failed when build new rowset 1st wait, res=" << status;
         return nullptr;
@@ -774,23 +579,19 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         LOG(WARNING) << "segcompaction failed when build new rowset, res=" << status;
         return nullptr;
     }
-    status = _wait_flying_segcompaction();
+    status = wait_flying_segcompaction();
     if (!status.ok()) {
         LOG(WARNING) << "segcompaction failed when build new rowset 2nd wait, res=" << status;
         return nullptr;
     }
 
-    if (_segcompaction_file_writer) {
-        _segcompaction_file_writer->close();
+    if (_segcompaction_worker.get_file_writer()) {
+        _segcompaction_worker.get_file_writer()->close();
     }
     // When building a rowset, we must ensure that the current _segment_writer has been
     // flushed, that is, the current _segment_writer is nullptr
     DCHECK(_segment_writer == nullptr) << "segment must be null when build rowset";
     _build_rowset_meta(_rowset_meta);
-
-    if (_rowset_meta->oldest_write_timestamp() == -1) {
-        _rowset_meta->set_oldest_write_timestamp(UnixSeconds());
-    }
 
     if (_rowset_meta->newest_write_timestamp() == -1) {
         _rowset_meta->set_newest_write_timestamp(UnixSeconds());
@@ -812,9 +613,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
-    for (auto& file_writer : _file_writers) {
-        _rowset_meta->add_segment_file_size(file_writer->bytes_appended());
-    }
+    _rowset_meta->add_segments_file_size(_file_writers);
     RowsetSharedPtr rowset;
     status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                           &rowset);
@@ -864,7 +663,6 @@ void BetaRowsetWriter::_build_rowset_meta(std::shared_ptr<RowsetMeta> rowset_met
     int64_t total_data_size = 0;
     int64_t total_index_size = 0;
     std::vector<KeyBoundsPB> segments_encoded_key_bounds;
-    std::unordered_set<std::string> key_set;
     {
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
         for (const auto& itr : _segid_statistics_map) {
@@ -872,15 +670,8 @@ void BetaRowsetWriter::_build_rowset_meta(std::shared_ptr<RowsetMeta> rowset_met
             total_data_size += itr.second.data_size;
             total_index_size += itr.second.index_size;
             segments_encoded_key_bounds.push_back(itr.second.key_bounds);
-#ifndef NDEBUG
-            if (_context.enable_unique_key_merge_on_write) {
-                DCHECK(itr.second.key_set.get() != nullptr);
-                key_set.insert(itr.second.key_set->begin(), itr.second.key_set->end());
-            }
-#endif
         }
     }
-    _num_mow_keys = key_set.size();
     for (auto itr = _segments_encoded_key_bounds.begin(); itr != _segments_encoded_key_bounds.end();
          ++itr) {
         segments_encoded_key_bounds.push_back(*itr);
@@ -924,7 +715,7 @@ RowsetSharedPtr BetaRowsetWriter::build_tmp() {
 
 Status BetaRowsetWriter::_do_create_segment_writer(
         std::unique_ptr<segment_v2::SegmentWriter>* writer, bool is_segcompaction, int64_t begin,
-        int64_t end, const vectorized::Block* block) {
+        int64_t end, const FlushContext* flush_ctx) {
     std::string path;
     int32_t segment_id = 0;
     if (is_segcompaction) {
@@ -932,7 +723,10 @@ Status BetaRowsetWriter::_do_create_segment_writer(
         path = BetaRowset::local_segment_path_segcompacted(_context.rowset_dir, _context.rowset_id,
                                                            begin, end);
     } else {
-        segment_id = _num_segment.fetch_add(1);
+        int32_t segid_offset = (flush_ctx != nullptr && flush_ctx->segment_id.has_value())
+                                       ? flush_ctx->segment_id.value()
+                                       : allocate_segment_id();
+        segment_id = segid_offset + _segment_start_id;
         path = _rowset_meta->is_local()
                        ? BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id,
                                                        segment_id)
@@ -944,7 +738,14 @@ Status BetaRowsetWriter::_do_create_segment_writer(
         return Status::Error<INIT_FAILED>();
     }
     io::FileWriterPtr file_writer;
-    Status st = fs->create_file(path, &file_writer);
+    io::FileWriterOptions opts;
+    opts.expiration_time = _file_cache_is_persistent ? INT64_MAX
+                               : _file_cache_ttl_seconds == 0
+                                       ? 0
+                                       : _create_time + _file_cache_ttl_seconds;
+    opts.is_cold_data = !_is_hot_data;
+    opts.disable_file_cache = _context.disable_file_cache;
+    Status st = fs->create_file(path, &file_writer, &opts);
     if (!st.ok()) {
         LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;
         return st;
@@ -952,39 +753,44 @@ Status BetaRowsetWriter::_do_create_segment_writer(
 
     DCHECK(file_writer != nullptr);
     segment_v2::SegmentWriterOptions writer_options;
-    writer_options.rowset_ctx = &_context;
     writer_options.enable_unique_key_merge_on_write = _context.enable_unique_key_merge_on_write;
+    writer_options.rowset_ctx = &_context;
     writer_options.is_direct_write = _context.is_direct_write;
+    if (is_segcompaction) {
+        writer_options.is_direct_write = false;
+    }
 
     if (is_segcompaction) {
-        writer->reset(new segment_v2::SegmentWriter(file_writer.get(), _num_segcompacted,
-                                                    _context.tablet_schema, _context.data_dir,
-                                                    _context.max_rows_per_segment, writer_options));
-        if (_segcompaction_file_writer != nullptr) {
-            _segcompaction_file_writer->close();
+        writer->reset(new segment_v2::SegmentWriter(
+                file_writer.get(), _num_segcompacted, _context.tablet_schema, _context.tablet,
+                _context.data_dir, _context.max_rows_per_segment, writer_options,
+                _context.mow_context));
+        if (_segcompaction_worker.get_file_writer() != nullptr) {
+            _segcompaction_worker.get_file_writer()->close();
         }
-        _segcompaction_file_writer.reset(file_writer.release());
+        _segcompaction_worker.get_file_writer().reset(file_writer.release());
     } else {
-        writer->reset(new segment_v2::SegmentWriter(file_writer.get(), segment_id,
-                                                    _context.tablet_schema, _context.data_dir,
-                                                    _context.max_rows_per_segment, writer_options));
+        writer->reset(new segment_v2::SegmentWriter(
+                file_writer.get(), segment_id, _context.tablet_schema, _context.tablet,
+                _context.data_dir, _context.max_rows_per_segment, writer_options,
+                _context.mow_context));
         {
             std::lock_guard<SpinLock> l(_lock);
-            _file_writers.push_back(std::move(file_writer));
+            _file_writers.push_back({segment_id, std::move(file_writer)});
+        }
+        auto s = (*writer)->init(flush_ctx);
+        if (!s.ok()) {
+            LOG(WARNING) << "failed to init segment writer: " << s.to_string();
+            writer->reset(nullptr);
+            return s;
         }
     }
 
-    auto s = (*writer)->init(block);
-    if (!s.ok()) {
-        LOG(WARNING) << "failed to init segment writer: " << s.to_string();
-        writer->reset(nullptr);
-        return s;
-    }
     return Status::OK();
 }
 
 Status BetaRowsetWriter::_create_segment_writer(std::unique_ptr<segment_v2::SegmentWriter>* writer,
-                                                const vectorized::Block* block) {
+                                                const FlushContext* flush_ctx) {
     size_t total_segment_num = _num_segment - _segcompacted_point + 1 + _num_segcompacted;
     if (UNLIKELY(total_segment_num > config::max_segment_num_per_rowset)) {
         LOG(WARNING) << "too many segments in rowset."
@@ -995,19 +801,15 @@ Status BetaRowsetWriter::_create_segment_writer(std::unique_ptr<segment_v2::Segm
                      << " _num_segcompacted:" << _num_segcompacted;
         return Status::Error<TOO_MANY_SEGMENTS>();
     } else {
-        return _do_create_segment_writer(writer, false, -1, -1, block);
+        return _do_create_segment_writer(writer, false, -1, -1, flush_ctx);
     }
-}
-
-Status BetaRowsetWriter::_create_segment_writer_for_segcompaction(
-        std::unique_ptr<segment_v2::SegmentWriter>* writer, uint64_t begin, uint64_t end) {
-    return _do_create_segment_writer(writer, true, begin, end);
 }
 
 Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::SegmentWriter>* writer,
                                                int64_t* flush_size) {
     uint32_t segid = (*writer)->get_segment_id();
     uint32_t row_num = (*writer)->num_rows_written();
+    uint32_t segid_offset = segid - _segment_start_id;
 
     if ((*writer)->num_rows_written() == 0) {
         return Status::OK();
@@ -1019,6 +821,10 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
         LOG(WARNING) << "failed to finalize segment: " << s.to_string();
         return Status::Error<WRITER_DATA_WRITE_ERROR>();
     }
+    VLOG_DEBUG << "tablet_id:" << _context.tablet_id
+               << " flushing filename: " << (*writer)->get_data_dir()->path()
+               << " rowset_id:" << _context.rowset_id << " segment num:" << _num_segment;
+
     KeyBoundsPB key_bounds;
     Slice min_key = (*writer)->min_encoded_key();
     Slice max_key = (*writer)->max_encoded_key();
@@ -1031,13 +837,12 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
     segstat.data_size = segment_size;
     segstat.index_size = index_size;
     segstat.key_bounds = key_bounds;
-    segstat.key_set = (*writer)->get_key_set();
     {
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
         CHECK_EQ(_segid_statistics_map.find(segid) == _segid_statistics_map.end(), true);
         _segid_statistics_map.emplace(segid, segstat);
-        _segment_num_rows.resize(_num_segment);
-        _segment_num_rows[_num_segment - 1] = row_num;
+        _segment_num_rows.resize(_next_segment_id);
+        _segment_num_rows[segid_offset] = row_num;
     }
     VLOG_DEBUG << "_segid_statistics_map add new record. segid:" << segid << " row_num:" << row_num
                << " data_size:" << segment_size << " index_size:" << index_size;
@@ -1046,6 +851,44 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
     if (flush_size) {
         *flush_size = segment_size + index_size;
     }
+    {
+        std::lock_guard<std::mutex> lock(_segment_set_mutex);
+        _segment_set.add(segid_offset);
+        while (_segment_set.contains(_num_segment)) {
+            _num_segment++;
+        }
+    }
+    return Status::OK();
+}
+
+Status BetaRowsetWriter::flush_segment_writer_for_segcompaction(
+        std::unique_ptr<segment_v2::SegmentWriter>* writer, uint64_t index_size,
+        KeyBoundsPB& key_bounds) {
+    uint32_t segid = (*writer)->get_segment_id();
+    uint32_t row_num = (*writer)->row_count();
+    uint64_t segment_size;
+
+    auto s = (*writer)->finalize_footer(&segment_size);
+    if (!s.ok()) {
+        LOG(WARNING) << "failed to finalize segment: " << s.to_string();
+        return Status::Error<WRITER_DATA_WRITE_ERROR>();
+    }
+
+    Statistics segstat;
+    segstat.row_num = row_num;
+    segstat.data_size = segment_size;
+    segstat.index_size = index_size;
+    segstat.key_bounds = key_bounds;
+    {
+        std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
+        CHECK_EQ(_segid_statistics_map.find(segid) == _segid_statistics_map.end(), true);
+        _segid_statistics_map.emplace(segid, segstat);
+    }
+    VLOG_DEBUG << "_segid_statistics_map add new record. segid:" << segid << " row_num:" << row_num
+               << " data_size:" << segment_size << " index_size:" << index_size;
+
+    writer->reset();
+
     return Status::OK();
 }
 

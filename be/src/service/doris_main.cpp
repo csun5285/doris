@@ -15,20 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <errno.h>
+#include <butil/macros.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <fcntl.h>
+#include <gperftools/malloc_extension.h> // IWYU pragma: keep
 #include <libgen.h>
 #include <setjmp.h>
-#include <sys/file.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <ostream>
+#include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
+#include <vector>
 
-#include "cloud/io/cloud_file_cache_profile.h"
+#include "olap/tablet_schema_cache.h"
+#include "olap/utils.h"
+#include "runtime/memory/mem_tracker_limiter.h"
 #include "util/jni-util.h"
 
 #if defined(LEAK_SANITIZER)
@@ -36,17 +49,10 @@
 #endif
 
 #include <curl/curl.h>
-#include <gperftools/profiler.h>
 #include <thrift/TOutput.h>
 
 #include "agent/heartbeat_server.h"
 #include "agent/topic_subscriber.h"
-#include "cloud/io/cloud_file_cache_downloader.h"
-#include "cloud/io/cloud_file_cache_factory.h"
-#include "cloud/io/cloud_file_cache_profile.h"
-#include "cloud/io/cloud_file_cache_settings.h"
-#include "cloud/io/local_file_system.h"
-#include "cloud/io/s3_file_bufferpool.h"
 #include "cloud/io/tmp_file_mgr.h"
 #include "common/config.h"
 #include "common/daemon.h"
@@ -54,28 +60,30 @@
 #include "common/resource_tls.h"
 #include "common/signal_handler.h"
 #include "common/status.h"
-#include "common/utils.h"
-#include "env/env.h"
+#include "io/cache/block/block_file_cache_downloader.h"
+#include "io/cache/block/block_file_cache_factory.h"
+#include "io/cache/block/block_file_cache_profile.h"
+#include "io/cache/block/block_file_cache_settings.h"
+#include "io/fs/local_file_system.h"
+#include "io/fs/s3_file_bufferpool.h"
 #include "olap/options.h"
-#include "olap/storage_engine.h"
+#include "cloud/olap/storage_engine.h"
 #include "runtime/exec_env.h"
-#include "runtime/heartbeat_flags.h"
 #include "service/backend_options.h"
 #include "service/backend_service.h"
 #include "service/brpc_service.h"
 #include "service/http_service.h"
-#include "service/single_replica_load_download_service.h"
 #include "util/debug_util.h"
-#include "util/doris_metrics.h"
-#include "util/perf_counters.h"
 #include "util/telemetry/telemetry.h"
 #include "util/thrift_rpc_helper.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
 
-static void help(const char*);
+namespace doris {
+class TMasterInfo;
+} // namespace doris
 
-#include <dlfcn.h>
+static void help(const char*);
 
 extern "C" {
 void __lsan_do_leak_check();
@@ -286,6 +294,10 @@ int main(int argc, char** argv) {
         fprintf(stderr, "you need set DORIS_HOME environment variable.\n");
         exit(-1);
     }
+    if (getenv("PID_DIR") == nullptr) {
+        fprintf(stderr, "you need set PID_DIR environment variable.\n");
+        exit(-1);
+    }
 
     using doris::Status;
     using std::string;
@@ -394,6 +406,31 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (doris::config::enable_file_cache) {
+        std::unordered_set<std::string> cache_path_set;
+        std::vector<doris::CachePath> cache_paths;
+        olap_res = doris::parse_conf_cache_paths(doris::config::file_cache_path, cache_paths);
+        if (!olap_res) {
+            LOG(FATAL) << "parse config file cache path failed, path="
+                       << doris::config::file_cache_path;
+            exit(-1);
+        }
+        for (auto& cache_path : cache_paths) {
+            if (cache_path_set.find(cache_path.path) != cache_path_set.end()) {
+                LOG(WARNING) << fmt::format("cache path {} is duplicate", cache_path.path);
+                continue;
+            }
+            cache_path_set.emplace(cache_path.path);
+            Status st = doris::io::FileCacheFactory::instance().create_file_cache(
+                    cache_path.path, cache_path.init_settings());
+            if (!st) {
+                LOG(FATAL) << st;
+                exit(-1);
+            }
+        }
+    }
+
+    // Load file cache before starting up daemon threads to make sure StorageEngine is read.
     doris::Daemon daemon;
     daemon.init(argc, argv, paths);
     daemon.start();
@@ -505,18 +542,6 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    doris::BRpcService single_replica_load_brpc_service(exec_env);
-    if (doris::config::enable_single_replica_load) {
-        status = single_replica_load_brpc_service.start(
-                doris::config::single_replica_load_brpc_port,
-                doris::config::single_replica_load_brpc_num_threads);
-        if (!status.ok()) {
-            LOG(ERROR) << "single replica load BRPC service did not start correctly, exiting";
-            doris::shutdown_logging();
-            exit(1);
-        }
-    }
-
     // 3. http service
     doris::HttpService http_service(exec_env, doris::config::webserver_port,
                                     doris::config::webserver_num_workers);
@@ -532,18 +557,6 @@ int main(int argc, char** argv) {
         LOG(ERROR) << "Doris Be http service did not start correctly, exiting";
         doris::shutdown_logging();
         exit(1);
-    }
-
-    doris::SingleReplicaLoadDownloadService download_service(
-            exec_env, doris::config::single_replica_load_download_port,
-            doris::config::single_replica_load_download_num_workers);
-    if (doris::config::enable_single_replica_load) {
-        status = download_service.start();
-        if (!status.ok()) {
-            LOG(ERROR) << "Doris Be download service did not start correctly, exiting";
-            doris::shutdown_logging();
-            exit(1);
-        }
     }
 
     // 4. heart beat server
@@ -578,12 +591,9 @@ int main(int argc, char** argv) {
         sleep(10);
     }
 
+    doris::TabletSchemaCache::stop_and_join();
     http_service.stop();
     brpc_service.join();
-    if (doris::config::enable_single_replica_load) {
-        download_service.stop();
-        single_replica_load_brpc_service.join();
-    }
     daemon.stop();
     heartbeat_thrift_server->stop();
     heartbeat_thrift_server->join();
@@ -598,9 +608,9 @@ int main(int argc, char** argv) {
     heartbeat_thrift_server = nullptr;
 
     doris::ExecEnv::destroy(exec_env);
-
     delete engine;
     engine = nullptr;
+
     return 0;
 }
 

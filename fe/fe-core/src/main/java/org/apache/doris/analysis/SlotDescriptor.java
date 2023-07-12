@@ -67,8 +67,9 @@ public class SlotDescriptor {
     private ColumnStats stats;  // only set if 'column' isn't set
     private boolean isAgg;
     private boolean isMultiRef;
-    // used for load to get more information of varchar and decimal
-    private Type originType;
+    // If set to false, then such slots will be ignored during
+    // materialize them.Used to optimize to read less data and less memory usage
+    private boolean needMaterialize = true;
 
     public SlotDescriptor(SlotId id, TupleDescriptor parent) {
         this.id = id;
@@ -106,6 +107,14 @@ public class SlotDescriptor {
 
     public boolean getIsAgg() {
         return isAgg;
+    }
+
+    public void setNeedMaterialize(boolean needMaterialize) {
+        this.needMaterialize = needMaterialize;
+    }
+
+    public boolean isInvalid() {
+        return !this.needMaterialize;
     }
 
     public void setIsAgg(boolean agg) {
@@ -151,7 +160,6 @@ public class SlotDescriptor {
     public void setColumn(Column column) {
         this.column = column;
         this.type = column.getType();
-        this.originType = column.getOriginType();
     }
 
     public void setSrcColumn(Column column) {
@@ -243,10 +251,6 @@ public class SlotDescriptor {
         this.label = label;
     }
 
-    public void setSourceExprs(List<Expr> exprs) {
-        sourceExprs = exprs;
-    }
-
     public void setSourceExpr(Expr expr) {
         sourceExprs = Collections.singletonList(expr);
     }
@@ -305,13 +309,11 @@ public class SlotDescriptor {
         return true;
     }
 
-    // TODO
     public TSlotDescriptor toThrift() {
-
         TSlotDescriptor tSlotDescriptor = new TSlotDescriptor(id.asInt(), parent.getId().asInt(),
-                (originType != null ? originType.toThrift() : type.toThrift()), -1, byteOffset, nullIndicatorByte,
+                type.toThrift(), -1, byteOffset, nullIndicatorByte,
                 nullIndicatorBit, ((column != null) ? column.getName() : ""), slotIdx, isMaterialized);
-
+        tSlotDescriptor.setNeedMaterialize(needMaterialize);
         if (column != null) {
             LOG.debug("column name:{}, column unique id:{}", column.getName(), column.getUniqueId());
             tSlotDescriptor.setColUniqueId(column.getUniqueId());
@@ -336,13 +338,15 @@ public class SlotDescriptor {
     }
 
     public String getExplainString(String prefix) {
-        StringBuilder builder = new StringBuilder();
-        String colStr = (column == null ? "null" : column.getName());
-        String typeStr = (type == null ? "null" : type.toString());
-        builder.append(prefix).append("SlotDescriptor{")
-                .append("id=").append(id).append(", col=").append(colStr).append(", type=").append(typeStr)
-                .append(", nullable=").append(isNullable).append("}");
-        return builder.toString();
+        return new StringBuilder()
+                .append(prefix).append("SlotDescriptor{")
+                .append("id=").append(id)
+                .append(", col=").append(column == null ? "null" : column.getName())
+                .append(", colUniqueId=").append(column == null ? "null" : column.getUniqueId())
+                .append(", type=").append(type == null ? "null" : type.toSql())
+                .append(", nullable=").append(isNullable)
+                .append("}")
+                .toString();
     }
 
     public boolean isScanSlot() {

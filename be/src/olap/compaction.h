@@ -17,22 +17,27 @@
 
 #pragma once
 
+#include <butil/macros.h>
+#include <stdint.h>
+
 #include <memory>
+#include <string>
 #include <vector>
 
+#include "common/status.h"
+#include "io/io_common.h"
 #include "olap/merger.h"
 #include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "olap/storage_engine.h"
+#include "olap/rowid_conversion.h"
+#include "olap/rowset/rowset.h"
+#include "olap/rowset/rowset_reader.h"
 #include "olap/tablet.h"
-#include "olap/tablet_meta.h"
-#include "olap/utils.h"
-#include "rowset/rowset_id_generator.h"
-#include "util/semaphore.hpp"
+#include "olap/tablet_schema.h"
 
 namespace doris {
 
-class DataDir;
+class MemTrackerLimiter;
+class RowsetWriter;
 
 // This class is a base class for compaction.
 // Any compaction should go through four procedures.
@@ -42,10 +47,8 @@ class DataDir;
 //  4. gc output rowset if failed
 class Compaction {
 public:
-    Compaction(TabletSharedPtr tablet, const std::string& label);
+    Compaction(const TabletSharedPtr& tablet, const std::string& label);
     virtual ~Compaction();
-
-    Status quick_rowsets_compact();
 
     virtual Status prepare_compact() = 0;
     Status execute_compact();
@@ -64,9 +67,10 @@ protected:
     Status do_compaction_impl(int64_t permits);
 
     // update and persistent tablet meta
-    virtual Status update_tablet_meta(const Merger::Statistics* stats = nullptr);
+    virtual Status modify_rowsets(const Merger::Statistics* stats = nullptr);
     virtual void garbage_collection();
 
+    Status construct_output_rowset_writer(RowsetWriterContext& ctx, bool is_vertical = false);
     Status construct_input_rowset_readers();
 
     Status check_version_continuity(const std::vector<RowsetSharedPtr>& rowsets);
@@ -105,7 +109,6 @@ protected:
 
     Version _output_version;
 
-    int64_t _oldest_write_timestamp;
     int64_t _newest_write_timestamp;
     RowIdConversion _rowid_conversion;
     TabletSchemaSPtr _cur_tablet_schema;

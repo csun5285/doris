@@ -48,7 +48,8 @@ import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.httpv2.HttpServer;
 import org.apache.doris.httpv2.IllegalArgException;
 import org.apache.doris.load.Load;
-import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.AccessControllerManager;
+import org.apache.doris.mysql.privilege.Auth;
 import org.apache.doris.persist.EditLog;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.system.Backend;
@@ -158,7 +159,8 @@ public abstract class DorisHttpTestCase {
 
         // index
         MaterializedIndex baseIndex = new MaterializedIndex(testIndexId, MaterializedIndex.IndexState.NORMAL);
-        TabletMeta tabletMeta = new TabletMeta(testDbId, testTableId, testPartitionId, testIndexId, testSchemaHash, TStorageMedium.HDD);
+        TabletMeta tabletMeta = new TabletMeta(testDbId, testTableId, testPartitionId, testIndexId, testSchemaHash,
+                TStorageMedium.HDD);
         baseIndex.addTablet(tablet, tabletMeta);
 
         tablet.addReplica(replica1);
@@ -212,7 +214,8 @@ public abstract class DorisHttpTestCase {
     private static Env newDelegateCatalog() {
         try {
             Env env = Deencapsulation.newInstance(Env.class);
-            PaloAuth auth = new PaloAuth();
+            Auth auth = new Auth();
+            AccessControllerManager accessManager = new AccessControllerManager(auth);
             //EasyMock.expect(catalog.getAuth()).andReturn(paloAuth).anyTimes();
             Database db = new Database(testDbId, "default_cluster:testDb");
             OlapTable table = newTable(TABLE_NAME);
@@ -244,10 +247,6 @@ public abstract class DorisHttpTestCase {
                     internalCatalog.getDbNames();
                     minTimes = 0;
                     result = Lists.newArrayList("default_cluster:testDb");
-
-                    internalCatalog.getClusterDbNames("default_cluster");
-                    minTimes = 0;
-                    result = Lists.newArrayList("default_cluster:testDb");
                 }
             };
 
@@ -270,9 +269,9 @@ public abstract class DorisHttpTestCase {
 
             new Expectations(env) {
                 {
-                    env.getAuth();
+                    env.getAccessManager();
                     minTimes = 0;
-                    result = auth;
+                    result = accessManager;
 
                     env.isMaster();
                     minTimes = 0;
@@ -298,9 +297,6 @@ public abstract class DorisHttpTestCase {
                     minTimes = 0;
 
                     env.changeDb((ConnectContext) any, anyString);
-                    minTimes = 0;
-
-                    env.initDefaultCluster();
                     minTimes = 0;
 
                     env.getCatalogMgr();

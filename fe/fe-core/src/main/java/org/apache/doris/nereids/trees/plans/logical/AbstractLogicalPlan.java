@@ -21,15 +21,20 @@ import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.properties.UnboundLogicalProperties;
 import org.apache.doris.nereids.trees.plans.AbstractPlan;
+import org.apache.doris.nereids.trees.plans.Explainable;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
+import org.apache.doris.qe.ConnectContext;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Abstract class for all concrete logical plan.
  */
-public abstract class AbstractLogicalPlan extends AbstractPlan implements LogicalPlan {
+public abstract class AbstractLogicalPlan extends AbstractPlan implements LogicalPlan, Explainable {
+
+    private Supplier<Boolean> hasUnboundExpressions = () -> super.hasUnboundExpression();
 
     public AbstractLogicalPlan(PlanType type, Plan... children) {
         super(type, children);
@@ -45,13 +50,24 @@ public abstract class AbstractLogicalPlan extends AbstractPlan implements Logica
     }
 
     @Override
+    public boolean hasUnboundExpression() {
+        return hasUnboundExpressions.get();
+    }
+
+    @Override
     public LogicalProperties computeLogicalProperties() {
-        boolean hasUnboundChild = children.stream().map(Plan::getLogicalProperties)
+        boolean hasUnboundChild = children.stream()
+                .map(Plan::getLogicalProperties)
                 .anyMatch(UnboundLogicalProperties.class::isInstance);
         if (hasUnboundChild || hasUnboundExpression()) {
             return UnboundLogicalProperties.INSTANCE;
         } else {
             return new LogicalProperties(this::computeOutput);
         }
+    }
+
+    @Override
+    public Plan getExplainPlan(ConnectContext ctx) {
+        return this;
     }
 }

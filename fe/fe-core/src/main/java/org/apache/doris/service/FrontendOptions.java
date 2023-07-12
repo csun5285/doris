@@ -28,6 +28,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -192,6 +193,10 @@ public class FrontendOptions {
             }
         }
         return false;
+    }
+
+    public static boolean isBindIPV6() {
+        return localAddr instanceof Inet6Address;
     }
 
 }

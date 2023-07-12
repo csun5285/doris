@@ -48,6 +48,7 @@ suitePath = "${DORIS_HOME}/regression-test/suites"
 dataPath = "${DORIS_HOME}/regression-test/data"
 pluginPath = "${DORIS_HOME}/regression-test/plugins"
 realDataPath = "${DORIS_HOME}/regression-test/realdata"
+sslCertificatePath = "${DORIS_HOME}/regression-test/ssl_default_certificate"
 
 // will test <group>/<suite>.groovy
 // empty group will test all group
@@ -89,7 +90,7 @@ sqlserver_2022_port=1433
 clickhouse_22_port=8123
 
 // hive catalog test config
-// To enable jdbc test, you need first start hive container.
+// To enable hive test, you need first start hive container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`
 enableHiveTest=false
 hms_port=9183
@@ -136,7 +137,6 @@ extEsHost = "***********"
 extEsPort = 9200
 extEsUser = "*******"
 extEsPassword = "***********"
-cacheDataPath = "/mnt/disk2/yunyou/cachedata"
 
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
@@ -159,3 +159,10 @@ stageIamSk = ""
 
 // used for cos, which sdk does not return arn, so construct arn by user id.
 stageIamUserId = ""
+// If the failure suite num exceeds this config
+// all following suite will be skipped to fast quit the run.
+// <=0 means no limit.
+max_failure_num=0
+
+// used for exporting test
+s3ExportBucketName = ""

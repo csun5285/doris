@@ -21,9 +21,12 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.AuthenticationException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.profile.MultiProfileTreeBuilder;
 import org.apache.doris.common.profile.ProfileTreeBuilder;
 import org.apache.doris.common.profile.ProfileTreeNode;
+import org.apache.doris.common.profile.SummaryProfile;
+import org.apache.doris.nereids.stats.StatsErrorEstimator;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
@@ -87,7 +90,7 @@ public class ProfileManager {
             Arrays.asList(JOB_ID, QUERY_ID, USER, DEFAULT_DB, SQL_STATEMENT, QUERY_TYPE,
                     START_TIME, END_TIME, TOTAL_TIME, QUERY_STATE, TRACE_ID));
 
-    private class ProfileElement {
+    public static class ProfileElement {
         public ProfileElement(RuntimeProfile profile) {
             this.profile = profile;
         }
@@ -99,6 +102,8 @@ public class ProfileManager {
         public MultiProfileTreeBuilder builder = null;
         public String errMsg = "";
 
+        public StatsErrorEstimator statsErrorEstimator;
+
         // lazy load profileContent because sometimes profileContent is very large
         public String getProfileContent() {
             if (profileContent != null) {
@@ -107,6 +112,14 @@ public class ProfileManager {
             // no need to lock because the possibility of concurrent read is very low
             profileContent = profile.toString();
             return profileContent;
+        }
+
+        public double getError() {
+            return statsErrorEstimator.getQError();
+        }
+
+        public void setStatsErrorEstimator(StatsErrorEstimator statsErrorEstimator) {
+            this.statsErrorEstimator = statsErrorEstimator;
         }
     }
 
@@ -141,8 +154,15 @@ public class ProfileManager {
     public ProfileElement createElement(RuntimeProfile profile) {
         ProfileElement element = new ProfileElement(profile);
         RuntimeProfile summaryProfile = profile.getChildList().get(0).first;
-        for (String header : PROFILE_HEADERS) {
+        for (String header : SummaryProfile.SUMMARY_KEYS) {
             element.infoStrings.put(header, summaryProfile.getInfoString(header));
+        }
+        List<Pair<RuntimeProfile, Boolean>> childList = summaryProfile.getChildList();
+        if (!childList.isEmpty()) {
+            RuntimeProfile executionProfile = childList.get(0).first;
+            for (String header : SummaryProfile.EXECUTION_SUMMARY_KEYS) {
+                element.infoStrings.put(header, executionProfile.getInfoString(header));
+            }
         }
 
         MultiProfileTreeBuilder builder = new MultiProfileTreeBuilder(profile);
@@ -164,7 +184,7 @@ public class ProfileManager {
 
         ProfileElement element = createElement(profile);
         // 'insert into' does have job_id, put all profiles key with query_id
-        String key = element.infoStrings.get(ProfileManager.QUERY_ID);
+        String key = element.infoStrings.get(SummaryProfile.PROFILE_ID);
         // check when push in, which can ensure every element in the list has QUERY_ID column,
         // so there is no need to check when remove element from list.
         if (Strings.isNullOrEmpty(key)) {
@@ -172,10 +192,10 @@ public class ProfileManager {
                     + "may be forget to insert 'QUERY_ID' or 'JOB_ID' column into infoStrings");
         }
 
+        writeLock.lock();
         // a profile may be updated multiple times in queryIdToProfileMap,
         // and only needs to be inserted into the queryIdDeque for the first time.
         queryIdToProfileMap.put(key, element);
-        writeLock.lock();
         try {
             if (!queryIdDeque.contains(key)) {
                 if (queryIdDeque.size() >= Config.max_query_profile_num) {
@@ -199,18 +219,18 @@ public class ProfileManager {
         try {
             Iterator reverse = queryIdDeque.descendingIterator();
             while (reverse.hasNext()) {
-                String  queryId = (String) reverse.next();
+                String queryId = (String) reverse.next();
                 ProfileElement profileElement = queryIdToProfileMap.get(queryId);
                 if (profileElement == null) {
                     continue;
                 }
                 Map<String, String> infoStrings = profileElement.infoStrings;
-                if (type != null && !infoStrings.get(QUERY_TYPE).equalsIgnoreCase(type.name())) {
+                if (type != null && !infoStrings.get(SummaryProfile.TASK_TYPE).equalsIgnoreCase(type.name())) {
                     continue;
                 }
 
                 List<String> row = Lists.newArrayList();
-                for (String str : PROFILE_HEADERS) {
+                for (String str : SummaryProfile.SUMMARY_KEYS) {
                     row.add(infoStrings.get(str));
                 }
                 result.add(row);
@@ -234,6 +254,10 @@ public class ProfileManager {
         }
     }
 
+    public ProfileElement findProfileElementObject(String queryId) {
+        return queryIdToProfileMap.get(queryId);
+    }
+
     /**
      * Check if the query with specific query id is queried by specific user.
      *
@@ -248,7 +272,7 @@ public class ProfileManager {
             if (element == null) {
                 throw new AuthenticationException("query with id " + queryId + " not found");
             }
-            if (!element.infoStrings.get(USER).equals(user)) {
+            if (!element.infoStrings.get(SummaryProfile.USER).equals(user)) {
                 throw new AuthenticationException("Access deny to view query with id: " + queryId);
             }
         } finally {
@@ -340,13 +364,30 @@ public class ProfileManager {
         readLock.lock();
         try {
             for (Map.Entry<String, ProfileElement> entry : queryIdToProfileMap.entrySet()) {
-                if (entry.getValue().infoStrings.getOrDefault(TRACE_ID, "").equals(traceId)) {
+                if (entry.getValue().infoStrings.getOrDefault(SummaryProfile.TRACE_ID, "").equals(traceId)) {
                     return entry.getKey();
                 }
             }
             return "";
         } finally {
             readLock.unlock();
+        }
+    }
+
+    public void setStatsErrorEstimator(String queryId, StatsErrorEstimator statsErrorEstimator) {
+        ProfileElement profileElement = findProfileElementObject(queryId);
+        if (profileElement != null) {
+            profileElement.setStatsErrorEstimator(statsErrorEstimator);
+        }
+    }
+
+    public void cleanProfile() {
+        writeLock.lock();
+        try {
+            queryIdToProfileMap.clear();
+            queryIdDeque.clear();
+        } finally {
+            writeLock.unlock();
         }
     }
 }

@@ -17,13 +17,25 @@
 
 #pragma once
 
+#include <butil/macros.h>
 #include <jni.h>
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <string>
 
 #include "common/status.h"
-#include "gutil/macros.h"
+#include "jni_md.h"
 #include "util/thrift_util.h"
 
+#ifdef USE_HADOOP_HDFS
+// defined in hadoop_hdfs/hdfs.h
+extern "C" JNIEnv* getJNIEnv(void);
+#endif
+
 namespace doris {
+class JniUtil;
 
 #define RETURN_ERROR_IF_EXC(env)                                     \
     do {                                                             \
@@ -57,9 +69,9 @@ public:
     static jclass jni_util_class() { return jni_util_cl_; }
     static jmethodID throwable_to_stack_trace_id() { return throwable_to_stack_trace_id_; }
 
-    static const int32_t INITIAL_RESERVED_BUFFER_SIZE = 1024;
+    static const int64_t INITIAL_RESERVED_BUFFER_SIZE = 1024;
     // TODO: we need a heuristic strategy to increase buffer size for variable-size output.
-    static inline int32_t IncreaseReservedBufferSize(int n) {
+    static inline int64_t IncreaseReservedBufferSize(int n) {
         return INITIAL_RESERVED_BUFFER_SIZE << n;
     }
 

@@ -24,7 +24,6 @@ suite("test_dynamic_table", "dynamic_table"){
             table "${table_name}"
             
             // set http request header params
-            set 'enable_vectorized_engine', vec_flag
             set 'read_json_by_line', read_flag
             set 'format', format_flag
             set 'read_json_by_line', read_flag
@@ -62,7 +61,7 @@ suite("test_dynamic_table", "dynamic_table"){
             )
             DUPLICATE KEY(`name`)
             DISTRIBUTED BY HASH(`name`) BUCKETS 10
-            properties("replication_num" = "3");
+            properties("replication_num" = "1");
         """
 
     // case0.0: dirty data, which not influence table shchema
@@ -104,7 +103,7 @@ suite("test_dynamic_table", "dynamic_table"){
             )
             DUPLICATE KEY(`test_id`)
             DISTRIBUTED BY HASH(`test_id`) BUCKETS 10
-            properties("replication_num" = "3");
+            properties("replication_num" = "1");
         """
     // DDL/DML return 1 row and 3 column, the only value is update row count
     assertTrue(result1.size() == 1)
@@ -136,7 +135,7 @@ suite("test_dynamic_table", "dynamic_table"){
             )
             DUPLICATE KEY(`name`)
             DISTRIBUTED BY HASH(`name`) BUCKETS 10
-            properties("replication_num" = "3");
+            properties("replication_num" = "1");
         """
 
         //stream load src_json
@@ -188,10 +187,6 @@ suite("test_dynamic_table", "dynamic_table"){
         //check data in table and check table schema
         def select_res_now = "true"
         for(i = 0; i < 5; i++){
-            if( i == 3 ){
-                logger.info("open vectorized after ${i}".toString())
-                sql "SET enable_vectorized_engine=true;"
-            }
             select_res_now = sql "select * from ${table_name} order by name"
             logger.info("after alter schema, it's ${i} time select,  select result: ${select_res_now}".toString())
             assertEquals(select_res.toString(), select_res_now.toString())

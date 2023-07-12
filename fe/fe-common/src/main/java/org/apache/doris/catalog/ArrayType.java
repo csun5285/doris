@@ -24,8 +24,10 @@ import org.apache.doris.thrift.TTypeNodeType;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.Lists;
 import com.google.gson.annotations.SerializedName;
 
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -78,6 +80,10 @@ public class ArrayType extends Type {
             return true;
         }
 
+        if (t.isAnyType()) {
+            return t.matchesType(this);
+        }
+
         if (!t.isArrayType()) {
             return false;
         }
@@ -89,6 +95,31 @@ public class ArrayType extends Type {
 
         return itemType.matchesType(((ArrayType) t).itemType)
                 && (((ArrayType) t).containsNull || !containsNull);
+    }
+
+    @Override
+    public boolean hasTemplateType() {
+        return itemType.hasTemplateType();
+    }
+
+    @Override
+    public Type specializeTemplateType(Type specificType, Map<String, Type> specializedTypeMap,
+                                       boolean useSpecializedType) throws TypeException {
+        ArrayType specificArrayType = null;
+        if (specificType instanceof ArrayType) {
+            specificArrayType = (ArrayType) specificType;
+        } else if (!useSpecializedType) {
+            throw new TypeException(specificType + " is not ArrayType");
+        }
+
+        Type newItemType = itemType;
+        if (itemType.hasTemplateType()) {
+            newItemType = itemType.specializeTemplateType(
+                specificArrayType != null ? specificArrayType.itemType : specificType,
+                specializedTypeMap, useSpecializedType);
+        }
+
+        return new ArrayType(newItemType);
     }
 
     public static ArrayType create() {
@@ -139,6 +170,7 @@ public class ArrayType extends Type {
         Preconditions.checkNotNull(itemType);
         node.setType(TTypeNodeType.ARRAY);
         node.setContainsNull(containsNull);
+        node.setContainsNulls(Lists.newArrayList(containsNull));
         itemType.toThrift(container);
     }
 
@@ -157,6 +189,16 @@ public class ArrayType extends Type {
     @Override
     public boolean isSupported() {
         return !itemType.isNull();
+    }
+
+    @Override
+    public boolean supportSubType(Type subType) {
+        for (Type supportedType : getArraySubTypes()) {
+            if (subType.getPrimitiveType() == supportedType.getPrimitiveType()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

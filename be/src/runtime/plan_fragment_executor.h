@@ -20,36 +20,37 @@
 
 #pragma once
 
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/types.pb.h>
+
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
-#include "common/object_pool.h"
 #include "common/status.h"
-#include "runtime/datetime_value.h"
-#include "runtime/query_fragments_ctx.h"
-#include "runtime/query_statistics.h"
 #include "runtime/runtime_state.h"
-#include "util/hash_util.hpp"
-#include "util/time.h"
-#include "vec/core/block.h"
+#include "util/runtime_profile.h"
 
 namespace doris {
 
-class QueryFragmentsCtx;
+class QueryContext;
 class ExecNode;
 class RowDescriptor;
-class RowBatch;
 class DataSink;
-class DataStreamMgr;
-class RuntimeProfile;
-class RuntimeState;
-class TNetworkAddress;
-class TPlanExecRequest;
-class TPlanFragment;
-class TPlanFragmentExecParams;
-class TPlanExecParams;
+class DescriptorTbl;
+class ExecEnv;
+class ObjectPool;
+class QueryStatistics;
+
+namespace vectorized {
+class Block;
+} // namespace vectorized
 
 // PlanFragmentExecutor handles all aspects of the execution of a single plan fragment,
 // including setup and tear-down, both in the success and error case.
@@ -78,8 +79,8 @@ public:
     // Note: this does not take a const RuntimeProfile&, because it might need to call
     // functions like PrettyPrint() or to_thrift(), neither of which is const
     // because they take locks.
-    typedef std::function<void(const Status& status, RuntimeProfile* profile, bool done)>
-            report_status_callback;
+    using report_status_callback =
+            std::function<void(const Status&, RuntimeProfile*, RuntimeProfile*, bool)>;
 
     // report_status_cb, if !empty(), is used to report the accumulated profile
     // information periodically during execution (open() or get_next()).
@@ -98,9 +99,8 @@ public:
     // If request.query_options.mem_limit > 0, it is used as an approximate limit on the
     // number of bytes this query can consume at runtime.
     // The query will be aborted (MEM_LIMIT_EXCEEDED) if it goes over that limit.
-    // If fragments_ctx is not null, some components will be got from fragments_ctx.
-    Status prepare(const TExecPlanFragmentParams& request,
-                   QueryFragmentsCtx* fragments_ctx = nullptr);
+    // If query_ctx is not null, some components will be got from query_ctx.
+    Status prepare(const TExecPlanFragmentParams& request, QueryContext* query_ctx = nullptr);
 
     // Start execution. Call this prior to get_next().
     // If this fragment has a sink, open() will send all rows produced
@@ -112,13 +112,6 @@ public:
     // If this fragment has a sink, report_status_cb will have been called for the final
     // time when open() returns, and the status-reporting thread will have been stopped.
     Status open();
-
-    // Return results through 'batch'. Sets '*batch' to nullptr if no more results.
-    // '*batch' is owned by PlanFragmentExecutor and must not be deleted.
-    // When *batch == nullptr, get_next() should not be called anymore. Also, report_status_cb
-    // will have been called for the final time and the status-reporting thread
-    // will have been stopped.
-    Status get_next(RowBatch** batch);
 
     // Closes the underlying plan fragment and frees up all resources allocated
     // in open()/get_next().
@@ -134,6 +127,7 @@ public:
 
     // Profile information for plan and output sink.
     RuntimeProfile* profile();
+    RuntimeProfile* load_channel_profile();
 
     const Status& status() const { return _status; }
 
@@ -193,11 +187,12 @@ private:
     // returned via get_next's row batch
     // Created in prepare (if required), owned by this object.
     std::unique_ptr<DataSink> _sink;
-    std::unique_ptr<RowBatch> _row_batch;
-    std::unique_ptr<doris::vectorized::Block> _block;
 
     // Number of rows returned by this fragment
     RuntimeProfile::Counter* _rows_produced_counter;
+
+    // Number of blocks returned by this fragment
+    RuntimeProfile::Counter* _blocks_produced_counter;
 
     RuntimeProfile::Counter* _fragment_cpu_timer;
 
@@ -211,10 +206,12 @@ private:
     PPlanFragmentCancelReason _cancel_reason;
     std::string _cancel_msg;
 
+    OpentelemetrySpan _span;
+
     ObjectPool* obj_pool() { return _runtime_state->obj_pool(); }
 
     // typedef for TPlanFragmentExecParams.per_node_scan_ranges
-    typedef std::map<TPlanNodeId, std::vector<TScanRangeParams>> PerNodeScanRanges;
+    using PerNodeScanRanges = std::map<TPlanNodeId, std::vector<TScanRangeParams>>;
 
     // Main loop of profile reporting thread.
     // Exits when notified on _done_cv.
@@ -226,23 +223,16 @@ private:
     // done == true or we have an error status.
     void send_report(bool done);
 
-    // If _status.ok(), sets _status to status.
-    // If we're transitioning to an error status, stops report thread and
-    // sends a final report.
-    void update_status(const Status& status);
-
     // Executes open() logic and returns resulting status. Does not set _status.
     // If this plan fragment has no sink, open_internal() does nothing.
     // If this plan fragment has a sink and open_internal() returns without an
     // error condition, all rows will have been sent to the sink, the sink will
     // have been closed, a final report will have been sent and the report thread will
     // have been stopped. _sink will be set to nullptr after successful execution.
-    Status open_internal();
     Status open_vectorized_internal();
 
     // Executes get_next() logic and returns resulting status.
-    Status get_next_internal(RowBatch** batch);
-    Status get_vectorized_internal(::doris::vectorized::Block** block);
+    Status get_vectorized_internal(::doris::vectorized::Block* block, bool* eos);
 
     // Stops report thread, if one is running. Blocks until report thread terminates.
     // Idempotent.

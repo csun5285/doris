@@ -31,20 +31,37 @@ import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.analysis.StorageBackend;
+import org.apache.doris.analysis.TableName;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.Table;
+import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.catalog.external.ExternalTable;
+import org.apache.doris.cluster.ClusterNamespace;
+import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.VectorizedUtil;
+import org.apache.doris.datasource.InternalCatalog;
+import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rewrite.mvrewrite.MVSelectFailedException;
+import org.apache.doris.statistics.query.StatsDelta;
+import org.apache.doris.thrift.TColumn;
+import org.apache.doris.thrift.TFetchOption;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TRuntimeFilterMode;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -52,6 +69,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * The planner is responsible for turning parse trees into plan fragments that can be shipped off to backends for
@@ -94,8 +113,6 @@ public class OriginalPlanner extends Planner {
         return analyzer.getAssignedRuntimeFilter();
     }
 
-    /**
-     */
     private void setResultExprScale(Analyzer analyzer, ArrayList<Expr> outputExprs) {
         for (TupleDescriptor tupleDesc : analyzer.getDescTbl().getTupleDescs()) {
             for (SlotDescriptor slotDesc : tupleDesc.getSlots()) {
@@ -145,16 +162,9 @@ public class OriginalPlanner extends Planner {
         } else {
             queryStmt = (QueryStmt) statement;
         }
-
         plannerContext = new PlannerContext(analyzer, queryStmt, queryOptions, statement);
         singleNodePlanner = new SingleNodePlanner(plannerContext);
         PlanNode singleNodePlan = singleNodePlanner.createSingleNodePlan();
-
-        // TODO change to vec should happen after distributed planner
-        if (VectorizedUtil.isVectorized()) {
-            singleNodePlan.convertToVectoriezd();
-        }
-
         ProjectPlanner projectPlanner = new ProjectPlanner(analyzer);
         projectPlanner.projectSingleNodePlan(queryStmt.getResultExprs(), singleNodePlan);
 
@@ -162,6 +172,8 @@ public class OriginalPlanner extends Planner {
             InsertStmt insertStmt = (InsertStmt) statement;
             insertStmt.prepareExpressions();
         }
+
+        checkColumnPrivileges(singleNodePlan);
 
         // TODO chenhao16 , no used materialization work
         // compute referenced slots before calling computeMemLayout()
@@ -193,13 +205,16 @@ public class OriginalPlanner extends Planner {
          */
         analyzer.getDescTbl().computeMemLayout();
         singleNodePlan.finalize(analyzer);
-
+        if (Config.enable_query_hit_stats && plannerContext.getStatement() != null
+                && plannerContext.getStatement().getExplainOptions() == null) {
+            collectQueryStat(singleNodePlan);
+        }
         // check and set flag for topn detail query opt
         if (VectorizedUtil.isVectorized()) {
             checkAndSetTopnOpt(singleNodePlan);
         }
 
-        if (queryOptions.num_nodes == 1) {
+        if (queryOptions.num_nodes == 1 || queryStmt.isPointQuery()) {
             // single-node execution; we're almost done
             singleNodePlan = addUnassignedConjuncts(analyzer, singleNodePlan);
             fragments.add(new PlanFragment(plannerContext.getNextFragmentId(), singleNodePlan,
@@ -234,13 +249,15 @@ public class OriginalPlanner extends Planner {
             rootFragment = distributedPlanner.createInsertFragment(rootFragment, insertStmt, fragments);
             rootFragment.setSink(insertStmt.getDataSink());
             insertStmt.complete();
-            ArrayList<Expr> exprs = ((InsertStmt) statement).getResultExprs();
+            List<Expr> exprs = statement.getResultExprs();
             List<Expr> resExprs = Expr.substituteList(
                     exprs, rootFragment.getPlanRoot().getOutputSmap(), analyzer, true);
             rootFragment.setOutputExprs(resExprs);
         } else {
             List<Expr> resExprs = Expr.substituteList(queryStmt.getResultExprs(),
                     rootFragment.getPlanRoot().getOutputSmap(), analyzer, false);
+            LOG.debug("result Exprs {}", queryStmt.getResultExprs());
+            LOG.debug("substitute result Exprs {}", resExprs);
             rootFragment.setOutputExprs(resExprs);
         }
         LOG.debug("finalize plan fragments");
@@ -265,6 +282,99 @@ public class OriginalPlanner extends Planner {
                 isBlockQuery = false;
                 LOG.debug("this isn't block query");
             }
+            // Check SelectStatement if optimization condition satisfied
+            if (selectStmt.isPointQueryShortCircuit()) {
+                // Optimize for point query like: SELECT * FROM t1 WHERE pk1 = 1 and pk2 = 2
+                // such query will use direct RPC to do point query
+                LOG.debug("it's a point query");
+                Map<SlotRef, Expr> eqConjuncts = ((SelectStmt) selectStmt).getPointQueryEQPredicates();
+                OlapScanNode olapScanNode = (OlapScanNode) singleNodePlan;
+                olapScanNode.setDescTable(analyzer.getDescTbl());
+                olapScanNode.setPointQueryEqualPredicates(eqConjuncts);
+                if (analyzer.getPrepareStmt() != null) {
+                    // Cache them for later request better performance
+                    analyzer.getPrepareStmt().cacheSerializedDescriptorTable(olapScanNode.getDescTable());
+                    analyzer.getPrepareStmt().cacheSerializedOutputExprs(rootFragment.getOutputExprs());
+                }
+            } else if (selectStmt.isTwoPhaseReadOptEnabled()) {
+                // Optimize query like `SELECT ... FROM <tbl> WHERE ... ORDER BY ... LIMIT ...`
+                if (singleNodePlan instanceof SortNode
+                        && singleNodePlan.getChildren().size() == 1
+                        && ((SortNode) singleNodePlan).getChild(0) instanceof OlapScanNode) {
+                    // Double check this plan to ensure it's a general topn query
+                    injectRowIdColumnSlot();
+                    ((SortNode) singleNodePlan).setUseTwoPhaseReadOpt(true);
+                } else if (singleNodePlan instanceof OlapScanNode &&  singleNodePlan.getChildren().size() == 0) {
+                    // Optimize query like `SELECT ... FROM <tbl> WHERE ... LIMIT ...`.
+                    // This typically used when row store enabled, to reduce scan cost
+                    injectRowIdColumnSlot();
+                } else {
+                    // This is not a general topn query, rollback needMaterialize flag
+                    for (SlotDescriptor slot : analyzer.getDescTbl().getSlotDescs().values()) {
+                        slot.setNeedMaterialize(true);
+                    }
+                }
+            }
+        }
+    }
+
+    private void checkColumnPrivileges(PlanNode singleNodePlan) throws UserException {
+        if (ConnectContext.get() == null) {
+            return;
+        }
+        // 1. collect all columns from all scan nodes
+        List<ScanNode> scanNodes = Lists.newArrayList();
+        singleNodePlan.collect((PlanNode planNode) -> planNode instanceof ScanNode, scanNodes);
+        // catalog : <db.table : column>
+        Map<String, HashMultimap<TableName, String>> ctlToTableColumnMap = Maps.newHashMap();
+        for (ScanNode scanNode : scanNodes) {
+            if (!scanNode.needToCheckColumnPriv()) {
+                continue;
+            }
+            TupleDescriptor tupleDesc = scanNode.getTupleDesc();
+            TableIf table = tupleDesc.getTable();
+            if (table == null) {
+                continue;
+            }
+            TableName tableName = getFullQualifiedTableNameFromTable(table);
+            for (SlotDescriptor slotDesc : tupleDesc.getSlots()) {
+                if (!slotDesc.isMaterialized()) {
+                    continue;
+                }
+                Column column = slotDesc.getColumn();
+                if (column == null) {
+                    continue;
+                }
+                HashMultimap<TableName, String> tableColumnMap = ctlToTableColumnMap.get(tableName.getCtl());
+                if (tableColumnMap == null) {
+                    tableColumnMap = HashMultimap.create();
+                    ctlToTableColumnMap.put(tableName.getCtl(), tableColumnMap);
+                }
+                tableColumnMap.put(tableName, column.getName());
+                LOG.debug("collect column {} in {}", column.getName(), tableName);
+            }
+        }
+        // 2. check privs
+        // TODO: only support SELECT_PRIV now
+        PrivPredicate wanted = PrivPredicate.SELECT;
+        for (Map.Entry<String, HashMultimap<TableName, String>> entry : ctlToTableColumnMap.entrySet()) {
+            Env.getCurrentEnv().getAccessManager().checkColumnsPriv(ConnectContext.get().getCurrentUserIdentity(),
+                    entry.getKey(), entry.getValue(), wanted);
+        }
+    }
+
+    private TableName getFullQualifiedTableNameFromTable(TableIf table) throws AnalysisException {
+        if (table instanceof Table) {
+            String dbName = ClusterNamespace.getNameFromFullName(((Table) table).getQualifiedDbName());
+            if (Strings.isNullOrEmpty(dbName)) {
+                throw new AnalysisException("failed to get db name from table " + table.getName());
+            }
+            return new TableName(InternalCatalog.INTERNAL_CATALOG_NAME, dbName, table.getName());
+        } else if (table instanceof ExternalTable) {
+            ExternalTable extTable = (ExternalTable) table;
+            return new TableName(extTable.getCatalog().getName(), extTable.getDbName(), extTable.getName());
+        } else {
+            throw new AnalysisException("table " + table.getName() + " is not internal or external table instance");
         }
     }
 
@@ -340,7 +450,6 @@ public class OriginalPlanner extends Planner {
         topPlanFragment.getPlanRoot().resetTupleIds(Lists.newArrayList(fileStatusDesc.getId()));
     }
 
-
     private SlotDescriptor injectRowIdColumnSlot(Analyzer analyzer, TupleDescriptor tupleDesc) {
         SlotDescriptor slotDesc = analyzer.getDescTbl().addSlotDescriptor(tupleDesc);
         LOG.debug("inject slot {}", slotDesc);
@@ -357,11 +466,69 @@ public class OriginalPlanner extends Planner {
         return slotDesc;
     }
 
+    // We use two phase read to optimize sql like: select * from tbl [where xxx = ???] [order by column1] [limit n]
+    // in the first phase, we add an extra column `RowId` to Block, and sort blocks in TopN nodes
+    // in the second phase, we have n rows, we do a fetch rpc to get all rowids date for the n rows
+    // and reconconstruct the final block
+    private void injectRowIdColumnSlot() {
+        boolean injected = false;
+        OlapTable olapTable = null;
+        OlapScanNode scanNode = null;
+        for (PlanFragment fragment : fragments) {
+            PlanNode node = fragment.getPlanRoot();
+            PlanNode parent = null;
+            // OlapScanNode is the last node.
+            // So, just get the last two node and check if they are SortNode and OlapScan.
+            while (node.getChildren().size() != 0) {
+                parent = node;
+                node = node.getChildren().get(0);
+            }
+
+            // case1
+            if ((node instanceof OlapScanNode) && (parent instanceof SortNode)) {
+                SortNode sortNode = (SortNode) parent;
+                scanNode = (OlapScanNode) node;
+                SlotDescriptor slot = injectRowIdColumnSlot(analyzer, scanNode.getTupleDesc());
+                injectRowIdColumnSlot(analyzer, sortNode.getSortInfo().getSortTupleDescriptor());
+                SlotRef extSlot = new SlotRef(slot);
+                sortNode.getResolvedTupleExprs().add(extSlot);
+                sortNode.getSortInfo().setUseTwoPhaseRead();
+                injected = true;
+                olapTable = scanNode.getOlapTable();
+                break;
+            }
+            // case2
+            if ((node instanceof OlapScanNode) && parent == null) {
+                scanNode = (OlapScanNode) node;
+                injectRowIdColumnSlot(analyzer, scanNode.getTupleDesc());
+                injected = true;
+                olapTable = scanNode.getOlapTable();
+                break;
+            }
+        }
+        for (PlanFragment fragment : fragments) {
+            if (injected && fragment.getSink() instanceof ResultSink) {
+                TFetchOption fetchOption = new TFetchOption();
+                fetchOption.setFetchRowStore(olapTable.storeRowColumn());
+                fetchOption.setUseTwoPhaseFetch(true);
+                fetchOption.setNodesInfo(Env.getCurrentSystemInfo().createAliveNodesInfo());
+                // TODO for row store used seperate more faster path for wide tables
+                if (!olapTable.storeRowColumn()) {
+                    // Set column desc for each column
+                    List<TColumn> columnsDesc = new ArrayList<TColumn>();
+                    scanNode.getColumnDesc(columnsDesc, null, null);
+                    fetchOption.setColumnDesc(columnsDesc);
+                }
+                ((ResultSink) fragment.getSink()).setFetchOption(fetchOption);
+                break;
+            }
+        }
+    }
+
     /**
      * Push sort down to olap scan.
      */
     private void pushSortToOlapScan(Analyzer analyzer) {
-        boolean addedRowIdColumn = false;
         for (PlanFragment fragment : fragments) {
             PlanNode node = fragment.getPlanRoot();
             PlanNode parent = null;
@@ -379,20 +546,6 @@ public class OriginalPlanner extends Planner {
             SortNode sortNode = (SortNode) parent;
             OlapScanNode scanNode = (OlapScanNode) node;
 
-            // We use two phase read to optimize sql like: select * from tbl [where xxx = ???] order by column1 limit n
-            // in the first phase, we add an extra column `RowId` to Block, and sort blocks in TopN nodes
-            // in the second phase, we have n rows, we do a fetch rpc to get all rowids date for the n rows
-            // and reconconstruct the final block
-            if (!addedRowIdColumn &&  sortNode.isUseTopNTwoPhaseOptimize()) {
-                // fragment.setParallelExecNum(1);
-                SlotDescriptor slot = injectRowIdColumnSlot(analyzer, scanNode.getTupleDesc());
-                injectRowIdColumnSlot(analyzer, sortNode.getSortInfo().getSortTupleDescriptor());
-                addedRowIdColumn = true;
-                SlotRef extSlot = new SlotRef(slot);
-                sortNode.getResolvedTupleExprs().add(extSlot);
-                sortNode.getSortInfo().setUseTwoPhaseRead();
-            }
-
             if (!scanNode.checkPushSort(sortNode)) {
                 continue;
             }
@@ -408,10 +561,20 @@ public class OriginalPlanner extends Planner {
     }
 
     /**
-     * push output exprs to olap scan.
+     * outputColumnUniqueIds contain columns in OrderByExprs and outputExprs,
+     * push output column unique id set to olap scan.
+     *
+     * when query to storage layer, there are need read raw data
+     * for columns which in outputColumnUniqueIds
+     *
+     * for example:
+     * select A from tb where B = 1 and C > 'hello' order by B;
+     *
+     * column unique id for `A` and `B` will put into outputColumnUniqueIds.
+     *
     */
     private void pushOutColumnUniqueIdsToOlapScan(PlanFragment rootFragment, Analyzer analyzer) {
-        HashSet<Integer> outputColumnUniqueIds =  new HashSet<>();
+        Set<Integer> outputColumnUniqueIds = new HashSet<>();
         ArrayList<Expr> outputExprs = rootFragment.getOutputExprs();
         for (Expr expr : outputExprs) {
             if (expr instanceof SlotRef) {
@@ -423,6 +586,7 @@ public class OriginalPlanner extends Planner {
 
         for (PlanFragment fragment : fragments) {
             PlanNode node = fragment.getPlanRoot();
+            PlanNode parent = null;
             while (node.getChildren().size() != 0) {
                 for (PlanNode childNode : node.getChildren()) {
                     List<SlotId> outputSlotIds = childNode.getOutputSlotIds();
@@ -434,9 +598,25 @@ public class OriginalPlanner extends Planner {
                     }
                 }
                 // OlapScanNode is the last node.
-                // So, just get the last node and check if it is OlapScan.
+                // So, just get the two node and check if they are SortNode and OlapScan.
+                parent = node;
                 node = node.getChildren().get(0);
             }
+
+            if (parent instanceof SortNode) {
+                SortNode sortNode = (SortNode) parent;
+                List<Expr> orderingExprs = sortNode.getSortInfo().getOrigOrderingExprs();
+                if (orderingExprs != null) {
+                    for (Expr expr : orderingExprs) {
+                        if (expr instanceof SlotRef) {
+                            if (((SlotRef) expr).getColumn() != null) {
+                                outputColumnUniqueIds.add(((SlotRef) expr).getColumn().getUniqueId());
+                            }
+                        }
+                    }
+                }
+            }
+
             if (!(node instanceof OlapScanNode)) {
                 continue;
             }
@@ -582,5 +762,24 @@ public class OriginalPlanner extends Planner {
     @Override
     public DescriptorTable getDescTable() {
         return analyzer.getDescTbl();
+    }
+
+    private void collectQueryStat(PlanNode root) {
+        try {
+            if (root instanceof ScanNode) {
+                StatsDelta delta = ((ScanNode) root).genQueryStats();
+                if (delta != null && !delta.empty()) {
+                    Env.getCurrentEnv().getQueryStats().addStats(delta);
+                    if (!delta.getTabletStats().isEmpty()) {
+                        Env.getCurrentEnv().getQueryStats().addStats(delta.getTabletStats());
+                    }
+                }
+            }
+            for (PlanNode child : root.getChildren()) {
+                collectQueryStat(child);
+            }
+        } catch (UserException e) {
+            LOG.info("failed to collect query stat: {}", e.getMessage());
+        }
     }
 }

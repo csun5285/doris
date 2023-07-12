@@ -27,6 +27,7 @@ import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.UserException;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.rewrite.ExprRewriter;
+import org.apache.doris.thrift.TQueryOptions;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
@@ -123,6 +124,14 @@ public abstract class StatementBase implements ParseNode {
         return explainOptions;
     }
 
+    public void setIsPrepared() {
+        this.isPrepared = true;
+    }
+
+    public boolean isPrepared() {
+        return this.isPrepared;
+    }
+
     /*
      * Print SQL syntax corresponding to this node.
      *
@@ -204,7 +213,7 @@ public abstract class StatementBase implements ParseNode {
      * @throws AnalysisException
      * @param rewriter
      */
-    public void foldConstant(ExprRewriter rewriter) throws AnalysisException {
+    public void foldConstant(ExprRewriter rewriter, TQueryOptions tQueryOptions) throws AnalysisException {
         throw new IllegalStateException(
                 "foldConstant() not implemented for this stmt: " + getClass().getSimpleName());
     }

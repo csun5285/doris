@@ -25,6 +25,8 @@ import org.apache.doris.common.util.DynamicPartitionUtil;
 import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.PropertyAnalyzer;
 
+import com.google.common.base.Strings;
+
 import java.util.Map;
 
 // clause which is used to modify table properties
@@ -41,6 +43,16 @@ public class ModifyTablePropertiesClause extends AlterTableClause {
     }
 
     private String storagePolicy;
+
+    private boolean ccrEnable = false;
+
+    public void setCcrEnable(boolean ccrEnable) {
+        this.ccrEnable = ccrEnable;
+    }
+
+    public boolean isCcrEnable() {
+        return ccrEnable;
+    }
 
     public ModifyTablePropertiesClause(Map<String, String> properties) {
         super(AlterOpType.MODIFY_TABLE_PROPERTY);
@@ -94,18 +106,44 @@ public class ModifyTablePropertiesClause extends AlterTableClause {
             ReplicaAllocation replicaAlloc = PropertyAnalyzer.analyzeReplicaAllocation(properties, "default");
             properties.put("default." + PropertyAnalyzer.PROPERTIES_REPLICATION_ALLOCATION,
                     replicaAlloc.toCreateStmt());
-        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                 || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            this.needTableStable = false;
+            this.opType = AlterOpType.MODIFY_TABLE_PROPERTY_SYNC;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+            boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+            if (isInMemory == true) {
+                throw new AnalysisException("Not support set 'in_memory'='true' now!");
+            }
             this.needTableStable = false;
             this.opType = AlterOpType.MODIFY_TABLE_PROPERTY_SYNC;
         } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_TABLET_TYPE)) {
             throw new AnalysisException("Alter tablet type not supported");
         } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)) {
             this.needTableStable = false;
-            setStoragePolicy(properties.getOrDefault(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY, ""));
+            String storagePolicy = properties.getOrDefault(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY, "");
+            if (!Strings.isNullOrEmpty(storagePolicy)
+                    && properties.containsKey(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE)) {
+                throw new AnalysisException(
+                        "Can not set UNIQUE KEY table that enables Merge-On-write"
+                                + " with storage policy(" + storagePolicy + ")");
+            }
+            setStoragePolicy(storagePolicy);
         } else if (properties.containsKey(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE)) {
-            throw new AnalysisException("Alter tablet type not supported");
+            throw new AnalysisException("Can not change UNIQUE KEY to Merge-On-Write mode");
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_DUPLICATE_WITHOUT_KEYS_BY_DEFAULT)) {
+            throw new AnalysisException("Can not change enable_duplicate_without_keys_by_default");
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE)) {
+            // do nothing, will be alter in SchemaChangeHandler.updateTableProperties
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_CCR_ENABLE)) {
+            this.needTableStable = false;
+            setCcrEnable(
+                    Boolean.parseBoolean(properties.getOrDefault(PropertyAnalyzer.PROPERTIES_CCR_ENABLE, "false")));
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_BINLOG_ENABLE)
+                || properties.containsKey(PropertyAnalyzer.PROPERTIES_BINLOG_TTL_SECONDS)
+                || properties.containsKey(PropertyAnalyzer.PROPERTIES_BINLOG_MAX_BYTES)
+                || properties.containsKey(PropertyAnalyzer.PROPERTIES_BINLOG_MAX_HISTORY_NUMS)) {
+            // do nothing, will be alter in SchemaChangeHandler.updateBinlogConfig
         } else {
             throw new AnalysisException("Unknown table property: " + properties.keySet());
         }

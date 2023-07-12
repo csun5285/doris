@@ -17,16 +17,32 @@
 
 #include "vec/sink/vresult_file_sink.h"
 
+#include <gen_cpp/DataSinks_types.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <glog/logging.h>
+#include <opentelemetry/nostd/shared_ptr.h>
+#include <time.h>
+
+#include <new>
+#include <ostream>
+
 #include "common/config.h"
+#include "common/object_pool.h"
 #include "runtime/buffer_control_block.h"
 #include "runtime/exec_env.h"
-#include "runtime/file_result_writer.h"
 #include "runtime/result_buffer_mgr.h"
-#include "runtime/row_batch.h"
 #include "runtime/runtime_state.h"
+#include "util/runtime_profile.h"
+#include "util/telemetry/telemetry.h"
 #include "util/uid_util.h"
 #include "vec/exprs/vexpr.h"
 #include "vec/runtime/vfile_result_writer.h"
+#include "vec/sink/vresult_writer.h"
+
+namespace doris {
+class QueryStatistics;
+class TExpr;
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -81,8 +97,7 @@ Status VResultFileSink::init(const TDataSink& tsink) {
 
 Status VResultFileSink::prepare_exprs(RuntimeState* state) {
     // From the thrift expressions create the real exprs.
-    RETURN_IF_ERROR(
-            VExpr::create_expr_trees(state->obj_pool(), _t_output_expr, &_output_vexpr_ctxs));
+    RETURN_IF_ERROR(VExpr::create_expr_trees(_t_output_expr, _output_vexpr_ctxs));
     // Prepare the exprs to run.
     RETURN_IF_ERROR(VExpr::prepare(_output_vexpr_ctxs, state, _row_desc));
     return Status::OK();
@@ -102,7 +117,8 @@ Status VResultFileSink::prepare(RuntimeState* state) {
     if (_is_top_sink) {
         // create sender
         RETURN_IF_ERROR(state->exec_env()->result_mgr()->create_sender(
-                state->fragment_instance_id(), _buf_size, &_sender, state->query_timeout()));
+                state->fragment_instance_id(), _buf_size, &_sender, state->enable_pipeline_exec(),
+                state->execution_timeout()));
         // create writer
         _writer.reset(new (std::nothrow) VFileResultWriter(
                 _file_opts.get(), _storage_type, state->fragment_instance_id(), _output_vexpr_ctxs,
@@ -110,7 +126,8 @@ Status VResultFileSink::prepare(RuntimeState* state) {
                 _output_row_descriptor));
     } else {
         // init channel
-        _output_block.reset(new Block(_output_row_descriptor.tuple_descriptors()[0]->slots(), 1));
+        _output_block =
+                Block::create_unique(_output_row_descriptor.tuple_descriptors()[0]->slots(), 1);
         _writer.reset(new (std::nothrow) VFileResultWriter(
                 _file_opts.get(), _storage_type, state->fragment_instance_id(), _output_vexpr_ctxs,
                 _profile, nullptr, _output_block.get(), state->return_object_data_as_binary(),
@@ -124,19 +141,13 @@ Status VResultFileSink::prepare(RuntimeState* state) {
 }
 
 Status VResultFileSink::open(RuntimeState* state) {
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VResultFileSink::open");
     if (!_is_top_sink) {
         RETURN_IF_ERROR(_stream_sender->open(state));
     }
     return VExpr::open(_output_vexpr_ctxs, state);
 }
 
-Status VResultFileSink::send(RuntimeState* state, RowBatch* batch) {
-    return Status::NotSupported("Not Implemented VResultFileSink Node::get_next scalar");
-}
-
-Status VResultFileSink::send(RuntimeState* state, Block* block) {
-    INIT_AND_SCOPE_SEND_SPAN(state->get_tracer(), _send_span, "VResultFileSink::send");
+Status VResultFileSink::send(RuntimeState* state, Block* block, bool eos) {
     RETURN_IF_ERROR(_writer->append_block(*block));
     return Status::OK();
 }
@@ -146,7 +157,6 @@ Status VResultFileSink::close(RuntimeState* state, Status exec_status) {
         return Status::OK();
     }
 
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VResultFileSink::close");
     Status final_status = exec_status;
     // close the writer
     if (_writer) {
@@ -167,13 +177,14 @@ Status VResultFileSink::close(RuntimeState* state, Status exec_status) {
                 state->fragment_instance_id());
     } else {
         if (final_status.ok()) {
-            RETURN_IF_ERROR(_stream_sender->send(state, _output_block.get()));
+            auto st = _stream_sender->send(state, _output_block.get(), true);
+            if (!st.template is<ErrorCode::END_OF_FILE>()) {
+                RETURN_IF_ERROR(st);
+            }
         }
         RETURN_IF_ERROR(_stream_sender->close(state, final_status));
         _output_block->clear();
     }
-
-    VExpr::close(_output_vexpr_ctxs, state);
 
     _closed = true;
     return Status::OK();

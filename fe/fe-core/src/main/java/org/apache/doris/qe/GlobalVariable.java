@@ -93,10 +93,11 @@ public final class GlobalVariable {
     public static int passwordHistory = 0;
     // 0: DISABLED
     // 2: STRONG
+    // cloud mode use strong password policy and prohibit change it, so comment out it
     // @VariableMgr.VarAttr(name = VALIDATE_PASSWORD_POLICY, flag = VariableMgr.GLOBAL)
-    public static long validatePasswordPolicy = 2;
+    public static long validatePasswordPolicy = 0;
 
-    // Don't allow create instance.
+    // Don't allow to create instance.
     private GlobalVariable() {
     }
 

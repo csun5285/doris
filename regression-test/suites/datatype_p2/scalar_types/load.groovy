@@ -131,9 +131,8 @@ suite("test_scalar_types_load_p2", "p2") {
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
         DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        PROPERTIES("replication_num" = "1", "enable_unique_key_merge_on_write" = "true");
         """
-    // TODO change enable_unique_key_merge_on_write to true when supported in cloud
 
     // insert data into unique key table1 2 times
     sql """INSERT INTO ${testTable} SELECT `c_datetimev2`, `c_bigint`, `c_decimalv3`,
@@ -172,7 +171,7 @@ suite("test_scalar_types_load_p2", "p2") {
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
         DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        PROPERTIES("replication_num" = "1", "enable_unique_key_merge_on_write" = "false");
         """
 
     // insert data into unique key table1 2 times
@@ -277,9 +276,8 @@ suite("test_scalar_types_load_p2", "p2") {
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
         DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        PROPERTIES("replication_num" = "1", "enable_unique_key_merge_on_write" = "true");
         """
-    // TODO change enable_unique_key_merge_on_write to true when supported in cloud
 
     // insert data into unique key table1 2 times
     sql """INSERT INTO ${testTable} SELECT `c_datetimev2`, `c_bigint`, `c_decimalv3`,
@@ -333,7 +331,7 @@ suite("test_scalar_types_load_p2", "p2") {
         UNIQUE KEY(`c_datetimev2`, `c_bigint`, `c_decimalv3`)
         COMMENT 'OLAP'
         DISTRIBUTED BY HASH(`c_bigint`) BUCKETS 10
-        PROPERTIES("replication_num" = "1");
+        PROPERTIES("replication_num" = "1", "enable_unique_key_merge_on_write" = "false");
         """
 
     // insert data into unique key table1 2 times

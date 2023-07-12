@@ -16,13 +16,13 @@
 // under the License.
 
 #include "olap/rowset/segment_v2/inverted_index_compound_directory.h"
-#include "cloud/io/file_reader.h"
-#include "cloud/io/file_writer.h"
 
 #include "CLucene/SharedHeader.h"
-#include "CLucene/StdHeader.h"
-//#include "olap/iterators.h"
-#include "util/md5.h"
+#include "common/status.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_writer.h"
+#include "io/fs/path.h"
+#include "util/slice.h"
 
 #ifdef _CL_HAVE_IO_H
 #include <io.h>
@@ -36,12 +36,29 @@
 #ifdef _CL_HAVE_DIRECT_H
 #include <direct.h>
 #endif
+#include <CLucene/LuceneThreads.h>
+#include <CLucene/clucene-config.h>
+#include <CLucene/debug/error.h>
+#include <CLucene/debug/mem.h>
 #include <CLucene/index/IndexReader.h>
 #include <CLucene/index/IndexWriter.h>
 #include <CLucene/store/LockFactory.h>
+#include <CLucene/store/RAMDirectory.h>
 #include <CLucene/util/Misc.h>
 #include <assert.h>
-#include <errno.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <glog/logging.h>
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <utility>
 
 #define CL_MAX_PATH 4096
 #define CL_MAX_DIR CL_MAX_PATH
@@ -263,6 +280,7 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
             error.set(CL_ERR_IO, "Could not open file");
         }
     }
+    delete h->_shared_lock;
     _CLDECDELETE(h)
     return false;
 }
@@ -272,7 +290,8 @@ DorisCompoundDirectory::FSIndexInput::FSIndexInput(const FSIndexInput& other)
     if (other._handle == nullptr) {
         _CLTHROWA(CL_ERR_NullPointer, "other handle is null");
     }
-    std::lock_guard<doris::Mutex> wlock(other._handle->_shared_lock);
+
+    std::lock_guard<doris::Mutex> wlock(*other._handle->_shared_lock);
     _handle = _CL_POINTER(other._handle);
     _pos = other._handle->_fpos; //note where we are currently...
 }
@@ -281,6 +300,7 @@ DorisCompoundDirectory::FSIndexInput::SharedHandle::SharedHandle(const char* pat
     _length = 0;
     _fpos = 0;
     strcpy(this->path, path);
+    _shared_lock = new doris::Mutex();
 }
 
 DorisCompoundDirectory::FSIndexInput::SharedHandle::~SharedHandle() {
@@ -301,16 +321,19 @@ lucene::store::IndexInput* DorisCompoundDirectory::FSIndexInput::clone() const {
 void DorisCompoundDirectory::FSIndexInput::close() {
     BufferedIndexInput::close();
     if (_handle != nullptr) {
-        _handle->_shared_lock.lock();
+        doris::Mutex* lock = _handle->_shared_lock;
+        bool ref = false;
+        {
+            std::lock_guard<doris::Mutex> wlock(*lock);
+            //determine if we are about to delete the handle...
+            ref = (_LUCENE_ATOMIC_INT_GET(_handle->__cl_refcount) > 1);
+            //decdelete (deletes if refcount is down to 0
+            _CLDECDELETE(_handle);
+        }
 
-        //determine if we are about to delete the handle...
-        bool dounlock = (_LUCENE_ATOMIC_INT_GET(_handle->__cl_refcount) > 1);
-
-        //decdelete (deletes if refcount is down to 0
-        _CLDECDELETE(_handle)
-
-        if (dounlock) {
-            _handle->_shared_lock.unlock();
+        //if _handle is not ref by other FSIndexInput, try to release mutex lock, or it will be leaked.
+        if (!ref) {
+            delete lock;
         }
     }
 }
@@ -324,16 +347,21 @@ void DorisCompoundDirectory::FSIndexInput::seekInternal(const int64_t position) 
 void DorisCompoundDirectory::FSIndexInput::readInternal(uint8_t* b, const int32_t len) {
     CND_PRECONDITION(_handle != nullptr, "shared file handle has closed");
     CND_PRECONDITION(_handle->_reader != nullptr, "file is not open");
-    std::lock_guard<doris::Mutex> wlock(_handle->_shared_lock);
+    std::lock_guard<doris::Mutex> wlock(*_handle->_shared_lock);
+
+    int64_t position = getFilePointer();
+    if (_pos != position) {
+        _pos = position;
+    }
 
     if (_handle->_fpos != _pos) {
         _handle->_fpos = _pos;
     }
 
-    io::IOState state;
+    io::IOContext io_ctx;
     Slice result {b, (size_t)len};
     size_t bytes_read = 0;
-    if (!_handle->_reader->read_at(_pos, result, &bytes_read, &state).ok()) {
+    if (!_handle->_reader->read_at(_pos, result, &bytes_read, &io_ctx).ok()) {
         _CLTHROWA(CL_ERR_IO, "read past EOF");
     }
     bufferLength = len;
@@ -408,7 +436,7 @@ void DorisCompoundDirectory::FSIndexOutput::close() {
 
 int64_t DorisCompoundDirectory::FSIndexOutput::length() const {
     CND_PRECONDITION(writer != nullptr, "file is not open");
-    size_t ret;
+    int64_t ret;
     if (!writer->fs()->file_size(writer->path(), &ret).ok()) {
         return -1;
     }
@@ -509,10 +537,11 @@ bool DorisCompoundDirectory::list(std::vector<std::string>* names) const {
     CND_PRECONDITION(!directory.empty(), "directory is not open");
     char fl[CL_MAX_DIR];
     priv_getFN(fl, "");
-    std::vector<std::filesystem::path> paths;
-    RETURN_IF_ERROR(fs->list(fl, &paths));
-    for (auto path : paths) {
-        names->push_back(path.string());
+    std::vector<io::FileInfo> files;
+    bool exists;
+    RETURN_IF_ERROR(fs->list(fl, true, &files, &exists));
+    for (auto& file : files) {
+        names->push_back(file.file_name);
     }
     return true;
 }
@@ -595,7 +624,7 @@ int64_t DorisCompoundDirectory::fileLength(const char* name) const {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     char buffer[CL_MAX_DIR];
     priv_getFN(buffer, name);
-    size_t size = 0;
+    int64_t size = -1;
     RETURN_IF_ERROR(fs->file_size(buffer, &size));
     return size;
 }

@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 suite("test_rollup_agg") {
+
+    // because nereids cannot support rollup correctly forbid it temporary
+    sql """set enable_nereids_planner=false"""
+
     def tbName = "test_rollup_agg"
 
     def getJobRollupState = { tableName ->
@@ -42,6 +46,7 @@ suite("test_rollup_agg") {
     while (max_try_secs--) {
         String res = getJobRollupState(tbName)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)
@@ -57,6 +62,7 @@ suite("test_rollup_agg") {
     while (max_try_secs--) {
         String res = getJobColumnState(tbName)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)

@@ -19,6 +19,7 @@ package org.apache.doris.journal;
 
 import org.apache.doris.alter.AlterJobV2;
 import org.apache.doris.alter.BatchAlterJobPersistInfo;
+import org.apache.doris.alter.IndexChangeJob;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.backup.BackupJob;
 import org.apache.doris.backup.Repository;
@@ -31,11 +32,12 @@ import org.apache.doris.catalog.EncryptKeySearchDesc;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.FunctionSearchDesc;
 import org.apache.doris.catalog.Resource;
-import org.apache.doris.cluster.BaseParam;
 import org.apache.doris.cluster.Cluster;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.SmallFileMgr.SmallFile;
+import org.apache.doris.cooldown.CooldownConfList;
+import org.apache.doris.cooldown.CooldownDelete;
 import org.apache.doris.datasource.CatalogLog;
 import org.apache.doris.datasource.ExternalObjectLog;
 import org.apache.doris.datasource.InitCatalogLog;
@@ -59,27 +61,30 @@ import org.apache.doris.mtmv.metadata.DropMTMVTask;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.mtmv.metadata.MTMVTask;
 import org.apache.doris.mysql.privilege.UserPropertyInfo;
+import org.apache.doris.persist.AlterLightSchemaChangeInfo;
+import org.apache.doris.persist.AlterMultiMaterializedView;
 import org.apache.doris.persist.AlterRoutineLoadJobOperationLog;
 import org.apache.doris.persist.AlterUserOperationLog;
 import org.apache.doris.persist.AlterViewInfo;
-import org.apache.doris.persist.BackendIdsUpdateInfo;
+import org.apache.doris.persist.AnalyzeDeletionLog;
 import org.apache.doris.persist.BackendReplicasInfo;
 import org.apache.doris.persist.BackendTabletsInfo;
 import org.apache.doris.persist.BatchDropInfo;
 import org.apache.doris.persist.BatchModifyPartitionsInfo;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
+import org.apache.doris.persist.BatchRemoveTransactionsOperationV2;
 import org.apache.doris.persist.CleanLabelOperationLog;
-import org.apache.doris.persist.ClusterInfo;
+import org.apache.doris.persist.CleanQueryStatsInfo;
 import org.apache.doris.persist.ColocatePersistInfo;
 import org.apache.doris.persist.ConsistencyCheckInfo;
 import org.apache.doris.persist.CreateTableInfo;
 import org.apache.doris.persist.DatabaseInfo;
 import org.apache.doris.persist.DropDbInfo;
 import org.apache.doris.persist.DropInfo;
-import org.apache.doris.persist.DropLinkDbAndUpdateDbInfo;
 import org.apache.doris.persist.DropPartitionInfo;
 import org.apache.doris.persist.DropResourceOperationLog;
 import org.apache.doris.persist.DropSqlBlockRuleOperationLog;
+import org.apache.doris.persist.DropWorkloadGroupOperationLog;
 import org.apache.doris.persist.GlobalVarPersistInfo;
 import org.apache.doris.persist.HbPackage;
 import org.apache.doris.persist.LdapInfo;
@@ -100,6 +105,7 @@ import org.apache.doris.persist.ReplicaPersistInfo;
 import org.apache.doris.persist.RoutineLoadOperation;
 import org.apache.doris.persist.SetReplicaStatusOperationLog;
 import org.apache.doris.persist.TableAddOrDropColumnsInfo;
+import org.apache.doris.persist.TableAddOrDropInvertedIndicesInfo;
 import org.apache.doris.persist.TableInfo;
 import org.apache.doris.persist.TablePropertyInfo;
 import org.apache.doris.persist.TableRenameColumnInfo;
@@ -109,6 +115,8 @@ import org.apache.doris.plugin.PluginInfo;
 import org.apache.doris.policy.DropPolicyLog;
 import org.apache.doris.policy.Policy;
 import org.apache.doris.policy.StoragePolicy;
+import org.apache.doris.resource.workloadgroup.WorkloadGroup;
+import org.apache.doris.statistics.AnalysisInfo;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.Frontend;
 import org.apache.doris.transaction.TransactionState;
@@ -308,8 +316,7 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             case OperationType.OP_EXPORT_UPDATE_STATE:
-                data = new ExportJob.StateTransfer();
-                ((ExportJob.StateTransfer) data).readFields(in);
+                data = ExportJob.StateTransfer.read(in);
                 isRead = true;
                 break;
             case OperationType.OP_FINISH_DELETE: {
@@ -335,9 +342,9 @@ public class JournalEntity implements Writable {
             }
             case OperationType.OP_ADD_FRONTEND:
             case OperationType.OP_ADD_FIRST_FRONTEND:
+            case OperationType.OP_MODIFY_FRONTEND:
             case OperationType.OP_REMOVE_FRONTEND: {
-                data = new Frontend();
-                ((Frontend) data).readFields(in);
+                data = Frontend.read(in);
                 isRead = true;
                 break;
             }
@@ -373,8 +380,7 @@ public class JournalEntity implements Writable {
                 break;
             }
             case OperationType.OP_MASTER_INFO_CHANGE: {
-                data = new MasterInfo();
-                ((MasterInfo) data).readFields(in);
+                data = MasterInfo.read(in);
                 isRead = true;
                 break;
             }
@@ -395,32 +401,6 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             }
-            case OperationType.OP_DROP_CLUSTER:
-            case OperationType.OP_EXPAND_CLUSTER: {
-                data = new ClusterInfo();
-                ((ClusterInfo) data).readFields(in);
-                isRead = true;
-                break;
-            }
-            case OperationType.OP_LINK_CLUSTER:
-            case OperationType.OP_MIGRATE_CLUSTER: {
-                data = new BaseParam();
-                ((BaseParam) data).readFields(in);
-                isRead = true;
-                break;
-            }
-            case OperationType.OP_UPDATE_DB: {
-                data = new DatabaseInfo();
-                ((DatabaseInfo) data).readFields(in);
-                isRead = true;
-                break;
-            }
-            case OperationType.OP_DROP_LINKDB: {
-                data = new DropLinkDbAndUpdateDbInfo();
-                ((DropLinkDbAndUpdateDbInfo) data).readFields(in);
-                isRead = true;
-                break;
-            }
             case OperationType.OP_ADD_BROKER:
             case OperationType.OP_DROP_BROKER: {
                 data = new BrokerMgr.ModifyBrokerInfo();
@@ -434,12 +414,6 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             }
-            case OperationType.OP_UPDATE_CLUSTER_AND_BACKENDS: {
-                data = new BackendIdsUpdateInfo();
-                ((BackendIdsUpdateInfo) data).readFields(in);
-                isRead = true;
-                break;
-            }
             case OperationType.OP_UPSERT_TRANSACTION_STATE:
             case OperationType.OP_DELETE_TRANSACTION_STATE: {
                 data = new TransactionState();
@@ -449,6 +423,11 @@ public class JournalEntity implements Writable {
             }
             case OperationType.OP_BATCH_REMOVE_TXNS: {
                 data = BatchRemoveTransactionsOperation.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_BATCH_REMOVE_TXNS_V2: {
+                data = BatchRemoveTransactionsOperationV2.read(in);
                 isRead = true;
                 break;
             }
@@ -478,8 +457,7 @@ public class JournalEntity implements Writable {
                 break;
             }
             case OperationType.OP_MODIFY_TABLE_COLOCATE: {
-                data = new TablePropertyInfo();
-                ((TablePropertyInfo) data).readFields(in);
+                data = TablePropertyInfo.read(in);
                 isRead = true;
                 break;
             }
@@ -494,6 +472,16 @@ public class JournalEntity implements Writable {
                 break;
             }
             case OperationType.OP_DROP_FUNCTION: {
+                data = FunctionSearchDesc.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_ADD_GLOBAL_FUNCTION: {
+                data = Function.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_DROP_GLOBAL_FUNCTION: {
                 data = FunctionSearchDesc.read(in);
                 isRead = true;
                 break;
@@ -578,6 +566,16 @@ public class JournalEntity implements Writable {
             }
             case OperationType.OP_ALTER_JOB_V2: {
                 data = AlterJobV2.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_UPDATE_COOLDOWN_CONF: {
+                data = CooldownConfList.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_COOLDOWN_DELETE: {
+                data = CooldownDelete.read(in);
                 isRead = true;
                 break;
             }
@@ -727,6 +725,16 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             }
+            case OperationType.OP_MODIFY_TABLE_ADD_OR_DROP_INVERTED_INDICES: {
+                data = TableAddOrDropInvertedIndicesInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_INVERTED_INDEX_JOB: {
+                data = IndexChangeJob.read(in);
+                isRead = true;
+                break;
+            }
             case OperationType.OP_CLEAN_LABEL: {
                 data = CleanLabelOperationLog.read(in);
                 isRead = true;
@@ -752,7 +760,7 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             }
-            case OperationType.OP_ALTER_MTMV_JOB: {
+            case OperationType.OP_CHANGE_MTMV_JOB: {
                 data = ChangeMTMVJob.read(in);
                 isRead = true;
                 break;
@@ -767,13 +775,59 @@ public class JournalEntity implements Writable {
                 isRead = true;
                 break;
             }
-            case OperationType.OP_ALTER_MTMV_TASK: {
+            case OperationType.OP_CHANGE_MTMV_TASK: {
                 data = ChangeMTMVTask.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_ALTER_MTMV_STMT: {
+                data = AlterMultiMaterializedView.read(in);
                 isRead = true;
                 break;
             }
             case OperationType.OP_ALTER_USER: {
                 data = AlterUserOperationLog.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_CREATE_WORKLOAD_GROUP:
+            case OperationType.OP_ALTER_WORKLOAD_GROUP: {
+                data = WorkloadGroup.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_DROP_WORKLOAD_GROUP: {
+                data = DropWorkloadGroupOperationLog.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_ALTER_LIGHT_SCHEMA_CHANGE: {
+                data = AlterLightSchemaChangeInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_CLEAN_QUERY_STATS: {
+                data = CleanQueryStatsInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_CREATE_ANALYSIS_JOB: {
+                data = AnalysisInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_CREATE_ANALYSIS_TASK: {
+                data = AnalysisInfo.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_DELETE_ANALYSIS_JOB: {
+                data = AnalyzeDeletionLog.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_DELETE_ANALYSIS_TASK: {
+                data = AnalyzeDeletionLog.read(in);
                 isRead = true;
                 break;
             }

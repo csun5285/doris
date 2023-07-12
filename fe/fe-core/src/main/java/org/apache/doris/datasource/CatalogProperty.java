@@ -18,10 +18,10 @@
 package org.apache.doris.datasource;
 
 import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.HMSResource;
 import org.apache.doris.catalog.Resource;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
+import org.apache.doris.datasource.property.PropertyConverter;
 import org.apache.doris.persist.gson.GsonUtils;
 
 import com.google.common.base.Strings;
@@ -86,25 +86,27 @@ public class CatalogProperty implements Writable {
     public Map<String, String> getProperties() {
         Map<String, String> mergedProperties = Maps.newHashMap();
         if (!Strings.isNullOrEmpty(resource)) {
-            mergedProperties = catalogResource().getCopiedProperties();
+            Resource res = catalogResource();
+            if (res != null) {
+                mergedProperties = res.getCopiedProperties();
+            }
         }
         mergedProperties.putAll(properties);
         return mergedProperties;
     }
 
     public void modifyCatalogProps(Map<String, String> props) {
-        props = HMSResource.getPropertiesFromGlue(props);
-        properties.putAll(props);
-    }
-
-    private Map<String, String> getStorageProperties() {
-        return CloudProperty.convert(getProperties());
+        properties.putAll(PropertyConverter.convertToMetaProperties(props));
     }
 
     public Map<String, String> getHadoopProperties() {
         Map<String, String> hadoopProperties = getProperties();
-        hadoopProperties.putAll(getStorageProperties());
+        hadoopProperties.putAll(PropertyConverter.convertToHadoopFSProperties(getProperties()));
         return hadoopProperties;
+    }
+
+    public void addProperty(String key, String val) {
+        this.properties.put(key, val);
     }
 
     @Override

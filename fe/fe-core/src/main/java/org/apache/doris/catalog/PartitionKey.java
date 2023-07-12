@@ -32,6 +32,12 @@ import org.apache.doris.common.io.Writable;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSerializationContext;
+import com.google.gson.JsonSerializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -47,11 +53,20 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
     private static final Logger LOG = LogManager.getLogger(PartitionKey.class);
     private List<LiteralExpr> keys;
     private List<PrimitiveType> types;
+    private boolean isDefaultListPartitionKey = false;
 
     // constructor for partition prune
     public PartitionKey() {
         keys = Lists.newArrayList();
         types = Lists.newArrayList();
+    }
+
+    public void setDefaultListPartition(boolean isDefaultListPartitionKey) {
+        this.isDefaultListPartitionKey = isDefaultListPartitionKey;
+    }
+
+    public boolean isDefaultListPartitionKey() {
+        return isDefaultListPartitionKey;
     }
 
     // Factory methods
@@ -92,7 +107,9 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
         // PARTITION BY LIST(k1, k2)
         // (
         //     PARTITION p1 VALUES IN (("1","beijing"), ("1", "shanghai")),
-        //     PARTITION p2 VALUES IN (("2","shanghai"))
+        //     PARTITION p2 VALUES IN (("2","shanghai")),
+        //     PARTITION p3 VALUES IN,
+        //     PARTITION p4,
         // )
         //
         // for single list partition:
@@ -104,18 +121,29 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
         //     PARTITION p3 VALUES IN ("11", "12", "13", "14", "15"),
         //     PARTITION p4 VALUES IN ("16", "17", "18", "19", "20"),
         //     PARTITION p5 VALUES IN ("21", "22", "23", "24", "25"),
-        //     PARTITION p6 VALUES IN ("26")
+        //     PARTITION p6 VALUES IN ("26"),
+        //     PARTITION p5 VALUES IN,
+        //     PARTITION p7
         // )
         //
-        Preconditions.checkArgument(values.size() == types.size(),
-                "in value size[" + values.size() + "] is not equal to partition column size[" + types.size() + "].");
+        // ListPartitionInfo::createAndCheckPartitionItem has checked
+        Preconditions.checkArgument(values.size() <= types.size(),
+                "in value size[" + values.size() + "] is not less than partition column size[" + types.size() + "].");
 
         PartitionKey partitionKey = new PartitionKey();
         for (int i = 0; i < values.size(); i++) {
             partitionKey.keys.add(values.get(i).getValue(types.get(i)));
             partitionKey.types.add(types.get(i).getPrimitiveType());
         }
+        if (values.isEmpty()) {
+            for (int i = 0; i < types.size(); ++i) {
+                partitionKey.keys.add(LiteralExpr.createInfinity(types.get(i), false));
+                partitionKey.types.add(types.get(i).getPrimitiveType());
+            }
+            partitionKey.setDefaultListPartition(true);
+        }
 
+        Preconditions.checkState(partitionKey.keys.size() == types.size());
         return partitionKey;
     }
 
@@ -137,6 +165,10 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
 
     public List<LiteralExpr> getKeys() {
         return keys;
+    }
+
+    public List<PrimitiveType> getTypes() {
+        return types;
     }
 
     public long getHashValue() {
@@ -246,7 +278,11 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
         builder.append("]; ");
 
         builder.append("keys: [");
-        builder.append(toString(keys));
+        if (isDefaultListPartitionKey()) {
+            builder.append("default key");
+        } else {
+            builder.append(toString(keys));
+        }
         builder.append("]; ");
 
         return builder.toString();
@@ -403,5 +439,72 @@ public class PartitionKey implements Comparable<PartitionKey>, Writable {
             ret += type.ordinal();
         }
         return ret;
+    }
+
+    public static class PartitionKeySerializer implements JsonSerializer<PartitionKey> {
+        @Override
+        public JsonElement serialize(PartitionKey partitionKey, java.lang.reflect.Type reflectType,
+                                     JsonSerializationContext context) {
+            JsonArray result = new JsonArray();
+
+            List<PrimitiveType> types = partitionKey.getTypes();
+            List<LiteralExpr> keys = partitionKey.getKeys();
+            int count = keys.size();
+            if (count != types.size()) {
+                throw new JsonParseException("Size of keys and types are not equal");
+            }
+
+            for (int i = 0; i < count; i++) {
+                JsonArray typeAndKey = new JsonArray();
+                PrimitiveType type = types.get(i);
+                typeAndKey.add(new JsonPrimitive(type.toString()));
+
+                if (keys.get(i) == MaxLiteral.MAX_VALUE) {
+                    typeAndKey.add(new JsonPrimitive("MAX_VALUE"));
+                } else {
+                    switch (type) {
+                        case TINYINT:
+                        case SMALLINT:
+                        case INT:
+                        case BIGINT: {
+                            IntLiteral key = (IntLiteral) keys.get(i);
+                            typeAndKey.add(new JsonPrimitive(key.getLongValue()));
+                        }
+                            break;
+                        case LARGEINT: {
+                            LargeIntLiteral key = (LargeIntLiteral) keys.get(i);
+                            typeAndKey.add(new JsonPrimitive(key.getRealValue().toString()));
+                        }
+                            break;
+                        case DATE:
+                        case DATETIME:
+                        case DATEV2:
+                        case DATETIMEV2: {
+                            DateLiteral key = (DateLiteral) keys.get(i);
+                            typeAndKey.add(new JsonPrimitive(key.convertToString(type)));
+                        }
+                            break;
+                        case CHAR:
+                        case VARCHAR:
+                        case STRING: {
+                            StringLiteral key = (StringLiteral) keys.get(i);
+                            typeAndKey.add(new JsonPrimitive(key.getValue()));
+                        }
+                            break;
+                        case BOOLEAN: {
+                            BoolLiteral key = (BoolLiteral) keys.get(i);
+                            typeAndKey.add(new JsonPrimitive(key.getValue()));
+                        }
+                            break;
+                        default:
+                            throw new JsonParseException("type[" + type.name() + "] not supported: ");
+                    }
+                }
+
+                result.add(typeAndKey);
+            }
+
+            return result;
+        }
     }
 }

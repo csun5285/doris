@@ -24,7 +24,6 @@ import org.apache.doris.common.jmockit.Deencapsulation;
 import org.apache.doris.datasource.InternalCatalog;
 
 import com.google.common.collect.Lists;
-import mockit.Expectations;
 import mockit.Injectable;
 import org.junit.Assert;
 import org.junit.Test;
@@ -54,12 +53,6 @@ public class MVColumnOneChildPatternTest {
         SlotRef slotRef = new SlotRef(tableName, "c1");
         List<Expr> child0Params = Lists.newArrayList();
         child0Params.add(slotRef);
-        new Expectations() {
-            {
-                castExpr.unwrapSlotRef();
-                result = slotRef;
-            }
-        };
         List<Expr> params = Lists.newArrayList();
         params.add(castExpr);
         FunctionCallExpr functionCallExpr = new FunctionCallExpr(AggregateType.MIN.name(), params);
@@ -90,7 +83,7 @@ public class MVColumnOneChildPatternTest {
         Deencapsulation.setField(functionCallExpr, "fn", aggregateFunction);
         MVColumnOneChildPattern mvColumnOneChildPattern = new MVColumnOneChildPattern(
                 AggregateType.SUM.name().toLowerCase());
-        Assert.assertFalse(mvColumnOneChildPattern.match(functionCallExpr));
+        Assert.assertTrue(mvColumnOneChildPattern.match(functionCallExpr));
     }
 
     @Test
@@ -105,6 +98,6 @@ public class MVColumnOneChildPatternTest {
         Deencapsulation.setField(functionCallExpr, "fn", aggregateFunction);
         MVColumnOneChildPattern mvColumnOneChildPattern = new MVColumnOneChildPattern(
                 AggregateType.SUM.name().toLowerCase());
-        Assert.assertFalse(mvColumnOneChildPattern.match(functionCallExpr));
+        Assert.assertTrue(mvColumnOneChildPattern.match(functionCallExpr));
     }
 }

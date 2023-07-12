@@ -18,7 +18,7 @@
 package org.apache.doris.ldap;
 
 import org.apache.doris.common.LdapConfig;
-import org.apache.doris.mysql.privilege.PaloRole;
+import org.apache.doris.mysql.privilege.Role;
 
 import java.util.Objects;
 
@@ -26,29 +26,42 @@ import java.util.Objects;
  * Used to cache LDAP information of user, such as password and privileges.
  */
 public class LdapUserInfo {
-    public LdapUserInfo(String userName, boolean isSetPasswd, String passwd, PaloRole role) {
+    public LdapUserInfo(String userName, boolean isSetPasswd, String passwd, Role role) {
         this.userName = userName;
+        this.isExists = true;
         this.isSetPasswd = isSetPasswd;
         this.passwd = passwd;
         this.role = role;
         this.lastTimeStamp = System.currentTimeMillis();
     }
 
-    private LdapUserInfo(String userName, boolean isSetPasswd, String passwd, PaloRole role, long lastTimeStamp) {
+    private LdapUserInfo(String userName, boolean isSetPasswd, String passwd, Role role, long lastTimeStamp) {
         this.userName = userName;
+        this.isExists = true;
         this.isSetPasswd = isSetPasswd;
         this.passwd = passwd;
         this.role = role;
         this.lastTimeStamp = lastTimeStamp;
     }
 
+    public LdapUserInfo(String notExistsUserName) {
+        this.userName = notExistsUserName;
+        this.isExists = false;
+        this.isSetPasswd = false;
+        this.passwd = null;
+        this.role = null;
+        this.lastTimeStamp = System.currentTimeMillis();
+    }
+
     private final String userName;
+
+    private final boolean isExists;
 
     private final boolean isSetPasswd;
 
     private final String passwd;
 
-    private final PaloRole role;
+    private final Role role;
 
     private final long lastTimeStamp;
 
@@ -57,7 +70,7 @@ public class LdapUserInfo {
     }
 
     // The password needs to be checked by LdapManager for updated cache, so it is visible in the package.
-    boolean isSetPasswd() {
+    public boolean isSetPasswd() {
         return isSetPasswd;
     }
 
@@ -65,8 +78,12 @@ public class LdapUserInfo {
         return passwd;
     }
 
-    public PaloRole getPaloRole() {
+    public Role getPaloRole() {
         return role;
+    }
+
+    public boolean isExists() {
+        return isExists;
     }
 
     public LdapUserInfo cloneWithPasswd(String passwd) {

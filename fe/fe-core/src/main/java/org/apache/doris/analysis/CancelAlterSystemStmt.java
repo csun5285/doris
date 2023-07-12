@@ -46,7 +46,6 @@ public class CancelAlterSystemStmt extends CancelStmt {
             HostInfo hostInfo = SystemInfoService.getHostAndPort(hostPort);
             this.hostInfos.add(hostInfo);
         }
-
         Preconditions.checkState(!this.hostInfos.isEmpty());
     }
 

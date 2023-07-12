@@ -74,9 +74,7 @@ public class LogicalCheckPolicy<CHILD_TYPE extends Plan> extends LogicalUnary<CH
 
     @Override
     public String toString() {
-        return Utils.toSqlString("LogicalCheckPolicy",
-            "child", child()
-        );
+        return Utils.toSqlString("LogicalCheckPolicy");
     }
 
     @Override
@@ -152,7 +150,7 @@ public class LogicalCheckPolicy<CHILD_TYPE extends Plan> extends LogicalUnary<CH
             CreatePolicyCommand command = (CreatePolicyCommand) nereidsParser.parseSingle(sql);
             Optional<Expression> wherePredicate = command.getWherePredicate();
             if (!wherePredicate.isPresent()) {
-                throw new AnalysisException("Invaild row policy [" + policy.getPolicyName() + "], " + sql);
+                throw new AnalysisException("Invalid row policy [" + policy.getPolicyName() + "], " + sql);
             }
             switch (policy.getFilterType()) {
                 case PERMISSIVE:

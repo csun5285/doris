@@ -20,23 +20,28 @@
 
 #pragma once
 
+#include <opentelemetry/trace/span.h>
+#include <stddef.h>
+// IWYU pragma: no_include <opentelemetry/nostd/shared_ptr.h>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "common/status.h"
-#include "gen_cpp/DataSinks_types.h"
-#include "gen_cpp/Exprs_types.h"
-#include "runtime/descriptors.h"
-#include "runtime/query_statistics.h"
+#include "util/runtime_profile.h"
 #include "util/telemetry/telemetry.h"
 
 namespace doris {
 
 class ObjectPool;
-class RowBatch;
-class RuntimeProfile;
 class RuntimeState;
 class TPlanFragmentExecParams;
 class RowDescriptor;
+class DescriptorTbl;
+class QueryStatistics;
+class TDataSink;
+class TExpr;
+class TPipelineFragmentParams;
 
 namespace vectorized {
 class Block;
@@ -57,20 +62,16 @@ public:
     // Setup. Call before send() or close().
     virtual Status open(RuntimeState* state) = 0;
 
-    // Send a row batch into this sink.
-    // eos should be true when the last batch is passed to send()
-    virtual Status send(RuntimeState* state, RowBatch* batch) = 0;
-
     // Send a Block into this sink.
-    virtual Status send(RuntimeState* state, vectorized::Block* block) {
+    virtual Status send(RuntimeState* state, vectorized::Block* block, bool eos = false) {
         return Status::NotSupported("Not support send block");
-    };
+    }
     // Releases all resources that were allocated in prepare()/send().
     // Further send() calls are illegal after calling close().
     // It must be okay to call this multiple times. Subsequent calls should
     // be ignored.
     virtual Status close(RuntimeState* state, Status exec_status) {
-        profile()->add_to_span();
+        profile()->add_to_span(_span);
         _closed = true;
         return Status::OK();
     }
@@ -80,20 +81,21 @@ public:
     static Status create_data_sink(ObjectPool* pool, const TDataSink& thrift_sink,
                                    const std::vector<TExpr>& output_exprs,
                                    const TPlanFragmentExecParams& params,
-                                   const RowDescriptor& row_desc, bool is_vec,
+                                   const RowDescriptor& row_desc, RuntimeState* state,
                                    std::unique_ptr<DataSink>* sink, DescriptorTbl& desc_tbl);
+
+    static Status create_data_sink(ObjectPool* pool, const TDataSink& thrift_sink,
+                                   const std::vector<TExpr>& output_exprs,
+                                   const TPipelineFragmentParams& params,
+                                   const size_t& local_param_idx, const RowDescriptor& row_desc,
+                                   RuntimeState* state, std::unique_ptr<DataSink>* sink,
+                                   DescriptorTbl& desc_tbl);
 
     // Returns the runtime profile for the sink.
     virtual RuntimeProfile* profile() = 0;
 
     virtual void set_query_statistics(std::shared_ptr<QueryStatistics> statistics) {
         _query_statistics = statistics;
-    }
-
-    void end_send_span() {
-        if (_send_span) {
-            _send_span->End();
-        }
     }
 
 protected:
@@ -105,7 +107,7 @@ protected:
     // Maybe this will be transferred to BufferControlBlock.
     std::shared_ptr<QueryStatistics> _query_statistics;
 
-    OpentelemetrySpan _send_span {};
+    OpentelemetrySpan _span {};
 };
 
 } // namespace doris

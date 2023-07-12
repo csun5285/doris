@@ -72,8 +72,11 @@ suite("test_javaudaf_mysum_int") {
 
         qt_select4 """ select user_id, udaf_my_sum_int(user_id), sum(user_id) from ${tableName} group by user_id order by user_id; """
         
-        sql """ DROP FUNCTION udaf_my_sum_int(int); """
+        qt_select5 """ select udaf_my_sum_int(user_id) over(partition by char_col) from test_javaudaf_mysum_int order by char_col; """
+        qt_select6 """ select udaf_my_sum_int(user_id) over(partition by char_col order by string_col) from test_javaudaf_mysum_int order by char_col; """
+        qt_select7 """ select udaf_my_sum_int(user_id) over(partition by char_col order by string_col rows between 1 preceding and 1 following ) from test_javaudaf_mysum_int order by char_col; """
     } finally {
+        try_sql("DROP FUNCTION IF EXISTS udaf_my_sum_int(int);")
         try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 }

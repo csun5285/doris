@@ -17,31 +17,49 @@
 
 #include "olap/delta_writer.h"
 
-#include <gtest/gtest.h>
-#include <sys/file.h>
+#include <gen_cpp/AgentService_types.h>
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-test-part.h>
+#include <stdlib.h>
+#include <unistd.h>
 
+#include <iostream>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 
+#include "common/config.h"
+#include "common/object_pool.h"
 #include "exec/tablet_info.h"
 #include "gen_cpp/Descriptors_types.h"
-#include "gen_cpp/PaloInternalService_types.h"
 #include "gen_cpp/Types_types.h"
 #include "gen_cpp/internal_service.pb.h"
-#include "olap/field.h"
+#include "gtest/gtest_pred_impl.h"
+#include "io/fs/local_file_system.h"
+#include "olap/data_dir.h"
+#include "olap/iterators.h"
+#include "olap/olap_define.h"
 #include "olap/options.h"
 #include "olap/rowset/beta_rowset.h"
+#include "olap/rowset/segment_v2/segment.h"
 #include "olap/schema.h"
 #include "olap/storage_engine.h"
 #include "olap/tablet.h"
-#include "olap/tablet_meta_manager.h"
-#include "olap/utils.h"
+#include "olap/tablet_manager.h"
+#include "olap/txn_manager.h"
+#include "runtime/decimalv2_value.h"
+#include "runtime/define_primitive_type.h"
 #include "runtime/descriptor_helper.h"
+#include "runtime/descriptors.h"
 #include "runtime/exec_env.h"
-#include "runtime/mem_pool.h"
-#include "runtime/tuple.h"
-#include "util/file_utils.h"
+#include "vec/columns/column.h"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/runtime/vdatetime_value.h"
 
 namespace doris {
+class OlapMeta;
 
 // This is DeltaWriter unit test which used by streaming load.
 // And also it should take schema change into account after streaming load.
@@ -54,8 +72,7 @@ static void set_up() {
     char buffer[MAX_PATH_LEN];
     EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
     config::storage_root_path = std::string(buffer) + "/data_test";
-    FileUtils::remove_all(config::storage_root_path);
-    FileUtils::create_dir(config::storage_root_path);
+    io::global_local_filesystem()->delete_and_create_directory(config::storage_root_path);
     std::vector<StorePath> paths;
     paths.emplace_back(config::storage_root_path, -1);
 
@@ -76,7 +93,8 @@ static void tear_down() {
         k_engine = nullptr;
     }
     EXPECT_EQ(system("rm -rf ./data_test"), 0);
-    FileUtils::remove_all(std::string(getenv("DORIS_HOME")) + "/" + UNUSED_PREFIX);
+    io::global_local_filesystem()->delete_directory(std::string(getenv("DORIS_HOME")) + "/" +
+                                                    UNUSED_PREFIX);
 }
 
 static void create_tablet_request(int64_t tablet_id, int32_t schema_hash,
@@ -313,28 +331,72 @@ static TDescriptorTable create_descriptor_tablet() {
     tuple_builder.add_slot(
             TSlotDescriptorBuilder().type(TYPE_DATEV2).column_name("k11").column_pos(10).build());
 
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_TINYINT).column_name("v1").column_pos(11).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_SMALLINT).column_name("v2").column_pos(12).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_INT).column_name("v3").column_pos(13).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_BIGINT).column_name("v4").column_pos(14).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_LARGEINT).column_name("v5").column_pos(15).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_DATE).column_name("v6").column_pos(16).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_DATETIME).column_name("v7").column_pos(17).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().string_type(4).column_name("v8").column_pos(18).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().string_type(65).column_name("v9").column_pos(19).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().decimal_type(6, 3).column_name("v10").column_pos(20).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_DATEV2).column_name("v11").column_pos(21).build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_TINYINT)
+                                   .column_name("v1")
+                                   .column_pos(11)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_SMALLINT)
+                                   .column_name("v2")
+                                   .column_pos(12)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_INT)
+                                   .column_name("v3")
+                                   .column_pos(13)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_BIGINT)
+                                   .column_name("v4")
+                                   .column_pos(14)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_LARGEINT)
+                                   .column_name("v5")
+                                   .column_pos(15)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_DATE)
+                                   .column_name("v6")
+                                   .column_pos(16)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_DATETIME)
+                                   .column_name("v7")
+                                   .column_pos(17)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .string_type(4)
+                                   .column_name("v8")
+                                   .column_pos(18)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .string_type(65)
+                                   .column_name("v9")
+                                   .column_pos(19)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .decimal_type(6, 3)
+                                   .column_name("v10")
+                                   .column_pos(20)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_DATEV2)
+                                   .column_name("v11")
+                                   .column_pos(21)
+                                   .nullable(false)
+                                   .build());
     tuple_builder.build(&dtb);
 
     return dtb.desc_tbl();
@@ -353,9 +415,22 @@ static TDescriptorTable create_descriptor_tablet_with_sequence_col() {
     tuple_builder.add_slot(
             TSlotDescriptorBuilder().type(TYPE_DATEV2).column_name("v2").column_pos(3).build());
     tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_DATETIME)
+                                   .column_name("v1")
+                                   .column_pos(2)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
+                                   .type(TYPE_DATEV2)
+                                   .column_name("v2")
+                                   .column_pos(3)
+                                   .nullable(false)
+                                   .build());
+    tuple_builder.add_slot(TSlotDescriptorBuilder()
                                    .type(TYPE_INT)
                                    .column_name(SEQUENCE_COL)
                                    .column_pos(4)
+                                   .nullable(false)
                                    .build());
     tuple_builder.build(&dtb);
 
@@ -390,19 +465,14 @@ TEST_F(TestDeltaWriter, open) {
     PUniqueId load_id;
     load_id.set_hi(0);
     load_id.set_lo(0);
-    WriteRequest write_req = {10003,   270068375,  WriteType::LOAD,      20001, 0,     30001,
+    WriteRequest write_req = {10003,   270068375,  WriteType::LOAD,      20001, 30001,
                               load_id, tuple_desc, &tuple_desc->slots(), true,  &param};
     DeltaWriter* delta_writer = nullptr;
-    DeltaWriter::open(&write_req, &delta_writer);
-    EXPECT_NE(delta_writer, nullptr);
-    res = delta_writer->close();
-    EXPECT_EQ(Status::OK(), res);
-    res = delta_writer->close_wait(PSlaveTabletNodes(), false);
-    EXPECT_EQ(Status::OK(), res);
-    SAFE_DELETE(delta_writer);
 
     // test vec delta writer
-    DeltaWriter::open(&write_req, &delta_writer, TUniqueId(), true);
+    std::unique_ptr<RuntimeProfile> profile;
+    profile = std::make_unique<RuntimeProfile>("LoadChannels");
+    DeltaWriter::open(&write_req, &delta_writer, profile.get(), TUniqueId());
     EXPECT_NE(delta_writer, nullptr);
     res = delta_writer->close();
     EXPECT_EQ(Status::OK(), res);
@@ -412,129 +482,6 @@ TEST_F(TestDeltaWriter, open) {
 
     res = k_engine->tablet_manager()->drop_tablet(request.tablet_id, request.replica_id, false);
     EXPECT_EQ(Status::OK(), res);
-}
-
-TEST_F(TestDeltaWriter, write) {
-    TCreateTabletReq request;
-    create_tablet_request(10004, 270068376, &request);
-    Status res = k_engine->create_tablet(request);
-    EXPECT_EQ(Status::OK(), res);
-
-    TDescriptorTable tdesc_tbl = create_descriptor_tablet();
-    ObjectPool obj_pool;
-    DescriptorTbl* desc_tbl = nullptr;
-    DescriptorTbl::create(&obj_pool, tdesc_tbl, &desc_tbl);
-    TupleDescriptor* tuple_desc = desc_tbl->get_tuple_descriptor(0);
-    const std::vector<SlotDescriptor*>& slots = tuple_desc->slots();
-    OlapTableSchemaParam param;
-
-    PUniqueId load_id;
-    load_id.set_hi(0);
-    load_id.set_lo(0);
-    WriteRequest write_req = {10004,   270068376,  WriteType::LOAD,        20002, 0,     30002,
-                              load_id, tuple_desc, &(tuple_desc->slots()), true,  &param};
-    DeltaWriter* delta_writer = nullptr;
-    DeltaWriter::open(&write_req, &delta_writer);
-    EXPECT_NE(delta_writer, nullptr);
-
-    MemPool pool;
-    // Tuple 1
-    {
-        Tuple* tuple = reinterpret_cast<Tuple*>(pool.allocate(tuple_desc->byte_size()));
-        memset(tuple, 0, tuple_desc->byte_size());
-        *(int8_t*)(tuple->get_slot(slots[0]->tuple_offset())) = -127;
-        *(int16_t*)(tuple->get_slot(slots[1]->tuple_offset())) = -32767;
-        *(int32_t*)(tuple->get_slot(slots[2]->tuple_offset())) = -2147483647;
-        *(int64_t*)(tuple->get_slot(slots[3]->tuple_offset())) = -9223372036854775807L;
-
-        int128_t large_int_value = -90000;
-        memcpy(tuple->get_slot(slots[4]->tuple_offset()), &large_int_value, sizeof(int128_t));
-
-        ((DateTimeValue*)(tuple->get_slot(slots[5]->tuple_offset())))
-                ->from_date_str("2048-11-10", 10);
-        ((DateTimeValue*)(tuple->get_slot(slots[6]->tuple_offset())))
-                ->from_date_str("2636-08-16 19:39:43", 19);
-
-        StringValue* char_ptr = (StringValue*)(tuple->get_slot(slots[7]->tuple_offset()));
-        char_ptr->ptr = (char*)pool.allocate(4);
-        memcpy(char_ptr->ptr, "abcd", 4);
-        char_ptr->len = 4;
-
-        StringValue* var_ptr = (StringValue*)(tuple->get_slot(slots[8]->tuple_offset()));
-        var_ptr->ptr = (char*)pool.allocate(5);
-        memcpy(var_ptr->ptr, "abcde", 5);
-        var_ptr->len = 5;
-
-        DecimalV2Value decimal_value;
-        decimal_value.assign_from_double(1.1);
-        *(DecimalV2Value*)(tuple->get_slot(slots[9]->tuple_offset())) = decimal_value;
-        ((doris::vectorized::DateV2Value<doris::vectorized::DateV2ValueType>*)(tuple->get_slot(
-                 slots[10]->tuple_offset())))
-                ->from_date_str("2048-11-10", 10);
-
-        *(int8_t*)(tuple->get_slot(slots[11]->tuple_offset())) = -127;
-        *(int16_t*)(tuple->get_slot(slots[12]->tuple_offset())) = -32767;
-        *(int32_t*)(tuple->get_slot(slots[13]->tuple_offset())) = -2147483647;
-        *(int64_t*)(tuple->get_slot(slots[14]->tuple_offset())) = -9223372036854775807L;
-
-        memcpy(tuple->get_slot(slots[15]->tuple_offset()), &large_int_value, sizeof(int128_t));
-
-        ((DateTimeValue*)(tuple->get_slot(slots[16]->tuple_offset())))
-                ->from_date_str("2048-11-10", 10);
-        ((DateTimeValue*)(tuple->get_slot(slots[17]->tuple_offset())))
-                ->from_date_str("2636-08-16 19:39:43", 19);
-
-        char_ptr = (StringValue*)(tuple->get_slot(slots[18]->tuple_offset()));
-        char_ptr->ptr = (char*)pool.allocate(4);
-        memcpy(char_ptr->ptr, "abcd", 4);
-        char_ptr->len = 4;
-
-        var_ptr = (StringValue*)(tuple->get_slot(slots[19]->tuple_offset()));
-        var_ptr->ptr = (char*)pool.allocate(5);
-        memcpy(var_ptr->ptr, "abcde", 5);
-        var_ptr->len = 5;
-
-        DecimalV2Value val_decimal;
-        val_decimal.assign_from_double(1.1);
-
-        *(DecimalV2Value*)(tuple->get_slot(slots[20]->tuple_offset())) = val_decimal;
-
-        ((doris::vectorized::DateV2Value<doris::vectorized::DateV2ValueType>*)(tuple->get_slot(
-                 slots[21]->tuple_offset())))
-                ->from_date_str("2048-11-10", 10);
-
-        res = delta_writer->write(tuple);
-        EXPECT_EQ(Status::OK(), res);
-    }
-
-    res = delta_writer->close();
-    EXPECT_EQ(Status::OK(), res);
-    res = delta_writer->close_wait(PSlaveTabletNodes(), false);
-    EXPECT_EQ(Status::OK(), res);
-
-    // publish version success
-    TabletSharedPtr tablet = k_engine->tablet_manager()->get_tablet(write_req.tablet_id);
-    OlapMeta* meta = tablet->data_dir()->get_meta();
-    Version version;
-    version.first = tablet->rowset_with_max_version()->end_version() + 1;
-    version.second = tablet->rowset_with_max_version()->end_version() + 1;
-    std::map<TabletInfo, RowsetSharedPtr> tablet_related_rs;
-    StorageEngine::instance()->txn_manager()->get_txn_related_tablets(
-            write_req.txn_id, write_req.partition_id, &tablet_related_rs);
-    for (auto& tablet_rs : tablet_related_rs) {
-        RowsetSharedPtr rowset = tablet_rs.second;
-        res = k_engine->txn_manager()->publish_txn(meta, write_req.partition_id, write_req.txn_id,
-                                                   write_req.tablet_id, write_req.schema_hash,
-                                                   tablet_rs.first.tablet_uid, version);
-        EXPECT_EQ(Status::OK(), res);
-        res = tablet->add_inc_rowset(rowset);
-        EXPECT_EQ(Status::OK(), res);
-    }
-    EXPECT_EQ(1, tablet->num_rows());
-
-    res = k_engine->tablet_manager()->drop_tablet(request.tablet_id, request.replica_id, false);
-    EXPECT_EQ(Status::OK(), res);
-    delete delta_writer;
 }
 
 TEST_F(TestDeltaWriter, vec_write) {
@@ -554,13 +501,13 @@ TEST_F(TestDeltaWriter, vec_write) {
     PUniqueId load_id;
     load_id.set_hi(0);
     load_id.set_lo(0);
-    WriteRequest write_req = {10004,   270068376,  WriteType::LOAD,        20002, 0,     30002,
+    WriteRequest write_req = {10004,   270068376,  WriteType::LOAD,        20002, 30002,
                               load_id, tuple_desc, &(tuple_desc->slots()), false, &param};
     DeltaWriter* delta_writer = nullptr;
-    DeltaWriter::open(&write_req, &delta_writer, TUniqueId(), true);
+    std::unique_ptr<RuntimeProfile> profile;
+    profile = std::make_unique<RuntimeProfile>("LoadChannels");
+    DeltaWriter::open(&write_req, &delta_writer, profile.get(), TUniqueId());
     ASSERT_NE(delta_writer, nullptr);
-
-    MemPool pool;
 
     vectorized::Block block;
     for (const auto& slot_desc : tuple_desc->slots()) {
@@ -586,12 +533,12 @@ TEST_F(TestDeltaWriter, vec_write) {
         int128_t k5 = -90000;
         columns[4]->insert_data((const char*)&k5, sizeof(k5));
 
-        DateTimeValue k6;
+        vectorized::VecDateTimeValue k6;
         k6.from_date_str("2048-11-10", 10);
         auto k6_int = k6.to_int64();
         columns[5]->insert_data((const char*)&k6_int, sizeof(k6_int));
 
-        DateTimeValue k7;
+        vectorized::VecDateTimeValue k7;
         k7.from_date_str("2636-08-16 19:39:43", 19);
         auto k7_int = k7.to_int64();
         columns[6]->insert_data((const char*)&k7_int, sizeof(k7_int));
@@ -623,12 +570,12 @@ TEST_F(TestDeltaWriter, vec_write) {
         int128_t v5 = -90000;
         columns[15]->insert_data((const char*)&v5, sizeof(v5));
 
-        DateTimeValue v6;
+        vectorized::VecDateTimeValue v6;
         v6.from_date_str("2048-11-10", 10);
         auto v6_int = v6.to_int64();
         columns[16]->insert_data((const char*)&v6_int, sizeof(v6_int));
 
-        DateTimeValue v7;
+        vectorized::VecDateTimeValue v7;
         v7.from_date_str("2636-08-16 19:39:43", 19);
         auto v7_int = v7.to_int64();
         columns[17]->insert_data((const char*)&v7_int, sizeof(v7_int));
@@ -684,74 +631,6 @@ TEST_F(TestDeltaWriter, vec_write) {
     delete delta_writer;
 }
 
-TEST_F(TestDeltaWriter, sequence_col) {
-    TCreateTabletReq request;
-    create_tablet_request_with_sequence_col(10005, 270068377, &request);
-    Status res = k_engine->create_tablet(request);
-    EXPECT_EQ(Status::OK(), res);
-
-    TDescriptorTable tdesc_tbl = create_descriptor_tablet_with_sequence_col();
-    ObjectPool obj_pool;
-    DescriptorTbl* desc_tbl = nullptr;
-    DescriptorTbl::create(&obj_pool, tdesc_tbl, &desc_tbl);
-    TupleDescriptor* tuple_desc = desc_tbl->get_tuple_descriptor(0);
-    const std::vector<SlotDescriptor*>& slots = tuple_desc->slots();
-    OlapTableSchemaParam param;
-
-    PUniqueId load_id;
-    load_id.set_hi(0);
-    load_id.set_lo(0);
-    WriteRequest write_req = {10005,   270068377,  WriteType::LOAD,        20003, 0,     30003,
-                              load_id, tuple_desc, &(tuple_desc->slots()), true,  &param};
-    DeltaWriter* delta_writer = nullptr;
-    DeltaWriter::open(&write_req, &delta_writer);
-    EXPECT_NE(delta_writer, nullptr);
-
-    MemPool pool;
-    // Tuple 1
-    {
-        Tuple* tuple = reinterpret_cast<Tuple*>(pool.allocate(tuple_desc->byte_size()));
-        memset(tuple, 0, tuple_desc->byte_size());
-        *(int8_t*)(tuple->get_slot(slots[0]->tuple_offset())) = 123;
-        *(int16_t*)(tuple->get_slot(slots[1]->tuple_offset())) = 456;
-        ((DateTimeValue*)(tuple->get_slot(slots[2]->tuple_offset())))
-                ->from_date_str("2020-07-16 19:39:43", 19);
-        *(int32_t*)(tuple->get_slot(slots[4]->tuple_offset())) = 1;
-
-        res = delta_writer->write(tuple);
-        EXPECT_EQ(Status::OK(), res);
-    }
-
-    res = delta_writer->close();
-    EXPECT_EQ(Status::OK(), res);
-    res = delta_writer->close_wait(PSlaveTabletNodes(), false);
-    EXPECT_EQ(Status::OK(), res);
-
-    // publish version success
-    TabletSharedPtr tablet = k_engine->tablet_manager()->get_tablet(write_req.tablet_id);
-    OlapMeta* meta = tablet->data_dir()->get_meta();
-    Version version;
-    version.first = tablet->rowset_with_max_version()->end_version() + 1;
-    version.second = tablet->rowset_with_max_version()->end_version() + 1;
-    std::map<TabletInfo, RowsetSharedPtr> tablet_related_rs;
-    StorageEngine::instance()->txn_manager()->get_txn_related_tablets(
-            write_req.txn_id, write_req.partition_id, &tablet_related_rs);
-    for (auto& tablet_rs : tablet_related_rs) {
-        RowsetSharedPtr rowset = tablet_rs.second;
-        res = k_engine->txn_manager()->publish_txn(meta, write_req.partition_id, write_req.txn_id,
-                                                   write_req.tablet_id, write_req.schema_hash,
-                                                   tablet_rs.first.tablet_uid, version);
-        EXPECT_EQ(Status::OK(), res);
-        res = tablet->add_inc_rowset(rowset);
-        EXPECT_EQ(Status::OK(), res);
-    }
-    EXPECT_EQ(1, tablet->num_rows());
-
-    res = k_engine->tablet_manager()->drop_tablet(request.tablet_id, request.replica_id, false);
-    EXPECT_EQ(Status::OK(), res);
-    delete delta_writer;
-}
-
 TEST_F(TestDeltaWriter, vec_sequence_col) {
     TCreateTabletReq request;
     sleep(20);
@@ -769,13 +648,13 @@ TEST_F(TestDeltaWriter, vec_sequence_col) {
     PUniqueId load_id;
     load_id.set_hi(0);
     load_id.set_lo(0);
-    WriteRequest write_req = {10005,   270068377,  WriteType::LOAD,        20003, 0,     30003,
+    WriteRequest write_req = {10005,   270068377,  WriteType::LOAD,        20003, 30003,
                               load_id, tuple_desc, &(tuple_desc->slots()), false, &param};
     DeltaWriter* delta_writer = nullptr;
-    DeltaWriter::open(&write_req, &delta_writer, TUniqueId(), true);
+    std::unique_ptr<RuntimeProfile> profile;
+    profile = std::make_unique<RuntimeProfile>("LoadChannels");
+    DeltaWriter::open(&write_req, &delta_writer, profile.get(), TUniqueId());
     ASSERT_NE(delta_writer, nullptr);
-
-    MemPool pool;
 
     vectorized::Block block;
     for (const auto& slot_desc : tuple_desc->slots()) {
@@ -792,7 +671,7 @@ TEST_F(TestDeltaWriter, vec_sequence_col) {
         int16_t c2 = 456;
         columns[1]->insert_data((const char*)&c2, sizeof(c2));
 
-        DateTimeValue c3;
+        vectorized::VecDateTimeValue c3;
         c3.from_date_str("2020-07-16 19:39:43", 19);
         int64_t c3_int = c3.to_int64();
         columns[2]->insert_data((const char*)&c3_int, sizeof(c3));
@@ -814,7 +693,7 @@ TEST_F(TestDeltaWriter, vec_sequence_col) {
         int16_t c2 = 456;
         columns[1]->insert_data((const char*)&c2, sizeof(c2));
 
-        DateTimeValue c3;
+        vectorized::VecDateTimeValue c3;
         c3.from_date_str("2020-07-31 19:39:43", 19);
         int64_t c3_int = c3.to_int64();
         columns[2]->insert_data((const char*)&c3_int, sizeof(c3));
@@ -873,8 +752,9 @@ TEST_F(TestDeltaWriter, vec_sequence_col) {
     opts.tablet_schema = rowset->tablet_schema();
 
     std::unique_ptr<RowwiseIterator> iter;
-    Schema schema(rowset->tablet_schema());
-    segments[0]->new_iterator(schema, opts, &iter);
+    std::shared_ptr<Schema> schema = std::make_shared<Schema>(rowset->tablet_schema());
+    auto s = segments[0]->new_iterator(schema, opts, &iter);
+    ASSERT_TRUE(s.ok());
     auto read_block = rowset->tablet_schema()->create_block();
     res = iter->next_batch(&read_block);
     ASSERT_TRUE(res.ok());

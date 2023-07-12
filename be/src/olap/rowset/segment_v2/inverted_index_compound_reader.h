@@ -17,35 +17,41 @@
 
 #pragma once
 
-#include <CLucene.h>
+#include <CLucene.h> // IWYU pragma: keep
+#include <CLucene/SharedHeader.h>
+#include <CLucene/store/Directory.h>
+#include <CLucene/store/IndexInput.h>
+#include <CLucene/store/IndexOutput.h>
+#include <CLucene/util/Equators.h>
+#include <CLucene/util/VoidMap.h>
+#include <stdint.h>
 
-#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
+#include "io/fs/file_system.h"
 
-#include "cloud/io/file_system.h"
-#include "util/lock.h"
+class CLuceneError;
+
+namespace lucene {
+namespace store {
+class RAMDirectory;
+} // namespace store
+} // namespace lucene
 
 namespace doris {
 
 namespace segment_v2 {
 
-/**
- * Class for accessing a compound stream.
- * This class implements a directory, but is limited to only read operations.
- * Directory methods that would normally modify data throw an exception.
- *
- */
 class CLUCENE_EXPORT DorisCompoundReader : public lucene::store::Directory {
 private:
     class ReaderFileEntry;
+
     friend class DorisCompoundReader::ReaderFileEntry;
 
-private:
     int32_t readBufferSize;
-
     // base info
     lucene::store::Directory* dir;
     lucene::store::RAMDirectory* ram_dir;
@@ -53,73 +59,41 @@ private:
     std::string file_name;
     CL_NS(store)::IndexInput* stream;
 
-    typedef CL_NS(util)::CLHashMap<char*, ReaderFileEntry*, CL_NS(util)::Compare::Char,
-                                   CL_NS(util)::Equals::Char, CL_NS(util)::Deletor::acArray,
-                                   CL_NS(util)::Deletor::Object<ReaderFileEntry> > EntriesType;
+    using EntriesType =
+            lucene::util::CLHashMap<char*, ReaderFileEntry*, lucene::util::Compare::Char,
+                                    lucene::util::Equals::Char, lucene::util::Deletor::acArray,
+                                    lucene::util::Deletor::Object<ReaderFileEntry>>;
 
     EntriesType* entries;
 
-    doris::Mutex _this_lock;
+    std::mutex _this_lock;
 
 protected:
     /** Removes an existing file in the directory-> */
-    bool doDeleteFile(const char* name);
+    bool doDeleteFile(const char* name) override;
 
 public:
     DorisCompoundReader(lucene::store::Directory* dir, const char* name,
                         int32_t _readBufferSize = CL_NS(store)::BufferedIndexInput::BUFFER_SIZE);
-
-    ///Destructor - only call this if you are sure the directory
-    ///is not being used anymore. Otherwise use the ref-counting
-    ///facilities of _CLDECDELETE
-    virtual ~DorisCompoundReader();
-
-    // Copy compound directory file to ram directory
+    ~DorisCompoundReader() override;
     void copyFile(const char* file, int64_t file_length, uint8_t* buffer, int64_t buffer_length);
-
-    /// Get a list of strings, one for each file in the directory.
-    bool list(std::vector<std::string>* names) const;
-
-    /// Returns true iff a file with the given name exists.
-    bool fileExists(const char* name) const;
-
-    /// Returns the text name of the directory
-    const char* getDirName() const; ///<returns reference
-
+    bool list(std::vector<std::string>* names) const override;
+    bool fileExists(const char* name) const override;
     lucene::store::Directory* getDirectory();
-
-    /// Returns the time the named file was last modified.
-    int64_t fileModified(const char* name) const;
-
-    /// Returns the length in bytes of a file in the directory.
-    int64_t fileLength(const char* name) const;
-
-    /// Returns a stream reading an existing file.
-    virtual bool openInput(const char* name, lucene::store::IndexInput*& ret, CLuceneError& err,
-                           int32_t bufferSize = -1);
-
-    /// Renames an existing file in the directory.
-    void renameFile(const char* from, const char* to);
-
-    /** Not implemented
-     * @throws UnsupportedOperationException */
-    void touchFile(const char* name);
-
-    /** Not implemented
-     * @throws UnsupportedOperationException */
-    virtual lucene::store::IndexOutput* createOutput(const char* name);
-
-    ///Decrease the ref-count to the directory by one. If
-    ///the object is no longer needed, then the object is
-    ///removed from the directory pool.
-    void close();
-
-    std::string toString() const;
-
+    int64_t fileModified(const char* name) const override;
+    int64_t fileLength(const char* name) const override;
+    bool openInput(const char* name, lucene::store::IndexInput*& ret, CLuceneError& err,
+                   int32_t bufferSize = -1) override;
+    bool openInput(const char* name, std::unique_ptr<lucene::store::IndexInput>& ret,
+                   CLuceneError& err, int32_t bufferSize = -1);
+    void renameFile(const char* from, const char* to) override;
+    void touchFile(const char* name) override;
+    lucene::store::IndexOutput* createOutput(const char* name) override;
+    void close() override;
+    std::string toString() const override;
     std::string getFileName() { return file_name; }
-
     static const char* getClassName();
-    const char* getObjectName() const;
+    const char* getObjectName() const override;
 };
 
 } // namespace segment_v2

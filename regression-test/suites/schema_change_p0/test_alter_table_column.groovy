@@ -29,8 +29,12 @@ suite("test_alter_table_column") {
                 value1 INT
             )
             DUPLICATE KEY (k1)
-            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1", "light_schema_change" = "true");
+            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1", "light_schema_change" = "false");
         """
+
+    // alter and test light schema change
+    sql """ALTER TABLE ${tbName1} SET ("light_schema_change" = "true");"""
+
     sql """
             ALTER TABLE ${tbName1} 
             ADD COLUMN k2 INT KEY AFTER k1,
@@ -41,8 +45,9 @@ suite("test_alter_table_column") {
 
     int max_try_secs = 600
     while (max_try_secs--) {
-        String result = getJobState(tbName1)
-        if (result == "FINISHED") {
+        String res = getJobState(tbName1)
+        if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -62,8 +67,9 @@ suite("test_alter_table_column") {
 
     max_try_secs = 600
     while (max_try_secs--) {
-        String result = getJobState(tbName1)
-        if (result == "FINISHED") {
+        String res = getJobState(tbName1)
+        if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -78,7 +84,7 @@ suite("test_alter_table_column") {
     sql "insert into ${tbName1} values(1,1,10,20);"
     sql "insert into ${tbName1} values(1,1,30,40);"
     qt_sql "desc ${tbName1};"
-    qt_sql "select * from ${tbName1};"
+    qt_sql "select * from ${tbName1} order by value1;"
     sql "DROP TABLE ${tbName1} FORCE;"
 
     def tbName2 = "alter_table_column_agg"
@@ -99,8 +105,9 @@ suite("test_alter_table_column") {
 
     max_try_secs = 600
     while (max_try_secs--) {
-        String result = getJobState(tbName1)
-        if (result == "FINISHED") {
+        String res = getJobState(tbName2)
+        if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -115,7 +122,7 @@ suite("test_alter_table_column") {
     sql "insert into ${tbName2} values(1,1,10,20);"
     sql "insert into ${tbName2} values(1,1,30,40);"
     qt_sql "desc ${tbName2};"
-    qt_sql "select * from ${tbName2};"
+    qt_sql "select * from ${tbName2} order by value2;"
     sql "DROP TABLE ${tbName2} FORCE;"
 
     def tbNameAddArray = "alter_table_add_array_column_dup"
@@ -156,13 +163,13 @@ suite("test_alter_table_column") {
     
     Thread.sleep(200)
     qt_sql "desc ${tbNameAddArray};"
-    qt_sql "select * from ${tbNameAddArray};"
+    qt_sql "select * from ${tbNameAddArray} order by k1;"
     sql "DROP TABLE ${tbNameAddArray} FORCE;"
 
     // vector search
     def check_load_result = {checklabel, testTablex ->
         Integer max_try_milli_secs = 10000
-        while(max_try_milli_secs) {
+        while (max_try_milli_secs) {
             def result = sql "show load where label = '${checklabel}'"
             if(result[0][2] == "FINISHED") {
                 qt_select "select * from ${testTablex} order by k1"
@@ -206,8 +213,9 @@ suite("test_alter_table_column") {
 
     max_try_secs = 600
     while (max_try_secs--) {
-        String result = getJobState(tbName1)
-        if (result == "FINISHED") {
+        String res = getJobState(tbName3)
+        if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)

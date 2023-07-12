@@ -17,52 +17,60 @@
 
 #pragma once
 
-#include "exec/olap_utils.h"
-#include "exprs/function_filter.h"
+#include <gen_cpp/PaloInternalService_types.h>
+#include <stdint.h>
+
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "common/factory_creator.h"
+#include "common/status.h"
+#include "olap/data_dir.h"
 #include "olap/reader.h"
-#include "util/runtime_profile.h"
+#include "olap/rowset/rowset_reader.h"
+#include "olap/tablet.h"
+#include "olap/tablet_schema.h"
 #include "vec/exec/scan/vscanner.h"
 
 namespace doris {
 
 struct OlapScanRange;
+class FunctionFilter;
+class RuntimeProfile;
+class RuntimeState;
+class TPaloScanRange;
 
 namespace vectorized {
 
 class NewOlapScanNode;
 struct FilterPredicates;
+class Block;
 
 class NewOlapScanner : public VScanner {
+    ENABLE_FACTORY_CREATOR(NewOlapScanner);
+
 public:
-    NewOlapScanner(const TabletSharedPtr& tablet, int64_t version, RuntimeState* state,
-                   NewOlapScanNode* parent, int64_t limit, bool aggregation, bool need_agg_finalize,
-                   RuntimeProfile* profile);
+    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
+                   const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
+                   const std::vector<RowsetReaderSharedPtr>& rs_readers,
+                   const std::vector<std::pair<int, int>>& rs_reader_seg_offsets,
+                   bool need_agg_finalize, RuntimeProfile* profile);
+
+    Status init() override;
 
     Status open(RuntimeState* state) override;
 
     Status close(RuntimeState* state) override;
 
-    Status prepare(const std::vector<OlapScanRange*>& key_ranges, VExprContext** vconjunct_ctx_ptr,
-                   const std::vector<TCondition>& filters,
-                   const FilterPredicates& filter_predicates,
-                   const std::vector<FunctionFilter>& function_filters);
-
     const std::string& scan_disk() const { return _tablet->data_dir()->path(); }
 
-    void set_compound_filters(const std::vector<std::vector<TCondition>>& compound_filters);
+    void set_compound_filters(const std::vector<TCondition>& compound_filters);
 
-    doris::TabletStorageType get_storage_type() override {
-        return doris::TabletStorageType::STORAGE_TYPE_LOCAL;
-    }
+    doris::TabletStorageType get_storage_type() override;
 
-    const TabletSharedPtr& get_tablet() const { return _tablet; }
-
-    bool has_delete_predicate() const {
-        for (const auto& rs: _tablet_reader_params.rs_readers) {
-            if (rs->rowset()->has_delete_predicate()) { return true; }
-        }
-        return false;
-    }
 protected:
     Status _get_block_impl(RuntimeState* state, Block* block, bool* eos) override;
     void _update_counters_before_close() override;
@@ -83,13 +91,15 @@ private:
     TabletSchemaSPtr _tablet_schema;
     TabletSharedPtr _tablet;
     int64_t _version;
+    const TPaloScanRange& _scan_range;
+    std::vector<OlapScanRange*> _key_ranges;
 
     TabletReader::ReaderParams _tablet_reader_params;
     std::unique_ptr<TabletReader> _tablet_reader;
 
     std::vector<uint32_t> _return_columns;
     std::unordered_set<uint32_t> _tablet_columns_convert_to_null_set;
-    std::vector<std::vector<TCondition>> _compound_filters;
+    std::vector<TCondition> _compound_filters;
 
     // ========= profiles ==========
     int64_t _compressed_bytes_read = 0;

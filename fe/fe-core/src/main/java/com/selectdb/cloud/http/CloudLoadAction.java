@@ -20,8 +20,8 @@ import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
 import org.apache.doris.httpv2.exception.UnauthorizedException;
 import org.apache.doris.httpv2.rest.RestBaseController;
+import org.apache.doris.httpv2.rest.manager.HttpUtils;
 import org.apache.doris.httpv2.util.ExecutionResultSet;
-import org.apache.doris.httpv2.util.HttpUtil;
 import org.apache.doris.httpv2.util.StatementSubmitter;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.qe.ConnectContext;
@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -195,10 +196,11 @@ public class CloudLoadAction extends RestBaseController {
     }
 
     @RequestMapping(path = "/query", method = RequestMethod.POST)
-    public Object loadQuery(HttpServletRequest request, HttpServletResponse response) throws InterruptedException {
+    public Object loadQuery(HttpServletRequest request, HttpServletResponse response)
+            throws InterruptedException, IOException {
         MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.increase(1L);
         LOG.info("query request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
-        String postContent = HttpUtil.getBody(request);
+        String postContent = HttpUtils.getBody(request);
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
             long startTime = System.currentTimeMillis();

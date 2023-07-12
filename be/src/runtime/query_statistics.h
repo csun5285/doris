@@ -17,19 +17,24 @@
 
 #pragma once
 
-#include <mutex>
+#include <stdint.h>
 
-#include "gen_cpp/data.pb.h"
+#include <map>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
+
 #include "util/spinlock.h"
 
 namespace doris {
 
-class QueryStatistics;
 class QueryStatisticsRecvr;
+class PNodeStatistics;
+class PQueryStatistics;
 
 class NodeStatistics {
 public:
-    NodeStatistics() : peak_memory_bytes(0) {};
+    NodeStatistics() : peak_memory_bytes(0) {}
 
     void add_peak_memory(int64_t peak_memory) { this->peak_memory_bytes += peak_memory; }
 

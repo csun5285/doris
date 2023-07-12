@@ -17,48 +17,50 @@
 
 #pragma once
 
-#ifdef CLOUD_MODE
-#include "cloud/olap/storage_engine.h"
+#include <butil/macros.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <gen_cpp/segment_v2.pb.h>
+#include <glog/logging.h>
 
-#else
 #include <cstdint>
-#include <functional>
+#include <map>
 #include <memory> // for unique_ptr
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "cloud/io/file_system.h"
 #include "common/status.h" // Status
-#include "gen_cpp/segment_v2.pb.h"
-#include "gutil/macros.h"
-#include "olap/iterators.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_system.h"
 #include "olap/olap_common.h"
-#include "olap/primary_key_index.h"
 #include "olap/rowset/segment_v2/column_reader.h" // ColumnReader
 #include "olap/rowset/segment_v2/page_handle.h"
-#include "olap/short_key_index.h"
-#include "olap/tablet_meta.h"
+#include "olap/schema.h"
 #include "olap/tablet_schema.h"
-#include "util/faststring.h"
 #include "util/once.h"
+#include "util/slice.h"
 
 namespace doris {
 
-class SegmentGroup;
-class TabletSchema;
 class ShortKeyIndexDecoder;
 class Schema;
 class StorageReadOptions;
+class MemTracker;
+class PrimaryKeyIndexReader;
+class RowwiseIterator;
+
+namespace io {
+class FileReaderOptions;
+} // namespace io
+struct RowLocation;
 
 namespace segment_v2 {
 
 class BitmapIndexIterator;
-class ColumnReader;
-class ColumnIterator;
 class Segment;
-class SegmentIterator;
-using SegmentSharedPtr = std::shared_ptr<Segment>;
+class InvertedIndexIterator;
 
+using SegmentSharedPtr = std::shared_ptr<Segment>;
 // A Segment is used to represent a segment in memory format. When segment is
 // generated, it won't be modified, so this struct aimed to help read operation.
 // It will prepare all ColumnReader to create ColumnIterator as needed.
@@ -69,26 +71,32 @@ using SegmentSharedPtr = std::shared_ptr<Segment>;
 // change finished, client should disable all cached Segment for old TabletSchema.
 class Segment : public std::enable_shared_from_this<Segment> {
 public:
-    static Status open(io::FileSystem* fs, const std::string& path, const std::string& cache_path,
-                       uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
-                       std::shared_ptr<Segment>* output, metrics_hook metrics = nullptr);
+    static Status open(io::FileSystemSPtr fs, const std::string& path, uint32_t segment_id,
+                       RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
+                       const io::FileReaderOptions& reader_options,
+                       std::shared_ptr<Segment>* output, bool is_lazy_open = false,
+                       bool disable_file_cache = false);
 
     ~Segment();
 
-    Status new_iterator(const Schema& schema, const StorageReadOptions& read_options,
+    Status new_iterator(SchemaSPtr schema, const StorageReadOptions& read_options,
                         std::unique_ptr<RowwiseIterator>* iter);
 
     uint32_t id() const { return _segment_id; }
 
     RowsetId rowset_id() const { return _rowset_id; }
 
-    // RowsetId rowset_id() const { return _rowset_id; }
-
     uint32_t num_rows() const { return _footer.num_rows(); }
 
-    Status new_column_iterator(const TabletColumn& tablet_column, ColumnIterator** iter);
+    Status new_column_iterator(const TabletColumn& tablet_column,
+                                std::unique_ptr<ColumnIterator>* iter);
 
-    Status new_bitmap_index_iterator(const TabletColumn& tablet_column, BitmapIndexIterator** iter);
+    Status new_bitmap_index_iterator(const TabletColumn& tablet_column,
+                                     std::unique_ptr<BitmapIndexIterator>* iter);
+
+    Status new_inverted_index_iterator(const TabletColumn& tablet_column,
+                                       const TabletIndex* index_meta, OlapReaderStatistics* stats,
+                                       std::unique_ptr<InvertedIndexIterator>* iter);
 
     Status new_inverted_index_iterator(const TabletColumn& tablet_column,
                                        const TabletIndex* index_meta, InvertedIndexIterator** iter);
@@ -103,7 +111,7 @@ public:
         return _pk_index_reader.get();
     }
 
-    Status lookup_row_key(const Slice& key, RowLocation* row_location);
+    Status lookup_row_key(const Slice& key, bool with_seq_col, RowLocation* row_location);
 
     Status read_key_by_rowid(uint32_t row_id, std::string* key);
 
@@ -117,15 +125,19 @@ public:
     std::string min_key() {
         DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta());
         return _footer.primary_key_index_meta().min_key();
-    };
+    }
     std::string max_key() {
         DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta());
         return _footer.primary_key_index_meta().max_key();
-    };
+    }
+
+    Status lazy_open(StorageReadOptions& opts);
 
     io::FileReaderSPtr file_reader() { return _file_reader; }
 
     int64_t meta_mem_usage() const { return _meta_mem_usage; }
+
+    bool disable_file_cache() const { return _disable_file_cache; }
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
@@ -158,6 +170,8 @@ private:
     // after this segment is generated.
     std::map<int32_t, std::unique_ptr<ColumnReader>> _column_readers;
 
+    std::map<int32_t, std::unique_ptr<ColumnReader>> _column_without_index_readers;
+
     // used to guarantee that short key index will be loaded at most once in a thread-safe way
     DorisCallOnce<Status> _load_index_once;
     // used to guarantee that primary key bloom filter will be loaded at most once in a thread-safe way
@@ -170,8 +184,11 @@ private:
     std::unique_ptr<PrimaryKeyIndexReader> _pk_index_reader;
     // Segment may be destructed after StorageEngine, in order to exit gracefully.
     std::shared_ptr<MemTracker> _segment_meta_mem_tracker;
+
+    DorisCallOnce<Status> _lazy_open_once;
+    std::atomic<bool> _is_lazy_open = false;
+    bool _disable_file_cache = false;
 };
 
 } // namespace segment_v2
 } // namespace doris
-#endif

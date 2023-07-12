@@ -17,10 +17,6 @@
 
 suite("redundant_conjuncts") {
     sql """
-        SET enable_vectorized_engine = true;
-    """
-
-    sql """
     DROP TABLE IF EXISTS redundant_conjuncts;
     """
     sql """
@@ -36,11 +32,11 @@ suite("redundant_conjuncts") {
     """
     
     qt_redundant_conjuncts """
-    EXPLAIN SELECT v1 FROM redundant_conjuncts WHERE k1 = 1 AND k1 = 1;
+    EXPLAIN SELECT /*+SET_VAR(enable_nereids_planner=false, REWRITE_OR_TO_IN_PREDICATE_THRESHOLD=2, parallel_fragment_exec_instance_num = 1) */ v1 FROM redundant_conjuncts WHERE k1 = 1 AND k1 = 1;
     """
 
     sql "set REWRITE_OR_TO_IN_PREDICATE_THRESHOLD = 100"
     qt_redundant_conjuncts_gnerated_by_extract_common_filter """
-    EXPLAIN SELECT v1 FROM redundant_conjuncts WHERE k1 = 1 OR k1 = 2;
+    EXPLAIN SELECT /*+SET_VAR(enable_nereids_planner=false, REWRITE_OR_TO_IN_PREDICATE_THRESHOLD=100, parallel_fragment_exec_instance_num = 1) */ v1 FROM redundant_conjuncts WHERE k1 = 1 OR k1 = 2;
     """
 }

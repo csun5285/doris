@@ -17,19 +17,31 @@
 
 #pragma once
 
+#include <gen_cpp/PaloInternalService_types.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <boost/container/detail/std_fwd.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdint>
-#include <map>
+#include <iterator>
+#include <memory>
+#include <set>
 #include <sstream>
 #include <string>
-#include <type_traits>
+#include <utility>
 #include <variant>
+#include <vector>
 
+#include "common/status.h"
 #include "exec/olap_utils.h"
 #include "olap/olap_common.h"
-#include "olap/tuple.h"
+#include "olap/olap_tuple.h"
+#include "runtime/datetime_value.h"
+#include "runtime/define_primitive_type.h"
 #include "runtime/primitive_type.h"
 #include "runtime/type_limit.h"
+#include "vec/core/types.h"
 #include "vec/io/io_helper.h"
 #include "vec/runtime/vdatetime_value.h"
 
@@ -38,17 +50,11 @@ namespace doris {
 template <PrimitiveType primitive_type, class T>
 std::string cast_to_string(T value, int scale) {
     if constexpr (primitive_type == TYPE_DECIMAL32) {
-        std::stringstream ss;
-        vectorized::write_text<int32_t>((int32_t)value, scale, ss);
-        return ss.str();
+        return ((vectorized::Decimal<int32_t>)value).to_string(scale);
     } else if constexpr (primitive_type == TYPE_DECIMAL64) {
-        std::stringstream ss;
-        vectorized::write_text<int64_t>((int64_t)value, scale, ss);
-        return ss.str();
+        return ((vectorized::Decimal<int64_t>)value).to_string(scale);
     } else if constexpr (primitive_type == TYPE_DECIMAL128I) {
-        std::stringstream ss;
-        vectorized::write_text<int128_t>((int128_t)value, scale, ss);
-        return ss.str();
+        return ((vectorized::Decimal<int128_t>)value).to_string(scale);
     } else if constexpr (primitive_type == TYPE_TINYINT) {
         return std::to_string(static_cast<int>(value));
     } else if constexpr (primitive_type == TYPE_LARGEINT) {
@@ -85,8 +91,10 @@ public:
 
     ColumnValueRange(std::string col_name, int precision, int scale);
 
+    ColumnValueRange(std::string col_name, bool is_nullable_col, int precision, int scale);
+
     ColumnValueRange(std::string col_name, const CppType& min, const CppType& max,
-                     bool contain_null, int precision, int scale);
+                     bool is_nullable_col, bool contain_null, int precision, int scale);
 
     // should add fixed value before add range
     Status add_fixed_value(const CppType& value);
@@ -96,13 +104,15 @@ public:
 
     Status add_range(SQLFilterOp op, CppType value);
 
-    Status add_match_value(MatchType match_type, const CppType& value);
     Status add_compound_value(SQLFilterOp op, CppType value);
+
+    bool is_in_compound_value_range() const;
+
+    Status add_match_value(MatchType match_type, const CppType& value);
 
     bool is_fixed_value_range() const;
 
     bool is_match_value_range() const;
-    bool is_boundary_value_range() const;
 
     bool is_scope_value_range() const;
 
@@ -169,6 +179,8 @@ public:
 
     const std::string& column_name() const { return _column_name; }
 
+    bool is_nullable_col() const { return _is_nullable_col; }
+
     bool contain_null() const { return _contain_null; }
 
     size_t get_fixed_value_size() const { return _fixed_values.size(); }
@@ -187,7 +199,8 @@ public:
             // 2. convert to min max filter condition
             TCondition null_pred;
             if (TYPE_MAX == _high_value && _high_op == FILTER_LESS_OR_EQUAL &&
-                TYPE_MIN == _low_value && _low_op == FILTER_LARGER_OR_EQUAL && !contain_null()) {
+                TYPE_MIN == _low_value && _low_op == FILTER_LARGER_OR_EQUAL && _is_nullable_col &&
+                !contain_null()) {
                 null_pred.__set_column_name(_column_name);
                 null_pred.__set_condition_op("is");
                 null_pred.condition_values.emplace_back("not null");
@@ -226,7 +239,8 @@ public:
         } else {
             // 3. convert to is null and is not null filter condition
             TCondition null_pred;
-            if (TYPE_MAX == _low_value && TYPE_MIN == _high_value && contain_null()) {
+            if (TYPE_MAX == _low_value && TYPE_MIN == _high_value && _is_nullable_col &&
+                contain_null()) {
                 null_pred.__set_column_name(_column_name);
                 null_pred.__set_condition_op("is");
                 null_pred.condition_values.emplace_back("null");
@@ -242,7 +256,6 @@ public:
         TCondition condition;
         condition.__set_column_name(_column_name);
         condition.__set_condition_op(is_in ? "*=" : "!*=");
-        condition.__set_compound_type(_compound_type);
         condition.__set_marked_by_runtime_filter(_marked_runtime_filter_predicate);
 
         for (const auto& value : _fixed_values) {
@@ -255,11 +268,35 @@ public:
         }
     }
 
+    void to_condition_in_compound(std::vector<TCondition>& filters) {
+        for (const auto& value : _compound_values) {
+            TCondition condition;
+            condition.__set_column_name(_column_name);
+            if (value.first == FILTER_LARGER) {
+                condition.__set_condition_op(">>");
+            } else if (value.first == FILTER_LARGER_OR_EQUAL) {
+                condition.__set_condition_op(">=");
+            } else if (value.first == FILTER_LESS) {
+                condition.__set_condition_op("<<");
+            } else if (value.first == FILTER_LESS_OR_EQUAL) {
+                condition.__set_condition_op("<=");
+            } else if (value.first == FILTER_IN) {
+                condition.__set_condition_op("*=");
+            } else if (value.first == FILTER_NOT_IN) {
+                condition.__set_condition_op("!*=");
+            }
+            condition.condition_values.push_back(
+                    cast_to_string<primitive_type, CppType>(value.second, _scale));
+            if (condition.condition_values.size() != 0) {
+                filters.push_back(condition);
+            }
+        }
+    }
+
     void to_match_condition(std::vector<TCondition>& filters) {
         for (const auto& value : _match_values) {
             TCondition condition;
             condition.__set_column_name(_column_name);
-            condition.__set_compound_type(_compound_type);
 
             if (value.first == MatchType::MATCH_ANY) {
                 condition.__set_condition_op("match_any");
@@ -279,28 +316,7 @@ public:
                 condition.__set_condition_op("match_element_ge");
             }
             condition.condition_values.push_back(
-                cast_to_string<primitive_type, CppType>(value.second, _scale));
-            if (condition.condition_values.size() != 0) {
-                filters.push_back(condition);
-            }
-        }
-    }
-
-    void to_boundary_condition(std::vector<TCondition>& filters) {
-        for (const auto& value : _boundary_values) {
-            TCondition condition;
-            condition.__set_column_name(_column_name);
-            condition.__set_compound_type(_compound_type);
-            if (value.first == FILTER_LARGER) {
-                condition.__set_condition_op(">>");
-            } else if (value.first == FILTER_LARGER_OR_EQUAL) {
-                condition.__set_condition_op(">=");
-            } else if (value.first == FILTER_LESS) {
-                condition.__set_condition_op("<<");
-            } else if (value.first == FILTER_LESS_OR_EQUAL) {
-                condition.__set_condition_op("<=");
-            }
-            condition.condition_values.push_back(cast_to_string<primitive_type, CppType>(value.second, _scale));
+                    cast_to_string<primitive_type, CppType>(value.second, _scale));
             if (condition.condition_values.size() != 0) {
                 filters.push_back(condition);
             }
@@ -313,13 +329,16 @@ public:
         _high_value = TYPE_MAX;
         _low_op = FILTER_LARGER_OR_EQUAL;
         _high_op = FILTER_LESS_OR_EQUAL;
-        _contain_null = true;
+        _contain_null = _is_nullable_col;
     }
 
     bool is_whole_value_range() const {
+        DCHECK(_is_nullable_col || !contain_null())
+                << "Non-nullable column cannot contains null value";
+
         return _fixed_values.empty() && _low_value == TYPE_MIN && _high_value == TYPE_MAX &&
                _low_op == FILTER_LARGER_OR_EQUAL && _high_op == FILTER_LESS_OR_EQUAL &&
-               contain_null();
+               _is_nullable_col == contain_null();
     }
 
     // only two case will set range contain null, call by temp_range in olap scan node
@@ -334,24 +353,14 @@ public:
         } else {
             set_whole_value_range();
         }
-        _contain_null = contain_null;
-    };
-
-    // SELECTDB_CODE_BEGIN
-    void set_compound_type(const TCompoundType::type& compound_type) {
-        _compound_type = compound_type;
+        _contain_null = _is_nullable_col && contain_null;
     }
 
     void mark_runtime_filter_predicate(bool is_runtime_filter_predicate) {
         _marked_runtime_filter_predicate = is_runtime_filter_predicate;
     }
 
-    bool get_marked_by_runtime_filter() const {
-        return _marked_runtime_filter_predicate;
-    }
-
-    TCompoundType::type get_compound_type() const;
-    // SELECTDB_CODE_END
+    bool get_marked_by_runtime_filter() const { return _marked_runtime_filter_predicate; }
 
     int precision() const { return _precision; }
 
@@ -370,35 +379,27 @@ public:
         range.add_range(op, *value);
     }
 
+    static void add_compound_value_range(ColumnValueRange<primitive_type>& range, SQLFilterOp op,
+                                         CppType* value) {
+        range.add_compound_value(op, *value);
+    }
+
     static void add_match_value_range(ColumnValueRange<primitive_type>& range, MatchType match_type,
                                       CppType* match_value) {
         range.add_match_value(match_type, *match_value);
     }
 
-    static void add_compound_value_range(ColumnValueRange<primitive_type>& range, SQLFilterOp op, 
-                                    CppType* value) {
-        range.add_compound_value(op, *value);
-    }
-
-    static ColumnValueRange<primitive_type> create_empty_column_value_range() {
-        return ColumnValueRange<primitive_type>::create_empty_column_value_range("");
-    }
-
-    static ColumnValueRange<primitive_type> create_empty_column_value_range(
-            const std::string& col_name) {
-        return ColumnValueRange<primitive_type>(col_name, TYPE_MAX, TYPE_MIN, false);
-    }
-
-    static ColumnValueRange<primitive_type> create_empty_column_value_range(int precision,
+    static ColumnValueRange<primitive_type> create_empty_column_value_range(bool is_nullable_col,
+                                                                            int precision,
                                                                             int scale) {
-        return ColumnValueRange<primitive_type>::create_empty_column_value_range("", precision,
-                                                                                 scale);
+        return ColumnValueRange<primitive_type>::create_empty_column_value_range(
+                "", is_nullable_col, precision, scale);
     }
 
     static ColumnValueRange<primitive_type> create_empty_column_value_range(
-            const std::string& col_name, int precision, int scale) {
-        return ColumnValueRange<primitive_type>(col_name, TYPE_MAX, TYPE_MIN, false, precision,
-                                                scale);
+            const std::string& col_name, bool is_nullable_col, int precision, int scale) {
+        return ColumnValueRange<primitive_type>(col_name, TYPE_MAX, TYPE_MIN, is_nullable_col,
+                                                false, precision, scale);
     }
 
 protected:
@@ -414,18 +415,13 @@ private:
     CppType _high_value;        // Column's high value, open interval at right
     SQLFilterOp _low_op;
     SQLFilterOp _high_op;
-    std::set<CppType> _fixed_values; // Column's fixed int value
+    std::set<CppType> _fixed_values;                       // Column's fixed int value
     std::set<std::pair<MatchType, CppType>> _match_values; // match value using in full-text search
 
+    bool _is_nullable_col;
     bool _contain_null;
     int _precision;
     int _scale;
-
-    // SELECTDB_CODE_BEGIN
-    std::set<std::pair<SQLFilterOp, CppType>> _boundary_values; // range boundary value in CompoundPredicate
-    TCompoundType::type _compound_type = TCompoundType::UNKNOWN;
-    bool _marked_runtime_filter_predicate = false;
-    // SELECTDB_CODE_END
     
     static constexpr bool _is_reject_split_type = primitive_type == PrimitiveType::TYPE_LARGEINT ||
                                                   primitive_type == PrimitiveType::TYPE_DECIMALV2 ||
@@ -436,6 +432,10 @@ private:
                                                   primitive_type == PrimitiveType::TYPE_BOOLEAN ||
                                                   primitive_type == PrimitiveType::TYPE_DATETIME ||
                                                   primitive_type == PrimitiveType::TYPE_DATETIMEV2;
+
+    // range value except leaf node of and node in compound expr tree
+    std::set<std::pair<SQLFilterOp, CppType>> _compound_values;
+    bool _marked_runtime_filter_predicate = false;
 };
 
 class OlapScanKeys {
@@ -541,27 +541,35 @@ ColumnValueRange<primitive_type>::ColumnValueRange(std::string col_name, const C
           _high_value(max),
           _low_op(FILTER_LARGER_OR_EQUAL),
           _high_op(FILTER_LESS_OR_EQUAL),
+          _is_nullable_col(true),
           _contain_null(contain_null),
           _precision(-1),
           _scale(-1) {}
 
 template <PrimitiveType primitive_type>
 ColumnValueRange<primitive_type>::ColumnValueRange(std::string col_name, const CppType& min,
-                                                   const CppType& max, bool contain_null,
-                                                   int precision, int scale)
+                                                   const CppType& max, bool is_nullable_col,
+                                                   bool contain_null, int precision, int scale)
         : _column_name(std::move(col_name)),
           _column_type(primitive_type),
           _low_value(min),
           _high_value(max),
           _low_op(FILTER_LARGER_OR_EQUAL),
           _high_op(FILTER_LESS_OR_EQUAL),
-          _contain_null(contain_null),
+          _is_nullable_col(is_nullable_col),
+          _contain_null(is_nullable_col && contain_null),
           _precision(precision),
           _scale(scale) {}
 
 template <PrimitiveType primitive_type>
 ColumnValueRange<primitive_type>::ColumnValueRange(std::string col_name, int precision, int scale)
-        : ColumnValueRange(std::move(col_name), TYPE_MIN, TYPE_MAX, true, precision, scale) {}
+        : ColumnValueRange(std::move(col_name), TYPE_MIN, TYPE_MAX, true, true, precision, scale) {}
+
+template <PrimitiveType primitive_type>
+ColumnValueRange<primitive_type>::ColumnValueRange(std::string col_name, bool is_nullable_col,
+                                                   int precision, int scale)
+        : ColumnValueRange(std::move(col_name), TYPE_MIN, TYPE_MAX, is_nullable_col,
+                           is_nullable_col, precision, scale) {}
 
 template <PrimitiveType primitive_type>
 Status ColumnValueRange<primitive_type>::add_fixed_value(const CppType& value) {
@@ -579,26 +587,25 @@ Status ColumnValueRange<primitive_type>::add_fixed_value(const CppType& value) {
 }
 
 template <PrimitiveType primitive_type>
+Status ColumnValueRange<primitive_type>::add_compound_value(SQLFilterOp op, CppType value) {
+    std::pair<SQLFilterOp, CppType> val_with_op(op, value);
+    _compound_values.insert(val_with_op);
+    _contain_null = false;
+
+    _high_value = TYPE_MIN;
+    _low_value = TYPE_MAX;
+    return Status::OK();
+}
+
+template <PrimitiveType primitive_type>
 Status ColumnValueRange<primitive_type>::add_match_value(MatchType match_type,
-    const CppType& value) {
+                                                         const CppType& value) {
     std::pair<MatchType, CppType> match_value(match_type, value);
     _match_values.insert(match_value);
     _contain_null = false;
 
     // _high_value = TYPE_MIN;
     // _low_value = TYPE_MAX;
-    return Status::OK();
-}
-
-template <PrimitiveType primitive_type>
-Status ColumnValueRange<primitive_type>::add_compound_value(SQLFilterOp op, CppType value) {
-    std::pair<SQLFilterOp, CppType> boundary_val(op, value);
-    _boundary_values.insert(boundary_val);
-    _contain_null = false;
-
-    _high_value = TYPE_MIN;
-    _low_value = TYPE_MAX;
-
     return Status::OK();
 }
 
@@ -613,13 +620,13 @@ bool ColumnValueRange<primitive_type>::is_fixed_value_range() const {
 }
 
 template <PrimitiveType primitive_type>
-bool ColumnValueRange<primitive_type>::is_match_value_range() const {
-    return _match_values.size() != 0;
+bool ColumnValueRange<primitive_type>::is_in_compound_value_range() const {
+    return _compound_values.size() != 0;
 }
 
 template <PrimitiveType primitive_type>
-bool ColumnValueRange<primitive_type>::is_boundary_value_range() const {
-    return _boundary_values.size() != 0;
+bool ColumnValueRange<primitive_type>::is_match_value_range() const {
+    return _match_values.size() != 0;
 }
 
 template <PrimitiveType primitive_type>
@@ -633,16 +640,8 @@ bool ColumnValueRange<primitive_type>::is_empty_value_range() const {
         return true;
     }
 
-    return (!is_fixed_value_range() && 
-                !is_scope_value_range() && 
-                !contain_null() &&
-                !is_boundary_value_range() &&
-                !is_match_value_range());
-}
-
-template <PrimitiveType primitive_type>
-TCompoundType::type ColumnValueRange<primitive_type>::get_compound_type() const {
-    return _compound_type;
+    return (!is_fixed_value_range() && !is_scope_value_range() && !contain_null() &&
+            !is_match_value_range());
 }
 
 template <PrimitiveType primitive_type>
@@ -1140,10 +1139,10 @@ Status OlapScanKeys::extend_scan_key(ColumnValueRange<primitive_type>& range,
     if (range.is_match_value_range() && _begin_scan_keys.empty()) {
         _begin_scan_keys.emplace_back();
         _begin_scan_keys.back().add_value(
-            cast_to_string<primitive_type, CppType>(type_limit<CppType>::min(), 0));
+                cast_to_string<primitive_type, CppType>(type_limit<CppType>::min(), 0));
         _end_scan_keys.emplace_back();
         _end_scan_keys.back().add_value(
-            cast_to_string<primitive_type, CppType>(type_limit<CppType>::max(), 0));
+                cast_to_string<primitive_type, CppType>(type_limit<CppType>::max(), 0));
         _begin_include = true;
         _end_include = true;
         *exact_value = false;

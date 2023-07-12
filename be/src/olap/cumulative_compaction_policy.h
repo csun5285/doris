@@ -17,14 +17,21 @@
 
 #pragma once
 
-#include <string>
+#include <stddef.h>
+#include <stdint.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/config.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
 
 namespace doris {
 
 class Tablet;
+struct Version;
 
 const static std::string CUMULATIVE_SIZE_BASED_POLICY = "SIZE_BASED";
 
@@ -51,9 +58,7 @@ public:
     /// param all_rowsets, all rowsets in tablet.
     /// param current_cumulative_point, current cumulative point value.
     /// return score, the result score after calculate.
-    virtual void calc_cumulative_compaction_score(
-            Tablet* tablet, const std::vector<RowsetMetaSharedPtr>& all_rowsets,
-            int64_t current_cumulative_point, uint32_t* score) = 0;
+    virtual uint32_t calc_cumulative_compaction_score(Tablet* tablet) = 0;
 
     /// Pick input rowsets from candidate rowsets for compaction. This function is pure virtual function.
     /// Its implementation depends on concrete compaction policy.
@@ -110,13 +115,10 @@ public:
     /// it needs tablet pointer to access tablet method.
     /// param tablet, the shared pointer of tablet
     SizeBasedCumulativeCompactionPolicy(
-            int64_t size_based_promotion_size =
-                    config::cumulative_size_based_promotion_size_mbytes * 1024 * 1024,
-            double size_based_promotion_ratio = config::cumulative_size_based_promotion_ratio,
-            int64_t size_based_promotion_min_size =
-                    config::cumulative_size_based_promotion_min_size_mbytes * 1024 * 1024,
-            int64_t size_based_compaction_lower_bound_size =
-                    config::cumulative_size_based_compaction_lower_size_mbytes * 1024 * 1024);
+            int64_t promotion_size = config::compaction_promotion_size_mbytes * 1024 * 1024,
+            double promotion_ratio = config::compaction_promotion_ratio,
+            int64_t promotion_min_size = config::compaction_promotion_min_size_mbytes * 1024 * 1024,
+            int64_t compaction_min_size = config::compaction_min_size_mbytes * 1024 * 1024);
 
     /// Destructor function of SizeBasedCumulativeCompactionPolicy.
     ~SizeBasedCumulativeCompactionPolicy() {}
@@ -152,10 +154,7 @@ public:
 
     /// Num based cumulative compaction policy implements calc cumulative compaction score function.
     /// Its main policy is calculating the accumulative compaction score after current cumulative_point in tablet.
-    void calc_cumulative_compaction_score(Tablet* tablet,
-                                          const std::vector<RowsetMetaSharedPtr>& all_rowsets,
-                                          int64_t current_cumulative_point,
-                                          uint32_t* score) override;
+    uint32_t calc_cumulative_compaction_score(Tablet* tablet) override;
 
     std::string name() override { return CUMULATIVE_SIZE_BASED_POLICY; }
 
@@ -169,19 +168,19 @@ private:
     int64_t _level_size(const int64_t size);
 
     /// when policy calculate cumulative_compaction_score, update promotion size at the same time
-    void _refresh_tablet_size_based_promotion_size(Tablet* tablet, int64_t promotion_size);
+    void _refresh_tablet_promotion_size(Tablet* tablet, int64_t promotion_size);
 
     int64_t cloud_promotion_size(Tablet* tablet) const;
 
 private:
     /// cumulative compaction promotion size, unit is byte.
-    int64_t _size_based_promotion_size;
+    int64_t _promotion_size;
     /// cumulative compaction promotion ratio of base rowset total disk size.
-    double _size_based_promotion_ratio;
+    double _promotion_ratio;
     /// cumulative compaction promotion min size, unit is byte.
-    int64_t _size_based_promotion_min_size;
+    int64_t _promotion_min_size;
     /// lower bound size to do compaction compaction.
-    int64_t _size_based_compaction_lower_bound_size;
+    int64_t _compaction_min_size;
 };
 
 /// The factory of CumulativeCompactionPolicy, it can product different policy according to the `policy` parameter.

@@ -17,25 +17,31 @@
 
 #pragma once
 
-#include <rapidjson/prettywriter.h>
+#include <gen_cpp/BackendService_types.h>
+#include <gen_cpp/FrontendService_types.h>
+#include <gen_cpp/PlanNodes_types.h>
+#include <gen_cpp/Types_types.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <future>
-#include <sstream>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "common/logging.h"
 #include "common/status.h"
 #include "common/utils.h"
-#include "gen_cpp/BackendService_types.h"
-#include "gen_cpp/FrontendService_types.h"
 #include "runtime/exec_env.h"
-#include "runtime/stream_load/load_stream_mgr.h"
 #include "runtime/stream_load/stream_load_executor.h"
-#include "service/backend_options.h"
-#include "util/string_util.h"
 #include "util/time.h"
 #include "util/uid_util.h"
 
 namespace doris {
+namespace io {
+class StreamLoadPipe;
+} // namespace io
 
 // kafka related info
 class KafkaLoadInfo {
@@ -81,8 +87,10 @@ public:
 class MessageBodySink;
 
 class StreamLoadContext {
+    ENABLE_FACTORY_CREATOR(StreamLoadContext);
+
 public:
-    StreamLoadContext(ExecEnv* exec_env) : id(UniqueId::gen_uid()), _exec_env(exec_env), _refs(0) {
+    StreamLoadContext(ExecEnv* exec_env) : id(UniqueId::gen_uid()), _exec_env(exec_env) {
         start_millis = UnixMillis();
     }
 
@@ -91,8 +99,6 @@ public:
             _exec_env->stream_load_executor()->rollback_txn(this);
             need_rollback = false;
         }
-
-        _exec_env->load_stream_mgr()->remove(id);
     }
 
     std::string to_json() const;
@@ -108,10 +114,6 @@ public:
     // return the brief info of this context.
     // also print the load source info if detail is set to true
     std::string brief(bool detail = false) const;
-
-    void ref() { _refs.fetch_add(1); }
-    // If unref() returns true, this object should be delete
-    bool unref() { return _refs.fetch_sub(1) == 1; }
 
 public:
     // load type, eg: ROUTINE LOAD/MANUAL LOAD
@@ -136,6 +138,7 @@ public:
     int32_t timeout_second = -1;
     AuthInfo auth;
     bool two_phase_commit = false;
+    std::string load_comment;
 
     // the following members control the max progress of a consuming
     // process. if any of them reach, the consuming will finish.
@@ -164,6 +167,7 @@ public:
     TFileCompressType::type compress_type = TFileCompressType::UNKNOWN;
 
     std::shared_ptr<MessageBodySink> body_sink;
+    std::shared_ptr<io::StreamLoadPipe> pipe;
 
     TStreamLoadPutResult put_result;
 
@@ -211,7 +215,6 @@ public:
 
 private:
     ExecEnv* _exec_env;
-    std::atomic<int> _refs;
 };
 
 } // namespace doris

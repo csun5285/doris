@@ -17,18 +17,31 @@
 
 #include "agent/agent_server.h"
 
+#include <gen_cpp/AgentService_types.h>
+#include <gen_cpp/HeartbeatService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <stdint.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
 #include <filesystem>
+#include <ostream>
 #include <string>
 
 #include "agent/task_worker_pool.h"
 #include "agent/topic_subscriber.h"
 #include "agent/user_resource_listener.h"
+#include "agent/utils.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "gutil/strings/substitute.h"
+#include "olap/olap_define.h"
+#include "olap/options.h"
 #include "olap/snapshot_manager.h"
+#include "runtime/exec_env.h"
+
+namespace doris {
+class TopicListener;
+} // namespace doris
 
 using std::string;
 using std::vector;
@@ -49,6 +62,8 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
         }
     }
 
+    MasterServerClient::create(master_info);
+
     // It is the same code to create workers of each type, so we use a macro
     // to make code to be more readable.
 
@@ -68,24 +83,50 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
 #endif // BE_TEST
 
 #ifdef CLOUD_MODE
-    CREATE_AND_START_POOL(DELETE, _delete_workers);
-    CREATE_AND_START_POOL(ALTER_TABLE, _alter_tablet_workers);
+    _push_delete_workers.reset(new PushTaskPool(exec_env,
+                                                TaskWorkerPool::ThreadModel::MULTI_THREADS,
+                                                PushTaskPool::PushWokerType::DELETE));
+    _push_delete_workers->start();
+    _alter_tablet_workers.reset(
+            new AlterTableTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _alter_tablet_workers->start();
     CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
     CREATE_AND_START_THREAD(REPORT_TASK, _report_task_workers);
     CREATE_AND_START_POOL(CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers);
 #else
-    CREATE_AND_START_POOL(CREATE_TABLE, _create_tablet_workers);
-    CREATE_AND_START_POOL(DROP_TABLE, _drop_tablet_workers);
-    // Both PUSH and REALTIME_PUSH type use _push_workers
-    CREATE_AND_START_POOL(PUSH, _push_workers);
-    CREATE_AND_START_POOL(PUBLISH_VERSION, _publish_version_workers);
-    CREATE_AND_START_POOL(CLEAR_TRANSACTION_TASK, _clear_transaction_task_workers);
-    CREATE_AND_START_POOL(DELETE, _delete_workers);
-    CREATE_AND_START_POOL(ALTER_TABLE, _alter_tablet_workers);
+#ifndef BE_TEST
+    _create_tablet_workers.reset(
+            new CreateTableTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _create_tablet_workers->start();
+    _drop_tablet_workers.reset(
+            new DropTableTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _drop_tablet_workers->start();
+
+    // Both PUSH and REALTIME_PUSH type use _push_load_workers
+    _push_load_workers.reset(new PushTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS,
+                                              PushTaskPool::PushWokerType::LOAD_V2));
+    _push_load_workers->start();
+    _publish_version_workers.reset(
+            new PublishVersionTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _publish_version_workers->start();
+    _clear_transaction_task_workers.reset(
+            new ClearTransactionTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _clear_transaction_task_workers->start();
+    _push_delete_workers.reset(new PushTaskPool(exec_env,
+                                                TaskWorkerPool::ThreadModel::MULTI_THREADS,
+                                                PushTaskPool::PushWokerType::DELETE));
+    _push_delete_workers->start();
+    _alter_tablet_workers.reset(
+            new AlterTableTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _alter_tablet_workers->start();
+    _clone_workers.reset(new CloneTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _clone_workers->start();
+    _storage_medium_migrate_workers.reset(
+            new StorageMediumMigrateTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
+    _storage_medium_migrate_workers->start();
+#endif
     CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
-    CREATE_AND_START_POOL(CLONE, _clone_workers);
-    CREATE_AND_START_POOL(STORAGE_MEDIUM_MIGRATE, _storage_medium_migrate_workers);
     CREATE_AND_START_POOL(CHECK_CONSISTENCY, _check_consistency_workers);
     CREATE_AND_START_POOL(UPLOAD, _upload_workers);
     CREATE_AND_START_POOL(DOWNLOAD, _download_workers);
@@ -93,14 +134,14 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     CREATE_AND_START_POOL(RELEASE_SNAPSHOT, _release_snapshot_workers);
     CREATE_AND_START_POOL(MOVE, _move_dir_workers);
     CREATE_AND_START_POOL(UPDATE_TABLET_META_INFO, _update_tablet_meta_info_workers);
+    CREATE_AND_START_THREAD(PUSH_COOLDOWN_CONF, _push_cooldown_conf_workers);
 
     CREATE_AND_START_THREAD(REPORT_TASK, _report_task_workers);
     CREATE_AND_START_THREAD(REPORT_DISK_STATE, _report_disk_state_workers);
     CREATE_AND_START_THREAD(REPORT_OLAP_TABLE, _report_tablet_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
-    CREATE_AND_START_THREAD(REFRESH_STORAGE_POLICY, _storage_refresh_policy_workers);
-    CREATE_AND_START_POOL(UPDATE_STORAGE_POLICY, _storage_update_policy_workers);
-#endif
+    CREATE_AND_START_POOL(PUSH_STORAGE_POLICY, _push_storage_policy_workers);
+#endif // CLOUD_MODE
 #undef CREATE_AND_START_POOL
 #undef CREATE_AND_START_THREAD
 
@@ -163,8 +204,8 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
             HANDLE_TYPE(TTaskType::UPDATE_TABLET_META_INFO, _update_tablet_meta_info_workers,
                         update_tablet_meta_info_req);
             HANDLE_TYPE(TTaskType::COMPACTION, _submit_table_compaction_workers, compaction_req);
-            HANDLE_TYPE(TTaskType::NOTIFY_UPDATE_STORAGE_POLICY, _storage_update_policy_workers,
-                        update_policy);
+            HANDLE_TYPE(TTaskType::PUSH_STORAGE_POLICY, _push_storage_policy_workers,
+                        push_storage_policy_req);
             HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers, calc_delete_bitmap_req);
 
         case TTaskType::REALTIME_PUSH:
@@ -174,11 +215,10 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
                         "task(signature={}) has wrong request member = push_req", signature);
                 break;
             }
-            if (task.push_req.push_type == TPushType::LOAD ||
-                task.push_req.push_type == TPushType::LOAD_V2) {
-                _push_workers->submit_task(task);
+            if (task.push_req.push_type == TPushType::LOAD_V2) {
+                _push_load_workers->submit_task(task);
             } else if (task.push_req.push_type == TPushType::DELETE) {
-                _delete_workers->submit_task(task);
+                _push_delete_workers->submit_task(task);
             } else {
                 ret_st = Status::InvalidArgument(
                         "task(signature={}, type={}, push_type={}) has wrong push_type", signature,
@@ -199,7 +239,17 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
                 _alter_inverted_index_workers->submit_task(task);
             } else {
                 ret_st = Status::InvalidArgument(strings::Substitute(
-                        "task(signature=$0) has wrong request member", signature));
+                        "task(signature=$0) has wrong request member = alter_inverted_index_req",
+                        signature));
+            }
+            break;
+        case TTaskType::PUSH_COOLDOWN_CONF:
+            if (task.__isset.push_cooldown_conf) {
+                _push_cooldown_conf_workers->submit_task(task);
+            } else {
+                ret_st = Status::InvalidArgument(
+                        "task(signature={}) has wrong request member = push_cooldown_conf",
+                        signature);
             }
             break;
         default:

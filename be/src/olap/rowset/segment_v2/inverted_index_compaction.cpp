@@ -1,3 +1,20 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 #include "inverted_index_compaction.h"
 
 #include <CLucene.h>
@@ -15,12 +32,8 @@ void compact_column(int32_t index_id, int src_segment_num, int dest_segment_num,
                     std::vector<uint32_t> dest_segment_num_rows) {
     lucene::store::Directory* dir =
             DorisCompoundDirectory::getDirectory(fs, index_writer_path.c_str(), false);
-    lucene::index::IndexWriter* index_writer = _CLNEW lucene::index::IndexWriter(
-            dir, nullptr, true /* create */, true /* closeDirOnShutdown */);
-    // NOTE: need to ref_cnt-- for dir,
-    // when index_writer is destroyed, if closeDir is set, dir will be close
-    // _CLDECDELETE(dir) will try to ref_cnt--, when it decreases to 1, dir will be destroyed.
-    _CLLDECDELETE(dir)
+    auto index_writer = _CLNEW lucene::index::IndexWriter(dir, nullptr, true /* create */,
+                                                          true /* closeDirOnShutdown */);
 
     // get compound directory src_index_dirs
     std::vector<lucene::store::Directory*> src_index_dirs(src_segment_num);
@@ -29,7 +42,7 @@ void compact_column(int32_t index_id, int src_segment_num, int dest_segment_num,
         std::string src_idx_full_name =
                 src_index_files[i] + "_" + std::to_string(index_id) + ".idx";
         DorisCompoundReader* reader = new DorisCompoundReader(
-                DorisCompoundDirectory::getDirectory(fs, tablet_path.c_str(), true),
+                DorisCompoundDirectory::getDirectory(fs, tablet_path.c_str()),
                 src_idx_full_name.c_str());
         src_index_dirs[i] = reader;
     }
@@ -47,7 +60,10 @@ void compact_column(int32_t index_id, int src_segment_num, int dest_segment_num,
 
     index_writer->close();
     _CLDELETE(index_writer);
-    index_writer = nullptr;
+    // NOTE: need to ref_cnt-- for dir,
+    // when index_writer is destroyed, if closeDir is set, dir will be close
+    // _CLDECDELETE(dir) will try to ref_cnt--, when it decreases to 1, dir will be destroyed.
+    _CLDECDELETE(dir)
     for (auto d : src_index_dirs) {
         if (d != nullptr) {
             d->close();
@@ -56,7 +72,8 @@ void compact_column(int32_t index_id, int src_segment_num, int dest_segment_num,
     }
     for (auto d : dest_index_dirs) {
         if (d != nullptr) {
-            d->close();
+            // NOTE: DO NOT close dest dir here, because it will be closed when dest index writer finalize.
+            //d->close();
             _CLDELETE(d);
         }
     }

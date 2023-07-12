@@ -24,7 +24,6 @@ import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.InvalidFormatException;
 import org.apache.doris.thrift.TDateLiteral;
 import org.apache.doris.thrift.TExprNode;
@@ -52,6 +51,7 @@ import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
 import java.time.format.TextStyle;
 import java.time.temporal.ChronoField;
+import java.time.temporal.IsoFields;
 import java.time.temporal.TemporalAccessor;
 import java.util.Collections;
 import java.util.List;
@@ -591,7 +591,7 @@ public class DateLiteral extends LiteralExpr {
         type = ScalarType.createDatetimeV2Type(newScale);
     }
 
-    private String convertToString(PrimitiveType type) {
+    public String convertToString(PrimitiveType type) {
         if (type == PrimitiveType.DATE || type == PrimitiveType.DATEV2) {
             return String.format("%04d-%02d-%02d", year, month, day);
         } else if (type == PrimitiveType.DATETIMEV2) {
@@ -668,14 +668,26 @@ public class DateLiteral extends LiteralExpr {
     }
 
     public void castToDate() {
-        if (Config.enable_date_conversion) {
-            this.type = Type.DATEV2;
-        } else {
+        if (this.type.isDateOrDateTime()) {
             this.type = Type.DATE;
+        } else {
+            this.type = Type.DATEV2;
         }
         hour = 0;
         minute = 0;
         second = 0;
+    }
+
+    public boolean hasTimePart() {
+        if (this.type.isDateV2() || this.type.isDate()) {
+            return false;
+        } else {
+            if (hour != 0 || minute != 0 || second != 0) {
+                return true;
+            } else {
+                return !this.type.isDatetime() && microsecond != 0;
+            }
+        }
     }
 
     private long makePackedDatetime() {
@@ -911,30 +923,33 @@ public class DateLiteral extends LiteralExpr {
                     case 'T': // %T Time, 24-hour (HH:mm:ss)
                         builder.appendPattern("HH:mm:ss");
                         break;
-                    case 'v': // %v Week (01..53), where Monday is the first day of the week; used with %x
+                    case 'V': // %V Week (01..53), where Sunday is the first day of the week; used with %X
                         builder.appendValue(ChronoField.ALIGNED_WEEK_OF_YEAR, 2);
                         break;
-                    case 'x':
-                    case 'Y': // %Y Year, numeric, four digits
-                        // %x Year for the week, where Monday is the first day of the week,
-                        // numeric, four digits; used with %v
-                        builder.appendValue(ChronoField.YEAR, 4);
+                    case 'v': // %v Week (01..53), where Monday is the first day of the week; used with %x
+                        builder.appendValue(IsoFields.WEEK_OF_WEEK_BASED_YEAR, 2);
                         break;
                     case 'W': // %W Weekday name (Sunday..Saturday)
                         builder.appendText(ChronoField.DAY_OF_WEEK, TextStyle.FULL);
+                        break;
+                    case 'x': // %x Year for the week where Monday is the first day of the week,
+                        builder.appendValue(IsoFields.WEEK_BASED_YEAR, 4);
+                        break;
+                    case 'X':
+                    case 'Y': // %Y Year, numeric, four digits
+                        // %X Year for the week, where Sunday is the first day of the week,
+                        // numeric, four digits; used with %v
+                        builder.appendValue(ChronoField.YEAR, 4);
                         break;
                     case 'y': // %y Year, numeric (two digits)
                         builder.appendValueReduced(ChronoField.YEAR, 2, 2, 1970);
                         break;
                     // TODO(Gabriel): support microseconds in date literal
+                    case 'D': // %D Day of the month with English suffix (0th, 1st, 2nd, 3rd, …)
                     case 'f': // %f Microseconds (000000..999999)
-                    case 'w': // %w Day of the week (0=Sunday..6=Saturday)
                     case 'U': // %U Week (00..53), where Sunday is the first day of the week
                     case 'u': // %u Week (00..53), where Monday is the first day of the week
-                    case 'V': // %V Week (01..53), where Sunday is the first day of the week; used with %X
-                    case 'X': // %X Year for the week where Sunday is the first day of the week,
-                        // numeric, four digits; used with %V
-                    case 'D': // %D Day of the month with English suffix (0th, 1st, 2nd, 3rd, …)
+                    case 'w': // %w Day of the week (0=Sunday..6=Saturday)
                         throw new AnalysisException(String.format("%%%s not supported in date format string",
                                 character));
                     case '%': // %% A literal "%" character
@@ -1734,5 +1749,4 @@ public class DateLiteral extends LiteralExpr {
             return;
         }
     }
-
 }

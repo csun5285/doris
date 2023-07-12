@@ -17,26 +17,52 @@
 
 #pragma once
 
-#include <future>
-#include <variant>
+#include <gen_cpp/PlanNodes_types.h>
+#include <stddef.h>
+#include <stdint.h>
 
+#include <iosfwd>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+#include "common/global_types.h"
+#include "common/status.h"
 #include "exprs/runtime_filter_slots.h"
-#include "join_op.h"
-#include "process_hash_table_probe.h"
+#include "util/runtime_profile.h"
+#include "vec/aggregate_functions/aggregate_function.h"
+#include "vec/columns/column.h"
+#include "vec/columns/columns_number.h"
+#include "vec/common/aggregation_common.h"
+#include "vec/common/arena.h"
 #include "vec/common/columns_hashing.h"
-#include "vec/common/hash_table/hash_map.h"
 #include "vec/common/hash_table/partitioned_hash_map.h"
+#include "vec/common/string_ref.h"
+#include "vec/core/block.h"
+#include "vec/core/types.h"
+#include "vec/exec/join/join_op.h" // IWYU pragma: keep
+#include "vec/exprs/vexpr_fwd.h"
 #include "vec/runtime/shared_hash_table_controller.h"
 #include "vjoin_node_base.h"
+
+template <typename T>
+struct HashCRC32;
 
 namespace doris {
 
 class ObjectPool;
 class IRuntimeFilter;
+class DescriptorTbl;
+class RuntimeState;
 
 namespace vectorized {
 
-class SharedHashTableController;
+struct UInt128;
+struct UInt256;
+template <int JoinOpType>
+struct ProcessHashTableProbe;
 
 template <typename RowRefListType>
 struct SerializedHashTableContext {
@@ -50,6 +76,7 @@ struct SerializedHashTableContext {
     Iter iter;
     bool inited = false;
     std::vector<StringRef> keys;
+    size_t keys_memory_usage = 0;
 
     void serialize_keys(const ColumnRawPtrs& key_columns, size_t num_rows) {
         if (keys.size() < num_rows) {
@@ -57,10 +84,12 @@ struct SerializedHashTableContext {
         }
 
         _arena.reset(new Arena());
+        keys_memory_usage = 0;
         size_t keys_size = key_columns.size();
         for (size_t i = 0; i < num_rows; ++i) {
             keys[i] = serialize_keys_to_pool_contiguous(i, keys_size, key_columns, *_arena);
         }
+        keys_memory_usage = _arena->size();
     }
 
     void init_once() {
@@ -72,17 +101,6 @@ struct SerializedHashTableContext {
 
 private:
     std::unique_ptr<Arena> _arena;
-};
-
-template <typename HashMethod>
-struct IsSerializedHashTableContextTraits {
-    constexpr static bool value = false;
-};
-
-template <typename Value, typename Mapped>
-struct IsSerializedHashTableContextTraits<
-        ColumnsHashing::HashMethodSerialized<Value, Mapped, true>> {
-    constexpr static bool value = true;
 };
 
 // T should be UInt32 UInt64 UInt128
@@ -181,7 +199,6 @@ using HashTableVariants = std::variant<
         I256FixedKeyHashTableContext<false, RowRefListWithFlags>>;
 
 class VExprContext;
-class HashJoinNode;
 
 using HashTableCtxVariants =
         std::variant<std::monostate, ProcessHashTableProbe<TJoinOp::INNER_JOIN>,
@@ -206,25 +223,42 @@ public:
     static constexpr int PREFETCH_STEP = 64;
 
     HashJoinNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs);
-    ~HashJoinNode();
+    ~HashJoinNode() override;
 
     Status init(const TPlanNode& tnode, RuntimeState* state = nullptr) override;
     Status prepare(RuntimeState* state) override;
     Status open(RuntimeState* state) override;
-    Status get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) override;
     Status get_next(RuntimeState* state, Block* block, bool* eos) override;
     Status close(RuntimeState* state) override;
     void add_hash_buckets_info(const std::string& info);
     void add_hash_buckets_filled_info(const std::string& info);
 
+    Status alloc_resource(RuntimeState* state) override;
+    void release_resource(RuntimeState* state) override;
+    Status sink(doris::RuntimeState* state, vectorized::Block* input_block, bool eos) override;
+    bool need_more_input_data() const;
+    Status pull(RuntimeState* state, vectorized::Block* output_block, bool* eos) override;
+    Status push(RuntimeState* state, vectorized::Block* input_block, bool eos) override;
+    void prepare_for_next() override;
+
+    void debug_string(int indentation_level, std::stringstream* out) const override;
+
+    bool can_sink_write() const {
+        if (_should_build_hash_table) {
+            return true;
+        }
+        return _shared_hash_table_context && _shared_hash_table_context->signaled;
+    }
+
+    bool should_build_hash_table() const { return _should_build_hash_table; }
+
 private:
-    using VExprContexts = std::vector<VExprContext*>;
     // probe expr
-    VExprContexts _probe_expr_ctxs;
+    VExprContextSPtrs _probe_expr_ctxs;
     // build expr
-    VExprContexts _build_expr_ctxs;
+    VExprContextSPtrs _build_expr_ctxs;
     // other expr
-    std::unique_ptr<VExprContext*> _vother_join_conjunct_ptr;
+    VExprContextSPtrs _other_join_conjuncts;
 
     // mark the join column whether support null eq
     std::vector<bool> _is_null_safe_eq_join;
@@ -254,10 +288,17 @@ private:
     RuntimeProfile::Counter* _probe_side_output_timer;
     RuntimeProfile::Counter* _build_side_compute_hash_timer;
     RuntimeProfile::Counter* _build_side_merge_block_timer;
+    RuntimeProfile::Counter* _build_runtime_filter_timer;
+
+    RuntimeProfile::Counter* _open_timer;
+    RuntimeProfile::Counter* _allocate_resource_timer;
+
+    RuntimeProfile::Counter* _build_blocks_memory_usage;
+    RuntimeProfile::Counter* _hash_table_memory_usage;
+    RuntimeProfile::HighWaterMarkCounter* _build_arena_memory_usage;
+    RuntimeProfile::HighWaterMarkCounter* _probe_arena_memory_usage;
 
     RuntimeProfile* _build_phase_profile;
-
-    int64_t _mem_used;
 
     std::shared_ptr<Arena> _arena;
 
@@ -297,13 +338,18 @@ private:
 
     // for cases when a probe row matches more than batch size build rows.
     bool _is_any_probe_match_row_output = false;
+    uint8_t _build_block_idx = 0;
+    int64_t _build_side_mem_used = 0;
+    int64_t _build_side_last_mem_used = 0;
+    MutableBlock _build_side_mutable_block;
+
     SharedHashTableContextPtr _shared_hash_table_context = nullptr;
 
     Status _materialize_build_side(RuntimeState* state) override;
 
     Status _process_build_block(RuntimeState* state, Block& block, uint8_t offset);
 
-    Status _do_evaluate(Block& block, std::vector<VExprContext*>& exprs,
+    Status _do_evaluate(Block& block, VExprContextSPtrs& exprs,
                         RuntimeProfile::Counter& expr_call_timer, std::vector<int>& res_col_ids);
 
     template <bool BuildSide>
@@ -341,6 +387,7 @@ private:
     std::unordered_map<const Block*, std::vector<int>> _inserted_rows;
 
     std::vector<IRuntimeFilter*> _runtime_filters;
+    size_t _build_bf_cardinality = 0;
 };
 } // namespace vectorized
 } // namespace doris

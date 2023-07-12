@@ -17,11 +17,21 @@
 
 #pragma once
 
+#include <aws/core/utils/memory/stl/AWSStringStream.h>
+
 #include <cstddef>
 #include <list>
+#include <memory>
+#include <string>
 
+#include "common/status.h"
+#include "io/cache/block/block_file_cache_fwd.h"
+#include "io/fs/s3_file_bufferpool.h"
+#include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
+#include "io/fs/path.h"
 #include "util/s3_util.h"
+#include "util/slice.h"
 
 namespace Aws::S3 {
 namespace Model {
@@ -32,51 +42,111 @@ class S3Client;
 
 namespace doris {
 namespace io {
+class BlockFileCache;
+class S3FileSystem;
 
 class S3FileWriter final : public FileWriter {
 public:
-    S3FileWriter(Path path, std::shared_ptr<Aws::S3::S3Client> client, const S3Conf& s3_conf);
+    S3FileWriter(std::string key, std::shared_ptr<S3FileSystem> fs, const FileWriterOptions* opts);
     ~S3FileWriter() override;
 
     Status close() override;
 
     Status abort() override;
-
-    Status append(const Slice& data) override;
-
     Status appendv(const Slice* data, size_t data_cnt) override;
-
-    Status write_at(size_t offset, const Slice& data) override;
-
     Status finalize() override;
+    Status write_at(size_t offset, const Slice& data) override {
+        return Status::NotSupported("not support");
+    }
 
-    size_t bytes_appended() const override { return _bytes_appended; }
-
-    int64_t upload_cost_ms() const { return *_upload_cost_ms; }
-
-    const Path& path() const override { return _path; }
+    void mark_index_offset() {
+        if (_expiration_time == 0) {
+            _index_offset = _bytes_appended;
+            // Only the normal data need to change to index data
+            if (_pending_buf) {
+                std::dynamic_pointer_cast<UploadFileBuffer>(_pending_buf)
+                        ->set_index_offset(_index_offset);
+            }
+        }
+    }
 
 private:
+    Status _open();
     Status _close();
 
-    Status _open();
-
-    Status _upload_part();
-
-    void _reset_stream();
-
 private:
-    std::shared_ptr<Aws::S3::S3Client> _client;
-    S3Conf _s3_conf;
-    std::string _upload_id;
-    bool _is_open = false;
-    bool _closed = false;
-    size_t _bytes_appended = 0;
+    class WaitGroup {
+    public:
+        WaitGroup() = default;
 
-    std::shared_ptr<Aws::StringStream> _stream_ptr;
+        ~WaitGroup() = default;
+
+        WaitGroup(const WaitGroup&) = delete;
+        WaitGroup(WaitGroup&&) = delete;
+        void operator=(const WaitGroup&) = delete;
+        void operator=(WaitGroup&&) = delete;
+        // add one counter indicating one more concurrent worker
+        void add(int count = 1) { _count += count; }
+
+        // decrease count if one concurrent worker finished it's work
+        void done() {
+            _count--;
+            if (_count.load() <= 0) {
+                _cv.notify_all();
+            }
+        }
+
+        // wait for all concurrent workers finish their work and return true
+        // would return false if timeout, default timeout would be 5min
+        bool wait(int64_t timeout_seconds = 300) {
+            if (_count.load() <= 0) {
+                return true;
+            }
+            std::unique_lock<std::mutex> lck {_lock};
+            _cv.wait_for(lck, std::chrono::seconds(timeout_seconds),
+                         [this]() { return _count.load() <= 0; });
+            return _count.load() <= 0;
+        }
+
+    private:
+        std::mutex _lock;
+        std::condition_variable _cv;
+        std::atomic_int64_t _count {0};
+    };
+    void _wait_until_finish(std::string task_name);
+    Status _complete();
+    Status _create_multi_upload_request();
+    void _put_object(UploadFileBuffer& buf);
+    void _upload_one_part(int64_t part_num, UploadFileBuffer& buf);
+    FileBlocksHolderPtr _allocate_file_segments(size_t offset);
+
+    std::string _bucket;
+    std::string _key;
+    bool _sse_enabled = false;
+
+    std::shared_ptr<Aws::S3::S3Client> _client;
+    std::string _upload_id;
+    size_t _bytes_appended {0};
+    size_t _index_offset {0};
+
     // Current Part Num for CompletedPart
-    int _cur_part_num = 0;
-    std::list<std::shared_ptr<Aws::S3::Model::CompletedPart>> _completed_parts;
+    int _cur_part_num = 1;
+    std::mutex _completed_lock;
+    std::vector<std::unique_ptr<Aws::S3::Model::CompletedPart>> _completed_parts;
+
+    Key _cache_key;
+    BlockFileCache* _cache;
+
+    WaitGroup _wait;
+
+    std::atomic_bool _failed = false;
+    Status _st = Status::OK();
+    size_t _bytes_written = 0;
+
+    std::shared_ptr<FileBuffer> _pending_buf = nullptr;
+    int64_t _expiration_time;
+    bool _is_cold_data;
+    bool _disable_file_cache = false;
 };
 
 } // namespace io

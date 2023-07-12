@@ -17,17 +17,32 @@
 
 #include "io/fs/local_file_reader.h"
 
-#include <atomic>
+#include <bthread/bthread.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <fmt/format.h>
+#include <glog/logging.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <string>
+#include <utility>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "io/fs/err_utils.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
-#include "util/errno.h"
 
 namespace doris {
 namespace io {
+class IOContext;
 
-LocalFileReader::LocalFileReader(Path path, size_t file_size, int fd, LocalFileSystem* fs)
-        : _fd(fd), _path(std::move(path)), _file_size(file_size), _fs(fs) {
+LocalFileReader::LocalFileReader(Path path, size_t file_size, int fd,
+                                 std::shared_ptr<LocalFileSystem> fs)
+        : _fd(fd), _path(std::move(path)), _file_size(file_size), _fs(std::move(fs)) {
     DorisMetrics::instance()->local_file_open_reading->increment(1);
     DorisMetrics::instance()->local_file_reader_total->increment(1);
 }
@@ -41,22 +56,29 @@ Status LocalFileReader::close() {
     if (_closed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         DorisMetrics::instance()->local_file_open_reading->increment(-1);
         int res = -1;
+#if !defined(USE_BTHREAD_SCANNER)
+        DCHECK(bthread_self() == 0);
+        res = ::close(_fd);
+#else
         if (bthread_self() == 0) {
             res = ::close(_fd);
         } else {
-            AsyncIO::run_task([&] { res = ::close(_fd); }, io::FileSystemType::LOCAL);
+            auto task = [&] { res = ::close(_fd); };
+            AsyncIO::run_task(task, io::FileSystemType::LOCAL);
         }
-
-        if (res == -1) {
-            return Status::IOError("failed to close {}: {}", _path.native(), std::strerror(errno));
+#endif
+        if (-1 == res) {
+            std::string err = errno_to_str();
+            LOG(WARNING) << fmt::format("failed to close {}: {}", _path.native(), err);
+            return Status::IOError("failed to close {}: {}", _path.native(), err);
         }
         _fd = -1;
     }
     return Status::OK();
 }
 
-Status LocalFileReader::read_at(size_t offset, Slice result, const IOContext& io_ctx,
-                                size_t* bytes_read) {
+Status LocalFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                     const IOContext* /*io_ctx*/) {
     DCHECK(!closed());
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",

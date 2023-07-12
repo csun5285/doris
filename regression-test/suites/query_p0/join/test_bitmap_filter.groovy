@@ -21,7 +21,6 @@ suite("test_bitmap_filter", "query_p0") {
     def tbl3 = "test_query_db.baseall"
 
     sql "set runtime_filter_type = 16"
-    sql "set enable_vectorized_engine = true"
     sql "DROP TABLE IF EXISTS ${tbl2}"
     sql """
     CREATE TABLE ${tbl2} (
@@ -77,6 +76,8 @@ suite("test_bitmap_filter", "query_p0") {
     qt_sql17 "select k1, k2 from ${tbl1} t where 10 not in (select k2 from ${tbl2}) order by 1, 2;"
 
     qt_sql18 "select k1, k2 from ${tbl1} t where 100 not in (select k2 from ${tbl2}) order by 1, 2;"
+
+    qt_sql19 "select k1 from ${tbl1} t where k1 in (select k2 from ${tbl2} where bitmap_count(k2) > 6) order by 1;"
 
     test {
         sql "select k1, k2 from ${tbl1} b1 where k1 in (select k2 from ${tbl2} b2 where b1.k2 = b2.k1) order by k1;"

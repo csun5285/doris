@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <tuple>
 
-#include "cloud/io/cloud_file_cache_downloader.h"
+#include "io/cache/block/block_file_cache_downloader.h"
 #include "cloud/utils.h"
 #include "common/logging.h"
 #include "olap/rowset/beta_rowset.h"

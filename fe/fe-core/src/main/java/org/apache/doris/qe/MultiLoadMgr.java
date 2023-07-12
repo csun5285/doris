@@ -87,8 +87,7 @@ public class MultiLoadMgr {
             if (infoMap.containsKey(multiLabel)) {
                 throw new LabelAlreadyUsedException(label);
             }
-            BeSelectionPolicy policy = new BeSelectionPolicy.Builder().setCluster(ConnectContext.get().getClusterName())
-                    .needLoadAvailable().build();
+            BeSelectionPolicy policy = new BeSelectionPolicy.Builder().needLoadAvailable().build();
             List<Long> backendIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, 1);
             if (backendIds.isEmpty()) {
                 throw new DdlException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + " policy: " + policy);
@@ -346,7 +345,15 @@ public class MultiLoadMgr {
             Map<String, String> brokerProperties = Maps.newHashMap();
             brokerProperties.put(BrokerDesc.MULTI_LOAD_BROKER_BACKEND_KEY, backendId.toString());
             BrokerDesc brokerDesc = new BrokerDesc(BrokerDesc.MULTI_LOAD_BROKER, brokerProperties);
-            LoadStmt loadStmt = new LoadStmt(commitLabel, dataDescriptions, brokerDesc, null, properties);
+
+            String comment = "multi load";
+            if (properties.containsKey(LoadStmt.KEY_COMMENT)) {
+                comment = properties.get(LoadStmt.KEY_COMMENT);
+                properties.remove(LoadStmt.KEY_COMMENT);
+            }
+
+            properties.remove(LoadStmt.KEY_COMMENT);
+            LoadStmt loadStmt = new LoadStmt(commitLabel, dataDescriptions, brokerDesc, properties, comment);
             loadStmt.setEtlJobType(EtlJobType.BROKER);
             loadStmt.setOrigStmt(new OriginStatement("", 0));
             loadStmt.setUserInfo(ConnectContext.get().getCurrentUserIdentity());

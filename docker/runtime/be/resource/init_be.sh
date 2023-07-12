@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/env bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -16,90 +16,158 @@
 # specific language governing permissions and limitations
 # under the License.
 
-FE_SERVERS=""
-BE_ADDR=""
+set -eo pipefail
+shopt -s nullglob
 
-ARGS=$(getopt -o -h: --long fe_servers:,be_addr: -n "$0" -- "$@")
+DORIS_HOME="/opt/apache-doris"
 
-eval set -- "${ARGS}"
+# Obtain necessary and basic information to complete initialization
 
-while [[ -n "$1" ]]; do
-    case "$1" in
-    --fe_servers)
-        FE_SERVERS=$2
-        shift
-        ;;
-    --be_addr)
-        BE_ADDR=$2
-        shift
-        ;;
-    --) ;;
+# logging functions
+# usage: doris_[note|warn|error] $log_meg
+#    ie: doris_warn "task may be risky!"
+#   out: 2023-01-08T19:08:16+08:00 [Warn] [Entrypoint]: task may be risky!
+doris_log() {
+  local type="$1"
+  shift
+  # accept argument string or stdin
+  local text="$*"
+  if [ "$#" -eq 0 ]; then text="$(cat)"; fi
+  local dt="$(date -Iseconds)"
+  printf '%s [%s] [Entrypoint]: %s\n' "$dt" "$type" "$text"
+}
+doris_note() {
+  doris_log Note "$@"
+}
+doris_warn() {
+  doris_log Warn "$@" >&2
+}
+doris_error() {
+  doris_log ERROR "$@" >&2
+  exit 1
+}
 
-    *)
-        echo "Error option $1"
-        break
-        ;;
-    esac
-    shift
-done
+# check to see if this file is being run or sourced from another script
+_is_sourced() {
+  [ "${#FUNCNAME[@]}" -ge 2 ] &&
+    [ "${FUNCNAME[0]}" = '_is_sourced' ] &&
+    [ "${FUNCNAME[1]}" = 'source' ]
+}
 
-#echo FE_SERVERS = $FE_SERVERS
-echo "DEBUG >>>>>> FE_SERVERS=[${FE_SERVERS}]"
-echo "DEBUG >>>>>> BE_ADDR=[${BE_ADDR}]"
+docker_setup_env() {
+  sysctl -w vm.max_map_count=2000000
+  declare -g DATABASE_ALREADY_EXISTS
+  if [ -d "${DORIS_HOME}/be/storage/data" ]; then
+    DATABASE_ALREADY_EXISTS='true'
+  fi
+}
 
-feIpArray=()
-feEditLogPortArray=()
+add_priority_networks() {
+  doris_note "add priority_networks ${1} to ${DORIS_HOME}/be/conf/be.conf"
+  echo "priority_networks = ${1}" >>${DORIS_HOME}/be/conf/be.conf
+}
 
-IFS=","
-# shellcheck disable=SC2206
-feServerArray=(${FE_SERVERS})
+show_be_args(){
+  doris_note "============= init args ================"
+  doris_note "MASTER_FE_IP " ${MASTER_FE_IP}
+  doris_note "CURRENT_BE_IP " ${CURRENT_BE_IP}
+  doris_note "CURRENT_BE_PORT " ${CURRENT_BE_PORT}
+  doris_note "RUN_TYPE " ${RUN_TYPE}
+  doris_note "PRIORITY_NETWORKS " ${PRIORITY_NETWORKS}
+}
 
-for i in "${!feServerArray[@]}"; do
-    val=${feServerArray[i]}
-    val=${val// /}
-    tmpFeId=$(echo "${val}" | awk -F ':' '{ sub(/fe/, ""); sub(/ /, ""); print$1}')
-    tmpFeIp=$(echo "${val}" | awk -F ':' '{ sub(/ /, ""); print$2}')
-    tmpFeEditLogPort=$(echo "${val}" | awk -F ':' '{ sub(/ /, ""); print$3}')
-    feIpArray[tmpFeId]=${tmpFeIp}
-    feEditLogPortArray[tmpFeId]=${tmpFeEditLogPort}
-done
+# Execute sql script, passed via stdin
+# usage: docker_process_sql sql_script
+docker_process_sql() {
+  set +e
+  mysql -uroot -P9030 -h${MASTER_FE_IP} --comments "$@" 2>/dev/null
+}
 
-be_ip=$(echo "${BE_ADDR}" | awk -F ':' '{ sub(/ /, ""); print$1}')
-be_heartbeat_port=$(echo "${BE_ADDR}" | awk -F ':' '{ sub(/ /, ""); print$2}')
+node_role_conf(){
+  if [[ ${NODE_ROLE} == 'computation' ]]; then
+    doris_note "this node role is computation"
+    echo "be_node_role=computation" >>${DORIS_HOME}/be/conf/be.conf
+  else
+    doris_note "this node role is mix"
+  fi
+}
 
-echo "DEBUG >>>>>> feIpArray = ${feIpArray[*]}"
-echo "DEBUG >>>>>> feEditLogPortArray = ${feEditLogPortArray[*]}"
-echo "DEBUG >>>>>> masterFe = ${feIpArray[1]}:${feEditLogPortArray[1]}"
-echo "DEBUG >>>>>> be_addr = ${be_ip}:${be_heartbeat_port}"
-
-priority_networks=$(echo "${be_ip}" | awk -F '.' '{print$1"."$2"."$3".0/24"}')
-echo "DEBUG >>>>>> Append the configuration [priority_networks = ${priority_networks}] to /opt/apache-doris/be/conf/fe.conf"
-echo "priority_networks = ${priority_networks}" >>/opt/apache-doris/be/conf/be.conf
-
-registerMySQL="mysql -uroot -P9030 -h${feIpArray[1]} -e \"alter system add backend '${be_ip}:${be_heartbeat_port}'\""
-echo "DEBUG >>>>>> registerMySQL = ${registerMySQL}"
-
-registerShell="/opt/apache-doris/be/bin/start_be.sh &"
-echo "DEBUG >>>>>> registerShell = ${registerShell}"
-
-for ((i = 0; i <= 20; i++)); do
-
-    ## check be register status
-    echo "mysql -uroot -P9030 -h${feIpArray[1]} -e \"show backends\" | grep \" ${be_ip} \" | grep \" ${be_heartbeat_port} \""
-    mysql -uroot -P9030 -h"${feIpArray[1]}" -e "show backends" | grep "[[:space:]]${be_ip}[[:space:]]" | grep "[[:space:]]${be_heartbeat_port}[[:space:]]"
-    be_join_status=$?
-    echo "DEBUG >>>>>> The " "${i}" "time to register BE node, be_join_status=${be_join_status}"
-    if [[ "${be_join_status}" == 0 ]]; then
-        ## be registe successfully
-        echo "DEBUG >>>>>> run command ${registerShell}"
-        eval "${registerShell}"
+register_be_to_fe() {
+  set +e
+  # check fe status
+  local is_fe_start=false
+  for i in {1..300}; do
+    docker_process_sql <<<"alter system add backend '${CURRENT_BE_IP}:${CURRENT_BE_PORT}'"
+    register_be_status=$?
+    if [[ $register_be_status == 0 ]]; then
+      doris_note "BE successfully registered to FE！"
+      is_fe_start=true
+      break
     else
-        ## be doesn't registe
-        echo "DEBUG >>>>>> run commnad ${registerMySQL}"
-        eval "${registerMySQL}"
-        if [[ "${i}" == 20 ]]; then
-            echo "DEBUG >>>>>> BE Start Or Register FAILED!"
-        fi
-        sleep 5
+      check_be_status
+      if [ -n "$BE_ALREADY_EXISTS" ]; then
+        doris_warn "Same backend already exists! No need to register again！"
+        break
+      fi
+      if [[ $(( $i % 20 )) == 1 ]]; then
+          doris_warn "register_be_status: ${register_be_status}"
+          doris_warn "BE failed registered to FE!"
+      fi
     fi
-done
+    if [[ $(( $i % 20 )) == 1 ]]; then
+      doris_note "Register BE to FE is failed. retry."
+    fi
+    sleep 1
+  done
+  if ! [[ $is_fe_start ]]; then
+    doris_error "Failed to register BE to FE！Tried 30 times！Maybe FE Start Failed！"
+  fi
+}
+
+check_be_status() {
+    set +e
+    local is_fe_start=false
+    for i in {1..300}; do
+        if [[ $(($i % 20)) == 1 ]]; then
+            doris_warn "start check be register status~"
+        fi
+        docker_process_sql <<<"show backends;" | grep "[[:space:]]${CURRENT_BE_IP}[[:space:]]" | grep "[[:space:]]${CURRENT_BE_PORT}[[:space:]]"
+        be_join_status=$?
+        if [[ "${be_join_status}" == 0 ]]; then
+            doris_note "Verify that BE is registered to FE successfully"
+            is_fe_start=true
+            return
+        else
+            if [[ $(($i % 20)) == 1 ]]; then
+                doris_note "register is failed, wait next~"
+            fi
+        fi
+        sleep 1
+    done
+    if [[ ! $is_fe_start ]]; then
+        doris_error "Failed to register BE to FE！Tried 30 times！Maybe FE Start Failed！"
+    fi
+}
+
+
+_main() {
+  if [[ $RUN_TYPE == "K8S" ]]; then
+      start_be.sh
+  else
+      docker_setup_env
+      if [ -z "$DATABASE_ALREADY_EXISTS" ]; then
+        add_priority_networks $PRIORITY_NETWORKS
+        node_role_conf
+      fi
+      show_be_args
+      register_be_to_fe
+      check_be_status
+      doris_note "Ready to start BE！"
+      start_be.sh
+      exec "$@"
+  fi
+}
+
+if ! _is_sourced; then
+  _main "$@"
+fi

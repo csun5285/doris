@@ -53,11 +53,12 @@ public class ShowTrashStmt extends ShowStmt {
     public void analyze(Analyzer analyzer) throws AnalysisException {
         // ATTN: root has admin and operator Privileges
         if (Config.isCloudMode()
-                && !Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
+                && !Env.getCurrentEnv().getAccessManager()
+                .checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_UNSUPPORTED_OPERATION_ERROR);
         }
-        if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)
-                && !Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
+        if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)
+                && !Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(),
                         PrivPredicate.OPERATOR)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN/OPERATOR");
         }

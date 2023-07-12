@@ -17,13 +17,28 @@
 
 #include "vec/exprs/vcast_expr.h"
 
-#include <string_view>
+#include <fmt/format.h>
+#include <gen_cpp/Types_types.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <algorithm>
+#include <memory>
+#include <ostream>
+#include <vector>
 
 #include "common/status.h"
-#include "vec/core/field.h"
-#include "vec/data_types/data_type_factory.hpp"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/core/columns_with_type_and_name.h"
 #include "vec/exprs/vexpr.h"
+#include "vec/exprs/vexpr_context.h"
 #include "vec/functions/simple_function_factory.h"
+
+namespace doris {
+class RowDescriptor;
+class RuntimeState;
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -34,17 +49,21 @@ doris::Status VCastExpr::prepare(doris::RuntimeState* state, const doris::RowDes
     DCHECK_EQ(_children.size(), 1);
     auto child = _children[0];
     const auto& child_name = child->expr_name();
-    auto child_column = child->data_type()->create_column();
 
     // create a const string column
     _target_data_type = _data_type;
-    _target_data_type_name = DataTypeFactory::instance().get(_target_data_type);
-    _cast_param_data_type = std::make_shared<DataTypeString>();
-    _cast_param = _cast_param_data_type->create_column_const(1, _target_data_type_name);
+    // TODO(xy): support return struct type name
+    _target_data_type_name = _target_data_type->get_name();
+    // Using typeindex to indicate the datatype, not using type name because
+    // type name is not stable, but type index is stable and immutable
+    _cast_param_data_type = _target_data_type;
+    // Has to cast to int16_t or there will be compile error because there is no
+    // TypeIndexField
+    _cast_param = _cast_param_data_type->create_column_const_with_default_value(1);
 
     ColumnsWithTypeAndName argument_template;
     argument_template.reserve(2);
-    argument_template.emplace_back(std::move(child_column), child->data_type(), child_name);
+    argument_template.emplace_back(nullptr, child->data_type(), child_name);
     argument_template.emplace_back(_cast_param, _cast_param_data_type, _target_data_type_name);
     _function = SimpleFunctionFactory::instance().get_function(function_name, argument_template,
                                                                _data_type);
@@ -99,7 +118,7 @@ std::string VCastExpr::debug_string() const {
     out << "CastExpr(CAST " << _cast_param_data_type->get_name() << " to "
         << _target_data_type->get_name() << "){";
     bool first = true;
-    for (VExpr* input_expr : children()) {
+    for (auto& input_expr : children()) {
         if (first) {
             first = false;
         } else {

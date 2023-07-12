@@ -34,9 +34,9 @@ hdfs
 
 HDFS table-valued-function(tvf), allows users to read and access file contents on S3-compatible object storage, just like accessing relational table. Currently supports `csv/csv_with_names/csv_with_names_and_types/json/parquet/orc` file format.
 
-**grammer**
+#### syntax
 
-```
+```sql
 hdfs(
   "uri" = "..",
   "fs.defaultFS" = "...",
@@ -66,6 +66,7 @@ File format parameters:
 - `format`: (required) Currently support `csv/csv_with_names/csv_with_names_and_types/json/parquet/orc`
 - `column_separator`: (optional) default `,`.
 - `line_delimiter`: (optional) default `\n`.
+- `compress_type`: (optional) Currently support `UNKNOWN/PLAIN/GZ/LZO/BZ2/LZ4FRAME/DEFLATE`. Default value is `UNKNOWN`, it will automatically infer the type based on the suffix of `uri`.
 
     The following 6 parameters are used for loading in json format. For specific usage methods, please refer to: [Json Load](../../../data-operate/import/import-way/load-json-format.md)
 
@@ -75,6 +76,11 @@ File format parameters:
 - `json_paths`: (optional) default `""`
 - `num_as_string`: (optional) default `false`
 - `fuzzy_parse`: (optional) default `false`
+
+    <version since="dev">The following 2 parameters are used for loading in csv format</version>
+
+- `trim_double_quotes`: Boolean type (optional), the default value is `false`. True means that the outermost double quotes of each field in the csv file are trimmed.
+- `skip_lines`: Integer type (optional), the default value is 0. It will skip some lines in the head of csv file. It will be disabled when the format is `csv_with_names` or `csv_with_names_and_types`.
 
 ### Examples
 

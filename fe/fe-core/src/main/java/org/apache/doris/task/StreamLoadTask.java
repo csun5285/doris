@@ -83,6 +83,10 @@ public class StreamLoadTask implements LoadTaskInfo {
     private String headerType = "";
     private List<String> hiddenColumns;
     private boolean trimDoubleQuotes = false;
+    private boolean isPartialUpdate = false;
+
+    private int skipLines = 0;
+    private boolean enableProfile = false;
 
     public StreamLoadTask(TUniqueId id, long txnId, TFileType fileType, TFileFormatType formatType,
             TFileCompressType compressType) {
@@ -257,6 +261,20 @@ public class StreamLoadTask implements LoadTaskInfo {
         return trimDoubleQuotes;
     }
 
+    public int getSkipLines() {
+        return skipLines;
+    }
+
+    @Override
+    public boolean getEnableProfile() {
+        return enableProfile;
+    }
+
+    @Override
+    public boolean isPartialUpdate() {
+        return isPartialUpdate;
+    }
+
     public static StreamLoadTask fromTStreamLoadPutRequest(TStreamLoadPutRequest request) throws UserException {
         StreamLoadTask streamLoadTask = new StreamLoadTask(request.getLoadId(), request.getTxnId(),
                 request.getFileType(), request.getFormatType(),
@@ -358,6 +376,15 @@ public class StreamLoadTask implements LoadTaskInfo {
         }
         if (request.isSetTrimDoubleQuotes()) {
             trimDoubleQuotes = request.isTrimDoubleQuotes();
+        }
+        if (request.isSetSkipLines()) {
+            skipLines = request.getSkipLines();
+        }
+        if (request.isSetEnableProfile()) {
+            enableProfile = request.isEnableProfile();
+        }
+        if (request.isSetPartialUpdate()) {
+            isPartialUpdate = request.isPartialUpdate();
         }
     }
 

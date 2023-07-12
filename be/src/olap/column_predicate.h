@@ -20,10 +20,11 @@
 #include <roaring/roaring.hh>
 
 #include "olap/schema.h"
-#include "olap/column_block.h"
 #include "olap/rowset/segment_v2/bitmap_index_reader.h"
 #include "olap/rowset/segment_v2/inverted_index_reader.h"
 #include "olap/rowset/segment_v2/bloom_filter.h"
+#include "olap/rowset/segment_v2/inverted_index_reader.h"
+#include "olap/schema.h"
 #include "olap/selection_vector.h"
 #include "vec/columns/column.h"
 
@@ -31,8 +32,7 @@ using namespace doris::segment_v2;
 
 namespace doris {
 
-// class Schema;
-class RowBlockV2;
+class Schema;
 
 struct PredicateParams {
     std::string value;
@@ -113,12 +113,31 @@ struct PredicateTypeTraits {
         return (type == PredicateType::IN_LIST || type == PredicateType::NOT_IN_LIST);
     }
 
+    static constexpr bool is_equal_or_list(PredicateType type) {
+        return (type == PredicateType::EQ || type == PredicateType::IN_LIST);
+    }
+
     static constexpr bool is_comparison(PredicateType type) {
         return (type == PredicateType::EQ || type == PredicateType::NE ||
                 type == PredicateType::LT || type == PredicateType::LE ||
                 type == PredicateType::GT || type == PredicateType::GE);
     }
 };
+
+#define EVALUATE_BY_SELECTOR(EVALUATE_IMPL_WITH_NULL_MAP, EVALUATE_IMPL_WITHOUT_NULL_MAP) \
+    const bool is_dense_column = pred_col.size() == size;                                 \
+    for (uint16_t i = 0; i < size; i++) {                                                 \
+        uint16_t idx = is_dense_column ? i : sel[i];                                      \
+        if constexpr (is_nullable) {                                                      \
+            if (EVALUATE_IMPL_WITH_NULL_MAP(idx)) {                                       \
+                sel[new_size++] = idx;                                                    \
+            }                                                                             \
+        } else {                                                                          \
+            if (EVALUATE_IMPL_WITHOUT_NULL_MAP(idx)) {                                    \
+                sel[new_size++] = idx;                                                    \
+            }                                                                             \
+        }                                                                                 \
+    }
 
 class ColumnPredicate {
 public:
@@ -131,19 +150,12 @@ public:
 
     virtual PredicateType type() const = 0;
 
-    // evaluate predicate on ColumnBlock
-    virtual void evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size) const = 0;
-    virtual void evaluate_or(ColumnBlock* block, uint16_t* sel, uint16_t size,
-                             bool* flags) const = 0;
-    virtual void evaluate_and(ColumnBlock* block, uint16_t* sel, uint16_t size,
-                              bool* flags) const = 0;
-
     //evaluate predicate on Bitmap
     virtual Status evaluate(BitmapIndexIterator* iterator, uint32_t num_rows,
                             roaring::Roaring* roaring) const = 0;
 
     //evaluate predicate on inverted
-    virtual Status evaluate(const Schema& schema, InvertedIndexIterator* iterators,
+    virtual Status evaluate(const Schema& schema, InvertedIndexIterator* iterator,
                             uint32_t num_rows, roaring::Roaring* bitmap) const {
         return Status::NotSupported(
                 "Not Implemented evaluate with inverted index, please check the predicate");
@@ -154,11 +166,11 @@ public:
     virtual uint16_t evaluate(const vectorized::IColumn& column, uint16_t* sel,
                               uint16_t size) const {
         return size;
-    };
+    }
     virtual void evaluate_and(const vectorized::IColumn& column, const uint16_t* sel, uint16_t size,
-                              bool* flags) const {};
+                              bool* flags) const {}
     virtual void evaluate_or(const vectorized::IColumn& column, const uint16_t* sel, uint16_t size,
-                             bool* flags) const {};
+                             bool* flags) const {}
 
     virtual bool evaluate_and(const std::pair<WrapperField*, WrapperField*>& statistic) const {
         return true;
@@ -182,6 +194,15 @@ public:
                                   bool* flags) const {
         DCHECK(false) << "should not reach here";
     }
+
+    virtual std::string get_search_str() const {
+        DCHECK(false) << "should not reach here";
+        return "";
+    }
+
+    virtual void set_page_ng_bf(std::unique_ptr<segment_v2::BloomFilter>) {
+        DCHECK(false) << "should not reach here";
+    }
     uint32_t column_id() const { return _column_id; }
 
     bool opposite() const { return _opposite; }
@@ -195,6 +216,13 @@ public:
     virtual bool need_to_clone() const { return false; }
 
     virtual void clone(ColumnPredicate** to) const { LOG(FATAL) << "clone not supported"; }
+
+    virtual int get_filter_id() const { return -1; }
+
+    PredicateFilterInfo get_filtered_info() const {
+        return PredicateFilterInfo {static_cast<int>(type()), _evaluated_rows - 1,
+                                    _evaluated_rows - 1 - _passed_rows};
+    }
 
     std::shared_ptr<PredicateParams> predicate_params() { return _predicate_params; }
 
@@ -246,6 +274,8 @@ protected:
     // TODO: the value is only in delete condition, better be template value
     bool _opposite;
     std::shared_ptr<PredicateParams> _predicate_params;
+    mutable uint64_t _evaluated_rows = 1;
+    mutable uint64_t _passed_rows = 0;
 };
 
 } //namespace doris

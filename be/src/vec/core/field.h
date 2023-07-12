@@ -20,17 +20,37 @@
 
 #pragma once
 
+#include <fmt/format.h>
+#include <glog/logging.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <map>
+#include <new>
+#include <ostream>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
-#include "vec/common/exception.h"
-#include "vec/common/int_exp.h"
-#include "vec/common/strong_typedef.h"
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
 #include "vec/common/uint128.h"
 #include "vec/core/types.h"
+
+namespace doris {
+namespace vectorized {
+template <typename T>
+struct TypeId;
+template <typename T>
+struct TypeName;
+} // namespace vectorized
+struct PackedInt128;
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -71,6 +91,7 @@ struct AvgNearestFieldTypeTrait<Int64> {
 };
 
 class Field;
+
 using FieldVector = std::vector<Field>;
 
 /// Array and Tuple use the same storage type -- FieldVector, but we declare
@@ -85,6 +106,8 @@ using FieldVector = std::vector<Field>;
 
 DEFINE_FIELD_VECTOR(Array);
 DEFINE_FIELD_VECTOR(Tuple);
+DEFINE_FIELD_VECTOR(Map);
+#undef DEFINE_FIELD_VECTOR
 
 using FieldMap = std::map<String, Field, std::less<String>>;
 #define DEFINE_FIELD_MAP(X)       \
@@ -160,6 +183,9 @@ public:
     }
 
     JsonbField& operator=(JsonbField&& x) {
+        if (data) {
+            delete[] data;
+        }
         data = x.data;
         size = x.size;
         x.data = nullptr;
@@ -174,7 +200,7 @@ public:
     }
 
     const char* get_value() const { return data; }
-    const uint32_t get_size() const { return size; }
+    uint32_t get_size() const { return size; }
 
     bool operator<(const JsonbField& r) const {
         LOG(FATAL) << "comparing between JsonbField is not supported";
@@ -314,7 +340,8 @@ public:
             AggregateFunctionState = 22,
             JSONB = 23,
             Decimal128I = 24,
-            VariantMap = 25,
+            Map = 25,
+            VariantMap = 26,
         };
 
         static const int MIN_NON_POD = 16;
@@ -341,6 +368,8 @@ public:
                 return "Array";
             case Tuple:
                 return "Tuple";
+            case Map:
+                return "Map";
             case Decimal32:
                 return "Decimal32";
             case Decimal64:
@@ -509,6 +538,8 @@ public:
             return get<Array>() < rhs.get<Array>();
         case Types::Tuple:
             return get<Tuple>() < rhs.get<Tuple>();
+        case Types::Map:
+            return get<Map>() < rhs.get<Map>();
         case Types::Decimal32:
             return get<DecimalField<Decimal32>>() < rhs.get<DecimalField<Decimal32>>();
         case Types::Decimal64:
@@ -555,6 +586,8 @@ public:
             return get<Array>() <= rhs.get<Array>();
         case Types::Tuple:
             return get<Tuple>() <= rhs.get<Tuple>();
+        case Types::Map:
+            return get<Map>() < rhs.get<Map>();
         case Types::Decimal32:
             return get<DecimalField<Decimal32>>() <= rhs.get<DecimalField<Decimal32>>();
         case Types::Decimal64:
@@ -594,6 +627,8 @@ public:
             return get<Array>() == rhs.get<Array>();
         case Types::Tuple:
             return get<Tuple>() == rhs.get<Tuple>();
+        case Types::Map:
+            return get<Map>() < rhs.get<Map>();
         case Types::UInt128:
             return get<UInt128>() == rhs.get<UInt128>();
         case Types::Int128:
@@ -621,8 +656,8 @@ public:
 
 private:
     std::aligned_union_t<DBMS_MIN_FIELD_SIZE - sizeof(Types::Which), Null, UInt64, UInt128, Int64,
-                         Int128, Float64, String, JsonbField, Array, Tuple, DecimalField<Decimal32>,
-                         DecimalField<Decimal64>, DecimalField<Decimal128>,
+                         Int128, Float64, String, JsonbField, Array, Tuple, Map, VariantMap,
+                         DecimalField<Decimal32>, DecimalField<Decimal64>, DecimalField<Decimal128>,
                          DecimalField<Decimal128I>, AggregateFunctionStateData>
             storage;
 
@@ -685,6 +720,9 @@ private:
             return;
         case Types::Tuple:
             f(field.template get<Tuple>());
+            return;
+        case Types::Map:
+            f(field.template get<Map>());
             return;
         case Types::Decimal32:
             f(field.template get<DecimalField<Decimal32>>());
@@ -760,6 +798,9 @@ private:
             break;
         case Types::Tuple:
             destroy<Tuple>();
+            break;
+        case Types::Map:
+            destroy<Map>();
             break;
         case Types::AggregateFunctionState:
             destroy<AggregateFunctionStateData>();
@@ -849,6 +890,10 @@ struct Field::TypeToEnum<Tuple> {
     static constexpr Types::Which value = Types::Tuple;
 };
 template <>
+struct Field::TypeToEnum<Map> {
+    static const Types::Which value = Types::Map;
+};
+template <>
 struct Field::TypeToEnum<DecimalField<Decimal32>> {
     static constexpr Types::Which value = Types::Decimal32;
 };
@@ -914,6 +959,10 @@ struct Field::EnumToType<Field::Types::Tuple> {
     using Type = Tuple;
 };
 template <>
+struct Field::EnumToType<Field::Types::Map> {
+    using Type = Map;
+};
+template <>
 struct Field::EnumToType<Field::Types::Decimal32> {
     using Type = DecimalField<Decimal32>;
 };
@@ -972,6 +1021,10 @@ struct TypeName<VariantMap> {
     static std::string get() { return "VariantMap"; }
 };
 template <>
+struct TypeName<Map> {
+    static std::string get() { return "Map"; }
+};
+template <>
 struct TypeName<AggregateFunctionStateData> {
     static std::string get() { return "AggregateFunctionState"; }
 };
@@ -989,7 +1042,7 @@ struct NearestFieldTypeImpl<signed char> {
 };
 template <>
 struct NearestFieldTypeImpl<unsigned char> {
-    using Type = UInt64;
+    using Type = Int64;
 };
 
 template <>
@@ -1108,6 +1161,10 @@ struct NearestFieldTypeImpl<Tuple> {
     using Type = Tuple;
 };
 template <>
+struct NearestFieldTypeImpl<Map> {
+    using Type = Map;
+};
+template <>
 struct NearestFieldTypeImpl<bool> {
     using Type = UInt64;
 };
@@ -1126,13 +1183,26 @@ struct NearestFieldTypeImpl<AggregateFunctionStateData> {
     using Type = AggregateFunctionStateData;
 };
 
+template <>
+struct Field::TypeToEnum<PackedInt128> {
+    static const Types::Which value = Types::Int128;
+};
+
+template <>
+struct NearestFieldTypeImpl<PackedInt128> {
+    using Type = Int128;
+};
+
 template <typename T>
 decltype(auto) cast_to_nearest_field_type(T&& x) {
     using U = NearestFieldType<std::decay_t<T>>;
-    if constexpr (std::is_same_v<std::decay_t<T>, U>)
+    if constexpr (std::is_same_v<PackedInt128, std::decay_t<T>>) {
+        return U(x.value);
+    } else if constexpr (std::is_same_v<std::decay_t<T>, U>) {
         return std::forward<T>(x);
-    else
+    } else {
         return U(x);
+    }
 }
 
 /// This (rather tricky) code is to avoid ambiguity in expressions like
@@ -1168,8 +1238,5 @@ std::enable_if_t<!std::is_same_v<std::decay_t<T>, Field>, Field&> Field::operato
 
     return *this;
 }
-
-class ReadBuffer;
-class WriteBuffer;
 
 } // namespace doris::vectorized

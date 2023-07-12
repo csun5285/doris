@@ -23,6 +23,7 @@
 #include "vec/columns/column_nullable.h"
 #include "vec/columns/columns_number.h"
 #include "vec/common/assert_cast.h"
+#include "vec/core/block.h" // IWYU pragma: keep
 #include "vec/runtime/shared_hash_table_controller.h"
 
 namespace doris {
@@ -31,14 +32,14 @@ namespace doris {
 template <typename ExprCtxType>
 class RuntimeFilterSlotsBase {
 public:
-    RuntimeFilterSlotsBase(const std::vector<ExprCtxType*>& prob_expr_ctxs,
-                           const std::vector<ExprCtxType*>& build_expr_ctxs,
+    RuntimeFilterSlotsBase(const std::vector<std::shared_ptr<ExprCtxType>>& prob_expr_ctxs,
+                           const std::vector<std::shared_ptr<ExprCtxType>>& build_expr_ctxs,
                            const std::vector<TRuntimeFilterDesc>& runtime_filter_descs)
             : _probe_expr_context(prob_expr_ctxs),
               _build_expr_context(build_expr_ctxs),
               _runtime_filter_descs(runtime_filter_descs) {}
 
-    Status init(RuntimeState* state, int64_t hash_table_size) {
+    Status init(RuntimeState* state, int64_t hash_table_size, size_t build_bf_cardinality) {
         DCHECK(_probe_expr_context.size() == _build_expr_context.size());
 
         // runtime filter effect strategy
@@ -103,6 +104,10 @@ public:
                 runtime_filter->change_to_bloom_filter();
             }
 
+            if (runtime_filter->is_bloomfilter()) {
+                RETURN_IF_ERROR(runtime_filter->init_bloom_filter(build_bf_cardinality));
+            }
+
             // Note:
             // In the case that exist *remote target* and in filter and other filter,
             // we must merge other filter whatever in filter is over the max num in current node,
@@ -153,20 +158,6 @@ public:
         }
 
         return Status::OK();
-    }
-
-    void insert(TupleRow* row) {
-        for (int i = 0; i < _build_expr_context.size(); ++i) {
-            auto iter = _runtime_filters.find(i);
-            if (iter != _runtime_filters.end()) {
-                void* val = _build_expr_context[i]->get_value(row);
-                if (val != nullptr) {
-                    for (auto filter : iter->second) {
-                        filter->insert(val);
-                    }
-                }
-            }
-        }
     }
 
     void insert(std::unordered_map<const vectorized::Block*, std::vector<int>>& datas) {
@@ -256,13 +247,12 @@ public:
     bool empty() { return !_runtime_filters.size(); }
 
 private:
-    const std::vector<ExprCtxType*>& _probe_expr_context;
-    const std::vector<ExprCtxType*>& _build_expr_context;
+    const std::vector<std::shared_ptr<ExprCtxType>>& _probe_expr_context;
+    const std::vector<std::shared_ptr<ExprCtxType>>& _build_expr_context;
     const std::vector<TRuntimeFilterDesc>& _runtime_filter_descs;
     // prob_contition index -> [IRuntimeFilter]
     std::map<int, std::list<IRuntimeFilter*>> _runtime_filters;
 };
 
-using RuntimeFilterSlots = RuntimeFilterSlotsBase<ExprContext>;
 using VRuntimeFilterSlots = RuntimeFilterSlotsBase<vectorized::VExprContext>;
 } // namespace doris

@@ -17,20 +17,19 @@
 
 package org.apache.doris.analysis;
 
-import org.apache.doris.catalog.AggregateType;
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.PartitionType;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
-import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import org.apache.commons.lang.NotImplementedException;
+import org.apache.commons.lang3.NotImplementedException;
 
 import java.util.List;
 import java.util.Map;
@@ -41,6 +40,8 @@ public class PartitionDesc {
     protected List<SinglePartitionDesc> singlePartitionDescs;
 
     protected PartitionType type;
+
+    public PartitionDesc() {}
 
     public PartitionDesc(List<String> partitionColNames,
                          List<AllPartitionDesc> allPartitionDescs) throws AnalysisException {
@@ -70,22 +71,25 @@ public class PartitionDesc {
         return this.singlePartitionDescs;
     }
 
+    public SinglePartitionDesc getSinglePartitionDescByName(String partitionName) {
+        for (SinglePartitionDesc singlePartitionDesc : this.singlePartitionDescs) {
+            if (singlePartitionDesc.getPartitionName().equals(partitionName)) {
+                return singlePartitionDesc;
+            }
+        }
+        return null;
+    }
+
     public List<String> getPartitionColNames() {
         return partitionColNames;
     }
 
-    public void analyze(List<ColumnDef> columnDefs, Map<String, String> otherProperties) throws AnalysisException {
+    public void analyze(List<ColumnDef> columnDefs, Map<String, String> otherProperties, KeysDesc keysDesc)
+            throws AnalysisException {
         if (partitionColNames == null || partitionColNames.isEmpty()) {
             throw new AnalysisException("No partition columns.");
         }
 
-        // `analyzeUniqueKeyMergeOnWrite` would modify `properties`, which will be used later,
-        // so we just clone a properties map here.
-        boolean enableUniqueKeyMergeOnWrite = false;
-        if (otherProperties != null) {
-            enableUniqueKeyMergeOnWrite =
-                PropertyAnalyzer.analyzeUniqueKeyMergeOnWrite(Maps.newHashMap(otherProperties));
-        }
         Set<String> partColNames = Sets.newTreeSet(String.CASE_INSENSITIVE_ORDER);
         for (String partitionCol : partitionColNames) {
             if (!partColNames.add(partitionCol)) {
@@ -95,9 +99,10 @@ public class PartitionDesc {
             boolean found = false;
             for (ColumnDef columnDef : columnDefs) {
                 if (columnDef.getName().equals(partitionCol)) {
-                    if (!columnDef.isKey() && (columnDef.getAggregateType() != AggregateType.NONE
-                            || enableUniqueKeyMergeOnWrite)) {
-                        throw new AnalysisException("The partition column could not be aggregated column");
+                    if (!columnDef.isKey() && keysDesc.getKeysType() != KeysType.DUP_KEYS) {
+                        throw new AnalysisException(
+                                "The partition column must be key column in " + keysDesc.getKeysType().toSql()
+                                        + " table");
                     }
                     if (columnDef.getType().isFloatingPointType()) {
                         throw new AnalysisException("Floating point type column can not be partition column");
@@ -154,11 +159,11 @@ public class PartitionDesc {
     }
 
     public String toSql() {
-        throw new NotImplementedException();
+        throw new NotImplementedException("toSql not implemented");
     }
 
     public PartitionInfo toPartitionInfo(List<Column> schema, Map<String, Long> partitionNameToId, boolean isTemp)
-            throws DdlException {
-        throw new NotImplementedException();
+            throws DdlException, AnalysisException {
+        throw new NotImplementedException("toPartitionInfo not implemented");
     }
 }

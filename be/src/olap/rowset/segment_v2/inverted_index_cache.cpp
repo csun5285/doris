@@ -15,11 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "cloud/io/file_system.h"
+#include "io/fs/file_system.h"
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
+
+#include <CLucene/debug/mem.h>
+#include <CLucene/search/IndexSearcher.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <string.h>
+#include <sys/resource.h>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <iostream>
+
+#include "common/logging.h"
+#include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/inverted_index_compound_directory.h"
 #include "olap/rowset/segment_v2/inverted_index_compound_reader.h"
+#include "runtime/thread_context.h"
 #include "util/defer_op.h"
+#include "util/runtime_profile.h"
 
 namespace doris {
 namespace segment_v2 {
@@ -27,12 +42,14 @@ namespace segment_v2 {
 InvertedIndexSearcherCache* InvertedIndexSearcherCache::_s_instance = nullptr;
 
 IndexSearcherPtr InvertedIndexSearcherCache::build_index_searcher(const io::FileSystemSPtr& fs,
-                                              const std::string& index_dir,
-                                              const std::string& file_name) {
-    DorisCompoundReader* directory = new DorisCompoundReader(
-            DorisCompoundDirectory::getDirectory(fs, index_dir.c_str()), file_name.c_str());
+                                                                  const std::string& index_dir,
+                                                                  const std::string& file_name) {
+    DorisCompoundReader* directory =
+            new DorisCompoundReader(DorisCompoundDirectory::getDirectory(fs, index_dir.c_str()),
+                                    file_name.c_str(), config::inverted_index_read_buffer_size);
     auto closeDirectory = true;
-    auto index_searcher = std::make_shared<lucene::search::IndexSearcher>(directory, closeDirectory);
+    auto index_searcher =
+            std::make_shared<lucene::search::IndexSearcher>(directory, closeDirectory);
     // NOTE: need to cl_refcount-- here, so that directory will be deleted when
     // index_searcher is destroyed
     _CLDECDELETE(directory)
@@ -45,8 +62,8 @@ void InvertedIndexSearcherCache::create_global_instance(size_t capacity, uint32_
     _s_instance = &instance;
 }
 
-InvertedIndexSearcherCache::InvertedIndexSearcherCache(size_t capacity, uint32_t num_shards) :
-          _mem_tracker(std::make_unique<MemTracker>("InvertedIndexSearcherCache")) {
+InvertedIndexSearcherCache::InvertedIndexSearcherCache(size_t capacity, uint32_t num_shards)
+        : _mem_tracker(std::make_unique<MemTracker>("InvertedIndexSearcherCache")) {
     SCOPED_CONSUME_MEM_TRACKER(_mem_tracker.get());
     uint64_t fd_number = config::min_file_descriptor_number;
     struct rlimit l;
@@ -67,7 +84,8 @@ InvertedIndexSearcherCache::InvertedIndexSearcherCache(size_t capacity, uint32_t
 
     if (config::enable_inverted_index_cache_check_timestamp) {
         auto get_last_visit_time = [](const void* value) -> int64_t {
-            InvertedIndexSearcherCache::CacheValue* cache_value = (InvertedIndexSearcherCache::CacheValue*)value;
+            InvertedIndexSearcherCache::CacheValue* cache_value =
+                    (InvertedIndexSearcherCache::CacheValue*)value;
             return cache_value->last_visit_time;
         };
         _cache = std::unique_ptr<Cache>(
@@ -80,17 +98,18 @@ InvertedIndexSearcherCache::InvertedIndexSearcherCache(size_t capacity, uint32_t
     }
 }
 
-Status InvertedIndexSearcherCache::get_index_searcher(const io::FileSystemSPtr& fs, const std::string& index_dir,
-                                                      const std::string& file_name, InvertedIndexCacheHandle* cache_handle,
-                                                      bool use_cache) {
+Status InvertedIndexSearcherCache::get_index_searcher(const io::FileSystemSPtr& fs,
+                                                      const std::string& index_dir,
+                                                      const std::string& file_name,
+                                                      InvertedIndexCacheHandle* cache_handle,
+                                                      OlapReaderStatistics* stats, bool use_cache) {
     auto file_path = index_dir + "/" + file_name;
 
     using namespace std::chrono;
     auto start_time = steady_clock::now();
     Defer cost {[&]() {
         int64_t cost = duration_cast<microseconds>(steady_clock::now() - start_time).count();
-        VLOG_DEBUG << "finish get_index_searcher for " << file_path
-                   << ", cost=" << cost << "us";
+        VLOG_DEBUG << "finish get_index_searcher for " << file_path << ", cost=" << cost << "us";
     }};
 
     InvertedIndexSearcherCache::CacheKey cache_key(file_path);
@@ -98,11 +117,14 @@ Status InvertedIndexSearcherCache::get_index_searcher(const io::FileSystemSPtr& 
         cache_handle->owned = false;
         return Status::OK();
     }
+
     cache_handle->owned = !use_cache;
     IndexSearcherPtr index_searcher = nullptr;
-    auto mem_tracker = std::unique_ptr<MemTracker>(new MemTracker("InvertedIndexSearcherCacheWithRead"));
+    auto mem_tracker =
+            std::unique_ptr<MemTracker>(new MemTracker("InvertedIndexSearcherCacheWithRead"));
 #ifndef BE_TEST
     {
+        SCOPED_RAW_TIMER(&stats->inverted_index_searcher_open_timer);
         SCOPED_CONSUME_MEM_TRACKER(mem_tracker.get());
         index_searcher = build_index_searcher(fs, index_dir, file_name);
     }
@@ -112,28 +134,31 @@ Status InvertedIndexSearcherCache::get_index_searcher(const io::FileSystemSPtr& 
         IndexCacheValuePtr cache_value = std::make_unique<InvertedIndexSearcherCache::CacheValue>();
         cache_value->index_searcher = std::move(index_searcher);
         cache_value->size = mem_tracker->consumption();
-        *cache_handle = InvertedIndexCacheHandle(_cache.get(), _insert(cache_key, cache_value.release()));
+        *cache_handle =
+                InvertedIndexCacheHandle(_cache.get(), _insert(cache_key, cache_value.release()));
     } else {
         cache_handle->index_searcher = std::move(index_searcher);
     }
     return Status::OK();
 }
 
-Status InvertedIndexSearcherCache::insert(const io::FileSystemSPtr& fs, const std::string& index_dir, const std::string& file_name) {
+Status InvertedIndexSearcherCache::insert(const io::FileSystemSPtr& fs,
+                                          const std::string& index_dir,
+                                          const std::string& file_name) {
     auto file_path = index_dir + "/" + file_name;
 
     using namespace std::chrono;
     auto start_time = steady_clock::now();
     Defer cost {[&]() {
         int64_t cost = duration_cast<microseconds>(steady_clock::now() - start_time).count();
-        VLOG_DEBUG << "finish insert index_searcher for " << file_path
-                   << ", cost=" << cost << "us";
+        VLOG_DEBUG << "finish insert index_searcher for " << file_path << ", cost=" << cost << "us";
     }};
 
     InvertedIndexSearcherCache::CacheKey cache_key(file_path);
     IndexCacheValuePtr cache_value = std::make_unique<InvertedIndexSearcherCache::CacheValue>();
     IndexSearcherPtr index_searcher = nullptr;
-    auto mem_tracker = std::unique_ptr<MemTracker>(new MemTracker("InvertedIndexSearcherCacheWithInsert"));
+    auto mem_tracker =
+            std::unique_ptr<MemTracker>(new MemTracker("InvertedIndexSearcherCacheWithInsert"));
 #ifndef BE_TEST
     {
         SCOPED_CONSUME_MEM_TRACKER(mem_tracker.get());
@@ -155,7 +180,41 @@ Status InvertedIndexSearcherCache::erase(const std::string& index_file_path) {
     return Status::OK();
 }
 
-bool InvertedIndexSearcherCache::_lookup(const InvertedIndexSearcherCache::CacheKey& key, InvertedIndexCacheHandle* handle) {
+int64_t InvertedIndexSearcherCache::prune() {
+    if (_cache) {
+        const int64_t curtime = UnixMillis();
+        int64_t byte_size = 0L;
+        auto pred = [curtime, &byte_size](const void* value) -> bool {
+            InvertedIndexSearcherCache::CacheValue* cache_value =
+                    (InvertedIndexSearcherCache::CacheValue*)value;
+            if ((cache_value->last_visit_time +
+                 config::index_cache_entry_no_visit_gc_time_s * 1000) < curtime) {
+                byte_size += cache_value->size;
+                return true;
+            }
+            return false;
+        };
+
+        MonotonicStopWatch watch;
+        watch.start();
+        // Prune cache in lazy mode to save cpu and minimize the time holding write lock
+        int64_t prune_num = _cache->prune_if(pred, true);
+        LOG(INFO) << "prune " << prune_num << " entries in inverted index cache. cost(ms): "
+                  << watch.elapsed_time() / 1000 / 1000;
+        return byte_size;
+    }
+    return 0L;
+}
+
+int64_t InvertedIndexSearcherCache::mem_consumption() {
+    if (_cache) {
+        return _cache->mem_consumption();
+    }
+    return 0L;
+}
+
+bool InvertedIndexSearcherCache::_lookup(const InvertedIndexSearcherCache::CacheKey& key,
+                                         InvertedIndexCacheHandle* handle) {
     auto lru_handle = _cache->lookup(key.index_file_path);
     if (lru_handle == nullptr) {
         return false;
@@ -164,15 +223,78 @@ bool InvertedIndexSearcherCache::_lookup(const InvertedIndexSearcherCache::Cache
     return true;
 }
 
-Cache::Handle* InvertedIndexSearcherCache::_insert(const InvertedIndexSearcherCache::CacheKey& key, CacheValue* value) {
+Cache::Handle* InvertedIndexSearcherCache::_insert(const InvertedIndexSearcherCache::CacheKey& key,
+                                                   CacheValue* value) {
     auto deleter = [](const doris::CacheKey& key, void* value) {
-        InvertedIndexSearcherCache::CacheValue* cache_value = (InvertedIndexSearcherCache::CacheValue*)value;
+        InvertedIndexSearcherCache::CacheValue* cache_value =
+                (InvertedIndexSearcherCache::CacheValue*)value;
         delete cache_value;
     };
 
-    Cache::Handle* lru_handle = _cache->insert(key.index_file_path, value, value->size,
-                                deleter, CachePriority::NORMAL);
+    Cache::Handle* lru_handle =
+            _cache->insert(key.index_file_path, value, value->size, deleter, CachePriority::NORMAL);
     return lru_handle;
+}
+
+InvertedIndexQueryCache* InvertedIndexQueryCache::_s_instance = nullptr;
+
+bool InvertedIndexQueryCache::lookup(const CacheKey& key, InvertedIndexQueryCacheHandle* handle) {
+    auto lru_handle = _cache->lookup(key.encode());
+    if (lru_handle == nullptr) {
+        return false;
+    }
+    *handle = InvertedIndexQueryCacheHandle(_cache.get(), lru_handle);
+    return true;
+}
+
+void InvertedIndexQueryCache::insert(const CacheKey& key, std::shared_ptr<roaring::Roaring> bitmap,
+                                     InvertedIndexQueryCacheHandle* handle) {
+    auto deleter = [](const doris::CacheKey& key, void* value) {
+        delete (InvertedIndexQueryCache::CacheValue*)value;
+    };
+
+    std::unique_ptr<InvertedIndexQueryCache::CacheValue> cache_value_ptr =
+            std::make_unique<InvertedIndexQueryCache::CacheValue>();
+    cache_value_ptr->last_visit_time = UnixMillis();
+    cache_value_ptr->bitmap = bitmap;
+    cache_value_ptr->size = bitmap->getSizeInBytes();
+
+    auto lru_handle = _cache->insert(key.encode(), (void*)cache_value_ptr.release(),
+                                     bitmap->getSizeInBytes(), deleter, CachePriority::NORMAL);
+    *handle = InvertedIndexQueryCacheHandle(_cache.get(), lru_handle);
+}
+
+int64_t InvertedIndexQueryCache::prune() {
+    if (_cache) {
+        const int64_t curtime = UnixMillis();
+        int64_t byte_size = 0L;
+        auto pred = [curtime, &byte_size](const void* value) -> bool {
+            InvertedIndexQueryCache::CacheValue* cache_value =
+                    (InvertedIndexQueryCache::CacheValue*)value;
+            if ((cache_value->last_visit_time +
+                 config::index_cache_entry_no_visit_gc_time_s * 1000) < curtime) {
+                byte_size += cache_value->size;
+                return true;
+            }
+            return false;
+        };
+
+        MonotonicStopWatch watch;
+        watch.start();
+        // Prune cache in lazy mode to save cpu and minimize the time holding write lock
+        int64_t prune_num = _cache->prune_if(pred, true);
+        LOG(INFO) << "prune " << prune_num << " entries in inverted index cache. cost(ms): "
+                  << watch.elapsed_time() / 1000 / 1000;
+        return byte_size;
+    }
+    return 0L;
+}
+
+int64_t InvertedIndexQueryCache::mem_consumption() {
+    if (_cache) {
+        return _cache->mem_consumption();
+    }
+    return 0L;
 }
 
 } // namespace segment_v2

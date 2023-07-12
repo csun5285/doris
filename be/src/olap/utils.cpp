@@ -17,24 +17,23 @@
 
 #include "olap/utils.h"
 
-#include <dirent.h>
-#include <errno.h>
-#include <lz4/lz4.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/stat.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
 #include <time.h>
 #include <unistd.h>
+#include <zconf.h>
+#include <zlib.h>
 
-#include <cstdint>
+#include <cmath>
 #include <cstring>
-#include <filesystem>
+#include <memory>
 #include <regex>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include "olap/file_helper.h"
-#include "util/file_utils.h"
+#include "util/sse_util.hpp"
 
 #ifdef DORIS_WITH_LZO
 #include <lzo/lzo1c.h>
@@ -45,11 +44,11 @@
 
 #include "common/logging.h"
 #include "common/status.h"
-#include "env/env.h"
-#include "gutil/strings/substitute.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_writer.h"
+#include "io/fs/local_file_system.h"
 #include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "util/errno.h"
 #include "util/string_parser.hpp"
 
 using std::string;
@@ -59,141 +58,8 @@ using std::vector;
 namespace doris {
 using namespace ErrorCode;
 
-Status olap_compress(const char* src_buf, size_t src_len, char* dest_buf, size_t dest_len,
-                     size_t* written_len, OLAPCompressionType compression_type) {
-    if (nullptr == src_buf || nullptr == dest_buf || nullptr == written_len) {
-        LOG(WARNING) << "input param with nullptr pointer. src_buf is nullptr: "
-                     << (src_buf == nullptr ? "true" : "false") << " src_buf=["
-                     << (src_buf == nullptr ? "nullptr" : src_buf)
-                     << "], dest_buf is nullptr: " << (dest_buf == nullptr ? "true" : "false")
-                     << " dest_buf=[" << (dest_buf == nullptr ? "nullptr" : dest_buf)
-                     << "], written_len is nullptr: "
-                     << (written_len == nullptr ? "true" : " false") << " written_len=["
-                     << (dest_buf == nullptr ? -1 : *dest_buf) << "]";
-
-        return Status::Error<INVALID_ARGUMENT>();
-    }
-
-    *written_len = dest_len;
-    switch (compression_type) {
-#ifdef DORIS_WITH_LZO
-    case OLAP_COMP_TRANSPORT: {
-        // A small buffer(hundreds of bytes) for LZO1X
-        unsigned char mem[LZO1X_1_MEM_COMPRESS];
-        int lzo_res = 0;
-        if (LZO_E_OK != (lzo_res = lzo1x_1_compress(
-                                 reinterpret_cast<const lzo_byte*>(src_buf), src_len,
-                                 reinterpret_cast<unsigned char*>(dest_buf), written_len, mem))) {
-            LOG(WARNING) << "compress failed. src_len=" << src_len << "; dest_len= " << dest_len
-                         << "; written_len=" << *written_len << "; lzo_res=" << lzo_res;
-
-            return Status::Error<COMPRESS_ERROR>();
-        } else if (*written_len > dest_len) {
-            VLOG_NOTICE << "buffer overflow when compressing. "
-                        << "dest_len=" << dest_len << ", written_len=" << *written_len;
-
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-    case OLAP_COMP_STORAGE: {
-        // data for LZO1C_99
-        unsigned char mem[LZO1C_99_MEM_COMPRESS];
-        int lzo_res = 0;
-        if (LZO_E_OK != (lzo_res = lzo1c_99_compress(
-                                 reinterpret_cast<const lzo_byte*>(src_buf), src_len,
-                                 reinterpret_cast<unsigned char*>(dest_buf), written_len, mem))) {
-            LOG(WARNING) << "compress failed. src_len=" << src_len << "; dest_len= " << dest_len
-                         << "; written_len=" << *written_len << "; lzo_res=" << lzo_res;
-
-            return Status::Error<COMPRESS_ERROR>();
-        } else if (*written_len > dest_len) {
-            VLOG_NOTICE << "buffer overflow when compressing. "
-                        << ", dest_len=" << dest_len << ", written_len=" << *written_len;
-
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-#endif
-
-    case OLAP_COMP_LZ4: {
-        // int lz4_res = LZ4_compress_limitedOutput(src_buf, dest_buf, src_len, dest_len);
-        int lz4_res = LZ4_compress_default(src_buf, dest_buf, src_len, dest_len);
-        *written_len = lz4_res;
-        if (0 == lz4_res) {
-            VLOG_TRACE << "compress failed. src_len=" << src_len << ", dest_len=" << dest_len
-                       << ", written_len=" << *written_len << ", lz4_res=" << lz4_res;
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-    default:
-        LOG(WARNING) << "unknown compression type. [type=" << compression_type << "]";
-        break;
-    }
-    return Status::OK();
-}
-
-Status olap_decompress(const char* src_buf, size_t src_len, char* dest_buf, size_t dest_len,
-                       size_t* written_len, OLAPCompressionType compression_type) {
-    if (nullptr == src_buf || nullptr == dest_buf || nullptr == written_len) {
-        LOG(WARNING) << "input param with nullptr pointer. [src_buf=" << src_buf
-                     << " dest_buf=" << dest_buf << " written_len=" << written_len << "]";
-
-        return Status::Error<INVALID_ARGUMENT>();
-    }
-
-    *written_len = dest_len;
-    switch (compression_type) {
-#ifdef DORIS_WITH_LZO
-    case OLAP_COMP_TRANSPORT: {
-        int lzo_res = lzo1x_decompress_safe(reinterpret_cast<const lzo_byte*>(src_buf), src_len,
-                                            reinterpret_cast<unsigned char*>(dest_buf), written_len,
-                                            nullptr);
-        if (LZO_E_OK != lzo_res) {
-            LOG(WARNING) << "decompress failed. src_len=" << src_len << "; dest_len= " << dest_len
-                         << "; written_len=" << *written_len << "; lzo_res=" << lzo_res;
-            return Status::Error<DECOMPRESS_ERROR>();
-        } else if (*written_len > dest_len) {
-            LOG(WARNING) << "buffer overflow when decompressing. [dest_len=" << dest_len
-                         << " written_len=" << *written_len << "]";
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-    case OLAP_COMP_STORAGE: {
-        int lzo_res = lzo1c_decompress_safe(reinterpret_cast<const lzo_byte*>(src_buf), src_len,
-                                            reinterpret_cast<unsigned char*>(dest_buf), written_len,
-                                            nullptr);
-        if (LZO_E_OK != lzo_res) {
-            LOG(WARNING) << "compress failed. src_len=" << src_len << "; dest_len= " << dest_len
-                         << "; written_len=" << *written_len << "; lzo_res=" << lzo_res;
-            return Status::Error<DECOMPRESS_ERROR>();
-        } else if (*written_len > dest_len) {
-            LOG(WARNING) << "buffer overflow when decompressing. [dest_len=" << dest_len
-                         << " written_len=" << *written_len << "]";
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-#endif
-
-    case OLAP_COMP_LZ4: {
-        int lz4_res = LZ4_decompress_safe(src_buf, dest_buf, src_len, dest_len);
-        *written_len = lz4_res;
-        if (lz4_res < 0) {
-            LOG(WARNING) << "decompress failed. src_len=" << src_len << "; dest_len= " << dest_len
-                         << "; written_len=" << *written_len << "; lzo_res=" << lz4_res;
-            return Status::Error<BUFFER_OVERFLOW>();
-        }
-        break;
-    }
-    default:
-        LOG(FATAL) << "unknown compress kind. kind=" << compression_type;
-        break;
-    }
-    return Status::OK();
+uint32_t olap_adler32_init() {
+    return adler32(0L, Z_NULL, 0);
 }
 
 uint32_t olap_adler32(uint32_t adler, const char* buf, size_t len) {
@@ -542,18 +408,6 @@ unsigned int crc32c_lut(char const* b, unsigned int off, unsigned int len, unsig
     return localCrc;
 }
 
-uint32_t olap_crc32(uint32_t crc32, const char* buf, size_t len) {
-#if defined(__i386) || defined(__x86_64__)
-    if (OLAP_LIKELY(CpuInfo::is_supported(CpuInfo::SSE4_2))) {
-        return baidu_crc32_qw(buf, crc32, len);
-    } else {
-        return crc32c_lut(buf, 0, len, crc32);
-    }
-#else
-    return crc32c_lut(buf, 0, len, crc32);
-#endif
-}
-
 Status gen_timestamp_string(string* out_string) {
     time_t now = time(nullptr);
     tm local_tm;
@@ -594,13 +448,7 @@ Status read_write_test_file(const string& test_file_path) {
             return Status::Error<IO_ERROR>();
         }
     }
-    Status res = Status::OK();
-    FileHandler file_handler;
-    if ((res = file_handler.open_with_mode(test_file_path.c_str(), O_RDWR | O_CREAT | O_SYNC,
-                                           S_IRUSR | S_IWUSR)) != Status::OK()) {
-        LOG(WARNING) << "fail to create test file. path=" << test_file_path;
-        return res;
-    }
+
     const size_t TEST_FILE_BUF_SIZE = 4096;
     const size_t DIRECT_IO_ALIGNMENT = 512;
     char* write_test_buff = nullptr;
@@ -621,45 +469,34 @@ Status read_write_test_file(const string& test_file_path) {
         int32_t tmp_value = rand_r(&rand_seed);
         write_test_buff[i] = static_cast<char>(tmp_value);
     }
-    if (!(res = file_handler.pwrite(write_buff.get(), TEST_FILE_BUF_SIZE, SEEK_SET))) {
-        LOG(WARNING) << "fail to write test file. [file_name=" << test_file_path << "]";
-        return res;
-    }
-    if ((res = file_handler.pread(read_buff.get(), TEST_FILE_BUF_SIZE, SEEK_SET)) != Status::OK()) {
-        LOG(WARNING) << "fail to read test file. [file_name=" << test_file_path << "]";
-        return res;
-    }
+
+    // write file
+    io::FileWriterPtr file_writer;
+    RETURN_IF_ERROR(io::global_local_filesystem()->create_file(test_file_path, &file_writer));
+    RETURN_IF_ERROR(file_writer->append({write_buff.get(), TEST_FILE_BUF_SIZE}));
+    RETURN_IF_ERROR(file_writer->close());
+    // read file
+    io::FileReaderSPtr file_reader;
+    RETURN_IF_ERROR(io::global_local_filesystem()->open_file(test_file_path, &file_reader));
+    size_t bytes_read = 0;
+    RETURN_IF_ERROR(file_reader->read_at(0, {read_buff.get(), TEST_FILE_BUF_SIZE}, &bytes_read));
     if (memcmp(write_buff.get(), read_buff.get(), TEST_FILE_BUF_SIZE) != 0) {
         LOG(WARNING) << "the test file write_buf and read_buf not equal, [file_name = "
                      << test_file_path << "]";
         return Status::Error<TEST_FILE_ERROR>();
     }
-    if ((res = file_handler.close()) != Status::OK()) {
-        LOG(WARNING) << "fail to close test file. [file_name=" << test_file_path << "]";
-        return res;
-    }
-    if (remove(test_file_path.c_str()) != 0) {
-        char errmsg[64];
-        VLOG_NOTICE << "fail to delete test file. [err='" << strerror_r(errno, errmsg, 64)
-                    << "' path='" << test_file_path << "']";
-        return Status::Error<IO_ERROR>();
-    }
-    return res;
+    // delete file
+    return io::global_local_filesystem()->delete_file(test_file_path);
 }
 
-bool check_datapath_rw(const string& path) {
-    if (!FileUtils::check_exist(path)) return false;
-    string file_path = path + "/.read_write_test_file";
-    try {
-        Status res = read_write_test_file(file_path);
-        return res.ok();
-    } catch (...) {
-        // do nothing
+Status check_datapath_rw(const string& path) {
+    bool exists = true;
+    RETURN_IF_ERROR(io::global_local_filesystem()->exists(path, &exists));
+    if (!exists) {
+        return Status::IOError("path does not exist: {}", path);
     }
-    LOG(WARNING) << "error when try to read and write temp file under the data path and return "
-                    "false. [path="
-                 << path << "]";
-    return false;
+    string file_path = path + "/.read_write_test_file";
+    return read_write_test_file(file_path);
 }
 
 __thread char Errno::_buf[BUF_SIZE]; ///< buffer instance

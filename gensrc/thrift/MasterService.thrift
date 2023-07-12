@@ -43,6 +43,10 @@ struct TTabletInfo {
     // data size on remote storage
     16: optional Types.TSize remote_data_size
     17: optional bool is_persistent
+    // 17: optional Types.TReplicaId cooldown_replica_id
+    // 18: optional bool is_cooldown
+    19: optional i64 cooldown_term
+    20: optional Types.TUniqueId cooldown_meta_id
 }
 
 struct TFinishTaskRequest {
@@ -96,6 +100,9 @@ struct TReportRequest {
     // the max compaction score of all tablets on a backend,
     // this field should be set along with tablet report
     8: optional i64 tablet_max_compaction_score
+    9: optional list<AgentService.TStoragePolicy> storage_policy // only id and version
+    10: optional list<AgentService.TStorageResource> resource // only id and version
+    11: i32 num_cores
 }
 
 struct TMasterResult {
@@ -103,7 +110,7 @@ struct TMasterResult {
     1: required Status.TStatus status
 }
 
-// Now we only support CPU share.
+// Deprecated
 enum TResourceType {
     TRESOURCE_CPU_SHARE
     TRESOURCE_IO_SHARE
@@ -117,11 +124,12 @@ enum TResourceType {
     TRESOURCE_HDD_WRITE_MBPS
 }
 
+// Deprecated
 struct TResourceGroup {
     1: required map<TResourceType, i32> resourceByType
 }
 
-// Resource per user
+// Deprecated
 struct TUserResource {
     1: required TResourceGroup resource
 
@@ -129,6 +137,7 @@ struct TUserResource {
     2: required map<string, i32> shareByGroup
 }
 
+// Deprecated
 struct TFetchResourceResult {
     // Master service not find protocol version, so using agent service version
     1: required AgentService.TAgentServiceVersion protocolVersion

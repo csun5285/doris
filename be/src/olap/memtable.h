@@ -17,154 +17,223 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <cstring>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <ostream>
+#include <vector>
 
 #include "common/object_pool.h"
-#include "olap/olap_define.h"
-#include "olap/skiplist.h"
+#include "common/status.h"
+#include "gutil/integral_types.h"
+#include "olap/olap_common.h"
 #include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 #include "runtime/memory/mem_tracker.h"
-#include "util/tuple_row_zorder_compare.h"
 #include "vec/aggregate_functions/aggregate_function.h"
-#include "vec/common/string_ref.h"
+#include "vec/common/arena.h"
 #include "vec/core/block.h"
 
 namespace doris {
 
-struct ContiguousRow;
 class RowsetWriter;
 class Schema;
 class SlotDescriptor;
 class TabletSchema;
-class Tuple;
 class TupleDescriptor;
+enum KeysType : int;
+struct FlushContext;
+
+// row pos in _input_mutable_block
+struct RowInBlock {
+    size_t _row_pos;
+    char* _agg_mem;
+    size_t* _agg_state_offset;
+    bool _has_init_agg;
+
+    RowInBlock(size_t row) : _row_pos(row), _has_init_agg(false) {}
+
+    void init_agg_places(char* agg_mem, size_t* agg_state_offset) {
+        _has_init_agg = true;
+        _agg_mem = agg_mem;
+        _agg_state_offset = agg_state_offset;
+    }
+
+    char* agg_places(size_t offset) const { return _agg_mem + _agg_state_offset[offset]; }
+
+    inline bool has_init_agg() const { return _has_init_agg; }
+
+    inline void remove_init_agg() { _has_init_agg = false; }
+};
+
+class Tie {
+public:
+    class Iter {
+    public:
+        Iter(Tie& tie) : _tie(tie), _next(tie._begin + 1) {}
+        size_t left() { return _left; }
+        size_t right() { return _right; }
+
+        // return false means no more ranges
+        bool next() {
+            if (_next >= _tie._end) {
+                return false;
+            }
+            _next = _find(1, _next);
+            if (_next >= _tie._end) {
+                return false;
+            }
+            _left = _next - 1;
+            _next = _find(0, _next);
+            _right = _next;
+            return true;
+        }
+
+    private:
+        size_t _find(uint8_t value, size_t start) {
+            if (start >= _tie._end) {
+                return start;
+            }
+            size_t offset = start - _tie._begin;
+            size_t size = _tie._end - start;
+            void* p = std::memchr(_tie._bits.data() + offset, value, size);
+            if (p == nullptr) {
+                return _tie._end;
+            }
+            return static_cast<uint8_t*>(p) - _tie._bits.data() + _tie._begin;
+        }
+
+    private:
+        Tie& _tie;
+        size_t _left;
+        size_t _right;
+        size_t _next;
+    };
+
+public:
+    Tie(size_t begin, size_t end) : _begin(begin), _end(end) {
+        _bits = std::vector<uint8_t>(_end - _begin, 1);
+    }
+    uint8_t operator[](int i) const { return _bits[i - _begin]; }
+    uint8_t& operator[](int i) { return _bits[i - _begin]; }
+    Iter iter() { return Iter(*this); }
+
+private:
+    const size_t _begin;
+    const size_t _end;
+    std::vector<uint8_t> _bits;
+};
+
+class RowInBlockComparator {
+public:
+    RowInBlockComparator(const Schema* schema) : _schema(schema) {}
+    // call set_block before operator().
+    // only first time insert block to create _input_mutable_block,
+    // so can not Comparator of construct to set pblock
+    void set_block(vectorized::MutableBlock* pblock) { _pblock = pblock; }
+    int operator()(const RowInBlock* left, const RowInBlock* right) const;
+
+private:
+    const Schema* _schema;
+    vectorized::MutableBlock* _pblock; // 对应Memtable::_input_mutable_block
+};
+
+class MemTableStat {
+public:
+    MemTableStat& operator+=(MemTableStat& stat) {
+        raw_rows += stat.raw_rows;
+        merged_rows += stat.merged_rows;
+        sort_ns += stat.sort_ns;
+        agg_ns += stat.agg_ns;
+        put_into_output_ns += stat.put_into_output_ns;
+        delete_bitmap_ns += stat.delete_bitmap_ns;
+        segment_writer_ns += stat.segment_writer_ns;
+        duration_ns += stat.duration_ns;
+        sort_times += stat.sort_times;
+        agg_times += stat.agg_times;
+
+        return *this;
+    }
+
+    int64_t raw_rows = 0;
+    int64_t merged_rows = 0;
+    int64_t sort_ns = 0;
+    int64_t agg_ns = 0;
+    int64_t put_into_output_ns = 0;
+    int64_t delete_bitmap_ns = 0;
+    int64_t segment_writer_ns = 0;
+    int64_t duration_ns = 0;
+    int64_t sort_times = 0;
+    int64_t agg_times = 0;
+};
 
 class MemTable {
 public:
     MemTable(TabletSharedPtr tablet, Schema* schema, const TabletSchema* tablet_schema,
              const std::vector<SlotDescriptor*>* slot_descs, TupleDescriptor* tuple_desc,
-             RowsetWriter* rowset_writer, DeleteBitmapPtr delete_bitmap,
-             const RowsetIdUnorderedSet& rowset_ids, int64_t cur_max_version,
+             RowsetWriter* rowset_writer, std::shared_ptr<MowContext> mow_context,
              const std::shared_ptr<MemTracker>& insert_mem_tracker,
-             const std::shared_ptr<MemTracker>& flush_mem_tracker, bool support_vec = false);
+             const std::shared_ptr<MemTracker>& flush_mem_tracker);
     ~MemTable();
 
     int64_t tablet_id() const { return _tablet->tablet_id(); }
-    KeysType keys_type() const { return _tablet->keys_type(); }
     size_t memory_usage() const {
-        return _insert_mem_tracker->consumption() + _flush_mem_tracker->consumption();
+        return _insert_mem_tracker->consumption() + _arena->used_size() +
+               _flush_mem_tracker->consumption();
     }
-
-    inline void insert(const Tuple* tuple) { (this->*_insert_fn)(tuple); }
     // insert tuple from (row_pos) to (row_pos+num_rows)
-    void insert(const vectorized::Block* block, const std::vector<int>& row_idxs);
+    void insert(const vectorized::Block* block, const std::vector<int>& row_idxs,
+                bool is_append = false);
 
     void shrink_memtable_by_agg();
 
-    bool is_flush() const;
+    bool need_flush() const;
 
-    bool need_to_agg();
+    bool need_agg() const;
 
     /// Flush
     Status flush();
     Status close();
 
     int64_t flush_size() const { return _flush_size; }
-    int64_t merged_rows() const { return _merged_rows; }
+
+    void set_callback(std::function<void(MemTableStat&)> callback) {
+        _delta_writer_callback = callback;
+    }
+
+    bool empty() const { return _input_mutable_block.rows() == 0; }
+    void assign_segment_id();
 
 private:
-    Status _do_flush(int64_t& duration_ns);
-
-    class RowCursorComparator : public RowComparator {
-    public:
-        RowCursorComparator(const Schema* schema);
-        int operator()(const char* left, const char* right) const override;
-
-    private:
-        const Schema* _schema;
-    };
-
-    // row pos in _input_mutable_block
-    struct RowInBlock {
-        size_t _row_pos;
-        char* _agg_mem;
-        size_t* _agg_state_offset;
-
-        RowInBlock(size_t row) : _row_pos(row) {};
-
-        void init_agg_places(char* agg_mem, size_t* agg_state_offset) {
-            _agg_mem = agg_mem;
-            _agg_state_offset = agg_state_offset;
-        }
-
-        char* agg_places(size_t offset) const { return _agg_mem + _agg_state_offset[offset]; }
-    };
-
-    class RowInBlockComparator {
-    public:
-        RowInBlockComparator(const Schema* schema) : _schema(schema) {};
-        // call set_block before operator().
-        // only first time insert block to create _input_mutable_block,
-        // so can not Comparator of construct to set pblock
-        void set_block(vectorized::MutableBlock* pblock) { _pblock = pblock; }
-        int operator()(const RowInBlock* left, const RowInBlock* right) const;
-
-    private:
-        const Schema* _schema;
-        vectorized::MutableBlock* _pblock; // 对应Memtable::_input_mutable_block
-    };
+    Status _do_flush();
 
 private:
-    using Table = SkipList<char*, RowComparator>;
-    using TableKey = Table::key_type;
-    using VecTable = SkipList<RowInBlock*, RowInBlockComparator>;
-
-public:
-    /// The iterator of memtable, so that the data in this memtable
-    /// can be visited outside.
-    class Iterator {
-    public:
-        Iterator(MemTable* mem_table);
-        ~Iterator() = default;
-
-        void seek_to_first();
-        bool valid();
-        void next();
-        ContiguousRow get_current_row();
-
-    private:
-        MemTable* _mem_table;
-        Table::Iterator _it;
-    };
-
-private:
-    void _tuple_to_row(const Tuple* tuple, ContiguousRow* row, MemPool* mem_pool);
-    void _aggregate_two_row(const ContiguousRow& new_row, TableKey row_in_skiplist);
-    void _replace_row(const ContiguousRow& src_row, TableKey row_in_skiplist);
-    void _insert_dup(const Tuple* tuple);
-    void _insert_agg(const Tuple* tuple);
     // for vectorized
-    void _insert_one_row_from_block(RowInBlock* row_in_block);
-    void _aggregate_two_row_in_block(RowInBlock* new_row, RowInBlock* row_in_skiplist);
+    void _aggregate_two_row_in_block(vectorized::MutableBlock& mutable_block, RowInBlock* new_row,
+                                     RowInBlock* row_in_skiplist);
 
-    Status _generate_delete_bitmap(int64_t atomic_num_segments_before_flush,
-                                   int64_t atomic_num_segments_after_flush);
+    Status _generate_delete_bitmap(int32_t segment_id);
+
+    // serialize block to row store format and append serialized data into row store column
+    // in block
+    void serialize_block_to_row_column(vectorized::Block& block);
 
     // Unfold variant column to Block
     // Eg. [A | B | C | (D, E, F)]
     // After unfold block structure changed to -> [A | B | C | D | E | F]
     // The expanded D, E, F is dynamic part of the block
-    void unfold_variant_column(vectorized::Block& block);
+    // The flushed Block columns should match exactly from the same type of frontend meta
+    Status unfold_variant_column(vectorized::Block& block, FlushContext* ctx);
 
 private:
     TabletSharedPtr _tablet;
+    const KeysType _keys_type;
     Schema* _schema;
     const TabletSchema* _tablet_schema;
-    // the slot in _slot_descs are in order of tablet's schema
-    const std::vector<SlotDescriptor*>* _slot_descs;
-
-    // TODO: change to unique_ptr of comparator
-    std::shared_ptr<RowComparator> _row_comparator;
 
     std::shared_ptr<RowInBlockComparator> _vec_row_comparator;
 
@@ -178,13 +247,10 @@ private:
     // The memory value automatically tracked by the mem hook is 20% less than the manually recorded
     // value in the memtable, because some freed memory is not allocated in the DeltaWriter.
     std::unique_ptr<MemTracker> _insert_mem_tracker_use_hook;
-    // This is a buffer, to hold the memory referenced by the rows that have not
-    // been inserted into the SkipList
-    std::unique_ptr<MemPool> _buffer_mem_pool;
-    // Only the rows will be inserted into SkipList can allocate memory from _table_mem_pool.
+    // Only the rows will be inserted into SkipList can allocate memory from _arena.
     // In this way, we can make MemTable::memory_usage() to be more accurate, and eventually
     // reduce the number of segment files that are generated by current load
-    std::unique_ptr<MemPool> _table_mem_pool;
+    std::unique_ptr<vectorized::Arena> _arena;
     // The object buffer pool for convert tuple to row
     ObjectPool _agg_buffer_pool;
     // Only the rows will be inserted into SkipList can acquire the owner ship from
@@ -192,11 +258,7 @@ private:
     ObjectPool _agg_object_pool;
 
     size_t _schema_size;
-    std::unique_ptr<Table> _skip_list;
-    Table::Hint _hint;
 
-    std::unique_ptr<VecTable> _vec_skip_list;
-    VecTable::Hint _vec_hint;
     void _init_columns_offset_by_slot_descs(const std::vector<SlotDescriptor*>* slot_descs,
                                             const TupleDescriptor* tuple_desc);
     std::vector<int> _column_offset;
@@ -208,31 +270,37 @@ private:
     // Number of rows inserted to this memtable.
     // This is not the rows in this memtable, because rows may be merged
     // in unique or aggregate key model.
-    int64_t _rows = 0;
-    int64_t _merged_rows = 0;
-    void (MemTable::*_insert_fn)(const Tuple* tuple) = nullptr;
-    void (MemTable::*_aggregate_two_row_fn)(const ContiguousRow& new_row,
-                                            TableKey row_in_skiplist) = nullptr;
+    MemTableStat _stat;
 
     //for vectorized
     vectorized::MutableBlock _input_mutable_block;
     vectorized::MutableBlock _output_mutable_block;
+    size_t _last_sorted_pos = 0;
 
+    //return number of same keys
+    size_t _sort();
+    void _sort_one_column(std::vector<RowInBlock*>& row_in_blocks, Tie& tie,
+                          std::function<int(const RowInBlock*, const RowInBlock*)> cmp);
     template <bool is_final>
-    void _collect_vskiplist_results();
+    void _finalize_one_row(RowInBlock* row, const vectorized::ColumnsWithTypeAndName& block_data,
+                           int row_pos);
+    template <bool is_final>
+    void _aggregate();
+    void _put_into_output(vectorized::Block& in_block);
     bool _is_first_insertion;
+    std::function<void(MemTableStat&)> _delta_writer_callback;
+    std::optional<int32_t> _segment_id = std::nullopt;
 
     void _init_agg_functions(const vectorized::Block* block);
     std::vector<vectorized::AggregateFunctionPtr> _agg_functions;
     std::vector<size_t> _offsets_of_aggregate_states;
     size_t _total_size_of_aggregate_states;
     std::vector<RowInBlock*> _row_in_blocks;
-    // Memory usage without mempool.
+    // Memory usage without _arena.
     size_t _mem_usage;
 
-    DeleteBitmapPtr _delete_bitmap;
-    RowsetIdUnorderedSet _rowset_ids;
-    int64_t _cur_max_version;
+    std::shared_ptr<MowContext> _mow_context;
+    size_t _num_columns;
 }; // class MemTable
 
 inline std::ostream& operator<<(std::ostream& os, const MemTable& table) {

@@ -17,34 +17,67 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "common/factory_creator.h"
+#include "common/global_types.h"
+#include "common/status.h"
 #include "exec/olap_common.h"
 #include "exec/text_converter.h"
-#include "exprs/bloomfilter_predicate.h"
-#include "exprs/function_filter.h"
-#include "io/file_factory.h"
-#include "runtime/tuple.h"
+#include "io/io_common.h"
+#include "runtime/descriptors.h"
+#include "util/runtime_profile.h"
 #include "vec/common/schema_util.h"
-#include "vec/exec/format/format_common.h"
+#include "vec/core/block.h"
 #include "vec/exec/format/generic_reader.h"
 #include "vec/exec/scan/vscanner.h"
+
+namespace doris {
+class RuntimeState;
+class TFileRangeDesc;
+class TFileScanRange;
+class TFileScanRangeParams;
+
+namespace vectorized {
+class ShardedKVCache;
+class VExpr;
+class VExprContext;
+} // namespace vectorized
+struct TypeDescriptor;
+} // namespace doris
 
 namespace doris::vectorized {
 
 class NewFileScanNode;
 
 class VFileScanner : public VScanner {
+    ENABLE_FACTORY_CREATOR(VFileScanner);
+
 public:
+    static constexpr const char* NAME = "VFileScanner";
+
     VFileScanner(RuntimeState* state, NewFileScanNode* parent, int64_t limit,
                  const TFileScanRange& scan_range, RuntimeProfile* profile,
-                 KVCache<string>& kv_cache);
+                 ShardedKVCache* kv_cache);
 
     Status open(RuntimeState* state) override;
 
     Status close(RuntimeState* state) override;
 
-public:
-    Status prepare(VExprContext** vconjunct_ctx_ptr,
-                   std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range);
+    Status prepare(const VExprContextSPtrs& conjuncts,
+                   std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range,
+                   const std::unordered_map<std::string, int>* colname_to_slot_id);
+
+    std::string get_name() override { return VFileScanner::NAME; }
+
+    std::string get_current_scan_range_name() override { return _current_range_path; }
 
 protected:
     Status _get_block_impl(RuntimeState* state, Block* block, bool* eof) override;
@@ -52,7 +85,7 @@ protected:
     Status _get_next_reader();
 
     // TODO: cast input block columns type to string.
-    Status _cast_src_block(Block* block) { return Status::OK(); };
+    Status _cast_src_block(Block* block) { return Status::OK(); }
 
 protected:
     std::unique_ptr<TextConverter> _text_converter;
@@ -77,11 +110,11 @@ protected:
     // created from param.expr_of_dest_slot
     // For query, it saves default value expr of all dest columns, or nullptr for NULL.
     // For load, it saves conversion expr/default value of all dest columns.
-    std::vector<vectorized::VExprContext*> _dest_vexpr_ctx;
+    VExprContextSPtrs _dest_vexpr_ctx;
     // dest slot name to index in _dest_vexpr_ctx;
     std::unordered_map<std::string, int> _dest_slot_name_to_idx;
     // col name to default value expr
-    std::unordered_map<std::string, vectorized::VExprContext*> _col_default_value_ctx;
+    std::unordered_map<std::string, vectorized::VExprContextSPtr> _col_default_value_ctx;
     // the map values of dest slot id to src slot desc
     // if there is not key of dest slot id in dest_sid_to_src_sid_without_trans, it will be set to nullptr
     std::vector<SlotDescriptor*> _src_slot_descs_order_by_dest;
@@ -97,33 +130,31 @@ protected:
     std::unordered_set<std::string> _missing_cols;
 
     // For load task
-    std::unique_ptr<doris::vectorized::VExprContext*> _pre_conjunct_ctx_ptr;
+    vectorized::VExprContextSPtrs _pre_conjunct_ctxs;
     std::unique_ptr<RowDescriptor> _src_row_desc;
     // row desc for default exprs
     std::unique_ptr<RowDescriptor> _default_val_row_desc;
-
-    // Mem pool used to allocate _src_tuple and _src_tuple_row
-    std::unique_ptr<MemPool> _mem_pool;
-
-    KVCache<std::string>& _kv_cache;
+    // owned by scan node
+    ShardedKVCache* _kv_cache;
 
     bool _scanner_eof = false;
     int _rows = 0;
     int _num_of_columns_from_file;
 
+    bool _src_block_mem_reuse = false;
     bool _strict_mode;
 
     bool _src_block_init = false;
     Block* _src_block_ptr;
     Block _src_block;
 
-    VExprContext* _push_down_expr = nullptr;
+    VExprContextSPtrs _push_down_conjuncts;
     bool _is_dynamic_schema = false;
     // for tracing dynamic schema
     std::unique_ptr<vectorized::schema_util::FullBaseSchemaView> _full_base_schema_view;
 
-    std::unique_ptr<FileCacheStatistics> _file_cache_statistics;
-    std::unique_ptr<IOContext> _io_ctx;
+    std::unique_ptr<io::FileCacheStatistics> _file_cache_statistics;
+    std::unique_ptr<io::IOContext> _io_ctx;
 
 private:
     RuntimeProfile::Counter* _get_block_timer = nullptr;
@@ -134,6 +165,15 @@ private:
     RuntimeProfile::Counter* _convert_to_output_block_timer = nullptr;
     // to monitor reader create time(S3 reader may take too long)
     RuntimeProfile::Counter* _next_reader_timer = nullptr;
+    RuntimeProfile::Counter* _empty_file_counter = nullptr;
+
+    const std::unordered_map<std::string, int>* _col_name_to_slot_id;
+    // single slot filter conjuncts
+    std::unordered_map<int, VExprContextSPtrs> _slot_id_to_filter_conjuncts;
+    // not single(zero or multi) slot filter conjuncts
+    VExprContextSPtrs _not_single_slot_filter_conjuncts;
+    // save the path of current scan range
+    std::string _current_range_path = "";
 
 private:
     Status _init_expr_ctxes();
@@ -144,6 +184,11 @@ private:
     Status _pre_filter_src_block();
     Status _convert_to_output_block(Block* block);
     Status _generate_fill_columns();
+    Status _handle_dynamic_block(Block* block);
+    Status _split_conjuncts();
+    Status _split_conjuncts_expr(const VExprContextSPtr& context,
+                                 const VExprSPtr& conjunct_expr_root);
+    void _get_slot_ids(VExpr* expr, std::vector<int>* slot_ids);
 
     void _reset_counter() {
         _counter.num_rows_unselected = 0;

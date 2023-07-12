@@ -46,21 +46,19 @@ fi
 # Check args
 usage() {
     echo "
-Usage: $0 <options>
+Usage: $0 [options...] [packages...]
   Optional options:
-     -d                 build specified dependencies, space separated, e.g. -d \"re2 curl clucene\"
-     -a                 rebuild all dependencies
-     -j                 build thirdparty parallel
-     --clean            clean the extracted data
+     -j <num>               build thirdparty parallel
+     --clean                clean the extracted data
+     --continue <package>   continue to build the remaining packages (starts from the specified package)
   "
     exit 1
 }
 
 if ! OPTS="$(getopt \
     -n "$0" \
-    -o 'hj:d:ai' \
-    -l 'help' \
-    -l 'clean' \
+    -o 'hj:' \
+    -l 'help,clean,continue:' \
     -- "$@")"; then
     usage
 fi
@@ -75,62 +73,57 @@ else
     PARALLEL="$(($(nproc) / 4 + 1))"
 fi
 
-BUILD_ALL=1
-DEPS=""
-INCREMENTAL_BUILD=0
+while true; do
+    case "$1" in
+    -j)
+        PARALLEL="$2"
+        shift 2
+        ;;
+    -h)
+        HELP=1
+        shift
+        ;;
+    --help)
+        HELP=1
+        shift
+        ;;
+    --clean)
+        CLEAN=1
+        shift
+        ;;
+    --continue)
+        CONTINUE=1
+        start_package="${2}"
+        shift 2
+        ;;
+    --)
+        shift
+        break
+        ;;
+    *)
+        echo "Internal error"
+        exit 1
+        ;;
+    esac
+done
 
-if [[ "$#" -ne 1 ]]; then
-    while true; do
-        case "$1" in
-        -j)
-            PARALLEL="$2"
-            shift 2
-            ;;
-        -d)
-            DEPS="$2"
-            BUILD_ALL=0
-            shift 2
-            ;;
-        -a)
-            BUILD_ALL=1
-            shift
-            ;;
-        -i)
-            INCREMENTAL_BUILD=1
-            BUILD_ALL=0
-            shift
-            ;;
-        -h)
-            HELP=1
-            shift
-            ;;
-        --clean)
-            CLEAN=1
-            shift
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            echo "Internal error"
-            exit 1
-            ;;
-        esac
-    done
+if [[ "${CONTINUE}" -eq 1 ]]; then
+    if [[ -z "${start_package}" ]] || [[ "${#}" -ne 0 ]]; then
+        usage
+    fi
 fi
+
+read -r -a packages <<<"${@}"
 
 if [[ "${HELP}" -eq 1 ]]; then
     usage
-    exit
 fi
 
 echo "Get params:
     PARALLEL            -- ${PARALLEL}
-    DEPS                -- ${DEPS}
-    BUILD_ALL           -- ${BUILD_ALL}
-    INCREMENTAL_BUILD   -- ${INCREMENTAL_BUILD}
     CLEAN               -- ${CLEAN}
+    PACKAGES            -- ${packages[*]}
+    CONTINUE            -- ${start_package}
 "
 
 if [[ ! -f "${TP_DIR}/download-thirdparty.sh" ]]; then
@@ -147,66 +140,14 @@ fi
 
 cd "${TP_DIR}"
 
-if [[ -f version.txt ]]; then
-    CUR_VERSION=$(grep -v "#" version.txt | awk '{print $1; exit}')
-else
-    CUR_VERSION="y"
-fi
-
-if [[ -f ${TP_INSTALL_DIR}/version.txt ]]; then
-    INSTALLED_VERSION=$(grep -v "#" "${TP_INSTALL_DIR}/version.txt" | awk '{print $1; exit}')
-else
-    INSTALLED_VERSION="x"
-fi
-
-# Incremental build, remove existing src folder if needed
-if [[ -f version.txt && ${INCREMENTAL_BUILD} -eq 1 ]]; then
-    NEED_REMOVE=0
-    if [[ ${INSTALLED_VERSION} != "x" ]]; then
-        VER_DIFF=$((CUR_VERSION - INSTALLED_VERSION))
-        if [[ ${VER_DIFF} -gt 0 ]]; then
-            NEED_REMOVE=1
-        fi
-    else
-            NEED_REMOVE=1
-    fi
-
-    if [[ ${NEED_REMOVE} -ne 0 ]]; then
-        mkdir src/bak/src -p
-        CNT=0
-        for i in $(grep -v "#" version.txt); do
-            if [[ ${CNT} -lt 2 ]]; then
-                CNT=$((CNT + 1))
-                continue
-            fi
-            folder=$(echo "${i}" | sed -r 's/[-_]/*/')
-            set -x
-            find src -maxdepth 1 -type d -iname "*${folder}*" -exec mv {} src/bak/{}-$(date +"%Y%m%d%H%M%S") \;
-            if [[ "_${folder}" == "_clucene" ]];then
-                find installed/include/ -name "CLucene*" -exec mv {} src/bak/ \;
-            fi
-            set +x
-        done
-    fi
-fi
-
-if [[ "${CLEAN}" -eq 1 ]] && [[ -d "${TP_SOURCE_DIR}" ]] && [[ ${BUILD_ALL} -eq 1 ]]; then
+if [[ "${CLEAN}" -eq 1 ]] && [[ -d "${TP_SOURCE_DIR}" ]]; then
     echo 'Clean the extracted data ...'
     find "${TP_SOURCE_DIR}" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} \;
     echo 'Success!'
-elif [[ "${CLEAN}" -eq 1 ]] && [[ "${DEPS}" != "" ]]; then
-    for i in $(echo "${DEPS}"); do
-        echo 'Clean the extracted data: ${i}'
-        folder=$(echo "${i}" | sed -r 's/[-_]/*/')
-        set -x
-        find "${TP_SOURCE_DIR}" -maxdepth 1 -type d -iname "*${folder}*" -exec rm -rf {} \;
-        set +x
-    done
 fi
 
-
 # Download thirdparties.
-${TP_DIR}/download-thirdparty.sh
+"${TP_DIR}/download-thirdparty.sh"
 
 export LD_LIBRARY_PATH="${TP_DIR}/installed/lib:${LD_LIBRARY_PATH}"
 
@@ -216,6 +157,8 @@ if [[ "${CC}" == *gcc ]]; then
     warning_stringop_truncation='-Wno-stringop-truncation'
     warning_class_memaccess='-Wno-class-memaccess'
     warning_array_parameter='-Wno-array-parameter'
+    warning_narrowing='-Wno-narrowing'
+    warning_dangling_reference='-Wno-dangling-reference'
     boost_toolset='gcc'
 elif [[ "${CC}" == *clang ]]; then
     warning_uninitialized='-Wno-uninitialized'
@@ -226,6 +169,7 @@ elif [[ "${CC}" == *clang ]]; then
     warning_reserved_identifier='-Wno-reserved-identifier'
     warning_suggest_override='-Wno-suggest-override -Wno-suggest-destructor-override'
     warning_option_ignored='-Wno-option-ignored'
+    warning_narrowing='-Wno-c++11-narrowing'
     boost_toolset='clang'
     libhdfs_cxx17='-std=c++1z'
 
@@ -322,9 +266,9 @@ check_if_source_exist() {
     echo "===== begin build $1"
 }
 
-check_if_archieve_exist() {
+check_if_archive_exist() {
     if [[ -z $1 ]]; then
-        echo "archieve should specified to check if exist."
+        echo "archive should specified to check if exist."
         exit 1
     fi
 
@@ -380,51 +324,6 @@ build_libbacktrace() {
 
     make -j "${PARALLEL}"
     make install
-}
-
-#clucene
-build_clucene() {
-    if [[ "$(uname -m)" == 'x86_64' ]]; then
-        USE_AVX2="${USE_AVX2:-1}"
-    else
-        USE_AVX2="${USE_AVX2:-0}"
-    fi
-    if [[ -z "${USE_BTHREAD_SCANNER}" ]]; then
-        USE_BTHREAD_SCANNER='ON'
-    fi
-    if [[ ${USE_BTHREAD_SCANNER} == "ON" ]]; then
-        USE_BTHREAD=1
-    else
-        USE_BTHREAD=0
-    fi
-
-    check_if_source_exist "${CLUCENE_SOURCE}"
-    cd "${TP_SOURCE_DIR}/${CLUCENE_SOURCE}"
-
-    mkdir -p "${BUILD_DIR}"
-    cd "${BUILD_DIR}"
-    rm -rf CMakeCache.txt CMakeFiles/
-
-    ${CMAKE_CMD} -G "${GENERATOR}" \
-        -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-        -DBUILD_STATIC_LIBRARIES=ON \
-        -DBUILD_SHARED_LIBRARIES=OFF \
-        -DBOOST_ROOT="${TP_INSTALL_DIR}" \
-        -DZLIB_ROOT="${TP_INSTALL_DIR}" \
-        -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer ${warning_narrowing}" \
-        -DUSE_STAT64=0 \
-        -DUSE_AVX2="${USE_AVX2}" \
-        -DUSE_BTHREAD="${USE_BTHREAD}" \
-        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-        -DBUILD_CONTRIBS_LIB=ON ..
-    ${BUILD_SYSTEM} -j "${PARALLEL}"
-    ${BUILD_SYSTEM} install
-
-    cd "${TP_SOURCE_DIR}/${CLUCENE_SOURCE}"
-    if [[ ! -d "${TP_INSTALL_DIR}"/share ]]; then
-        mkdir -p "${TP_INSTALL_DIR}"/share
-    fi
-    cp -rf src/contribs-lib/CLucene/analysis/jieba/dict "${TP_INSTALL_DIR}"/share/
 }
 
 # libevent
@@ -487,11 +386,11 @@ build_thrift() {
 
     if [[ "${KERNEL}" != 'Darwin' ]]; then
         cflags="-I${TP_INCLUDE_DIR}"
-        cxxflags="-I${TP_INCLUDE_DIR} ${warning_unused_but_set_variable}"
+        cxxflags="-I${TP_INCLUDE_DIR} ${warning_unused_but_set_variable} -Wno-inconsistent-missing-override"
         ldflags="-L${TP_LIB_DIR} --static"
     else
-        cflags="-I${TP_INCLUDE_DIR} -Wno-implicit-function-declaration"
-        cxxflags="-I${TP_INCLUDE_DIR} ${warning_unused_but_set_variable}"
+        cflags="-I${TP_INCLUDE_DIR} -Wno-implicit-function-declaration -Wno-inconsistent-missing-override"
+        cxxflags="-I${TP_INCLUDE_DIR} ${warning_unused_but_set_variable} -Wno-inconsistent-missing-override"
         ldflags="-L${TP_LIB_DIR}"
     fi
 
@@ -571,7 +470,7 @@ build_gflags() {
     rm -rf CMakeCache.txt CMakeFiles/
 
     "${CMAKE_CMD}" -G "${GENERATOR}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=On ../
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=On ../
 
     "${BUILD_SYSTEM}" -j "${PARALLEL}"
     "${BUILD_SYSTEM}" install
@@ -803,8 +702,9 @@ build_hyperscan() {
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
 
-    "${CMAKE_CMD}" -G "${GENERATOR}" -DBUILD_SHARED_LIBS=0 \
-        -DBOOST_ROOT="${BOOST_SOURCE}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" -DBUILD_EXAMPLES=OFF ..
+    CXXFLAGS="-D_HAS_AUTO_PTR_ETC=0" \
+        "${CMAKE_CMD}" -G "${GENERATOR}" -DBUILD_SHARED_LIBS=0 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DBOOST_ROOT="${TP_INSTALL_DIR}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" -DBUILD_EXAMPLES=OFF ..
     "${BUILD_SYSTEM}" -j "${PARALLEL}" install
     strip_lib libhs.a
 }
@@ -823,7 +723,9 @@ build_boost() {
     CXXFLAGS="${cxxflags}" \
         ./bootstrap.sh --prefix="${TP_INSTALL_DIR}" --with-toolset="${boost_toolset}"
     # -q: Fail at first error
-    ./b2 -q link=static runtime-link=static -j "${PARALLEL}" --without-mpi --without-graph --without-graph_parallel --without-python cxxflags="-std=c++11 -g -I${TP_INCLUDE_DIR} -L${TP_LIB_DIR}" install
+    ./b2 -q link=static runtime-link=static -j "${PARALLEL}" \
+        --without-mpi --without-graph --without-graph_parallel --without-python \
+        cxxflags="-std=c++17 -g -I${TP_INCLUDE_DIR} -L${TP_LIB_DIR}" install
 }
 
 # mysql
@@ -938,7 +840,7 @@ build_rocksdb() {
 
     # -Wno-range-loop-construct gcc-11
     CFLAGS="-I ${TP_INCLUDE_DIR} -I ${TP_INCLUDE_DIR}/snappy -I ${TP_INCLUDE_DIR}/lz4" \
-        CXXFLAGS="-Wno-deprecated-copy ${warning_stringop_truncation} ${warning_shadow} ${warning_dangling_gsl} \
+        CXXFLAGS="-include cstdint -Wno-deprecated-copy ${warning_stringop_truncation} ${warning_shadow} ${warning_dangling_gsl} \
     ${warning_defaulted_function_deleted} ${warning_unused_but_set_variable} -Wno-pessimizing-move -Wno-range-loop-construct" \
         LDFLAGS="${ldflags}" \
         PORTABLE=1 make USE_RTTI=1 -j "${PARALLEL}" static_lib
@@ -996,13 +898,7 @@ build_libunixodbc() {
 
     cd "${TP_SOURCE_DIR}/${ODBC_SOURCE}"
 
-    if [[ "${KERNEL}" != 'Darwin' ]]; then
-        cflags="-I${TP_INCLUDE_DIR} -Wno-int-conversion"
-    else
-        cflags="-I${TP_INCLUDE_DIR} -Wno-int-conversion -Wno-implicit-function-declaration"
-    fi
-
-    CFLAGS="${cflags}" \
+    CFLAGS="-I${TP_INCLUDE_DIR} -Wno-int-conversion -Wno-implicit-function-declaration" \
         LDFLAGS="-L${TP_LIB_DIR}" \
         ./configure --prefix="${TP_INSTALL_DIR}" --with-included-ltdl --enable-static=yes --enable-shared=no
 
@@ -1052,7 +948,7 @@ build_arrow() {
     export ARROW_LZ4_URL="${TP_SOURCE_DIR}/${LZ4_NAME}"
     export ARROW_FLATBUFFERS_URL="${TP_SOURCE_DIR}/${FLATBUFFERS_NAME}"
     export ARROW_ZSTD_URL="${TP_SOURCE_DIR}/${ZSTD_NAME}"
-    export ARROW_JEMALLOC_URL="${TP_SOURCE_DIR}/${JEMALLOC_NAME}"
+    export ARROW_JEMALLOC_URL="${TP_SOURCE_DIR}/${JEMALLOC_ARROW_NAME}"
     export ARROW_Thrift_URL="${TP_SOURCE_DIR}/${THRIFT_NAME}"
     export ARROW_SNAPPY_URL="${TP_SOURCE_DIR}/${SNAPPY_NAME}"
     export ARROW_ZLIB_URL="${TP_SOURCE_DIR}/${ZLIB_NAME}"
@@ -1104,6 +1000,23 @@ build_arrow() {
     strip_lib libparquet.a
 }
 
+# abseil
+build_abseil() {
+    check_if_source_exist "${ABSEIL_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${ABSEIL_SOURCE}"
+
+    LDFLAGS="-L${TP_LIB_DIR}" \
+        "${CMAKE_CMD}" -B "${BUILD_DIR}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DABSL_ENABLE_INSTALL=ON \
+        -DBUILD_DEPS=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_CXX_STANDARD=11
+
+    cmake --build "${BUILD_DIR}" -j "${PARALLEL}"
+    cmake --install "${BUILD_DIR}" --prefix "${TP_INSTALL_DIR}"
+}
+
 # s2
 build_s2() {
     check_if_source_exist "${S2_SOURCE}"
@@ -1114,23 +1027,13 @@ build_s2() {
 
     rm -rf CMakeCache.txt CMakeFiles/
 
-    if [[ "${KERNEL}" != 'Darwin' ]]; then
-        ldflags="-L${TP_LIB_DIR} -static-libstdc++ -static-libgcc"
-    else
-        ldflags="-L${TP_LIB_DIR}"
-    fi
-
-    CXXFLAGS="-O3" \
-        LDFLAGS="${ldflags}" \
-        "${CMAKE_CMD}" -G "${GENERATOR}" -DBUILD_SHARED_LIBS=0 -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
-        -DCMAKE_INCLUDE_PATH="${TP_INSTALL_DIR}/include" \
+    LDFLAGS="-L${TP_LIB_DIR}" \
+        ${CMAKE_CMD} -G "${GENERATOR}" -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
+        -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" \
         -DBUILD_SHARED_LIBS=OFF \
-        -DGFLAGS_ROOT_DIR="${TP_INSTALL_DIR}/include" \
         -DWITH_GFLAGS=ON \
-        -DGLOG_ROOT_DIR="${TP_INSTALL_DIR}/include" \
-        -DCMAKE_LIBRARY_PATH="${TP_INSTALL_DIR}/lib64" \
-        -DOPENSSL_ROOT_DIR="${TP_INSTALL_DIR}/include" \
-        -DWITH_GLOG=ON ..
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_LIBRARY_PATH="${TP_INSTALL_DIR}" ..
 
     "${BUILD_SYSTEM}" -j "${PARALLEL}"
     "${BUILD_SYSTEM}" install
@@ -1149,11 +1052,11 @@ build_bitshuffle() {
     cd "${TP_SOURCE_DIR}/${BITSHUFFLE_SOURCE}"
     PREFIX="${TP_INSTALL_DIR}"
 
-    # This library has significant optimizations when built with -mavx2. However,
-    # we still need to support non-AVX2-capable hardware. So, we build it twice,
-    # once with the flag and once without, and use some linker tricks to
-    # suffix the AVX2 symbols with '_avx2'.
-    arches=('default' 'avx2')
+    # This library has significant optimizations when built with AVX2/AVX512. However,
+    # we still need to support non-AVX2-capable hardware. So, we build it three times,
+    # with the flag AVX2, AVX512 each and once without, and use some linker tricks to
+    # suffix the AVX2 symbols with '_avx2', AVX512 symbols with '_avx512'
+    arches=('default' 'avx2' 'avx512')
     MACHINE_TYPE="$(uname -m)"
     # Becuase aarch64 don't support avx2, disable it.
     if [[ "${MACHINE_TYPE}" == "aarch64" || "${MACHINE_TYPE}" == 'arm64' ]]; then
@@ -1166,6 +1069,9 @@ build_bitshuffle() {
         if [[ "${arch}" == "avx2" ]]; then
             arch_flag="-mavx2"
         fi
+        if [[ "${arch}" == "avx512" ]]; then
+            arch_flag="-mavx512bw -mavx512f"
+        fi
         tmp_obj="bitshuffle_${arch}_tmp.o"
         dst_obj="bitshuffle_${arch}.o"
         "${CC}" ${EXTRA_CFLAGS:+${EXTRA_CFLAGS}} ${arch_flag:+${arch_flag}} -std=c99 "-I${PREFIX}/include/lz4" -O3 -DNDEBUG -c \
@@ -1175,7 +1081,7 @@ build_bitshuffle() {
         # Merge the object files together to produce a combined .o file.
         "${ld}" -r -o "${tmp_obj}" bitshuffle_core.o bitshuffle.o iochain.o
         # For the AVX2 symbols, suffix them.
-        if [[ "${arch}" == "avx2" ]]; then
+        if [[ "${arch}" == "avx2" ]] || [[ "${arch}" == "avx512" ]]; then
             local nm="${DORIS_BIN_UTILS}/nm"
             local objcopy="${DORIS_BIN_UTILS}/objcopy"
 
@@ -1261,9 +1167,9 @@ build_parallel_hashmap() {
 
 # pdqsort
 build_pdqsort() {
-    check_if_source_exist "${PDQSORT_SOURCE}"
-    cd "${TP_SOURCE_DIR}/${PDQSORT_SOURCE}"
-    cp -r pdqsort.h "${TP_INSTALL_DIR}/include/"
+    check_if_archive_exist "${PDQSORT_FILE}"
+    cd "${TP_SOURCE_DIR}"
+    cp "${PDQSORT_FILE}" "${TP_INSTALL_DIR}/include/"
 }
 
 # libdivide
@@ -1353,7 +1259,8 @@ build_aws_sdk() {
     "${CMAKE_CMD}" -G "${GENERATOR}" -B"${BUILD_DIR}" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" \
         -DCMAKE_PREFIX_PATH="${TP_INSTALL_DIR}" -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF \
         -DCURL_LIBRARY_RELEASE="${TP_INSTALL_DIR}/lib/libcurl.a" -DZLIB_LIBRARY_RELEASE="${TP_INSTALL_DIR}/lib/libz.a" \
-        -DBUILD_ONLY="core;s3;s3-crt;transfer" -DCMAKE_CXX_FLAGS="-Wno-nonnull -Wno-deprecated-declarations" -DCPP_STANDARD=17
+        -DBUILD_ONLY="core;s3;s3-crt;transfer" \
+        -DCMAKE_CXX_FLAGS="-Wno-nonnull -Wno-deprecated-declarations ${warning_dangling_reference}" -DCPP_STANDARD=17
 
     cd "${BUILD_DIR}"
 
@@ -1450,14 +1357,8 @@ build_gsasl() {
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
 
-    if [[ "${KERNEL}" != 'Darwin' ]]; then
-        cflags=''
-    else
-        cflags='-Wno-implicit-function-declaration'
-    fi
-
     KRB5_CONFIG="${TP_INSTALL_DIR}/bin/krb5-config" \
-        CFLAGS="${cflags} -I${TP_INCLUDE_DIR}" \
+        CFLAGS="-I${TP_INCLUDE_DIR} -Wno-implicit-function-declaration" \
         ../configure --prefix="${TP_INSTALL_DIR}" --with-gssapi-impl=mit --enable-shared=no --with-pic --with-libidn-prefix="${TP_INSTALL_DIR}"
 
     make -j "${PARALLEL}"
@@ -1477,7 +1378,8 @@ build_krb5() {
     fi
 
     CFLAGS="-fcommon -fPIC -I${TP_INSTALL_DIR}/include" LDFLAGS="-L${TP_INSTALL_DIR}/lib" \
-        ../configure --prefix="${TP_INSTALL_DIR}" --disable-shared --enable-static ${with_crypto_impl:+${with_crypto_impl}}
+        ../configure --prefix="${TP_INSTALL_DIR}" --disable-shared --enable-static \
+        --without-keyutils ${with_crypto_impl:+${with_crypto_impl}}
 
     make -j "${PARALLEL}"
     make install
@@ -1506,6 +1408,7 @@ build_hdfs3() {
         -DKERBEROS_LIBRARIES="${TP_INSTALL_DIR}/lib/libkrb5.a" \
         -DGSASL_INCLUDE_DIR="${TP_INSTALL_DIR}/include" \
         -DGSASL_LIBRARIES="${TP_INSTALL_DIR}/lib/libgsasl.a" \
+        -DCMAKE_CXX_FLAGS='-include cstdint' \
         ..
 
     make CXXFLAGS="${libhdfs_cxx17}" -j "${PARALLEL}"
@@ -1515,8 +1418,8 @@ build_hdfs3() {
 
 # jemalloc
 build_jemalloc() {
-    check_if_source_exist "${JEMALLOC_SOURCE}"
-    cd "${TP_SOURCE_DIR}/${JEMALLOC_SOURCE}"
+    check_if_source_exist "${JEMALLOC_DORIS_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${JEMALLOC_DORIS_SOURCE}"
 
     mkdir -p "${BUILD_DIR}"
     cd "${BUILD_DIR}"
@@ -1668,14 +1571,17 @@ build_fast_float() {
     cp -r ./include/fast_float "${TP_INSTALL_DIR}/include/"
 }
 
-# hadoop_libs_x86
-build_hadoop_libs_x86() {
-    check_if_source_exist "${HADOOP_LIBS_X86_SOURCE}"
-    cd "${TP_SOURCE_DIR}/${HADOOP_LIBS_X86_SOURCE}"
+# hadoop_libs
+build_hadoop_libs() {
+    check_if_source_exist "${HADOOP_LIBS_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${HADOOP_LIBS_SOURCE}"
+    echo "THIRDPARTY_INSTALLED=${TP_INSTALL_DIR}" >env.sh
+    ./build.sh
+
     mkdir -p "${TP_INSTALL_DIR}/include/hadoop_hdfs/"
     mkdir -p "${TP_INSTALL_DIR}/lib/hadoop_hdfs/"
-    cp ./include/hdfs.h "${TP_INSTALL_DIR}/include/hadoop_hdfs/"
-    cp -r ./* "${TP_INSTALL_DIR}/lib/hadoop_hdfs/"
+    cp -r ./hadoop-dist/target/hadoop-libhdfs-3.3.4/* "${TP_INSTALL_DIR}/lib/hadoop_hdfs/"
+    cp -r ./hadoop-dist/target/hadoop-libhdfs-3.3.4/include/hdfs.h "${TP_INSTALL_DIR}/include/hadoop_hdfs/"
 }
 
 build_poco() {
@@ -1706,129 +1612,83 @@ build_cos_sdk() {
     cp ./lib/libcossdk.a "${TP_INSTALL_DIR}/lib64/"
 }
 
-if [[ "$(uname -s)" == 'Darwin' ]]; then
-    echo 'build for Darwin'
-    build_binutils
-    build_gettext
-fi
-
-####################################[ Build ]###################################
-
-# Choose what to build
-if [[ -d ${TP_INSTALL_DIR} && "${DEPS}" != "" ]]; then
-    for i in $(echo "${DEPS}"); do
-        "build_${i}"
-    done
-    echo "Built specified dependencies: ${DEPS}"
-    exit
-fi
-
-if [[ "${CUR_VERSION}" == "${INSTALLED_VERSION}" && ${BUILD_ALL} -eq 0 ]]; then
-    echo "Installed dependencies are up to date, if you want to rebuild all dependencies, use -a option"
-    exit
-fi
-
-# Incremental build
-if [[ -f version.txt && ${INCREMENTAL_BUILD} -eq 1 ]]; then
-    if [[ "${INSTALLED_VERSION}" -gt "${CUR_VERSION}" ]]; then
-        echo "Installed dependencies are up to date, if you want to downgrade, use -a or -d option to rebuild"
-        exit
+if [[ "${#packages[@]}" -eq 0 ]]; then
+    packages=(
+        libunixodbc
+        openssl
+        libevent
+        zlib
+        lz4
+        bzip
+        lzo2
+        zstd
+        boost # must before thrift
+        protobuf
+        gflags
+        gtest
+        glog
+        rapidjson
+        snappy
+        gperftools
+        curl
+        re2
+        hyperscan
+        thrift
+        leveldb
+        brpc
+        jemalloc
+        rocksdb
+        krb5 # before cyrus_sasl
+        cyrus_sasl
+        librdkafka
+        flatbuffers
+        orc
+        arrow
+        abseil
+        s2
+        bitshuffle
+        croaringbitmap
+        fmt
+        parallel_hashmap
+        pdqsort
+        libdivide
+        cctz
+        tsan_header
+        mysql
+        aws_sdk
+        js_and_css
+        lzma
+        xml2
+        idn
+        gsasl
+        hdfs3
+        benchmark
+        simdjson
+        nlohmann_json
+        opentelemetry
+        libbacktrace
+        sse2neon
+        xxhash
+        concurrentqueue
+        fast_float
+        poco
+        cos_sdk
+    )
+    if [[ "$(uname -s)" == 'Darwin' ]]; then
+        read -r -a packages <<<"binutils gettext ${packages[*]}"
+    elif [[ "$(uname -s)" == 'Linux' ]]; then
+        read -r -a packages <<<"${packages[*]} hadoop_libs"
     fi
-    VER_DIFF=$((CUR_VERSION - INSTALLED_VERSION))
-    if [[ ${VER_DIFF} -lt 2 ]]; then
-        INC_BUILD_DEPS=""
-        CNT=0
-        for i in $(grep -v "#" version.txt); do
-            if [[ ${CNT} -lt 2 ]]; then
-                CNT=$((CNT + 1))
-                continue
-            fi
-            INC_BUILD_DEPS="${INC_BUILD_DEPS} ${i}"
-            "build_${i}"
-        done
-        if [[ "${INC_BUILD_DEPS}" != "" ]]; then
-            cd "${TP_DIR}"
-            echo "Incremental build done:${INC_BUILD_DEPS}"
-            cp -f version.txt "${TP_INSTALL_DIR}/version.txt"
-            exit
-        else
-            echo "Continue to full build"
-        fi
-    else
-        echo "Third party Version diff is ${VER_DIFF}, need a full rebuild"
-        # FXIME: should we set BUILD_ALL=1?
+fi
+
+for package in "${packages[@]}"; do
+    if [[ "${package}" == "${start_package}" ]]; then
+        PACKAGE_FOUND=1
     fi
-fi
-
-# Full build
-echo "Full build dependencies"
-
-build_libunixodbc
-build_openssl
-build_libevent
-build_zlib
-build_lz4
-build_bzip
-build_lzo2
-build_zstd
-build_boost # must before thrift
-build_protobuf
-build_gflags
-build_gtest
-build_glog
-build_rapidjson
-build_snappy
-build_gperftools
-build_curl
-build_re2
-build_hyperscan
-build_thrift
-build_leveldb
-build_brpc
-build_jemalloc
-build_rocksdb
-build_krb5 # before cyrus_sasl
-build_cyrus_sasl
-build_librdkafka
-build_flatbuffers
-build_orc
-build_arrow
-build_s2
-build_bitshuffle
-build_croaringbitmap
-build_fmt
-build_parallel_hashmap
-build_pdqsort
-build_libdivide
-build_cctz
-build_tsan_header
-build_mysql
-build_aws_sdk
-build_js_and_css
-build_lzma
-build_xml2
-build_idn
-build_gsasl
-build_hdfs3
-build_benchmark
-build_simdjson
-build_nlohmann_json
-build_opentelemetry
-build_libbacktrace
-build_sse2neon
-build_xxhash
-build_concurrentqueue
-build_clucene
-build_fast_float
-build_cos_sdk
-
-# Full build done
-cd "${TP_DIR}"
-if [[ -f version.txt ]]; then
-    cp -f version.txt ${TP_INSTALL_DIR}/version.txt
-fi
-if [[ "$(uname -m)" == 'x86_64' ]]; then
-    build_hadoop_libs_x86
-fi
+    if [[ "${CONTINUE}" -eq 0 ]] || [[ "${PACKAGE_FOUND}" -eq 1 ]]; then
+        command="build_${package}"
+        ${command}
+    fi
+done
 
 echo "Finished to build all thirdparties"

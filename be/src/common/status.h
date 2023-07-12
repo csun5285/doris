@@ -6,18 +6,25 @@
 
 #include <fmt/format.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
+#include <gen_cpp/Status_types.h> // for TStatus
 #include <glog/logging.h>
+#include <stdint.h>
 
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
-#include "common/compiler_util.h"
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
 #include "gen_cpp/Status_types.h" // for TStatus
 #include "service/backend_options.h"
 #ifdef ENABLE_STACKTRACE
 #include "util/stack_util.h"
 #endif
+
+#include "common/expected.h"
 
 namespace doris {
 
@@ -51,6 +58,7 @@ TStatusError(UNINITIALIZED);
 TStatusError(ABORTED);
 TStatusError(DATA_QUALITY_ERROR);
 TStatusError(LABEL_ALREADY_EXISTS);
+TStatusError(NOT_AUTHORIZED);
 #undef TStatusError
 // BE internal errors
 E(OS_ERROR, -100);
@@ -73,6 +81,7 @@ E(FILE_FORMAT_ERROR, -119);
 E(EVAL_CONJUNCTS_ERROR, -120);
 E(COPY_FILE_ERROR, -121);
 E(FILE_ALREADY_EXIST, -122);
+E(BAD_CAST, -123);
 E(CALL_SEQUENCE_ERROR, -202);
 E(BUFFER_OVERFLOW, -204);
 E(CONFIG_ERROR, -205);
@@ -107,6 +116,7 @@ E(TOO_MANY_VERSION, -235);
 E(NOT_INITIALIZED, -236);
 E(ALREADY_CANCELLED, -237);
 E(TOO_MANY_SEGMENTS, -238);
+E(ALREADY_CLOSED, -239);
 E(CE_CMD_PARAMS_ERROR, -300);
 E(CE_BUFFER_TOO_SMALL, -301);
 E(CE_CMD_NOT_VALID, -302);
@@ -178,7 +188,6 @@ E(WRITER_ROW_BLOCK_ERROR, -1202);
 E(WRITER_SEGMENT_NOT_FINALIZED, -1203);
 E(ROWBLOCK_DECOMPRESS_ERROR, -1300);
 E(ROWBLOCK_FIND_ROW_EXCEPTION, -1301);
-E(ROWBLOCK_READ_INFO_ERROR, -1302);
 E(HEADER_ADD_VERSION, -1400);
 E(HEADER_DELETE_VERSION, -1401);
 E(HEADER_ADD_PENDING_DELTA, -1402);
@@ -207,6 +216,8 @@ E(COLUMN_READ_STREAM, -1706);
 E(COLUMN_STREAM_NOT_EXIST, -1716);
 E(COLUMN_VALUE_NULL, -1717);
 E(COLUMN_SEEK_ERROR, -1719);
+E(COLUMN_NO_MATCH_OFFSETS_SIZE, -1720);
+E(COLUMN_NO_MATCH_FILTER_SIZE, -1721);
 E(DELETE_INVALID_CONDITION, -1900);
 E(DELETE_UPDATE_HEADER_FAILED, -1901);
 E(DELETE_SAVE_HEADER_FAILED, -1902);
@@ -248,6 +259,10 @@ E(ROWSET_RENAME_FILE_FAILED, -3116);
 E(SEGCOMPACTION_INIT_READER, -3117);
 E(SEGCOMPACTION_INIT_WRITER, -3118);
 E(SEGCOMPACTION_FAILED, -3119);
+E(PIP_WAIT_FOR_RF, -3120);
+E(PIP_WAIT_FOR_SC, -3121);
+E(ROWSET_ADD_TO_BINLOG_FAILED, -3122);
+E(ROWSET_BINLOG_NOT_ONLY_ONE_VERSION, -3123);
 E(EMPTY_SEGMENT, -4002);
 E(INVERTED_INDEX_INVALID_PARAMETERS, -6000);
 E(INVERTED_INDEX_NOT_SUPPORTED, -6001);
@@ -255,13 +270,15 @@ E(INVERTED_INDEX_CLUCENE_ERROR, -6002);
 E(INVERTED_INDEX_FILE_NOT_FOUND, -6003);
 E(INVERTED_INDEX_FILE_HIT_LIMIT, -6004);
 E(INVERTED_INDEX_NO_TERMS, -6005);
+E(INVERTED_INDEX_RENAME_FILE_FAILED, -6006);
+E(INVERTED_INDEX_EVALUATE_SKIPPED, -6007);
 #undef E
-}; // namespace ErrorCode
+} // namespace ErrorCode
 
 // clang-format off
 // whether to capture stacktrace
 template <int code>
-static constexpr bool capture_stacktrace() {
+constexpr bool capture_stacktrace() {
     return code != ErrorCode::OK
         && code != ErrorCode::END_OF_FILE
         && code != ErrorCode::MEM_LIMIT_EXCEEDED
@@ -269,6 +286,7 @@ static constexpr bool capture_stacktrace() {
         && code != ErrorCode::TOO_MANY_SEGMENTS
         && code != ErrorCode::TOO_MANY_VERSION
         && code != ErrorCode::ALREADY_CANCELLED
+        && code != ErrorCode::ALREADY_CLOSED
         && code != ErrorCode::PUSH_TRANSACTION_ALREADY_EXIST
         && code != ErrorCode::BE_NO_SUITABLE_VERSION
         && code != ErrorCode::CUMULATIVE_NO_SUITABLE_VERSION
@@ -276,7 +294,20 @@ static constexpr bool capture_stacktrace() {
         && code != ErrorCode::ROWSET_RENAME_FILE_FAILED
         && code != ErrorCode::SEGCOMPACTION_INIT_READER
         && code != ErrorCode::SEGCOMPACTION_INIT_WRITER
-        && code != ErrorCode::SEGCOMPACTION_FAILED;
+        && code != ErrorCode::SEGCOMPACTION_FAILED
+        && code != ErrorCode::INVERTED_INDEX_INVALID_PARAMETERS
+        && code != ErrorCode::INVERTED_INDEX_NOT_SUPPORTED
+        && code != ErrorCode::INVERTED_INDEX_CLUCENE_ERROR
+        && code != ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND
+        && code != ErrorCode::INVERTED_INDEX_FILE_HIT_LIMIT
+        && code != ErrorCode::INVERTED_INDEX_NO_TERMS
+        && code != ErrorCode::INVERTED_INDEX_EVALUATE_SKIPPED
+        && code != ErrorCode::META_KEY_NOT_FOUND
+        && code != ErrorCode::PUSH_VERSION_ALREADY_EXIST
+        && code != ErrorCode::TRANSACTION_NOT_EXIST
+        && code != ErrorCode::TRANSACTION_ALREADY_VISIBLE
+        && code != ErrorCode::TOO_MANY_TRANSACTIONS
+        && code != ErrorCode::TRANSACTION_ALREADY_COMMITTED;
 }
 // clang-format on
 
@@ -376,6 +407,8 @@ public:
     ERROR_CTOR(NotSupported, NOT_IMPLEMENTED_ERROR)
     ERROR_CTOR(EndOfFile, END_OF_FILE)
     ERROR_CTOR(InternalError, INTERNAL_ERROR)
+    ERROR_CTOR(WaitForRf, PIP_WAIT_FOR_RF)
+    ERROR_CTOR(WaitForScannerContext, PIP_WAIT_FOR_SC)
     ERROR_CTOR(RuntimeError, RUNTIME_ERROR)
     ERROR_CTOR(Cancelled, CANCELLED)
     ERROR_CTOR(MemoryLimitExceeded, MEM_LIMIT_EXCEEDED)
@@ -386,6 +419,7 @@ public:
     ERROR_CTOR(Uninitialized, UNINITIALIZED)
     ERROR_CTOR(Aborted, ABORTED)
     ERROR_CTOR(DataQualityError, DATA_QUALITY_ERROR)
+    ERROR_CTOR(NotAuthorized, NOT_AUTHORIZED)
 #undef ERROR_CTOR
 
     template <int code>
@@ -398,8 +432,13 @@ public:
     bool is_io_error() const {
         return ErrorCode::IO_ERROR == _code || ErrorCode::READ_UNENOUGH == _code ||
                ErrorCode::CHECKSUM_ERROR == _code || ErrorCode::FILE_DATA_ERROR == _code ||
-               ErrorCode::TEST_FILE_ERROR == _code || ErrorCode::ROWBLOCK_READ_INFO_ERROR == _code;
+               ErrorCode::TEST_FILE_ERROR == _code;
     }
+
+    bool is_invalid_argument() const { return ErrorCode::INVALID_ARGUMENT == _code; }
+
+    bool is_not_found() const { return _code == ErrorCode::NOT_FOUND; }
+    bool is_not_authorized() const { return code() == TStatusCode::NOT_AUTHORIZED; }
 
     // Convert into TStatus. Call this if 'status_container' contains an optional
     // TStatus field named 'status'. This also sets __isset.status.
@@ -413,11 +452,6 @@ public:
     void to_thrift(TStatus* status) const;
     TStatus to_thrift() const;
     void to_protobuf(PStatus* status) const;
-
-    std::string code_as_string() const {
-        return (int)_code >= 0 ? doris::to_string(static_cast<TStatusCode::type>(_code))
-                               : fmt::format("E{}", (int16_t)_code);
-    }
 
     std::string to_string() const;
 
@@ -466,14 +500,19 @@ private:
 #endif
     };
     std::unique_ptr<ErrMsg> _err_msg;
+
+    std::string code_as_string() const {
+        return (int)_code >= 0 ? doris::to_string(static_cast<TStatusCode::type>(_code))
+                               : fmt::format("E{}", (int16_t)_code);
+    }
 };
 
 inline std::ostream& operator<<(std::ostream& ostr, const Status& status) {
     ostr << '[' << status.code_as_string() << ']';
     ostr << (status._err_msg ? status._err_msg->_msg : "");
 #ifdef ENABLE_STACKTRACE
-    if (status->_err_msg && !status->_err_msg._stack.empty()) {
-        ostr << '\n' << status->_err_msg._stack;
+    if (status._err_msg && !status._err_msg->_stack.empty()) {
+        ostr << '\n' << status._err_msg->_stack;
     }
 #endif
     return ostr;
@@ -494,18 +533,8 @@ inline std::string Status::to_string() const {
         }                               \
     } while (false)
 
-// End _get_next_span after last call to get_next method
-#define RETURN_IF_ERROR_AND_CHECK_SPAN(stmt, get_next_span, done) \
-    do {                                                          \
-        Status _status_ = (stmt);                                 \
-        auto _span = (get_next_span);                             \
-        if (UNLIKELY(_span && (!_status_.ok() || done))) {        \
-            _span->End();                                         \
-        }                                                         \
-        if (UNLIKELY(!_status_.ok())) {                           \
-            return _status_;                                      \
-        }                                                         \
-    } while (false)
+#define RETURN_ERROR_IF_NON_VEC \
+    return Status::NotSupported("Non-vectorized engine is not supported since Doris 2.0.");
 
 #define RETURN_IF_STATUS_ERROR(status, stmt) \
     do {                                     \
@@ -550,6 +579,18 @@ inline std::string Status::to_string() const {
             return _s;                                             \
         }                                                          \
     } while (false);
+
+template <typename T>
+using Result = expected<T, Status>;
+
+#define RETURN_IF_ERROR_RESULT(stmt)                \
+    do {                                            \
+        Status _status_ = (stmt);                   \
+        if (UNLIKELY(!_status_.ok())) {             \
+            return unexpected(std::move(_status_)); \
+        }                                           \
+    } while (false)
+
 } // namespace doris
 #ifdef WARN_UNUSED_RESULT
 #undef WARN_UNUSED_RESULT

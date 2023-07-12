@@ -17,12 +17,22 @@
 
 #include "exec/odbc_connector.h"
 
+#include <glog/logging.h>
+#include <sql.h>
 #include <sqlext.h>
+#include <wchar.h>
 
-#include <codecvt>
+#include <algorithm>
+#include <ostream>
 
-#include "runtime/primitive_type.h"
-#include "util/types.h"
+#include "runtime/define_primitive_type.h"
+#include "runtime/descriptors.h"
+#include "runtime/types.h"
+#include "util/runtime_profile.h"
+
+namespace doris {
+class RuntimeState;
+} // namespace doris
 
 #define ODBC_DISPOSE(h, ht, x, op)                                                        \
     {                                                                                     \
@@ -35,10 +45,6 @@
             return Status::InternalError(err_msg.c_str());                                \
         }                                                                                 \
     }
-
-static constexpr uint32_t SMALL_COLUMN_SIZE_BUFFER = 100;
-// Now we only treat HLL, CHAR, VARCHAR as big column
-static constexpr uint32_t BIG_COLUMN_SIZE_BUFFER = 65535;
 
 namespace doris {
 
@@ -139,8 +145,8 @@ Status ODBCConnector::query() {
         auto type = _tuple_desc->slots()[i]->type().type;
         column_data->buffer_length = (type == TYPE_HLL || type == TYPE_CHAR ||
                                       type == TYPE_VARCHAR || type == TYPE_STRING)
-                                             ? BIG_COLUMN_SIZE_BUFFER
-                                             : SMALL_COLUMN_SIZE_BUFFER;
+                                             ? big_column_size_buffer
+                                             : small_column_size_buffer;
         column_data->target_value_ptr = malloc(sizeof(char) * column_data->buffer_length);
         _columns_data.emplace_back(column_data);
     }

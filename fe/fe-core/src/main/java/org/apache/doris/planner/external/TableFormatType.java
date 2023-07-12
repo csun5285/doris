@@ -18,8 +18,10 @@
 package org.apache.doris.planner.external;
 
 public enum TableFormatType {
+    HIVE("hive"),
     ICEBERG("iceberg"),
-    HUDI("hudi");
+    HUDI("hudi"),
+    PAIMON("paimon");
 
     private final String tableFormatType;
 

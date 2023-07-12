@@ -29,11 +29,13 @@ import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TException;
 import org.apache.thrift.transport.TTransportException;
 
 import java.nio.ByteBuffer;
@@ -42,6 +44,8 @@ import java.util.Map;
 
 public class MasterOpExecutor {
     private static final Logger LOG = LogManager.getLogger(MasterOpExecutor.class);
+
+    private static final float RPC_TIMEOUT_COEFFICIENT = 1.2f;
 
     private final OriginStatement originStmt;
     private final ConnectContext ctx;
@@ -57,11 +61,11 @@ public class MasterOpExecutor {
         this.originStmt = originStmt;
         this.ctx = ctx;
         if (status.isNeedToWaitJournalSync()) {
-            this.waitTimeoutMs = ctx.getSessionVariable().getQueryTimeoutS() * 1000;
+            this.waitTimeoutMs = (int) (ctx.getExecTimeout() * 1000 * RPC_TIMEOUT_COEFFICIENT);
         } else {
             this.waitTimeoutMs = 0;
         }
-        this.thriftTimeoutMs = ctx.getSessionVariable().getQueryTimeoutS() * 1000;
+        this.thriftTimeoutMs = (int) (ctx.getExecTimeout() * 1000 * RPC_TIMEOUT_COEFFICIENT);
         // if isQuery=false, we shouldn't retry twice when catch exception because of Idempotency
         this.shouldNotRetry = !isQuery;
     }
@@ -70,7 +74,7 @@ public class MasterOpExecutor {
         Span forwardSpan =
                 ctx.getTracer().spanBuilder("forward").setParent(Context.current())
                         .startSpan();
-        try (Scope scope = forwardSpan.makeCurrent()) {
+        try (Scope ignored = forwardSpan.makeCurrent()) {
             forward();
         } catch (Exception e) {
             forwardSpan.recordException(e);
@@ -91,7 +95,7 @@ public class MasterOpExecutor {
         int masterRpcPort = ctx.getEnv().getMasterRpcPort();
         TNetworkAddress thriftAddress = new TNetworkAddress(masterHost, masterRpcPort);
 
-        FrontendService.Client client = null;
+        FrontendService.Client client;
         try {
             client = ClientPool.frontendPool.borrowObject(thriftAddress, thriftTimeoutMs);
         } catch (Exception e) {
@@ -104,7 +108,6 @@ public class MasterOpExecutor {
         params.setStmtIdx(originStmt.idx);
         params.setUser(ctx.getQualifiedUser());
         params.setDb(ctx.getDatabase());
-        params.setResourceInfo(ctx.toResourceCtx());
         params.setUserIp(ctx.getRemoteIP());
         params.setStmtId(ctx.getStmtId());
         params.setCurrentUserIdent(ctx.getCurrentUserIdentity().toThrift());
@@ -120,7 +123,7 @@ public class MasterOpExecutor {
         params.setSessionVariables(ctx.getSessionVariable().getForwardVariables());
 
         // create a trace carrier
-        Map<String, String> traceCarrier = new HashMap<String, String>();
+        Map<String, String> traceCarrier = new HashMap<>();
         // Inject the request with the current context
         Telemetry.getOpenTelemetry().getPropagators().getTextMapPropagator()
                 .inject(Context.current(), traceCarrier, (carrier, key, value) -> carrier.put(key, value));
@@ -140,16 +143,25 @@ public class MasterOpExecutor {
             result = client.forward(params);
             isReturnToPool = true;
         } catch (TTransportException e) {
+            // wrap the raw exception.
+            Exception exception = new ForwardToMasterException(
+                    String.format("Forward statement %s to Master %s failed", ctx.getStmtId(),
+                            thriftAddress), e);
+
             boolean ok = ClientPool.frontendPool.reopen(client, thriftTimeoutMs);
             if (!ok) {
-                throw e;
+                throw exception;
             }
             if (shouldNotRetry || e.getType() == TTransportException.TIMED_OUT) {
-                throw e;
+                throw exception;
             } else {
                 LOG.warn("Forward statement " + ctx.getStmtId() + " to Master " + thriftAddress + " twice", e);
-                result = client.forward(params);
-                isReturnToPool = true;
+                try {
+                    result = client.forward(params);
+                    isReturnToPool = true;
+                } catch (TException ex) {
+                    throw exception;
+                }
             }
         } finally {
             if (isReturnToPool) {
@@ -199,5 +211,29 @@ public class MasterOpExecutor {
 
     public void setResult(TMasterOpResult result) {
         this.result = result;
+    }
+
+    public static class ForwardToMasterException extends RuntimeException {
+
+        private static final Map<Integer, String> TYPE_MSG_MAP =
+                ImmutableMap.<Integer, String>builder()
+                        .put(TTransportException.UNKNOWN, "Unknown exception")
+                        .put(TTransportException.NOT_OPEN, "Connection is not open")
+                        .put(TTransportException.ALREADY_OPEN, "Connection has already opened up")
+                        .put(TTransportException.TIMED_OUT, "Connection timeout")
+                        .put(TTransportException.END_OF_FILE, "EOF")
+                        .put(TTransportException.CORRUPTED_DATA, "Corrupted data")
+                        .build();
+
+        private final String msg;
+
+        public ForwardToMasterException(String msg, TTransportException exception) {
+            this.msg = msg + ", cause: " + TYPE_MSG_MAP.get(exception.getType());
+        }
+
+        @Override
+        public String getMessage() {
+            return msg;
+        }
     }
 }

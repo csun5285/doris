@@ -17,13 +17,27 @@
 
 #pragma once
 
-#include <future>
-#include <string>
-#include <variant>
+#include <gen_cpp/PlanNodes_types.h>
 
+#include <future>
+#include <memory>
+#include <type_traits>
+#include <variant>
+#include <vector>
+
+#include "common/status.h"
 #include "exec/exec_node.h"
-#include "gen_cpp/PlanNodes_types.h"
 #include "runtime/descriptors.h"
+#include "util/runtime_profile.h"
+#include "vec/core/block.h"
+#include "vec/data_types/data_type.h"
+#include "vec/exprs/vexpr_fwd.h"
+
+namespace doris {
+class ObjectPool;
+class RuntimeState;
+
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -52,6 +66,9 @@ public:
     virtual const RowDescriptor& intermediate_row_desc() const override {
         return *_intermediate_row_desc;
     }
+
+    virtual Status alloc_resource(RuntimeState* state) override;
+    virtual void release_resource(RuntimeState* state) override;
 
     virtual Status init(const TPlanNode& tnode, RuntimeState* state = nullptr) override;
 
@@ -99,7 +116,7 @@ protected:
     std::unique_ptr<RowDescriptor> _output_row_desc;
     std::unique_ptr<RowDescriptor> _intermediate_row_desc;
     // output expr
-    std::vector<VExprContext*> _output_expr_ctxs;
+    VExprContextSPtrs _output_expr_ctxs;
 
     Block _join_block;
 
@@ -107,6 +124,7 @@ protected:
     MutableColumnPtr _tuple_is_null_right_flag_column;
 
     RuntimeProfile::Counter* _build_timer;
+    RuntimeProfile::Counter* _build_get_next_timer;
     RuntimeProfile::Counter* _probe_timer;
     RuntimeProfile::Counter* _build_rows_counter;
     RuntimeProfile::Counter* _probe_rows_counter;

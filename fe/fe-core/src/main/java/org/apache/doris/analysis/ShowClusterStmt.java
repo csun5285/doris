@@ -25,9 +25,9 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
-import org.apache.doris.mysql.privilege.PaloPrivilege;
 import org.apache.doris.mysql.privilege.PrivBitSet;
 import org.apache.doris.mysql.privilege.PrivPredicate;
+import org.apache.doris.mysql.privilege.Privilege;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ShowResultSetMetaData;
 
@@ -62,8 +62,8 @@ public class ShowClusterStmt extends ShowStmt {
     public void analyze(Analyzer analyzer) throws AnalysisException {
         if (Config.isNotCloudMode()) {
             // just user root
-            if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(),
-                    PrivPredicate.of(PrivBitSet.of(PaloPrivilege.ADMIN_PRIV, PaloPrivilege.NODE_PRIV), Operator.OR))) {
+            if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get().getCurrentUserIdentity(),
+                    PrivPredicate.of(PrivBitSet.of(Privilege.ADMIN_PRIV, Privilege.NODE_PRIV), Operator.OR))) {
                 ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN");
             }
         }

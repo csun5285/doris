@@ -18,21 +18,21 @@
 #ifndef DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 #define DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 
-#include <glog/logging.h>
+#include <gen_cpp/olap_file.pb.h>
 
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "cloud/io/file_system.h"
-#include "cloud/io/file_system_map.h"
-#include "cloud/io/local_file_system.h"
-#include "gen_cpp/olap_file.pb.h"
+#include "common/logging.h"
 #include "google/protobuf/util/message_differencer.h"
+#include "io/fs/file_system.h"
+#include "io/fs/file_writer.h"
+#include "io/fs/local_file_system.h"
 #include "json2pb/json_to_pb.h"
 #include "json2pb/pb_to_json.h"
 #include "olap/olap_common.h"
+#include "olap/storage_policy.h"
 #include "olap/tablet_schema.h"
 #include "olap/tablet_schema_cache.h"
 
@@ -102,7 +102,7 @@ public:
             if (is_local()) {
                 _fs = io::global_local_filesystem();
             } else {
-                _fs = io::FileSystemMap::instance()->get(resource_id());
+                _fs = get_filesystem(resource_id());
                 LOG_IF(WARNING, !_fs) << "Cannot get file system: " << resource_id();
             }
         }
@@ -111,12 +111,16 @@ public:
 
     void set_fs(io::FileSystemSPtr fs) {
         if (fs && fs->type() != io::FileSystemType::LOCAL) {
-            _rowset_meta_pb.set_resource_id(fs->resource_id());
+            _rowset_meta_pb.set_resource_id(fs->id());
         }
         _fs = std::move(fs);
     }
 
-    const io::ResourceId& resource_id() const { return _rowset_meta_pb.resource_id(); }
+    const std::string& resource_id() const { return _rowset_meta_pb.resource_id(); }
+
+    void set_resource_id(std::string resource_id) {
+        _rowset_meta_pb.set_resource_id(std::move(resource_id));
+    }
 
     bool is_local() const { return !_rowset_meta_pb.has_resource_id(); }
 
@@ -180,13 +184,7 @@ public:
 
     int64_t start_version() const { return _rowset_meta_pb.start_version(); }
 
-    void set_start_version(int64_t start_version) {
-        _rowset_meta_pb.set_start_version(start_version);
-    }
-
     int64_t end_version() const { return _rowset_meta_pb.end_version(); }
-
-    void set_end_version(int64_t end_version) { _rowset_meta_pb.set_end_version(end_version); }
 
     int64_t num_rows() const { return _rowset_meta_pb.num_rows(); }
 
@@ -371,15 +369,14 @@ public:
         }
     }
 
-    void set_oldest_write_timestamp(int64_t timestamp) {
-        _rowset_meta_pb.set_oldest_write_timestamp(timestamp);
+    void add_segment_key_bounds(const KeyBoundsPB& segments_key_bounds) {
+        *_rowset_meta_pb.add_segments_key_bounds() = segments_key_bounds;
+        set_segments_overlap(OVERLAPPING);
     }
 
     void set_newest_write_timestamp(int64_t timestamp) {
         _rowset_meta_pb.set_newest_write_timestamp(timestamp);
     }
-
-    int64_t oldest_write_timestamp() const { return _rowset_meta_pb.oldest_write_timestamp(); }
 
     int64_t newest_write_timestamp() const { return _rowset_meta_pb.newest_write_timestamp(); }
 

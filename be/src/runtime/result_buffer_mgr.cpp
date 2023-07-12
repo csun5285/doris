@@ -17,21 +17,24 @@
 
 #include "runtime/result_buffer_mgr.h"
 
-#include "gen_cpp/PaloInternalService_types.h"
-#include "gen_cpp/types.pb.h"
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/types.pb.h>
+#include <glog/logging.h>
+#include <stdint.h>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <memory>
+#include <ostream>
+#include <utility>
+
 #include "runtime/buffer_control_block.h"
-#include "runtime/raw_value.h"
 #include "util/doris_metrics.h"
+#include "util/metrics.h"
+#include "util/thread.h"
 
 namespace doris {
 
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(result_buffer_block_count, MetricUnit::NOUNIT);
-
-//std::size_t hash_value(const TUniqueId& fragment_id) {
-//    uint32_t value = RawValue::get_hash_value(&fragment_id.lo, TypeDescriptor(TYPE_BIGINT), 0);
-//    value = RawValue::get_hash_value(&fragment_id.hi, TypeDescriptor(TYPE_BIGINT), value);
-//    return value;
-//}
 
 ResultBufferMgr::ResultBufferMgr() : _stop_background_threads_latch(1) {
     // Each BufferControlBlock has a limited queue size of 1024, it's not needed to count the
@@ -59,15 +62,21 @@ Status ResultBufferMgr::init() {
 
 Status ResultBufferMgr::create_sender(const TUniqueId& query_id, int buffer_size,
                                       std::shared_ptr<BufferControlBlock>* sender,
-                                      int query_timeout) {
+                                      bool enable_pipeline, int exec_timout) {
     *sender = find_control_block(query_id);
     if (*sender != nullptr) {
         LOG(WARNING) << "already have buffer control block for this instance " << query_id;
         return Status::OK();
     }
 
-    std::shared_ptr<BufferControlBlock> control_block(
-            new BufferControlBlock(query_id, buffer_size));
+    std::shared_ptr<BufferControlBlock> control_block = nullptr;
+
+    if (enable_pipeline) {
+        control_block = std::make_shared<PipBufferControlBlock>(query_id, buffer_size);
+    } else {
+        control_block = std::make_shared<BufferControlBlock>(query_id, buffer_size);
+    }
+
     {
         std::lock_guard<std::mutex> l(_lock);
         _buffer_map.insert(std::make_pair(query_id, control_block));
@@ -76,7 +85,7 @@ Status ResultBufferMgr::create_sender(const TUniqueId& query_id, int buffer_size
         // otherwise in some case may block all fragment handle threads
         // details see issue https://github.com/apache/doris/issues/16203
         // add extra 5s for avoid corner case
-        int64_t max_timeout = time(nullptr) + query_timeout + 5;
+        int64_t max_timeout = time(nullptr) + exec_timout + 5;
         cancel_at_time(max_timeout, query_id);
     }
     *sender = control_block;
@@ -93,17 +102,6 @@ std::shared_ptr<BufferControlBlock> ResultBufferMgr::find_control_block(const TU
     }
 
     return std::shared_ptr<BufferControlBlock>();
-}
-
-Status ResultBufferMgr::fetch_data(const TUniqueId& query_id, TFetchDataResult* result) {
-    std::shared_ptr<BufferControlBlock> cb = find_control_block(query_id);
-
-    if (nullptr == cb) {
-        // the sender tear down its buffer block
-        return Status::InternalError("no result for this query.");
-    }
-
-    return cb->get_batch(result);
 }
 
 void ResultBufferMgr::fetch_data(const PUniqueId& finst_id, GetResultBatchCtx* ctx) {

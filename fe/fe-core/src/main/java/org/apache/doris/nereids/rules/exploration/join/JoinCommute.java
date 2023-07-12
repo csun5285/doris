@@ -20,9 +20,15 @@ package org.apache.doris.nereids.rules.exploration.join;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.exploration.OneExplorationRuleFactory;
+import org.apache.doris.nereids.trees.expressions.Expression;
+import org.apache.doris.nereids.trees.expressions.Not;
 import org.apache.doris.nereids.trees.expressions.Slot;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapContains;
 import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.thrift.TRuntimeFilterType;
 
 import java.util.List;
 
@@ -31,42 +37,53 @@ import java.util.List;
  */
 public class JoinCommute extends OneExplorationRuleFactory {
 
-    public static final JoinCommute LEFT_DEEP = new JoinCommute(SwapType.LEFT_DEEP);
-    public static final JoinCommute ZIG_ZAG = new JoinCommute(SwapType.ZIG_ZAG);
-    public static final JoinCommute BUSHY = new JoinCommute(SwapType.BUSHY);
+    public static final JoinCommute LEFT_DEEP = new JoinCommute(SwapType.LEFT_DEEP, false);
+    public static final JoinCommute ZIG_ZAG = new JoinCommute(SwapType.ZIG_ZAG, false);
+    public static final JoinCommute BUSHY = new JoinCommute(SwapType.BUSHY, false);
+    public static final JoinCommute NON_INNER = new JoinCommute(SwapType.BUSHY, true);
 
     private final SwapType swapType;
+    private final boolean justNonInner;
 
-    public JoinCommute(SwapType swapType) {
+    public JoinCommute(SwapType swapType, boolean justNonInner) {
         this.swapType = swapType;
+        this.justNonInner = justNonInner;
     }
 
     @Override
     public Rule build() {
         return logicalJoin()
+                .when(join -> !justNonInner || !join.getJoinType().isInnerJoin())
                 .when(join -> check(swapType, join))
+                .whenNot(LogicalJoin::hasJoinHint)
+                .whenNot(join -> joinOrderMatchBitmapRuntimeFilterOrder(join))
+                .whenNot(LogicalJoin::isMarkJoin)
                 .then(join -> {
-                    LogicalJoin<GroupPlan, GroupPlan> newJoin = new LogicalJoin<>(
-                            join.getJoinType().swap(),
-                            join.getHashJoinConjuncts(),
-                            join.getOtherJoinConjuncts(),
-                            join.right(), join.left(),
-                            join.getJoinReorderContext());
+                    LogicalJoin<Plan, Plan> newJoin = join.withTypeChildren(join.getJoinType().swap(),
+                            join.right(), join.left());
+                    newJoin.getJoinReorderContext().copyFrom(join.getJoinReorderContext());
                     newJoin.getJoinReorderContext().setHasCommute(true);
                     if (swapType == SwapType.ZIG_ZAG && isNotBottomJoin(join)) {
                         newJoin.getJoinReorderContext().setHasCommuteZigZag(true);
                     }
 
                     return newJoin;
-                }).toRule(RuleType.LOGICAL_JOIN_COMMUTATE);
+                }).toRule(RuleType.LOGICAL_JOIN_COMMUTE);
     }
 
     enum SwapType {
         LEFT_DEEP, ZIG_ZAG, BUSHY
     }
 
+    /**
+     * Check if commutative law needs to be enforced.
+     */
     public static boolean check(SwapType swapType, LogicalJoin<GroupPlan, GroupPlan> join) {
         if (swapType == SwapType.LEFT_DEEP && isNotBottomJoin(join)) {
+            return false;
+        }
+
+        if (join.getJoinType().isNullAwareLeftAntiJoin()) {
             return false;
         }
 
@@ -82,5 +99,25 @@ public class JoinCommute extends OneExplorationRuleFactory {
         // TODO: tmp way to judge containJoin
         List<Slot> output = groupPlan.getOutput();
         return !output.stream().map(Slot::getQualifier).allMatch(output.get(0).getQualifier()::equals);
+    }
+
+    /**
+     * bitmap runtime filter requires bitmap column on right.
+     */
+    private boolean joinOrderMatchBitmapRuntimeFilterOrder(LogicalJoin<GroupPlan, GroupPlan> join) {
+        if (!ConnectContext.get().getSessionVariable().isRuntimeFilterTypeEnabled(TRuntimeFilterType.BITMAP)) {
+            return false;
+        }
+        for (Expression expr : join.getOtherJoinConjuncts()) {
+            if (expr instanceof Not) {
+                expr = expr.child(0);
+            }
+            if (expr instanceof BitmapContains) {
+                BitmapContains bitmapContains = (BitmapContains) expr;
+                return (join.right().getOutputSet().containsAll(bitmapContains.child(0).getInputSlots())
+                        && join.left().getOutputSet().containsAll(bitmapContains.child(1).getInputSlots()));
+            }
+        }
+        return false;
     }
 }

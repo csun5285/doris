@@ -17,27 +17,48 @@
 
 #pragma once
 
+#include <gen_cpp/internal_service.pb.h>
+#include <glog/logging.h>
+
+#include <atomic>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <mutex>
+#include <ostream>
+#include <shared_mutex>
+#include <string>
 #include <unordered_map>
-#include <utility>
+#include <unordered_set>
 #include <vector>
 
-#include "gen_cpp/PaloInternalService_types.h"
-#include "gen_cpp/Types_types.h"
-#include "gen_cpp/internal_service.pb.h"
-#include "gutil/strings/substitute.h"
-#include "runtime/descriptors.h"
-#include "runtime/memory/mem_tracker.h"
-#include "runtime/thread_context.h"
+#include "common/status.h"
 #include "util/bitmap.h"
-#include "util/countdown_latch.h"
 #include "util/lock.h"
-#include "util/priority_thread_pool.hpp"
+#include "util/runtime_profile.h"
+#include "util/spinlock.h"
 #include "util/uid_util.h"
-#include "vec/core/block.h"
+
+namespace google {
+namespace protobuf {
+template <typename Element>
+class RepeatedField;
+template <typename Key, typename T>
+class Map;
+template <typename T>
+class RepeatedPtrField;
+} // namespace protobuf
+} // namespace google
 
 namespace doris {
+class PSlaveTabletNodes;
+class PSuccessSlaveTabletNodeIds;
+class PTabletError;
+class PTabletInfo;
+class PTabletWriterOpenRequest;
+class PUniqueId;
+class TupleDescriptor;
+class OpenPartitionRequest;
 
 struct TabletsChannelKey {
     UniqueId id;
@@ -64,7 +85,7 @@ class LoadChannel;
 class TabletsChannel {
 public:
     TabletsChannel(const TabletsChannelKey& key, const UniqueId& load_id, bool is_high_priority,
-                   bool is_vec);
+                   RuntimeProfile* profile);
 
     ~TabletsChannel();
 
@@ -74,51 +95,62 @@ public:
     Status open_all_writers_for_partition(const OpenPartitionRequest& request);
 
     // no-op when this channel has been closed or cancelled
-    template <typename TabletWriterAddRequest, typename TabletWriterAddResult>
-    Status add_batch(const TabletWriterAddRequest& request, TabletWriterAddResult* response);
+    Status add_batch(const PTabletWriterAddBlockRequest& request,
+                     PTabletWriterAddBlockResult* response);
 
     // Mark sender with 'sender_id' as closed.
     // If all senders are closed, close this channel, set '*finished' to true, update 'tablet_vec'
     // to include all tablets written in this channel.
     // no-op when this channel has been closed or cancelled
-    template <typename Request, typename Response>
-    Status close(LoadChannel* parent, bool* finished, const Request& request, Response* response);
+#ifdef CLOUD_MODE
+    Status close(LoadChannel* parent, bool* finished, const PTabletWriterAddBlockRequest& request,
+                 PTabletWriterAddBlockResult* response);
+#else
+    Status
+    close(LoadChannel* parent, int sender_id, int64_t backend_id, bool* finished,
+          const google::protobuf::RepeatedField<int64_t>& partition_ids,
+          google::protobuf::RepeatedPtrField<PTabletInfo>* tablet_vec,
+          google::protobuf::RepeatedPtrField<PTabletError>* tablet_error,
+          const google::protobuf::Map<int64_t, PSlaveTabletNodes>& slave_tablet_nodes,
+          google::protobuf::Map<int64_t, PSuccessSlaveTabletNodeIds>* success_slave_tablet_node_ids,
+          const bool write_single_replica);
+#endif
 
     // no-op when this channel has been closed or cancelled
     Status cancel();
 
-    // upper application may call this to try to reduce the mem usage of this channel.
-    // eg. flush the largest memtable immediately.
-    // return Status::OK if mem is reduced.
-    // no-op when this channel has been closed or cancelled
-    void reduce_mem_usage();
-
     int64_t mem_consumption();
+
+    void get_writers_mem_consumption_snapshot(
+            std::multimap<int64_t, int64_t, std::greater<int64_t>>* mem_consumptions) {
+        std::lock_guard<SpinLock> l(_tablet_writers_lock);
+        *mem_consumptions = _mem_consumptions;
+    }
+
+    void flush_memtable_async(int64_t tablet_id);
+    void wait_flush(int64_t tablet_id);
 
 private:
     template <typename Request>
     Status _get_current_seq(int64_t& cur_seq, const Request& request);
 
-    // open all writer
-    Status _open_all_writers(const PTabletWriterOpenRequest& request, PTabletWriterOpenResult* response);
-
     template <typename TabletWriterAddRequest>
-    Status _open_all_writers_for_partition(int64_t tablet_id,
+    Status _open_all_writers_for_partition(const int64_t& tablet_id,
                                            const TabletWriterAddRequest& request);
+    // open all writer
+    Status _open_all_writers(const PTabletWriterOpenRequest& request,
+                             PTabletWriterOpenResult* response);
 
-    bool _try_to_wait_flushing();
-
-#ifndef CLOUD_MODE
     // deal with DeltaWriter close_wait(), add tablet to list for return.
     void _close_wait(DeltaWriter* writer,
                      google::protobuf::RepeatedPtrField<PTabletInfo>* tablet_vec,
                      google::protobuf::RepeatedPtrField<PTabletError>* tablet_error,
                      PSlaveTabletNodes slave_tablet_nodes, const bool write_single_replica);
-#endif
-
     void _build_partition_tablets_relation(const PTabletWriterOpenRequest& request);
+
     void _add_broken_tablet(int64_t tablet_id);
     bool _is_broken_tablet(int64_t tablet_id);
+    void _init_profile(RuntimeProfile* profile);
 
     // id of this load channel
     TabletsChannelKey _key;
@@ -127,7 +159,6 @@ private:
     doris::Mutex _lock;
 
     SpinLock _tablet_writers_lock;
-    std::mutex _tablet_writers_open_lock;
 
     enum State {
         kInitialized,
@@ -144,8 +175,6 @@ private:
     OlapTableSchemaParam* _schema = nullptr;
 
     TupleDescriptor* _tuple_desc = nullptr;
-    // row_desc used to construct
-    RowDescriptor* _row_desc = nullptr;
 
     // next sequence we expect
     int _num_remaining_senders = 0;
@@ -154,25 +183,19 @@ private:
     // status to return when operate on an already closed/cancelled channel
     // currently it's OK.
     Status _close_status;
-
     std::map<int64, std::vector<int64>> _partition_tablets_map;
     std::map<int64, int64> _tablet_partition_map;
 
     // tablet_id -> TabletChannel
     std::unordered_map<int64_t, DeltaWriter*> _tablet_writers;
-
     // broken tablet ids.
     // If a tablet write fails, it's id will be added to this set.
     // So that following batch will not handle this tablet anymore.
     std::unordered_set<int64_t> _broken_tablets;
 
-    bool _reducing_mem_usage = false;
-    // only one thread can reduce memory for one TabletsChannel.
-    // if some other thread call `reduce_memory_usage` at the same time,
-    // it will wait on this condition variable.
-    doris::ConditionVariable _reduce_memory_cond;
-
     std::shared_mutex _broken_tablets_lock;
+
+    std::unordered_set<int64_t> _reducing_tablets;
 
     std::unordered_set<int64_t> _partition_ids;
 
@@ -180,9 +203,21 @@ private:
 
     bool _is_high_priority = false;
 
-    bool _is_vec = false;
-
     bool _write_single_replica = false;
+
+    // mem -> tablet_id
+    // sort by memory size
+    std::multimap<int64_t, int64_t, std::greater<int64_t>> _mem_consumptions;
+
+    RuntimeProfile* _profile;
+    RuntimeProfile::Counter* _add_batch_number_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _memory_usage_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _write_memory_usage_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _flush_memory_usage_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _max_tablet_memory_usage_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _max_tablet_write_memory_usage_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _max_tablet_flush_memory_usage_counter = nullptr;
+    RuntimeProfile::Counter* _slave_replica_timer = nullptr;
 };
 
 template <typename Request>

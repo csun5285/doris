@@ -15,16 +15,25 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-param-test.h>
+#include <gtest/gtest-test-part.h>
+#include <stddef.h>
+
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "gtest/gtest.h"
+#include "gtest/gtest_pred_impl.h"
 #include "vec/aggregate_functions/aggregate_function.h"
-#include "vec/aggregate_functions/aggregate_function_min_max.h"
 #include "vec/aggregate_functions/aggregate_function_simple_factory.h"
-#include "vec/columns/column_decimal.h"
+#include "vec/columns/column.h"
+#include "vec/columns/column_string.h"
 #include "vec/columns/column_vector.h"
-#include "vec/data_types/data_type.h"
+#include "vec/columns/columns_number.h"
+#include "vec/common/string_ref.h"
+#include "vec/core/field.h"
+#include "vec/core/types.h"
 #include "vec/data_types/data_type_decimal.h"
 #include "vec/data_types/data_type_number.h"
 #include "vec/data_types/data_type_string.h"
@@ -49,8 +58,7 @@ TEST_P(AggMinMaxTest, min_max_test) {
     AggregateFunctionSimpleFactory factory;
     register_aggregate_function_minmax(factory);
     DataTypes data_types = {std::make_shared<DataTypeInt32>()};
-    Array array;
-    auto agg_function = factory.get(min_max_type, data_types, array);
+    auto agg_function = factory.get(min_max_type, data_types);
     std::unique_ptr<char[]> memory(new char[agg_function->size_of_data()]);
     AggregateDataPtr place = memory.get();
     agg_function->create(place);
@@ -82,8 +90,7 @@ TEST_P(AggMinMaxTest, min_max_decimal_test) {
     AggregateFunctionSimpleFactory factory;
     register_aggregate_function_minmax(factory);
     DataTypes data_types = {data_type};
-    Array array;
-    auto agg_function = factory.get(min_max_type, data_types, array);
+    auto agg_function = factory.get(min_max_type, data_types);
     std::unique_ptr<char[]> memory(new char[agg_function->size_of_data()]);
     AggregateDataPtr place = memory.get();
     agg_function->create(place);
@@ -130,8 +137,7 @@ TEST_P(AggMinMaxTest, min_max_string_test) {
     AggregateFunctionSimpleFactory factory;
     register_aggregate_function_minmax(factory);
     DataTypes data_types = {std::make_shared<DataTypeString>()};
-    Array array;
-    auto agg_function = factory.get(min_max_type, data_types, array);
+    auto agg_function = factory.get(min_max_type, data_types);
     std::unique_ptr<char[]> memory(new char[agg_function->size_of_data()]);
     AggregateDataPtr place = memory.get();
     agg_function->create(place);

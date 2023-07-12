@@ -97,10 +97,11 @@ public class ColumnTypeTest {
     public void testDecimal() throws AnalysisException {
         TypeDef type = TypeDef.createDecimal(12, 5);
         type.analyze(null);
-        Assert.assertEquals("decimal(12, 5)", type.toString());
         if (Config.enable_decimal_conversion) {
+            Assert.assertEquals("decimalv3(12, 5)", type.toString());
             Assert.assertEquals(PrimitiveType.DECIMAL64, type.getType().getPrimitiveType());
         } else {
+            Assert.assertEquals("decimal(12, 5)", type.toString());
             Assert.assertEquals(PrimitiveType.DECIMALV2, type.getType().getPrimitiveType());
         }
         Assert.assertEquals(12, ((ScalarType) type.getType()).getScalarPrecision());
@@ -240,17 +241,17 @@ public class ColumnTypeTest {
         // 2. Read objects from file
         DataInputStream dis = new DataInputStream(Files.newInputStream(path));
         Type rType1 = ColumnType.read(dis);
-        Assert.assertTrue(rType1.equals(type1));
+        Assert.assertEquals(rType1, type1);
 
         Type rType2 = ColumnType.read(dis);
-        Assert.assertTrue(rType2.equals(type2));
+        Assert.assertEquals(rType2, type2);
 
         Type rType3 = ColumnType.read(dis);
 
         // Change it when remove DecimalV2
         Assert.assertTrue(rType3.equals(type3) || rType3.equals(type4));
 
-        Assert.assertFalse(type1.equals(this));
+        Assert.assertNotEquals(type1, this);
 
         // 3. delete files
         dis.close();

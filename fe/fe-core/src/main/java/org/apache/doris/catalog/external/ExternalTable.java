@@ -31,14 +31,13 @@ import org.apache.doris.datasource.ExternalCatalog;
 import org.apache.doris.datasource.ExternalSchemaCache;
 import org.apache.doris.persist.gson.GsonPostProcessable;
 import org.apache.doris.persist.gson.GsonUtils;
-import org.apache.doris.statistics.AnalysisTaskInfo;
-import org.apache.doris.statistics.AnalysisTaskScheduler;
+import org.apache.doris.statistics.AnalysisInfo;
 import org.apache.doris.statistics.BaseAnalysisTask;
 import org.apache.doris.thrift.TTableDescriptor;
 
 import com.google.gson.annotations.SerializedName;
 import lombok.Getter;
-import org.apache.commons.lang.NotImplementedException;
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -68,7 +67,7 @@ public class ExternalTable implements TableIf, Writable, GsonPostProcessable {
     @SerializedName(value = "dbName")
     protected String dbName;
 
-    protected boolean objectCreated = false;
+    protected boolean objectCreated;
     protected ExternalCatalog catalog;
     protected ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock(true);
 
@@ -308,8 +307,13 @@ public class ExternalTable implements TableIf, Writable, GsonPostProcessable {
     }
 
     @Override
-    public BaseAnalysisTask createAnalysisTask(AnalysisTaskScheduler scheduler, AnalysisTaskInfo info) {
-        throw new NotImplementedException();
+    public BaseAnalysisTask createAnalysisTask(AnalysisInfo info) {
+        throw new NotImplementedException("createAnalysisTask not implemented");
+    }
+
+    @Override
+    public long estimatedRowCount() {
+        return 1;
     }
 
     /**
@@ -323,6 +327,13 @@ public class ExternalTable implements TableIf, Writable, GsonPostProcessable {
         throw new NotImplementedException("implement in sub class");
     }
 
+    /**
+     * Should only be called in ExternalCatalog's getSchema(),
+     * which is called from schema cache.
+     * If you want to get schema of this table, use getFullSchema()
+     *
+     * @return
+     */
     public void unsetObjectCreated() {
         this.objectCreated = false;
     }

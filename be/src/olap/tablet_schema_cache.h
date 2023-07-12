@@ -22,6 +22,7 @@
 #include <unordered_map>
 
 #include "olap/tablet_schema.h"
+#include "util/doris_metrics.h"
 
 namespace doris {
 class TabletSchemaPB;
@@ -35,6 +36,14 @@ public:
     TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaPB& schema);
 
     TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaSPtr& schema);
+    static void stop_and_join() {
+        DCHECK(_s_instance != nullptr);
+        _s_instance->stop();
+    }
+
+    TabletSchemaSPtr insert(const std::string& key);
+
+    void stop();
 
 private:
     /**
@@ -55,6 +64,8 @@ private:
         }
     };
     std::unordered_map<Key, TabletSchemaSPtr, HashOfKey> _cache;
+    std::atomic_bool _should_stop = {false};
+    std::atomic_bool _is_stopped = {false};
 };
 
 } // namespace doris

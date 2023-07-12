@@ -17,22 +17,30 @@
 
 #pragma once
 
+#include <butil/macros.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <memory>
-#include <shared_mutex>
+#include <string>
+#include <vector>
 
 #include "common/status.h"
 #include "io/fs/file_reader.h"
+#include "io/fs/file_system.h"
 #include "io/fs/path.h"
+#include "util/slice.h"
 
 namespace doris {
 namespace io {
+class IOContext;
 
 const std::string CACHE_DONE_FILE_SUFFIX = "_DONE";
 
 class FileCache : public FileReader {
 public:
-    FileCache() : _last_match_time(time(nullptr)), _cache_file_size(0) {}
-    virtual ~FileCache() = default;
+    FileCache() : _cache_file_size(0) {}
+    ~FileCache() override = default;
 
     DISALLOW_COPY_AND_ASSIGN(FileCache);
 
@@ -47,7 +55,11 @@ public:
     virtual Status clean_all_cache() = 0;
 
     // Dummy fs
-    FileSystem* fs() const override { return nullptr; }
+    FileSystemSPtr fs() const override { return nullptr; }
+    
+    virtual Status clean_one_cache(size_t* cleaned_size) = 0;
+
+    virtual bool is_gc_finish() const = 0;
 
     virtual bool is_dummy_file_cache() { return false; }
 
@@ -55,11 +67,33 @@ public:
                                    io::FileReaderSPtr remote_file_reader, size_t req_size,
                                    size_t offset = 0);
 
-    void update_last_match_time() { _last_match_time = time(nullptr); }
-    int64_t get_last_match_time() const { return _last_match_time; }
+    virtual int64_t get_oldest_match_time() const = 0;
 
 protected:
-    int64_t _last_match_time;
+    Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                        const IOContext* io_ctx) override {
+        return Status::NotSupported("dummy file cache only used for GC");
+    }
+
+    Status _remove_file(const Path& file, size_t* cleaned_size);
+
+    Status _remove_cache_and_done(const Path& cache_file, const Path& cache_done_file,
+                                  size_t* cleaned_size);
+
+    Status _get_dir_files_and_remove_unfinished(const Path& cache_dir,
+                                                std::vector<Path>& cache_names);
+
+    Status _clean_unfinished_files(const std::vector<Path>& unfinished_files);
+
+    Status _check_and_delete_empty_dir(const Path& cache_dir);
+
+    template <typename T>
+    struct SubFileLRUComparator {
+        bool operator()(const T& lhs, const T& rhs) const {
+            return lhs.last_match_time > rhs.last_match_time;
+        }
+    };
+
     size_t _cache_file_size;
 };
 
@@ -67,7 +101,7 @@ using FileCachePtr = std::shared_ptr<FileCache>;
 
 struct FileCacheLRUComparator {
     bool operator()(const FileCachePtr& lhs, const FileCachePtr& rhs) const {
-        return lhs->get_last_match_time() > rhs->get_last_match_time();
+        return lhs->get_oldest_match_time() > rhs->get_oldest_match_time();
     }
 };
 

@@ -17,28 +17,44 @@
 
 #include "olap/task/engine_batch_load_task.h"
 
+#include <fmt/format.h>
+#include <gen_cpp/AgentService_types.h>
+#include <gen_cpp/Metrics_types.h>
+#include <gen_cpp/Types_types.h>
 #include <pthread.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
 #include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <sstream>
+#include <list>
 #include <string>
+#include <system_error>
 
 #include "boost/lexical_cast.hpp"
 #include "cloud/utils.h"
+#include "common/config.h"
+#include "common/logging.h"
 #include "gen_cpp/AgentService_types.h"
 #include "http/http_client.h"
+#include "olap/data_dir.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/push_handler.h"
-#include "olap/storage_engine.h"
+#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
+#include "olap/tablet_manager.h"
+#include "runtime/memory/mem_tracker_limiter.h"
 #include "runtime/thread_context.h"
 #include "util/doris_metrics.h"
 #include "util/pretty_printer.h"
+#include "util/runtime_profile.h"
+#include "util/stopwatch.hpp"
+
+namespace doris {
+class TTabletInfo;
+} // namespace doris
 
 using apache::thrift::ThriftDebugString;
 using std::list;
@@ -61,7 +77,7 @@ EngineBatchLoadTask::~EngineBatchLoadTask() {}
 Status EngineBatchLoadTask::execute() {
     SCOPED_ATTACH_TASK(_mem_tracker);
     Status status;
-    if (_push_req.push_type == TPushType::LOAD || _push_req.push_type == TPushType::LOAD_V2) {
+    if (_push_req.push_type == TPushType::LOAD_V2) {
         RETURN_IF_ERROR(_init());
         uint32_t retry_time = 0;
         while (retry_time < PUSH_MAX_RETRY) {
@@ -100,7 +116,7 @@ Status EngineBatchLoadTask::_init() {
 #endif
 
     // check disk capacity
-    if (_push_req.push_type == TPushType::LOAD || _push_req.push_type == TPushType::LOAD_V2) {
+    if (_push_req.push_type == TPushType::LOAD_V2) {
         if (tablet->data_dir()->reach_capacity_limit(_push_req.__isset.http_file_size)) {
             return Status::IOError("Disk does not have enough capacity");
         }
@@ -272,11 +288,7 @@ Status EngineBatchLoadTask::_push(const TPushReq& request,
         return Status::InternalError("could not find tablet {}", request.tablet_id);
     }
 
-    PushType type = PUSH_NORMAL;
-    if (request.push_type == TPushType::LOAD_V2) {
-        type = PUSH_NORMAL_V2;
-    }
-
+    PushType type = PushType::PUSH_NORMAL_V2;
     int64_t duration_ns = 0;
     PushHandler push_handler;
     if (!request.__isset.transaction_id) {
@@ -335,11 +347,11 @@ Status EngineBatchLoadTask::_delete_data(const TPushReq& request,
     }
 
 #ifdef CLOUD_MODE
-    res = push_handler.cloud_process_streaming_ingestion(tablet, request, PUSH_FOR_DELETE,
+    res = push_handler.cloud_process_streaming_ingestion(tablet, request, PushType::PUSH_FOR_DELETE,
                                                              tablet_info_vec);
 #else
-    res = push_handler.process_streaming_ingestion(tablet, request, PUSH_FOR_DELETE,
-                                                       tablet_info_vec);
+    res = push_handler.process_streaming_ingestion(tablet, request, PushType::PUSH_FOR_DELETE,
+                                                   tablet_info_vec);
 #endif
     if (!res.ok()) {
         DorisMetrics::instance()->delete_requests_failed->increment(1);

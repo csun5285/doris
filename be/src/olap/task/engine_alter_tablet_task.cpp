@@ -17,10 +17,19 @@
 
 #include "olap/task/engine_alter_tablet_task.h"
 
+#include <fmt/format.h>
+#include <gen_cpp/AgentService_types.h>
+#include <glog/logging.h>
+
+#include <ostream>
+#include <string>
+
 #include "cloud/cloud_schema_change.h"
+#include "common/config.h"
 #include "olap/schema_change.h"
-#include "runtime/memory/mem_tracker.h"
+#include "runtime/memory/mem_tracker_limiter.h"
 #include "runtime/thread_context.h"
+#include "util/doris_metrics.h"
 
 namespace doris {
 
@@ -51,44 +60,6 @@ Status EngineAlterTabletTask::execute() {
         DorisMetrics::instance()->create_rollup_requests_failed->increment(1);
         return res;
     }
-    return res;
-} // execute
-
-
-EngineAlterInvertedIndexTask::EngineAlterInvertedIndexTask(const TAlterInvertedIndexReq& alter_inverted_index_request)
-        : _alter_inverted_index_req(alter_inverted_index_request) {
-
-    auto type = MemTrackerLimiter::SCHEMA_CHANGE;
-    std::string label = fmt::format("EngineAlterInvertedIndexTask#tabletId={}",
-                                    std::to_string(_alter_inverted_index_req.tablet_id));
-    auto limit = config::memory_limitation_per_thread_for_schema_change_bytes;
-    _mem_tracker = std::make_shared<MemTrackerLimiter>(type, label, limit);
-}
-
-Status EngineAlterInvertedIndexTask::execute() {
-    // SCOPED_ATTACH_TASK(_mem_tracker, ThreadContext::TaskType::STORAGE);
-    DorisMetrics::instance()->create_rollup_requests_total->increment(1);
-
-    Status res;
-#ifdef CLOUD_MODE
-    DCHECK(_alter_inverted_index_req.__isset.job_id);
-    cloud::CloudSchemaChange cloud_sc(std::to_string(_alter_inverted_index_req.job_id),
-                                    _alter_inverted_index_req.expiration);
-    res = cloud_sc.process_alter_inverted_index(_alter_inverted_index_req);
-#else
-    res = SchemaChangeHandler::process_alter_inverted_index(_alter_inverted_index_req);
-#endif
-    if (!res.ok()) {
-        LOG(WARNING) << "failed to do alter inverted index task. res=" << res
-                     << " tablet_id=" << _alter_inverted_index_req.tablet_id
-                     << ", schema_hash=" << _alter_inverted_index_req.schema_hash;
-        DorisMetrics::instance()->create_rollup_requests_failed->increment(1);
-        return res;
-    }
-
-    LOG(INFO) << "success to create new alter inverted index. res=" << res
-              << " tablet_id=" << _alter_inverted_index_req.tablet_id 
-              << ", schema_hash="<< _alter_inverted_index_req.schema_hash;
     return res;
 } // execute
 

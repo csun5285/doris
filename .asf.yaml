@@ -19,8 +19,8 @@ github:
   description: Apache Doris is an MPP-based interactive SQL data warehousing for reporting and analysis.
   homepage: https://doris.apache.org/
   labels:
-    - data-warehousing
-    - mpp
+    - real-time
+    - query-engine
     - olap
     - dbms
     - apache
@@ -30,8 +30,8 @@ github:
     - big-data
     - iceberg
     - hudi
-    - datalake
-    - hive
+    - delta-lake
+    - spark
     - hadoop
     - analytics
     - tpch

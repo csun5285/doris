@@ -71,11 +71,12 @@ hdfsUser = "doris-test"
 hdfsPasswd = ""
 brokerName = "broker_name"
 
-s3Endpoint = "cos.ap-beijing.myqcloud.com"
-s3BucketName = "doris-build-1308700295"
-s3Region="ap-beijing"
-s3Provider="COS"
-sf1DataPath = "/data"
+// broker load test config
+// enableBrokerLoad=true
 
+// cacheDataPath = "/data/regression/"
+s3Endpoint = "cos.ap-hongkong.myqcloud.com"
+s3BucketName = "doris-build-hk-1308700295"
+s3Region = "ap-hongkong"
 
-
+max_failure_num=50

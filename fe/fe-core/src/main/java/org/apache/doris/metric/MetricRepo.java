@@ -96,7 +96,9 @@ public final class MetricRepo {
 
     public static LongCounterMetric COUNTER_EDIT_LOG_WRITE;
     public static LongCounterMetric COUNTER_EDIT_LOG_READ;
+    public static LongCounterMetric COUNTER_EDIT_LOG_CURRENT;
     public static LongCounterMetric COUNTER_EDIT_LOG_SIZE_BYTES;
+    public static LongCounterMetric COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES;
     public static LongCounterMetric COUNTER_EDIT_LOG_CLEAN_SUCCESS;
     public static LongCounterMetric COUNTER_EDIT_LOG_CLEAN_FAILED;
     public static Histogram HISTO_EDIT_LOG_WRITE_LATENCY;
@@ -498,9 +500,18 @@ public final class MetricRepo {
                 "counter of edit log read from bdbje");
         COUNTER_EDIT_LOG_READ.addLabel(new MetricLabel("type", "read"));
         DORIS_METRIC_REGISTER.addMetrics(COUNTER_EDIT_LOG_READ);
-        COUNTER_EDIT_LOG_SIZE_BYTES = new LongCounterMetric("edit_log", MetricUnit.BYTES, "size of edit log");
-        COUNTER_EDIT_LOG_SIZE_BYTES.addLabel(new MetricLabel("type", "bytes"));
+        COUNTER_EDIT_LOG_CURRENT = new LongCounterMetric("edit_log", MetricUnit.OPERATIONS,
+                "counter of current edit log in bdbje");
+        COUNTER_EDIT_LOG_CURRENT.addLabel(new MetricLabel("type", "current"));
+        DORIS_METRIC_REGISTER.addMetrics(COUNTER_EDIT_LOG_CURRENT);
+        COUNTER_EDIT_LOG_SIZE_BYTES = new LongCounterMetric("edit_log", MetricUnit.BYTES,
+                "size of accumulated edit log");
+        COUNTER_EDIT_LOG_SIZE_BYTES.addLabel(new MetricLabel("type", "accumulated_bytes"));
         DORIS_METRIC_REGISTER.addMetrics(COUNTER_EDIT_LOG_SIZE_BYTES);
+        COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES = new LongCounterMetric("edit_log", MetricUnit.BYTES,
+                "size of current edit log");
+        COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES.addLabel(new MetricLabel("type", "current_bytes"));
+        DORIS_METRIC_REGISTER.addMetrics(COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES);
         HISTO_EDIT_LOG_WRITE_LATENCY = METRIC_REGISTER.histogram(
             MetricRegistry.name("editlog", "write", "latency", "ms"));
 
@@ -589,13 +600,12 @@ public final class MetricRepo {
                 "number of writing tablets in all running transactions") {
             @Override
             public Long getValue() {
-                return Env.getCurrentGlobalTransactionMgr().getAllRunningTxnReplicaNum();
+                return Env.getCurrentGlobalTransactionMgr().getAllPublishTxnNum();
             }
         };
         DORIS_METRIC_REGISTER.addMetrics(txnReplicaNum);
-        DB_GAUGE_TXN_REPLICA_NUM = addLabeledMetrics("db", () -> new GaugeMetricImpl<>("txn_replica_num",
-                MetricUnit.NOUNIT, "number of writing tablets in all running transactions"));
-
+        DB_GAUGE_PUBLISH_TXN_NUM = addLabeledMetrics("db",
+                () -> new GaugeMetricImpl<>("publish_txn_num", MetricUnit.NOUNIT, "number of publish transactions"));
         COUNTER_ROUTINE_LOAD_ROWS = new LongCounterMetric("routine_load_rows", MetricUnit.ROWS,
                 "total rows of routine load");
         DORIS_METRIC_REGISTER.addMetrics(COUNTER_ROUTINE_LOAD_ROWS);
@@ -738,7 +748,7 @@ public final class MetricRepo {
         SystemInfoService infoService = Env.getCurrentSystemInfo();
         TabletInvertedIndex invertedIndex = Env.getCurrentInvertedIndex();
 
-        for (Long beId : infoService.getBackendIds(false)) {
+        for (Long beId : infoService.getAllBackendIds(false)) {
             Backend be = infoService.getBackend(beId);
             if (be == null) {
                 continue;

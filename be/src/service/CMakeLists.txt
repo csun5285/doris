@@ -26,14 +26,18 @@ add_library(Service
     backend_service.cpp
     brpc_service.cpp
     http_service.cpp
-    single_replica_load_download_service.cpp
+    point_query_executor.cpp
     internal_service.cpp
 )
+
+pch_reuse(Service)
 
 if (${MAKE_TEST} STREQUAL "OFF")
     add_executable(doris_be
         doris_main.cpp
     )
+
+    pch_reuse(doris_be)
 
     # This permits libraries loaded by dlopen to link to the symbols in the program.
     set_target_properties(doris_be PROPERTIES ENABLE_EXPORTS 1)

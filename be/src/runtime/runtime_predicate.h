@@ -17,26 +17,25 @@
 
 #pragma once
 
-#include <atomic>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
 
-#include "common/config.h"
-#include "common/object_pool.h"
+#include "common/status.h"
 #include "exec/olap_common.h"
-#include "gen_cpp/PaloInternalService_types.h" // for TQueryOptions
-#include "gen_cpp/Types_types.h"               // for TUniqueId
-#include "olap/column_predicate.h"
 #include "olap/tablet_schema.h"
-#include "runtime/datetime_value.h"
-#include "runtime/exec_env.h"
-#include "runtime/mem_pool.h"
-#include "util/threadpool.h"
+#include "runtime/define_primitive_type.h"
+#include "runtime/primitive_type.h"
+#include "util/binary_cast.hpp"
+#include "vec/common/arena.h"
 #include "vec/core/field.h"
 #include "vec/core/types.h"
+#include "vec/runtime/vdatetime_value.h"
 
 namespace doris {
+class ColumnPredicate;
 
 namespace vectorized {
 
@@ -49,7 +48,7 @@ public:
     bool inited() {
         std::unique_lock<std::shared_mutex> wlock(_rwlock);
         return _inited;
-    };
+    }
 
     void set_tablet_schema(TabletSchemaSPtr tablet_schema) {
         std::unique_lock<std::shared_mutex> wlock(_rwlock);
@@ -68,7 +67,7 @@ private:
     Field _orderby_extrem {Field::Types::Null};
     std::shared_ptr<ColumnPredicate> _predictate {nullptr};
     TabletSchemaSPtr _tablet_schema;
-    std::unique_ptr<MemPool> _predicate_mem_pool;
+    std::unique_ptr<Arena> _predicate_arena;
     std::function<std::string(const Field&)> _get_value_fn;
     bool _nulls_first = true;
     bool _inited = false;

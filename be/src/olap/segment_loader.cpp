@@ -17,8 +17,9 @@
 
 #include "olap/segment_loader.h"
 
-#include "olap/rowset/rowset.h"
-#include "olap/tablet_schema.h"
+#include "common/config.h"
+#include "olap/olap_define.h"
+#include "olap/rowset/beta_rowset.h"
 #include "util/stopwatch.hpp"
 
 namespace doris {
@@ -74,7 +75,7 @@ Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
 
     std::vector<segment_v2::SegmentSharedPtr> segments;
     // Todo: How to handle the space size of lazy open segments in cache
-    RETURN_NOT_OK(rowset->load_segments(&segments, is_lazy_open, disable_file_cache));
+    RETURN_IF_ERROR(rowset->load_segments(&segments, is_lazy_open, disable_file_cache));
 
     cache_handle->owned = !(use_cache && !disable_file_cache);
     if (use_cache && !disable_file_cache) {
@@ -87,6 +88,10 @@ Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
     }
 
     return Status::OK();
+}
+
+void SegmentLoader::erase_segment(const SegmentLoader::CacheKey& key) {
+    _cache->erase(key.encode());
 }
 
 Status SegmentLoader::prune() {

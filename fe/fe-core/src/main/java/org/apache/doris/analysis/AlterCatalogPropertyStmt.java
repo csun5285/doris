@@ -36,15 +36,21 @@ import java.util.Map;
  */
 public class AlterCatalogPropertyStmt extends DdlStmt {
     private final String catalogName;
+    private final String comment;
     private final Map<String, String> newProperties;
 
     public AlterCatalogPropertyStmt(String catalogName, Map<String, String> newProperties) {
         this.catalogName = catalogName;
         this.newProperties = newProperties;
+        this.comment = newProperties.getOrDefault("comment", "");
     }
 
     public String getCatalogName() {
         return catalogName;
+    }
+
+    public String getComment() {
+        return comment;
     }
 
     public Map<String, String> getNewProperties() {
@@ -55,7 +61,7 @@ public class AlterCatalogPropertyStmt extends DdlStmt {
     public void analyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
         Util.checkCatalogAllRules(catalogName);
-        if (!Env.getCurrentEnv().getAuth().checkCtlPriv(
+        if (!Env.getCurrentEnv().getAccessManager().checkCtlPriv(
                 ConnectContext.get(), catalogName, PrivPredicate.ALTER)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_CATALOG_ACCESS_DENIED,
                     analyzer.getQualifiedUser(), catalogName);

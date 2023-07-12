@@ -21,8 +21,8 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.datasource.CatalogProperty;
-import org.apache.doris.datasource.CloudProperty;
 import org.apache.doris.datasource.ExternalCatalog;
+import org.apache.doris.datasource.property.constants.S3Properties;
 
 import com.google.common.collect.Maps;
 import com.selectdb.cloud.proto.SelectdbCloud;
@@ -116,11 +116,12 @@ public class IAMTokenMgr {
             CatalogProperty catalogProperty = catalog.getCatalogProperty();
             Map<String, String> modifiedProperties = new HashMap<>();
             // Use aws client access all cloud storage.
-            modifiedProperties.put(CloudProperty.CLOUD_ACCESS_KEY, stsToken.getLeft());
-            modifiedProperties.put(CloudProperty.CLOUD_SECRET_KEY, stsToken.getMiddle());
-            modifiedProperties.put(CloudProperty.CLOUD_SESSION_TOKEN, stsToken.getRight());
+            modifiedProperties.put(S3Properties.Env.ACCESS_KEY, stsToken.getLeft());
+            modifiedProperties.put(S3Properties.Env.SECRET_KEY, stsToken.getMiddle());
+            modifiedProperties.put(S3Properties.Env.TOKEN, stsToken.getRight());
             catalogProperty.modifyCatalogProps(modifiedProperties);
-            catalog.refreshCatalog();
+            // todo(dx): fix when doris update it in parameter
+            catalog.refreshCatalog(catalog);
         }
     }
 

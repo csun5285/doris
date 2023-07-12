@@ -83,6 +83,10 @@ public class Checkpoint extends MasterDaemon {
     // public for unit test, so that we can trigger checkpoint manually.
     // DO NOT call it manually outside the unit test.
     public synchronized void doCheckpoint() throws CheckpointException {
+        if (!Env.getServingEnv().isHttpReady()) {
+            LOG.info("Http server is not ready.");
+            return;
+        }
         long imageVersion = 0;
         long checkPointVersion = 0;
         Storage storage = null;
@@ -128,7 +132,7 @@ public class Checkpoint extends MasterDaemon {
                         String.format("checkpoint version should be %d," + " actual replayed journal id is %d",
                                 checkPointVersion, env.getReplayedJournalId()));
             }
-            env.fixBugAfterMetadataReplayed(false);
+            env.postProcessAfterMetadataReplayed(false);
             latestImageFilePath = env.saveImage();
             replayedJournalId = env.getReplayedJournalId();
 
@@ -192,7 +196,7 @@ public class Checkpoint extends MasterDaemon {
                 }
                 int port = Config.http_port;
 
-                String url = "http://" + host + ":" + port + "/put?version=" + replayedJournalId
+                String url = "http://" + NetUtils.getHostPortInAccessibleFormat(host, port) + "/put?version=" + replayedJournalId
                         + "&port=" + port;
                 LOG.info("Put image:{}", url);
 
@@ -266,6 +270,8 @@ public class Checkpoint extends MasterDaemon {
                 editLog.deleteJournals(deleteVersion + 1);
                 if (MetricRepo.isInit) {
                     MetricRepo.COUNTER_EDIT_LOG_CLEAN_SUCCESS.increase(1L);
+                    MetricRepo.COUNTER_CURRENT_EDIT_LOG_SIZE_BYTES.reset();
+                    MetricRepo.COUNTER_EDIT_LOG_CURRENT.update(editLog.getEditLogNum());
                 }
                 LOG.info("journals <= {} are deleted. image version {}, other nodes min version {}",
                         deleteVersion, checkPointVersion, minOtherNodesJournalId);

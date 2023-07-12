@@ -22,7 +22,7 @@
 
 #include "common/status.h"
 #include "runtime/runtime_state.h"
-#include "udf/udf_internal.h"
+#include "udf/udf.h"
 #include "util/binary_cast.hpp"
 #include "util/type_traits.h"
 #include "vec/columns/column_nullable.h"
@@ -127,6 +127,10 @@ struct TimeStampImpl {
     static constexpr auto name = "timestamp";
 
     static inline auto execute(const OpArgType& t) { return t; }
+
+    static DataTypes get_variadic_argument_types() {
+        return {std::make_shared<typename DateTraits<ArgType>::DateType>()};
+    }
 };
 
 template <typename ArgType>
@@ -276,12 +280,12 @@ template <typename Transform>
 struct TransformerToStringTwoArgument {
     static void vector_constant(FunctionContext* context,
                                 const PaddedPODArray<typename Transform::FromType>& ts,
-                                const std::string& format, ColumnString::Chars& res_data,
+                                const StringRef& format, ColumnString::Chars& res_data,
                                 ColumnString::Offsets& res_offsets,
                                 PaddedPODArray<UInt8>& null_map) {
         auto len = ts.size();
         res_offsets.resize(len);
-        res_data.reserve(len * format.size() + len);
+        res_data.reserve(len * format.size + len);
         null_map.resize_fill(len, false);
 
         size_t offset = 0;
@@ -290,12 +294,10 @@ struct TransformerToStringTwoArgument {
             size_t new_offset;
             bool is_null;
             if constexpr (is_specialization_of_v<Transform, FromUnixTimeImpl>) {
-                std::tie(new_offset, is_null) =
-                        Transform::execute(t, StringRef(format.c_str(), format.size()), res_data,
-                                           offset, context->impl()->state()->timezone_obj());
-            } else {
                 std::tie(new_offset, is_null) = Transform::execute(
-                        t, StringRef(format.c_str(), format.size()), res_data, offset);
+                        t, format, res_data, offset, context->state()->timezone_obj());
+            } else {
+                std::tie(new_offset, is_null) = Transform::execute(t, format, res_data, offset);
             }
             res_offsets[i] = new_offset;
             null_map[i] = is_null;

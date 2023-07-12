@@ -17,13 +17,27 @@
 
 #include "olap/base_compaction.h"
 
+#include <gen_cpp/olap_file.pb.h>
+#include <stdint.h>
+#include <time.h>
+
+#include <memory>
+#include <mutex>
+#include <ostream>
+
+#include "common/config.h"
+#include "common/logging.h"
+#include "olap/olap_define.h"
+#include "olap/rowset/rowset_meta.h"
+#include "runtime/thread_context.h"
 #include "util/doris_metrics.h"
+#include "util/thread.h"
 #include "util/trace.h"
 
 namespace doris {
 using namespace ErrorCode;
 
-BaseCompaction::BaseCompaction(TabletSharedPtr tablet)
+BaseCompaction::BaseCompaction(const TabletSharedPtr& tablet)
         : Compaction(tablet, "BaseCompaction:" + std::to_string(tablet->tablet_id())) {}
 
 BaseCompaction::~BaseCompaction() {}
@@ -41,7 +55,7 @@ Status BaseCompaction::prepare_compact() {
     TRACE("got base compaction lock");
 
     // 1. pick rowsets to compact
-    RETURN_NOT_OK(pick_rowsets_to_compact());
+    RETURN_IF_ERROR(pick_rowsets_to_compact());
     TRACE("rowsets picked");
     TRACE_COUNTER_INCREMENT("input_rowsets_count", _input_rowsets.size());
     _tablet->set_clone_occurred(false);
@@ -73,7 +87,7 @@ Status BaseCompaction::execute_compact_impl() {
 
     // 2. do base compaction, merge rowsets
     int64_t permits = get_compaction_permits();
-    RETURN_NOT_OK(do_compaction(permits));
+    RETURN_IF_ERROR(do_compaction(permits));
     TRACE("compaction finished");
 
     // 3. set state to success
@@ -88,10 +102,9 @@ Status BaseCompaction::execute_compact_impl() {
 }
 
 void BaseCompaction::_filter_input_rowset() {
-    // if enable dup key skip big file and no delete predicate
+    // if dup_key and no delete predicate
     // we skip big files too save resources
-    if (!config::enable_dup_key_base_compaction_skip_big_file ||
-        _tablet->keys_type() != KeysType::DUP_KEYS) {
+    if (_tablet->keys_type() != KeysType::DUP_KEYS) {
         return;
     }
     for (auto& rs : _input_rowsets) {
@@ -112,11 +125,9 @@ void BaseCompaction::_filter_input_rowset() {
 }
 
 Status BaseCompaction::pick_rowsets_to_compact() {
-    _input_rowsets.clear();
-    _tablet->pick_candidate_rowsets_to_base_compaction(&_input_rowsets);
-    std::sort(_input_rowsets.begin(), _input_rowsets.end(), Rowset::comparator);
-    RETURN_NOT_OK(check_version_continuity(_input_rowsets));
-    RETURN_NOT_OK(_check_rowset_overlapping(_input_rowsets));
+    _input_rowsets = _tablet->pick_candidate_rowsets_to_base_compaction();
+    RETURN_IF_ERROR(check_version_continuity(_input_rowsets));
+    RETURN_IF_ERROR(_check_rowset_overlapping(_input_rowsets));
     _filter_input_rowset();
     if (_input_rowsets.size() <= 1) {
         return Status::Error<BE_NO_SUITABLE_VERSION>();
@@ -151,11 +162,11 @@ Status BaseCompaction::pick_rowsets_to_compact() {
     }
 
     // 1. cumulative rowset must reach base_compaction_num_cumulative_deltas threshold
-    if (_input_rowsets.size() > config::base_compaction_num_cumulative_deltas) {
+    if (_input_rowsets.size() > config::base_compaction_min_rowset_num) {
         VLOG_NOTICE << "satisfy the base compaction policy. tablet=" << _tablet->full_name()
                     << ", num_cumulative_rowsets=" << _input_rowsets.size() - 1
                     << ", base_compaction_num_cumulative_rowsets="
-                    << config::base_compaction_num_cumulative_deltas;
+                    << config::base_compaction_min_rowset_num;
         return Status::OK();
     }
 
@@ -167,7 +178,7 @@ Status BaseCompaction::pick_rowsets_to_compact() {
         cumulative_total_size += (*it)->data_disk_size();
     }
 
-    double base_cumulative_delta_ratio = config::base_cumulative_delta_ratio;
+    double min_data_ratio = config::base_compaction_min_data_ratio;
     if (base_size == 0) {
         // base_size == 0 means this may be a base version [0-1], which has no data.
         // set to 1 to void divide by zero
@@ -175,18 +186,18 @@ Status BaseCompaction::pick_rowsets_to_compact() {
     }
     double cumulative_base_ratio = static_cast<double>(cumulative_total_size) / base_size;
 
-    if (cumulative_base_ratio > base_cumulative_delta_ratio) {
+    if (cumulative_base_ratio > min_data_ratio) {
         VLOG_NOTICE << "satisfy the base compaction policy. tablet=" << _tablet->full_name()
                     << ", cumulative_total_size=" << cumulative_total_size
                     << ", base_size=" << base_size
                     << ", cumulative_base_ratio=" << cumulative_base_ratio
-                    << ", policy_ratio=" << base_cumulative_delta_ratio;
+                    << ", policy_min_data_ratio=" << min_data_ratio;
         return Status::OK();
     }
 
     // 3. the interval since last base compaction reaches the threshold
     int64_t base_creation_time = _input_rowsets[0]->creation_time();
-    int64_t interval_threshold = config::base_compaction_interval_seconds_since_last_operation;
+    int64_t interval_threshold = 86400;
     int64_t interval_since_last_base_compaction = time(nullptr) - base_creation_time;
     if (interval_since_last_base_compaction > interval_threshold) {
         VLOG_NOTICE << "satisfy the base compaction policy. tablet=" << _tablet->full_name()

@@ -28,7 +28,6 @@ import org.apache.doris.catalog.ColocateTableIndex;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.DiskInfo;
 import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.InternalSchemaInitializer;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
@@ -74,6 +73,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
@@ -96,7 +96,6 @@ public class TabletRepairAndBalanceTest {
 
     static {
         try {
-            InternalSchemaInitializer.forTest = true;
             tag1 = Tag.create(Tag.TYPE_LOCATION, "zone1");
             tag2 = Tag.create(Tag.TYPE_LOCATION, "zone2");
         } catch (AnalysisException e) {
@@ -106,6 +105,7 @@ public class TabletRepairAndBalanceTest {
 
     @BeforeClass
     public static void beforeClass() throws Exception {
+        FeConstants.runningUnitTest = true;
         System.out.println(runningDir);
         FeConstants.runningUnitTest = true;
         FeConstants.tablet_checker_interval_ms = 1000;
@@ -126,7 +126,7 @@ public class TabletRepairAndBalanceTest {
         Env.getCurrentEnv().createDb(createDbStmt);
 
         // must set disk info, or the tablet scheduler won't work
-        backends = Env.getCurrentSystemInfo().getClusterBackends(SystemInfoService.DEFAULT_CLUSTER);
+        backends = Env.getCurrentSystemInfo().getAllBackends();
         for (Backend be : backends) {
             Map<String, TDisk> backendDisks = Maps.newHashMap();
             TDisk tDisk1 = new TDisk();
@@ -310,7 +310,7 @@ public class TabletRepairAndBalanceTest {
 
         // check backend get() methods
         SystemInfoService infoService = Env.getCurrentSystemInfo();
-        Set<Tag> tags = infoService.getTagsByCluster(SystemInfoService.DEFAULT_CLUSTER);
+        Set<Tag> tags = infoService.getTags();
         Assert.assertEquals(2, tags.size());
 
         // check tablet and replica number
@@ -585,7 +585,10 @@ public class TabletRepairAndBalanceTest {
             try {
                 tbl.checkReplicaAllocation();
                 break;
-            } catch (UserException e) {
+            } catch (UserException | NoSuchElementException e) {
+                // Why do we add no such element exception because hash map is not a thread safe struct.
+                // In this ut using a big loop to iterate the hash map,
+                // it will increase the probability of map to throw NoSuchElementException exception.
                 System.out.println(e.getMessage());
             }
             Thread.sleep(1000);

@@ -18,6 +18,7 @@
 package org.apache.doris.load.loadv2;
 
 import org.apache.doris.analysis.LoadStmt;
+import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.AuthorizationInfo;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
@@ -28,6 +29,7 @@ import org.apache.doris.common.DuplicatedRequestException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.FeConstants;
+import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.LabelAlreadyUsedException;
 import org.apache.doris.common.LoadException;
 import org.apache.doris.common.MetaNotFoundException;
@@ -44,8 +46,8 @@ import org.apache.doris.load.EtlStatus;
 import org.apache.doris.load.FailMsg;
 import org.apache.doris.load.FailMsg.CancelType;
 import org.apache.doris.load.Load;
-import org.apache.doris.mysql.privilege.PaloPrivilege;
 import org.apache.doris.mysql.privilege.PrivPredicate;
+import org.apache.doris.mysql.privilege.Privilege;
 import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.Coordinator;
@@ -75,6 +77,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -129,6 +132,11 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
     private boolean isJobTypeRead = false;
 
     protected List<ErrorTabletInfo> errorTabletInfos = Lists.newArrayList();
+
+    protected UserIdentity userInfo = UserIdentity.UNKNOWN;
+
+    protected String comment = "";
+
 
     public static class LoadStatistic {
         // number of rows processed on BE, this number will be updated periodically by query report.
@@ -380,6 +388,22 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         }
     }
 
+    public UserIdentity getUserInfo() {
+        return userInfo;
+    }
+
+    public void setUserInfo(UserIdentity userInfo) {
+        this.userInfo = userInfo;
+    }
+
+    public String getComment() {
+        return comment;
+    }
+
+    public void setComment(String comment) {
+        this.comment = comment;
+    }
+
     private void initDefaultJobProperties() {
         long timeout = Config.broker_load_default_timeout_second;
         switch (jobType) {
@@ -394,7 +418,9 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
                 timeout = Config.broker_load_default_timeout_second;
                 break;
             case INSERT:
-                timeout = Config.insert_load_default_timeout_second;
+                timeout = Optional.ofNullable(ConnectContext.get())
+                                    .map(ConnectContext::getExecTimeout)
+                                    .orElse(Config.insert_load_default_timeout_second);
                 break;
             case MINI:
                 timeout = Config.stream_load_default_timeout_second;
@@ -582,10 +608,10 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             checkAuthWithoutAuthInfo(command);
             return;
         }
-        if (!Env.getCurrentEnv().getAuth().checkPrivByAuthInfo(ConnectContext.get(), authorizationInfo,
+        if (!Env.getCurrentEnv().getAccessManager().checkPrivByAuthInfo(ConnectContext.get(), authorizationInfo,
                 PrivPredicate.LOAD)) {
             ErrorReport.reportDdlException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,
-                    PaloPrivilege.LOAD_PRIV);
+                    Privilege.LOAD_PRIV);
         }
     }
 
@@ -603,14 +629,14 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             Set<String> tableNames = getTableNames();
             if (tableNames.isEmpty()) {
                 // forward compatibility
-                if (!Env.getCurrentEnv().getAuth().checkDbPriv(ConnectContext.get(), db.getFullName(),
+                if (!Env.getCurrentEnv().getAccessManager().checkDbPriv(ConnectContext.get(), db.getFullName(),
                         PrivPredicate.LOAD)) {
                     ErrorReport.reportDdlException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR,
-                            PaloPrivilege.LOAD_PRIV);
+                            Privilege.LOAD_PRIV);
                 }
             } else {
                 for (String tblName : tableNames) {
-                    if (!Env.getCurrentEnv().getAuth().checkTblPriv(ConnectContext.get(), db.getFullName(),
+                    if (!Env.getCurrentEnv().getAccessManager().checkTblPriv(ConnectContext.get(), db.getFullName(),
                             tblName, PrivPredicate.LOAD)) {
                         ErrorReport.reportDdlException(ErrorCode.ERR_TABLEACCESS_DENIED_ERROR,
                                 command,
@@ -798,18 +824,20 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         jobInfo.add(state.name());
 
         // progress
+        // check null
+        String progress = Env.getCurrentProgressManager().getProgressInfo(String.valueOf(id));
         switch (state) {
             case PENDING:
-                jobInfo.add("ETL:0%; LOAD:0%");
+                jobInfo.add("0%");
                 break;
             case CANCELLED:
-                jobInfo.add("ETL:N/A; LOAD:N/A");
+                jobInfo.add(progress);
                 break;
             case ETL:
-                jobInfo.add("ETL:" + progress + "%; LOAD:0%");
+                jobInfo.add(progress);
                 break;
             default:
-                jobInfo.add("ETL:100%; LOAD:" + progress + "%");
+                jobInfo.add(progress);
                 break;
         }
 
@@ -850,6 +878,10 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         jobInfo.add(transactionId);
         // error tablets
         jobInfo.add(errorTabletsToJson());
+        // user
+        jobInfo.add(userInfo.getQualifiedUser());
+        // comment
+        jobInfo.add(comment);
         return jobInfo;
     }
 
@@ -892,8 +924,6 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             job = new SparkLoadJob();
         } else if (type == EtlJobType.INSERT) {
             job = new InsertLoadJob();
-        } else if (type == EtlJobType.MINI) {
-            job = new MiniLoadJob();
         } else {
             throw new IOException("Unknown load type: " + type.name());
         }
@@ -1096,6 +1126,13 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
             Text.writeString(out, entry.getKey());
             Text.writeString(out, String.valueOf(entry.getValue()));
         }
+        if (userInfo == null) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(true);
+            userInfo.write(out);
+        }
+        Text.writeString(out, comment);
     }
 
     public void readFields(DataInput in) throws IOException {
@@ -1138,6 +1175,18 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         } catch (Exception e) {
             // should not happen
             throw new IOException("failed to replay job property", e);
+        }
+        if (Env.getCurrentEnvJournalVersion() >= FeMetaVersion.VERSION_117) {
+            if (in.readBoolean()) {
+                userInfo = UserIdentity.read(in);
+                // must set is as analyzed, because when write the user info to meta image, it will be checked.
+                userInfo.setIsAnalyzed();
+            } else {
+                userInfo = UserIdentity.UNKNOWN;
+            }
+            comment = Text.readString(in);
+        } else {
+            comment = "";
         }
     }
 

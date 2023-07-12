@@ -17,21 +17,29 @@
 
 #pragma once
 
-#include <memory> // for unique_ptr
+#include <gen_cpp/segment_v2.pb.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "common/status.h"         // for Status
-#include "gen_cpp/segment_v2.pb.h" // for EncodingTypePB
+#include <algorithm>
+#include <memory> // for unique_ptr
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/status.h" // for Status
+#include "olap/field.h"    // for Field
 #include "olap/rowset/segment_v2/common.h"
-#include "olap/rowset/segment_v2/page_pointer.h" // for PagePointer
-#include "olap/tablet_schema.h"                  // for TabletColumn
-#include "olap/inverted_index_parser.h"
-#include "util/bitmap.h"                         // for BitmapChange
-#include "util/slice.h"                          // for OwnedSlice
+#include "olap/rowset/segment_v2/inverted_index_writer.h"
+#include "util/bitmap.h" // for BitmapChange
+#include "util/slice.h"  // for OwnedSlice
 
 namespace doris {
 
-class TypeInfo;
 class BlockCompressionCodec;
+class TabletColumn;
+class TabletIndex;
 
 namespace io {
 class FileWriter;
@@ -51,6 +59,9 @@ struct ColumnWriterOptions {
     bool need_zone_map = false;
     bool need_bitmap_index = false;
     bool need_bloom_filter = false;
+    bool is_ngram_bf_index = false;
+    uint8_t gram_size;
+    uint16_t gram_bf_size;
     std::vector<const TabletIndex*> indexes;
     const TabletIndex* inverted_index = nullptr;
     std::string to_string() const {
@@ -110,7 +121,7 @@ public:
     Status append_nullable(const uint8_t* nullmap, const void* data, size_t num_rows);
 
     // use only in vectorized load
-    Status append_nullable(const uint8_t* null_map, const uint8_t** data, size_t num_rows);
+    virtual Status append_nullable(const uint8_t* null_map, const uint8_t** data, size_t num_rows);
 
     virtual Status append_nulls(size_t num_rows) = 0;
 
@@ -151,6 +162,7 @@ private:
 
 class FlushPageCallback {
 public:
+    virtual ~FlushPageCallback() = default;
     virtual Status put_extra_info_in_page(DataPageFooterPB* footer) { return Status::OK(); }
 };
 
@@ -262,6 +274,57 @@ private:
     FlushPageCallback* _new_page_callback = nullptr;
 };
 
+class StructColumnWriter final : public ColumnWriter {
+public:
+    explicit StructColumnWriter(const ColumnWriterOptions& opts, std::unique_ptr<Field> field,
+                                ScalarColumnWriter* null_writer,
+                                std::vector<std::unique_ptr<ColumnWriter>>& sub_column_writers);
+    ~StructColumnWriter() override = default;
+
+    Status init() override;
+
+    Status append_nullable(const uint8_t* null_map, const uint8_t** data, size_t num_rows) override;
+    Status append_data(const uint8_t** ptr, size_t num_rows) override;
+
+    uint64_t estimate_buffer_size() override;
+
+    Status finish() override;
+    Status write_data() override;
+    Status write_ordinal_index() override;
+    Status append_nulls(size_t num_rows) override;
+
+    Status finish_current_page() override;
+
+    Status write_zone_map() override {
+        if (_opts.need_zone_map) {
+            return Status::NotSupported("struct not support zone map");
+        }
+        return Status::OK();
+    }
+
+    Status write_bitmap_index() override {
+        if (_opts.need_bitmap_index) {
+            return Status::NotSupported("struct not support bitmap index");
+        }
+        return Status::OK();
+    }
+    Status write_inverted_index() override;
+    Status write_bloom_filter_index() override {
+        if (_opts.need_bloom_filter) {
+            return Status::NotSupported("struct not support bloom filter index");
+        }
+        return Status::OK();
+    }
+
+    ordinal_t get_next_rowid() const override { return _sub_column_writers[0]->get_next_rowid(); }
+
+private:
+    size_t _num_sub_column_writers;
+    std::unique_ptr<ScalarColumnWriter> _null_writer;
+    std::vector<std::unique_ptr<ColumnWriter>> _sub_column_writers;
+    ColumnWriterOptions _opts;
+};
+
 class ArrayColumnWriter final : public ColumnWriter, public FlushPageCallback {
 public:
     explicit ArrayColumnWriter(const ColumnWriterOptions& opts, std::unique_ptr<Field> field,
@@ -313,6 +376,62 @@ private:
     std::unique_ptr<ScalarColumnWriter> _offset_writer;
     std::unique_ptr<ScalarColumnWriter> _null_writer;
     std::unique_ptr<ColumnWriter> _item_writer;
+    std::unique_ptr<InvertedIndexColumnWriter> _inverted_index_builder;
+    ColumnWriterOptions _opts;
+};
+
+class MapColumnWriter final : public ColumnWriter, public FlushPageCallback {
+public:
+    explicit MapColumnWriter(const ColumnWriterOptions& opts, std::unique_ptr<Field> field,
+                             ScalarColumnWriter* null_writer, ScalarColumnWriter* offsets_writer,
+                             std::vector<std::unique_ptr<ColumnWriter>>& _kv_writers);
+
+    ~MapColumnWriter() override = default;
+
+    Status init() override;
+
+    Status append_data(const uint8_t** ptr, size_t num_rows) override;
+    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+    uint64_t estimate_buffer_size() override;
+
+    Status finish() override;
+    Status write_data() override;
+    Status write_ordinal_index() override;
+    Status write_inverted_index() override;
+    Status append_nulls(size_t num_rows) override;
+
+    Status finish_current_page() override;
+
+    Status write_zone_map() override {
+        if (_opts.need_zone_map) {
+            return Status::NotSupported("map not support zone map");
+        }
+        return Status::OK();
+    }
+
+    Status write_bitmap_index() override {
+        if (_opts.need_bitmap_index) {
+            return Status::NotSupported("map not support bitmap index");
+        }
+        return Status::OK();
+    }
+    Status write_bloom_filter_index() override {
+        if (_opts.need_bloom_filter) {
+            return Status::NotSupported("map not support bloom filter index");
+        }
+        return Status::OK();
+    }
+
+    // according key writer to get next rowid
+    ordinal_t get_next_rowid() const override { return _offsets_writer->get_next_rowid(); }
+
+private:
+    Status put_extra_info_in_page(DataPageFooterPB* header) override;
+
+    std::vector<std::unique_ptr<ColumnWriter>> _kv_writers;
+    // we need null writer to make sure a row is null or not
+    std::unique_ptr<ScalarColumnWriter> _null_writer;
+    std::unique_ptr<ScalarColumnWriter> _offsets_writer;
     std::unique_ptr<InvertedIndexColumnWriter> _inverted_index_builder;
     ColumnWriterOptions _opts;
 };

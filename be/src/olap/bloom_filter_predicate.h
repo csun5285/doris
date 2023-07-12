@@ -17,7 +17,7 @@
 
 #pragma once
 
-#include "exprs/bloomfilter_predicate.h"
+#include "exprs/bloom_filter_func.h"
 #include "exprs/runtime_filter.h"
 #include "olap/column_predicate.h"
 #include "runtime/primitive_type.h"
@@ -30,6 +30,7 @@
 namespace doris {
 
 // only use in runtime filter and segment v2
+
 template <PrimitiveType T>
 class BloomFilterColumnPredicate : public ColumnPredicate {
 public:
@@ -40,18 +41,11 @@ public:
                                int be_exec_version)
             : ColumnPredicate(column_id),
               _filter(filter),
-              _specific_filter(static_cast<SpecificFilter*>(_filter.get())),
+              _specific_filter(reinterpret_cast<SpecificFilter*>(_filter.get())),
               _be_exec_version(be_exec_version) {}
     ~BloomFilterColumnPredicate() override = default;
 
     PredicateType type() const override { return PredicateType::BF; }
-
-    void evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size) const override;
-
-    void evaluate_or(ColumnBlock* block, uint16_t* sel, uint16_t size,
-                     bool* flags) const override {};
-    void evaluate_and(ColumnBlock* block, uint16_t* sel, uint16_t size,
-                      bool* flags) const override {};
 
     Status evaluate(BitmapIndexIterator* iterators, uint32_t num_rows,
                     roaring::Roaring* roaring) const override {
@@ -72,24 +66,38 @@ private:
         uint16_t new_size = 0;
         if (column.is_column_dictionary()) {
             auto* dict_col = reinterpret_cast<const vectorized::ColumnDictI32*>(&column);
-            for (uint16_t i = 0; i < size; i++) {
-                uint16_t idx = sel[i];
-                sel[new_size] = idx;
-                if constexpr (is_nullable) {
-                    new_size += !null_map[idx] &&
-                                _specific_filter->find_uint32_t(dict_col->get_hash_value(idx));
-                } else {
-                    new_size += _specific_filter->find_uint32_t(dict_col->get_hash_value(idx));
+            if (_be_exec_version >= 2) {
+                for (uint16_t i = 0; i < size; i++) {
+                    uint16_t idx = sel[i];
+                    sel[new_size] = idx;
+                    if constexpr (is_nullable) {
+                        new_size += !null_map[idx] && _specific_filter->find_uint32_t(
+                                                              dict_col->get_crc32_hash_value(idx));
+                    } else {
+                        new_size += _specific_filter->find_uint32_t(
+                                dict_col->get_crc32_hash_value(idx));
+                    }
+                }
+            } else {
+                for (uint16_t i = 0; i < size; i++) {
+                    uint16_t idx = sel[i];
+                    sel[new_size] = idx;
+                    if constexpr (is_nullable) {
+                        new_size += !null_map[idx] &&
+                                    _specific_filter->find_uint32_t(dict_col->get_hash_value(idx));
+                    } else {
+                        new_size += _specific_filter->find_uint32_t(dict_col->get_hash_value(idx));
+                    }
                 }
             }
-        } else if (IRuntimeFilter::enable_use_batch(_be_exec_version, T)) {
-            new_size = _specific_filter->find_fixed_len_olap_engine(
-                    (char*)reinterpret_cast<
+        } else if (IRuntimeFilter::enable_use_batch(_be_exec_version > 0, T)) {
+            const auto& data =
+                    reinterpret_cast<
                             const vectorized::PredicateColumnType<PredicateEvaluateType<T>>*>(
                             &column)
-                            ->get_data()
-                            .data(),
-                    null_map, sel, size);
+                            ->get_data();
+            new_size = _specific_filter->find_fixed_len_olap_engine((char*)data.data(), null_map,
+                                                                    sel, size, data.size() != size);
         } else {
             uint24_t tmp_uint24_value;
             auto get_cell_value = [&tmp_uint24_value](auto& data) {
@@ -102,24 +110,20 @@ private:
                 }
             };
 
-            auto pred_col_data =
+            auto& pred_col =
                     reinterpret_cast<
                             const vectorized::PredicateColumnType<PredicateEvaluateType<T>>*>(
                             &column)
-                            ->get_data()
-                            .data();
-            for (uint16_t i = 0; i < size; i++) {
-                uint16_t idx = sel[i];
-                sel[new_size] = idx;
+                            ->get_data();
 
-                if constexpr (is_nullable) {
-                    new_size += !null_map[idx] && _specific_filter->find_olap_engine(
-                                                          get_cell_value(pred_col_data[idx]));
-                } else {
-                    new_size +=
-                            _specific_filter->find_olap_engine(get_cell_value(pred_col_data[idx]));
-                }
-            }
+            auto pred_col_data = pred_col.data();
+#define EVALUATE_WITH_NULL_IMPL(IDX) \
+    !null_map[IDX] && _specific_filter->find_olap_engine(get_cell_value(pred_col_data[IDX]))
+#define EVALUATE_WITHOUT_NULL_IMPL(IDX) \
+    _specific_filter->find_olap_engine(get_cell_value(pred_col_data[IDX]))
+            EVALUATE_BY_SELECTOR(EVALUATE_WITH_NULL_IMPL, EVALUATE_WITHOUT_NULL_IMPL)
+#undef EVALUATE_WITH_NULL_IMPL
+#undef EVALUATE_WITHOUT_NULL_IMPL
         }
         return new_size;
     }
@@ -129,37 +133,14 @@ private:
         return info;
     }
 
+    int get_filter_id() const override { return _filter->get_filter_id(); }
+
     std::shared_ptr<BloomFilterFuncBase> _filter;
     SpecificFilter* _specific_filter; // owned by _filter
-    mutable uint64_t _evaluated_rows = 1;
-    mutable uint64_t _passed_rows = 0;
     mutable bool _always_true = false;
     mutable bool _has_calculate_filter = false;
     int _be_exec_version;
 };
-
-template <PrimitiveType T>
-void BloomFilterColumnPredicate<T>::evaluate(ColumnBlock* block, uint16_t* sel,
-                                             uint16_t* size) const {
-    uint16_t new_size = 0;
-    if (block->is_nullable()) {
-        for (uint16_t i = 0; i < *size; ++i) {
-            uint16_t idx = sel[i];
-            sel[new_size] = idx;
-            const auto* cell_value = reinterpret_cast<const void*>(block->cell(idx).cell_ptr());
-            new_size +=
-                    (!block->cell(idx).is_null() && _specific_filter->find_olap_engine(cell_value));
-        }
-    } else {
-        for (uint16_t i = 0; i < *size; ++i) {
-            uint16_t idx = sel[i];
-            sel[new_size] = idx;
-            const auto* cell_value = reinterpret_cast<const void*>(block->cell(idx).cell_ptr());
-            new_size += _specific_filter->find_olap_engine(cell_value);
-        }
-    }
-    *size = new_size;
-}
 
 template <PrimitiveType T>
 uint16_t BloomFilterColumnPredicate<T>::evaluate(const vectorized::IColumn& column, uint16_t* sel,

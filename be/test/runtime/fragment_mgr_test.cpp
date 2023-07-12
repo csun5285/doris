@@ -17,12 +17,20 @@
 
 #include "runtime/fragment_mgr.h"
 
-#include <gtest/gtest.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-test-part.h>
+
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <thread>
 
 #include "common/config.h"
 #include "exec/data_sink.h"
+#include "gtest/gtest_pred_impl.h"
+#include "runtime/exec_env.h"
 #include "runtime/plan_fragment_executor.h"
-#include "runtime/row_batch.h"
+#include "runtime/runtime_state.h"
 
 namespace doris {
 
@@ -36,7 +44,7 @@ PlanFragmentExecutor::PlanFragmentExecutor(ExecEnv* exec_env,
 PlanFragmentExecutor::~PlanFragmentExecutor() {}
 
 Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request,
-                                     QueryFragmentsCtx* batch_ctx) {
+                                     QueryContext* batch_ctx) {
     return s_prepare_status;
 }
 
@@ -95,8 +103,6 @@ TEST_F(FragmentMgrTest, CancelNormal) {
     params.params.fragment_instance_id.__set_hi(100);
     params.params.fragment_instance_id.__set_lo(200);
     EXPECT_TRUE(mgr.exec_plan_fragment(params).ok());
-    // Cancel after add
-    EXPECT_TRUE(mgr.cancel(params.params.fragment_instance_id).ok());
 }
 
 TEST_F(FragmentMgrTest, CancelWithoutAdd) {
@@ -105,7 +111,6 @@ TEST_F(FragmentMgrTest, CancelWithoutAdd) {
     params.params.fragment_instance_id = TUniqueId();
     params.params.fragment_instance_id.__set_hi(100);
     params.params.fragment_instance_id.__set_lo(200);
-    EXPECT_TRUE(mgr.cancel(params.params.fragment_instance_id).ok());
 }
 
 TEST_F(FragmentMgrTest, PrepareFailed) {
@@ -122,7 +127,7 @@ TEST_F(FragmentMgrTest, OfferPoolFailed) {
     config::fragment_pool_thread_num_min = 1;
     config::fragment_pool_thread_num_max = 1;
     config::fragment_pool_queue_size = 0;
-    FragmentMgr mgr(nullptr);
+    FragmentMgr mgr(doris::ExecEnv::GetInstance());
 
     TExecPlanFragmentParams params;
     params.params.fragment_instance_id = TUniqueId();

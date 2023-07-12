@@ -21,9 +21,11 @@ import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.trees.plans.AbstractPlan;
+import org.apache.doris.nereids.trees.plans.Explainable;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.statistics.Statistics;
 
 import java.util.Optional;
 import javax.annotation.Nullable;
@@ -31,7 +33,7 @@ import javax.annotation.Nullable;
 /**
  * Abstract class for all concrete physical plan.
  */
-public abstract class AbstractPhysicalPlan extends AbstractPlan implements PhysicalPlan {
+public abstract class AbstractPhysicalPlan extends AbstractPlan implements PhysicalPlan, Explainable {
 
     protected final PhysicalProperties physicalProperties;
 
@@ -46,8 +48,8 @@ public abstract class AbstractPhysicalPlan extends AbstractPlan implements Physi
 
     public AbstractPhysicalPlan(PlanType type, Optional<GroupExpression> groupExpression,
             LogicalProperties logicalProperties, @Nullable PhysicalProperties physicalProperties,
-            StatsDeriveResult statsDeriveResult, Plan... children) {
-        super(type, groupExpression, Optional.of(logicalProperties), statsDeriveResult, children);
+            Statistics statistics, Plan... children) {
+        super(type, groupExpression, Optional.of(logicalProperties), statistics, children);
         this.physicalProperties = physicalProperties == null ? PhysicalProperties.ANY : physicalProperties;
     }
 
@@ -55,4 +57,8 @@ public abstract class AbstractPhysicalPlan extends AbstractPlan implements Physi
         return physicalProperties;
     }
 
+    @Override
+    public Plan getExplainPlan(ConnectContext ctx) {
+        return this;
+    }
 }

@@ -133,15 +133,14 @@ public class CanalSyncChannel extends SyncChannel {
                             Lists.newArrayList(tbl.getId()), label,
                         new TransactionState.TxnCoordinator(TransactionState.TxnSourceType.FE,
                             FrontendOptions.getLocalHostAddress()), sourceType, timeoutSecond);
-                    String authCodeUuid = Env.getCurrentGlobalTransactionMgr().getTransactionState(
-                            db.getId(), txnId).getAuthCode();
+                    String token = Env.getCurrentEnv().getLoadManager().getTokenManager().acquireToken();
                     request = new TStreamLoadPutRequest()
                         .setTxnId(txnId).setDb(txnConf.getDb()).setTbl(txnConf.getTbl())
                         .setFileType(TFileType.FILE_STREAM).setFormatType(TFileFormatType.FORMAT_CSV_PLAIN)
                         .setThriftRpcTimeoutMs(5000).setLoadId(txnExecutor.getLoadId())
                         .setMergeType(TMergeType.MERGE).setDeleteCondition(DELETE_CONDITION)
                         .setColumns(targetColumn);
-                    txnConf.setTxnId(txnId).setAuthCodeUuid(authCodeUuid);
+                    txnConf.setTxnId(txnId).setToken(token);
                     txnEntry.setLabel(label);
                     txnExecutor.setTxnId(txnId);
                 } catch (DuplicatedRequestException e) {
@@ -246,8 +245,9 @@ public class CanalSyncChannel extends SyncChannel {
             UUID uuid = UUID.randomUUID();
             TUniqueId loadId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
             this.timeoutSecond = timeoutSecond;
-            TTxnParams txnConf = new TTxnParams().setNeedTxn(true).setThriftRpcTimeoutMs(5000)
-                    .setTxnId(-1).setDb(db.getFullName()).setTbl(tbl.getName()).setDbId(db.getId());
+            TTxnParams txnConf = new TTxnParams().setNeedTxn(true).setEnablePipelineTxnLoad(Config.enable_pipeline_load)
+                    .setThriftRpcTimeoutMs(5000).setTxnId(-1).setDb(db.getFullName())
+                    .setTbl(tbl.getName()).setDbId(db.getId());
             this.txnExecutor = new InsertStreamTxnExecutor(new TransactionEntry(txnConf, db, tbl));
             txnExecutor.setTxnId(-1L);
             txnExecutor.setLoadId(loadId);

@@ -22,44 +22,34 @@ import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
-import org.apache.doris.nereids.trees.plans.GroupPlan;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
-import org.apache.doris.nereids.util.ExpressionUtils;
 import org.apache.doris.nereids.util.PlanUtils;
 
-import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
  * Push the predicate in the LogicalFilter to the aggregate child.
  * For example:
+ * <pre>
  * Logical plan tree:
- *                 any_node
- *                   |
  *                filter (a>0 and b>0)
  *                   |
  *                group by(a, c)
- *                   |
- *                 scan
  * transformed to:
- *                 project
- *                   |
  *              upper filter (b>0)
  *                   |
  *                group by(a, c)
  *                   |
  *              bottom filter (a>0)
- *                   |
- *                 scan
+ * </pre>
  * Note:
- *    'a>0' could be push down, because 'a' is in group by keys;
- *    but 'b>0' could not push down, because 'b' is not in group by keys.
- *
+ * 'a>0' could be push down, because 'a' is in group by keys;
+ * but 'b>0' could not push down, because 'b' is not in group by keys.
  */
 
 public class PushdownFilterThroughAggregation extends OneRewriteRuleFactory {
@@ -67,22 +57,12 @@ public class PushdownFilterThroughAggregation extends OneRewriteRuleFactory {
     @Override
     public Rule build() {
         return logicalFilter(logicalAggregate()).then(filter -> {
-            LogicalAggregate<GroupPlan> aggregate = filter.child();
-            Set<Slot> canPushDownSlots = new HashSet<>();
-            if (aggregate.hasRepeat()) {
-                // When there is a repeat, the push-down condition is consistent with the repeat
-                canPushDownSlots.addAll(aggregate.getSourceRepeat().get().getCommonGroupingSetExpressions());
-            } else {
-                for (Expression groupByExpression : aggregate.getGroupByExpressions()) {
-                    if (groupByExpression instanceof Slot) {
-                        canPushDownSlots.add((Slot) groupByExpression);
-                    }
-                }
-            }
+            LogicalAggregate<Plan> aggregate = filter.child();
+            Set<Slot> canPushDownSlots = getCanPushDownSlots(aggregate);
 
-            List<Expression> pushDownPredicates = Lists.newArrayList();
-            List<Expression> filterPredicates = Lists.newArrayList();
-            ExpressionUtils.extractConjunction(filter.getPredicates()).forEach(conjunct -> {
+            Set<Expression> pushDownPredicates = Sets.newHashSet();
+            Set<Expression> filterPredicates = Sets.newHashSet();
+            filter.getConjuncts().forEach(conjunct -> {
                 Set<Slot> conjunctSlots = conjunct.getInputSlots();
                 if (canPushDownSlots.containsAll(conjunctSlots)) {
                     pushDownPredicates.add(conjunct);
@@ -90,21 +70,30 @@ public class PushdownFilterThroughAggregation extends OneRewriteRuleFactory {
                     filterPredicates.add(conjunct);
                 }
             });
-
-            return pushDownPredicate(filter, aggregate, pushDownPredicates, filterPredicates);
+            if (pushDownPredicates.size() == 0) {
+                return null;
+            }
+            Plan bottomFilter = new LogicalFilter<>(pushDownPredicates, aggregate.child(0));
+            aggregate = (LogicalAggregate<Plan>) aggregate.withChildren(bottomFilter);
+            return PlanUtils.filterOrSelf(filterPredicates, aggregate);
         }).toRule(RuleType.PUSHDOWN_PREDICATE_THROUGH_AGGREGATION);
     }
 
-    private Plan pushDownPredicate(LogicalFilter filter, LogicalAggregate aggregate,
-            List<Expression> pushDownPredicates, List<Expression> filterPredicates) {
-        if (pushDownPredicates.size() == 0) {
-            // nothing pushed down, just return origin plan
-            return filter;
+    /**
+     * get the slots that can be pushed down
+     */
+    public static Set<Slot> getCanPushDownSlots(LogicalAggregate<? extends Plan> aggregate) {
+        Set<Slot> canPushDownSlots = new HashSet<>();
+        if (aggregate.hasRepeat()) {
+            // When there is a repeat, the push-down condition is consistent with the repeat
+            canPushDownSlots.addAll(aggregate.getSourceRepeat().get().getCommonGroupingSetExpressions());
+        } else {
+            for (Expression groupByExpression : aggregate.getGroupByExpressions()) {
+                if (groupByExpression instanceof Slot) {
+                    canPushDownSlots.add((Slot) groupByExpression);
+                }
+            }
         }
-        LogicalFilter bottomFilter = new LogicalFilter<>(ExpressionUtils.and(pushDownPredicates),
-                aggregate.child(0));
-
-        aggregate = aggregate.withChildren(Lists.newArrayList(bottomFilter));
-        return PlanUtils.filterOrSelf(filterPredicates, aggregate);
+        return canPushDownSlots;
     }
 }

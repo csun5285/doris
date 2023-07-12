@@ -162,8 +162,6 @@ public class PlaceHolderExpr extends LiteralExpr {
         return this;
     }
 
-
-
     @Override
     public String toSqlImpl() {
         if (this.lExpr == null) {

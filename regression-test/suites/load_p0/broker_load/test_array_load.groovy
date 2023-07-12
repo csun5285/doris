@@ -20,13 +20,7 @@ suite("test_array_load", "load_p0") {
     def testTable = "tbl_test_array_load"
     def testTable01 = "tbl_test_array_load01"
     
-    def create_test_table = {testTablex, enable_vectorized_flag ->
-        if (enable_vectorized_flag) {
-            sql """ set enable_vectorized_engine = true """
-        } else {
-            sql """ set enable_vectorized_engine = true """
-        }
-
+    def create_test_table = {testTablex ->
         def result1 = sql """
             CREATE TABLE IF NOT EXISTS ${testTable} (
               `k1` INT(11) NULL COMMENT "",
@@ -201,7 +195,8 @@ suite("test_array_load", "load_p0") {
     def check_data_correct = {table_name ->
         sql "sync"
         // select the table and check whether the data is correct
-        qt_select "select * from ${table_name} order by k1" 
+        qt_select "select * from ${table_name} order by k1"
+        qt_select_count "select count(3), count(k6) from ${table_name}"
     }
 
     try {
@@ -210,7 +205,7 @@ suite("test_array_load", "load_p0") {
             try {
                 sql "DROP TABLE IF EXISTS ${testTable}"
                 
-                create_test_table.call(testTable, true)
+                create_test_table.call(testTable)
 
                 load_array_data.call(testTable, 'true', '', 'json', '', '', '', '', '', '', 'simple_array.json')
                 
@@ -220,39 +215,11 @@ suite("test_array_load", "load_p0") {
                 try_sql("DROP TABLE IF EXISTS ${testTable}")
             }
 
-            // case2: import array data in json format and disable vectorized engine
-            try {
-                sql "DROP TABLE IF EXISTS ${testTable}"
-                
-                create_test_table.call(testTable, false)
-
-                load_array_data.call(testTable, 'true', '', 'json', '', '', '', '', '', '', 'simple_array.json')
-                
-                check_data_correct(testTable)
-
-            } finally {
-                try_sql("DROP TABLE IF EXISTS ${testTable}")
-            }
-            
             // case3: import array data in csv format and enable vectorized engine
             try {
                 sql "DROP TABLE IF EXISTS ${testTable}"
                 
-                create_test_table.call(testTable, true)
-
-                load_array_data.call(testTable, 'true', '', 'csv', '', '', '', '', '', '/', 'simple_array.csv')
-                
-                check_data_correct(testTable)
-
-            } finally {
-                try_sql("DROP TABLE IF EXISTS ${testTable}")
-            }
-
-            // case4: import array data in csv format and disable vectorized engine
-            try {
-                sql "DROP TABLE IF EXISTS ${testTable}"
-                
-                create_test_table.call(testTable, false)
+                create_test_table.call(testTable)
 
                 load_array_data.call(testTable, 'true', '', 'csv', '', '', '', '', '', '/', 'simple_array.csv')
                 
@@ -297,7 +264,7 @@ suite("test_array_load", "load_p0") {
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
             
-            create_test_table.call(testTable, true)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs.call(testTable, test_load_label, hdfs_json_file_path, "json",
@@ -308,28 +275,29 @@ suite("test_array_load", "load_p0") {
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
         }
-
-        // case6: import array data by hdfs and disable vectorized engine
+        // test unified load
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
-            
-            create_test_table.call(testTable, false)
+            sql """ set enable_unified_load=true; """
+
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs.call(testTable, test_load_label, hdfs_json_file_path, "json",
-                                brokerName, hdfsUser, hdfsPasswd)
-            
+                    brokerName, hdfsUser, hdfsPasswd)
+
             check_load_result.call(test_load_label, testTable)
 
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
+            sql """ set enable_unified_load=false; """
         }
 
         // case7: import array data by hdfs in csv format and enable vectorized
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
 
-            create_test_table.call(testTable, true)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_csv_file_path, "csv",
@@ -340,28 +308,29 @@ suite("test_array_load", "load_p0") {
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
         }
-
-        // case8: import array data by hdfs in csv format and disable vectorized
+        // test unified load
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
+            sql """ set enable_unified_load=true; """
 
-            create_test_table.call(testTable, false)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_csv_file_path, "csv",
-                                brokerName, hdfsUser, hdfsPasswd)
-            
+                    brokerName, hdfsUser, hdfsPasswd)
+
             check_load_result.call(test_load_label, testTable)
 
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
+            sql """ set enable_unified_load=false; """
         }
 
         // case9: import array data by hdfs in orc format and enable vectorized
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
 
-            create_test_table.call(testTable, true)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_orc_file_path, "orc",
@@ -372,28 +341,29 @@ suite("test_array_load", "load_p0") {
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
         }
-
-        // case10: import array data by hdfs in orc format and disable vectorized
+        // test unified load
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
+            sql """ set enable_unified_load=true; """
 
-            create_test_table.call(testTable, false)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_orc_file_path, "orc",
-                                brokerName, hdfsUser, hdfsPasswd)
-            
+                    brokerName, hdfsUser, hdfsPasswd)
+
             check_load_result.call(test_load_label, testTable)
 
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
+            sql """ set enable_unified_load=false; """
         }
 
         // case11: import array data by hdfs in parquet format and enable vectorized
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
 
-            create_test_table.call(testTable, true)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_parquet_file_path, "parquet",
@@ -404,28 +374,29 @@ suite("test_array_load", "load_p0") {
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
         }
-
-        // case12: import array data by hdfs in parquet format and disable vectorized
+        // test unified load
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
+            sql """ set enable_unified_load=true; """
 
-            create_test_table.call(testTable, false)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_parquet_file_path, "parquet",
-                                brokerName, hdfsUser, hdfsPasswd)
-            
+                    brokerName, hdfsUser, hdfsPasswd)
+
             check_load_result.call(test_load_label, testTable)
 
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
+            sql """ set enable_unified_load=false; """
         }
 
         // case13: import array data by hdfs in orc format(with array type) and enable vectorized
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
 
-            create_test_table.call(testTable, true)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_orc_file_path2, "orc",
@@ -436,22 +407,22 @@ suite("test_array_load", "load_p0") {
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
         }
-
-        // case14: import array data by hdfs in orc format(with array type) and disable vectorized
+        // test unified load
         try {
             sql "DROP TABLE IF EXISTS ${testTable}"
+            sql """ set enable_unified_load=true; """
 
-            create_test_table.call(testTable, false)
+            create_test_table.call(testTable)
 
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs1.call(testTable, test_load_label, hdfs_orc_file_path2, "orc",
-                                brokerName, hdfsUser, hdfsPasswd)
-            
+                    brokerName, hdfsUser, hdfsPasswd)
+
             check_load_result.call(test_load_label, testTable)
 
         } finally {
             try_sql("DROP TABLE IF EXISTS ${testTable}")
+            sql """ set enable_unified_load=false; """
         }
-
     }
 }

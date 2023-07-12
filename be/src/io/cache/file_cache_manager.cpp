@@ -17,14 +17,27 @@
 
 #include "io/cache/file_cache_manager.h"
 
-#include "gutil/strings/util.h"
+#include <fmt/format.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <utility>
+
+#include "common/config.h"
 #include "io/cache/dummy_file_cache.h"
 #include "io/cache/sub_file_cache.h"
 #include "io/cache/whole_file_cache.h"
+#include "io/fs/file_reader_options.h"
+#include "io/fs/file_system.h"
 #include "io/fs/local_file_system.h"
-#include "olap/storage_engine.h"
-#include "util/file_utils.h"
-#include "util/string_util.h"
+#include "olap/data_dir.h"
+#include "olap/rowset/beta_rowset.h"
+#include "cloud/olap/storage_engine.h"
+#include "olap/tablet.h"
+#include "olap/tablet_manager.h"
 
 namespace doris {
 namespace io {
@@ -44,13 +57,31 @@ bool GCContextPerDisk::try_add_file_cache(FileCachePtr cache, int64_t file_size)
     return false;
 }
 
-void GCContextPerDisk::get_gc_file_caches(std::list<FileCachePtr>& result) {
-    while (!_lru_queue.empty() && _used_size > _conf_max_size) {
-        auto file_cache = _lru_queue.top();
-        _used_size -= file_cache->cache_file_size();
-        result.push_back(file_cache);
+FileCachePtr GCContextPerDisk::top() {
+    if (!_lru_queue.empty() && _used_size > _conf_max_size) {
+        return _lru_queue.top();
+    }
+    return nullptr;
+}
+
+void GCContextPerDisk::pop() {
+    if (!_lru_queue.empty()) {
         _lru_queue.pop();
     }
+}
+
+Status GCContextPerDisk::gc_top() {
+    if (!_lru_queue.empty() && _used_size > _conf_max_size) {
+        auto file_cache = _lru_queue.top();
+        size_t cleaned_size = 0;
+        RETURN_IF_ERROR(file_cache->clean_one_cache(&cleaned_size));
+        _used_size -= cleaned_size;
+        _lru_queue.pop();
+        if (!file_cache->is_gc_finish()) {
+            _lru_queue.push(file_cache);
+        }
+    }
+    return Status::OK();
 }
 
 void FileCacheManager::add_file_cache(const std::string& cache_path, FileCachePtr file_cache) {
@@ -101,13 +132,16 @@ void FileCacheManager::_add_file_cache_for_gc_by_disk(std::vector<GCContextPerDi
 void FileCacheManager::_gc_unused_file_caches(std::list<FileCachePtr>& result) {
     std::vector<TabletSharedPtr> tablets =
             StorageEngine::instance()->tablet_manager()->get_all_tablet();
+    bool exists = true;
     for (const auto& tablet : tablets) {
-        std::vector<Path> seg_file_paths;
-        if (io::global_local_filesystem()->list(tablet->tablet_path(), &seg_file_paths).ok()) {
-            for (Path seg_file : seg_file_paths) {
-                std::string seg_filename = seg_file.native();
+        std::vector<FileInfo> seg_files;
+        if (io::global_local_filesystem()
+                    ->list(tablet->tablet_path(), true, &seg_files, &exists)
+                    .ok()) {
+            for (auto& seg_file : seg_files) {
+                std::string seg_filename = seg_file.file_name;
                 // check if it is a dir name
-                if (ends_with(seg_filename, ".dat") || ends_with(seg_filename, "clone")) {
+                if (!BetaRowset::is_segment_cache_dir(seg_filename)) {
                     continue;
                 }
                 // skip file cache already in memory
@@ -175,16 +209,21 @@ void FileCacheManager::gc_file_caches() {
     // policy2: GC file cache by disk size
     if (gc_conf_size > 0) {
         for (size_t i = 0; i < contexts.size(); ++i) {
-            std::list<FileCachePtr> gc_file_list;
-            contexts[i].get_gc_file_caches(gc_file_list);
-            for (auto item : gc_file_list) {
-                std::shared_lock<std::shared_mutex> rdlock(_cache_map_lock);
-                // for dummy file cache, check already used or not again
-                if (item->is_dummy_file_cache() &&
-                    _file_cache_map.find(item->cache_dir().native()) != _file_cache_map.end()) {
-                    continue;
+            auto& context = contexts[i];
+            FileCachePtr file_cache;
+            while ((file_cache = context.top()) != nullptr) {
+                {
+                    std::shared_lock<std::shared_mutex> rdlock(_cache_map_lock);
+                    // for dummy file cache, check already used or not again
+                    if (file_cache->is_dummy_file_cache() &&
+                        _file_cache_map.find(file_cache->cache_dir().native()) !=
+                                _file_cache_map.end()) {
+                        context.pop();
+                        continue;
+                    }
                 }
-                item->clean_all_cache();
+                WARN_IF_ERROR(context.gc_top(),
+                              fmt::format("gc {} error", file_cache->cache_dir().native()));
             }
         }
     }
@@ -192,12 +231,13 @@ void FileCacheManager::gc_file_caches() {
 
 FileCachePtr FileCacheManager::new_file_cache(const std::string& cache_dir, int64_t alive_time_sec,
                                               io::FileReaderSPtr remote_file_reader,
-                                              const std::string& file_cache_type) {
-    if (file_cache_type == "whole_file_cache") {
+                                              io::FileCachePolicy cache_type) {
+    switch (cache_type) {
+    case io::FileCachePolicy::WHOLE_FILE_CACHE:
         return std::make_unique<WholeFileCache>(cache_dir, alive_time_sec, remote_file_reader);
-    } else if (file_cache_type == "sub_file_cache") {
+    case io::FileCachePolicy::SUB_FILE_CACHE:
         return std::make_unique<SubFileCache>(cache_dir, alive_time_sec, remote_file_reader);
-    } else {
+    default:
         return nullptr;
     }
 }

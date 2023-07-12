@@ -40,7 +40,7 @@ import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.system.SystemInfoService;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 
 import java.io.IOException;
@@ -169,11 +169,12 @@ public class DorisAssert {
 
         public QueryAssert(ConnectContext connectContext, String sql) {
             this.connectContext = connectContext;
+            this.connectContext.getState().setIsQuery(true);
             this.sql = sql;
         }
 
         public void explainContains(String... keywords) throws Exception {
-            Assert.assertTrue(Stream.of(keywords).allMatch(explainQuery()::contains));
+            Assert.assertTrue(explainQuery(), Stream.of(keywords).allMatch(explainQuery()::contains));
         }
 
         public void explainContains(String keywords, int count) throws Exception {

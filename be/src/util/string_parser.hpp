@@ -21,20 +21,34 @@
 #pragma once
 
 #include <fast_float/fast_float.h>
+#include <fast_float/parse_number.h>
+#include <glog/logging.h>
+#include <stdlib.h>
 
-#include <cmath>
+// IWYU pragma: no_include <bits/std_abs.h>
+#include <cmath> // IWYU pragma: keep
 #include <cstdint>
-#include <cstring>
 #include <limits>
+#include <map>
 #include <string>
+#include <system_error>
 #include <type_traits>
+#include <utility>
 
-#include "common/compiler_util.h"
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/status.h"
 #include "runtime/primitive_type.h"
+#include "runtime/large_int_value.h"
+#include "vec/common/int_exp.h"
 #include "vec/data_types/data_type_decimal.h"
 
 namespace doris {
+namespace vectorized {
+struct Int128I;
+template <typename T>
+struct Decimal;
+} // namespace vectorized
 
 // Utility functions for doing atoi/atof on non-null terminated strings.  On micro benchmarks,
 // this is significantly faster than libc (atoi/strtol and atof/strtod).
@@ -67,10 +81,27 @@ public:
     };
 
     template <typename T>
-    static T numeric_limits(bool negative);
+    static T numeric_limits(bool negative) {
+        if constexpr (std::is_same_v<T, __int128>) {
+            return negative ? MIN_INT128 : MAX_INT128;
+        } else {
+            return negative ? std::numeric_limits<T>::min() : std::numeric_limits<T>::max();
+        }
+    }
 
     template <typename T>
-    static T get_scale_multiplier(int scale);
+    static T get_scale_multiplier(int scale) {
+        static_assert(std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t> ||
+                              std::is_same_v<T, __int128>,
+                      "You can only instantiate as int32_t, int64_t, __int128.");
+        if constexpr (std::is_same_v<T, int32_t>) {
+            return common::exp10_i32(scale);
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            return common::exp10_i64(scale);
+        } else if constexpr (std::is_same_v<T, __int128>) {
+            return common::exp10_i128(scale);
+        }
+    }
 
     // This is considerably faster than glibc's implementation (25x).
     // In the case of overflow, the max/min value for the data type will be returned.
@@ -228,7 +259,7 @@ private:
 }; // end of class StringParser
 
 template <typename T>
-inline T StringParser::string_to_int_internal(const char* s, int len, ParseResult* result) {
+T StringParser::string_to_int_internal(const char* s, int len, ParseResult* result) {
     if (UNLIKELY(len <= 0)) {
         *result = PARSE_FAILURE;
         return 0;
@@ -242,7 +273,8 @@ inline T StringParser::string_to_int_internal(const char* s, int len, ParseResul
     switch (*s) {
     case '-':
         negative = true;
-        max_val = StringParser::numeric_limits<T>(false) + 1;
+        max_val += 1;
+        [[fallthrough]];
     case '+':
         ++i;
     }
@@ -283,8 +315,7 @@ inline T StringParser::string_to_int_internal(const char* s, int len, ParseResul
 }
 
 template <typename T>
-inline T StringParser::string_to_unsigned_int_internal(const char* s, int len,
-                                                       ParseResult* result) {
+T StringParser::string_to_unsigned_int_internal(const char* s, int len, ParseResult* result) {
     if (UNLIKELY(len <= 0)) {
         *result = PARSE_FAILURE;
         return 0;
@@ -331,8 +362,7 @@ inline T StringParser::string_to_unsigned_int_internal(const char* s, int len,
 }
 
 template <typename T>
-inline T StringParser::string_to_int_internal(const char* s, int len, int base,
-                                              ParseResult* result) {
+T StringParser::string_to_int_internal(const char* s, int len, int base, ParseResult* result) {
     typedef typename std::make_unsigned<T>::type UnsignedT;
     UnsignedT val = 0;
     UnsignedT max_val = StringParser::numeric_limits<T>(false);
@@ -346,6 +376,7 @@ inline T StringParser::string_to_int_internal(const char* s, int len, int base,
     case '-':
         negative = true;
         max_val = StringParser::numeric_limits<T>(false) + 1;
+        [[fallthrough]];
     case '+':
         i = 1;
     }
@@ -390,7 +421,7 @@ inline T StringParser::string_to_int_internal(const char* s, int len, int base,
 }
 
 template <typename T>
-inline T StringParser::string_to_int_no_overflow(const char* s, int len, ParseResult* result) {
+T StringParser::string_to_int_no_overflow(const char* s, int len, ParseResult* result) {
     T val = 0;
     if (UNLIKELY(len == 0)) {
         *result = PARSE_SUCCESS;
@@ -421,7 +452,7 @@ inline T StringParser::string_to_int_no_overflow(const char* s, int len, ParseRe
 }
 
 template <typename T>
-inline T StringParser::string_to_float_internal(const char* s, int len, ParseResult* result) {
+T StringParser::string_to_float_internal(const char* s, int len, ParseResult* result) {
     int i = 0;
     // skip leading spaces
     for (; i < len; ++i) {
@@ -494,14 +525,6 @@ inline bool StringParser::string_to_bool_internal(const char* s, int len, ParseR
 }
 
 template <>
-__int128 StringParser::numeric_limits<__int128>(bool negative);
-
-template <typename T>
-T StringParser::numeric_limits(bool negative) {
-    return negative ? std::numeric_limits<T>::min() : std::numeric_limits<T>::max();
-}
-
-template <>
 inline int StringParser::StringParseTraits<uint8_t>::max_ascii_len() {
     return 3;
 }
@@ -547,8 +570,8 @@ inline int StringParser::StringParseTraits<__int128>::max_ascii_len() {
 }
 
 template <typename T>
-inline T StringParser::string_to_decimal(const char* s, int len, int type_precision, int type_scale,
-                                         ParseResult* result) {
+T StringParser::string_to_decimal(const char* s, int len, int type_precision, int type_scale,
+                                  ParseResult* result) {
     // Special cases:
     //   1) '' == Fail, an empty string fails to parse.
     //   2) '   #   ' == #, leading and trailing white space is ignored.
@@ -569,6 +592,7 @@ inline T StringParser::string_to_decimal(const char* s, int len, int type_precis
         switch (*s) {
         case '-':
             is_negative = true;
+            [[fallthrough]];
         case '+':
             ++s;
             --len;

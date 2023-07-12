@@ -142,7 +142,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
 
         // 1 build cluster to backend info
         SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
-        for (Long beId : systemInfoService.getBackendIds(false)) {
+        for (Long beId : systemInfoService.getAllBackendIds()) {
             Backend be = systemInfoService.getBackend(beId);
             clusterToBes.putIfAbsent(be.getCloudClusterId(), new ArrayList<Long>());
             clusterToBes.get(be.getCloudClusterId()).add(beId);

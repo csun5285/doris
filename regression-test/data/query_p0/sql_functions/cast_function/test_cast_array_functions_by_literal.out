@@ -18,5 +18,8 @@
 [NULL, NULL, NULL]
 
 -- !sql7 --
-['a', 'b', 'c']
+["a", "b", "c"]
+
+-- !sql8 --
+\N
 

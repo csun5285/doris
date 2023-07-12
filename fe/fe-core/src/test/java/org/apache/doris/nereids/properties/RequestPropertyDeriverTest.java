@@ -24,19 +24,20 @@ import org.apache.doris.nereids.properties.DistributionSpecHash.ShuffleType;
 import org.apache.doris.nereids.trees.expressions.AssertNumRowsElement;
 import org.apache.doris.nereids.trees.expressions.ExprId;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateParam;
+import org.apache.doris.nereids.trees.plans.AggMode;
 import org.apache.doris.nereids.trees.plans.AggPhase;
 import org.apache.doris.nereids.trees.plans.GroupPlan;
+import org.apache.doris.nereids.trees.plans.JoinHint;
 import org.apache.doris.nereids.trees.plans.JoinType;
-import org.apache.doris.nereids.trees.plans.Plan;
-import org.apache.doris.nereids.trees.plans.physical.AbstractPhysicalJoin;
-import org.apache.doris.nereids.trees.plans.physical.PhysicalAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalAssertNumRows;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalHashAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalHashJoin;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalNestedLoopJoin;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.util.ExpressionUtils;
-import org.apache.doris.nereids.util.JoinUtils;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import mockit.Expectations;
 import mockit.Injectable;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 @SuppressWarnings("unused")
 public class RequestPropertyDeriverTest {
@@ -75,7 +77,8 @@ public class RequestPropertyDeriverTest {
     @Test
     public void testNestedLoopJoin() {
         PhysicalNestedLoopJoin<GroupPlan, GroupPlan> join = new PhysicalNestedLoopJoin<>(JoinType.CROSS_JOIN,
-                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, logicalProperties, groupPlan, groupPlan);
+                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, Optional.empty(), logicalProperties, groupPlan,
+                groupPlan);
         GroupExpression groupExpression = new GroupExpression(join);
 
         RequestPropertyDeriver requestPropertyDeriver = new RequestPropertyDeriver(jobContext);
@@ -89,16 +92,16 @@ public class RequestPropertyDeriverTest {
 
     @Test
     public void testShuffleHashJoin() {
-        new MockUp<JoinUtils>() {
+        new MockUp<PhysicalHashJoin>() {
             @Mock
-            Pair<List<ExprId>, List<ExprId>> getOnClauseUsedSlots(
-                    AbstractPhysicalJoin<? extends Plan, ? extends Plan> join) {
+            Pair<List<ExprId>, List<ExprId>> getHashConjunctsExprIds() {
                 return Pair.of(Lists.newArrayList(new ExprId(0)), Lists.newArrayList(new ExprId(1)));
             }
         };
 
         PhysicalHashJoin<GroupPlan, GroupPlan> join = new PhysicalHashJoin<>(JoinType.RIGHT_OUTER_JOIN,
-                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, logicalProperties, groupPlan, groupPlan);
+                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, JoinHint.NONE, Optional.empty(), logicalProperties,
+                groupPlan, groupPlan);
         GroupExpression groupExpression = new GroupExpression(join);
 
         RequestPropertyDeriver requestPropertyDeriver = new RequestPropertyDeriver(jobContext);
@@ -115,16 +118,16 @@ public class RequestPropertyDeriverTest {
 
     @Test
     public void testShuffleOrBroadcastHashJoin() {
-        new MockUp<JoinUtils>() {
+        new MockUp<PhysicalHashJoin>() {
             @Mock
-            Pair<List<ExprId>, List<ExprId>> getOnClauseUsedSlots(
-                    AbstractPhysicalJoin<? extends Plan, ? extends Plan> join) {
+            Pair<List<ExprId>, List<ExprId>> getHashConjunctsExprIds() {
                 return Pair.of(Lists.newArrayList(new ExprId(0)), Lists.newArrayList(new ExprId(1)));
             }
         };
 
         PhysicalHashJoin<GroupPlan, GroupPlan> join = new PhysicalHashJoin<>(JoinType.INNER_JOIN,
-                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, logicalProperties, groupPlan, groupPlan);
+                ExpressionUtils.EMPTY_CONDITION, ExpressionUtils.EMPTY_CONDITION, JoinHint.NONE, Optional.empty(), logicalProperties,
+                groupPlan, groupPlan);
         GroupExpression groupExpression = new GroupExpression(join);
 
         RequestPropertyDeriver requestPropertyDeriver = new RequestPropertyDeriver(jobContext);
@@ -143,14 +146,13 @@ public class RequestPropertyDeriverTest {
     @Test
     public void testLocalAggregate() {
         SlotReference key = new SlotReference("col1", IntegerType.INSTANCE);
-        PhysicalAggregate<GroupPlan> aggregate = new PhysicalAggregate<>(
+        PhysicalHashAggregate<GroupPlan> aggregate = new PhysicalHashAggregate<>(
                 Lists.newArrayList(key),
                 Lists.newArrayList(key),
-                Lists.newArrayList(key),
-                AggPhase.LOCAL,
+                new AggregateParam(AggPhase.LOCAL, AggMode.INPUT_TO_RESULT),
                 true,
-                false,
                 logicalProperties,
+                RequireProperties.of(PhysicalProperties.ANY),
                 groupPlan
         );
         GroupExpression groupExpression = new GroupExpression(aggregate);
@@ -166,14 +168,13 @@ public class RequestPropertyDeriverTest {
     public void testGlobalAggregate() {
         SlotReference key = new SlotReference("col1", IntegerType.INSTANCE);
         SlotReference partition = new SlotReference("partition", IntegerType.INSTANCE);
-        PhysicalAggregate<GroupPlan> aggregate = new PhysicalAggregate<>(
+        PhysicalHashAggregate<GroupPlan> aggregate = new PhysicalHashAggregate<>(
                 Lists.newArrayList(key),
                 Lists.newArrayList(key),
-                Lists.newArrayList(partition),
-                AggPhase.GLOBAL,
-                true,
+                new AggregateParam(AggPhase.GLOBAL, AggMode.BUFFER_TO_RESULT),
                 true,
                 logicalProperties,
+                RequireProperties.of(PhysicalProperties.createHash(ImmutableList.of(partition), ShuffleType.AGGREGATE)),
                 groupPlan
         );
         GroupExpression groupExpression = new GroupExpression(aggregate);
@@ -191,14 +192,13 @@ public class RequestPropertyDeriverTest {
     @Test
     public void testGlobalAggregateWithoutPartition() {
         SlotReference key = new SlotReference("col1", IntegerType.INSTANCE);
-        PhysicalAggregate<GroupPlan> aggregate = new PhysicalAggregate<>(
+        PhysicalHashAggregate<GroupPlan> aggregate = new PhysicalHashAggregate<>(
                 Lists.newArrayList(),
                 Lists.newArrayList(key),
-                Lists.newArrayList(),
-                AggPhase.GLOBAL,
-                true,
+                new AggregateParam(AggPhase.GLOBAL, AggMode.BUFFER_TO_RESULT),
                 true,
                 logicalProperties,
+                RequireProperties.of(PhysicalProperties.GATHER),
                 groupPlan
         );
         GroupExpression groupExpression = new GroupExpression(aggregate);

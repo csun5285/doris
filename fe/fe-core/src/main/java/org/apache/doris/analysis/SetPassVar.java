@@ -22,7 +22,7 @@ import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
-import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.Auth;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 
@@ -36,6 +36,7 @@ public class SetPassVar extends SetVar {
     public SetPassVar(UserIdentity userIdent, PassVar passVar) {
         this.userIdent = userIdent;
         this.passVar = passVar;
+        this.varType = SetVarType.SET_PASS_VAR;
     }
 
     public UserIdentity getUserIdent() {
@@ -77,13 +78,13 @@ public class SetPassVar extends SetVar {
         }
 
         // 2. No user can set password for root expect for root user itself
-        if (userIdent.getQualifiedUser().equals(PaloAuth.ROOT_USER)
-                && !ClusterNamespace.getNameFromFullName(ctx.getQualifiedUser()).equals(PaloAuth.ROOT_USER)) {
+        if (userIdent.getQualifiedUser().equals(Auth.ROOT_USER)
+                && !ClusterNamespace.getNameFromFullName(ctx.getQualifiedUser()).equals(Auth.ROOT_USER)) {
             throw new AnalysisException("Can not set password for root user, except root itself");
         }
 
         // 3. user has grant privs
-        if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.GRANT)) {
+        if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.GRANT)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT");
         }
     }

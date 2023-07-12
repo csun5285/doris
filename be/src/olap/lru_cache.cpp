@@ -4,18 +4,14 @@
 
 #include "olap/lru_cache.h"
 
-#include <rapidjson/document.h>
-#include <stdio.h>
 #include <stdlib.h>
 
+#include <mutex>
+#include <new>
 #include <sstream>
 #include <string>
 
 #include "gutil/bits.h"
-#include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "olap/row_block.h"
-#include "olap/utils.h"
 #include "runtime/thread_context.h"
 #include "util/doris_metrics.h"
 
@@ -235,7 +231,7 @@ void LRUCache::_lru_append(LRUHandle* list, LRUHandle* e) {
 }
 
 Cache::Handle* LRUCache::lookup(const CacheKey& key, uint32_t hash) {
-    std::lock_guard<doris::Mutex> l(_mutex);
+    std::lock_guard l(_mutex);
     ++_lookup_count;
     LRUHandle* e = _table.lookup(key, hash);
     if (e != nullptr) {
@@ -258,7 +254,7 @@ void LRUCache::release(Cache::Handle* handle) {
     LRUHandle* e = reinterpret_cast<LRUHandle*>(handle);
     bool last_ref = false;
     {
-        std::lock_guard<doris::Mutex> l(_mutex);
+        std::lock_guard l(_mutex);
         last_ref = _unref(e);
         if (last_ref) {
             _usage -= e->total_size;
@@ -361,7 +357,7 @@ Cache::Handle* LRUCache::insert(const CacheKey& key, uint32_t hash, void* value,
     e->charge = charge;
     e->key_length = key.size();
     e->total_size = (_type == LRUCacheType::SIZE ? handle_size + charge : 1);
-    // DCHECK(_type == LRUCacheType::SIZE || bytes != -1) << " _type " << _type;
+    //DCHECK(_type == LRUCacheType::SIZE || bytes != -1) << " _type " << _type;
     e->bytes = (_type == LRUCacheType::SIZE ? handle_size + charge : handle_size + bytes);
     e->hash = hash;
     e->refs = 2; // one for the returned handle, one for LRUCache.
@@ -377,7 +373,7 @@ Cache::Handle* LRUCache::insert(const CacheKey& key, uint32_t hash, void* value,
     DorisMetrics::instance()->lru_cache_memory_bytes->increment(e->bytes);
     LRUHandle* to_remove_head = nullptr;
     {
-        std::lock_guard<doris::Mutex> l(_mutex);
+        std::lock_guard l(_mutex);
 
         // Free the space following strict LRU policy until enough space
         // is freed or the lru list is empty
@@ -420,7 +416,7 @@ void LRUCache::erase(const CacheKey& key, uint32_t hash) {
     LRUHandle* e = nullptr;
     bool last_ref = false;
     {
-        std::lock_guard<doris::Mutex> l(_mutex);
+        std::lock_guard l(_mutex);
         e = _table.remove(key, hash);
         if (e != nullptr) {
             last_ref = _unref(e);
@@ -443,7 +439,7 @@ void LRUCache::erase(const CacheKey& key, uint32_t hash) {
 int64_t LRUCache::prune() {
     LRUHandle* to_remove_head = nullptr;
     {
-        std::lock_guard<doris::Mutex> l(_mutex);
+        std::lock_guard l(_mutex);
         while (_lru_normal.next != &_lru_normal) {
             LRUHandle* old = _lru_normal.next;
             _evict_one_entry(old);
@@ -470,7 +466,7 @@ int64_t LRUCache::prune() {
 int64_t LRUCache::prune_if(CacheValuePredicate pred, bool lazy_mode) {
     LRUHandle* to_remove_head = nullptr;
     {
-        std::lock_guard<doris::Mutex> l(_mutex);
+        std::lock_guard l(_mutex);
         LRUHandle* p = _lru_normal.next;
         while (p != &_lru_normal) {
             LRUHandle* next = p->next;
@@ -560,10 +556,10 @@ ShardedLRUCache::ShardedLRUCache(const std::string& name, size_t total_capacity,
                                  bool cache_value_check_timestamp,
                                  uint32_t total_element_count_capacity)
         : ShardedLRUCache(name, total_capacity, type, num_shards, total_element_count_capacity) {
-        for (int s = 0; s < _num_shards; s++) {
-            _shards[s]->set_cache_value_time_extractor(cache_value_time_extractor);
-            _shards[s]->set_cache_value_check_timestamp(cache_value_check_timestamp);
-        }
+    for (int s = 0; s < _num_shards; s++) {
+        _shards[s]->set_cache_value_time_extractor(cache_value_time_extractor);
+        _shards[s]->set_cache_value_check_timestamp(cache_value_check_timestamp);
+    }
 }
 
 ShardedLRUCache::~ShardedLRUCache() {

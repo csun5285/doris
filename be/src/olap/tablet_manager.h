@@ -17,32 +17,38 @@
 
 #pragma once
 
-#include <atomic>
-#include <list>
+#include <butil/macros.h>
+#include <gen_cpp/BackendService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "common/status.h"
-#include "gen_cpp/AgentService_types.h"
-#include "gen_cpp/BackendService_types.h"
-#include "gen_cpp/MasterService_types.h"
-#include "olap/olap_define.h"
-#include "olap/olap_meta.h"
-#include "olap/options.h"
+#include "olap/olap_common.h"
 #include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 
 namespace doris {
 
-class Tablet;
 class DataDir;
+class CumulativeCompactionPolicy;
+class MemTracker;
+class TCreateTabletReq;
+class TTablet;
+class TTabletInfo;
 
-using TabletSharedPtr = std::shared_ptr<Tablet>;
 // TabletManager provides get, add, delete tablet method for storage engine
 // NOTE: If you want to add a method that needs to hold meta-lock before you can call it,
 // please uniformly name the method in "xxx_unlocked()" mode
@@ -76,10 +82,25 @@ public:
     TabletSharedPtr get_tablet(TTabletId tablet_id, bool include_deleted = false,
                                std::string* err = nullptr);
 
+    std::pair<TabletSharedPtr, Status> get_tablet_and_status(TTabletId tablet_id,
+                                                             bool include_deleted = false);
+
     TabletSharedPtr get_tablet(TTabletId tablet_id, TabletUid tablet_uid,
                                bool include_deleted = false, std::string* err = nullptr);
 
-    std::vector<TabletSharedPtr> get_all_tablet();
+    std::vector<TabletSharedPtr> get_all_tablet(std::function<bool(Tablet*)>&& filter =
+                                                        [](Tablet* t) { return t->is_used(); }) {
+        std::vector<TabletSharedPtr> res;
+        for (const auto& tablets_shard : _tablets_shards) {
+            std::shared_lock rdlock(tablets_shard.lock);
+            for (auto& [id, tablet] : tablets_shard.tablet_map) {
+                if (filter(tablet.get())) {
+                    res.emplace_back(tablet);
+                }
+            }
+        }
+        return res;
+    }
 
     uint64_t get_rowset_nums();
     uint64_t get_segment_nums();
@@ -134,13 +155,15 @@ public:
 
     void obtain_specific_quantity_tablets(std::vector<TabletInfo>& tablets_info, int64_t num);
 
-    void register_clone_tablet(int64_t tablet_id);
+    // return `true` if register success
+    bool register_clone_tablet(int64_t tablet_id);
     void unregister_clone_tablet(int64_t tablet_id);
 
     void get_tablets_distribution_on_different_disks(
             std::map<int64_t, std::map<DataDir*, int64_t>>& tablets_num_on_disk,
             std::map<int64_t, std::map<DataDir*, std::vector<TabletSize>>>& tablets_info_on_disk);
-    void get_cooldown_tablets(std::vector<TabletSharedPtr>* tables);
+    void get_cooldown_tablets(std::vector<TabletSharedPtr>* tables,
+                              std::function<bool(const TabletSharedPtr&)> skip_tablet);
 
     void get_all_tablets_storage_format(TCheckStorageFormatResult* result);
 

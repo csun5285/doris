@@ -20,11 +20,7 @@ suite("test_clean_label") {
     def testTable = "tbl_test_clean_label"
     def dbName = context.config.getDbNameByFile(context.file)
     
-    def create_test_table = {testTablex, enable_vectorized_flag ->
-        if (enable_vectorized_flag) {
-            sql """ set enable_vectorized_engine = true """
-        }
-
+    def create_test_table = {testTablex ->
         def result1 = sql """
             CREATE TABLE IF NOT EXISTS ${testTable} (
               `k1` INT(11) NULL COMMENT "",
@@ -47,11 +43,11 @@ suite("test_clean_label") {
     // case1: 
     try {
         sql "DROP TABLE IF EXISTS ${testTable}"
+        create_test_table.call(testTable)
         def label1 = "clean_label_test1" + UUID.randomUUID().toString().replaceAll("-", "")
         def label2 = "clean_label_test2" + UUID.randomUUID().toString().replaceAll("-", "")
         def label3 = "clean_label_test3" + UUID.randomUUID().toString().replaceAll("-", "")
         def label4 = "clean_label_test4" + UUID.randomUUID().toString().replaceAll("-", "")
-        create_test_table.call(testTable, true)
 
         test {
             sql "insert into ${testTable} with label ${label1} select 1, 2;"

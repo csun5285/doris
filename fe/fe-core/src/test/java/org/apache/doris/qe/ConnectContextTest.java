@@ -20,7 +20,7 @@ package org.apache.doris.qe;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.mysql.MysqlCapability;
 import org.apache.doris.mysql.MysqlCommand;
-import org.apache.doris.mysql.privilege.PaloAuth;
+import org.apache.doris.mysql.privilege.Auth;
 import org.apache.doris.thrift.TUniqueId;
 
 import mockit.Mocked;
@@ -41,7 +41,7 @@ public class ConnectContextTest {
     @Mocked
     private ConnectScheduler connectScheduler;
     @Mocked
-    private PaloAuth paloAuth;
+    private Auth auth;
     @Mocked
     private String qualifiedUser;
 
@@ -140,21 +140,20 @@ public class ConnectContextTest {
         // sleep no time out
         ctx.setStartTime();
         Assert.assertFalse(ctx.isKilled());
-        long now = ctx.getStartTime() + ctx.getSessionVariable().getWaitTimeoutS() * 1000 - 1;
+        long now = ctx.getStartTime() + ctx.getSessionVariable().getWaitTimeoutS() * 1000L - 1;
         ctx.checkTimeout(now);
         Assert.assertFalse(ctx.isKilled());
 
         // Timeout
         ctx.setStartTime();
-        now = ctx.getStartTime() + ctx.getSessionVariable().getWaitTimeoutS() * 1000 + 1;
+        now = ctx.getStartTime() + ctx.getSessionVariable().getWaitTimeoutS() * 1000L + 1;
         ctx.setExecutor(executor);
         ctx.checkTimeout(now);
         Assert.assertTrue(ctx.isKilled());
 
         // user query timeout
         ctx.setStartTime();
-        ctx.setUserQueryTimeout(1);
-        now = ctx.getStartTime() + paloAuth.getQueryTimeout(qualifiedUser) * 1000 + 1;
+        now = ctx.getStartTime() + auth.getQueryTimeout(qualifiedUser) * 1000L + 1;
         ctx.setExecutor(executor);
         ctx.checkTimeout(now);
         Assert.assertTrue(ctx.isKilled());
@@ -176,12 +175,14 @@ public class ConnectContextTest {
 
         // sleep no time out
         Assert.assertFalse(ctx.isKilled());
-        long now = ctx.getSessionVariable().getQueryTimeoutS() * 1000 - 1;
+        ctx.setExecutor(executor);
+        long now = ctx.getExecTimeout() * 1000L - 1;
         ctx.checkTimeout(now);
         Assert.assertFalse(ctx.isKilled());
 
         // Timeout
-        now = ctx.getSessionVariable().getQueryTimeoutS() * 1000 + 1;
+        ctx.setExecutor(executor);
+        now = ctx.getExecTimeout() * 1000L + 1;
         ctx.checkTimeout(now);
         Assert.assertFalse(ctx.isKilled());
 

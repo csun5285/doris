@@ -17,7 +17,6 @@
 
 package org.apache.doris.common.util;
 
-import org.apache.doris.common.Config;
 import org.apache.doris.qe.ConnectContext;
 
 public class VectorizedUtil {
@@ -31,8 +30,16 @@ public class VectorizedUtil {
     public static boolean isVectorized() {
         ConnectContext connectContext = ConnectContext.get();
         if (connectContext == null) {
-            return Config.disable_enable_vectorized_engine;
+            return false;
         }
-        return connectContext.getSessionVariable().enableVectorizedEngine() || Config.disable_enable_vectorized_engine;
+        return true;
+    }
+
+    public static boolean isPipeline() {
+        ConnectContext connectContext = ConnectContext.get();
+        if (connectContext == null) {
+            return false;
+        }
+        return connectContext.getSessionVariable().enablePipelineEngine();
     }
 }

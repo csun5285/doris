@@ -64,6 +64,7 @@ struct HashMethodOneNumber : public columns_hashing_impl::HashMethodBase<
 
     /// Find key into HashTable or HashMap. If Data is HashMap and key was found, returns ptr to value, otherwise nullptr.
     using Base::find_key; /// (Data & data, size_t row, Arena & pool) -> FindResult
+    using Base::find_key_with_hash;
 
     /// Get hash value of row.
     using Base::get_hash; /// (const Data & data, size_t row, Arena & pool) -> size_t
@@ -214,7 +215,7 @@ struct HashMethodSingleLowNullableColumn : public SingleColumnMethod {
         return nullptr;
     }
 
-    ColumnRawPtrs key_columns;
+    const ColumnNullable* key_column;
 
     static const ColumnRawPtrs get_nested_column(const IColumn* col) {
         auto* nullable = check_and_get_column<ColumnNullable>(*col);
@@ -226,11 +227,11 @@ struct HashMethodSingleLowNullableColumn : public SingleColumnMethod {
     HashMethodSingleLowNullableColumn(const ColumnRawPtrs& key_columns_nullable,
                                       const Sizes& key_sizes, const HashMethodContextPtr& context)
             : Base(get_nested_column(key_columns_nullable[0]), key_sizes, context),
-              key_columns(key_columns_nullable) {}
+              key_column(assert_cast<const ColumnNullable*>(key_columns_nullable[0])) {}
 
     template <typename Data>
     ALWAYS_INLINE EmplaceResult emplace_key(Data& data, size_t row, Arena& pool) {
-        if (key_columns[0]->is_null_at(row)) {
+        if (key_column->is_null_at(row)) {
             bool has_null_key = data.has_null_key_data();
             data.has_null_key_data() = true;
 
@@ -257,10 +258,42 @@ struct HashMethodSingleLowNullableColumn : public SingleColumnMethod {
             return EmplaceResult(inserted);
     }
 
+    template <typename Data>
+    ALWAYS_INLINE EmplaceResult emplace_key(Data& data, size_t hash_value, size_t row,
+                                            Arena& pool) {
+        if (key_column->is_null_at(row)) {
+            bool has_null_key = data.has_null_key_data();
+            data.has_null_key_data() = true;
+
+            if constexpr (has_mapped) {
+                return EmplaceResult(data.get_null_key_data(), data.get_null_key_data(),
+                                     !has_null_key);
+            } else {
+                return EmplaceResult(!has_null_key);
+            }
+        }
+
+        auto key_holder = Base::get_key_holder(row, pool);
+
+        bool inserted = false;
+        typename Data::LookupResult it;
+        data.emplace(key_holder, it, hash_value, inserted);
+
+        if constexpr (has_mapped) {
+            auto& mapped = *lookup_result_get_mapped(it);
+            if (inserted) {
+                new (&mapped) Mapped();
+            }
+            return EmplaceResult(mapped, mapped, inserted);
+        } else {
+            return EmplaceResult(inserted);
+        }
+    }
+
     template <typename Data, typename Func, typename CreatorForNull>
     ALWAYS_INLINE typename std::enable_if_t<has_mapped, Mapped>& lazy_emplace_key(
             Data& data, size_t row, Arena& pool, Func&& f, CreatorForNull&& null_creator) {
-        if (key_columns[0]->is_null_at(row)) {
+        if (key_column->is_null_at(row)) {
             bool has_null_key = data.has_null_key_data();
             data.has_null_key_data() = true;
             if (!has_null_key) std::forward<CreatorForNull>(null_creator)(data.get_null_key_data());
@@ -276,7 +309,7 @@ struct HashMethodSingleLowNullableColumn : public SingleColumnMethod {
     ALWAYS_INLINE typename std::enable_if_t<has_mapped, Mapped>& lazy_emplace_key(
             Data& data, size_t row, Arena& pool, size_t hash_value, Func&& f,
             CreatorForNull&& null_creator) {
-        if (key_columns[0]->is_null_at(row)) {
+        if (key_column->is_null_at(row)) {
             bool has_null_key = data.has_null_key_data();
             data.has_null_key_data() = true;
             if (!has_null_key) std::forward<CreatorForNull>(null_creator)(data.get_null_key_data());
@@ -290,7 +323,7 @@ struct HashMethodSingleLowNullableColumn : public SingleColumnMethod {
 
     template <typename Data>
     ALWAYS_INLINE FindResult find_key(Data& data, size_t row, Arena& pool) {
-        if (key_columns[0]->is_null_at(row)) {
+        if (key_column->is_null_at(row)) {
             bool has_null_key = data.has_null_key_data();
             if constexpr (has_mapped)
                 return FindResult(&data.get_null_key_data(), has_null_key);

@@ -41,8 +41,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     sql "delete from ${tbName1} where k1 = 2;"
     sql "insert into ${tbName1} values(3,3,3,3);"
     sql "insert into ${tbName1} values(4,4,4,4);"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
+    qt_sql "select * from ${tbName1} order by k1;"
 
     // drop value3
     sql """
@@ -53,6 +52,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(100)
@@ -62,8 +62,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
             }
         }
     }
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
+    qt_sql "select * from ${tbName1} order by k1;"
 
      // drop value3
     sql """
@@ -74,6 +73,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(100)
@@ -83,12 +83,10 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
             }
         }
     }
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
+    qt_sql "select * from ${tbName1} order by k1;"
 
     sql "insert into ${tbName1} values(5,5,5,'B');"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
+    qt_sql "select * from ${tbName1} order by k1;"
     sql "DROP TABLE ${tbName1} FORCE;"
 
 //======================= Test Light Weight Schema Change 
@@ -101,16 +99,21 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
                 value2 INT
             )
             UNIQUE KEY (k1)
-            DISTRIBUTED BY HASH(k1) BUCKETS 1 properties("replication_num" = "1", "light_schema_change" = "true", "disable_auto_compaction" = "true");
+            DISTRIBUTED BY HASH(k1) BUCKETS 1 properties("replication_num" = "1", "light_schema_change" = "false", "disable_auto_compaction" = "true");
         """
-    // delete value3 = 2
+
     sql "insert into ${tbName1} values(1,1,1,1);"
     sql "insert into ${tbName1} values(2,2,2,2);"
+    qt_sql "select * from ${tbName1} where value2=2 order by k1;"
+
+    // test alter light schema change by the way
+    sql """ALTER TABLE ${tbName1} SET ("light_schema_change" = "true");"""
+
+    // delete value3 = 2
     sql "delete from ${tbName1} where k1 = 2;"
     sql "insert into ${tbName1} values(3,3,3,3);"
     sql "insert into ${tbName1} values(4,4,4,4);"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value2=3 order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value2=3 order by k1;"
+    qt_sql "select * from ${tbName1} where value2=3 order by k1;"
 
     // drop value3
     sql """
@@ -121,6 +124,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(100)
@@ -130,8 +134,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
             }
         }
     }
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=3 order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=3 order by k1;"
+    qt_sql "select * from ${tbName1} where value1=3 order by k1;"
 
     // drop value3
     sql """
@@ -142,6 +145,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(100)
@@ -151,12 +155,10 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
             }
         }
     }
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=4 order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=4  order by k1;"
+    qt_sql "select * from ${tbName1} where value1=4 order by k1;"
 
     sql "insert into ${tbName1} values(5,5,5,'B');"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} order by k1;"
+    qt_sql "select * from ${tbName1} order by k1;"
 
     // Do schema change that not do light weight schema change
     sql """
@@ -167,6 +169,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(100)
@@ -176,8 +179,7 @@ suite("test_alter_table_column_with_delete_drop_column_unique_key", "schema_chan
             }
         }
     }
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=4 order by k1;"
-    qt_sql "select /*+ SET_VAR(enable_vectorized_engine=true) */ * from ${tbName1} where value1=4  order by k1;"
+    qt_sql "select * from ${tbName1} where value1=4 order by k1;"
     sql "DROP TABLE ${tbName1} FORCE;"
 
 }

@@ -24,17 +24,12 @@ import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.SortInfo;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.analysis.TupleId;
-import org.apache.doris.catalog.Env;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.VectorizedUtil;
 import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.statistics.StatsRecursiveDerive;
-import org.apache.doris.system.Backend;
-import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TExchangeNode;
 import org.apache.doris.thrift.TExplainLevel;
-import org.apache.doris.thrift.TNodeInfo;
-import org.apache.doris.thrift.TPaloNodesInfo;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPlanNodeType;
 
@@ -44,6 +39,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import java.util.Collections;
 
 /**
  * Receiver side of a 1:n data stream. Logically, an ExchangeNode consumes the data
@@ -67,9 +64,17 @@ public class ExchangeNode extends PlanNode {
     // exchange node. Null if this exchange does not merge sorted streams
     private SortInfo mergeInfo;
 
-    // Offset after which the exchange begins returning rows. Currently valid
-    // only if mergeInfo_ is non-null, i.e. this is a merging exchange node.
-    private long offset;
+    /**
+     * use for Nereids only.
+     */
+    public ExchangeNode(PlanNodeId id, PlanNode inputNode) {
+        super(id, inputNode, EXCHANGE_NODE, StatisticalType.EXCHANGE_NODE);
+        offset = 0;
+        limit = -1;
+        this.conjuncts = Collections.emptyList();
+        children.add(inputNode);
+        computeTupleIds();
+    }
 
     /**
      * Create ExchangeNode that consumes output of inputNode.
@@ -145,17 +150,6 @@ public class ExchangeNode extends PlanNode {
                 : MERGING_EXCHANGE_NODE;
     }
 
-    /**
-     * This function is used to translate PhysicalLimit.
-     * Ignore the offset if this is not a merging exchange node.
-     * @param offset
-     */
-    public void setOffset(long offset) {
-        if (isMergingExchange()) {
-            this.offset = offset;
-        }
-    }
-
     @Override
     protected void toThrift(TPlanNode msg) {
         msg.node_type = TPlanNodeType.EXCHANGE_NODE;
@@ -165,9 +159,6 @@ public class ExchangeNode extends PlanNode {
         }
         if (mergeInfo != null) {
             msg.exchange_node.setSortInfo(mergeInfo.toThrift());
-            if (mergeInfo.useTwoPhaseRead()) {
-                msg.exchange_node.setNodesInfo(createNodesInfo());
-            }
         }
         msg.exchange_node.setOffset(offset);
     }
@@ -185,23 +176,8 @@ public class ExchangeNode extends PlanNode {
         return numInstances;
     }
 
-    /**
-    * Set the parameters used to fetch data by rowid column
-    * after init().
-    */
-    private TPaloNodesInfo createNodesInfo() {
-        TPaloNodesInfo nodesInfo = new TPaloNodesInfo();
-        SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
-        for (Long id : systemInfoService.getBackendIds(true /*need alive*/)) {
-            Backend backend = systemInfoService.getBackend(id);
-            nodesInfo.addToNodes(new TNodeInfo(backend.getId(), 0, backend.getHost(), backend.getBrpcPort()));
-        }
-        return nodesInfo;
-    }
-
     @Override
     public String getNodeExplainString(String prefix, TExplainLevel detailLevel) {
         return prefix + "offset: " + offset + "\n";
     }
-
 }

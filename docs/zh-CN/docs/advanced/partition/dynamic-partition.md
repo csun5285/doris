@@ -76,7 +76,7 @@ under the License.
 
 - `dynamic_partition.time_unit`
 
-  动态分区调度的单位。可指定为 `HOUR`、`DAY`、`WEEK`、`MONTH`。分别表示按小时、按天、按星期、按月进行分区创建或删除。
+  动态分区调度的单位。可指定为 `HOUR`、`DAY`、`WEEK`、`MONTH`、`YEAR`。分别表示按小时、按天、按星期、按月、按年进行分区创建或删除。
 
   当指定为 `HOUR` 时，动态创建的分区名后缀格式为 `yyyyMMddHH`，例如`2020032501`。小时为单位的分区列数据类型不能为 DATE。
 
@@ -85,6 +85,8 @@ under the License.
   当指定为 `WEEK` 时，动态创建的分区名后缀格式为`yyyy_ww`。即当前日期属于这一年的第几周，例如 `2020-03-25` 创建的分区名后缀为 `2020_13`, 表明目前为2020年第13周。
 
   当指定为 `MONTH` 时，动态创建的分区名后缀格式为 `yyyyMM`，例如 `202003`。
+
+  当指定为 `YEAR` 时，动态创建的分区名后缀格式为 `yyyy`，例如 `2020`。
 
 - `dynamic_partition.time_zone`
 
@@ -131,6 +133,8 @@ under the License.
 - `dynamic_partition.hot_partition_num`
 
   指定最新的多少个分区为热分区。对于热分区，系统会自动设置其 `storage_medium` 参数为SSD，并且设置 `storage_cooldown_time`。
+  
+  **注意：若存储路径下没有 SSD 磁盘路径，配置该参数会导致动态分区创建失败。**
 
   `hot_partition_num` 是往前 n 天和未来所有分区
 
@@ -148,11 +152,11 @@ under the License.
 
 - `dynamic_partition.reserved_history_periods`
 
-  需要保留的历史分区的时间范围。当`dynamic_partition.time_unit` 设置为 "DAY/WEEK/MONTH" 时，需要以 `[yyyy-MM-dd,yyyy-MM-dd],[...,...]` 格式进行设置。当`dynamic_partition.time_unit` 设置为 "HOUR" 时，需要以 `[yyyy-MM-dd HH:mm:ss,yyyy-MM-dd HH:mm:ss],[...,...]` 的格式来进行设置。如果不设置，默认为 `"NULL"`。
+  需要保留的历史分区的时间范围。当`dynamic_partition.time_unit` 设置为 "DAY/WEEK/MONTH/YEAR" 时，需要以 `[yyyy-MM-dd,yyyy-MM-dd],[...,...]` 格式进行设置。当`dynamic_partition.time_unit` 设置为 "HOUR" 时，需要以 `[yyyy-MM-dd HH:mm:ss,yyyy-MM-dd HH:mm:ss],[...,...]` 的格式来进行设置。如果不设置，默认为 `"NULL"`。
 
   我们举例说明。假设今天是 2021-09-06，按天分类，动态分区的属性设置为：
 
-  `time_unit="DAY/WEEK/MONTH", end=3, start=-3, reserved_history_periods="[2020-06-01,2020-06-20],[2020-10-31,2020-11-15]"`。
+  `time_unit="DAY/WEEK/MONTH/YEAR", end=3, start=-3, reserved_history_periods="[2020-06-01,2020-06-20],[2020-10-31,2020-11-15]"`。
 
   则系统会自动保留：
 
@@ -175,7 +179,7 @@ under the License.
 
 - `dynamic_partition.storage_medium`
 
-  <version since="dev"></version>
+  <version since="1.2.3"></version>
 
   指定创建的动态分区的默认存储介质。默认是 HDD，可选择 SSD。
 
@@ -489,7 +493,7 @@ mysql> SHOW DYNAMIC PARTITION TABLES;
 
     我们将前两个参数成为表的默认参数，而后两个参数成为动态分区专用参数。
 
-    当系统自动创爱分区时，会使用分桶数 32 和 副本数 1 这两个配置（即动态分区专用参数）。而不是分桶数 3 和 副本数 3 这两个配置。
+    当系统自动创建分区时，会使用分桶数 32 和 副本数 1 这两个配置（即动态分区专用参数）。而不是分桶数 3 和 副本数 3 这两个配置。
 
     当用户通过 `ALTER TABLE tbl1 ADD PARTITION` 语句手动添加分区时，则会使用分桶数 3 和 副本数 3 这两个配置（即表的默认参数）。
 

@@ -20,8 +20,8 @@ package org.apache.doris.catalog;
 import org.apache.doris.catalog.iam.IAMTokenMgr;
 import org.apache.doris.catalog.iam.RoleKeys;
 import org.apache.doris.common.ThreadPoolManager;
-import org.apache.doris.datasource.CloudProperty;
 import org.apache.doris.datasource.ExternalCatalog;
+import org.apache.doris.datasource.property.constants.S3Properties;
 
 import com.google.common.collect.Maps;
 
@@ -63,10 +63,10 @@ public class ExternalCatalogHook {
             return;
         }
         String roleName = Objects.requireNonNull(properties.get(IAMTokenMgr.CLOUD_ROLE_NAME), "Missing iam role name.");
-        String endpoint = Objects.requireNonNull(properties.get(CloudProperty.CLOUD_ENDPOINT),
-                CloudProperty.CLOUD_ENDPOINT + " can not be null");
-        String region = Objects.requireNonNull(properties.get(CloudProperty.CLOUD_REGION),
-                CloudProperty.CLOUD_REGION + " can not be null");
+        String endpoint = Objects.requireNonNull(properties.get(S3Properties.Env.ENDPOINT),
+                S3Properties.Env.ENDPOINT + " can not be null");
+        String region = Objects.requireNonNull(properties.get(S3Properties.Env.REGION),
+                S3Properties.Env.REGION + " can not be null");
         String externalId = properties.get(IAMTokenMgr.CLOUD_EXTERNAL_ID); // Nullable property
         // Lazy init when adding the first catalog with arn
         if (tokenManager == null) {

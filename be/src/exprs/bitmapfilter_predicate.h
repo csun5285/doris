@@ -33,7 +33,7 @@ public:
     virtual void insert_many(const std::vector<const BitmapValue*> bitmaps) = 0;
     virtual bool empty() = 0;
     virtual Status assign(BitmapValue* bitmap_value) = 0;
-    virtual void light_copy(BitmapFilterFuncBase* other) { _not_in = other->_not_in; };
+    virtual void light_copy(BitmapFilterFuncBase* other) { _not_in = other->_not_in; }
     virtual uint16_t find_fixed_len_olap_engine(const char* data, const uint8* nullmap,
                                                 uint16_t* offsets, int number) = 0;
     virtual void find_batch(const char* data, const uint8* nullmap, int number,
@@ -43,9 +43,13 @@ public:
     void set_not_in(bool not_in) { _not_in = not_in; }
     virtual ~BitmapFilterFuncBase() = default;
 
+    void set_filter_id(int filter_id) { _filter_id = filter_id; }
+    int get_filter_id() const { return _filter_id; }
+
 protected:
     // true -> not in bitmap, false -> in bitmap
     bool _not_in {false};
+    int _filter_id = -1;
 };
 
 template <PrimitiveType type>
@@ -151,6 +155,7 @@ void BitmapFilterFunc<type>::light_copy(BitmapFilterFuncBase* bitmapfilter_func)
     BitmapFilterFuncBase::light_copy(bitmapfilter_func);
     auto other_func = reinterpret_cast<BitmapFilterFunc*>(bitmapfilter_func);
     _bitmap_value = other_func->_bitmap_value;
+    set_filter_id(bitmapfilter_func->get_filter_id());
 }
 
 } // namespace doris

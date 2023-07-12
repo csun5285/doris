@@ -17,24 +17,47 @@
 
 #include "olap/rowid_conversion.h"
 
-#include <gtest/gtest.h>
+#include <gen_cpp/AgentService_types.h>
+#include <gen_cpp/Descriptors_types.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/olap_common.pb.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-param-test.h>
+#include <gtest/gtest-test-part.h>
+#include <stdint.h>
+#include <unistd.h>
 
-#include "common/logging.h"
-#include "olap/data_dir.h"
+#include <memory>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+
+#include "common/status.h"
+#include "gtest/gtest_pred_impl.h"
+#include "gutil/strings/numbers.h"
+#include "io/fs/local_file_system.h"
+#include "io/io_common.h"
 #include "olap/delete_handler.h"
 #include "olap/merger.h"
-#include "olap/row_cursor.h"
+#include "olap/options.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_factory.h"
+#include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_reader.h"
 #include "olap/rowset/rowset_reader_context.h"
 #include "olap/rowset/rowset_writer.h"
 #include "olap/rowset/rowset_writer_context.h"
-#include "olap/schema.h"
+#include "olap/storage_engine.h"
+#include "olap/tablet.h"
+#include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
-#include "olap/tablet_schema_helper.h"
-#include "util/file_utils.h"
+#include "util/uid_util.h"
+#include "vec/columns/column.h"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -42,29 +65,23 @@ using namespace ErrorCode;
 static const uint32_t MAX_PATH_LEN = 1024;
 static StorageEngine* k_engine = nullptr;
 
-class TestRowIdConversion : public testing::TestWithParam<std::tuple<KeysType, bool, bool>> {
+class TestRowIdConversion : public testing::TestWithParam<std::tuple<KeysType, bool, bool, bool>> {
 protected:
     void SetUp() override {
         char buffer[MAX_PATH_LEN];
         EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
         absolute_dir = std::string(buffer) + kTestDir;
-
-        if (FileUtils::check_exist(absolute_dir)) {
-            EXPECT_TRUE(FileUtils::remove_all(absolute_dir).ok());
-        }
-        EXPECT_TRUE(FileUtils::create_dir(absolute_dir).ok());
-        EXPECT_TRUE(FileUtils::create_dir(absolute_dir + "/tablet_path").ok());
-        _data_dir = std::make_unique<DataDir>(absolute_dir);
-        _data_dir->update_capacity();
+        EXPECT_TRUE(io::global_local_filesystem()->delete_and_create_directory(absolute_dir).ok());
+        EXPECT_TRUE(io::global_local_filesystem()
+                            ->create_directory(absolute_dir + "/tablet_path")
+                            .ok());
         doris::EngineOptions options;
         k_engine = new StorageEngine(options);
         StorageEngine::_s_instance = k_engine;
     }
 
     void TearDown() override {
-        if (FileUtils::check_exist(absolute_dir)) {
-            EXPECT_TRUE(FileUtils::remove_all(absolute_dir).ok());
-        }
+        EXPECT_TRUE(io::global_local_filesystem()->delete_directory(absolute_dir).ok());
         if (k_engine != nullptr) {
             k_engine->stop();
             delete k_engine;
@@ -129,10 +146,9 @@ protected:
         rowset_id.init(inc_id);
         rowset_writer_context->rowset_id = rowset_id;
         rowset_writer_context->rowset_type = BETA_ROWSET;
-        rowset_writer_context->data_dir = _data_dir.get();
         rowset_writer_context->rowset_state = VISIBLE;
         rowset_writer_context->tablet_schema = tablet_schema;
-        rowset_writer_context->rowset_dir = "tablet_path";
+        rowset_writer_context->rowset_dir = absolute_dir + "/tablet_path";
         rowset_writer_context->version = Version(inc_id, inc_id);
         rowset_writer_context->segments_overlap = overlap;
         rowset_writer_context->max_rows_per_segment = max_rows_per_segment;
@@ -168,25 +184,24 @@ protected:
         Status s = RowsetFactory::create_rowset_writer(writer_context, false, &rowset_writer);
         EXPECT_TRUE(s.ok());
 
-        RowCursor input_row;
-        input_row.init(tablet_schema);
-
         uint32_t num_rows = 0;
         for (int i = 0; i < rowset_data.size(); ++i) {
-            MemPool mem_pool;
+            vectorized::Block block = tablet_schema->create_block();
+            auto columns = block.mutate_columns();
             for (int rid = 0; rid < rowset_data[i].size(); ++rid) {
-                uint32_t c1 = std::get<0>(rowset_data[i][rid]);
-                uint32_t c2 = std::get<1>(rowset_data[i][rid]);
-                input_row.set_field_content(0, reinterpret_cast<char*>(&c1), &mem_pool);
-                input_row.set_field_content(1, reinterpret_cast<char*>(&c2), &mem_pool);
+                int32_t c1 = std::get<0>(rowset_data[i][rid]);
+                int32_t c2 = std::get<1>(rowset_data[i][rid]);
+                columns[0]->insert_data((const char*)&c1, sizeof(c1));
+                columns[1]->insert_data((const char*)&c2, sizeof(c2));
+
                 if (tablet_schema->keys_type() == UNIQUE_KEYS) {
                     uint8_t num = 0;
-                    input_row.set_field_content(2, reinterpret_cast<char*>(&num), &mem_pool);
+                    columns[2]->insert_data((const char*)&num, sizeof(num));
                 }
-                s = rowset_writer->add_row(input_row);
-                EXPECT_TRUE(s.ok());
                 num_rows++;
             }
+            s = rowset_writer->add_block(&block);
+            EXPECT_TRUE(s.ok());
             s = rowset_writer->flush();
             EXPECT_TRUE(s.ok());
         }
@@ -218,40 +233,14 @@ protected:
                 "hi": -5350970832824939812,
                 "lo": -6717994719194512122
             },
-            "creation_time": 1553765670,
-            "alpha_rowset_extra_meta_pb": {
-                "segment_groups": [
-                {
-                    "segment_group_id": 0,
-                    "num_segments": 2,
-                    "index_size": 132,
-                    "data_size": 576,
-                    "num_rows": 5,
-                    "zone_maps": [
-                    {
-                        "min": "MQ==",
-                        "max": "NQ==",
-                        "null_flag": false
-                    },
-                    {
-                        "min": "MQ==",
-                        "max": "Mw==",
-                        "null_flag": false
-                    },
-                    {
-                        "min": "J2J1c2gn",
-                        "max": "J3RvbSc=",
-                        "null_flag": false
-                    }
-                    ],
-                    "empty": false
-                }]
-            }
+            "creation_time": 1553765670
         })";
-        pb1->init_from_json(json_rowset_meta);
-        pb1->set_start_version(start);
-        pb1->set_end_version(end);
-        pb1->set_creation_time(10000);
+        RowsetMetaPB rowset_meta_pb;
+        json2pb::JsonToProtoMessage(json_rowset_meta, &rowset_meta_pb);
+        rowset_meta_pb.set_start_version(start);
+        rowset_meta_pb.set_end_version(end);
+        rowset_meta_pb.set_creation_time(10000);
+        pb1->init_from_pb(rowset_meta_pb);
     }
 
     void add_delete_predicate(TabletSharedPtr tablet, DeletePredicatePB& del_pred,
@@ -295,7 +284,7 @@ protected:
         TabletMetaSharedPtr tablet_meta(
                 new TabletMeta(1, 1, 1, 1, 1, 1, t_tablet_schema, 1, col_ordinal_to_unique_id,
                                UniqueId(1, 2), TTabletType::TABLET_TYPE_DISK,
-                               TCompressionType::LZ4F, "", enable_unique_key_merge_on_write));
+                               TCompressionType::LZ4F, 0, enable_unique_key_merge_on_write));
 
         TabletSharedPtr tablet(new Tablet(tablet_meta, nullptr));
         tablet->init();
@@ -318,24 +307,10 @@ protected:
         return tablet;
     }
 
-    void block_create(TabletSchemaSPtr tablet_schema, vectorized::Block* block) {
-        block->clear();
-        Schema schema(tablet_schema);
-        const auto& column_ids = schema.column_ids();
-        for (size_t i = 0; i < schema.num_column_ids(); ++i) {
-            auto column_desc = schema.column(column_ids[i]);
-            auto data_type = Schema::get_data_type_ptr(*column_desc);
-            EXPECT_TRUE(data_type != nullptr);
-            auto column = data_type->create_column();
-            block->insert(vectorized::ColumnWithTypeAndName(std::move(column), data_type,
-                                                            column_desc->name()));
-        }
-    }
-
     void check_rowid_conversion(KeysType keys_type, bool enable_unique_key_merge_on_write,
                                 uint32_t num_input_rowset, uint32_t num_segments,
                                 uint32_t rows_per_segment, const SegmentsOverlapPB& overlap,
-                                bool has_delete_handler) {
+                                bool has_delete_handler, bool is_vertical_merger) {
         // generate input data
         std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
         generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -360,7 +335,12 @@ protected:
         RowsetWriterContext writer_context;
         create_rowset_writer_context(tablet_schema, NONOVERLAPPING, 3456, &writer_context);
         std::unique_ptr<RowsetWriter> output_rs_writer;
-        Status s = RowsetFactory::create_rowset_writer(writer_context, false, &output_rs_writer);
+        Status s;
+        if (is_vertical_merger) {
+            s = RowsetFactory::create_rowset_writer(writer_context, true, &output_rs_writer);
+        } else {
+            s = RowsetFactory::create_rowset_writer(writer_context, false, &output_rs_writer);
+        }
         EXPECT_TRUE(s.ok());
 
         // merge input rowset
@@ -379,8 +359,14 @@ protected:
         Merger::Statistics stats;
         RowIdConversion rowid_conversion;
         stats.rowid_conversion = &rowid_conversion;
-        s = Merger::vmerge_rowsets(tablet, READER_BASE_COMPACTION, tablet_schema, input_rs_readers,
-                                   output_rs_writer.get(), &stats);
+        if (is_vertical_merger) {
+            s = Merger::vertical_merge_rowsets(tablet, ReaderType::READER_BASE_COMPACTION,
+                                               tablet_schema, input_rs_readers,
+                                               output_rs_writer.get(), 10000000, &stats);
+        } else {
+            s = Merger::vmerge_rowsets(tablet, ReaderType::READER_BASE_COMPACTION, tablet_schema,
+                                       input_rs_readers, output_rs_writer.get(), &stats);
+        }
         EXPECT_TRUE(s.ok());
         RowsetSharedPtr out_rowset = output_rs_writer->build();
 
@@ -390,15 +376,13 @@ protected:
         reader_context.need_ordered_result = false;
         std::vector<uint32_t> return_columns = {0, 1};
         reader_context.return_columns = &return_columns;
-        reader_context.is_vec = true;
         RowsetReaderSharedPtr output_rs_reader;
         create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
 
         // read output rowset data
-        vectorized::Block output_block;
         std::vector<std::tuple<int64_t, int64_t>> output_data;
         do {
-            block_create(tablet_schema, &output_block);
+            vectorized::Block output_block = tablet_schema->create_block();
             s = output_rs_reader->next_block(&output_block);
             auto columns = output_block.get_columns_with_type_and_name();
             EXPECT_EQ(columns.size(), 2);
@@ -492,7 +476,6 @@ protected:
 private:
     const std::string kTestDir = "/ut_dir/rowid_conversion_test";
     string absolute_dir;
-    std::unique_ptr<DataDir> _data_dir;
 };
 
 TEST_F(TestRowIdConversion, Basic) {
@@ -568,19 +551,25 @@ TEST_F(TestRowIdConversion, Basic) {
 
 INSTANTIATE_TEST_SUITE_P(
         Parameters, TestRowIdConversion,
-        ::testing::ValuesIn(std::vector<std::tuple<KeysType, bool, bool>> {
-                // Parameters: data_type, enable_unique_key_merge_on_write, has_delete_handler
-                {DUP_KEYS, false, false},
-                {UNIQUE_KEYS, false, false},
-                {UNIQUE_KEYS, true, false},
-                {DUP_KEYS, false, true},
-                {UNIQUE_KEYS, false, true},
-                {UNIQUE_KEYS, true, true}}));
+        ::testing::ValuesIn(std::vector<std::tuple<KeysType, bool, bool, bool>> {
+                // Parameters: data_type, enable_unique_key_merge_on_write, has_delete_handler, is_vertical_merger
+                {DUP_KEYS, false, false, false},
+                {UNIQUE_KEYS, false, false, false},
+                {UNIQUE_KEYS, true, false, false},
+                {DUP_KEYS, false, true, false},
+                {UNIQUE_KEYS, false, true, false},
+                {UNIQUE_KEYS, true, true, false},
+                {UNIQUE_KEYS, false, false, true},
+                {UNIQUE_KEYS, true, false, true},
+                {DUP_KEYS, false, true, true},
+                {UNIQUE_KEYS, false, true, true},
+                {UNIQUE_KEYS, true, true, true}}));
 
 TEST_P(TestRowIdConversion, Conversion) {
     KeysType keys_type = std::get<0>(GetParam());
     bool enable_unique_key_merge_on_write = std::get<1>(GetParam());
     bool has_delete_handler = std::get<2>(GetParam());
+    bool is_vertical_merger = std::get<3>(GetParam());
 
     // if num_input_rowset = 2, VCollectIterator::Level1Iterator::_merge = flase
     // if num_input_rowset = 3, VCollectIterator::Level1Iterator::_merge = true
@@ -592,7 +581,8 @@ TEST_P(TestRowIdConversion, Conversion) {
             SegmentsOverlapPB overlap = NONOVERLAPPING;
             std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
             check_rowid_conversion(keys_type, enable_unique_key_merge_on_write, num_input_rowset,
-                                   num_segments, rows_per_segment, overlap, has_delete_handler);
+                                   num_segments, rows_per_segment, overlap, has_delete_handler,
+                                   is_vertical_merger);
         }
         // RowsetReader: VMergeIterator
         {
@@ -600,7 +590,8 @@ TEST_P(TestRowIdConversion, Conversion) {
             SegmentsOverlapPB overlap = OVERLAPPING;
             std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
             check_rowid_conversion(keys_type, enable_unique_key_merge_on_write, num_input_rowset,
-                                   num_segments, rows_per_segment, overlap, has_delete_handler);
+                                   num_segments, rows_per_segment, overlap, has_delete_handler,
+                                   is_vertical_merger);
         }
         // RowsetReader: VUnionIterator
         {
@@ -608,7 +599,8 @@ TEST_P(TestRowIdConversion, Conversion) {
             SegmentsOverlapPB overlap = NONOVERLAPPING;
             std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
             check_rowid_conversion(keys_type, enable_unique_key_merge_on_write, num_input_rowset,
-                                   num_segments, rows_per_segment, overlap, has_delete_handler);
+                                   num_segments, rows_per_segment, overlap, has_delete_handler,
+                                   is_vertical_merger);
         }
         // RowsetReader: VUnionIterator + VMergeIterator
         {
@@ -616,7 +608,8 @@ TEST_P(TestRowIdConversion, Conversion) {
             SegmentsOverlapPB overlap = OVERLAP_UNKNOWN;
             std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
             check_rowid_conversion(keys_type, enable_unique_key_merge_on_write, num_input_rowset,
-                                   num_segments, rows_per_segment, overlap, has_delete_handler);
+                                   num_segments, rows_per_segment, overlap, has_delete_handler,
+                                   is_vertical_merger);
         }
     }
 }

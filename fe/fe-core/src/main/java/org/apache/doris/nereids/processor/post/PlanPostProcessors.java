@@ -20,6 +20,7 @@ package org.apache.doris.nereids.processor.post;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalPlan;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.thrift.TRuntimeFilterMode;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableList.Builder;
@@ -41,12 +42,12 @@ public class PlanPostProcessors {
      * post process
      *
      * @param physicalPlan input plan
-     * @return physcial plan
+     * @return physical plan
      */
     public PhysicalPlan process(PhysicalPlan physicalPlan) {
         PhysicalPlan resultPlan = physicalPlan;
         for (PlanPostProcessor processor : getProcessors()) {
-            resultPlan = (PhysicalPlan) resultPlan.accept(processor, cascadesContext);
+            resultPlan = (PhysicalPlan) processor.processRoot(resultPlan, cascadesContext);
         }
         return resultPlan;
     }
@@ -57,13 +58,19 @@ public class PlanPostProcessors {
     public List<PlanPostProcessor> getProcessors() {
         // add processor if we need
         Builder<PlanPostProcessor> builder = ImmutableList.builder();
-        if (cascadesContext.getConnectContext().getSessionVariable().isEnableNereidsRuntimeFilter()) {
+        builder.add(new MergeProjectPostProcessor());
+        builder.add(new PushdownFilterThroughProject());
+        builder.add(new FragmentProcessor());
+        if (!cascadesContext.getConnectContext().getSessionVariable().getRuntimeFilterMode()
+                        .toUpperCase().equals(TRuntimeFilterMode.OFF.name())) {
             builder.add(new RuntimeFilterGenerator());
             if (ConnectContext.get().getSessionVariable().enableRuntimeFilterPrune) {
                 builder.add(new RuntimeFilterPruner());
             }
         }
         builder.add(new Validator());
+        builder.add(new TopNScanOpt());
+        builder.add(new TwoPhaseReadOpt());
         return builder.build();
     }
 }

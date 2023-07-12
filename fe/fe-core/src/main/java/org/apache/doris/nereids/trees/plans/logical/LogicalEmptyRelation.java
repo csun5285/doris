@@ -39,8 +39,9 @@ import java.util.Optional;
  * e.g.
  * select * from tbl limit 0
  */
-public class LogicalEmptyRelation extends LogicalLeaf implements EmptyRelation {
-    private final ImmutableList<? extends NamedExpression> projects;
+public class LogicalEmptyRelation extends LogicalLeaf implements EmptyRelation, OutputPrunable {
+
+    private final List<NamedExpression> projects;
 
     public LogicalEmptyRelation(List<? extends NamedExpression> projects) {
         this(projects, Optional.empty(), Optional.empty());
@@ -58,13 +59,17 @@ public class LogicalEmptyRelation extends LogicalLeaf implements EmptyRelation {
     }
 
     @Override
-    public List<? extends NamedExpression> getProjects() {
+    public List<NamedExpression> getProjects() {
         return projects;
     }
 
     @Override
     public List<? extends Expression> getExpressions() {
         return ImmutableList.of();
+    }
+
+    public LogicalEmptyRelation withProjects(List<? extends NamedExpression> projects) {
+        return new LogicalEmptyRelation(projects, Optional.empty(), Optional.empty());
     }
 
     @Override
@@ -109,5 +114,15 @@ public class LogicalEmptyRelation extends LogicalLeaf implements EmptyRelation {
     @Override
     public int hashCode() {
         return Objects.hash(projects);
+    }
+
+    @Override
+    public List<NamedExpression> getOutputs() {
+        return projects;
+    }
+
+    @Override
+    public Plan pruneOutputs(List<NamedExpression> prunedOutputs) {
+        return withProjects(prunedOutputs);
     }
 }

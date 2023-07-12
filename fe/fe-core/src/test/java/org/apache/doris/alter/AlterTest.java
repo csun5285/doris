@@ -124,7 +124,7 @@ public class AlterTest {
                         + "PARTITION BY RANGE(k1)\n" + "(\n"
                         + "    PARTITION p1 values less than('2020-02-01 00:00:00'),\n"
                         + "    PARTITION p2 values less than('2020-03-01 00:00:00')\n" + ")\n"
-                        + "DISTRIBUTED BY HASH(k2) BUCKETS 3\n" + "PROPERTIES('replication_num' = '1');");
+                        + "DISTRIBUTED BY HASH(k2) BUCKETS 3\n" + "PROPERTIES('replication_num' = '1','enable_unique_key_merge_on_write' = 'false');");
 
         createTable("create external table test.odbc_table\n" + "(  `k1` bigint(20) COMMENT \"\",\n"
                 + "  `k2` datetime COMMENT \"\",\n" + "  `k3` varchar(20) COMMENT \"\",\n"
@@ -140,7 +140,7 @@ public class AlterTest {
                         + "   \"AWS_ROOT_PATH\" = \"/path/to/root\",\n" + "   \"AWS_ACCESS_KEY\" = \"bbb\",\n"
                         + "   \"AWS_SECRET_KEY\" = \"aaaa\",\n" + "   \"AWS_MAX_CONNECTIONS\" = \"50\",\n"
                         + "   \"AWS_REQUEST_TIMEOUT_MS\" = \"3000\",\n" + "   \"AWS_CONNECTION_TIMEOUT_MS\" = \"1000\",\n"
-                        + "   \"AWS_BUCKET\" = \"test-bucket\"\n"
+                        + "   \"AWS_BUCKET\" = \"test-bucket\",  \"s3_validity_check\" = \"false\"\n"
                         + ");");
 
         createRemoteStorageResource(
@@ -149,7 +149,7 @@ public class AlterTest {
                         + "   \"AWS_ROOT_PATH\" = \"/path/to/root\",\n" + "   \"AWS_ACCESS_KEY\" = \"bbb\",\n"
                         + "   \"AWS_SECRET_KEY\" = \"aaaa\",\n" + "   \"AWS_MAX_CONNECTIONS\" = \"50\",\n"
                         + "   \"AWS_REQUEST_TIMEOUT_MS\" = \"3000\",\n" + "   \"AWS_CONNECTION_TIMEOUT_MS\" = \"1000\",\n"
-                        + "   \"AWS_BUCKET\" = \"test-bucket\"\n"
+                        + "   \"AWS_BUCKET\" = \"test-bucket\", \"s3_validity_check\" = \"false\"\n"
                         + ");");
 
         createRemoteStoragePolicy(
@@ -230,8 +230,8 @@ public class AlterTest {
     }
 
     private static void alterTableWithExceptionMsg(String sql, String msg) throws Exception {
-        AlterTableStmt alterTableStmt = (AlterTableStmt) UtFrameUtils.parseAndAnalyzeStmt(sql, connectContext);
         try {
+            AlterTableStmt alterTableStmt = (AlterTableStmt) UtFrameUtils.parseAndAnalyzeStmt(sql, connectContext);
             Env.getCurrentEnv().alterTable(alterTableStmt);
         } catch (Exception e) {
             Assert.assertEquals(msg, e.getMessage());
@@ -415,11 +415,11 @@ public class AlterTest {
         alterTable(stmt, false);
         waitSchemaChangeJobDone(false);
 
-        stmt = "alter table test.tbl6 add rollup r1 (k1, k2)";
+        stmt = "alter table test.tbl6 add rollup r1 (k2, k1)";
         alterTable(stmt, false);
         waitSchemaChangeJobDone(true);
 
-        stmt = "alter table test.tbl6 add rollup r2 (k1, k2), r3 (k1, k2)";
+        stmt = "alter table test.tbl6 add rollup r2 (k2, k1), r3 (k2, k1)";
         alterTable(stmt, false);
         waitSchemaChangeJobDone(true);
 
@@ -453,6 +453,10 @@ public class AlterTest {
         stmt = "alter table test.tbl6 set ('dynamic_partition.enable' = 'false')";
         alterTable(stmt, false);
         Assert.assertFalse(tbl.getTableProperty().getDynamicPartitionProperty().getEnable());
+
+        String alterStmt = "alter table test.tbl6 set ('in_memory' = 'true')";
+        String errorMsg = "errCode = 2, detailMessage = Not support set 'in_memory'='true' now!";
+        alterTableWithExceptionMsg(alterStmt, errorMsg);
 
         // add partition when dynamic partition is disable
         stmt = "alter table test.tbl6 add partition p3 values less than('2020-04-01 00:00:00') distributed"
@@ -498,16 +502,20 @@ public class AlterTest {
         Assert.assertEquals(Short.valueOf("1"), Short.valueOf(tbl4.getPartitionInfo().getReplicaAllocation(p3.getId()).getTotalReplicaNum()));
 
         // batch update in_memory property
-        stmt = "alter table test.tbl4 modify partition (p1, p2, p3) set ('in_memory' = 'true')";
+        stmt = "alter table test.tbl4 modify partition (p1, p2, p3) set ('in_memory' = 'false')";
         partitionList = Lists.newArrayList(p1, p2, p3);
         for (Partition partition : partitionList) {
             Assert.assertEquals(false, tbl4.getPartitionInfo().getIsInMemory(partition.getId()));
         }
         alterTable(stmt, false);
         for (Partition partition : partitionList) {
-            Assert.assertEquals(true, tbl4.getPartitionInfo().getIsInMemory(partition.getId()));
+            Assert.assertEquals(false, tbl4.getPartitionInfo().getIsInMemory(partition.getId()));
         }
         Assert.assertEquals(false, tbl4.getPartitionInfo().getIsInMemory(p4.getId()));
+
+        String alterStmt = "alter table test.tbl4 modify partition (p1, p2, p3) set ('in_memory' = 'true')";
+        String errorMsg = "errCode = 2, detailMessage = Not support set 'in_memory'='true' now!";
+        alterTableWithExceptionMsg(alterStmt, errorMsg);
 
         // batch update storage_medium and storage_cooldown properties
         // alter storage_medium
@@ -1039,14 +1047,14 @@ public class AlterTest {
         // external table support reorder column
         db = Env.getCurrentInternalCatalog().getDbOrMetaException("default_cluster:test");
         odbcTable = db.getTableOrMetaException("odbc_table");
-        Assert.assertTrue(odbcTable.getBaseSchema().stream()
+        Assert.assertEquals(odbcTable.getBaseSchema().stream()
                 .map(column -> column.getName())
-                .reduce("", (totalName, columnName) -> totalName + columnName).equals("k1k2k3k4k5k6"));
+                .reduce("", (totalName, columnName) -> totalName + columnName), "k1k2k3k4k5k6");
         stmt = "alter table test.odbc_table order by (k6, k5, k4, k3, k2, k1)";
         alterTable(stmt, false);
-        Assert.assertTrue(odbcTable.getBaseSchema().stream()
+        Assert.assertEquals(odbcTable.getBaseSchema().stream()
                 .map(column -> column.getName())
-                .reduce("", (totalName, columnName) -> totalName + columnName).equals("k6k5k4k3k2k1"));
+                .reduce("", (totalName, columnName) -> totalName + columnName), "k6k5k4k3k2k1");
 
         // external table support drop column
         stmt = "alter table test.odbc_table drop column k6";
@@ -1125,7 +1133,7 @@ public class AlterTest {
 
     @Test
     public void testShowMV() throws Exception {
-        createMV("CREATE MATERIALIZED VIEW test_mv as select k1 from test.show_test;", false);
+        createMV("CREATE MATERIALIZED VIEW test_mv as select k1 from test.show_test group by k1;", false);
         waitSchemaChangeJobDone(true);
 
         String showMvSql = "SHOW CREATE MATERIALIZED VIEW test_mv on test.show_test;";
@@ -1133,7 +1141,7 @@ public class AlterTest {
                 showMvSql, connectContext);
         ShowExecutor executor = new ShowExecutor(connectContext, showStmt);
         Assert.assertEquals(executor.execute().getResultRows().get(0).get(2),
-                "CREATE MATERIALIZED VIEW test_mv as select k1 from test.show_test;");
+                "CREATE MATERIALIZED VIEW test_mv as select k1 from test.show_test group by k1;");
 
         showMvSql = "SHOW CREATE MATERIALIZED VIEW test_mv_empty on test.show_test;";
         showStmt = (ShowCreateMaterializedViewStmt) UtFrameUtils.parseAndAnalyzeStmt(showMvSql, connectContext);

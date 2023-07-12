@@ -17,19 +17,19 @@
 
 #pragma once
 
+#include <butil/macros.h>
+#include <glog/logging.h>
+
 #include <cstdint>
 #include <memory>
-#include <string>
+#include <utility>
+#include <vector>
 
-#include "cloud/io/file_reader.h"
 #include "common/status.h"
-#include "env/env.h"
-#include "gutil/macros.h"
+#include "io/fs/file_reader_writer_fwd.h"
 #include "olap/rowset/segment_v2/common.h"
 #include "olap/rowset/segment_v2/index_page.h"
 #include "olap/rowset/segment_v2/page_pointer.h"
-#include "util/coding.h"
-#include "util/slice.h"
 
 namespace doris {
 
@@ -38,6 +38,8 @@ class FileWriter;
 }
 
 namespace segment_v2 {
+class ColumnIndexMetaPB;
+class OrdinalIndexPB;
 
 // Ordinal index is implemented by one IndexPage that stores the first value ordinal
 // and file pointer for each data page.
@@ -70,7 +72,7 @@ public:
               _num_values(num_values) {}
 
     // load and parse the index page into memory
-    Status load(bool use_page_cache, bool kept_in_memory, bool disable_file_cache = false);
+    Status load(bool use_page_cache, bool kept_in_memory);
 
     // the returned iter points to the largest element which is less than `ordinal`,
     // or points to the first element if all elements are greater than `ordinal`,
@@ -115,8 +117,8 @@ public:
         DCHECK_LT(_cur_idx, _index->_num_pages);
         _cur_idx++;
     }
-    int32_t page_index() const { return _cur_idx; };
-    const PagePointer& page() const { return _index->_pages[_cur_idx]; };
+    int32_t page_index() const { return _cur_idx; }
+    const PagePointer& page() const { return _index->_pages[_cur_idx]; }
     ordinal_t first_ordinal() const { return _index->get_first_ordinal(_cur_idx); }
     ordinal_t last_ordinal() const { return _index->get_last_ordinal(_cur_idx); }
 

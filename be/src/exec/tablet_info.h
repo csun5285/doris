@@ -17,40 +17,49 @@
 
 #pragma once
 
+#include <gen_cpp/Descriptors_types.h>
+#include <gen_cpp/descriptors.pb.h>
+
 #include <cstdint>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/object_pool.h"
 #include "common/status.h"
-#include "gen_cpp/Descriptors_types.h"
-#include "gen_cpp/descriptors.pb.h"
-#include "olap/tablet_schema.h"
-#include "runtime/descriptors.h"
-#include "runtime/raw_value.h"
-#include "runtime/tuple.h"
+#include "vec/columns/column.h"
 #include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/exprs/vexpr_fwd.h"
 
 namespace doris {
-
-class MemPool;
-class RowBatch;
+class MemTracker;
+class SlotDescriptor;
+class TExprNode;
+class TabletColumn;
+class TabletIndex;
+class TupleDescriptor;
 
 struct OlapTableIndexSchema {
     int64_t index_id;
     std::vector<SlotDescriptor*> slots;
     int32_t schema_hash;
     std::vector<TabletColumn*> columns;
+    std::vector<TabletIndex*> indexes;
+    vectorized::VExprContextSPtr where_clause;
 
     void to_protobuf(POlapTableIndexSchema* pindex) const;
 };
 
 class OlapTableSchemaParam {
 public:
-    OlapTableSchemaParam() {}
-    ~OlapTableSchemaParam() noexcept {}
+    OlapTableSchemaParam() = default;
+    ~OlapTableSchemaParam() noexcept = default;
 
     Status init(const TOlapTableSchemaParam& tschema);
     Status init(const POlapTableSchemaParam& pschema);
@@ -75,6 +84,11 @@ public:
     
     bool is_dynamic_schema() const { return _is_dynamic_schema; }
 
+    bool is_partial_update() const { return _is_partial_update; }
+    std::set<std::string> partial_update_input_columns() const {
+        return _partial_update_input_columns;
+    }
+
     std::string debug_string() const;
 
 private:
@@ -87,6 +101,8 @@ private:
     std::vector<OlapTableIndexSchema*> _indexes;
     mutable ObjectPool _obj_pool;
     bool _is_dynamic_schema = false;
+    bool _is_partial_update = false;
+    std::set<std::string> _partial_update_input_columns;
 };
 
 using OlapTableIndexTablets = TOlapTableIndexTablets;
@@ -94,121 +110,6 @@ using OlapTableIndexTablets = TOlapTableIndexTablets;
 //     1: required i64 index_id
 //     2: required list<i64> tablets
 // }
-
-struct OlapTablePartition {
-    int64_t id = 0;
-    Tuple* start_key = nullptr;
-    Tuple* end_key = nullptr;
-    std::vector<Tuple*> in_keys;
-    int64_t num_buckets = 0;
-    std::vector<OlapTableIndexTablets> indexes;
-
-    std::string debug_string(TupleDescriptor* tuple_desc) const;
-};
-
-class OlapTablePartKeyComparator {
-public:
-    OlapTablePartKeyComparator(const std::vector<SlotDescriptor*>& slot_descs)
-            : _slot_descs(slot_descs) {}
-    // return true if lhs < rhs
-    // 'nullptr' is max value, but 'null' is min value
-    bool operator()(const Tuple* lhs, const Tuple* rhs) const {
-        if (lhs == nullptr) {
-            return false;
-        } else if (rhs == nullptr) {
-            return true;
-        }
-
-        for (auto slot_desc : _slot_descs) {
-            bool lhs_null = lhs->is_null(slot_desc->null_indicator_offset());
-            bool rhs_null = rhs->is_null(slot_desc->null_indicator_offset());
-            if (lhs_null && rhs_null) {
-                continue;
-            }
-            if (lhs_null || rhs_null) {
-                return !rhs_null;
-            }
-
-            auto lhs_value = lhs->get_slot(slot_desc->tuple_offset());
-            auto rhs_value = rhs->get_slot(slot_desc->tuple_offset());
-
-            int res = RawValue::compare(lhs_value, rhs_value, slot_desc->type());
-            if (res != 0) {
-                return res < 0;
-            }
-        }
-        // equal, return false
-        return false;
-    }
-
-private:
-    const std::vector<SlotDescriptor*>& _slot_descs;
-};
-
-// store an olap table's tablet information
-class OlapTablePartitionParam {
-public:
-    OlapTablePartitionParam(std::shared_ptr<OlapTableSchemaParam> schema,
-                            const TOlapTablePartitionParam& param);
-    ~OlapTablePartitionParam();
-
-    Status init();
-
-    int64_t db_id() const { return _t_param.db_id; }
-    int64_t table_id() const { return _t_param.table_id; }
-    int64_t version() const { return _t_param.version; }
-
-    // return true if we found this tuple in partition
-    bool find_partition(Tuple* tuple, const OlapTablePartition** partition) const;
-
-    uint32_t find_tablet(Tuple* tuple, const OlapTablePartition& partition) const;
-
-    const std::vector<OlapTablePartition*>& get_partitions() const { return _partitions; }
-    std::string debug_string() const;
-
-private:
-    Status _create_partition_keys(const std::vector<TExprNode>& t_exprs, Tuple** part_key);
-
-    Status _create_partition_key(const TExprNode& t_expr, Tuple* tuple, SlotDescriptor* slot_desc);
-
-    std::function<uint32_t(Tuple*, int64_t)> _compute_tablet_index;
-
-    // check if this partition contain this key
-    bool _part_contains(OlapTablePartition* part, Tuple* key) const {
-        if ((part->start_key == nullptr) && (part->in_keys.size() == 0)) {
-            // start_key is nullptr means the lower bound is boundless
-            return true;
-        }
-        OlapTablePartKeyComparator comparator(_partition_slot_descs);
-        const TOlapTablePartition& t_part = _t_param.partitions[0];
-        // when list partition, return true if equals.
-        if (t_part.__isset.in_keys) {
-            bool ret = false;
-            for (auto in_key : part->in_keys) {
-                ret = !comparator(key, in_key) && !comparator(in_key, key);
-                if (ret) {
-                    break;
-                }
-            }
-            return ret;
-        }
-        return !comparator(key, part->start_key);
-    }
-
-private:
-    // this partition only valid in this schema
-    std::shared_ptr<OlapTableSchemaParam> _schema;
-    TOlapTablePartitionParam _t_param;
-
-    std::vector<SlotDescriptor*> _partition_slot_descs;
-    std::vector<SlotDescriptor*> _distributed_slot_descs;
-
-    ObjectPool _obj_pool;
-    std::unique_ptr<MemPool> _mem_pool;
-    std::vector<OlapTablePartition*> _partitions;
-    std::unique_ptr<std::map<Tuple*, OlapTablePartition*, OlapTablePartKeyComparator>>
-            _partitions_map;
-};
 
 using BlockRow = std::pair<vectorized::Block*, int32_t>;
 using VecBlock = vectorized::Block;
@@ -220,9 +121,10 @@ struct VOlapTablePartition {
     std::vector<BlockRow> in_keys;
     int64_t num_buckets = 0;
     std::vector<OlapTableIndexTablets> indexes;
+    bool is_mutable;
 
     VOlapTablePartition(vectorized::Block* partition_block)
-            : start_key {partition_block, -1}, end_key {partition_block, -1} {};
+            : start_key {partition_block, -1}, end_key {partition_block, -1} {}
 };
 
 class VOlapTablePartKeyComparator {
@@ -288,7 +190,6 @@ private:
         return part->start_key.second == -1 || !comparator(key, &part->start_key);
     }
 
-private:
     // this partition only valid in this schema
     std::shared_ptr<OlapTableSchemaParam> _schema;
     TOlapTablePartitionParam _t_param;
@@ -306,6 +207,8 @@ private:
 
     bool _is_in_partition = false;
     uint32_t _mem_usage = 0;
+    // only works when using list partition, the resource is owned by _partitions
+    VOlapTablePartition* _default_partition = nullptr;
 };
 
 using TabletLocation = TTabletLocation;
@@ -357,7 +260,14 @@ struct NodeInfo {
 
 class DorisNodesInfo {
 public:
+    DorisNodesInfo() = default;
     DorisNodesInfo(const TPaloNodesInfo& t_nodes) {
+        for (auto& node : t_nodes.nodes) {
+            _nodes.emplace(node.id, node);
+        }
+    }
+    void setNodes(const TPaloNodesInfo& t_nodes) {
+        _nodes.clear();
         for (auto& node : t_nodes.nodes) {
             _nodes.emplace(node.id, node);
         }
@@ -370,9 +280,7 @@ public:
         return nullptr;
     }
 
-    const std::unordered_map<int64_t, NodeInfo>& nodes_info() {
-        return _nodes;
-    }
+    const std::unordered_map<int64_t, NodeInfo>& nodes_info() { return _nodes; }
 
 private:
     std::unordered_map<int64_t, NodeInfo> _nodes;

@@ -247,7 +247,7 @@ suite("test_union") {
     check2_doris(res7, res8)
     // 不同类型不同个数
     test {
-        sql """select k1, k2 from ${tbName2} union selectk11, k10, k9  from ${tbName1} order by k1, k2"""
+        sql """select k1, k2 from ${tbName2} union select k11, k10, k9  from ${tbName1} order by k1, k2"""
         check {result, exception, startTime, endTime ->
             assertTrue(exception != null)
             logger.info(exception.message)
@@ -273,7 +273,6 @@ suite("test_union") {
         qt_union40 """(select k1 from ${new_union_table}) union (select k${idx} from ${tbName1}) order by k1"""
     }
     sql"""drop table ${new_union_table}"""
-
 
     sql 'set enable_fallback_to_original_planner=false'
     sql 'set enable_nereids_planner=true'

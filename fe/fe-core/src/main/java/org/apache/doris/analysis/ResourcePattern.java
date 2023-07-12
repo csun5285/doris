@@ -21,7 +21,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
-import org.apache.doris.mysql.privilege.PaloAuth.PrivLevel;
+import org.apache.doris.mysql.privilege.Auth.PrivLevel;
 import org.apache.doris.persist.gson.GsonUtils;
 
 import com.google.common.base.Strings;
@@ -114,13 +114,13 @@ public class ResourcePattern implements Writable {
             return false;
         }
         ResourcePattern other = (ResourcePattern) obj;
-        return resourceName.equals(other.getResourceName());
+        return resourceName.equals(other.getResourceName()) && resourceType.equals(other.resourceType);
     }
 
     @Override
     public int hashCode() {
         int result = 17;
-        result = 31 * result + resourceName.hashCode();
+        result = 31 * result + resourceName.hashCode() + resourceType.hashCode();
         return result;
     }
 

@@ -19,7 +19,9 @@
 
 #include "common/status.h"
 #include "process_hash_table_probe.h"
+#include "runtime/thread_context.h" // IWYU pragma: keep
 #include "util/simd/bits.h"
+#include "vec/exprs/vexpr_context.h"
 #include "vhash_join_node.h"
 
 namespace doris::vectorized {
@@ -175,8 +177,12 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
     KeyGetter key_getter(probe_raw_ptrs, _join_node->_probe_key_sz, nullptr);
 
     if (probe_index == 0) {
+        size_t old_probe_keys_memory_usage = 0;
+        if (_arena) {
+            old_probe_keys_memory_usage = _arena->size();
+        }
         _arena.reset(new Arena());
-        if constexpr (IsSerializedHashTableContextTraits<KeyGetter>::value) {
+        if constexpr (ColumnsHashing::IsPreSerializedKeysHashMethodTraits<KeyGetter>::value) {
             if (_probe_keys.size() < probe_rows) {
                 _probe_keys.resize(probe_rows);
             }
@@ -185,10 +191,12 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
                 _probe_keys[i] =
                         serialize_keys_to_pool_contiguous(i, keys_size, probe_raw_ptrs, *_arena);
             }
+            _join_node->_probe_arena_memory_usage->add(_arena->size() -
+                                                       old_probe_keys_memory_usage);
         }
     }
 
-    if constexpr (IsSerializedHashTableContextTraits<KeyGetter>::value) {
+    if constexpr (ColumnsHashing::IsPreSerializedKeysHashMethodTraits<KeyGetter>::value) {
         key_getter.set_serialized_keys(_probe_keys.data());
     }
 
@@ -386,7 +394,7 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
     if constexpr (JoinOpType != TJoinOp::RIGHT_SEMI_JOIN &&
                   JoinOpType != TJoinOp::RIGHT_ANTI_JOIN) {
         SCOPED_TIMER(_probe_side_output_timer);
-        RETURN_IF_CATCH_BAD_ALLOC(
+        RETURN_IF_CATCH_EXCEPTION(
                 probe_side_output_column(mcol, _join_node->_left_output_slot_flags, current_offset,
                                          last_probe_index, probe_size, all_match_one, false));
     }
@@ -419,8 +427,12 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
         KeyGetter key_getter(probe_raw_ptrs, _join_node->_probe_key_sz, nullptr);
 
         if (probe_index == 0) {
+            size_t old_probe_keys_memory_usage = 0;
+            if (_arena) {
+                old_probe_keys_memory_usage = _arena->size();
+            }
             _arena.reset(new Arena());
-            if constexpr (IsSerializedHashTableContextTraits<KeyGetter>::value) {
+            if constexpr (ColumnsHashing::IsPreSerializedKeysHashMethodTraits<KeyGetter>::value) {
                 if (_probe_keys.size() < probe_rows) {
                     _probe_keys.resize(probe_rows);
                 }
@@ -430,9 +442,11 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
                                                                        *_arena);
                 }
             }
+            _join_node->_probe_arena_memory_usage->add(_arena->size() -
+                                                       old_probe_keys_memory_usage);
         }
 
-        if constexpr (IsSerializedHashTableContextTraits<KeyGetter>::value) {
+        if constexpr (ColumnsHashing::IsPreSerializedKeysHashMethodTraits<KeyGetter>::value) {
             key_getter.set_serialized_keys(_probe_keys.data());
         }
 
@@ -653,7 +667,7 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
         }
         {
             SCOPED_TIMER(_probe_side_output_timer);
-            RETURN_IF_CATCH_BAD_ALLOC(probe_side_output_column(
+            RETURN_IF_CATCH_EXCEPTION(probe_side_output_column(
                     mcol, _join_node->_left_output_slot_flags, current_offset, last_probe_index,
                     probe_size, all_match_one, true));
         }
@@ -663,11 +677,20 @@ Status ProcessHashTableProbe<JoinOpType>::do_process_with_other_join_conjuncts(
         // dispose the other join conjunct exec
         auto row_count = output_block->rows();
         if (row_count) {
-            int result_column_id = -1;
             int orig_columns = output_block->columns();
-            RETURN_IF_ERROR((*_join_node->_vother_join_conjunct_ptr)
-                                    ->execute(output_block, &result_column_id));
+            IColumn::Filter other_conjunct_filter(row_count, 1);
+            bool can_be_filter_all;
+            RETURN_IF_ERROR(VExprContext::execute_conjuncts(
+                    _join_node->_other_join_conjuncts, nullptr, output_block,
+                    &other_conjunct_filter, &can_be_filter_all));
 
+            auto result_column_id = output_block->columns();
+            auto filter_column = ColumnVector<UInt8>::create();
+            if (can_be_filter_all) {
+                memset(other_conjunct_filter.data(), 0, row_count);
+            }
+            filter_column->get_data() = std::move(other_conjunct_filter);
+            output_block->insert({std::move(filter_column), std::make_shared<DataTypeUInt8>(), ""});
             auto column = output_block->get_by_position(result_column_id).column;
             if constexpr (JoinOpType == TJoinOp::LEFT_OUTER_JOIN ||
                           JoinOpType == TJoinOp::FULL_OUTER_JOIN) {
@@ -1046,8 +1069,24 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
         };
 
         if (visited_iter.ok()) {
-            for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
-                insert_from_hash_table(visited_iter->block_offset, visited_iter->row_num);
+            if constexpr (std::is_same_v<Mapped, RowRefListWithFlag>) {
+                for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
+                    insert_from_hash_table(visited_iter->block_offset, visited_iter->row_num);
+                }
+            } else {
+                for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
+                    if constexpr (JoinOpType == TJoinOp::RIGHT_SEMI_JOIN) {
+                        if (visited_iter->visited) {
+                            insert_from_hash_table(visited_iter->block_offset,
+                                                   visited_iter->row_num);
+                        }
+                    } else {
+                        if (!visited_iter->visited) {
+                            insert_from_hash_table(visited_iter->block_offset,
+                                                   visited_iter->row_num);
+                        }
+                    }
+                }
             }
             if (!visited_iter.ok()) {
                 ++iter;
@@ -1058,11 +1097,15 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
             auto& mapped = iter->get_second();
             if constexpr (std::is_same_v<Mapped, RowRefListWithFlag>) {
                 if (mapped.visited) {
-                    visited_iter = mapped.begin();
-                    for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
-                        if constexpr (JoinOpType == TJoinOp::RIGHT_SEMI_JOIN) {
+                    if constexpr (JoinOpType == TJoinOp::RIGHT_SEMI_JOIN) {
+                        visited_iter = mapped.begin();
+                        for (; visited_iter.ok() && block_size < _batch_size; ++visited_iter) {
                             insert_from_hash_table(visited_iter->block_offset,
                                                    visited_iter->row_num);
+                        }
+                        if (visited_iter.ok()) {
+                            // block_size >= _batch_size, quit for loop
+                            break;
                         }
                     }
                     if (visited_iter.ok()) {

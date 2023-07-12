@@ -17,10 +17,26 @@
 
 #include "vec/exec/scan/new_es_scan_node.h"
 
-#include "exec/es/es_query_builder.h"
+#include <gen_cpp/Metrics_types.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/Types_types.h>
+
+#include <ostream>
+
+#include "common/logging.h"
+#include "common/object_pool.h"
+#include "exec/es/es_scan_reader.h"
 #include "exec/es/es_scroll_query.h"
+#include "runtime/descriptors.h"
+#include "runtime/runtime_state.h"
+#include "service/backend_options.h"
 #include "vec/exec/scan/new_es_scanner.h"
-#include "vec/utils/util.hpp"
+
+namespace doris {
+namespace vectorized {
+class VScanner;
+} // namespace vectorized
+} // namespace doris
 
 static const std::string NEW_SCAN_NODE_TYPE = "NewEsScanNode";
 
@@ -117,64 +133,11 @@ Status NewEsScanNode::_process_conjuncts() {
         return Status::OK();
     }
 
-    // fe by enable_new_es_dsl to control whether to generate DSL for easy rollback. After the code is stable, can delete the be generation logic
-    if (_properties.find(ESScanReader::KEY_QUERY_DSL) != _properties.end()) {
-        return Status::OK();
-    }
-
-    // if conjunct is constant, compute direct and set eos = true
-    for (int conj_idx = 0; conj_idx < _conjunct_ctxs.size(); ++conj_idx) {
-        if (_conjunct_ctxs[conj_idx]->root()->is_constant()) {
-            void* value = _conjunct_ctxs[conj_idx]->get_value(nullptr);
-            if (value == nullptr || *reinterpret_cast<bool*>(value) == false) {
-                _eos = true;
-            }
-        }
-    }
-    RETURN_IF_ERROR(build_conjuncts_list());
-    // remove those predicates which ES cannot support
-    std::vector<bool> list;
-    BooleanQueryBuilder::validate(_predicates, &list);
-
-    DCHECK(list.size() == _predicate_to_conjunct.size());
-    for (int i = list.size() - 1; i >= 0; i--) {
-        if (!list[i]) {
-            _predicate_to_conjunct.erase(_predicate_to_conjunct.begin() + i);
-            _predicates.erase(_predicates.begin() + i);
-        }
-    }
-
-    // filter the conjuncts and ES will process them later
-    for (int i = _predicate_to_conjunct.size() - 1; i >= 0; i--) {
-        int conjunct_index = _predicate_to_conjunct[i];
-        _conjunct_ctxs[conjunct_index]->close(_state);
-        _conjunct_ctxs.erase(_conjunct_ctxs.begin() + conjunct_index);
-    }
-
-    auto checker = [&](int index) {
-        return _conjunct_to_predicate[index] != -1 && list[_conjunct_to_predicate[index]];
-    };
-
-    // _peel_pushed_vconjunct
-    if (_vconjunct_ctx_ptr == nullptr) {
-        return Status::OK();
-    }
-    int leaf_index = 0;
-    vectorized::VExpr* conjunct_expr_root = (*_vconjunct_ctx_ptr)->root();
-    if (conjunct_expr_root != nullptr) {
-        vectorized::VExpr* new_conjunct_expr_root = vectorized::VectorizedUtils::dfs_peel_conjunct(
-                _state, *_vconjunct_ctx_ptr, conjunct_expr_root, leaf_index, checker);
-        if (new_conjunct_expr_root == nullptr) {
-            (*_vconjunct_ctx_ptr)->close(_state);
-            _vconjunct_ctx_ptr.reset(nullptr);
-        } else {
-            (*_vconjunct_ctx_ptr)->set_root(new_conjunct_expr_root);
-        }
-    }
+    CHECK(_properties.find(ESScanReader::KEY_QUERY_DSL) != _properties.end());
     return Status::OK();
 }
 
-Status NewEsScanNode::_init_scanners(std::list<VScanner*>* scanners) {
+Status NewEsScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
     if (_scan_ranges.empty()) {
         _eos = true;
         return Status::OK();
@@ -192,56 +155,22 @@ Status NewEsScanNode::_init_scanners(std::list<VScanner*>* scanners) {
         properties[ESScanReader::KEY_HOST_PORT] = get_host_port(es_scan_range->es_hosts);
         // push down limit to Elasticsearch
         // if predicate in _conjunct_ctxs can not be processed by Elasticsearch, we can not push down limit operator to Elasticsearch
-        if (limit() != -1 && limit() <= _state->batch_size() && _conjunct_ctxs.empty()) {
+        if (limit() != -1 && limit() <= _state->batch_size()) {
             properties[ESScanReader::KEY_TERMINATE_AFTER] = std::to_string(limit());
         }
 
         bool doc_value_mode = false;
         properties[ESScanReader::KEY_QUERY] = ESScrollQueryBuilder::build(
-                properties, _column_names, _predicates, _docvalue_context, &doc_value_mode);
+                properties, _column_names, _docvalue_context, &doc_value_mode);
 
-        NewEsScanner* scanner =
-                new NewEsScanner(_state, this, _limit_per_scanner, _tuple_id, properties,
-                                 _docvalue_context, doc_value_mode, _state->runtime_profile());
+        std::shared_ptr<NewEsScanner> scanner = NewEsScanner::create_shared(
+                _state, this, _limit_per_scanner, _tuple_id, properties, _docvalue_context,
+                doc_value_mode, _state->runtime_profile());
 
-        _scanner_pool.add(scanner);
-        Status st = scanner->prepare(_state, _vconjunct_ctx_ptr.get());
-        if (!st.ok()) {
-            // during prepare, scanner already cloned vexpr_context, should call close to release it.
-            scanner->close(_state);
-            return st;
-        }
-        scanners->push_back(static_cast<VScanner*>(scanner));
+        RETURN_IF_ERROR(scanner->prepare(_state, _conjuncts));
+        scanners->push_back(scanner);
     }
     return Status::OK();
 }
 
-// build predicate
-Status NewEsScanNode::build_conjuncts_list() {
-    Status status = Status::OK();
-    _conjunct_to_predicate.resize(_conjunct_ctxs.size());
-
-    for (int i = 0; i < _conjunct_ctxs.size(); ++i) {
-        EsPredicate* predicate = _pool->add(new EsPredicate(_conjunct_ctxs[i], _tuple_desc, _pool));
-        predicate->set_field_context(_fields_context);
-        status = predicate->build_disjuncts_list();
-        if (status.ok()) {
-            _conjunct_to_predicate[i] = _predicate_to_conjunct.size();
-            _predicate_to_conjunct.push_back(i);
-
-            _predicates.push_back(predicate);
-        } else {
-            _conjunct_to_predicate[i] = -1;
-
-            VLOG_CRITICAL << status;
-            status = predicate->get_es_query_status();
-            if (!status.ok()) {
-                LOG(WARNING) << status;
-                return status;
-            }
-        }
-    }
-
-    return Status::OK();
-}
 } // namespace doris::vectorized

@@ -17,39 +17,41 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
+#include <gen_cpp/segment_v2.pb.h>
+#include <glog/logging.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "cloud/io/file_reader.h"
-#include "cloud/io/file_system.h"
-#include "cloud/io/file_system_map.h"
+#include <string>
+#include <utility>
+
+#include "io/fs/file_system.h"
 #include "common/status.h"
-#include "env/env.h"
 #include "gen_cpp/segment_v2.pb.h"
-#include "olap/column_block.h"
+#include "io/fs/file_reader_writer_fwd.h"
 #include "olap/rowset/segment_v2/common.h"
 #include "olap/rowset/segment_v2/index_page.h"
 #include "olap/rowset/segment_v2/page_handle.h"
 #include "olap/rowset/segment_v2/page_pointer.h"
 #include "olap/rowset/segment_v2/parsed_page.h"
-#include "util/block_compression.h"
 #include "util/slice.h"
+#include "vec/data_types/data_type.h"
 
 namespace doris {
 
 class KeyCoder;
 class TypeInfo;
+class BlockCompressionCodec;
 
 namespace segment_v2 {
 
 class EncodingInfo;
-class IndexedColumnIterator;
 
 // thread-safe reader for IndexedColumn (see comments of `IndexedColumnWriter` to understand what IndexedColumn is)
 class IndexedColumnReader {
 public:
     explicit IndexedColumnReader(io::FileReaderSPtr file_reader, const IndexedColumnMetaPB& meta)
-            : _file_reader(std::move(file_reader)), _meta(meta) {};
+            : _file_reader(std::move(file_reader)), _meta(meta) {}
 
     Status load(bool use_page_cache, bool kept_in_memory);
 
@@ -65,6 +67,7 @@ public:
 
     CompressionTypePB get_compression() const { return _meta.compression(); }
     uint64_t get_memory_size() const { return _mem_size; }
+    void set_is_pk_index(bool is_pk) { _is_pk_index = is_pk; }
 
 private:
     Status load_index_page(const PagePointerPB& pp, PageHandle* handle, IndexPageReader* reader);
@@ -91,6 +94,7 @@ private:
     const EncodingInfo* _encoding_info = nullptr;
     const KeyCoder* _value_key_coder = nullptr;
     uint64_t _mem_size = 0;
+    bool _is_pk_index = false;
 };
 
 class IndexedColumnIterator {
@@ -125,11 +129,6 @@ public:
         DCHECK(_seeked);
         return _current_ordinal;
     }
-
-    // After one seek, we can only call this function once to read data
-    // into ColumnBlock. when read string type data, memory will allocated
-    // from Arena
-    Status next_batch(size_t* n, ColumnBlockView* column_view);
 
     // After one seek, we can only call this function once to read data
     Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst);

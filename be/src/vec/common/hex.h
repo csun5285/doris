@@ -1,5 +1,24 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+// This file is copied from
+// https://github.com/ClickHouse/ClickHouse/blob/master/src/Common/hex.h
+// and modified by Doris
+
 #pragma once
-#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -41,7 +60,7 @@ inline void write_bin_byte(UInt8 byte, void* out) {
 
 /// Produces hex representation of an unsigned int with leading zeros (for checksums)
 template <typename TUInt>
-inline void write_hex_uint_impl(TUInt uint_, char* out, const char* const table) {
+void write_hex_uint_impl(TUInt uint_, char* out, const char* const table) {
     union {
         TUInt value;
         UInt8 uint8[sizeof(TUInt)];
@@ -56,12 +75,12 @@ inline void write_hex_uint_impl(TUInt uint_, char* out, const char* const table)
 }
 
 template <typename TUInt>
-inline void write_hex_uint_uppercase(TUInt uint_, char* out) {
+void write_hex_uint_uppercase(TUInt uint_, char* out) {
     write_hex_uint_impl(uint_, out, hex_byte_to_char_uppercase_table);
 }
 
 template <typename TUInt>
-inline void write_hex_uint_lowercase(TUInt uint_, char* out) {
+void write_hex_uint_lowercase(TUInt uint_, char* out) {
     write_hex_uint_impl(uint_, out, hex_byte_to_char_lowercase_table);
 }
 

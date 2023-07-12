@@ -178,6 +178,8 @@ public class UtFrameUtils {
         Config.plugin_dir = dorisHome + "/plugins";
         Config.custom_config_dir = dorisHome + "/conf";
         Config.edit_log_type = "local";
+        Config.disable_decimalv2 = false;
+        Config.disable_datev1 = false;
         File file = new File(Config.custom_config_dir);
         if (!file.exists()) {
             file.mkdir();
@@ -210,6 +212,7 @@ public class UtFrameUtils {
 
     public static void createDorisCluster(String runningDir, int backendNum) throws EnvVarNotSetException, IOException,
             FeStartException, NotInitException, DdlException, InterruptedException {
+        FeConstants.disableInternalSchemaDb = true;
         List<Backend> bes = Lists.newArrayList();
         int port = createMetaServer(MockedMetaServerFactory.METASERVER_DEFAULT_IP);
         int feRpcPort = startFEServer(runningDir, port);
@@ -246,6 +249,7 @@ public class UtFrameUtils {
         // set runningUnitTest to true, so that for ut,
         // the agent task will be sent to "127.0.0.1" to make cluster running well.
         FeConstants.runningUnitTest = true;
+        FeConstants.disableInternalSchemaDb = true;
         int feRpcPort = startFEServer(runningDir, port);
         for (int i = 0; i < backendNum; i++) {
             String host = "127.0.0." + (i + 1);
@@ -300,7 +304,6 @@ public class UtFrameUtils {
         disks.put(diskInfo1.getRootPath(), diskInfo1);
         be.setDisks(ImmutableMap.copyOf(disks));
         be.setAlive(true);
-        be.setOwnerClusterName(SystemInfoService.DEFAULT_CLUSTER);
         be.setBePort(beThriftPort);
         be.setHttpPort(beHttpPort);
         be.setBrpcPort(beBrpcPort);

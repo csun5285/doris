@@ -17,25 +17,34 @@
 
 #pragma once
 
-#include <condition_variable>
+#include <bthread/types.h>
+#include <stdint.h>
 
+#include <atomic>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include "common/factory_creator.h"
 #include "common/status.h"
-#include "runtime/descriptors.h"
-#include "util/uid_util.h"
 #include "util/lock.h"
+#include "util/runtime_profile.h"
 #include "vec/core/block.h"
+#include "vec/exec/scan/vscanner.h"
 
 namespace doris {
 
-class PriorityThreadPool;
-class ThreadPool;
 class ThreadPoolToken;
-class ScannerScheduler;
+class RuntimeState;
+class TupleDescriptor;
 
 namespace vectorized {
 
 class VScanner;
 class VScanNode;
+class ScannerScheduler;
 
 // ScannerContext is responsible for recording the execution status
 // of a group of Scanners corresponding to a ScanNode.
@@ -46,85 +55,92 @@ class VScanNode;
 // ScannerScheduler schedules a ScannerContext at a time,
 // and submits the Scanners to the scanner thread pool for data scanning.
 class ScannerContext {
+    ENABLE_FACTORY_CREATOR(ScannerContext);
+
 public:
     ScannerContext(RuntimeState* state_, VScanNode* parent, const TupleDescriptor* input_tuple_desc,
-                   const TupleDescriptor* output_tuple_desc, const std::list<VScanner*>& scanners_,
-                   int64_t limit_, int64_t max_bytes_in_blocks_queue_)
-            : _state(state_),
-              _parent(parent),
-              _input_tuple_desc(input_tuple_desc),
-              _output_tuple_desc(output_tuple_desc),
-              _process_status(Status::OK()),
-              limit(limit_),
-              _max_bytes_in_queue(max_bytes_in_blocks_queue_),
-              _scanners(scanners_) {
-        ctx_id = UniqueId::gen_uid().to_string();
-        if (_scanners.empty()) {
-            _is_finished = true;
-        }
-    }
+                   const TupleDescriptor* output_tuple_desc,
+                   const std::list<VScannerSPtr>& scanners_, int64_t limit_,
+                   int64_t max_bytes_in_blocks_queue_);
 
+    virtual ~ScannerContext() = default;
     Status init();
 
-    vectorized::Block* get_free_block(bool* get_free_block);
-    void return_free_block(vectorized::Block* block);
+    vectorized::BlockUPtr get_free_block(bool* has_free_block, bool get_not_empty_block = false);
+    void return_free_block(std::unique_ptr<vectorized::Block> block);
 
     // Append blocks from scanners to the blocks queue.
-    void append_blocks_to_queue(const std::vector<vectorized::Block*>& blocks);
-
+    virtual void append_blocks_to_queue(std::vector<vectorized::BlockUPtr>& blocks);
     // Get next block from blocks queue. Called by ScanNode
     // Set eos to true if there is no more data to read.
     // And if eos is true, the block returned must be nullptr.
-    Status get_block_from_queue(vectorized::Block** block, bool* eos);
+    virtual Status get_block_from_queue(RuntimeState* state, vectorized::BlockUPtr* block,
+                                        bool* eos, int id, bool wait = true);
 
     // When a scanner complete a scan, this method will be called
     // to return the scanner to the list for next scheduling.
-    void push_back_scanner_and_reschedule(VScanner* scanner);
+    void push_back_scanner_and_reschedule(VScannerSPtr scanner);
 
     bool set_status_on_error(const Status& status);
 
     Status status() {
-        std::lock_guard<doris::Mutex> l(_transfer_lock);
+        std::lock_guard l(_transfer_lock);
         return _process_status;
     }
 
     // Called by ScanNode.
     // Used to notify the scheduler that this ScannerContext can stop working.
     void set_should_stop() {
-        std::lock_guard<doris::Mutex> l(_transfer_lock);
+        std::lock_guard l(_transfer_lock);
         _should_stop = true;
         _blocks_queue_added_cv.notify_one();
     }
 
     // Return true if this ScannerContext need no more process
-    bool done() {
-        std::lock_guard<doris::Mutex> l(_transfer_lock);
+    virtual bool done() {
+        std::unique_lock l(_transfer_lock);
         return _is_finished || _should_stop || !_process_status.ok();
     }
 
     // Update the running num of scanners and contexts
     void update_num_running(int32_t scanner_inc, int32_t sched_inc) {
-        std::lock_guard<doris::Mutex> l(_transfer_lock);
+        std::lock_guard l(_transfer_lock);
         _num_running_scanners += scanner_inc;
         _num_scheduling_ctx += sched_inc;
         _blocks_queue_added_cv.notify_one();
         _ctx_finish_cv.notify_one();
     }
 
-    void get_next_batch_of_scanners(std::list<VScanner*>* current_run);
+    int get_num_running_scanners() const { return _num_running_scanners; }
 
-    void clear_and_join();
+    int get_num_scheduling_ctx() const { return _num_scheduling_ctx; }
+
+    void get_next_batch_of_scanners(std::list<VScannerSPtr>* current_run);
+
+    void clear_and_join(VScanNode* node, RuntimeState* state);
+
+    virtual bool no_schedule();
 
     std::string debug_string();
 
     RuntimeState* state() { return _state; }
 
-    void incr_num_ctx_scheduling(int64_t num) { _num_ctx_scheduling += num; }
-    void incr_num_scanner_scheduling(int64_t num) { _num_scanner_scheduling += num; }
+    void incr_num_ctx_scheduling(int64_t num) { _scanner_ctx_sched_counter->update(num); }
+    void incr_num_scanner_scheduling(int64_t num) { _scanner_sched_counter->update(num); }
 
     VScanNode* parent() { return _parent; }
 
-public:
+    virtual bool empty_in_queue(int id);
+
+    virtual void set_max_queue_size(int max_queue_size) {};
+
+    // todo(wb) rethinking how to calculate ```_max_bytes_in_queue``` when executing shared scan
+    virtual inline bool has_enough_space_in_blocks_queue() const {
+        return _cur_bytes_in_queue < _max_bytes_in_queue / 2;
+    }
+
+    void reschedule_scanner_ctx();
+
     // the unique id of this context
     std::string ctx_id;
     int32_t queue_idx = -1;
@@ -132,13 +148,11 @@ public:
     std::vector<bthread_t> _btids;
 
 private:
-    Status _close_and_clear_scanners();
+    Status _close_and_clear_scanners(VScanNode* node, RuntimeState* state);
 
-    inline bool _has_enough_space_in_blocks_queue() {
-        return _cur_bytes_in_queue < _max_bytes_in_queue / 2;
-    }
+protected:
+    virtual void _dispose_coloate_blocks_not_in_queue() {}
 
-private:
     RuntimeState* _state;
     VScanNode* _parent;
 
@@ -156,7 +170,7 @@ private:
     // The blocks got from scanners will be added to the "blocks_queue".
     // And the upper scan node will be as a consumer to fetch blocks from this queue.
     // Should be protected by "_transfer_lock"
-    std::list<vectorized::Block*> blocks_queue;
+    std::list<vectorized::BlockUPtr> _blocks_queue;
     // Wait in get_block_from_queue(), by ScanNode.
     doris::ConditionVariable _blocks_queue_added_cv;
     // Wait in clear_and_join(), by ScanNode.
@@ -176,24 +190,30 @@ private:
     //      Always be set by ScannerScheduler.
     //      True means all scanners are finished to scan.
     Status _process_status;
-    bool _should_stop = false;
-    bool _is_finished = false;
+    std::atomic_bool _status_error = false;
+    std::atomic_bool _should_stop = false;
+    std::atomic_bool _is_finished = false;
 
-    // Pre-allocated blocks for all scanners to share, for memory reuse.
+    // Lazy-allocated blocks for all scanners to share, for memory reuse.
     doris::Mutex _free_blocks_lock;
-    std::vector<vectorized::Block*> _free_blocks;
+    std::vector<vectorized::BlockUPtr> _free_blocks;
+    // The current number of free blocks available to the scanners.
+    // Used to limit the memory usage of the scanner.
+    // NOTE: this is NOT the size of `_free_blocks`.
+    int32_t _free_blocks_capacity = 0;
 
+    int _batch_size;
     // The limit from SQL's limit clause
     int64_t limit;
 
     // Current number of running scanners.
-    int32_t _num_running_scanners = 0;
+    std::atomic_int32_t _num_running_scanners = 0;
     // Current number of ctx being scheduled.
     // After each Scanner finishes a task, it will put the corresponding ctx
     // back into the scheduling queue.
     // Therefore, there will be multiple pointer of same ctx in the scheduling queue.
     // Here we record the number of ctx in the scheduling  queue to clean up at the end.
-    int32_t _num_scheduling_ctx = 0;
+    std::atomic_int32_t _num_scheduling_ctx = 0;
     // Num of unfinished scanners. Should be set in init()
     int32_t _num_unfinished_scanners = 0;
     // Max number of scan thread for this scanner context.
@@ -206,15 +226,23 @@ private:
     // The max limit bytes of blocks in blocks queue
     int64_t _max_bytes_in_queue;
 
+    doris::vectorized::ScannerScheduler* _scanner_scheduler;
     // List "scanners" saves all "unfinished" scanners.
     // The scanner scheduler will pop scanners from this list, run scanner,
     // and then if the scanner is not finished, will be pushed back to this list.
     // Not need to protect by lock, because only one scheduler thread will access to it.
     doris::Mutex _scanners_lock;
-    std::list<VScanner*> _scanners;
+    std::list<VScannerSPtr> _scanners;
+    std::vector<int64_t> _finished_scanner_runtime;
+    std::vector<int64_t> _finished_scanner_rows_read;
 
-    int64_t _num_ctx_scheduling = 0;
-    int64_t _num_scanner_scheduling = 0;
+    std::shared_ptr<RuntimeProfile> _scanner_profile;
+    RuntimeProfile::Counter* _scanner_sched_counter = nullptr;
+    RuntimeProfile::Counter* _scanner_ctx_sched_counter = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _free_blocks_memory_usage = nullptr;
+    RuntimeProfile::HighWaterMarkCounter* _queued_blocks_memory_usage = nullptr;
+    RuntimeProfile::Counter* _newly_create_free_blocks_num = nullptr;
+    RuntimeProfile::Counter* _scanner_wait_batch_timer = nullptr;
 };
 } // namespace vectorized
 } // namespace doris

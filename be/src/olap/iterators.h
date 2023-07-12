@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "common/status.h"
+#include "io/io_common.h"
 #include "olap/block_column_predicate.h"
 #include "olap/column_predicate.h"
 #include "olap/olap_common.h"
@@ -31,19 +32,12 @@
 namespace doris {
 
 class RowCursor;
-class RowBlockV2;
 class Schema;
 class ColumnPredicate;
 
-struct IOContext {
-    ReaderType reader_type;
-};
 namespace vectorized {
 struct IteratorRowRef;
-};
-
-namespace vectorized {
-struct IteratorRowRef;
+class ScannerContext;
 };
 
 class StorageReadOptions {
@@ -89,13 +83,13 @@ public:
     // used to fiter rows in row block
     std::vector<ColumnPredicate*> column_predicates;
     std::vector<ColumnPredicate*> all_compound_column_predicates;
+    std::vector<ColumnPredicate*> column_predicates_except_leafnode_of_andnode;
     std::unordered_map<int32_t, std::shared_ptr<AndBlockColumnPredicate>> col_id_to_predicates;
     std::unordered_map<int32_t, std::vector<const ColumnPredicate*>> del_predicates_for_zone_map;
     TPushAggOp::type push_down_agg_type_opt = TPushAggOp::NONE;
 
     // REQUIRED (null is not allowed)
     OlapReaderStatistics* stats = nullptr;
-    const TUniqueId* query_id = nullptr;
     bool use_page_cache = false;
     int block_row_max = 4096 - 32; // see https://github.com/apache/doris/pull/11816
 
@@ -108,10 +102,6 @@ public:
     // columns for orderby keys
     std::vector<uint32_t>* read_orderby_key_columns = nullptr;
 
-    bool kept_in_memory = false;
-    bool use_disposable_cache = false;
-    int64_t expiration_time {0};
-    bool is_persistent {false};
     // runtime state
     RuntimeState* runtime_state = nullptr;
 
@@ -120,17 +110,20 @@ public:
 
     vectorized::VExpr* remaining_vconjunct_root = nullptr;
     const std::set<int32_t>* output_columns = nullptr;
-    IOContext io_ctx;
     Version version;
 
     bool is_lazy_open = false;
     bool no_need_to_read_index = false;
     vectorized::ScannerContext* ctx = nullptr;
 
-    bool disable_file_cache = false;
+    io::IOContext io_ctx;
+
+    std::vector<vectorized::VExprSPtr> remaining_conjunct_roots;
+    vectorized::VExprContextSPtrs common_expr_ctxs_push_down;
 };
 
-// Used to read data in RowBlockV2 one by one
+class RowwiseIterator;
+using RowwiseIteratorUPtr = std::unique_ptr<RowwiseIterator>;
 class RowwiseIterator {
 public:
     RowwiseIterator() = default;
@@ -147,10 +140,6 @@ public:
     // into input batch with Status::OK() returned
     // If there is no data to read, will return Status::EndOfFile.
     // If other error happens, other error code will be returned.
-    virtual Status next_batch(RowBlockV2* block) {
-        return Status::NotSupported("to be implemented");
-    }
-
     virtual Status next_batch(vectorized::Block* block) {
         return Status::NotSupported("to be implemented");
     }
@@ -162,7 +151,6 @@ public:
     virtual Status next_row(vectorized::IteratorRowRef* ref) {
         return Status::NotSupported("to be implemented");
     }
-
     virtual Status unique_key_next_row(vectorized::IteratorRowRef* ref) {
         return Status::NotSupported("to be implemented");
     }
@@ -183,15 +171,15 @@ public:
     // merge sort in priority queue
     virtual uint64_t data_id() const { return 0; }
 
-    // return if it's an empty iterator
-    virtual bool empty() const { return false; }
-
     virtual bool update_profile(RuntimeProfile* profile) { return false; }
 
     // return rows merged count by iterator
     virtual uint64_t merged_rows() const { return 0; }
 
     virtual void set_ctx(vectorized::ScannerContext* ctx) { }
+
+    // return if it's an empty iterator
+    virtual bool empty() const { return false; }
 };
 
 } // namespace doris

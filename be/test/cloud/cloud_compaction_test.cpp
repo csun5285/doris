@@ -6,6 +6,7 @@
 #include "cloud/cloud_cumulative_compaction.h"
 #include "cloud/cloud_meta_mgr.h"
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/status.h"
@@ -13,7 +14,6 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/unique_rowset_id_generator.h"
-#include "olap/storage_engine.h"
 #include "olap/tablet.h"
 
 using namespace doris;
@@ -236,8 +236,12 @@ TEST(CloudCompactionTest, schedule) {
         pair->second = true;
     });
 
-    config::min_cumulative_compaction_num_singleton_deltas = 2;
+    config::cumulative_compaction_min_deltas = 2;
     config::enable_parallel_cumu_compaction = true;
+    // To meet the condition of not skipping in `get_topn_tablets_to_compact`
+    StorageEngine::s_last_load_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                              std::chrono::system_clock::now().time_since_epoch())
+                                              .count();
 
     TabletSharedPtr tablet;
     cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
@@ -364,7 +368,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         pair->second = true;
     });
 
-    config::min_cumulative_compaction_num_singleton_deltas = 2;
+    config::cumulative_compaction_min_deltas = 2;
     config::base_compaction_num_cumulative_deltas = 2;
 
     selectdb::TabletStatsPB commit_job_stats;
@@ -402,10 +406,10 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         auto base_stats = stats;
         // - Thread2: base update tablet cache
         commit_job_stats = base_stats;
-        base.update_tablet_meta(nullptr);
+        base.modify_rowsets(nullptr);
         // - Thread1: cumu update tablet cache
         commit_job_stats = cumu_stats;
-        cumu.update_tablet_meta(nullptr);
+        cumu.modify_rowsets(nullptr);
         Versions versions;
         tablet->capture_consistent_versions({0, 34}, &versions);
         ASSERT_EQ(versions.size(), 3);
@@ -442,10 +446,10 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         auto cumu_stats = stats;
         // - Thread2: cumu update tablet cache
         commit_job_stats = cumu_stats;
-        cumu.update_tablet_meta(nullptr);
+        cumu.modify_rowsets(nullptr);
         // - Thread1: base update tablet cache
         commit_job_stats = base_stats;
-        base.update_tablet_meta(nullptr);
+        base.modify_rowsets(nullptr);
         Versions versions;
         tablet->capture_consistent_versions({0, 34}, &versions);
         ASSERT_EQ(versions.size(), 3);
@@ -476,7 +480,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         stats.set_cumulative_compaction_cnt(11);
         // - BE1 cumu update tablet cache
         commit_job_stats = stats;
-        cumu.update_tablet_meta(nullptr);
+        cumu.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
         tablet->capture_consistent_versions({0, 34}, &versions);
@@ -509,7 +513,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         stats.set_base_compaction_cnt(2);
         // - BE1 cumu update tablet cache
         commit_job_stats = stats;
-        base.update_tablet_meta(nullptr);
+        base.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
         tablet->capture_consistent_versions({0, 34}, &versions);
@@ -547,7 +551,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
     auto mock_service = _mock_service.get();
     meta_mgr->_stub = std::move(_mock_service);
 
-    config::min_cumulative_compaction_num_singleton_deltas = 2;
+    config::cumulative_compaction_min_deltas = 2;
     config::enable_parallel_cumu_compaction = true;
 
     auto prepare_tablet = [&](int64_t tablet_id) {
@@ -644,13 +648,13 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         auto cumu3_stats = stats;
         // - Thread2 cumu2 update tablet cache
         commit_job_stats = cumu2_stats;
-        cumu2.update_tablet_meta(nullptr);
+        cumu2.modify_rowsets(nullptr);
         // - Thread1 cumu1 update tablet cache
         commit_job_stats = cumu1_stats;
-        cumu1.update_tablet_meta(nullptr); // Don't update tablet cache
+        cumu1.modify_rowsets(nullptr); // Don't update tablet cache
         // - Thread3 cumu3 update tablet cache
         commit_job_stats = cumu3_stats;
-        cumu3.update_tablet_meta(nullptr);
+        cumu3.modify_rowsets(nullptr);
         Versions versions;
         tablet->capture_consistent_versions({0, 14}, &versions);
         ASSERT_EQ(versions.size(), 5);
@@ -758,10 +762,10 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         auto cumu2_stats = stats;
         // - BE1 Thread2 cumu2 update tablet cache
         commit_job_stats = cumu2_stats;
-        cumu2.update_tablet_meta(nullptr);
+        cumu2.modify_rowsets(nullptr);
         // - BE1 Thread1 cumu1 update tablet cache
         commit_job_stats = cumu1_stats;
-        cumu1.update_tablet_meta(nullptr);
+        cumu1.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
         tablet->capture_consistent_versions({0, 18}, &versions);

@@ -5,7 +5,7 @@
 }
 ---
 
-<!-- 
+<!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -28,7 +28,7 @@ under the License.
 
 ### name
 
-<version since="1.2">
+<version since="1.2.0">
 
 ARRAY
 
@@ -40,11 +40,17 @@ ARRAY
 
 由T类型元素组成的数组，不能作为key列使用。目前支持在Duplicate模型的表中使用。
 
+<version since="2.0">
+
+2.0 版本之后支持在Unique模型的表中非key列使用。
+
+</version>
+
 T支持的类型有：
 
 ```
 BOOLEAN, TINYINT, SMALLINT, INT, BIGINT, LARGEINT, FLOAT, DOUBLE, DECIMAL, DATE,
-DATETIME, CHAR, VARCHAR, STRING
+DATEV2, DATETIME, DATETIMEV2, CHAR, VARCHAR, STRING
 ```
 
 ### example

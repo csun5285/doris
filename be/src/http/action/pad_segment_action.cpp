@@ -6,9 +6,9 @@
 #include "http/http_channel.h"
 #include "http/http_request.h"
 #include "http/http_status.h"
-#include "cloud/io/file_system_map.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/segment_v2/segment_writer.h"
+#include "olap/storage_policy.h"
 #include "olap/tablet_schema.h"
 
 namespace doris {
@@ -16,7 +16,7 @@ namespace doris {
 // TODO(cyx): support building local pad segment
 Status build_remote_pad_segment(const std::string& resource_id, int64_t tablet_id,
                                 const std::string& rowset_id, int segment_id) {
-    auto fs = io::FileSystemMap::instance()->get(resource_id);
+    auto fs = get_filesystem(resource_id);
     if (fs == nullptr) {
         return Status::NotFound("could not find fs with resource_id={}", resource_id);
     }
@@ -25,7 +25,8 @@ Status build_remote_pad_segment(const std::string& resource_id, int64_t tablet_i
     RETURN_IF_ERROR(fs->create_file(path, &file_writer));
     auto schema = std::make_shared<TabletSchema>();
     SegmentWriterOptions opts;
-    SegmentWriter segment_writer(file_writer.get(), segment_id, schema, nullptr, INT32_MAX, opts);
+    SegmentWriter segment_writer(file_writer.get(), segment_id, schema, nullptr, nullptr, INT32_MAX,
+                                 opts, nullptr);
     uint64_t segment_file_size, index_size;
     RETURN_IF_ERROR(segment_writer.finalize(&segment_file_size, &index_size));
     return file_writer->close();

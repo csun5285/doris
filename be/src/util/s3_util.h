@@ -18,10 +18,17 @@
 #pragma once
 
 #include <aws/core/Aws.h>
+#include <fmt/format.h>
+#include <stdint.h>
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+
+#include "common/status.h"
+#include "gutil/hash/hash.h"
 
 #include "gen_cpp/selectdb_cloud.pb.h"
 namespace Aws {
@@ -31,6 +38,8 @@ class S3Client;
 } // namespace Aws
 
 namespace doris {
+
+class S3URI;
 
 const static std::string S3_AK = "AWS_ACCESS_KEY";
 const static std::string S3_SK = "AWS_SECRET_KEY";
@@ -51,28 +60,41 @@ struct S3Conf {
     int max_connections = -1;
     int request_timeout_ms = -1;
     int connect_timeout_ms = -1;
+
     bool sse_enabled = false;
     selectdb::ObjectStoreInfoPB::Provider provider;
 
-    std::string to_string() const;
+    bool use_virtual_addressing = true;
+
+    std::string to_string() const {
+        return fmt::format(
+                "(ak={}, sk=*, endpoint={}, region={}, bucket={}, prefix={}, max_connections={}, "
+                "request_timeout_ms={}, connect_timeout_ms={}, use_virtual_addressing={})",
+                ak, endpoint, region, bucket, prefix, max_connections, request_timeout_ms,
+                connect_timeout_ms, use_virtual_addressing);
+    }
+
+    uint64_t get_hash() const {
+        uint64_t hash_code = 0;
+        hash_code += Fingerprint(ak);
+        hash_code += Fingerprint(sk);
+        hash_code += Fingerprint(endpoint);
+        hash_code += Fingerprint(region);
+        hash_code += Fingerprint(bucket);
+        hash_code += Fingerprint(prefix);
+        hash_code += Fingerprint(max_connections);
+        hash_code += Fingerprint(request_timeout_ms);
+        hash_code += Fingerprint(connect_timeout_ms);
+        hash_code += Fingerprint(use_virtual_addressing);
+        return hash_code;
+    }
 };
 
-inline std::string S3Conf::to_string() const {
-    std::stringstream ss;
-    ss << "ak: " << ak << ", sk: " << sk << ", endpoint: " << endpoint << ", region: " << region
-       << ", bucket: " << bucket << ", prefix: " << prefix
-       << ", max_connections: " << max_connections << ", request_timeout_ms: " << request_timeout_ms
-       << ", connect_timeout_ms: " << connect_timeout_ms;
-    return ss.str();
-}
-
-class ClientFactory {
+class S3ClientFactory {
 public:
-    ~ClientFactory();
+    ~S3ClientFactory();
 
-    static ClientFactory& instance();
-
-    std::shared_ptr<Aws::S3::S3Client> create(const std::map<std::string, std::string>& prop);
+    static S3ClientFactory& instance();
 
     std::shared_ptr<Aws::S3::S3Client> create(const S3Conf& s3_conf);
 
@@ -80,10 +102,15 @@ public:
 
     static bool is_s3_conf_valid(const S3Conf& s3_conf);
 
+    static Status convert_properties_to_s3_conf(const std::map<std::string, std::string>& prop,
+                                                const S3URI& s3_uri, S3Conf* s3_conf);
+
 private:
-    ClientFactory();
+    S3ClientFactory();
 
     Aws::SDKOptions _aws_options;
+    std::mutex _lock;
+    std::unordered_map<uint64_t, std::shared_ptr<Aws::S3::S3Client>> _cache;
 };
 
 } // end namespace doris

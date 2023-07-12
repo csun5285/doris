@@ -19,17 +19,26 @@ package org.apache.doris.tablefunction;
 
 import org.apache.doris.analysis.BrokerDesc;
 import org.apache.doris.analysis.TupleDescriptor;
+import org.apache.doris.catalog.ArrayType;
 import org.apache.doris.catalog.Column;
-import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.HdfsResource;
+import org.apache.doris.catalog.MapType;
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.StructField;
+import org.apache.doris.catalog.StructType;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.FeConstants;
+import org.apache.doris.common.FeNameFormat;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.BrokerUtil;
+import org.apache.doris.common.util.Util;
+import org.apache.doris.datasource.property.constants.S3Properties;
 import org.apache.doris.planner.PlanNodeId;
 import org.apache.doris.planner.ScanNode;
-import org.apache.doris.planner.external.ExternalFileScanNode;
+import org.apache.doris.planner.external.TVFScanNode;
 import org.apache.doris.proto.InternalService;
 import org.apache.doris.proto.InternalService.PFetchTableSchemaRequest;
 import org.apache.doris.proto.Types.PScalarType;
@@ -52,19 +61,22 @@ import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPrimitiveType;
 import org.apache.doris.thrift.TStatusCode;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
-import com.selectdb.cloud.stage.StageUtil;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * ExternalFileTableValuedFunction is used for S3/HDFS/LOCAL table-valued-function
@@ -81,9 +93,16 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     protected static final String JSON_PATHS = "jsonpaths";
     protected static final String STRIP_OUTER_ARRAY = "strip_outer_array";
     protected static final String READ_JSON_BY_LINE = "read_json_by_line";
-
     protected static final String NUM_AS_STRING = "num_as_string";
     protected static final String FUZZY_PARSE = "fuzzy_parse";
+    protected static final String TRIM_DOUBLE_QUOTES = "trim_double_quotes";
+    protected static final String SKIP_LINES = "skip_lines";
+    protected static final String CSV_SCHEMA = "csv_schema";
+    protected static final String COMPRESS_TYPE = "compress_type";
+    // decimal(p,s)
+    private static final Pattern DECIMAL_TYPE_PATTERN = Pattern.compile("decimal\\((\\d+),(\\d+)\\)");
+    // datetime(p)
+    private static final Pattern DATETIME_TYPE_PATTERN = Pattern.compile("datetime\\((\\d+)\\)");
 
     protected static final ImmutableSet<String> FILE_FORMAT_PROPERTIES = new ImmutableSet.Builder<String>()
             .add(FORMAT)
@@ -96,14 +115,21 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             .add(FUZZY_PARSE)
             .add(COLUMN_SEPARATOR)
             .add(LINE_DELIMITER)
+            .add(TRIM_DOUBLE_QUOTES)
+            .add(SKIP_LINES)
+            .add(CSV_SCHEMA)
             .build();
 
+    // Columns got from file
     protected List<Column> columns = null;
+    // User specified csv columns, it will override columns got from file
+    private List<Column> csvSchema = Lists.newArrayList();
+
     protected List<TBrokerFileStatus> fileStatuses = Lists.newArrayList();
     protected Map<String, String> locationProperties;
 
     private TFileFormatType fileFormatType;
-    private TFileCompressType fileCompressType;
+    private TFileCompressType compressionType;
     private String headerType = "";
 
     private String columnSeparator = DEFAULT_COLUMN_SEPARATOR;
@@ -114,7 +140,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     private boolean readJsonByLine;
     private boolean numAsString;
     private boolean fuzzyParse;
-
+    private boolean trimDoubleQuotes;
+    private int skipLines;
 
     public abstract TFileType getTFileType();
 
@@ -127,11 +154,15 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     }
 
     public TFileCompressType getTFileCompressType() {
-        return fileCompressType;
+        return compressionType;
     }
 
     public Map<String, String> getLocationProperties() {
         return locationProperties;
+    }
+
+    public List<Column> getCsvSchema() {
+        return csvSchema;
     }
 
     public String getFsName() {
@@ -139,7 +170,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         if (fileType == TFileType.FILE_HDFS) {
             return locationProperties.get(HdfsTableValuedFunction.HADOOP_FS_NAME);
         } else if (fileType == TFileType.FILE_S3) {
-            return locationProperties.get(S3TableValuedFunction.S3_ENDPOINT);
+            return locationProperties.get(S3Properties.ENDPOINT);
         }
         return "";
     }
@@ -180,17 +211,97 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             default:
                 throw new AnalysisException("format:" + formatString + " is not supported.");
         }
-        fileCompressType = StageUtil.parseCompressType(validParams.getOrDefault(COMPRESS, ""));
 
         columnSeparator = validParams.getOrDefault(COLUMN_SEPARATOR, DEFAULT_COLUMN_SEPARATOR);
         lineDelimiter = validParams.getOrDefault(LINE_DELIMITER, DEFAULT_LINE_DELIMITER);
         jsonRoot = validParams.getOrDefault(JSON_ROOT, "");
         jsonPaths = validParams.getOrDefault(JSON_PATHS, "");
-
         readJsonByLine = Boolean.valueOf(validParams.get(READ_JSON_BY_LINE)).booleanValue();
         stripOuterArray = Boolean.valueOf(validParams.get(STRIP_OUTER_ARRAY)).booleanValue();
         numAsString = Boolean.valueOf(validParams.get(NUM_AS_STRING)).booleanValue();
         fuzzyParse = Boolean.valueOf(validParams.get(FUZZY_PARSE)).booleanValue();
+        trimDoubleQuotes = Boolean.valueOf(validParams.get(TRIM_DOUBLE_QUOTES)).booleanValue();
+        skipLines = Integer.valueOf(validParams.getOrDefault(SKIP_LINES, "0")).intValue();
+        try {
+            compressionType = Util.getFileCompressType(validParams.getOrDefault(COMPRESS_TYPE, "UNKNOWN"));
+        } catch (IllegalArgumentException e) {
+            throw new AnalysisException("Compress type : " + validParams.get(COMPRESS_TYPE) + " is not supported.");
+        }
+        if (formatString.equals("csv") || formatString.equals("csv_with_names")
+                || formatString.equals("csv_with_names_and_types")) {
+            parseCsvSchema(csvSchema, validParams);
+        }
+    }
+
+    // public for unit test
+    public static void parseCsvSchema(List<Column> csvSchema, Map<String, String> validParams)
+            throws AnalysisException {
+        String csvSchemaStr = validParams.get(CSV_SCHEMA);
+        if (Strings.isNullOrEmpty(csvSchemaStr)) {
+            return;
+        }
+        // the schema str is like: "k1:int;k2:bigint;k3:varchar(20);k4:datetime(6)"
+        String[] schemaStrs = csvSchemaStr.split(";");
+        try {
+            for (String schemaStr : schemaStrs) {
+                String[] kv = schemaStr.replace(" ", "").split(":");
+                if (kv.length != 2) {
+                    throw new AnalysisException("invalid csv schema: " + csvSchemaStr);
+                }
+                Column column = null;
+                String name = kv[0].toLowerCase();
+                FeNameFormat.checkColumnName(name);
+                String type = kv[1].toLowerCase();
+                if (type.equals("tinyint")) {
+                    column = new Column(name, PrimitiveType.TINYINT, true);
+                } else if (type.equals("smallint")) {
+                    column = new Column(name, PrimitiveType.SMALLINT, true);
+                } else if (type.equals("int")) {
+                    column = new Column(name, PrimitiveType.INT, true);
+                } else if (type.equals("bigint")) {
+                    column = new Column(name, PrimitiveType.BIGINT, true);
+                } else if (type.equals("largeint")) {
+                    column = new Column(name, PrimitiveType.LARGEINT, true);
+                } else if (type.equals("float")) {
+                    column = new Column(name, PrimitiveType.FLOAT, true);
+                } else if (type.equals("double")) {
+                    column = new Column(name, PrimitiveType.DOUBLE, true);
+                } else if (type.startsWith("decimal")) {
+                    // regex decimal(p, s)
+                    Matcher matcher = DECIMAL_TYPE_PATTERN.matcher(type);
+                    if (!matcher.find()) {
+                        throw new AnalysisException("invalid decimal type: " + type);
+                    }
+                    int precision = Integer.parseInt(matcher.group(1));
+                    int scale = Integer.parseInt(matcher.group(2));
+                    column = new Column(name, ScalarType.createDecimalV3Type(precision, scale), false, null, true, null,
+                            "");
+                } else if (type.equals("date")) {
+                    column = new Column(name, ScalarType.createDateType(), false, null, true, null, "");
+                } else if (type.startsWith("datetime")) {
+                    int scale = 0;
+                    if (!type.equals("datetime")) {
+                        // regex datetime(s)
+                        Matcher matcher = DATETIME_TYPE_PATTERN.matcher(type);
+                        if (!matcher.find()) {
+                            throw new AnalysisException("invalid datetime type: " + type);
+                        }
+                        scale = Integer.parseInt(matcher.group(1));
+                    }
+                    column = new Column(name, ScalarType.createDatetimeV2Type(scale), false, null, true, null, "");
+                } else if (type.equals("string")) {
+                    column = new Column(name, PrimitiveType.STRING, true);
+                } else if (type.equals("boolean")) {
+                    column = new Column(name, PrimitiveType.BOOLEAN, true);
+                } else {
+                    throw new AnalysisException("unsupported column type: " + type);
+                }
+                csvSchema.add(column);
+            }
+            LOG.debug("get csv schema: {}", csvSchema);
+        } catch (Exception e) {
+            throw new AnalysisException("invalid csv schema: " + e.getMessage());
+        }
     }
 
     public List<TBrokerFileStatus> getFileStatuses() {
@@ -205,6 +316,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         fileAttributes.setTextParams(fileTextScanRangeParams);
         if (this.fileFormatType == TFileFormatType.FORMAT_CSV_PLAIN) {
             fileAttributes.setHeaderType(this.headerType);
+            fileAttributes.setTrimDoubleQuotes(trimDoubleQuotes);
+            fileAttributes.setSkipLines(skipLines);
         } else if (this.fileFormatType == TFileFormatType.FORMAT_JSON) {
             fileAttributes.setJsonRoot(jsonRoot);
             fileAttributes.setJsonpaths(jsonPaths);
@@ -218,18 +331,24 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
 
     @Override
     public ScanNode getScanNode(PlanNodeId id, TupleDescriptor desc) {
-        return new ExternalFileScanNode(id, desc);
+        return new TVFScanNode(id, desc, false);
     }
 
     @Override
     public List<Column> getTableColumns() throws AnalysisException {
+        if (FeConstants.runningUnitTest) {
+            return Lists.newArrayList();
+        }
+        if (!csvSchema.isEmpty()) {
+            return csvSchema;
+        }
         if (this.columns != null) {
             return columns;
         }
         // get one BE address
         TNetworkAddress address = null;
         columns = Lists.newArrayList();
-        for (Backend be : Env.getCurrentSystemInfo().getIdToBackend().values()) {
+        for (Backend be : org.apache.doris.catalog.Env.getCurrentSystemInfo().getIdToBackend().values()) {
             if (be.isAlive()) {
                 address = new TNetworkAddress(be.getHost(), be.getBrpcPort());
                 break;
@@ -270,6 +389,43 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         return columns;
     }
 
+    /**
+     * Convert PTypeDesc into doris column type
+     * @param typeNodes list PTypeNodes in PTypeDesc
+     * @param start the start index of typeNode to parse
+     * @return column type and the number of parsed PTypeNodes
+     */
+    private Pair<Type, Integer> getColumnType(List<PTypeNode> typeNodes, int start) {
+        PScalarType columnType = typeNodes.get(start).getScalarType();
+        TPrimitiveType tPrimitiveType = TPrimitiveType.findByValue(columnType.getType());
+        Type type;
+        int parsedNodes;
+        if (tPrimitiveType == TPrimitiveType.ARRAY) {
+            Pair<Type, Integer> itemType = getColumnType(typeNodes, start + 1);
+            type =  ArrayType.create(itemType.key(), true);
+            parsedNodes = 1 + itemType.value();
+        } else if (tPrimitiveType == TPrimitiveType.MAP) {
+            Pair<Type, Integer> keyType = getColumnType(typeNodes, start + 1);
+            Pair<Type, Integer> valueType = getColumnType(typeNodes, start + 1 + keyType.value());
+            type = new MapType(keyType.key(), valueType.key());
+            parsedNodes = 1 + keyType.value() + valueType.value();
+        } else if (tPrimitiveType == TPrimitiveType.STRUCT) {
+            parsedNodes = 1;
+            ArrayList<StructField> fields = new ArrayList<>();
+            for (int i = 0; i < typeNodes.get(start).getStructFieldsCount(); ++i) {
+                Pair<Type, Integer> fieldType = getColumnType(typeNodes, start + parsedNodes);
+                fields.add(new StructField(typeNodes.get(start).getStructFields(i).getName(), fieldType.key()));
+                parsedNodes += fieldType.value();
+            }
+            type = new StructType(fields);
+        } else {
+            type = ScalarType.createType(PrimitiveType.fromThrift(tPrimitiveType),
+                    columnType.getLen(), columnType.getPrecision(), columnType.getScale());
+            parsedNodes = 1;
+        }
+        return Pair.of(type, parsedNodes);
+    }
+
     private void fillColumns(InternalService.PFetchTableSchemaResult result)
                             throws AnalysisException {
         if (result.getColumnNums() == 0) {
@@ -278,12 +434,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         for (int idx = 0; idx < result.getColumnNums(); ++idx) {
             PTypeDesc type = result.getColumnTypes(idx);
             String colName = result.getColumnNames(idx);
-            for (PTypeNode typeNode : type.getTypesList()) {
-                // only support ScalarType.
-                PScalarType scalarType = typeNode.getScalarType();
-                TPrimitiveType tPrimitiveType = TPrimitiveType.findByValue(scalarType.getType());
-                columns.add(new Column(colName, PrimitiveType.fromThrift(tPrimitiveType), true));
-            }
+            columns.add(new Column(colName, getColumnType(type.getTypesList(), 0).key(), true));
         }
     }
 
@@ -292,10 +443,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         TFileScanRangeParams fileScanRangeParams = new TFileScanRangeParams();
         fileScanRangeParams.setFileType(getTFileType());
         fileScanRangeParams.setFormatType(fileFormatType);
-        fileScanRangeParams.setCompressType(fileCompressType);
         fileScanRangeParams.setProperties(locationProperties);
         fileScanRangeParams.setFileAttributes(getFileAttributes());
-
         if (getTFileType() == TFileType.FILE_HDFS) {
             THdfsParams tHdfsParams = HdfsResource.generateHdfsParam(locationProperties);
             String fsNmae = getLocationProperties().get(HdfsTableValuedFunction.HADOOP_FS_NAME);
@@ -316,11 +465,14 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             throw new AnalysisException("Can not get first file, please check uri.");
         }
 
+        fileScanRangeParams.setCompressType(Util.getOrInferCompressType(compressionType, firstFile.getPath()));
         // set TFileRangeDesc
         TFileRangeDesc fileRangeDesc = new TFileRangeDesc();
         fileRangeDesc.setPath(firstFile.getPath());
         fileRangeDesc.setStartOffset(0);
         fileRangeDesc.setSize(firstFile.getSize());
+        fileRangeDesc.setFileSize(firstFile.getSize());
+        fileRangeDesc.setModificationTime(firstFile.getModificationTime());
         // set TFileScanRange
         TFileScanRange fileScanRange = new TFileScanRange();
         fileScanRange.addToRanges(fileRangeDesc);
@@ -329,3 +481,4 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
                 .setFileScanRange(ByteString.copyFrom(new TSerializer().serialize(fileScanRange))).build();
     }
 }
+

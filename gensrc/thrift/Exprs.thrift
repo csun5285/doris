@@ -63,6 +63,17 @@ enum TExprNodeType {
 
   // for schema change
   SCHEMA_CHANGE_EXPR,
+  // for map 
+  MAP_LITERAL,
+
+  // for struct
+  STRUCT_LITERAL,
+
+  // for lambda function expr
+  LAMBDA_FUNCTION_EXPR,
+  LAMBDA_FUNCTION_CALL_EXPR,
+  // for column_ref expr
+  COLUMN_REF,
 }
 
 //enum TAggregationOp {
@@ -128,6 +139,11 @@ struct TLikePredicate {
   1: required string escape_char;
 }
 
+struct TMatchPredicate {
+  1: required string parser_type;
+  2: required string parser_mode;
+}
+
 struct TLiteralPredicate {
   1: required bool value
   2: required bool is_null
@@ -146,7 +162,12 @@ struct TTupleIsNullPredicate {
 struct TSlotRef {
   1: required Types.TSlotId slot_id
   2: required Types.TTupleId tuple_id
-  3: required i32 col_unique_id
+  3: optional i32 col_unique_id
+}
+
+struct TColumnRef {
+  1: optional Types.TSlotId column_id
+  2: optional string column_name
 }
 
 struct TStringLiteral {
@@ -217,12 +238,19 @@ struct TExprNode {
   
   30: optional TJsonLiteral json_literal
   31: optional TSchemaChangeExpr schema_change_expr 
+
+  32: optional TColumnRef column_ref 
+  33: optional TMatchPredicate match_predicate
 }
 
 // A flattened representation of a tree of Expr nodes, obtained by depth-first
 // traversal.
 struct TExpr {
   1: required list<TExprNode> nodes
+}
+
+struct TExprList {
+  1: required list<TExpr> exprs
 }
 
 

@@ -16,9 +16,12 @@
 // under the License.
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "common/status.h"
 #include "exec/data_sink.h"
-#include "vec/exprs/vexpr_context.h"
+#include "vec/exprs/vexpr_fwd.h"
 
 namespace doris {
 
@@ -26,7 +29,11 @@ class RowDescriptor;
 class TExpr;
 class RuntimeState;
 class RuntimeProfile;
+class ObjectPool;
+class TDataSink;
+
 namespace vectorized {
+class Block;
 
 class VTableSink : public DataSink {
 public:
@@ -38,21 +45,21 @@ public:
 
     Status open(RuntimeState* state) override;
 
-    Status send(RuntimeState* state, RowBatch* batch) override;
-
-    Status send(RuntimeState* state, vectorized::Block* block) override;
+    Status send(RuntimeState* state, vectorized::Block* block, bool eos = false) override;
     // Flush all buffered data and close all existing channels to destination
     // hosts. Further send() calls are illegal after calling close().
     Status close(RuntimeState* state, Status exec_status) override;
 
     RuntimeProfile* profile() override { return _profile; }
 
+    const RowDescriptor& row_desc() { return _row_desc; }
+
 protected:
     // owned by RuntimeState
     ObjectPool* _pool;
     const RowDescriptor& _row_desc;
     const std::vector<TExpr>& _t_output_expr;
-    std::vector<VExprContext*> _output_vexpr_ctxs;
+    VExprContextSPtrs _output_vexpr_ctxs;
     RuntimeProfile* _profile;
     std::string _table_name;
     // whether use transaction

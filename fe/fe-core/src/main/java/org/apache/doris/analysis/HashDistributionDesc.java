@@ -120,12 +120,20 @@ public class HashDistributionDesc extends DistributionDesc {
                     } else if (column.getType().isArrayType()) {
                         throw new DdlException("Array Type should not be used in distribution column["
                                 + column.getName() + "].");
+                    } else if (column.getType().isMapType()) {
+                        throw new DdlException("Map Type should not be used in distribution column["
+                                + column.getName() + "].");
+                    } else if (column.getType().isStructType()) {
+                        throw new DdlException("Struct Type should not be used in distribution column["
+                                + column.getName() + "].");
                     } else if (column.getType().isFloatingPointType()) {
                         throw new DdlException("Floating point type should not be used in distribution column["
                                 + column.getName() + "].");
                     }
 
-                    distributionColumns.add(column);
+                    // distribution info and base columns persist seperately inside OlapTable, so we need deep copy
+                    // to avoid modify table columns also modify columns inside distribution info.
+                    distributionColumns.add(new Column(column));
                     find = true;
                     break;
                 }

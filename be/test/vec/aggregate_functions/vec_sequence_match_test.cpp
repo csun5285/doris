@@ -15,16 +15,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-test-part.h>
 
-#include "gtest/gtest.h"
+#include <memory>
+
+#include "gtest/gtest_pred_impl.h"
 #include "vec/aggregate_functions/aggregate_function.h"
 #include "vec/aggregate_functions/aggregate_function_simple_factory.h"
+#include "vec/columns/column_string.h"
 #include "vec/columns/column_vector.h"
-#include "vec/data_types/data_type.h"
+#include "vec/common/string_buffer.hpp"
+#include "vec/core/types.h"
 #include "vec/data_types/data_type_date_time.h"
 #include "vec/data_types/data_type_number.h"
 #include "vec/data_types/data_type_string.h"
+#include "vec/runtime/vdatetime_value.h"
+
+namespace doris {
+namespace vectorized {
+class IColumn;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -43,10 +55,9 @@ public:
                 std::make_shared<DataTypeString>(), std::make_shared<DataTypeDateTime>(),
                 std::make_shared<DataTypeUInt8>(), std::make_shared<DataTypeUInt8>(),
                 std::make_shared<DataTypeUInt8>()};
-        Array array;
-        agg_function_sequence_match = factory.get("sequence_match", data_types, array, false);
+        agg_function_sequence_match = factory.get("sequence_match", data_types, false);
         EXPECT_NE(agg_function_sequence_match, nullptr);
-        agg_function_sequence_count = factory.get("sequence_count", data_types, array, false);
+        agg_function_sequence_count = factory.get("sequence_count", data_types, false);
         EXPECT_NE(agg_function_sequence_count, nullptr);
     }
 
@@ -180,8 +191,7 @@ TEST_F(VSequenceMatchTest, testCountSerialize) {
     DataTypes data_types = {std::make_shared<DataTypeString>(),
                             std::make_shared<DataTypeDateTime>(), std::make_shared<DataTypeUInt8>(),
                             std::make_shared<DataTypeUInt8>()};
-    Array array;
-    agg_function_sequence_count = factory.get("sequence_count", data_types, array, false);
+    agg_function_sequence_count = factory.get("sequence_count", data_types, false);
     EXPECT_NE(agg_function_sequence_count, nullptr);
 
     const int NUM_CONDS = 4;
@@ -246,8 +256,7 @@ TEST_F(VSequenceMatchTest, testMatchReverseSortedSerializeMerge) {
     DataTypes data_types = {std::make_shared<DataTypeString>(),
                             std::make_shared<DataTypeDateTime>(), std::make_shared<DataTypeUInt8>(),
                             std::make_shared<DataTypeUInt8>()};
-    Array array;
-    agg_function_sequence_match = factory.get("sequence_match", data_types, array, false);
+    agg_function_sequence_match = factory.get("sequence_match", data_types, false);
     EXPECT_NE(agg_function_sequence_match, nullptr);
 
     const int NUM_CONDS = 2;
@@ -336,8 +345,7 @@ TEST_F(VSequenceMatchTest, testCountReverseSortedSerializeMerge) {
     DataTypes data_types = {std::make_shared<DataTypeString>(),
                             std::make_shared<DataTypeDateTime>(), std::make_shared<DataTypeUInt8>(),
                             std::make_shared<DataTypeUInt8>()};
-    Array array;
-    agg_function_sequence_count = factory.get("sequence_count", data_types, array, false);
+    agg_function_sequence_count = factory.get("sequence_count", data_types, false);
     EXPECT_NE(agg_function_sequence_count, nullptr);
 
     const int NUM_CONDS = 2;

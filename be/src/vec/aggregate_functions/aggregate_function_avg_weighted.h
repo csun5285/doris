@@ -17,12 +17,33 @@
 
 #pragma once
 
+#include <stddef.h>
+
+#include <algorithm>
+#include <boost/iterator/iterator_facade.hpp>
 #include <cmath>
+#include <memory>
+#include <type_traits>
 
 #include "runtime/decimalv2_value.h"
+#include "util/binary_cast.hpp"
 #include "vec/aggregate_functions/aggregate_function.h"
+#include "vec/columns/column_vector.h"
+#include "vec/common/assert_cast.h"
+#include "vec/core/types.h"
 #include "vec/data_types/data_type_number.h"
 #include "vec/io/io_helper.h"
+
+namespace doris {
+namespace vectorized {
+class Arena;
+class BufferReadable;
+class BufferWritable;
+class IColumn;
+template <typename T>
+class ColumnDecimal;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -31,7 +52,7 @@ struct AggregateFunctionAvgWeightedData {
     void add(const T& data_val, double weight_val) {
         if constexpr (IsDecimalV2<T>) {
             DecimalV2Value value = binary_cast<Int128, DecimalV2Value>(data_val);
-            data_sum = data_sum + (static_cast<double>(value) * weight_val);
+            data_sum = data_sum + (double(value) * weight_val);
         } else {
             data_sum = data_sum + (data_val * weight_val);
         }
@@ -73,7 +94,7 @@ public:
 
     AggregateFunctionAvgWeight(const DataTypes& argument_types_)
             : IAggregateFunctionDataHelper<AggregateFunctionAvgWeightedData<T>,
-                                           AggregateFunctionAvgWeight<T>>(argument_types_, {}) {}
+                                           AggregateFunctionAvgWeight<T>>(argument_types_) {}
 
     String get_name() const override { return "avg_weighted"; }
 
@@ -81,8 +102,8 @@ public:
 
     void add(AggregateDataPtr __restrict place, const IColumn** columns, size_t row_num,
              Arena*) const override {
-        const auto& column = static_cast<const ColVecType&>(*columns[0]);
-        const auto& weight = static_cast<const ColumnVector<Float64>&>(*columns[1]);
+        const auto& column = assert_cast<const ColVecType&>(*columns[0]);
+        const auto& weight = assert_cast<const ColumnVector<Float64>&>(*columns[1]);
         this->data(place).add(column.get_data()[row_num], weight.get_element(row_num));
     }
 
@@ -103,7 +124,7 @@ public:
     }
 
     void insert_result_into(ConstAggregateDataPtr __restrict place, IColumn& to) const override {
-        auto& column = static_cast<ColumnVector<Float64>&>(to);
+        auto& column = assert_cast<ColumnVector<Float64>&>(to);
         column.get_data().push_back(this->data(place).get());
     }
 };

@@ -56,13 +56,13 @@ public:
     ReturnType call(Fn fn) {
         if (!_has_called.load(std::memory_order_acquire)) {
             do {
-                std::lock_guard<doris::Mutex> l(_mutex);
+                std::lock_guard l(_mutex);
                 if (_has_called.load(std::memory_order_acquire)) break;
 
                 _status = fn();
                 _has_called.store(true, std::memory_order_release);
 
-            } while(false);
+            } while (false);
         }
         return _status;
     }

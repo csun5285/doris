@@ -17,37 +17,22 @@
 
 #pragma once
 
-#include <gen_cpp/Types_types.h>
+#include <butil/macros.h>
+#include <stddef.h>
 
 #include <memory>
 
 #include "common/status.h"
-#include "gutil/macros.h"
 #include "io/fs/path.h"
 #include "olap/olap_common.h"
 #include "util/slice.h"
 namespace doris {
 
-struct IOContext;
-
 namespace io {
 
 class FileSystem;
+class IOContext;
 
-struct IOState {
-    IOState(const TUniqueId* query_id, OlapReaderStatistics* stats, bool is_presistent,
-            bool use_disposable_cache, bool read_segment_index)
-            : query_id(query_id),
-              stats(stats),
-              is_persistent(is_presistent),
-              use_disposable_cache(use_disposable_cache),
-              read_segment_index(read_segment_index) {}
-    const TUniqueId* query_id = nullptr;
-    OlapReaderStatistics* stats = nullptr;
-    bool is_persistent = false;
-    bool use_disposable_cache = false;
-    bool read_segment_index = false;
-};
 class FileReader {
 public:
     FileReader() = default;
@@ -55,10 +40,12 @@ public:
 
     DISALLOW_COPY_AND_ASSIGN(FileReader);
 
-    virtual Status close() = 0;
+    /// If io_ctx is not null,
+    /// the caller must ensure that the IOContext exists during the left cycle of read_at()
+    Status read_at(size_t offset, Slice result, size_t* bytes_read,
+                   const IOContext* io_ctx = nullptr);
 
-    virtual Status read_at(size_t offset, Slice result, const IOContext& io_ctx,
-                           size_t* bytes_read) = 0;
+    virtual Status close() = 0;
 
     virtual const Path& path() const = 0;
 
@@ -66,10 +53,12 @@ public:
 
     virtual bool closed() const = 0;
 
-    virtual FileSystem* fs() const = 0;
-};
+    virtual std::shared_ptr<FileSystem> fs() const = 0;
 
-using FileReaderSPtr = std::shared_ptr<FileReader>;
+protected:
+    virtual Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                const IOContext* io_ctx) = 0;
+};
 
 } // namespace io
 } // namespace doris

@@ -17,15 +17,15 @@
 
 #pragma once
 
+#include <gen_cpp/data.pb.h>
 #include <snappy/snappy.h>
 
 #include <iostream>
 
-#include "gen_cpp/data.pb.h"
+#include "common/exception.h"
 #include "util/binary_cast.hpp"
 #include "util/string_parser.hpp"
 #include "vec/common/arena.h"
-#include "vec/common/exception.h"
 #include "vec/common/string_buffer.hpp"
 #include "vec/common/string_ref.h"
 #include "vec/common/uint128.h"
@@ -37,25 +37,10 @@
 namespace doris::vectorized {
 
 // Define in the namespace and avoid defining global macros,
-// because it maybe conflict with other libs
+// because it maybe conflicts with other libs
 static constexpr size_t DEFAULT_MAX_STRING_SIZE = 1073741824; // 1GB
 static constexpr size_t DEFAULT_MAX_JSON_SIZE = 1073741824;   // 1GB
 static constexpr auto WRITE_HELPERS_MAX_INT_WIDTH = 40U;
-
-template <typename T>
-inline T decimal_scale_multiplier(UInt32 scale);
-template <>
-inline Int32 decimal_scale_multiplier<Int32>(UInt32 scale) {
-    return common::exp10_i32(scale);
-}
-template <>
-inline Int64 decimal_scale_multiplier<Int64>(UInt32 scale) {
-    return common::exp10_i64(scale);
-}
-template <>
-inline Int128 decimal_scale_multiplier<Int128>(UInt32 scale) {
-    return common::exp10_i128(scale);
-}
 
 inline std::string int128_to_string(__int128_t value) {
     fmt::memory_buffer buffer;
@@ -109,17 +94,17 @@ void write_text(Decimal<T> value, UInt32 scale, std::ostream& ostr) {
 
 /// Write POD-type in native format. It's recommended to use only with packed (dense) data types.
 template <typename Type>
-inline void write_pod_binary(const Type& x, BufferWritable& buf) {
+void write_pod_binary(const Type& x, BufferWritable& buf) {
     buf.write(reinterpret_cast<const char*>(&x), sizeof(x));
 }
 
 template <typename Type>
-inline void write_int_binary(const Type& x, BufferWritable& buf) {
+void write_int_binary(const Type& x, BufferWritable& buf) {
     write_pod_binary(x, buf);
 }
 
 template <typename Type>
-inline void write_float_binary(const Type& x, BufferWritable& buf) {
+void write_float_binary(const Type& x, BufferWritable& buf) {
     write_pod_binary(x, buf);
 }
 
@@ -134,7 +119,7 @@ inline void write_string_binary(const StringRef& s, BufferWritable& buf) {
 }
 
 inline void write_string_binary(const char* s, BufferWritable& buf) {
-    write_string_binary(StringRef {s}, buf);
+    write_string_binary(StringRef {std::string(s)}, buf);
 }
 
 inline void write_json_binary(JsonbField s, BufferWritable& buf) {
@@ -158,23 +143,23 @@ inline void write_binary(const StringRef& x, BufferWritable& buf) {
 }
 
 template <typename Type>
-inline void write_binary(const Type& x, BufferWritable& buf) {
+void write_binary(const Type& x, BufferWritable& buf) {
     write_pod_binary(x, buf);
 }
 
 /// Read POD-type in native format
 template <typename Type>
-inline void read_pod_binary(Type& x, BufferReadable& buf) {
+void read_pod_binary(Type& x, BufferReadable& buf) {
     buf.read(reinterpret_cast<char*>(&x), sizeof(x));
 }
 
 template <typename Type>
-inline void read_int_binary(Type& x, BufferReadable& buf) {
+void read_int_binary(Type& x, BufferReadable& buf) {
     read_pod_binary(x, buf);
 }
 
 template <typename Type>
-inline void read_float_binary(Type& x, BufferReadable& buf) {
+void read_float_binary(Type& x, BufferReadable& buf) {
     read_pod_binary(x, buf);
 }
 
@@ -184,7 +169,7 @@ inline void read_string_binary(std::string& s, BufferReadable& buf,
     read_var_uint(size, buf);
 
     if (size > MAX_STRING_SIZE) {
-        throw Exception("Too large string size.", TStatusCode::VEC_EXCEPTION);
+        throw doris::Exception(ErrorCode::INTERNAL_ERROR, "Too large string size.");
     }
 
     s.resize(size);
@@ -197,7 +182,7 @@ inline void read_string_binary(StringRef& s, BufferReadable& buf,
     read_var_uint(size, buf);
 
     if (size > MAX_STRING_SIZE) {
-        throw Exception("Too large string size.", TStatusCode::VEC_EXCEPTION);
+        throw doris::Exception(ErrorCode::INTERNAL_ERROR, "Too large string size.");
     }
 
     s = buf.read(size);
@@ -226,7 +211,7 @@ void read_vector_binary(std::vector<Type>& v, BufferReadable& buf,
     read_var_uint(size, buf);
 
     if (size > MAX_VECTOR_SIZE) {
-        throw Exception("Too large vector size.", TStatusCode::VEC_EXCEPTION);
+        throw doris::Exception(ErrorCode::INTERNAL_ERROR, "Too large vector size.");
     }
 
     v.resize(size);
@@ -242,7 +227,7 @@ inline void read_binary(StringRef& x, BufferReadable& buf) {
 }
 
 template <typename Type>
-inline void read_binary(Type& x, BufferReadable& buf) {
+void read_binary(Type& x, BufferReadable& buf) {
     read_pod_binary(x, buf);
 }
 
@@ -377,7 +362,7 @@ bool try_read_int_text(T& x, ReadBuffer& buf) {
 }
 
 template <typename T>
-static inline const char* try_read_first_int_text(T& x, const char* pos, const char* end) {
+const char* try_read_first_int_text(T& x, const char* pos, const char* end) {
     const int len = end - pos;
     int i = 0;
     while (i < len) {

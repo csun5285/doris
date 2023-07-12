@@ -65,6 +65,7 @@ struct TRoutineLoadTask {
     12: optional TKafkaLoadInfo kafka_load_info
     13: optional PaloInternalService.TExecPlanFragmentParams params
     14: optional PlanNodes.TFileFormatType format
+    15: optional PaloInternalService.TPipelineFragmentParams pipeline_params
 }
 
 struct TKafkaMetaProxyRequest {
@@ -103,6 +104,7 @@ struct TStreamLoadRecord {
     16: required i64 load_bytes
     17: required i64 start_time
     18: required i64 finish_time
+    19: optional string comment
 }
 
 struct TStreamLoadRecordResult {
@@ -137,6 +139,21 @@ struct TCheckPreCacheRequest {
 struct TCheckPreCacheResponse {
     1: required Status.TStatus status
     2: optional map<i64, bool> task_done;
+}
+
+struct TIngestBinlogRequest {
+    1: optional i64 txn_id;
+    2: optional i64 remote_tablet_id;
+    3: optional i64 binlog_version;
+    4: optional string remote_host;
+    5: optional string remote_port;
+    6: optional i64 partition_id;
+    7: optional i64 local_tablet_id;
+    8: optional Types.TUniqueId load_id;
+}
+
+struct TIngestBinlogResult {
+    1: optional Status.TStatus status;
 }
 
 struct TSyncLoadForTabletsRequest {
@@ -218,10 +235,6 @@ service BackendService {
     PaloInternalService.TTransmitDataResult transmit_data(
         1:PaloInternalService.TTransmitDataParams params);
 
-    // Coordinator Fetch Data From Root fragment
-    PaloInternalService.TFetchDataResult fetch_data(
-        1:PaloInternalService.TFetchDataParams params);
-
     AgentService.TAgentResult submit_tasks(1:list<AgentService.TAgentTaskRequest> tasks);
 
     AgentService.TAgentResult make_snapshot(1:AgentService.TSnapshotRequest snapshot_request);
@@ -263,6 +276,8 @@ service BackendService {
     TPreCacheAsyncResponse pre_cache_async(1: TPreCacheAsyncRequest request);
 
     TCheckPreCacheResponse check_pre_cache(1: TCheckPreCacheRequest request);
+
+    TIngestBinlogResult ingest_binlog(1: TIngestBinlogRequest ingest_binlog_request);
 
     TSyncLoadForTabletsResponse sync_load_for_tablets(1: TSyncLoadForTabletsRequest request);
 

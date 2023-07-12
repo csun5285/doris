@@ -39,6 +39,7 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
+import org.apache.doris.persist.BatchRemoveTransactionsOperationV2;
 import org.apache.doris.persist.EditLog;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.task.AgentBatchTask;
@@ -739,7 +740,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         //do nothing
     }
 
-    public List<List<Comparable>> getDbInfo() throws AnalysisException {
+    public List<List<String>> getDbInfo() throws AnalysisException {
         throw new AnalysisException("Not supported");
     }
 
@@ -920,13 +921,13 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     @Override
-    public long getAllRunningTxnReplicaNum() {
+    public long getAllPublishTxnNum() {
         return 0;
     }
 
-    @Override
-    public long getAllPublishTxnNum() {
-        return 0;
+    public void replayBatchRemoveTransactionV2(BatchRemoveTransactionsOperationV2 operation)
+            throws MetaNotFoundException {
+        throw new MetaNotFoundException("Disallow to call replayBatchRemoveTransactionV2()");
     }
 
 }

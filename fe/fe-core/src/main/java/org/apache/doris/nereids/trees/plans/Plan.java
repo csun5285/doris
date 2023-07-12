@@ -27,11 +27,13 @@ import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -68,6 +70,17 @@ public interface Plan extends TreeNode<Plan> {
 
     default LogicalProperties computeLogicalProperties() {
         throw new IllegalStateException("Not support compute logical properties for " + getClass().getName());
+    }
+
+    /**
+     * Get extra plans.
+     */
+    default List<Plan> extraPlans() {
+        return ImmutableList.of();
+    }
+
+    default boolean displayExtraPlanFirst() {
+        return false;
     }
 
     /**
@@ -111,4 +124,44 @@ public interface Plan extends TreeNode<Plan> {
     Plan withGroupExpression(Optional<GroupExpression> groupExpression);
 
     Plan withLogicalProperties(Optional<LogicalProperties> logicalProperties);
+
+    <T> Optional<T> getMutableState(String key);
+
+    /** getOrInitMutableState */
+    default <T> T getOrInitMutableState(String key, Supplier<T> initState) {
+        Optional<T> mutableState = getMutableState(key);
+        if (!mutableState.isPresent()) {
+            T state = initState.get();
+            setMutableState(key, state);
+            return state;
+        }
+        return mutableState.get();
+    }
+
+    void setMutableState(String key, Object value);
+
+    /**
+     * a simple version of explain, used to verify plan shape
+     * @param prefix "  "
+     * @return string format of plan shape
+     */
+    default String shape(String prefix) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(prefix).append(shapeInfo()).append("\n");
+        String childPrefix = prefix + "--";
+        children().forEach(
+                child -> {
+                    builder.append(child.shape(childPrefix));
+                }
+        );
+        return builder.toString();
+    }
+
+    /**
+     * used in shape()
+     * @return default value is its class name
+     */
+    default String shapeInfo() {
+        return this.getClass().getSimpleName();
+    }
 }

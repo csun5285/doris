@@ -23,20 +23,23 @@ import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.expressions.WindowExpression;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
-import org.apache.doris.nereids.trees.expressions.literal.Literal;
+import org.apache.doris.nereids.trees.expressions.visitor.DefaultExpressionVisitor;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
-import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.util.ExpressionUtils;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -54,102 +57,182 @@ import java.util.stream.Collectors;
  *            Alias(SUM(v1#3 + 1))#7, Alias(SUM(v1#3) + 1)#8])
  * </pre>
  * After rule:
+ * <pre>
  * Project(k1#1, Alias(SR#9)#4, Alias(k1#1 + 1)#5, Alias(SR#10))#6, Alias(SR#11))#7, Alias(SR#10 + 1)#8)
  * +-- Aggregate(keys:[k1#1, SR#9], outputs:[k1#1, SR#9, Alias(SUM(v1#3))#10, Alias(SUM(v1#3 + 1))#11])
- * +-- Project(k1#1, Alias(K2#2 + 1)#9, v1#3)
- * <p>
+ *   +-- Project(k1#1, Alias(K2#2 + 1)#9, v1#3)
+ * </pre>
+ * Note: window function will be moved to upper project
+ * all agg functions except the top agg should be pushed to Aggregate node.
+ * example 1:
+ * <pre>
+ *    select min(x), sum(x) over () ...
+ * the 'sum(x)' is top agg of window function, it should be moved to upper project
+ * plan:
+ *    project(sum(x) over())
+ *        Aggregate(min(x), x)
+ * </pre>
+ * example 2:
+ * <pre>
+ *    select min(x), avg(sum(x)) over() ...
+ * the 'sum(x)' should be moved to Aggregate
+ * plan:
+ *    project(avg(y) over())
+ *         Aggregate(min(x), sum(x) as y)
+ * </pre>
+ * example 3:
+ * <pre>
+ *    select sum(x+1), x+1, sum(x+1) over() ...
+ * window function should use x instead of x+1
+ * plan:
+ *    project(sum(x+1) over())
+ *        Agg(sum(y), x)
+ *            project(x+1 as y)
+ * </pre>
  * More example could get from UT {NormalizeAggregateTest}
  */
-public class NormalizeAggregate extends OneRewriteRuleFactory {
+public class NormalizeAggregate extends OneRewriteRuleFactory implements NormalizeToSlot {
     @Override
     public Rule build() {
         return logicalAggregate().whenNot(LogicalAggregate::isNormalized).then(aggregate -> {
-            // substitution map used to substitute expression in aggregate's output to use it as top projections
-            Map<Expression, Expression> substitutionMap = Maps.newHashMap();
-            List<Expression> keys = aggregate.getGroupByExpressions();
-            List<NamedExpression> newOutputs = Lists.newArrayList();
 
-            // keys
-            Map<Boolean, List<Expression>> partitionedKeys = keys.stream()
-                    .collect(Collectors.groupingBy(SlotReference.class::isInstance));
-            List<Expression> newKeys = Lists.newArrayList();
-            List<NamedExpression> bottomProjections = Lists.newArrayList();
-            if (partitionedKeys.containsKey(false)) {
-                // process non-SlotReference keys
-                newKeys.addAll(partitionedKeys.get(false).stream()
-                        .map(e -> new Alias(e, e.toSql()))
-                        .peek(a -> substitutionMap.put(a.child(), a.toSlot()))
-                        .peek(bottomProjections::add)
-                        .map(Alias::toSlot)
-                        .collect(Collectors.toList()));
+            List<NamedExpression> aggregateOutput = aggregate.getOutputExpressions();
+            Set<Alias> existsAlias = ExpressionUtils.mutableCollect(aggregateOutput, Alias.class::isInstance);
+            Set<Expression> groupingByExprs = ImmutableSet.copyOf(aggregate.getGroupByExpressions());
+            NormalizeToSlotContext groupByToSlotContext =
+                    NormalizeToSlotContext.buildContext(existsAlias, groupingByExprs);
+            Set<NamedExpression> bottomGroupByProjects =
+                    groupByToSlotContext.pushDownToNamedExpression(groupingByExprs);
+
+            List<AggregateFunction> aggFuncs = Lists.newArrayList();
+            aggregateOutput.forEach(o -> o.accept(CollectNonWindowedAggFuncs.INSTANCE, aggFuncs));
+            // use group by context to normalize agg functions to process
+            //   sql like: select sum(a + 1) from t group by a + 1
+            //
+            // before normalize:
+            // agg(output: sum(a[#0] + 1)[#2], group_by: alias(a + 1)[#1])
+            // +-- project(a[#0], (a[#0] + 1)[#1])
+            //
+            // after normalize:
+            // agg(output: sum(alias(a + 1)[#1])[#2], group_by: alias(a + 1)[#1])
+            // +-- project((a[#0] + 1)[#1])
+            List<AggregateFunction> normalizedAggFuncs = groupByToSlotContext.normalizeToUseSlotRef(aggFuncs);
+            List<NamedExpression> bottomProjects = Lists.newArrayList(bottomGroupByProjects);
+            // TODO: if we have distinct agg, we must push down its children,
+            //   because need use it to generate distribution enforce
+            // step 1: split agg functions into 2 parts: distinct and not distinct
+            List<AggregateFunction> distinctAggFuncs = Lists.newArrayList();
+            List<AggregateFunction> nonDistinctAggFuncs = Lists.newArrayList();
+            for (AggregateFunction aggregateFunction : normalizedAggFuncs) {
+                if (aggregateFunction.isDistinct()) {
+                    distinctAggFuncs.add(aggregateFunction);
+                } else {
+                    nonDistinctAggFuncs.add(aggregateFunction);
+                }
             }
-            if (partitionedKeys.containsKey(true)) {
-                // process SlotReference keys
-                partitionedKeys.get(true).stream()
-                        .map(SlotReference.class::cast)
-                        .peek(s -> substitutionMap.put(s, s))
-                        .peek(bottomProjections::add)
-                        .forEach(newKeys::add);
-            }
-            // add all necessary key to output
-            substitutionMap.entrySet().stream()
-                    .filter(kv -> aggregate.getOutputExpressions().stream()
-                            .anyMatch(e -> e.anyMatch(kv.getKey()::equals)))
-                    .map(Entry::getValue)
-                    .map(NamedExpression.class::cast)
-                    .forEach(newOutputs::add);
-
-            // if we generate bottom, we need to generate to project too.
-            // output
-            List<NamedExpression> outputs = aggregate.getOutputExpressions();
-            Map<Boolean, List<NamedExpression>> partitionedOutputs = outputs.stream()
-                    .collect(Collectors.groupingBy(e -> e.anyMatch(AggregateFunction.class::isInstance)));
-
-            boolean needBottomProjects = partitionedKeys.containsKey(false);
-            if (partitionedOutputs.containsKey(true)) {
-                // process expressions that contain aggregate function
-                Set<AggregateFunction> aggregateFunctions = partitionedOutputs.get(true).stream()
-                        .flatMap(e -> e.<Set<AggregateFunction>>collect(AggregateFunction.class::isInstance).stream())
-                        .collect(Collectors.toSet());
-
-                // replace all non-slot expression in aggregate functions children.
-                for (AggregateFunction aggregateFunction : aggregateFunctions) {
+            // step 2: if we only have one distinct agg function, we do push down for it
+            if (!distinctAggFuncs.isEmpty()) {
+                // process distinct normalize and put it back to normalizedAggFuncs
+                List<AggregateFunction> newDistinctAggFuncs = Lists.newArrayList();
+                Map<Expression, Expression> replaceMap = Maps.newHashMap();
+                Map<Expression, NamedExpression> aliasCache = Maps.newHashMap();
+                for (AggregateFunction distinctAggFunc : distinctAggFuncs) {
                     List<Expression> newChildren = Lists.newArrayList();
-                    for (Expression child : aggregateFunction.getArguments()) {
-                        if (child instanceof SlotReference || child instanceof Literal) {
+                    for (Expression child : distinctAggFunc.children()) {
+                        if (child instanceof SlotReference) {
                             newChildren.add(child);
-                            if (child instanceof SlotReference) {
-                                bottomProjections.add((SlotReference) child);
-                            }
                         } else {
-                            needBottomProjects = true;
-                            Alias alias = new Alias(child, child.toSql());
-                            bottomProjections.add(alias);
+                            NamedExpression alias;
+                            if (aliasCache.containsKey(child)) {
+                                alias = aliasCache.get(child);
+                            } else {
+                                alias = new Alias(child, child.toSql());
+                                aliasCache.put(child, alias);
+                            }
+                            bottomProjects.add(alias);
                             newChildren.add(alias.toSlot());
                         }
                     }
-                    AggregateFunction newFunction = (AggregateFunction) aggregateFunction.withChildren(newChildren);
-                    Alias alias = new Alias(newFunction, newFunction.toSql());
-                    newOutputs.add(alias);
-                    substitutionMap.put(aggregateFunction, alias.toSlot());
+                    AggregateFunction newDistinctAggFunc = distinctAggFunc.withChildren(newChildren);
+                    replaceMap.put(distinctAggFunc, newDistinctAggFunc);
+                    newDistinctAggFuncs.add(newDistinctAggFunc);
                 }
+                aggregateOutput = aggregateOutput.stream()
+                        .map(e -> ExpressionUtils.replace(e, replaceMap))
+                        .map(NamedExpression.class::cast)
+                        .collect(Collectors.toList());
+                distinctAggFuncs = newDistinctAggFuncs;
+            }
+            normalizedAggFuncs = Lists.newArrayList(nonDistinctAggFuncs);
+            normalizedAggFuncs.addAll(distinctAggFuncs);
+            // TODO: process redundant expressions in aggregate functions children
+            // build normalized agg output
+            NormalizeToSlotContext normalizedAggFuncsToSlotContext =
+                    NormalizeToSlotContext.buildContext(existsAlias, normalizedAggFuncs);
+            // agg output include 2 part, normalized group by slots and normalized agg functions
+            List<NamedExpression> normalizedAggOutput = ImmutableList.<NamedExpression>builder()
+                    .addAll(bottomGroupByProjects.stream().map(NamedExpression::toSlot).iterator())
+                    .addAll(normalizedAggFuncsToSlotContext.pushDownToNamedExpression(normalizedAggFuncs))
+                    .build();
+            // add normalized agg's input slots to bottom projects
+            Set<Slot> bottomProjectSlots = bottomProjects.stream()
+                    .map(NamedExpression::toSlot)
+                    .collect(Collectors.toSet());
+            Set<NamedExpression> aggInputSlots = normalizedAggFuncs.stream()
+                    .map(Expression::getInputSlots)
+                    .flatMap(Set::stream)
+                    .filter(e -> !bottomProjectSlots.contains(e))
+                    .collect(Collectors.toSet());
+            bottomProjects.addAll(aggInputSlots);
+            // build group by exprs
+            List<Expression> normalizedGroupExprs = groupByToSlotContext.normalizeToUseSlotRef(groupingByExprs);
+            // build upper project, use two context to do pop up, because agg output maybe contain two part:
+            //   group by keys and agg expressions
+            List<NamedExpression> upperProjects = groupByToSlotContext
+                    .normalizeToUseSlotRefWithoutWindowFunction(aggregateOutput);
+            upperProjects = normalizedAggFuncsToSlotContext.normalizeToUseSlotRefWithoutWindowFunction(upperProjects);
+            // process Expression like Alias(SlotReference#0)#0
+            upperProjects = upperProjects.stream().map(e -> {
+                if (e instanceof Alias) {
+                    Alias alias = (Alias) e;
+                    if (alias.child() instanceof SlotReference) {
+                        SlotReference slotReference = (SlotReference) alias.child();
+                        if (slotReference.getExprId().equals(alias.getExprId())) {
+                            return slotReference;
+                        }
+                    }
+                }
+                return e;
+            }).collect(Collectors.toList());
+
+            Plan bottomPlan;
+            if (!bottomProjects.isEmpty()) {
+                bottomPlan = new LogicalProject<>(ImmutableList.copyOf(bottomProjects), aggregate.child());
+            } else {
+                bottomPlan = aggregate.child();
             }
 
-            // assemble
-            LogicalPlan root = aggregate.child();
-            if (needBottomProjects) {
-                root = new LogicalProject<>(bottomProjections, root);
-            }
-            root = new LogicalAggregate<>(newKeys, newOutputs, aggregate.isDisassembled(),
-                    true, aggregate.isFinalPhase(), aggregate.getAggPhase(),
-                    aggregate.getSourceRepeat(), root);
-            List<NamedExpression> projections = outputs.stream()
-                    .map(e -> ExpressionUtils.replace(e, substitutionMap))
-                    .map(NamedExpression.class::cast)
-                    .collect(Collectors.toList());
-            root = new LogicalProject<>(projections, root);
-
-            return root;
+            return new LogicalProject<>(upperProjects,
+                    aggregate.withNormalized(normalizedGroupExprs, normalizedAggOutput, bottomPlan));
         }).toRule(RuleType.NORMALIZE_AGGREGATE);
+    }
+
+    private static class CollectNonWindowedAggFuncs extends DefaultExpressionVisitor<Void, List<AggregateFunction>> {
+
+        private static final CollectNonWindowedAggFuncs INSTANCE = new CollectNonWindowedAggFuncs();
+
+        @Override
+        public Void visitWindow(WindowExpression windowExpression, List<AggregateFunction> context) {
+            for (Expression child : windowExpression.getExpressionsInWindowSpec()) {
+                child.accept(this, context);
+            }
+            return null;
+        }
+
+        @Override
+        public Void visitAggregateFunction(AggregateFunction aggregateFunction, List<AggregateFunction> context) {
+            context.add(aggregateFunction);
+            return null;
+        }
     }
 }

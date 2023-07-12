@@ -3,7 +3,6 @@
 *.pyc
 *.class
 *.iml
-*.swp
 *.jar
 *.log
 *.so.tmp
@@ -35,6 +34,7 @@ package-lock.json
 .settings/
 **/.idea/
 **/.vscode/
+**/.fleet/
 
 # docs
 docs/contents/
@@ -43,6 +43,7 @@ docs/.temp
 # output, thirdparty, extension
 output/
 rpc_data/
+metastore_db/
 thirdparty/src*
 thirdparty/installed*
 
@@ -57,6 +58,8 @@ regression-test/framework/dependency-reduced-pom.xml
 regression-test/realdata/*
 regression-test/cacheData/*
 regression-test/conf/regression-conf-custom.groovy
+regression-test/framework/bin/*
+regression-test/certificate.p12
 
 regression-test/cacheData/*
 regression-test/conf/regression-conf-custom.groovy
@@ -74,6 +77,9 @@ fe/fe-core/gen/
 fe/fe-core/src/main/resources/static/
 fe/fe-core/src/main/antlr4/org/apache/doris/nereids/DorisLexer.tokens
 fe/fe-core/src/main/antlr4/org/apache/doris/nereids/gen/
+fe/fe-common/src/main/java/org/apache/doris/thrift
+fe/fe-common/src/main/java/org/apache/parquet
+fe/fe-core/src/main/java/org/apache/parquet
 
 # BE
 be/build*/
@@ -84,6 +90,7 @@ be/src/gen_cpp/opcode
 be/tags
 be/test/olap/test_data/tablet_meta_test.hdr
 be/.devcontainer/
+be/src/apache-orc/
 
 ## tools
 tools/ssb-tools/ssb-data/
@@ -93,6 +100,12 @@ tools/**/TPC-H_Tools_v*/
 tools/**/tpc-h_v*.docx
 tools/**/tpc-h_v*.pdf
 tools/**/tpch-data/
+tools/single-node-cluster/fe*
 
 # be-ut
 data_test
+lru_cache_test
+
+/conf/log4j2-spring.xml
+/fe/fe-core/src/test/resources/real-help-resource.zip
+/ui/dist

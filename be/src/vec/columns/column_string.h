@@ -20,17 +20,40 @@
 
 #pragma once
 
+#include <glog/logging.h>
+#include <stdint.h>
+#include <sys/types.h>
+
 #include <cassert>
 #include <cstring>
+#include <typeinfo>
+#include <vector>
 
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/exception.h"
+#include "common/status.h"
+#include "gutil/integral_types.h"
+#include "runtime/define_primitive_type.h"
+#include "util/hash_util.hpp"
 #include "vec/columns/column.h"
 #include "vec/columns/column_impl.h"
 #include "vec/common/assert_cast.h"
+#include "vec/common/cow.h"
 #include "vec/common/memcmp_small.h"
 #include "vec/common/memcpy_small.h"
-#include "vec/common/pod_array.h"
+#include "vec/common/pod_array_fwd.h"
 #include "vec/common/sip_hash.h"
+#include "vec/common/string_ref.h"
 #include "vec/core/field.h"
+#include "vec/core/types.h"
+
+namespace doris {
+namespace vectorized {
+class Arena;
+class ColumnSorter;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -40,6 +63,15 @@ class ColumnString final : public COWHelper<IColumn, ColumnString> {
 public:
     using Char = UInt8;
     using Chars = PaddedPODArray<UInt8>;
+
+    void static check_chars_length(size_t total_length, size_t element_number) {
+        if (UNLIKELY(total_length > MAX_STRING_SIZE)) {
+            throw doris::Exception(
+                    ErrorCode::STRING_OVERFLOW_IN_VEC_ENGINE,
+                    "string column length is too large: total_length={}, element_number={}",
+                    total_length, element_number);
+        }
+    }
 
 private:
     // currently Offsets is uint32, if chars.size() exceeds 4G, offset will overflow.
@@ -61,16 +93,8 @@ private:
     /// Size of i-th element, including terminating zero.
     size_t ALWAYS_INLINE size_at(ssize_t i) const { return offsets[i] - offsets[i - 1]; }
 
-    void ALWAYS_INLINE check_chars_length(size_t total_length, size_t element_number) const {
-        if (UNLIKELY(total_length > MAX_STRING_SIZE)) {
-            LOG(FATAL) << "string column length is too large: total_length=" << total_length
-                       << " ,element_number=" << element_number;
-        }
-    }
-
     template <bool positive>
     struct less;
-
     template <bool positive>
     struct lessWithCollation;
 
@@ -112,12 +136,6 @@ public:
         return StringRef(&chars[offset_at(n)], size_at(n));
     }
 
-/// Suppress gcc 7.3.1 warning: '*((void*)&<anonymous> +8)' may be used uninitialized in this function
-#if !__clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
     void insert(const Field& x) override {
         const String& s = doris::vectorized::get<const String&>(x);
         const size_t old_size = chars.size();
@@ -130,10 +148,6 @@ public:
         memcpy(chars.data() + old_size, s.c_str(), size_to_append);
         offsets.push_back(new_size);
     }
-
-#if !__clang__
-#pragma GCC diagnostic pop
-#endif
 
     void insert_from(const IColumn& src_, size_t n) override {
         const ColumnString& src = assert_cast<const ColumnString&>(src_);
@@ -198,8 +212,13 @@ public:
             if (i != num - 1 && strings[i].data + len == strings[i + 1].data) {
                 continue;
             }
-            memcpy(data, ptr, length);
-            data += length;
+
+            if (length != 0) {
+                DCHECK(ptr != nullptr);
+                memcpy(data, ptr, length);
+                data += length;
+            }
+
             if (LIKELY(i != num - 1)) {
                 ptr = strings[i + 1].data;
                 length = 0;
@@ -256,7 +275,7 @@ public:
             offset += len;
             offsets.push_back(offset);
         }
-    };
+    }
 
     void insert_many_strings(const StringRef* strings, size_t num) override {
         size_t new_size = 0;
@@ -277,6 +296,51 @@ public:
                 offset += len;
             }
             offsets.push_back(offset);
+        }
+    }
+
+    template <typename T, size_t copy_length>
+    void insert_many_strings_fixed_length(const StringRef* strings, size_t num)
+            __attribute__((noinline));
+
+    template <size_t copy_length>
+    void insert_many_strings_fixed_length(const StringRef* strings, size_t num) {
+        size_t new_size = 0;
+        for (size_t i = 0; i < num; i++) {
+            new_size += strings[i].size;
+        }
+
+        const size_t old_size = chars.size();
+        check_chars_length(old_size + new_size, offsets.size() + num);
+        chars.resize(old_size + new_size + copy_length);
+
+        Char* data = chars.data();
+        size_t offset = old_size;
+        for (size_t i = 0; i < num; i++) {
+            uint32_t len = strings[i].size;
+            if (len) {
+                memcpy(data + offset, strings[i].data, copy_length);
+                offset += len;
+            }
+            offsets.push_back(offset);
+        }
+        chars.resize(old_size + new_size);
+    }
+
+    void insert_many_strings_overflow(const StringRef* strings, size_t num,
+                                      size_t max_length) override {
+        if (max_length <= 8) {
+            insert_many_strings_fixed_length<8>(strings, num);
+        } else if (max_length <= 16) {
+            insert_many_strings_fixed_length<16>(strings, num);
+        } else if (max_length <= 32) {
+            insert_many_strings_fixed_length<32>(strings, num);
+        } else if (max_length <= 64) {
+            insert_many_strings_fixed_length<64>(strings, num);
+        } else if (max_length <= 128) {
+            insert_many_strings_fixed_length<128>(strings, num);
+        } else {
+            insert_many_strings(strings, num);
         }
     }
 
@@ -363,6 +427,7 @@ public:
                              const int* indices_end) override;
 
     ColumnPtr filter(const Filter& filt, ssize_t result_size_hint) const override;
+    size_t filter(const Filter& filter) override;
 
     ColumnPtr permute(const Permutation& perm, size_t limit) const override;
 

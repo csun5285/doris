@@ -3,11 +3,10 @@
 #include <condition_variable>
 #include <string>
 
-#include "cloud/io/local_file_system.h"
-#include "cloud/io/path.h"
-#include "cloud/io/s3_file_writer.h"
+#include "io/fs/local_file_system.h"
+#include "io/fs/path.h"
+#include "io/fs/s3_file_writer.h"
 #include "common/config.h"
-#include "runtime/tmp_file_mgr.h"
 
 namespace doris::io {
 

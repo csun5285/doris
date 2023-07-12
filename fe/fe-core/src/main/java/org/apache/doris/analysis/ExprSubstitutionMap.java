@@ -43,6 +43,7 @@ public final class ExprSubstitutionMap {
     private static final Logger LOG = LogManager.getLogger(ExprSubstitutionMap.class);
 
     private boolean checkAnalyzed = true;
+    private boolean useNotCheckDescIdEquals = false;
     private List<Expr> lhs; // left-hand side
     private List<Expr> rhs; // right-hand side
 
@@ -61,6 +62,10 @@ public final class ExprSubstitutionMap {
         this.rhs = rhs;
     }
 
+    public void useNotCheckDescIdEquals() {
+        useNotCheckDescIdEquals = true;
+    }
+
     /**
      * Add an expr mapping. The rhsExpr must be analyzed to support correct substitution
      * across query blocks. It is not required that the lhsExpr is analyzed.
@@ -77,8 +82,14 @@ public final class ExprSubstitutionMap {
      */
     public Expr get(Expr lhsExpr) {
         for (int i = 0; i < lhs.size(); ++i) {
-            if (lhsExpr.equals(lhs.get(i))) {
-                return rhs.get(i);
+            if (useNotCheckDescIdEquals) {
+                if (lhsExpr.notCheckDescIdEquals(lhs.get(i))) {
+                    return rhs.get(i);
+                }
+            } else {
+                if (lhsExpr.equals(lhs.get(i))) {
+                    return rhs.get(i);
+                }
             }
         }
         return null;
@@ -143,7 +154,7 @@ public final class ExprSubstitutionMap {
         if (f == null) {
             return g;
         }
-        if (g == null) {
+        if (g == null || g.size() == 0) {
             return f;
         }
         ExprSubstitutionMap result = new ExprSubstitutionMap();
@@ -219,7 +230,7 @@ public final class ExprSubstitutionMap {
         if (f == null) {
             return g;
         }
-        if (g == null) {
+        if (g == null || g.size() == 0) {
             return f;
         }
         ExprSubstitutionMap result = new ExprSubstitutionMap();

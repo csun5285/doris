@@ -16,12 +16,22 @@
 // under the License.
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include "common/status.h"
 #include "exec/odbc_connector.h"
 #include "vec/sink/vtable_sink.h"
 
 namespace doris {
+class ObjectPool;
+class RowDescriptor;
+class RuntimeState;
+class TDataSink;
+class TExpr;
+
 namespace vectorized {
+class Block;
 
 // This class is a sinker, which put input data to odbc table
 class VOdbcTableSink : public VTableSink {
@@ -33,7 +43,7 @@ public:
 
     Status open(RuntimeState* state) override;
 
-    Status send(RuntimeState* state, vectorized::Block* block) override;
+    Status send(RuntimeState* state, vectorized::Block* block, bool eos = false) override;
 
     Status close(RuntimeState* state, Status exec_status) override;
 

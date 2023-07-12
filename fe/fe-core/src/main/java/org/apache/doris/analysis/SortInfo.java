@@ -267,12 +267,16 @@ public class SortInfo {
         // backup before substitute orderingExprs
         origOrderingExprs = orderingExprs;
 
+        // backup before substitute orderingExprs
+        origOrderingExprs = orderingExprs;
+
         // The ordering exprs are evaluated against the sort tuple, so they must reflect the
         // materialization decision above.
         substituteOrderingExprs(substOrderBy, analyzer);
 
         // Update the tuple descriptor used to materialize the input of the sort.
         setMaterializedTupleInfo(sortTupleDesc, sortTupleExprs);
+        LOG.debug("sortTupleDesc {}", sortTupleDesc);
 
         return substOrderBy;
     }
@@ -297,12 +301,15 @@ public class SortInfo {
         List<SlotDescriptor> slots = analyzer.changeSlotToNullableOfOuterJoinedTuples();
         ExprSubstitutionMap substOrderBy = new ExprSubstitutionMap();
         for (Expr origOrderingExpr : orderingExprs) {
-            SlotRef origSlotRef = origOrderingExpr.getSrcSlotRef();
             SlotDescriptor materializedDesc = analyzer.addSlotDescriptor(sortTupleDesc);
             materializedDesc.initFromExpr(origOrderingExpr);
             materializedDesc.setIsMaterialized(true);
+            SlotRef origSlotRef = origOrderingExpr.getSrcSlotRef();
+            LOG.debug("origOrderingExpr {}", origOrderingExpr);
             if (origSlotRef != null) {
-                materializedDesc.setColumn(origSlotRef.getColumn());
+                // need do this for two phase read of topn query optimization
+                // check https://github.com/apache/doris/pull/15642 for detail
+                materializedDesc.setSrcColumn(origSlotRef.getColumn());
             }
             SlotRef materializedRef = new SlotRef(materializedDesc);
             substOrderBy.put(origOrderingExpr, materializedRef);

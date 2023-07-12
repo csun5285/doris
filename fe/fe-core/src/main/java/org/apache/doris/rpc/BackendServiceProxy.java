@@ -18,6 +18,7 @@
 package org.apache.doris.rpc;
 
 import org.apache.doris.common.Config;
+import org.apache.doris.common.ThreadPoolManager;
 import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.proto.InternalService;
@@ -26,6 +27,7 @@ import org.apache.doris.proto.Types;
 import org.apache.doris.thrift.TExecPlanFragmentParamsList;
 import org.apache.doris.thrift.TFoldConstantParams;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TPipelineFragmentParamsList;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.Maps;
@@ -39,6 +41,7 @@ import org.apache.thrift.protocol.TCompactProtocol;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
@@ -48,6 +51,9 @@ public class BackendServiceProxy {
     // use exclusive lock to make sure only one thread can add or remove client from serviceMap.
     // use concurrent map to allow access serviceMap in multi thread.
     private ReentrantLock lock = new ReentrantLock();
+
+    private Executor grpcThreadPool = ThreadPoolManager.newDaemonCacheThreadPool(Config.grpc_threadmgr_threads_nums,
+            "grpc_thread_pool", true);
     private final Map<TNetworkAddress, BackendServiceClientExtIp> serviceMap;
 
     public BackendServiceProxy() {
@@ -128,7 +134,7 @@ public class BackendServiceProxy {
                 serviceClientExtIp = null;
             }
             if (serviceClientExtIp == null) {
-                BackendServiceClient client = new BackendServiceClient(address);
+                BackendServiceClient client = new BackendServiceClient(address, grpcThreadPool);
                 serviceMap.put(address, new BackendServiceClientExtIp(realIp, client));
             }
             return serviceMap.get(address).client;
@@ -154,6 +160,38 @@ public class BackendServiceProxy {
         }
         // VERSION 2 means we send TExecPlanFragmentParamsList, not single TExecPlanFragmentParams
         builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_2);
+
+        final InternalService.PExecPlanFragmentRequest pRequest = builder.build();
+        MetricRepo.BE_COUNTER_QUERY_RPC_ALL.getOrAdd(address.hostname).increase(1L);
+        MetricRepo.BE_COUNTER_QUERY_RPC_SIZE.getOrAdd(address.hostname).increase((long) pRequest.getSerializedSize());
+        try {
+            final BackendServiceClient client = getProxy(address);
+            if (twoPhaseExecution) {
+                return client.execPlanFragmentPrepareAsync(pRequest);
+            } else {
+                return client.execPlanFragmentAsync(pRequest);
+            }
+        } catch (Throwable e) {
+            LOG.warn("Execute plan fragment catch a exception, address={}:{}", address.getHostname(), address.getPort(),
+                    e);
+            throw new RpcException(address.hostname, e.getMessage());
+        }
+    }
+
+    public Future<InternalService.PExecPlanFragmentResult> execPlanFragmentsAsync(TNetworkAddress address,
+            TPipelineFragmentParamsList params, boolean twoPhaseExecution) throws TException, RpcException {
+        InternalService.PExecPlanFragmentRequest.Builder builder =
+                InternalService.PExecPlanFragmentRequest.newBuilder();
+        if (Config.use_compact_thrift_rpc) {
+            builder.setRequest(
+                    ByteString.copyFrom(new TSerializer(new TCompactProtocol.Factory()).serialize(params)));
+            builder.setCompact(true);
+        } else {
+            builder.setRequest(ByteString.copyFrom(new TSerializer().serialize(params))).build();
+            builder.setCompact(false);
+        }
+        // VERSION 3 means we send TPipelineFragmentParamsList
+        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_3);
 
         final InternalService.PExecPlanFragmentRequest pRequest = builder.build();
         MetricRepo.BE_COUNTER_QUERY_RPC_ALL.getOrAdd(address.hostname).increase(1L);
@@ -205,6 +243,18 @@ public class BackendServiceProxy {
             return client.fetchDataAsync(request);
         } catch (Throwable e) {
             LOG.warn("fetch data catch a exception, address={}:{}",
+                    address.getHostname(), address.getPort(), e);
+            throw new RpcException(address.hostname, e.getMessage());
+        }
+    }
+
+    public Future<InternalService.PTabletKeyLookupResponse> fetchTabletDataAsync(
+            TNetworkAddress address, InternalService.PTabletKeyLookupRequest request) throws RpcException {
+        try {
+            final BackendServiceClient client = getProxy(address);
+            return client.fetchTabletDataAsync(request);
+        } catch (Throwable e) {
+            LOG.warn("fetch tablet data catch a exception, address={}:{}",
                     address.getHostname(), address.getPort(), e);
             throw new RpcException(address.hostname, e.getMessage());
         }
@@ -340,4 +390,16 @@ public class BackendServiceProxy {
             throw new RpcException(address.hostname, e.getMessage());
         }
     }
+
+    public Future<InternalService.PFetchColIdsResponse> getColumnIdsByTabletIds(TNetworkAddress address,
+            InternalService.PFetchColIdsRequest request) throws RpcException {
+        try {
+            final BackendServiceClient client = getProxy(address);
+            return client.getColIdsByTabletIds(request);
+        } catch (Throwable e) {
+            LOG.warn("failed to fetch column id from address={}:{}", address.getHostname(), address.getPort());
+            throw new RpcException(address.hostname, e.getMessage());
+        }
+    }
+
 }

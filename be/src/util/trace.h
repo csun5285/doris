@@ -16,21 +16,25 @@
 // under the License.
 #pragma once
 
+#include <butil/macros.h>
+#include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <stdint.h>
 
+#include <chrono>
 #include <iosfwd>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "gutil/macros.h"
+#include "common/logging.h"
 #include "gutil/ref_counted.h"
 #include "gutil/strings/stringpiece.h"
 #include "gutil/strings/substitute.h"
 #include "gutil/threading/thread_collision_warner.h"
-#include "gutil/walltime.h"
+#include "util/scoped_cleanup.h"
 #include "util/spinlock.h"
+#include "util/time.h"
 #include "util/trace_metrics.h"
 
 namespace doris {
@@ -116,7 +120,7 @@ class Trace;
 // Construct a constant C string counter name which acts as a sort of
 // coarse-grained histogram for trace metrics.
 #define BUCKETED_COUNTER_NAME(prefix, duration_us) \
-    [=]() {                                        \
+    []() {                                         \
         if (duration_us >= 100 * 1000) {           \
             return prefix "_gt_100_ms";            \
         } else if (duration_us >= 10 * 1000) {     \
@@ -127,6 +131,32 @@ class Trace;
             return prefix "_lt_1ms";               \
         }                                          \
     }()
+
+// If this scope times out, make a simple trace.
+// It will log the cost time only.
+// Timeout is chrono duration struct, eg: 5ms, 100 * 1s.
+#define SCOPED_SIMPLE_TRACE_IF_TIMEOUT(timeout) \
+    SCOPED_SIMPLE_TRACE_TO_STREAM_IF_TIMEOUT(timeout, LOG(WARNING))
+
+// If this scope times out, then put simple trace to the stream.
+// Timeout is chrono duration struct, eg: 5ms, 100 * 1s.
+// For example:
+//
+//    std::string tag = "[foo]";
+//    SCOPED_SIMPLE_TRACE_TO_STREAM_IF_TIMEOUT(5s, LOG(INFO) << tag);
+//
+#define SCOPED_SIMPLE_TRACE_TO_STREAM_IF_TIMEOUT(timeout, stream)                       \
+    using namespace std::chrono_literals;                                               \
+    auto VARNAME_LINENUM(scoped_simple_trace) = doris::MonotonicMicros();               \
+    SCOPED_CLEANUP({                                                                    \
+        auto VARNAME_LINENUM(timeout_us) =                                              \
+                std::chrono::duration_cast<std::chrono::microseconds>(timeout).count(); \
+        auto VARNAME_LINENUM(cost_us) =                                                 \
+                doris::MonotonicMicros() - VARNAME_LINENUM(scoped_simple_trace);        \
+        if (VARNAME_LINENUM(cost_us) >= VARNAME_LINENUM(timeout_us)) {                  \
+            stream << "Simple trace cost(us): " << VARNAME_LINENUM(cost_us);            \
+        }                                                                               \
+    })
 
 namespace doris {
 
@@ -282,7 +312,7 @@ public:
 
 private:
     const char* const counter_;
-    MicrosecondsInt64 start_time_;
+    int64_t start_time_;
     DISALLOW_COPY_AND_ASSIGN(ScopedTraceLatencyCounter);
 };
 

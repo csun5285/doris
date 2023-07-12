@@ -21,28 +21,27 @@
 #include "runtime/runtime_state.h"
 
 #include <fmt/format.h>
+#include <gen_cpp/PaloInternalService_types.h>
+#include <gen_cpp/Types_types.h>
 
-#include <boost/algorithm/string/join.hpp>
-#include <sstream>
 #include <string>
 
-#include "cloud/io/cloud_file_cache_factory.h"
-#include "cloud/io/s3_file_system.h"
+#include "io/cache/block/block_file_cache_factory.h"
+#include "io/fs/s3_file_system.h"
 #include "cloud/utils.h"
+#include "common/config.h"
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "common/status.h"
-#include "exec/exec_node.h"
-#include "runtime/buffered_block_mgr2.h"
 #include "runtime/exec_env.h"
 #include "runtime/load_path_mgr.h"
-#include "runtime/memory/mem_tracker.h"
+#include "runtime/memory/mem_tracker_limiter.h"
+#include "runtime/memory/thread_mem_tracker_mgr.h"
 #include "runtime/runtime_filter_mgr.h"
-#include "util/file_utils.h"
-#include "util/load_error_hub.h"
-#include "util/pretty_printer.h"
+#include "runtime/thread_context.h"
 #include "util/timezone_utils.h"
 #include "util/uid_util.h"
+#include "vec/runtime/vdatetime_value.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -52,18 +51,19 @@ RuntimeState::RuntimeState(const TUniqueId& fragment_instance_id,
                            const TQueryOptions& query_options, const TQueryGlobals& query_globals,
                            ExecEnv* exec_env)
         : _profile("Fragment " + print_id(fragment_instance_id)),
+          _load_channel_profile("<unnamed>"),
           _obj_pool(new ObjectPool()),
           _runtime_filter_mgr(new RuntimeFilterMgr(TUniqueId(), this)),
           _data_stream_recvrs_pool(new ObjectPool()),
           _unreported_error_idx(0),
           _is_cancelled(false),
           _per_fragment_instance_idx(0),
-          _root_node_id(-1),
           _num_rows_load_total(0),
           _num_rows_load_filtered(0),
           _num_rows_load_unselected(0),
           _num_print_error_rows(0),
           _num_bytes_load_total(0),
+          _num_finished_scan_range(0),
           _load_job_id(-1),
           _normal_row_number(0),
           _error_row_number(0),
@@ -77,6 +77,7 @@ RuntimeState::RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
                            const TQueryOptions& query_options, const TQueryGlobals& query_globals,
                            ExecEnv* exec_env)
         : _profile("Fragment " + print_id(fragment_exec_params.fragment_instance_id)),
+          _load_channel_profile("<unnamed>"),
           _obj_pool(new ObjectPool()),
           _runtime_filter_mgr(new RuntimeFilterMgr(fragment_exec_params.query_id, this)),
           _data_stream_recvrs_pool(new ObjectPool()),
@@ -84,12 +85,12 @@ RuntimeState::RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
           _query_id(fragment_exec_params.query_id),
           _is_cancelled(false),
           _per_fragment_instance_idx(0),
-          _root_node_id(-1),
           _num_rows_load_total(0),
           _num_rows_load_filtered(0),
           _num_rows_load_unselected(0),
           _num_print_error_rows(0),
           _num_bytes_load_total(0),
+          _num_finished_scan_range(0),
           _normal_row_number(0),
           _error_row_number(0),
           _error_log_file_path(""),
@@ -103,8 +104,38 @@ RuntimeState::RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
     _query_contexts = io::FileCacheFactory::instance().get_query_context_holders(_query_id);
 }
 
+RuntimeState::RuntimeState(const TPipelineInstanceParams& pipeline_params,
+                           const TUniqueId& query_id, const TQueryOptions& query_options,
+                           const TQueryGlobals& query_globals, ExecEnv* exec_env)
+        : _profile("Fragment " + print_id(pipeline_params.fragment_instance_id)),
+          _load_channel_profile("<unnamed>"),
+          _obj_pool(new ObjectPool()),
+          _runtime_filter_mgr(new RuntimeFilterMgr(query_id, this)),
+          _data_stream_recvrs_pool(new ObjectPool()),
+          _unreported_error_idx(0),
+          _query_id(query_id),
+          _is_cancelled(false),
+          _per_fragment_instance_idx(0),
+          _num_rows_load_total(0),
+          _num_rows_load_filtered(0),
+          _num_rows_load_unselected(0),
+          _num_print_error_rows(0),
+          _num_bytes_load_total(0),
+          _num_finished_scan_range(0),
+          _normal_row_number(0),
+          _error_row_number(0),
+          _error_log_file(nullptr) {
+    if (pipeline_params.__isset.runtime_filter_params) {
+        _runtime_filter_mgr->set_runtime_filter_params(pipeline_params.runtime_filter_params);
+    }
+    Status status =
+            init(pipeline_params.fragment_instance_id, query_options, query_globals, exec_env);
+    DCHECK(status.ok());
+}
+
 RuntimeState::RuntimeState(const TQueryGlobals& query_globals)
         : _profile("<unnamed>"),
+          _load_channel_profile("<unnamed>"),
           _obj_pool(new ObjectPool()),
           _data_stream_recvrs_pool(new ObjectPool()),
           _unreported_error_idx(0),
@@ -121,7 +152,7 @@ RuntimeState::RuntimeState(const TQueryGlobals& query_globals)
         _nano_seconds = 0;
     } else if (!query_globals.now_string.empty()) {
         _timezone = TimezoneUtils::default_time_zone;
-        DateTimeValue dt;
+        vectorized::VecDateTimeValue dt;
         dt.from_date_str(query_globals.now_string.c_str(), query_globals.now_string.size());
         int64_t timestamp;
         dt.unix_timestamp(&timestamp, _timezone);
@@ -138,6 +169,7 @@ RuntimeState::RuntimeState(const TQueryGlobals& query_globals)
 
 RuntimeState::RuntimeState()
         : _profile("<unnamed>"),
+          _load_channel_profile("<unnamed>"),
           _obj_pool(new ObjectPool()),
           _data_stream_recvrs_pool(new ObjectPool()),
           _unreported_error_idx(0),
@@ -152,7 +184,6 @@ RuntimeState::RuntimeState()
 }
 
 RuntimeState::~RuntimeState() {
-    _block_mgr2.reset();
     // close error log file
     if (_error_log_file != nullptr && _error_log_file->is_open()) {
         _error_log_file->close();
@@ -176,10 +207,6 @@ RuntimeState::~RuntimeState() {
 #endif
     }
 
-    if (_error_hub != nullptr) {
-        _error_hub->close();
-    }
-
     _obj_pool->clear();
     _runtime_filter_mgr.reset();
 }
@@ -198,7 +225,7 @@ Status RuntimeState::init(const TUniqueId& fragment_instance_id, const TQueryOpt
         _nano_seconds = 0;
     } else if (!query_globals.now_string.empty()) {
         _timezone = TimezoneUtils::default_time_zone;
-        DateTimeValue dt;
+        vectorized::VecDateTimeValue dt;
         dt.from_date_str(query_globals.now_string.c_str(), query_globals.now_string.size());
         int64_t timestamp;
         dt.unix_timestamp(&timestamp, _timezone);
@@ -240,24 +267,6 @@ Status RuntimeState::init_mem_trackers(const TUniqueId& query_id) {
     return Status::OK();
 }
 
-Status RuntimeState::create_block_mgr() {
-    DCHECK(_block_mgr2.get() == nullptr);
-    RETURN_IF_ERROR(BufferedBlockMgr2::create(this, runtime_profile(), _exec_env->tmp_file_mgr(),
-                                              _exec_env->disk_io_mgr()->max_read_buffer_size(),
-                                              &_block_mgr2));
-    return Status::OK();
-}
-
-bool RuntimeState::error_log_is_empty() {
-    std::lock_guard<std::mutex> l(_error_log_lock);
-    return (_error_log.size() > 0);
-}
-
-std::string RuntimeState::error_log() {
-    std::lock_guard<std::mutex> l(_error_log_lock);
-    return boost::algorithm::join(_error_log, "\n");
-}
-
 bool RuntimeState::log_error(const std::string& error) {
     std::lock_guard<std::mutex> l(_error_log_lock);
 
@@ -292,9 +301,17 @@ Status RuntimeState::set_mem_limit_exceeded(const std::string& msg) {
 Status RuntimeState::check_query_state(const std::string& msg) {
     // TODO: it would be nice if this also checked for cancellation, but doing so breaks
     // cases where we use Status::Cancelled("Cancelled") to indicate that the limit was reached.
+    //
+    // If the thread MemTrackerLimiter exceeds the limit, an error status is returned.
+    // Usually used after SCOPED_ATTACH_TASK, during query execution.
     if (thread_context()->thread_mem_tracker()->limit_exceeded() &&
-        !config::enable_query_memroy_overcommit) {
-        RETURN_LIMIT_EXCEEDED(this, msg);
+        !config::enable_query_memory_overcommit) {
+        auto failed_msg = thread_context()->thread_mem_tracker()->query_tracker_limit_exceeded_str(
+                thread_context()->thread_mem_tracker()->tracker_limit_exceeded_str(),
+                thread_context()->thread_mem_tracker_mgr->last_consumer_tracker(), msg);
+        thread_context()->thread_mem_tracker()->print_log_usage(failed_msg);
+        log_error(failed_msg);
+        return Status::MemoryLimitExceeded(failed_msg);
     }
     return query_status();
 }
@@ -374,54 +391,8 @@ Status RuntimeState::append_error_msg_to_file(std::function<std::string()> line,
 
     if (out.size() > 0) {
         (*_error_log_file) << fmt::to_string(out) << std::endl;
-        export_load_error(fmt::to_string(out));
     }
     return Status::OK();
-}
-
-const std::string RuntimeState::get_error_log_file_path() const {
-    if (_error_log_file_path.empty()) {
-        return "";
-    }
-#ifdef CLOUD_MODE
-    // expiration must be less than a week (in seconds) for presigned url
-    static const unsigned EXPIRATION_SECONDS = 7 * 24 * 60 * 60 - 1;
-    // We should return a public endpoint to user.
-    return std::dynamic_pointer_cast<io::S3FileSystem>(_error_fs)->generate_presigned_url(
-            _s3_error_log_file_path, EXPIRATION_SECONDS, true);
-#else
-    std::stringstream url;
-    url << "http://" << BackendOptions::get_localhost() << ":" << config::webserver_port
-        << "/api/_load_error_log?"
-        << "file=" << _error_log_file_path;
-    return url.str();
-#endif
-}
-
-const int64_t HUB_MAX_ERROR_NUM = 10;
-
-void RuntimeState::export_load_error(const std::string& err_msg) {
-    if (_error_hub == nullptr) {
-        std::lock_guard<std::mutex> lock(_create_error_hub_lock);
-        if (_error_hub == nullptr) {
-            if (_load_error_hub_info == nullptr) {
-                return;
-            }
-
-            Status st = LoadErrorHub::create_hub(_exec_env, _load_error_hub_info.get(),
-                                                 _error_log_file_path, &_error_hub);
-            if (!st.ok()) {
-                LOG(WARNING) << "failed to create load error hub: " << st;
-                return;
-            }
-        }
-    }
-
-    if (_error_row_number <= HUB_MAX_ERROR_NUM) {
-        LoadErrorHub::ErrorMsg err(_load_job_id, err_msg);
-        // TODO(lingbin): think if should check return value?
-        _error_hub->export_error(err);
-    }
 }
 
 int64_t RuntimeState::get_load_mem_limit() {

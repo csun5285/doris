@@ -22,9 +22,29 @@ suite("test_tvf_p2", "p2") {
         String hdfsPort = context.config.otherConfigs.get("extHdfsPort")
 
         qt_eof_check """select * from hdfs(
-            "uri" = "hdfs://${nameNodeHost}:${hdfsPort}/user/data/tvf/bad_store_sales.parquet",
+            "uri" = "hdfs://${nameNodeHost}:${hdfsPort}/catalog/tvf/parquet/bad_store_sales.parquet",
             "fs.defaultFS" = "hdfs://${nameNodeHost}:${hdfsPort}",
             "format" = "parquet")
             where ss_store_sk = 4 and ss_addr_sk is null order by ss_item_sk"""
+
+        // array_ancestor_null.parquet is parquet file whose values in the array column are all nulls in a page
+        qt_array_ancestor_null """select count(list_double_col) from hdfs(
+            "uri" = "hdfs://${nameNodeHost}:${hdfsPort}/catalog/tvf/parquet/array_ancestor_null.parquet",
+            "format" = "parquet",
+            "fs.defaultFS" = "hdfs://${nameNodeHost}:${hdfsPort}")"""
+
+        // all_nested_types.parquet is parquet file that contains all complext types
+        qt_nested_types_parquet """select count(array0), count(array1), count(array2), count(array3), count(struct0), count(struct1), count(map0)
+            from hdfs(
+            "uri" = "hdfs://${nameNodeHost}:${hdfsPort}/catalog/tvf/parquet/all_nested_types.parquet",
+            "format" = "parquet",
+            "fs.defaultFS" = "hdfs://${nameNodeHost}:${hdfsPort}")"""
+
+        // all_nested_types.orc is orc file that contains all complext types
+        qt_nested_types_orc """select count(array0), count(array1), count(array2), count(array3), count(struct0), count(struct1), count(map0)
+            from hdfs(
+            "uri" = "hdfs://${nameNodeHost}:${hdfsPort}/catalog/tvf/orc/all_nested_types.orc",
+            "format" = "orc",
+            "fs.defaultFS" = "hdfs://${nameNodeHost}:${hdfsPort}")"""
     }
 }

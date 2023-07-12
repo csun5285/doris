@@ -16,7 +16,16 @@
 // under the License.
 #include "runtime/cache/result_node.h"
 
-#include "gen_cpp/internal_service.pb.h"
+#include <gen_cpp/internal_service.pb.h>
+#include <gen_cpp/types.pb.h>
+#include <glog/logging.h>
+
+#include <iostream>
+#include <limits>
+#include <utility>
+
+#include "common/config.h"
+#include "olap/olap_define.h"
 #include "runtime/cache/cache_utils.h"
 
 namespace doris {
@@ -77,7 +86,7 @@ PCacheStatus ResultNode::update_partition(const PUpdateCacheRequest* request,
 
     //Only one thread per SQL key can update the cache
     CacheWriteLock write_lock(_node_mtx);
-    if (request->cache_type() == CacheType::SQL_CACHE) {
+    if (request->cache_type() == SQL_CACHE) {
         return update_sql_cache(request, is_update_firstkey);
     } else {
         return update_partition_cache(request, is_update_firstkey);

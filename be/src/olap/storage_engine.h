@@ -17,55 +17,57 @@
 
 #pragma once
 
-#ifdef CLOUD_MODE
-#include "cloud/olap/storage_engine.h"
+#include <butil/macros.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/internal_service.pb.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <stdint.h>
 
-#else
-
-#include <pthread.h>
-#include <rapidjson/document.h>
-
+#include <atomic>
 #include <condition_variable>
 #include <ctime>
-#include <list>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
-#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
-#include "cloud/io/file_system.h"
-#include "cloud/meta_mgr.h"
 #include "common/status.h"
-#include "gen_cpp/AgentService_types.h"
-#include "gen_cpp/BackendService_types.h"
-#include "gen_cpp/MasterService_types.h"
 #include "gutil/ref_counted.h"
 #include "olap/compaction_permit_limiter.h"
 #include "olap/olap_common.h"
-#include "olap/olap_define.h"
-#include "olap/olap_meta.h"
 #include "olap/options.h"
+#include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_id_generator.h"
-#include "olap/tablet_manager.h"
-#include "olap/task/engine_task.h"
-#include "olap/txn_manager.h"
+#include "olap/rowset/segment_v2/segment.h"
+#include "olap/tablet.h"
+#include "olap/task/index_builder.h"
 #include "runtime/heartbeat_flags.h"
-#include "runtime/stream_load/stream_load_recorder.h"
 #include "util/countdown_latch.h"
-#include "util/thread.h"
-#include "util/threadpool.h"
 
 namespace doris {
 
 class DataDir;
 class EngineTask;
-class BlockManager;
 class MemTableFlushExecutor;
-class Tablet;
 class TaskWorkerPool;
 class BetaRowsetWriter;
+class BaseCompaction;
+class CumulativeCompaction;
+class SingleReplicaCompaction;
+class CumulativeCompactionPolicy;
+class MemTracker;
+class PriorityThreadPool;
+class StreamLoadRecorder;
+class TCloneReq;
+class TCreateTabletReq;
+class TabletManager;
+class Thread;
+class ThreadPool;
+class TxnManager;
 
 using SegCompactionCandidates = std::vector<segment_v2::SegmentSharedPtr>;
 using SegCompactionCandidatesSharedPtr = std::shared_ptr<SegCompactionCandidates>;
@@ -83,16 +85,6 @@ public:
 
     static StorageEngine* instance() { return _s_instance; }
 
-    io::FileSystemSPtr latest_fs() const {
-        std::lock_guard lock(_latest_fs_mtx);
-        return _latest_fs;
-    }
-
-    void set_latest_fs(const io::FileSystemSPtr& fs) {
-        std::lock_guard lock(_latest_fs_mtx);
-        _latest_fs = fs;
-    }
-
     Status create_tablet(const TCreateTabletReq& request);
 
     void clear_transaction_task(const TTransactionId transaction_id);
@@ -105,9 +97,6 @@ public:
 
     template <bool include_unused = false>
     std::vector<DataDir*> get_stores();
-
-    // @brief 设置root_path是否可用
-    void set_store_used_flag(const std::string& root_path, bool is_used);
 
     // @brief 获取所有root_path信息
     Status get_all_data_dir_info(std::vector<DataDirInfo>* data_dir_infos, bool need_update);
@@ -127,7 +116,7 @@ public:
     int32_t effective_cluster_id() const { return _effective_cluster_id; }
 
     void start_delete_unused_rowset();
-    void add_unused_rowset(const RowsetSharedPtr& rowset);
+    void add_unused_rowset(RowsetSharedPtr rowset);
 
     // Obtain shard path for new tablet.
     //
@@ -155,11 +144,9 @@ public:
     TxnManager* txn_manager() { return _txn_manager.get(); }
     MemTableFlushExecutor* memtable_flush_executor() { return _memtable_flush_executor.get(); }
 
-    cloud::MetaMgr* meta_mgr() { return _meta_mgr.get(); }
-
     bool check_rowset_id_in_unused_rowsets(const RowsetId& rowset_id);
 
-    RowsetId next_rowset_id() { return _rowset_id_generator->next_id(); };
+    RowsetId next_rowset_id() { return _rowset_id_generator->next_id(); }
 
     bool rowset_id_in_use(const RowsetId& rowset_id) {
         return _rowset_id_generator->id_in_use(rowset_id);
@@ -183,20 +170,27 @@ public:
     // start all background threads. This should be call after env is ready.
     Status start_bg_threads();
 
-    // CLOUD_MODE
-    Status cloud_start_bg_threads();
-
     // clear trash and snapshot file
     // option: update disk usage after sweep
     Status start_trash_sweep(double* usage, bool ignore_guard = false);
 
     void stop();
-    bool stopped() { return _stopped; }
+
+    void get_tablet_rowset_versions(const PGetTabletVersionsRequest* request,
+                                    PGetTabletVersionsResponse* response);
 
     void create_cumulative_compaction(TabletSharedPtr best_tablet,
                                       std::shared_ptr<CumulativeCompaction>& cumulative_compaction);
     void create_base_compaction(TabletSharedPtr best_tablet,
                                 std::shared_ptr<BaseCompaction>& base_compaction);
+
+    void create_single_replica_compaction(
+            TabletSharedPtr best_tablet,
+            std::shared_ptr<SingleReplicaCompaction>& single_replica_compaction,
+            CompactionType compaction_type);
+    bool get_peer_replica_info(int64_t tablet_id, TReplicaInfo* replica, std::string* token);
+
+    bool should_fetch_from_peer(int64_t tablet_id);
 
     std::shared_ptr<StreamLoadRecorder> get_stream_load_recorder() { return _stream_load_recorder; }
 
@@ -208,14 +202,18 @@ public:
     // check cumulative compaction config
     void check_cumulative_compaction_config();
 
-    Status submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type);
-    Status submit_quick_compaction_task(TabletSharedPtr tablet);
+    Status submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type,
+                                  bool force);
     Status submit_seg_compaction_task(BetaRowsetWriter* writer,
                                       SegCompactionCandidatesSharedPtr segments);
 
     std::unique_ptr<ThreadPool>& tablet_publish_txn_thread_pool() {
         return _tablet_publish_txn_thread_pool;
     }
+    bool stopped() { return _stopped; }
+    ThreadPool* get_bg_multiget_threadpool() { return _bg_multi_get_thread_pool.get(); }
+
+    Status process_index_change_task(const TAlterInvertedIndexReq& reqest);
 
 private:
     // Instance should be inited from `static open()`
@@ -234,7 +232,7 @@ private:
     Status _check_all_root_path_cluster_id();
     Status _judge_and_update_effective_cluster_id(int32_t cluster_id);
 
-    bool _delete_tablets_on_unused_root_path();
+    void _exit_if_too_many_disks_are_failed();
 
     void _clean_unused_txns();
 
@@ -242,18 +240,6 @@ private:
 
     Status _do_sweep(const std::string& scan_root, const time_t& local_tm_now,
                      const int32_t expire);
-
-    // CLOUD_MODE
-    void _refresh_s3_info_thread_callback();
-
-    // CLOUD_MODE
-    void _vacuum_stale_rowsets_thread_callback();
-
-    // CLOUD_MODE
-    void _sync_tablets_thread_callback();
-
-    // CLOUD_MODE
-    void _lease_compaction_thread_callback();
 
     // All these xxx_callback() functions are for Background threads
     // unused rowset monitor thread
@@ -280,6 +266,8 @@ private:
 
     void _start_clean_cache();
 
+    void _start_clean_lookup_cache();
+
     // Disk status monitoring. Monitoring unused_flag Road King's new corresponding root_path unused flag,
     // When the unused mark is detected, the corresponding table information is deleted from the memory, and the disk data does not move.
     // When the disk status is unusable, but the unused logo is not _push_tablet_into_submitted_compactiondetected, you need to download it from root_path
@@ -288,14 +276,11 @@ private:
 
     void _compaction_tasks_producer_callback();
 
+    void _update_replica_infos_callback();
+
     std::vector<TabletSharedPtr> _generate_compaction_tasks(CompactionType compaction_type,
                                                             std::vector<DataDir*>& data_dirs,
                                                             bool check_score);
-
-    std::vector<TabletSharedPtr> _generate_cloud_compaction_tasks(CompactionType compaction_type,
-                                                                  std::vector<DataDir*>& data_dirs,
-                                                                  bool check_score);
-
     void _update_cumulative_compaction_policy();
 
     bool _push_tablet_into_submitted_compaction(TabletSharedPtr tablet,
@@ -305,18 +290,25 @@ private:
 
     Status _init_stream_load_recorder(const std::string& stream_load_record_path);
 
-    Status _submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type);
+    Status _submit_compaction_task(TabletSharedPtr tablet, CompactionType compaction_type,
+                                   bool force);
 
-    Status _handle_quick_compaction(TabletSharedPtr);
+    Status _submit_single_replica_compaction_task(TabletSharedPtr tablet,
+                                                  CompactionType compaction_type);
 
     void _adjust_compaction_thread_num();
 
     void _cooldown_tasks_producer_callback();
+    void _remove_unused_remote_files_callback();
+    void _cold_data_compaction_producer_callback();
 
     void _cache_file_cleaner_tasks_producer_callback();
 
     Status _handle_seg_compaction(BetaRowsetWriter* writer,
                                   SegCompactionCandidatesSharedPtr segments);
+
+    Status _handle_index_change(IndexBuilderSharedPtr index_builder);
+    void _gc_binlogs();
 
 private:
     struct CompactionCandidate {
@@ -357,14 +349,8 @@ private:
     int32_t _effective_cluster_id;
     bool _is_all_cluster_id_exist;
 
-    bool _stopped;
-
     static StorageEngine* _s_instance;
-
-    // CLOUD_MODE
-    // FileSystem with latest object store info, new data will be written to this fs.
-    mutable std::mutex _latest_fs_mtx;
-    io::FileSystemSPtr _latest_fs;
+    bool _stopped;
 
     std::mutex _gc_mutex;
     // map<rowset_id(str), RowsetSharedPtr>, if we use RowsetId as the key, we need custom hash func
@@ -384,6 +370,7 @@ private:
     scoped_refptr<Thread> _disk_stat_monitor_thread;
     // thread to produce both base and cumulative compaction tasks
     scoped_refptr<Thread> _compaction_tasks_producer_thread;
+    scoped_refptr<Thread> _update_replica_infos_thread;
     scoped_refptr<Thread> _fd_cache_clean_thread;
     // threads to clean all file descriptor not actively in use
     std::vector<scoped_refptr<Thread>> _path_gc_threads;
@@ -391,12 +378,8 @@ private:
     std::vector<scoped_refptr<Thread>> _path_scan_threads;
     // thread to produce tablet checkpoint tasks
     scoped_refptr<Thread> _tablet_checkpoint_tasks_producer_thread;
-
-    // CLOUD_MODE
-    scoped_refptr<Thread> _refresh_s3_info_thread;
-    scoped_refptr<Thread> _vacuum_stale_rowsets_thread;
-    scoped_refptr<Thread> _sync_tablets_thread;
-    scoped_refptr<Thread> _lease_compaction_thread;
+    // thread to clean tablet lookup cache
+    scoped_refptr<Thread> _lookup_cache_clean_thread;
 
     // For tablet and disk-stat report
     std::mutex _report_mtx;
@@ -417,14 +400,16 @@ private:
 
     HeartbeatFlags* _heartbeat_flags;
 
-    std::unique_ptr<ThreadPool> _quick_compaction_thread_pool;
     std::unique_ptr<ThreadPool> _base_compaction_thread_pool;
     std::unique_ptr<ThreadPool> _cumu_compaction_thread_pool;
+    std::unique_ptr<ThreadPool> _single_replica_compaction_thread_pool;
     std::unique_ptr<ThreadPool> _seg_compaction_thread_pool;
+    std::unique_ptr<ThreadPool> _cold_data_compaction_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;
+    std::unique_ptr<ThreadPool> _bg_multi_get_thread_pool;
 
     CompactionPermitLimiter _permit_limiter;
 
@@ -432,6 +417,11 @@ private:
     // a tablet can do base and cumulative compaction at same time
     std::map<DataDir*, std::unordered_set<TTabletId>> _tablet_submitted_cumu_compaction;
     std::map<DataDir*, std::unordered_set<TTabletId>> _tablet_submitted_base_compaction;
+
+    std::mutex _peer_replica_infos_mutex;
+    // key: tabletId
+    std::unordered_map<int64_t, TReplicaInfo> _peer_replica_infos;
+    std::string _token;
 
     std::atomic<int32_t> _wakeup_producer_flag {0};
 
@@ -443,19 +433,17 @@ private:
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
 
     scoped_refptr<Thread> _cooldown_tasks_producer_thread;
+    scoped_refptr<Thread> _remove_unused_remote_files_thread;
+    scoped_refptr<Thread> _cold_data_compaction_producer_thread;
 
     scoped_refptr<Thread> _cache_file_cleaner_tasks_producer_thread;
 
-    std::unique_ptr<ThreadPool> _cooldown_thread_pool;
+    std::unique_ptr<PriorityThreadPool> _cooldown_thread_pool;
 
     std::mutex _running_cooldown_mutex;
-    std::unordered_map<DataDir*, int64_t> _running_cooldown_tasks_cnt;
     std::unordered_set<int64_t> _running_cooldown_tablets;
-
-    std::unique_ptr<cloud::MetaMgr> _meta_mgr;
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
 };
 
 } // namespace doris
-#endif

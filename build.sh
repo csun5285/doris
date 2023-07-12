@@ -38,17 +38,19 @@ usage() {
     echo "
 Usage: $0 <options>
   Optional options:
-     [no option]            build all components
-     --fe                   build Frontend and Spark DPP application. Default ON.
-     --be                   build Backend. Default ON.
-     --meta-tool            build Backend meta tool. Default OFF.
+     [no option]        build all components
+     --fe               build Frontend and Spark DPP application. Default ON.
+     --be               build Backend. Default ON.
+     --meta-tool        build Backend meta tool. Default OFF.
      --cloud-recovery-tool  build recovery tool. Default OFF.
-     --broker               build Broker. Default ON.
-     --audit                build audit loader. Default ON.
-     --spark-dpp            build Spark DPP application. Default ON.
-     --hive-udf             build Hive UDF library for Spark Load. Default ON.
-     --clean                clean and build target
-     -j                     build Backend parallel
+     --broker           build Broker. Default ON.
+     --audit            build audit loader. Default ON.
+     --spark-dpp        build Spark DPP application. Default ON.
+     --hive-udf         build Hive UDF library for Spark Load. Default ON.
+     --java-udf         build Java UDF. Default ON.
+     --clean            clean and build target
+     --output           specify the output directory
+     -j                 build Backend parallel
 
   Environment variables:
     USE_AVX2                    If the CPU does not support AVX2 instruction set, please set USE_AVX2=0. Default is ON.
@@ -66,6 +68,7 @@ Usage: $0 <options>
     $0 --broker                             build Broker
     $0 --be --fe                            build Backend, Frontend, Spark Dpp application and Java UDF library
     $0 --be --coverage                      build Backend with coverage enabled
+    $0 --be --output PATH                   build Backend, the result will be output to PATH(relative paths are available)
 
     USE_AVX2=0 $0 --be                      build Backend and not using AVX2 instruction.
     USE_AVX2=0 STRIP_DEBUG_INFO=ON $0       build all and not using AVX2 instruction, and strip the debug info for Backend
@@ -76,6 +79,7 @@ Usage: $0 <options>
 clean_gensrc() {
     pushd "${DORIS_HOME}/gensrc"
     make clean
+    rm -rf "${DORIS_HOME}/gensrc/build"
     rm -rf "${DORIS_HOME}/fe/fe-common/target"
     rm -rf "${DORIS_HOME}/fe/fe-core/target"
     popd
@@ -119,10 +123,12 @@ if ! OPTS="$(getopt \
     -l 'cloud-recovery-tool' \
     -l 'spark-dpp' \
     -l 'hive-udf' \
+    -l 'java-udf' \
     -l 'clean' \
     -l 'coverage' \
     -l 'help' \
     -l 'no-style-check' \
+    -l 'output:' \
     -o 'hj:' \
     -- "$@")"; then
     usage
@@ -203,6 +209,10 @@ else
             BUILD_HIVE_UDF=1
             shift
             ;;
+        --java-udf)
+            BUILD_JAVA_UDF=1
+            shift
+            ;;
         --clean)
             CLEAN=1
             shift
@@ -226,6 +236,10 @@ else
         -j)
             PARALLEL="$2"
             PARAMETER_FLAG=1
+            shift 2
+            ;;
+        --output)
+            DORIS_OUTPUT="$2"
             shift 2
             ;;
         --)
@@ -256,7 +270,6 @@ fi
 
 if [[ "${HELP}" -eq 1 ]]; then
     usage
-    exit
 fi
 # build thirdparty libraries if necessary
 if [[ ! -f "${DORIS_THIRDPARTY}/installed/lib/libbacktrace.a" ]]; then
@@ -270,31 +283,7 @@ if [[ ! -f "${DORIS_THIRDPARTY}/installed/lib/libbacktrace.a" ]]; then
         "${DORIS_THIRDPARTY}/build-thirdparty.sh" -j "${PARALLEL}" --clean
     fi
 fi
-# For soft upgrade, to minimize complaints of build issues, enable it by default in the future
-if [[ -z "${ENABLE_INCREMENTAL_THIRD_PARTY_BUILD}" ]]; then
-    ENABLE_INCREMENTAL_THIRD_PARTY_BUILD="ON"
-fi
-if [[ "${ENABLE_INCREMENTAL_THIRD_PARTY_BUILD}" == "ON" ]]; then
-    "${DORIS_THIRDPARTY}/build-thirdparty.sh" -i -j "${PARALLEL}"
-fi
 
-# check clucene md5, if it changes, rebuild
-. ${DORIS_THIRDPARTY}/vars.sh
-if [ ! -f ${DORIS_THIRDPARTY}/installed/lib/libic.a ] || [ ! -d $DORIS_THIRDPARTY/src/$CLUCENE_SOURCE ];then
-    rm -rf ${DORIS_THIRDPARTY}/installed/include/CLucene.h
-    rm -rf ${DORIS_THIRDPARTY}/installed/include/CLucene
-    rm -rf ${DORIS_THIRDPARTY}/installed/lib64/libclucene-*
-    ${DORIS_THIRDPARTY}/build-thirdparty.sh -j $PARALLEL -d clucene
-else
-    md5=`md5sum "$DORIS_THIRDPARTY/src/$CLUCENE_NAME"`
-    if [ "$md5" != "$CLUCENE_MD5SUM  $DORIS_THIRDPARTY/src/$CLUCENE_NAME" ]; then
-        rm -rf ${DORIS_THIRDPARTY}/installed/include/CLucene.h
-        rm -rf ${DORIS_THIRDPARTY}/installed/include/CLucene
-        rm -rf ${DORIS_THIRDPARTY}/installed/lib64/libclucene-*
-        rm -rf ${DORIS_THIRDPARTY}/src/$CLUCENE_NAME
-        ${DORIS_THIRDPARTY}/build-thirdparty.sh -j $PARALLEL -d clucene
-    fi
-fi
 
 if [[ "${CLEAN}" -eq 1 && "${BUILD_BE}" -eq 0 && "${BUILD_FE}" -eq 0 && "${BUILD_SPARK_DPP}" -eq 0 && ${BUILD_CLOUD} -eq 0 ]]; then
     clean_gensrc
@@ -302,6 +291,27 @@ if [[ "${CLEAN}" -eq 1 && "${BUILD_BE}" -eq 0 && "${BUILD_FE}" -eq 0 && "${BUILD
     clean_fe
     exit 0
 fi
+
+update_submodule() {
+    local submodule_path=$1
+    local submodule_name=$2
+    local archive_url=$3
+
+    set +e
+    cd "${DORIS_HOME}"
+    echo "Update ${submodule_name} submodule ..."
+    git submodule update --init --recursive "${submodule_path}"
+    exit_code=$?
+    set -e
+    if [[ "${exit_code}" -ne 0 ]]; then
+        echo "Update ${submodule_name} submodule failed, start to download and extract ${submodule_name} package ..."
+        mkdir -p "${DORIS_HOME}/${submodule_path}"
+        curl -L "${archive_url}" | tar -xz -C "${DORIS_HOME}/${submodule_path}" --strip-components=1
+    fi
+}
+
+update_submodule "be/src/apache-orc" "apache-orc" "https://github.com/apache/doris-thirdparty/archive/refs/heads/orc.tar.gz"
+update_submodule "be/src/clucene" "clucene" "https://github.com/apache/doris-thirdparty/archive/refs/heads/clucene.tar.gz"
 
 if [[ -z "${WITH_MYSQL}" ]]; then
     WITH_MYSQL='OFF'
@@ -356,6 +366,13 @@ fi
 if [[ -z "${CLOUD_MODE}" ]]; then
     CLOUD_MODE='ON'
 fi
+if [[ -z "${DISPLAY_BUILD_TIME}" ]]; then
+    DISPLAY_BUILD_TIME='OFF'
+fi
+
+if [[ -z "${OUTPUT_BE_BINARY}" ]]; then
+    OUTPUT_BE_BINARY=${BUILD_BE}
+fi
 
 if [[ -z "${DISABLE_JAVA_UDF}" ]]; then
     DISABLE_JAVA_UDF='OFF'
@@ -377,7 +394,7 @@ if [[ "${BUILD_JAVA_UDF}" -eq 1 && "$(uname -s)" == 'Darwin' ]]; then
     if [[ -z "${JAVA_HOME}" ]]; then
         CAUSE='the environment variable JAVA_HOME is not set'
     else
-        LIBJVM="$(find "${JAVA_HOME}/" -name 'libjvm.dylib')"
+        LIBJVM="$(find -L "${JAVA_HOME}/" -name 'libjvm.dylib')"
         if [[ -z "${LIBJVM}" ]]; then
             CAUSE="the library libjvm.dylib is missing"
         elif [[ "$(file "${LIBJVM}" | awk '{print $NF}')" != "$(uname -m)" ]]; then
@@ -388,6 +405,7 @@ if [[ "${BUILD_JAVA_UDF}" -eq 1 && "$(uname -s)" == 'Darwin' ]]; then
     if [[ -n "${CAUSE}" ]]; then
         echo -e "\033[33;1mWARNNING: \033[37;1mSkip building with Java UDF due to ${CAUSE}.\033[0m"
         BUILD_JAVA_UDF=0
+        DISABLE_JAVA_UDF_IN_CONF=1
     fi
 fi
 
@@ -423,21 +441,19 @@ echo "Get params:
     CLOUD_MODE          -- $CLOUD_MODE
     USE_MEM_TRACKER     -- ${USE_MEM_TRACKER}
     USE_JEMALLOC        -- ${USE_JEMALLOC}
-    USE_BTHREAD_SCANNER -- $USE_BTHREAD_SCANNER
-    STRICT_MEMORY_USE   -- ${STRICT_MEMORY_USE}
     ENABLE_INJECTION_POINT -- ${ENABLE_INJECTION_POINT}
+    USE_BTHREAD_SCANNER -- ${USE_BTHREAD_SCANNER}
     ENABLE_STACKTRACE   -- ${ENABLE_STACKTRACE}
     DENABLE_CLANG_COVERAGE -- ${DENABLE_CLANG_COVERAGE}
+    DISPLAY_BUILD_TIME  -- ${DISPLAY_BUILD_TIME}
+    ENABLE_PCH          -- ${ENABLE_PCH}
 "
 
 # Clean and build generated code
 if [[ "${CLEAN}" -eq 1 ]]; then
     clean_gensrc
 fi
-echo "Build generated code"
-cd "${DORIS_HOME}/gensrc"
-# DO NOT using parallel make(-j) for gensrc
-make
+"${DORIS_HOME}"/generated-source.sh noclean
 
 # Assesmble FE modules
 FE_MODULES=''
@@ -476,7 +492,7 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
     if [[ "${CLEAN}" -eq 1 ]]; then
         clean_be
     fi
-    MAKE_PROGRAM="$(which "${BUILD_SYSTEM}")"
+    MAKE_PROGRAM="$(command -v "${BUILD_SYSTEM}")"
     echo "-- Make program: ${MAKE_PROGRAM}"
     echo "-- Use ccache: ${CMAKE_USE_CCACHE}"
     echo "-- Extra cxx flags: ${EXTRA_CXX_FLAGS:-}"
@@ -498,18 +514,24 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
         -DBUILD_CLOUD_RECOVERY_TOOL="${BUILD_CLOUD_RECOVERY_TOOL}" \
         -DSTRIP_DEBUG_INFO="${STRIP_DEBUG_INFO}" \
         -DUSE_DWARF="${USE_DWARF}" \
+        -DDISPLAY_BUILD_TIME="${DISPLAY_BUILD_TIME}" \
+        -DENABLE_PCH="${ENABLE_PCH}" \
         -DUSE_MEM_TRACKER="${USE_MEM_TRACKER}" \
         -DUSE_JEMALLOC="${USE_JEMALLOC}" \
-        -DSTRICT_MEMORY_USE="${STRICT_MEMORY_USE}" \
-        -DUSE_BTHREAD_SCANNER=${USE_BTHREAD_SCANNER} \
+        -DUSE_BTHREAD_SCANNER="${USE_BTHREAD_SCANNER}" \
         -DENABLE_STACKTRACE="${ENABLE_STACKTRACE}" \
         -DUSE_AVX2="${USE_AVX2}" \
         -DGLIBC_COMPATIBILITY="${GLIBC_COMPATIBILITY}" \
         -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
         -DENABLE_CLANG_COVERAGE="${DENABLE_CLANG_COVERAGE}" \
+        -DDORIS_JAVA_HOME="${JAVA_HOME}" \
         "${DORIS_HOME}/be"
-    "${BUILD_SYSTEM}" -j "${PARALLEL}"
-    "${BUILD_SYSTEM}" install
+
+    if [[ "${OUTPUT_BE_BINARY}" -eq 1 ]]; then
+        "${BUILD_SYSTEM}" -j "${PARALLEL}"
+        "${BUILD_SYSTEM}" install
+    fi
+
     cd "${DORIS_HOME}"
 fi
 
@@ -598,15 +620,18 @@ if [[ "${FE_MODULES}" != '' ]]; then
     if [[ "${CLEAN}" -eq 1 ]]; then
         clean_fe
     fi
-    if [ "${NO_STYLE_CHECK}" -ne 0 ] || [ "${DISABLE_JAVA_CHECK_STYLE}" = "ON" ]; then
-        SKIP_MVN_CHECK_STYLE="-Dcheckstyle.skip"
+    if [[ "${DISABLE_JAVA_CHECK_STYLE}" = "ON" ]]; then
+        "${MVN_CMD}" package -pl ${FE_MODULES:+${FE_MODULES}} -Dskip.doc=true -DskipTests -Dcheckstyle.skip=true
+    else
+        "${MVN_CMD}" package -pl ${FE_MODULES:+${FE_MODULES}} -Dskip.doc=true -DskipTests
     fi
     "${MVN_CMD}" package -pl ${FE_MODULES:+${FE_MODULES}} -DskipTests ${SKIP_MVN_CHECK_STYLE}
     cd "${DORIS_HOME}"
 fi
 
 # Clean and prepare output dir
-DORIS_OUTPUT=${DORIS_HOME}/output/
+DORIS_OUTPUT=${DORIS_OUTPUT:="${DORIS_HOME}/output/"}
+echo "OUTPUT DIR=${DORIS_OUTPUT}"
 mkdir -p "${DORIS_OUTPUT}"
 
 # Copy Frontend and Backend
@@ -630,6 +655,7 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     copy_common_files "${DORIS_OUTPUT}/fe/"
     mkdir -p "${DORIS_OUTPUT}/fe/log"
     mkdir -p "${DORIS_OUTPUT}/fe/doris-meta"
+    mkdir -p "${DORIS_OUTPUT}/fe/conf/ssl"
 fi
 
 if [[ "${BUILD_SPARK_DPP}" -eq 1 ]]; then
@@ -638,7 +664,7 @@ if [[ "${BUILD_SPARK_DPP}" -eq 1 ]]; then
     cp -r -p "${DORIS_HOME}/fe/spark-dpp/target"/spark-dpp-*-jar-with-dependencies.jar "${DORIS_OUTPUT}/fe/spark-dpp"/
 fi
 
-if [[ "${BUILD_BE}" -eq 1 ]]; then
+if [[ "${OUTPUT_BE_BINARY}" -eq 1 ]]; then
     install -d "${DORIS_OUTPUT}/be/bin" \
         "${DORIS_OUTPUT}/be/conf" \
         "${DORIS_OUTPUT}/be/lib" \
@@ -648,8 +674,14 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
 
     cp -r -p "${DORIS_HOME}/be/output/bin"/* "${DORIS_OUTPUT}/be/bin"/
     cp -r -p "${DORIS_HOME}/be/output/conf"/* "${DORIS_OUTPUT}/be/conf"/
+    cp -r -p "${DORIS_HOME}/be/output/dict" "${DORIS_OUTPUT}/be/"
 
-    if [[ "${BUILD_JAVA_UDF}" -eq 0 ]]; then
+    if [[ -d "${DORIS_THIRDPARTY}/installed/lib/hadoop_hdfs/" ]]; then
+        cp -r -p "${DORIS_THIRDPARTY}/installed/lib/hadoop_hdfs/" "${DORIS_OUTPUT}/be/lib/"
+        rm -rf "${DORIS_OUTPUT}/be/lib/hadoop_hdfs/native/"
+    fi
+
+    if [[ "${DISABLE_JAVA_UDF_IN_CONF}" -eq 1 ]]; then
         echo -e "\033[33;1mWARNNING: \033[37;1mDisable Java UDF support in be.conf due to the BE was built without Java UDF.\033[0m"
         cat >>"${DORIS_OUTPUT}/be/conf/be.conf" <<EOF
 
@@ -694,7 +726,6 @@ EOF
     copy_common_files "${DORIS_OUTPUT}/be/"
     mkdir -p "${DORIS_OUTPUT}/be/log"
     mkdir -p "${DORIS_OUTPUT}/be/storage"
-    cp -r -p "${DORIS_THIRDPARTY}/installed/share/dict" "${DORIS_OUTPUT}/be/"
 fi
 
 if [[ "${BUILD_BROKER}" -eq 1 ]]; then
@@ -716,6 +747,23 @@ if [[ "${BUILD_AUDIT}" -eq 1 ]]; then
     rm -rf "${DORIS_OUTPUT}/audit_loader"/*
     cp -r -p "${DORIS_HOME}/fe_plugins/auditloader/output"/* "${DORIS_OUTPUT}/audit_loader"/
     cd "${DORIS_HOME}"
+fi
+
+if [[ "${BUILD_JAVA_UDF}" -eq 1 && "${BUILD_BE}" -eq 0 && "${BUILD_FE}" -eq 0 ]]; then
+    install -d "${DORIS_OUTPUT}/be/lib"
+
+    rm -rf "${DORIS_OUTPUT}/be/lib/java-udf-jar-with-dependencies.jar"
+
+    java_udf_path="${DORIS_HOME}/fe/java-udf/target/java-udf-jar-with-dependencies.jar"
+    if [[ -f "${java_udf_path}" ]]; then
+        cp "${java_udf_path}" "${DORIS_OUTPUT}/be/lib"/
+    fi
+
+    cd "${DORIS_HOME}"
+fi
+
+if [[ ${BUILD_CLOUD} -eq 1 ]]; then
+    cp -r -p "${DORIS_HOME}/cloud/output" "${DORIS_HOME}/output/ms"
 fi
 
 echo "***************************************"

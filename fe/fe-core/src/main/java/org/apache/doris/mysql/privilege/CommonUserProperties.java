@@ -17,11 +17,11 @@
 
 package org.apache.doris.mysql.privilege;
 
-import org.apache.doris.common.Config;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.resource.Tag;
+import org.apache.doris.resource.workloadgroup.WorkloadGroupMgr;
 
 import com.google.common.collect.Sets;
 import com.google.gson.annotations.SerializedName;
@@ -37,7 +37,7 @@ import java.util.Set;
 public class CommonUserProperties implements Writable {
     // The max connections allowed for a user on one FE
     @SerializedName("maxConn")
-    private long maxConn = Config.qe_max_connection;
+    private long maxConn = 100;
     // The maximum total number of query instances that the user is allowed to send from this FE
     @SerializedName("maxQueryInstances")
     private long maxQueryInstances = -1;
@@ -53,7 +53,13 @@ public class CommonUserProperties implements Writable {
     private long execMemLimit = -1;
 
     @SerializedName("queryTimeout")
-    private long queryTimeout = -1;
+    private int queryTimeout = -1;
+
+    @SerializedName("insertTimeout")
+    private int insertTimeout = -1;
+
+    @SerializedName("workloadGroup")
+    private String workloadGroup = WorkloadGroupMgr.DEFAULT_GROUP_NAME;
 
     private String[] sqlBlockRulesSplit = {};
 
@@ -115,12 +121,28 @@ public class CommonUserProperties implements Writable {
         this.execMemLimit = execMemLimit;
     }
 
-    public long getQueryTimeout() {
+    public int getQueryTimeout() {
         return queryTimeout;
     }
 
-    public void setQueryTimeout(long timeout) {
+    public void setQueryTimeout(int timeout) {
         this.queryTimeout = timeout;
+    }
+
+    public int getInsertTimeout() {
+        return insertTimeout;
+    }
+
+    public void setInsertTimeout(int insertTimeout) {
+        this.insertTimeout = insertTimeout;
+    }
+
+    public String getWorkloadGroup() {
+        return workloadGroup;
+    }
+
+    public void setWorkloadGroup(String workloadGroup) {
+        this.workloadGroup = workloadGroup;
     }
 
     public static CommonUserProperties read(DataInput in) throws IOException {

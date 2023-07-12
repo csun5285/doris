@@ -19,10 +19,13 @@ package org.apache.doris.persist;
 
 import org.apache.doris.alter.AlterJobV2;
 import org.apache.doris.alter.BatchAlterJobPersistInfo;
+import org.apache.doris.alter.IndexChangeJob;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.backup.BackupJob;
 import org.apache.doris.backup.Repository;
 import org.apache.doris.backup.RestoreJob;
+import org.apache.doris.binlog.AddPartitionRecord;
+import org.apache.doris.binlog.UpsertRecord;
 import org.apache.doris.blockrule.SqlBlockRule;
 import org.apache.doris.catalog.BrokerMgr;
 import org.apache.doris.catalog.Database;
@@ -33,14 +36,15 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.FunctionSearchDesc;
 import org.apache.doris.catalog.Resource;
-import org.apache.doris.cluster.BaseParam;
-import org.apache.doris.cluster.Cluster;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.SmallFileMgr.SmallFile;
+import org.apache.doris.cooldown.CooldownConfHandler;
+import org.apache.doris.cooldown.CooldownConfList;
+import org.apache.doris.cooldown.CooldownDelete;
 import org.apache.doris.datasource.CatalogLog;
 import org.apache.doris.datasource.ExternalObjectLog;
 import org.apache.doris.datasource.InitCatalogLog;
@@ -56,8 +60,6 @@ import org.apache.doris.load.DeleteHandler;
 import org.apache.doris.load.DeleteInfo;
 import org.apache.doris.load.ExportJob;
 import org.apache.doris.load.ExportMgr;
-import org.apache.doris.load.Load;
-import org.apache.doris.load.LoadErrorHub;
 import org.apache.doris.load.LoadJob;
 import org.apache.doris.load.StreamLoadRecordMgr.FetchStreamLoadRecord;
 import org.apache.doris.load.loadv2.LoadJob.LoadJobStateUpdateInfo;
@@ -77,10 +79,13 @@ import org.apache.doris.plugin.PluginInfo;
 import org.apache.doris.policy.DropPolicyLog;
 import org.apache.doris.policy.Policy;
 import org.apache.doris.policy.StoragePolicy;
+import org.apache.doris.resource.workloadgroup.WorkloadGroup;
+import org.apache.doris.statistics.AnalysisInfo;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.Frontend;
 import org.apache.doris.transaction.GlobalTransactionMgr;
 import org.apache.doris.transaction.TransactionState;
+import org.apache.doris.transaction.TransactionStatus;
 
 import com.selectdb.cloud.catalog.CloudWarmUpJob;
 import org.apache.logging.log4j.LogManager;
@@ -151,7 +156,7 @@ public class EditLog {
     /**
      * Load journal.
      **/
-    public static void loadJournal(Env env, JournalEntity journal) {
+    public static void loadJournal(Env env, Long logId, JournalEntity journal) {
         short opCode = journal.getOpCode();
         if (opCode != OperationType.OP_SAVE_NEXTID && opCode != OperationType.OP_TIMESTAMP) {
             LOG.debug("replay journal op code: {}", opCode);
@@ -237,6 +242,8 @@ public class EditLog {
                     LOG.info(
                             "Begin to unprotect add partition. db = " + info.getDbId() + " table = " + info.getTableId()
                                     + " partitionName = " + info.getPartition().getName());
+                    AddPartitionRecord addPartitionRecord = new AddPartitionRecord(logId, info);
+                    Env.getCurrentEnv().getBinlogManager().addAddPartitionRecord(addPartitionRecord);
                     env.replayAddPartition(info);
                     break;
                 }
@@ -341,37 +348,13 @@ public class EditLog {
                     env.replayRenameRollup(info);
                     break;
                 }
-                case OperationType.OP_LOAD_START: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    env.getLoadInstance().replayAddLoadJob(job);
-                    break;
-                }
-                case OperationType.OP_LOAD_ETL: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    env.getLoadInstance().replayEtlLoadJob(job);
-                    break;
-                }
-                case OperationType.OP_LOAD_LOADING: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    env.getLoadInstance().replayLoadingLoadJob(job);
-                    break;
-                }
-                case OperationType.OP_LOAD_QUORUM: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    Load load = env.getLoadInstance();
-                    load.replayQuorumLoadJob(job, env);
-                    break;
-                }
-                case OperationType.OP_LOAD_DONE: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    Load load = env.getLoadInstance();
-                    load.replayFinishLoadJob(job, env);
-                    break;
-                }
+                case OperationType.OP_LOAD_START:
+                case OperationType.OP_LOAD_ETL:
+                case OperationType.OP_LOAD_LOADING:
+                case OperationType.OP_LOAD_QUORUM:
+                case OperationType.OP_LOAD_DONE:
                 case OperationType.OP_LOAD_CANCEL: {
-                    LoadJob job = (LoadJob) journal.getData();
-                    Load load = env.getLoadInstance();
-                    load.replayCancelLoadJob(job);
+                    LOG.warn("load job is deprecated");
                     break;
                 }
                 case OperationType.OP_EXPORT_CREATE: {
@@ -383,7 +366,7 @@ public class EditLog {
                 case OperationType.OP_EXPORT_UPDATE_STATE:
                     ExportJob.StateTransfer op = (ExportJob.StateTransfer) journal.getData();
                     ExportMgr exportMgr = env.getExportMgr();
-                    exportMgr.replayUpdateJobState(op.getJobId(), op.getState());
+                    exportMgr.replayUpdateJobState(op);
                     break;
                 case OperationType.OP_FINISH_DELETE: {
                     DeleteInfo info = (DeleteInfo) journal.getData();
@@ -442,6 +425,11 @@ public class EditLog {
                 case OperationType.OP_ADD_FRONTEND: {
                     Frontend fe = (Frontend) journal.getData();
                     env.replayAddFrontend(fe);
+                    break;
+                }
+                case OperationType.OP_MODIFY_FRONTEND: {
+                    Frontend fe = (Frontend) journal.getData();
+                    env.replayModifyFrontend(fe);
                     break;
                 }
                 case OperationType.OP_REMOVE_FRONTEND: {
@@ -522,38 +510,7 @@ public class EditLog {
                     break;
                 }
                 case OperationType.OP_CREATE_CLUSTER: {
-                    final Cluster value = (Cluster) journal.getData();
-                    env.replayCreateCluster(value);
-                    break;
-                }
-                case OperationType.OP_DROP_CLUSTER: {
-                    final ClusterInfo value = (ClusterInfo) journal.getData();
-                    env.replayDropCluster(value);
-                    break;
-                }
-                case OperationType.OP_EXPAND_CLUSTER: {
-                    final ClusterInfo info = (ClusterInfo) journal.getData();
-                    env.replayExpandCluster(info);
-                    break;
-                }
-                case OperationType.OP_LINK_CLUSTER: {
-                    final BaseParam param = (BaseParam) journal.getData();
-                    env.replayLinkDb(param);
-                    break;
-                }
-                case OperationType.OP_MIGRATE_CLUSTER: {
-                    final BaseParam param = (BaseParam) journal.getData();
-                    env.replayMigrateDb(param);
-                    break;
-                }
-                case OperationType.OP_UPDATE_DB: {
-                    final DatabaseInfo param = (DatabaseInfo) journal.getData();
-                    env.replayUpdateDb(param);
-                    break;
-                }
-                case OperationType.OP_DROP_LINKDB: {
-                    final DropLinkDbAndUpdateDbInfo param = (DropLinkDbAndUpdateDbInfo) journal.getData();
-                    env.replayDropLinkDb(param);
+                    // Do nothing
                     break;
                 }
                 case OperationType.OP_ADD_BROKER: {
@@ -572,19 +529,19 @@ public class EditLog {
                     break;
                 }
                 case OperationType.OP_SET_LOAD_ERROR_HUB: {
-                    final LoadErrorHub.Param param = (LoadErrorHub.Param) journal.getData();
-                    env.getLoadInstance().setLoadErrorHubInfo(param);
-                    break;
-                }
-                case OperationType.OP_UPDATE_CLUSTER_AND_BACKENDS: {
-                    final BackendIdsUpdateInfo info = (BackendIdsUpdateInfo) journal.getData();
-                    env.replayUpdateClusterAndBackends(info);
+                    // final LoadErrorHub.Param param = (LoadErrorHub.Param) journal.getData();
+                    // ignore load error hub
                     break;
                 }
                 case OperationType.OP_UPSERT_TRANSACTION_STATE: {
                     final TransactionState state = (TransactionState) journal.getData();
                     Env.getCurrentGlobalTransactionMgr().replayUpsertTransactionState(state);
-                    LOG.debug("opcode: {}, tid: {}", opCode, state.getTransactionId());
+                    LOG.debug("logid: {}, opcode: {}, tid: {}", logId, opCode, state.getTransactionId());
+
+                    if (state.getTransactionStatus() == TransactionStatus.VISIBLE) {
+                        UpsertRecord upsertRecord = new UpsertRecord(logId, state);
+                        Env.getCurrentEnv().getBinlogManager().addUpsertRecord(upsertRecord);
+                    }
                     break;
                 }
                 case OperationType.OP_DELETE_TRANSACTION_STATE: {
@@ -597,6 +554,12 @@ public class EditLog {
                     final BatchRemoveTransactionsOperation operation =
                             (BatchRemoveTransactionsOperation) journal.getData();
                     Env.getCurrentGlobalTransactionMgr().replayBatchRemoveTransactions(operation);
+                    break;
+                }
+                case OperationType.OP_BATCH_REMOVE_TXNS_V2: {
+                    final BatchRemoveTransactionsOperationV2 operation =
+                            (BatchRemoveTransactionsOperationV2) journal.getData();
+                    Env.getCurrentGlobalTransactionMgr().replayBatchRemoveTransactionV2(operation);
                     break;
                 }
                 case OperationType.OP_CREATE_REPOSITORY: {
@@ -657,6 +620,16 @@ public class EditLog {
                 case OperationType.OP_DROP_FUNCTION: {
                     FunctionSearchDesc function = (FunctionSearchDesc) journal.getData();
                     Env.getCurrentEnv().replayDropFunction(function);
+                    break;
+                }
+                case OperationType.OP_ADD_GLOBAL_FUNCTION: {
+                    final Function function = (Function) journal.getData();
+                    Env.getCurrentEnv().replayCreateGlobalFunction(function);
+                    break;
+                }
+                case OperationType.OP_DROP_GLOBAL_FUNCTION: {
+                    FunctionSearchDesc function = (FunctionSearchDesc) journal.getData();
+                    Env.getCurrentEnv().replayDropGlobalFunction(function);
                     break;
                 }
                 case OperationType.OP_CREATE_ENCRYPTKEY: {
@@ -764,6 +737,13 @@ public class EditLog {
                     }
                     break;
                 }
+                case OperationType.OP_UPDATE_COOLDOWN_CONF:
+                    CooldownConfList cooldownConfList = (CooldownConfList) journal.getData();
+                    CooldownConfHandler.replayUpdateCooldownConf(cooldownConfList);
+                    break;
+                case OperationType.OP_COOLDOWN_DELETE:
+                    // noop
+                    break;
                 case OperationType.OP_BATCH_ADD_ROLLUP: {
                     BatchAlterJobPersistInfo batchAlterJobV2 = (BatchAlterJobPersistInfo) journal.getData();
                     for (AlterJobV2 alterJobV2 : batchAlterJobV2.getAlterJobV2List()) {
@@ -780,6 +760,7 @@ public class EditLog {
                 case OperationType.OP_MODIFY_IN_MEMORY:
                 case OperationType.OP_MODIFY_PERSISTENT:
                 case OperationType.OP_MODIFY_TTL_SECONDS:
+                case OperationType.OP_UPDATE_BINLOG_CONFIG:
                 case OperationType.OP_MODIFY_REPLICATION_NUM: {
                     ModifyTablePropertyOperationLog log = (ModifyTablePropertyOperationLog) journal.getData();
                     env.replayModifyTableProperty(opCode, log);
@@ -911,6 +892,27 @@ public class EditLog {
                     env.getSchemaChangeHandler().replayModifyTableLightSchemaChange(info);
                     break;
                 }
+                case OperationType.OP_ALTER_LIGHT_SCHEMA_CHANGE: {
+                    final AlterLightSchemaChangeInfo info = (AlterLightSchemaChangeInfo) journal.getData();
+                    env.getSchemaChangeHandler().replayAlterLightSchChange(info);
+                    break;
+                }
+                case OperationType.OP_CLEAN_QUERY_STATS: {
+                    final CleanQueryStatsInfo info = (CleanQueryStatsInfo) journal.getData();
+                    env.getQueryStats().clear(info);
+                    break;
+                }
+                case OperationType.OP_MODIFY_TABLE_ADD_OR_DROP_INVERTED_INDICES: {
+                    final TableAddOrDropInvertedIndicesInfo info =
+                            (TableAddOrDropInvertedIndicesInfo) journal.getData();
+                    env.getSchemaChangeHandler().replayModifyTableAddOrDropInvertedIndices(info);
+                    break;
+                }
+                case OperationType.OP_INVERTED_INDEX_JOB: {
+                    IndexChangeJob indexChangeJob = (IndexChangeJob) journal.getData();
+                    env.getSchemaChangeHandler().replayIndexChangeJob(indexChangeJob);
+                    break;
+                }
                 case OperationType.OP_CLEAN_LABEL: {
                     final CleanLabelOperationLog log = (CleanLabelOperationLog) journal.getData();
                     env.getLoadManager().replayCleanLabel(log);
@@ -921,7 +923,7 @@ public class EditLog {
                     env.getMTMVJobManager().replayCreateJob(job);
                     break;
                 }
-                case OperationType.OP_ALTER_MTMV_JOB: {
+                case OperationType.OP_CHANGE_MTMV_JOB: {
                     final ChangeMTMVJob changeJob = (ChangeMTMVJob) journal.getData();
                     env.getMTMVJobManager().replayUpdateJob(changeJob);
                     break;
@@ -936,7 +938,7 @@ public class EditLog {
                     env.getMTMVJobManager().replayCreateJobTask(task);
                     break;
                 }
-                case OperationType.OP_ALTER_MTMV_TASK: {
+                case OperationType.OP_CHANGE_MTMV_TASK: {
                     final ChangeMTMVTask changeTask = (ChangeMTMVTask) journal.getData();
                     env.getMTMVJobManager().replayUpdateTask(changeTask);
                     break;
@@ -944,6 +946,11 @@ public class EditLog {
                 case OperationType.OP_DROP_MTMV_TASK: {
                     final DropMTMVTask dropTask = (DropMTMVTask) journal.getData();
                     env.getMTMVJobManager().replayDropJobTasks(dropTask.getTaskIds());
+                    break;
+                }
+                case OperationType.OP_ALTER_MTMV_STMT: {
+                    final AlterMultiMaterializedView alterView = (AlterMultiMaterializedView) journal.getData();
+                    env.getAlterInstance().processAlterMaterializedView(alterView, true);
                     break;
                 }
                 case OperationType.OP_ALTER_USER: {
@@ -1006,8 +1013,40 @@ public class EditLog {
                     env.getCatalogMgr().replayRefreshExternalPartitions(log);
                     break;
                 }
+                case OperationType.OP_CREATE_WORKLOAD_GROUP: {
+                    final WorkloadGroup workloadGroup = (WorkloadGroup) journal.getData();
+                    env.getWorkloadGroupMgr().replayCreateWorkloadGroup(workloadGroup);
+                    break;
+                }
+                case OperationType.OP_DROP_WORKLOAD_GROUP: {
+                    final DropWorkloadGroupOperationLog operationLog =
+                            (DropWorkloadGroupOperationLog) journal.getData();
+                    env.getWorkloadGroupMgr().replayDropWorkloadGroup(operationLog);
+                    break;
+                }
+                case OperationType.OP_ALTER_WORKLOAD_GROUP: {
+                    final WorkloadGroup resource = (WorkloadGroup) journal.getData();
+                    env.getWorkloadGroupMgr().replayAlterWorkloadGroup(resource);
+                    break;
+                }
                 case OperationType.OP_INIT_EXTERNAL_TABLE: {
                     // Do nothing.
+                    break;
+                }
+                case OperationType.OP_CREATE_ANALYSIS_JOB: {
+                    env.getAnalysisManager().replayCreateAnalysisJob((AnalysisInfo) journal.getData());
+                    break;
+                }
+                case OperationType.OP_CREATE_ANALYSIS_TASK: {
+                    env.getAnalysisManager().replayCreateAnalysisTask((AnalysisInfo) journal.getData());
+                    break;
+                }
+                case OperationType.OP_DELETE_ANALYSIS_JOB: {
+                    env.getAnalysisManager().replayDeleteAnalysisJob((AnalyzeDeletionLog) journal.getData());
+                    break;
+                }
+                case OperationType.OP_DELETE_ANALYSIS_TASK: {
+                    env.getAnalysisManager().replayDeleteAnalysisTask((AnalyzeDeletionLog) journal.getData());
                     break;
                 }
                 default: {
@@ -1070,16 +1109,16 @@ public class EditLog {
     /**
      * Write an operation to the edit log. Do not sync to persistent store yet.
      */
-    private synchronized void logEdit(short op, Writable writable) {
+    private synchronized long logEdit(short op, Writable writable) {
         if (this.getNumEditStreams() == 0) {
             LOG.error("Fatal Error : no editLog stream", new Exception());
             throw new Error("Fatal Error : no editLog stream");
         }
 
         long start = System.currentTimeMillis();
-
+        long logId = -1;
         try {
-            journal.write(op, writable);
+            logId = journal.write(op, writable);
         } catch (Throwable t) {
             // Throwable contains all Exception and Error, such as IOException and
             // OutOfMemoryError
@@ -1096,6 +1135,7 @@ public class EditLog {
         totalTimeTransactions += (end - start);
         if (MetricRepo.isInit) {
             MetricRepo.HISTO_EDIT_LOG_WRITE_LATENCY.update((end - start));
+            MetricRepo.COUNTER_EDIT_LOG_CURRENT.increase(1L);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -1113,13 +1153,22 @@ public class EditLog {
         if (MetricRepo.isInit) {
             MetricRepo.COUNTER_EDIT_LOG_WRITE.increase(1L);
         }
+
+        return logId;
     }
 
     /**
      * Return the size of the current EditLog
      */
-    synchronized long getEditLogSize() throws IOException {
+    public synchronized long getEditLogSize() throws IOException {
         return editStream.length();
+    }
+
+    /**
+     * Return the number of the current EditLog
+     */
+    public synchronized long getEditLogNum() throws IOException {
+        return journal.getJournalNum();
     }
 
     public synchronized long getTxId() {
@@ -1163,7 +1212,9 @@ public class EditLog {
     }
 
     public void logAddPartition(PartitionPersistInfo info) {
-        logEdit(OperationType.OP_ADD_PARTITION, info);
+        long logId = logEdit(OperationType.OP_ADD_PARTITION, info);
+        AddPartitionRecord record = new AddPartitionRecord(logId, info);
+        Env.getCurrentEnv().getBinlogManager().addAddPartitionRecord(record);
     }
 
     public void logDropPartition(DropPartitionInfo info) {
@@ -1254,6 +1305,10 @@ public class EditLog {
         logEdit(OperationType.OP_ADD_FIRST_FRONTEND, fe);
     }
 
+    public void logModifyFrontend(Frontend fe) {
+        logEdit(OperationType.OP_MODIFY_FRONTEND, fe);
+    }
+
     public void logRemoveFrontend(Frontend fe) {
         logEdit(OperationType.OP_REMOVE_FRONTEND, fe);
     }
@@ -1332,10 +1387,6 @@ public class EditLog {
         logEdit(OperationType.OP_RENAME_DB, databaseInfo);
     }
 
-    public void logUpdateDatabase(DatabaseInfo databaseInfo) {
-        logEdit(OperationType.OP_UPDATE_DB, databaseInfo);
-    }
-
     public void logTableRename(TableInfo tableInfo) {
         logEdit(OperationType.OP_RENAME_TABLE, tableInfo);
     }
@@ -1356,30 +1407,6 @@ public class EditLog {
         logEdit(OperationType.OP_RENAME_COLUMN, info);
     }
 
-    public void logCreateCluster(Cluster cluster) {
-        logEdit(OperationType.OP_CREATE_CLUSTER, cluster);
-    }
-
-    public void logDropCluster(ClusterInfo info) {
-        logEdit(OperationType.OP_DROP_CLUSTER, info);
-    }
-
-    public void logExpandCluster(ClusterInfo ci) {
-        logEdit(OperationType.OP_EXPAND_CLUSTER, ci);
-    }
-
-    public void logLinkCluster(BaseParam param) {
-        logEdit(OperationType.OP_LINK_CLUSTER, param);
-    }
-
-    public void logMigrateCluster(BaseParam param) {
-        logEdit(OperationType.OP_MIGRATE_CLUSTER, param);
-    }
-
-    public void logDropLinkDb(DropLinkDbAndUpdateDbInfo info) {
-        logEdit(OperationType.OP_DROP_LINKDB, info);
-    }
-
     public void logAddBroker(BrokerMgr.ModifyBrokerInfo info) {
         logEdit(OperationType.OP_ADD_BROKER, info);
     }
@@ -1392,10 +1419,6 @@ public class EditLog {
         logEdit(OperationType.OP_DROP_ALL_BROKER, new Text(brokerName));
     }
 
-    public void logSetLoadErrorHub(LoadErrorHub.Param param) {
-        logEdit(OperationType.OP_SET_LOAD_ERROR_HUB, param);
-    }
-
     public void logExportCreate(ExportJob job) {
         logEdit(OperationType.OP_EXPORT_CREATE, job);
     }
@@ -1405,13 +1428,13 @@ public class EditLog {
         logEdit(OperationType.OP_EXPORT_UPDATE_STATE, transfer);
     }
 
-    public void logUpdateClusterAndBackendState(BackendIdsUpdateInfo info) {
-        logEdit(OperationType.OP_UPDATE_CLUSTER_AND_BACKENDS, info);
-    }
-
     // for TransactionState
     public void logInsertTransactionState(TransactionState transactionState) {
-        logEdit(OperationType.OP_UPSERT_TRANSACTION_STATE, transactionState);
+        long logId = logEdit(OperationType.OP_UPSERT_TRANSACTION_STATE, transactionState);
+        if (transactionState.getTransactionStatus() == TransactionStatus.VISIBLE) {
+            UpsertRecord record = new UpsertRecord(logId, transactionState);
+            Env.getCurrentEnv().getBinlogManager().addUpsertRecord(record);
+        }
     }
 
     public void logBackupJob(BackupJob job) {
@@ -1470,8 +1493,16 @@ public class EditLog {
         logEdit(OperationType.OP_ADD_FUNCTION, function);
     }
 
+    public void logAddGlobalFunction(Function function) {
+        logEdit(OperationType.OP_ADD_GLOBAL_FUNCTION, function);
+    }
+
     public void logDropFunction(FunctionSearchDesc function) {
         logEdit(OperationType.OP_DROP_FUNCTION, function);
+    }
+
+    public void logDropGlobalFunction(FunctionSearchDesc function) {
+        logEdit(OperationType.OP_DROP_GLOBAL_FUNCTION, function);
     }
 
     public void logAddEncryptKey(EncryptKey encryptKey) {
@@ -1539,6 +1570,18 @@ public class EditLog {
         logEdit(OperationType.OP_ALTER_RESOURCE, resource);
     }
 
+    public void logAlterWorkloadGroup(WorkloadGroup workloadGroup) {
+        logEdit(OperationType.OP_ALTER_WORKLOAD_GROUP, workloadGroup);
+    }
+
+    public void logCreateWorkloadGroup(WorkloadGroup workloadGroup) {
+        logEdit(OperationType.OP_CREATE_WORKLOAD_GROUP, workloadGroup);
+    }
+
+    public void logDropWorkloadGroup(DropWorkloadGroupOperationLog operationLog) {
+        logEdit(OperationType.OP_DROP_WORKLOAD_GROUP, operationLog);
+    }
+
     public void logAlterStoragePolicy(StoragePolicy storagePolicy) {
         logEdit(OperationType.OP_ALTER_STORAGE_POLICY, storagePolicy);
     }
@@ -1553,6 +1596,14 @@ public class EditLog {
 
     public void logAlterJob(AlterJobV2 alterJob) {
         logEdit(OperationType.OP_ALTER_JOB_V2, alterJob);
+    }
+
+    public void logUpdateCooldownConf(CooldownConfList cooldownConf) {
+        logEdit(OperationType.OP_UPDATE_COOLDOWN_CONF, cooldownConf);
+    }
+
+    public void logCooldownDelete(CooldownDelete cooldownDelete) {
+        logEdit(OperationType.OP_COOLDOWN_DELETE, cooldownDelete);
     }
 
     public void logBatchAlterJob(BatchAlterJobPersistInfo batchAlterJobV2) {
@@ -1591,7 +1642,15 @@ public class EditLog {
     public void logModifyTTLSeconds(ModifyTablePropertyOperationLog info) {
         logEdit(OperationType.OP_MODIFY_TTL_SECONDS, info);
     }
+
     // SELECTDB_CODE_END
+    public void logUpdateBinlogConfig(ModifyTablePropertyOperationLog info) {
+        logEdit(OperationType.OP_UPDATE_BINLOG_CONFIG, info);
+    }
+
+    public void logAlterLightSchemaChange(AlterLightSchemaChangeInfo info) {
+        logEdit(OperationType.OP_ALTER_LIGHT_SCHEMA_CHANGE, info);
+    }
 
     public void logReplaceTempPartition(ReplacePartitionOperationLog info) {
         logEdit(OperationType.OP_REPLACE_TEMP_PARTITION, info);
@@ -1625,8 +1684,8 @@ public class EditLog {
         logEdit(OperationType.OP_REPLACE_TABLE, log);
     }
 
-    public void logBatchRemoveTransactions(BatchRemoveTransactionsOperation op) {
-        logEdit(OperationType.OP_BATCH_REMOVE_TXNS, op);
+    public void logBatchRemoveTransactions(BatchRemoveTransactionsOperationV2 op) {
+        logEdit(OperationType.OP_BATCH_REMOVE_TXNS_V2, op);
     }
 
     public void logModifyComment(ModifyCommentOperationLog op) {
@@ -1661,27 +1720,27 @@ public class EditLog {
         logEdit(id, log);
     }
 
-    public void logCreateScheduleJob(MTMVJob job) {
+    public void logCreateMTMVJob(MTMVJob job) {
         logEdit(OperationType.OP_CREATE_MTMV_JOB, job);
     }
 
-    public void logDropScheduleJob(List<Long> jobIds) {
+    public void logDropMTMVJob(List<Long> jobIds) {
         logEdit(OperationType.OP_DROP_MTMV_JOB, new DropMTMVJob(jobIds));
     }
 
-    public void logChangeScheduleJob(ChangeMTMVJob changeJob) {
-        logEdit(OperationType.OP_ALTER_MTMV_JOB, changeJob);
+    public void logChangeMTMVJob(ChangeMTMVJob changeJob) {
+        logEdit(OperationType.OP_CHANGE_MTMV_JOB, changeJob);
     }
 
-    public void logCreateScheduleTask(MTMVTask task) {
+    public void logCreateMTMVTask(MTMVTask task) {
         logEdit(OperationType.OP_CREATE_MTMV_TASK, task);
     }
 
-    public void logAlterScheduleTask(ChangeMTMVTask changeTaskRecord) {
-        logEdit(OperationType.OP_ALTER_MTMV_TASK, changeTaskRecord);
+    public void logChangeMTMVTask(ChangeMTMVTask changeTaskRecord) {
+        logEdit(OperationType.OP_CHANGE_MTMV_TASK, changeTaskRecord);
     }
 
-    public void logAlterScheduleTask(List<String> taskIds) {
+    public void logDropMTMVTasks(List<String> taskIds) {
         logEdit(OperationType.OP_DROP_MTMV_TASK, new DropMTMVTask(taskIds));
     }
 
@@ -1737,11 +1796,43 @@ public class EditLog {
         logEdit(OperationType.OP_MODIFY_TABLE_LIGHT_SCHEMA_CHANGE, info);
     }
 
+    public void logModifyTableAddOrDropInvertedIndices(TableAddOrDropInvertedIndicesInfo info) {
+        logEdit(OperationType.OP_MODIFY_TABLE_ADD_OR_DROP_INVERTED_INDICES, info);
+    }
+
+    public void logIndexChangeJob(IndexChangeJob indexChangeJob) {
+        logEdit(OperationType.OP_INVERTED_INDEX_JOB, indexChangeJob);
+    }
+
     public void logCleanLabel(CleanLabelOperationLog log) {
         logEdit(OperationType.OP_CLEAN_LABEL, log);
     }
 
     public void logAlterUser(AlterUserOperationLog log) {
         logEdit(OperationType.OP_ALTER_USER, log);
+    }
+
+    public void logAlterMTMV(AlterMultiMaterializedView log) {
+        logEdit(OperationType.OP_ALTER_MTMV_STMT, log);
+    }
+
+    public void logCleanQueryStats(CleanQueryStatsInfo log) {
+        logEdit(OperationType.OP_CLEAN_QUERY_STATS, log);
+    }
+
+    public void logCreateAnalysisTasks(AnalysisInfo log) {
+        logEdit(OperationType.OP_CREATE_ANALYSIS_TASK, log);
+    }
+
+    public void logCreateAnalysisJob(AnalysisInfo log) {
+        logEdit(OperationType.OP_CREATE_ANALYSIS_JOB, log);
+    }
+
+    public void logDeleteAnalysisJob(AnalyzeDeletionLog log) {
+        logEdit(OperationType.OP_DELETE_ANALYSIS_JOB, log);
+    }
+
+    public void logDeleteAnalysisTask(AnalyzeDeletionLog log) {
+        logEdit(OperationType.OP_DELETE_ANALYSIS_TASK, log);
     }
 }

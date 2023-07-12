@@ -97,7 +97,7 @@ public class UseCloudClusterStmt extends StatementBase {
             return;
         }
         database = ClusterNamespace.getFullName(getClusterName(), database);
-        if (!Env.getCurrentEnv().getAuth().checkDbPriv(ConnectContext.get(), database, PrivPredicate.SHOW)) {
+        if (!Env.getCurrentEnv().getAccessManager().checkDbPriv(ConnectContext.get(), database, PrivPredicate.SHOW)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_DBACCESS_DENIED_ERROR,
                     analyzer.getQualifiedUser(), database);
         }

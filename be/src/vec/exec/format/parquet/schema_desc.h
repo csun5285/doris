@@ -18,8 +18,12 @@
 #pragma once
 
 #include <gen_cpp/parquet_types.h>
+#include <stddef.h>
+#include <stdint.h>
 
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/status.h"
@@ -42,6 +46,7 @@ struct FieldSchema {
     int physical_column_index = -1;
     int16_t definition_level = 0;
     int16_t repetition_level = 0;
+    int16_t repeated_parent_def_level = 0;
     std::vector<FieldSchema> children;
 
     FieldSchema() = default;
@@ -81,7 +86,7 @@ private:
 
     TypeDescriptor convert_to_doris_type(tparquet::LogicalType logicalType);
 
-    TypeDescriptor convert_to_doris_type(tparquet::ConvertedType::type convertedType);
+    TypeDescriptor convert_to_doris_type(const tparquet::SchemaElement& physical_schema);
 
     TypeDescriptor get_doris_type(const tparquet::SchemaElement& physical_schema);
 
@@ -114,7 +119,7 @@ public:
 
     std::string debug_string() const;
 
-    int32_t size() const { return _fields.size(); };
+    int32_t size() const { return _fields.size(); }
 };
 
 } // namespace doris::vectorized

@@ -17,49 +17,60 @@
 
 #pragma once
 
+#include <gen_cpp/Types_types.h>
+#include <glog/logging.h>
+#include <google/protobuf/stubs/callback.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <list>
+#include <memory>
+#include <mutex>
+#include <ostream>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
+#include "common/config.h"
 #include "common/global_types.h"
 #include "common/object_pool.h"
 #include "common/status.h"
-#include "gen_cpp/Types_types.h"
 #include "runtime/descriptors.h"
-#include "runtime/query_fragments_ctx.h"
 #include "runtime/query_statistics.h"
 #include "util/runtime_profile.h"
-
-namespace google {
-namespace protobuf {
-class Closure;
-}
-} // namespace google
+#include "util/stopwatch.hpp"
+#include "vec/columns/column.h"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/core/materialize_block.h"
+#include "vec/exprs/vexpr_fwd.h"
 
 namespace doris {
 class MemTracker;
-class RuntimeProfile;
 class PBlock;
+class MemTrackerLimiter;
+class PQueryStatistics;
+class RuntimeState;
 
 namespace vectorized {
-class Block;
 class VDataStreamMgr;
 class VSortedRunMerger;
-class VExprContext;
 
 class VDataStreamRecvr {
 public:
     VDataStreamRecvr(VDataStreamMgr* stream_mgr, RuntimeState* state, const RowDescriptor& row_desc,
                      const TUniqueId& fragment_instance_id, PlanNodeId dest_node_id,
-                     int num_senders, bool is_merging, int total_buffer_limit,
-                     RuntimeProfile* profile,
+                     int num_senders, bool is_merging, RuntimeProfile* profile,
                      std::shared_ptr<QueryStatisticsRecvr> sub_plan_query_statistics_recvr);
 
-    ~VDataStreamRecvr();
+    virtual ~VDataStreamRecvr();
 
-    Status create_merger(const std::vector<VExprContext*>& ordering_expr,
+    Status create_merger(const VExprContextSPtrs& ordering_expr,
                          const std::vector<bool>& is_asc_order,
                          const std::vector<bool>& nulls_first, size_t batch_size, int64_t limit,
                          size_t offset);
@@ -68,6 +79,10 @@ public:
                    ::google::protobuf::Closure** done);
 
     void add_block(Block* block, int sender_id, bool use_move);
+
+    bool sender_queue_empty(int sender_id);
+
+    bool ready_to_read();
 
     Status get_next(Block* block, bool* eos);
 
@@ -87,13 +102,18 @@ public:
 
     void close();
 
+    bool exceeds_limit(int batch_size) {
+        return _blocks_memory_usage->current_value() + batch_size >
+               config::exchg_node_buffer_size_bytes;
+    }
+
+    bool is_closed() const { return _is_closed; }
+
 private:
     class SenderQueue;
-    friend struct ReceiveQueueSortCursorImpl;
+    class PipSenderQueue;
 
-    bool exceeds_limit(int batch_size) {
-        return _num_buffered_bytes + batch_size > _total_buffer_limit;
-    }
+    friend struct BlockSupplierSortCursorImpl;
 
     // DataStreamMgr instance used to create this recvr. (Not owned)
     VDataStreamMgr* _mgr;
@@ -107,11 +127,6 @@ private:
     TUniqueId _fragment_instance_id;
     PlanNodeId _dest_node_id;
 
-    // soft upper limit on the total amount of buffering allowed for this stream across
-    // all sender queues. we stop acking incoming data once the amount of buffered data
-    // exceeds this value
-    int _total_buffer_limit;
-
     // Row schema, copied from the caller of CreateRecvr().
     RowDescriptor _row_desc;
 
@@ -120,8 +135,8 @@ private:
     bool _is_merging;
     bool _is_closed;
 
-    std::atomic<int> _num_buffered_bytes;
     std::unique_ptr<MemTracker> _mem_tracker;
+    // Managed by object pool
     std::vector<SenderQueue*> _sender_queues;
 
     std::unique_ptr<VSortedRunMerger> _merger;
@@ -130,19 +145,23 @@ private:
     RuntimeProfile* _profile;
 
     RuntimeProfile::Counter* _bytes_received_counter;
+    RuntimeProfile::Counter* _local_bytes_received_counter;
     RuntimeProfile::Counter* _deserialize_row_batch_timer;
     RuntimeProfile::Counter* _first_batch_wait_total_timer;
     RuntimeProfile::Counter* _buffer_full_total_timer;
     RuntimeProfile::Counter* _data_arrival_timer;
     RuntimeProfile::Counter* _decompress_timer;
     RuntimeProfile::Counter* _decompress_bytes;
+    RuntimeProfile::HighWaterMarkCounter* _blocks_memory_usage;
 
     std::shared_ptr<QueryStatisticsRecvr> _sub_plan_query_statistics_recvr;
+
+    bool _enable_pipeline;
 };
 
 class ThreadClosure : public google::protobuf::Closure {
 public:
-    void Run() { _cv.notify_one(); }
+    void Run() override { _cv.notify_one(); }
     void wait(std::unique_lock<std::mutex>& lock) { _cv.wait(lock); }
 
 private:
@@ -153,14 +172,16 @@ class VDataStreamRecvr::SenderQueue {
 public:
     SenderQueue(VDataStreamRecvr* parent_recvr, int num_senders, RuntimeProfile* profile);
 
-    ~SenderQueue();
+    virtual ~SenderQueue();
 
-    Status get_batch(Block** next_block);
+    virtual bool should_wait();
+
+    virtual Status get_batch(Block* next_block, bool* eos);
 
     void add_block(const PBlock& pblock, int be_number, int64_t packet_seq,
                    ::google::protobuf::Closure** done);
 
-    void add_block(Block* block, bool use_move);
+    virtual void add_block(Block* block, bool use_move);
 
     void decrement_senders(int sender_id);
 
@@ -168,20 +189,22 @@ public:
 
     void close();
 
-    Block* current_block() const { return _current_block.get(); }
+    bool queue_empty() {
+        std::unique_lock<std::mutex> l(_lock);
+        return _block_queue.empty();
+    }
 
-private:
+protected:
+    Status _inner_get_batch_without_lock(Block* block, bool* eos);
+
+    // Not managed by this class
     VDataStreamRecvr* _recvr;
     std::mutex _lock;
     bool _is_cancelled;
     int _num_remaining_senders;
     std::condition_variable _data_arrival_cv;
     std::condition_variable _data_removal_cv;
-
-    using VecBlockQueue = std::list<std::pair<int, Block*>>;
-    VecBlockQueue _block_queue;
-
-    std::unique_ptr<Block> _current_block;
+    std::list<std::pair<BlockUPtr, size_t>> _block_queue;
 
     bool _received_first_batch;
     // sender_id
@@ -190,6 +213,56 @@ private:
     std::unordered_map<int, int64_t> _packet_seq_map;
     std::deque<std::pair<google::protobuf::Closure*, MonotonicStopWatch>> _pending_closures;
     std::unordered_map<std::thread::id, std::unique_ptr<ThreadClosure>> _local_closure;
+};
+
+class VDataStreamRecvr::PipSenderQueue : public SenderQueue {
+public:
+    PipSenderQueue(VDataStreamRecvr* parent_recvr, int num_senders, RuntimeProfile* profile)
+            : SenderQueue(parent_recvr, num_senders, profile) {}
+
+    Status get_batch(Block* block, bool* eos) override {
+        std::lock_guard<std::mutex> l(_lock); // protect _block_queue
+        DCHECK(_is_cancelled || !_block_queue.empty() || _num_remaining_senders == 0)
+                << " _is_cancelled: " << _is_cancelled
+                << ", _block_queue_empty: " << _block_queue.empty()
+                << ", _num_remaining_senders: " << _num_remaining_senders;
+        return _inner_get_batch_without_lock(block, eos);
+    }
+
+    void add_block(Block* block, bool use_move) override {
+        if (block->rows() == 0) return;
+        {
+            std::unique_lock<std::mutex> l(_lock);
+            if (_is_cancelled) {
+                return;
+            }
+        }
+        BlockUPtr nblock = Block::create_unique(block->get_columns_with_type_and_name());
+
+        // local exchange should copy the block contented if use move == false
+        if (use_move) {
+            block->clear();
+        } else {
+            auto rows = block->rows();
+            for (int i = 0; i < nblock->columns(); ++i) {
+                nblock->get_by_position(i).column =
+                        nblock->get_by_position(i).column->clone_resized(rows);
+            }
+        }
+        materialize_block_inplace(*nblock);
+
+        auto block_mem_size = nblock->allocated_bytes();
+        {
+            std::unique_lock<std::mutex> l(_lock);
+            if (_is_cancelled) {
+                return;
+            }
+            _block_queue.emplace_back(std::move(nblock), block_mem_size);
+            COUNTER_UPDATE(_recvr->_local_bytes_received_counter, block_mem_size);
+            _recvr->_blocks_memory_usage->add(block_mem_size);
+            _data_arrival_cv.notify_one();
+        }
+    }
 };
 } // namespace vectorized
 } // namespace doris

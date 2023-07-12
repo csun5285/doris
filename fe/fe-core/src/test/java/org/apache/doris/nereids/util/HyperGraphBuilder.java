@@ -17,13 +17,11 @@
 
 package org.apache.doris.nereids.util;
 
-import org.apache.doris.common.Id;
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.cascades.DeriveStatsJob;
 import org.apache.doris.nereids.jobs.joinorder.JoinOrderJob;
 import org.apache.doris.nereids.jobs.joinorder.hypergraph.HyperGraph;
-import org.apache.doris.nereids.jobs.joinorder.hypergraph.bitmap.Bitmap;
 import org.apache.doris.nereids.memo.Group;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.Expression;
@@ -34,7 +32,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOlapScan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.statistics.ColumnStatistic;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.statistics.Statistics;
 
 import com.google.common.base.Preconditions;
 
@@ -47,9 +45,9 @@ import java.util.Optional;
 import java.util.Set;
 
 public class HyperGraphBuilder {
-    private List<Integer> rowCounts = new ArrayList<>();
-    private HashMap<BitSet, LogicalPlan> plans = new HashMap<>();
-    private HashMap<BitSet, List<Integer>> schemas = new HashMap<>();
+    private final List<Integer> rowCounts = new ArrayList<>();
+    private final HashMap<BitSet, LogicalPlan> plans = new HashMap<>();
+    private final HashMap<BitSet, List<Integer>> schemas = new HashMap<>();
 
     public HyperGraph build() {
         assert plans.size() == 1 : "there are cross join";
@@ -118,9 +116,13 @@ public class HyperGraphBuilder {
         Preconditions.checkArgument(node2 >= 0 && node1 < rowCounts.size(),
                 String.format("%d must in [%d, %d)", node1, 0, rowCounts.size()));
 
-        BitSet leftBitmap = Bitmap.newBitmap(node1);
-        BitSet rightBitmap = Bitmap.newBitmap(node2);
-        BitSet fullBitmap = Bitmap.newBitmapUnion(leftBitmap, rightBitmap);
+        BitSet leftBitmap = new BitSet();
+        leftBitmap.set(node1);
+        BitSet rightBitmap = new BitSet();
+        rightBitmap.set(node2);
+        BitSet fullBitmap = new BitSet();
+        fullBitmap.or(leftBitmap);
+        fullBitmap.or(rightBitmap);
         Optional<BitSet> fullKey = findPlan(fullBitmap);
         if (!fullKey.isPresent()) {
             Optional<BitSet> leftKey = findPlan(leftBitmap);
@@ -182,15 +184,16 @@ public class HyperGraphBuilder {
     }
 
     private void injectRowcount(Group group) {
-        if (!group.isJoinGroup()) {
+        if (!group.isInnerJoinGroup()) {
             LogicalOlapScan scanPlan = (LogicalOlapScan) group.getLogicalExpression().getPlan();
-            HashMap<Id, ColumnStatistic> slotIdToColumnStats = new HashMap<Id, ColumnStatistic>();
+            HashMap<Expression, ColumnStatistic> slotIdToColumnStats = new HashMap<Expression, ColumnStatistic>();
             int count = rowCounts.get(Integer.parseInt(scanPlan.getTable().getName()));
             for (Slot slot : scanPlan.getOutput()) {
-                slotIdToColumnStats.put(slot.getExprId(),
-                        new ColumnStatistic(count, count, 0, 0, 0, 0, 0, 0, null, null));
+                slotIdToColumnStats.put(slot,
+                        new ColumnStatistic(count, count, null, 0, 0, 0, 0,
+                                0, 0, null, null, true, null));
             }
-            StatsDeriveResult stats = new StatsDeriveResult(count, slotIdToColumnStats);
+            Statistics stats = new Statistics(count, slotIdToColumnStats);
             group.setStatistics(stats);
             return;
         }
@@ -212,9 +215,9 @@ public class HyperGraphBuilder {
         List<Expression> conditions = new ArrayList<>(join.getExpressions());
         Set<Slot> inputs = condition.getInputSlots();
         if (leftSlots.containsAll(inputs)) {
-            left = (LogicalJoin) attachCondition(condition, (LogicalJoin) left);
+            left = attachCondition(condition, (LogicalJoin) left);
         } else if (rightSlots.containsAll(inputs)) {
-            right = (LogicalJoin) attachCondition(condition, (LogicalJoin) right);
+            right = attachCondition(condition, (LogicalJoin) right);
         } else {
             conditions.add(condition);
         }

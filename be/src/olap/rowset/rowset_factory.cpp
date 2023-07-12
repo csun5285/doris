@@ -17,20 +17,24 @@
 
 #include "olap/rowset/rowset_factory.h"
 
+#include <gen_cpp/olap_file.pb.h>
+
 #include <memory>
 
 #include "beta_rowset.h"
-#include "gen_cpp/olap_file.pb.h"
+#include "io/fs/file_writer.h" // IWYU pragma: keep
 #include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/vertical_beta_rowset_writer.h"
 #include "olap/rowset/rowset_writer.h"
+#include "olap/rowset/rowset_writer_context.h"
 #include "olap/rowset/vertical_beta_rowset_writer.h"
 
 namespace doris {
 using namespace ErrorCode;
 
-Status RowsetFactory::create_rowset(TabletSchemaSPtr schema, const std::string& tablet_path,
-                                    RowsetMetaSharedPtr rowset_meta, RowsetSharedPtr* rowset) {
+Status RowsetFactory::create_rowset(const TabletSchemaSPtr& schema, const std::string& tablet_path,
+                                    const RowsetMetaSharedPtr& rowset_meta,
+                                    RowsetSharedPtr* rowset) {
     if (rowset_meta->rowset_type() == ALPHA_ROWSET) {
         return Status::Error<ROWSET_INVALID>();
     }

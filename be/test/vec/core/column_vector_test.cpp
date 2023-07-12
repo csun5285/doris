@@ -24,6 +24,12 @@
 #include <string>
 
 #include "vec/data_types/data_type_date.h"
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-test-part.h>
+
+#include <string>
+
+#include "gtest/gtest_pred_impl.h"
 
 namespace doris::vectorized {
 

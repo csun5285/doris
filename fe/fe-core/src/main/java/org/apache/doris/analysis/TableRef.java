@@ -161,12 +161,12 @@ public class TableRef implements ParseNode, Writable {
      * This method construct TableRef.
      */
     public TableRef(TableName name, String alias, PartitionNames partitionNames, ArrayList<Long> sampleTabletIds,
-            TableSample tableSample, ArrayList<String> commonHints) {
+                    TableSample tableSample, ArrayList<String> commonHints) {
         this(name, alias, partitionNames, sampleTabletIds, tableSample, commonHints, null);
     }
 
     public TableRef(TableName name, String alias, PartitionNames partitionNames, ArrayList<Long> sampleTabletIds,
-            TableSample tableSample, ArrayList<String> commonHints, TableSnapshot tableSnapshot) {
+                    TableSample tableSample, ArrayList<String> commonHints, TableSnapshot tableSnapshot) {
         this.name = name;
         if (alias != null) {
             if (Env.isStoredTableNamesLowerCase()) {

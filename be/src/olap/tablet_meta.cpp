@@ -17,17 +17,29 @@
 
 #include "olap/tablet_meta.h"
 
-#include <sstream>
+#include <gen_cpp/Descriptors_types.h>
+#include <gen_cpp/Types_types.h>
+#include <gen_cpp/olap_common.pb.h>
+#include <gen_cpp/olap_file.pb.h>
+#include <gen_cpp/segment_v2.pb.h>
+#include <gen_cpp/types.pb.h>
+#include <json2pb/pb_to_json.h>
+#include <time.h>
 
-#include "common/consts.h"
-#include "olap/file_helper.h"
+#include <set>
+#include <utility>
+
+#include "common/config.h"
+#include "io/fs/file_writer.h"
+#include "olap/data_dir.h"
+#include "olap/file_header.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta_manager.h"
+#include "olap/utils.h"
 #include "util/string_util.h"
 #include "util/uid_util.h"
-#include "util/url_coding.h"
 
 using std::string;
 using std::unordered_map;
@@ -40,16 +52,21 @@ Status TabletMeta::create(const TCreateTabletReq& request, const TabletUid& tabl
                           uint64_t shard_id, uint32_t next_unique_id,
                           const unordered_map<uint32_t, uint32_t>& col_ordinal_to_unique_id,
                           TabletMetaSharedPtr* tablet_meta) {
-    tablet_meta->reset(new TabletMeta(
+    std::optional<TBinlogConfig> binlog_config;
+    if (request.__isset.binlog_config) {
+        binlog_config = request.binlog_config;
+    }
+    *tablet_meta = std::make_shared<TabletMeta>(
             request.table_id, request.partition_id, request.tablet_id, request.replica_id,
             request.tablet_schema.schema_hash, shard_id, request.tablet_schema, next_unique_id,
             col_ordinal_to_unique_id, tablet_uid,
             request.__isset.tablet_type ? request.tablet_type : TTabletType::TABLET_TYPE_DISK,
             request.compression_type, request.is_in_memory, request.is_persistent,
-            request.storage_policy,
+            request.storage_policy_id,
             request.__isset.enable_unique_key_merge_on_write
                     ? request.enable_unique_key_merge_on_write
-                    : false));
+                    : false,
+            std::move(binlog_config));
     return Status::OK();
 }
 
@@ -64,8 +81,9 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
                        const std::unordered_map<uint32_t, uint32_t>& col_ordinal_to_unique_id,
                        TabletUid tablet_uid, TTabletType::type tabletType,
                        TCompressionType::type compression_type, bool is_in_memory,
-                       bool is_persistent, const std::string& storage_policy,
-                       bool enable_unique_key_merge_on_write)
+                       bool is_persistent, int64_t storage_policy_id,
+                       bool enable_unique_key_merge_on_write,
+                       std::optional<TBinlogConfig> binlog_config)
         : _tablet_uid(0, 0),
           _schema(new TabletSchema),
           _delete_bitmap(new DeleteBitmap(tablet_id)) {
@@ -85,9 +103,9 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
                                            ? TabletTypePB::TABLET_TYPE_DISK
                                            : TabletTypePB::TABLET_TYPE_MEMORY);
     tablet_meta_pb.set_enable_unique_key_merge_on_write(enable_unique_key_merge_on_write);
-    tablet_meta_pb.set_storage_policy(storage_policy);
     tablet_meta_pb.set_is_in_memory(is_in_memory);
     tablet_meta_pb.set_is_persistent(is_persistent);
+    tablet_meta_pb.set_storage_policy_id(storage_policy_id);
     TabletSchemaPB* schema = tablet_meta_pb.mutable_schema();
     schema->set_num_short_key_columns(tablet_schema.short_key_column_count);
     schema->set_num_rows_per_row_block(config::default_num_rows_per_column_file_block);
@@ -112,25 +130,25 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
     // compression_type used to compress segment page
     switch (compression_type) {
     case TCompressionType::NO_COMPRESSION:
-        schema->set_compression_type(NO_COMPRESSION);
+        schema->set_compression_type(segment_v2::NO_COMPRESSION);
         break;
     case TCompressionType::SNAPPY:
-        schema->set_compression_type(SNAPPY);
+        schema->set_compression_type(segment_v2::SNAPPY);
         break;
     case TCompressionType::LZ4:
-        schema->set_compression_type(LZ4);
+        schema->set_compression_type(segment_v2::LZ4);
         break;
     case TCompressionType::LZ4F:
-        schema->set_compression_type(LZ4F);
+        schema->set_compression_type(segment_v2::LZ4F);
         break;
     case TCompressionType::ZLIB:
-        schema->set_compression_type(ZLIB);
+        schema->set_compression_type(segment_v2::ZLIB);
         break;
     case TCompressionType::ZSTD:
-        schema->set_compression_type(ZSTD);
+        schema->set_compression_type(segment_v2::ZSTD);
         break;
     default:
-        schema->set_compression_type(LZ4F);
+        schema->set_compression_type(segment_v2::LZ4F);
         break;
     }
 
@@ -170,6 +188,13 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
                         column->set_has_bitmap_index(true);
                         break;
                     }
+                } else if (index.index_type == TIndexType::type::BLOOMFILTER ||
+                           index.index_type == TIndexType::type::NGRAM_BF) {
+                    DCHECK_EQ(index.columns.size(), 1);
+                    if (iequal(tcolumn.column_name, index.columns[0])) {
+                        column->set_is_bf_column(true);
+                        break;
+                    }
                 }
             }
         }
@@ -200,7 +225,11 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
             case TIndexType::BLOOMFILTER:
                 index_pb->set_index_type(IndexType::BLOOMFILTER);
                 break;
+            case TIndexType::NGRAM_BF:
+                index_pb->set_index_type(IndexType::NGRAM_BF);
+                break;
             }
+
             if (index.__isset.properties) {
                 auto properties = index_pb->mutable_properties();
                 for (auto kv : index.properties) {
@@ -222,11 +251,33 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
         schema->set_is_dynamic_schema(tablet_schema.is_dynamic_schema);
     }
 
+    if (tablet_schema.__isset.enable_single_replica_compaction) {
+        schema->set_enable_single_replica_compaction(
+                tablet_schema.enable_single_replica_compaction);
+    }
+
+    if (tablet_schema.__isset.is_dynamic_schema) {
+        schema->set_is_dynamic_schema(tablet_schema.is_dynamic_schema);
+    }
+
     if (tablet_schema.__isset.delete_sign_idx) {
         schema->set_delete_sign_idx(tablet_schema.delete_sign_idx);
     }
+    if (tablet_schema.__isset.store_row_column) {
+        schema->set_store_row_column(tablet_schema.store_row_column);
+    }
+    if (tablet_schema.__isset.skip_write_index_on_load) {
+        schema->set_skip_write_index_on_load(tablet_schema.skip_write_index_on_load);
+    }
+
+    if (binlog_config.has_value()) {
+        BinlogConfig tmp_binlog_config;
+        tmp_binlog_config = binlog_config.value();
+        tmp_binlog_config.to_pb(tablet_meta_pb.mutable_binlog_config());
+    }
 
     init_from_pb(tablet_meta_pb);
+    LOG(INFO) << "init tablet meta from pb: " << tablet_meta_pb.ShortDebugString();
 }
 
 TabletMeta::TabletMeta(const TabletMeta& b)
@@ -234,6 +285,7 @@ TabletMeta::TabletMeta(const TabletMeta& b)
           _index_id(b._index_id),
           _partition_id(b._partition_id),
           _tablet_id(b._tablet_id),
+          _replica_id(b._replica_id),
           _schema_hash(b._schema_hash),
           _shard_id(b._shard_id),
           _creation_time(b._creation_time),
@@ -246,12 +298,14 @@ TabletMeta::TabletMeta(const TabletMeta& b)
           _stale_rs_metas(b._stale_rs_metas),
           _in_restore_mode(b._in_restore_mode),
           _preferred_rowset_type(b._preferred_rowset_type),
-          _storage_policy(b._storage_policy),
+          _storage_policy_id(b._storage_policy_id),
+          _cooldown_meta_id(b._cooldown_meta_id),
           _enable_unique_key_merge_on_write(b._enable_unique_key_merge_on_write),
           _delete_bitmap(b._delete_bitmap),
           _is_in_memory(b._is_in_memory),
           _is_persistent(b._is_persistent),
-          _table_name(b._table_name) {};
+          _table_name(b._table_name),
+          _binlog_config(b._binlog_config) {}
 
 void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tcolumn,
                                           ColumnPB* column) {
@@ -268,6 +322,11 @@ void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tco
     column->set_index_length(length);
     column->set_precision(tcolumn.column_type.precision);
     column->set_frac(tcolumn.column_type.scale);
+
+    if (tcolumn.__isset.result_is_nullable) {
+        column->set_result_is_nullable(tcolumn.result_is_nullable);
+    }
+
     if (tcolumn.column_type.type == TPrimitiveType::VARCHAR ||
         tcolumn.column_type.type == TPrimitiveType::STRING) {
         if (!tcolumn.column_type.__isset.index_len) {
@@ -278,9 +337,13 @@ void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tco
     }
     if (!tcolumn.is_key) {
         column->set_is_key(false);
-        string aggregation_type;
-        EnumToString(TAggregationType, tcolumn.aggregation_type, aggregation_type);
-        column->set_aggregation(aggregation_type);
+        if (tcolumn.__isset.aggregation) {
+            column->set_aggregation(tcolumn.aggregation);
+        } else {
+            string aggregation_type;
+            EnumToString(TAggregationType, tcolumn.aggregation_type, aggregation_type);
+            column->set_aggregation(aggregation_type);
+        }
     } else {
         column->set_is_key(true);
         column->set_aggregation("NONE");
@@ -292,27 +355,16 @@ void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tco
     if (tcolumn.__isset.is_bloom_filter_column) {
         column->set_is_bf_column(tcolumn.is_bloom_filter_column);
     }
-    if (tcolumn.column_type.type == TPrimitiveType::ARRAY) {
+    for (size_t i = 0; i < tcolumn.children_column.size(); i++) {
         ColumnPB* children_column = column->add_children_columns();
-        init_column_from_tcolumn(0, tcolumn.children_column[0], children_column);
+        init_column_from_tcolumn(i, tcolumn.children_column[i], children_column);
     }
 }
 
 Status TabletMeta::create_from_file(const string& file_path) {
-    FileHeader<TabletMetaPB> file_header;
-    FileHandler file_handler;
-
-    if (file_handler.open(file_path, O_RDONLY) != Status::OK()) {
-        LOG(WARNING) << "fail to open ordinal file. file=" << file_path;
-        return Status::Error<IO_ERROR>();
-    }
-
-    // In file_header.unserialize(), it validates file length, signature, checksum of protobuf.
-    if (file_header.unserialize(&file_handler) != Status::OK()) {
-        LOG(WARNING) << "fail to unserialize tablet_meta. file='" << file_path;
-        return Status::Error<PARSE_PROTOBUF_ERROR>();
-    }
-
+    FileHeader<TabletMetaPB> file_header(file_path);
+    // In file_header.deserialize(), it validates file length, signature, checksum of protobuf.
+    RETURN_IF_ERROR(file_header.deserialize());
     TabletMetaPB tablet_meta_pb;
     try {
         tablet_meta_pb.CopyFrom(file_header.message());
@@ -323,26 +375,6 @@ Status TabletMeta::create_from_file(const string& file_path) {
 
     init_from_pb(tablet_meta_pb);
     return Status::OK();
-}
-
-Status TabletMeta::reset_tablet_uid(const string& header_file) {
-    Status res = Status::OK();
-    TabletMeta tmp_tablet_meta;
-    if ((res = tmp_tablet_meta.create_from_file(header_file)) != Status::OK()) {
-        LOG(WARNING) << "fail to load tablet meta from file"
-                     << ", meta_file=" << header_file;
-        return res;
-    }
-    TabletMetaPB tmp_tablet_meta_pb;
-    tmp_tablet_meta.to_meta_pb(&tmp_tablet_meta_pb);
-    *(tmp_tablet_meta_pb.mutable_tablet_uid()) = TabletUid::gen_uid().to_proto();
-    res = save(header_file, tmp_tablet_meta_pb);
-    if (!res.ok()) {
-        LOG(FATAL) << "fail to save tablet meta pb to "
-                   << " meta_file=" << header_file;
-        return res;
-    }
-    return res;
 }
 
 std::string TabletMeta::construct_header_file_path(const string& schema_hash_path,
@@ -374,28 +406,15 @@ Status TabletMeta::save(const string& file_path) {
 
 Status TabletMeta::save(const string& file_path, const TabletMetaPB& tablet_meta_pb) {
     DCHECK(!file_path.empty());
-
-    FileHeader<TabletMetaPB> file_header;
-    FileHandler file_handler;
-
-    if (!file_handler.open_with_mode(file_path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR)) {
-        LOG(WARNING) << "fail to open header file. file='" << file_path;
-        return Status::Error<IO_ERROR>();
-    }
-
+    FileHeader<TabletMetaPB> file_header(file_path);
     try {
         file_header.mutable_message()->CopyFrom(tablet_meta_pb);
     } catch (...) {
         LOG(WARNING) << "fail to copy protocol buffer object. file='" << file_path;
         return Status::Error<ErrorCode::INTERNAL_ERROR>();
     }
-
-    if (file_header.prepare(&file_handler) != Status::OK() ||
-        file_header.serialize(&file_handler) != Status::OK()) {
-        LOG(WARNING) << "fail to serialize to file header. file='" << file_path;
-        return Status::Error<SERIALIZE_PROTOBUF_ERROR>();
-    }
-
+    RETURN_IF_ERROR(file_header.prepare());
+    RETURN_IF_ERROR(file_header.serialize());
     return Status::OK();
 }
 
@@ -411,7 +430,7 @@ Status TabletMeta::_save_meta(DataDir* data_dir) {
                    << " tablet=" << full_name() << " _tablet_uid=" << _tablet_uid.to_string();
     }
     string meta_binary;
-    RETURN_NOT_OK(serialize(&meta_binary));
+    RETURN_IF_ERROR(serialize(&meta_binary));
     Status status = TabletMetaManager::save(data_dir, tablet_id(), schema_hash(), meta_binary);
     if (!status.ok()) {
         LOG(FATAL) << "fail to save tablet_meta. status=" << status << ", tablet_id=" << tablet_id()
@@ -523,7 +542,11 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
         _preferred_rowset_type = tablet_meta_pb.preferred_rowset_type();
     }
 
-    _storage_policy = tablet_meta_pb.storage_policy();
+    _storage_policy_id = tablet_meta_pb.storage_policy_id();
+    if (tablet_meta_pb.has_cooldown_meta_id()) {
+        _cooldown_meta_id = tablet_meta_pb.cooldown_meta_id();
+    }
+
     if (tablet_meta_pb.has_enable_unique_key_merge_on_write()) {
         _enable_unique_key_merge_on_write = tablet_meta_pb.enable_unique_key_merge_on_write();
     }
@@ -543,6 +566,10 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
             auto bitmap = tablet_meta_pb.delete_bitmap().segment_delete_bitmaps(i).data();
             delete_bitmap().delete_bitmap[{rst_id, seg_id, ver}] = roaring::Roaring::read(bitmap);
         }
+    }
+
+    if (tablet_meta_pb.has_binlog_config()) {
+        _binlog_config = tablet_meta_pb.binlog_config();
     }
 }
 
@@ -596,8 +623,13 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
     if (_preferred_rowset_type == BETA_ROWSET) {
         tablet_meta_pb->set_preferred_rowset_type(_preferred_rowset_type);
     }
+    if (_storage_policy_id > 0) {
+        tablet_meta_pb->set_storage_policy_id(_storage_policy_id);
+    }
+    if (_cooldown_meta_id.initialized()) {
+        tablet_meta_pb->mutable_cooldown_meta_id()->CopyFrom(_cooldown_meta_id.to_proto());
+    }
 
-    tablet_meta_pb->set_storage_policy(_storage_policy);
     tablet_meta_pb->set_enable_unique_key_merge_on_write(_enable_unique_key_merge_on_write);
 
     if (_enable_unique_key_merge_on_write) {
@@ -619,6 +651,7 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
             *(delete_bitmap_pb->add_segment_delete_bitmaps()) = std::move(bitmap_data);
         }
     }
+    _binlog_config.to_pb(tablet_meta_pb->mutable_binlog_config());
 }
 
 void TabletMeta::cloud_add_rs_metas(const std::vector<RowsetSharedPtr>& to_add) {
@@ -871,9 +904,9 @@ bool operator==(const TabletMeta& a, const TabletMeta& b) {
     }
     if (a._in_restore_mode != b._in_restore_mode) return false;
     if (a._preferred_rowset_type != b._preferred_rowset_type) return false;
-    if (a._storage_policy != b._storage_policy) return false;
     if (a._is_in_memory != b._is_in_memory) return false;
     if (a._is_persistent != b._is_persistent) return false;
+    if (a._storage_policy_id != b._storage_policy_id) return false;
     return true;
 }
 

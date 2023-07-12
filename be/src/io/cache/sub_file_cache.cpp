@@ -17,9 +17,27 @@
 
 #include "io/cache/sub_file_cache.h"
 
+#include <fmt/format.h>
+#include <glog/logging.h>
+#include <time.h>
+
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <future>
+#include <mutex>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/config.h"
+#include "common/status.h"
 #include "io/fs/local_file_system.h"
-#include "olap/iterators.h"
+#include "io/io_common.h"
+#include "runtime/exec_env.h"
+#include "util/string_util.h"
+#include "util/threadpool.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -37,10 +55,11 @@ SubFileCache::SubFileCache(const Path& cache_dir, int64_t alive_time_sec,
 
 SubFileCache::~SubFileCache() {}
 
-Status SubFileCache::read_at(size_t offset, Slice result, const IOContext& io_ctx,
-                             size_t* bytes_read) {
-    if (io_ctx.reader_type != READER_QUERY) {
-        return _remote_file_reader->read_at(offset, result, io_ctx, bytes_read);
+Status SubFileCache::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                  const IOContext* io_ctx) {
+    RETURN_IF_ERROR(_init());
+    if (io_ctx != nullptr && io_ctx->reader_type != ReaderType::READER_QUERY) {
+        return _remote_file_reader->read_at(offset, result, bytes_read, io_ctx);
     }
     std::vector<size_t> need_cache_offsets;
     RETURN_IF_ERROR(_get_need_cache_offsets(offset, result.size, &need_cache_offsets));
@@ -79,7 +98,6 @@ Status SubFileCache::read_at(size_t offset, Slice result, const IOContext& io_ct
                 RETURN_IF_ERROR(_generate_cache_reader(offset_begin, req_size));
             }
         }
-        _cache_file_size = _calc_cache_file_size();
     }
     {
         std::shared_lock<std::shared_mutex> rlock(_cache_map_lock);
@@ -102,7 +120,7 @@ Status SubFileCache::read_at(size_t offset, Slice result, const IOContext& io_ct
             Slice read_slice(result.mutable_data() + offset_begin - offset, req_size);
             size_t sub_bytes_read = -1;
             RETURN_NOT_OK_STATUS_WITH_WARN(
-                    _cache_file_readers[*iter]->read_at(offset_begin - *iter, read_slice, io_ctx,
+                    _cache_file_readers[*iter]->read_at(offset_begin - *iter, read_slice,
                                                         &sub_bytes_read),
                     fmt::format("Read local cache file failed: {}",
                                 _cache_file_readers[*iter]->path().native()));
@@ -116,14 +134,17 @@ Status SubFileCache::read_at(size_t offset, Slice result, const IOContext& io_ct
             _last_match_times[*iter] = time(nullptr);
         }
     }
-    update_last_match_time();
     return Status::OK();
 }
 
+std::pair<Path, Path> SubFileCache::_cache_path(size_t offset) {
+    return {_cache_dir / fmt::format("{}_{}", SUB_FILE_CACHE_PREFIX, offset),
+            _cache_dir /
+                    fmt::format("{}_{}{}", SUB_FILE_CACHE_PREFIX, offset, CACHE_DONE_FILE_SUFFIX)};
+}
+
 Status SubFileCache::_generate_cache_reader(size_t offset, size_t req_size) {
-    Path cache_file = _cache_dir / fmt::format("{}_{}", SUB_FILE_CACHE_PREFIX, offset);
-    Path cache_done_file = _cache_dir / fmt::format("{}_{}{}", SUB_FILE_CACHE_PREFIX, offset,
-                                                    CACHE_DONE_FILE_SUFFIX);
+    auto [cache_file, cache_done_file] = _cache_path(offset);
     bool done_file_exist = false;
     RETURN_NOT_OK_STATUS_WITH_WARN(
             io::global_local_filesystem()->exists(cache_done_file, &done_file_exist),
@@ -135,8 +156,9 @@ Status SubFileCache::_generate_cache_reader(size_t offset, size_t req_size) {
         ThreadPoolToken* thread_token =
                 ExecEnv::GetInstance()->get_serial_download_cache_thread_token();
         if (thread_token != nullptr) {
-            auto st = thread_token->submit_func([this, &download_st, cache_done_file, cache_file,
-                                                 offset, req_size] {
+            auto st = thread_token->submit_func([this, &download_st,
+                                                 cache_done_file = cache_done_file,
+                                                 cache_file = cache_file, offset, req_size] {
                 auto func = [this, cache_done_file, cache_file, offset, req_size] {
                     bool done_file_exist = false;
                     // Judge again whether cache_done_file exists, it is possible that the cache
@@ -180,7 +202,6 @@ Status SubFileCache::_generate_cache_reader(size_t offset, size_t req_size) {
     RETURN_IF_ERROR(io::global_local_filesystem()->open_file(cache_file, &cache_reader));
     _cache_file_readers.emplace(offset, cache_reader);
     _last_match_times.emplace(offset, time(nullptr));
-    update_last_match_time();
     LOG(INFO) << "Create cache file from remote file successfully: "
               << _remote_file_reader->path().native() << "(" << offset << ", " << req_size
               << ") -> " << cache_file.native();
@@ -199,6 +220,9 @@ Status SubFileCache::_get_need_cache_offsets(size_t offset, size_t req_size,
 }
 
 Status SubFileCache::clean_timeout_cache() {
+    RETURN_IF_ERROR(_init());
+    SubGcQueue gc_queue;
+    _gc_lru_queue.swap(gc_queue);
     std::vector<size_t> timeout_keys;
     {
         std::shared_lock<std::shared_mutex> rlock(_cache_map_lock);
@@ -206,67 +230,114 @@ Status SubFileCache::clean_timeout_cache() {
              iter != _last_match_times.cend(); ++iter) {
             if (time(nullptr) - iter->second > _alive_time_sec) {
                 timeout_keys.emplace_back(iter->first);
+            } else {
+                _gc_lru_queue.push({iter->first, iter->second});
             }
         }
     }
+
+    std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
     if (timeout_keys.size() > 0) {
-        std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
         for (std::vector<size_t>::const_iterator iter = timeout_keys.cbegin();
              iter != timeout_keys.cend(); ++iter) {
-            RETURN_IF_ERROR(_clean_cache_internal(*iter));
+            size_t cleaned_size = 0;
+            RETURN_IF_ERROR(_clean_cache_internal(*iter, &cleaned_size));
+            _cache_file_size -= cleaned_size;
         }
-        _cache_file_size = _calc_cache_file_size();
     }
-    return Status::OK();
+    return _check_and_delete_empty_dir(_cache_dir);
 }
 
 Status SubFileCache::clean_all_cache() {
     std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
     for (std::map<size_t, int64_t>::const_iterator iter = _last_match_times.cbegin();
          iter != _last_match_times.cend(); ++iter) {
-        RETURN_IF_ERROR(_clean_cache_internal(iter->first));
+        RETURN_IF_ERROR(_clean_cache_internal(iter->first, nullptr));
     }
-    _cache_file_size = _calc_cache_file_size();
+    _cache_file_size = 0;
+    return _check_and_delete_empty_dir(_cache_dir);
+}
+
+Status SubFileCache::clean_one_cache(size_t* cleaned_size) {
+    if (!_gc_lru_queue.empty()) {
+        const auto& cache = _gc_lru_queue.top();
+        {
+            std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
+            if (auto it = _last_match_times.find(cache.offset);
+                it != _last_match_times.end() && it->second == cache.last_match_time) {
+                RETURN_IF_ERROR(_clean_cache_internal(cache.offset, cleaned_size));
+                _cache_file_size -= *cleaned_size;
+                _gc_lru_queue.pop();
+            }
+        }
+        decltype(_last_match_times.begin()) it;
+        while (!_gc_lru_queue.empty() &&
+               (it = _last_match_times.find(_gc_lru_queue.top().offset)) !=
+                       _last_match_times.end() &&
+               it->second != _gc_lru_queue.top().last_match_time) {
+            _gc_lru_queue.pop();
+        }
+    }
+    if (_gc_lru_queue.empty()) {
+        std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
+        RETURN_IF_ERROR(_check_and_delete_empty_dir(_cache_dir));
+    }
     return Status::OK();
 }
 
-Status SubFileCache::_clean_cache_internal(size_t offset) {
+Status SubFileCache::_clean_cache_internal(size_t offset, size_t* cleaned_size) {
     if (_cache_file_readers.find(offset) != _cache_file_readers.end()) {
         _cache_file_readers.erase(offset);
     }
-    _cache_file_size = 0;
-    Path cache_file = _cache_dir / fmt::format("{}_{}", SUB_FILE_CACHE_PREFIX, offset);
-    Path done_file = _cache_dir /
-                     fmt::format("{}_{}{}", SUB_FILE_CACHE_PREFIX, offset, CACHE_DONE_FILE_SUFFIX);
-    bool done_file_exist = false;
-    RETURN_NOT_OK_STATUS_WITH_WARN(
-            io::global_local_filesystem()->exists(done_file, &done_file_exist),
-            "Check local done file exist failed.");
-    if (done_file_exist) {
-        RETURN_NOT_OK_STATUS_WITH_WARN(
-                io::global_local_filesystem()->delete_file(done_file),
-                fmt::format("Delete local done file failed: {}", done_file.native()));
+    if (_last_match_times.find(offset) != _last_match_times.end()) {
+        _last_match_times.erase(offset);
     }
-    bool cache_file_exist = false;
-    RETURN_NOT_OK_STATUS_WITH_WARN(
-            io::global_local_filesystem()->exists(cache_file, &cache_file_exist),
-            "Check local cache file exist failed.");
-    if (cache_file_exist) {
-        RETURN_NOT_OK_STATUS_WITH_WARN(
-                io::global_local_filesystem()->delete_file(cache_file),
-                fmt::format("Delete local cache file failed: {}", cache_file.native()));
+    auto [cache_file, done_file] = _cache_path(offset);
+    return _remove_cache_and_done(cache_file, done_file, cleaned_size);
+}
+
+Status SubFileCache::_init() {
+    if (_is_inited) {
+        return Status::OK();
     }
-    LOG(INFO) << "Delete local cache file successfully: " << cache_file.native();
+    std::vector<Path> cache_names;
+
+    std::unique_lock<std::shared_mutex> wrlock(_cache_map_lock);
+    size_t cache_file_size = 0;
+    RETURN_IF_ERROR(_get_dir_files_and_remove_unfinished(_cache_dir, cache_names));
+    std::map<int64_t, int64_t> expect_file_size_map;
+    RETURN_IF_ERROR(_get_all_sub_file_size(&expect_file_size_map));
+    for (const auto& file : cache_names) {
+        auto str_vec = split(file.native(), "_");
+        size_t offset = std::strtoul(str_vec[str_vec.size() - 1].c_str(), nullptr, 10);
+
+        int64_t file_size = -1;
+        auto path = _cache_dir / file;
+        RETURN_IF_ERROR(io::global_local_filesystem()->file_size(path, &file_size));
+        if (expect_file_size_map.find(offset) == expect_file_size_map.end() ||
+            expect_file_size_map[offset] != file_size) {
+            LOG(INFO) << "Delete invalid cache file: " << path.native() << ", offset: " << offset
+                      << ", size: " << file_size;
+            _clean_cache_internal(offset, nullptr);
+            continue;
+        }
+        _last_match_times[offset] = time(nullptr);
+        cache_file_size += file_size;
+    }
+    _cache_file_size = cache_file_size;
+    _is_inited = true;
     return Status::OK();
 }
 
-size_t SubFileCache::_calc_cache_file_size() {
-    size_t cache_file_size = 0;
-    for (std::map<size_t, io::FileReaderSPtr>::const_iterator iter = _cache_file_readers.cbegin();
-         iter != _cache_file_readers.cend(); ++iter) {
-        cache_file_size += iter->second->size();
+Status SubFileCache::_get_all_sub_file_size(std::map<int64_t, int64_t>* expect_file_size_map) {
+    std::vector<size_t> cache_offsets;
+    RETURN_IF_ERROR(_get_need_cache_offsets(0, _remote_file_reader->size(), &cache_offsets));
+    for (int i = 0; i < cache_offsets.size() - 1; ++i) {
+        expect_file_size_map->emplace(cache_offsets[i], config::max_sub_cache_file_size);
     }
-    return cache_file_size;
+    expect_file_size_map->emplace(cache_offsets[cache_offsets.size() - 1],
+                                  _remote_file_reader->size() % config::max_sub_cache_file_size);
+    return Status::OK();
 }
 
 } // namespace io

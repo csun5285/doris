@@ -18,6 +18,7 @@
 package org.apache.doris.mysql;
 
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.qe.GlobalVariable;
@@ -287,8 +288,8 @@ public class MysqlPassword {
     public static final String REG_SYMBOL = ".*[~!@#$%^&*()_+|<>,.?/:;'\\[\\]{}\"]+.*";
     public static final int MIN_PASSWORD_LEN = 8;
 
-    public static void validatePlainPassword(long validaPolicy, String text) throws AnalysisException {
-        if (validaPolicy == GlobalVariable.VALIDATE_PASSWORD_POLICY_STRONG) {
+    public static void validatePlainPassword(long validaPolicy, String text) throws AnalysisException  {
+        if (validaPolicy == GlobalVariable.VALIDATE_PASSWORD_POLICY_STRONG || Config.cloud_use_strong_password) {
             if (Strings.isNullOrEmpty(text) || text.length() < MIN_PASSWORD_LEN) {
                 throw new AnalysisException(
                         "Violate password validation policy: STRONG. The password must be at least 8 characters");

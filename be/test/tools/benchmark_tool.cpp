@@ -40,7 +40,6 @@
 #include "olap/data_dir.h"
 #include "olap/in_list_predicate.h"
 #include "olap/olap_common.h"
-#include "olap/row_block2.h"
 #include "olap/row_cursor.h"
 #include "olap/rowset/segment_v2/binary_dict_page.h"
 #include "olap/rowset/segment_v2/binary_plain_page.h"
@@ -51,10 +50,8 @@
 #include "olap/tablet_schema.h"
 #include "olap/tablet_schema_helper.h"
 #include "olap/types.h"
-#include "runtime/mem_pool.h"
 #include "testutil/test_util.h"
 #include "util/debug_util.h"
-#include "util/file_utils.h"
 
 DEFINE_string(operation, "Custom",
               "valid operation: Custom, BinaryDictPageEncode, BinaryDictPageDecode, SegmentScan, "
@@ -169,37 +166,7 @@ public:
     }
 
     void decode_pages() {
-        int slice_index = 0;
-        for (auto& src : results) {
-            PageDecoderOptions dict_decoder_options;
-            std::unique_ptr<BinaryPlainPageDecoder> dict_page_decoder(
-                    new BinaryPlainPageDecoder(dict_slice.slice(), dict_decoder_options));
-            dict_page_decoder->init();
-
-            StringRef dict_word_info[dict_page_decoder->_num_elems];
-            dict_page_decoder->get_dict_word_info(dict_word_info);
-
-            // decode
-            PageDecoderOptions decoder_options;
-            BinaryDictPageDecoder page_decoder(src.slice(), decoder_options);
-            page_decoder.init();
-
-            page_decoder.set_dict_decoder(dict_page_decoder.get(), dict_word_info);
-
-            //check values
-            size_t num = page_start_ids[slice_index + 1] - page_start_ids[slice_index];
-
-            MemPool pool;
-            const auto* type_info = get_scalar_type_info<OLAP_FIELD_TYPE_VARCHAR>();
-            std::unique_ptr<ColumnVectorBatch> cvb;
-            ColumnVectorBatch::create(num, false, type_info, nullptr, &cvb);
-            ColumnBlock column_block(cvb.get(), &pool);
-            ColumnBlockView block_view(&column_block);
-
-            page_decoder.next_batch(&num, &block_view);
-
-            slice_index++;
-        }
+        // TODO should rewrite this method by using vectorized next batch method
     }
 
 private:
@@ -268,24 +235,15 @@ class SegmentBenchmark : public BaseBenchmark {
 public:
     SegmentBenchmark(const std::string& name, int iterations, const std::string& column_type)
             : BaseBenchmark(name, iterations), _pool() {
-        if (FileUtils::check_exist(kSegmentDir)) {
-            FileUtils::remove_all(kSegmentDir);
-        }
-        FileUtils::create_dir(kSegmentDir);
-
+        io::global_local_filesystem()->delete_and_create_directory(kSegmentDir);
         init_schema(column_type);
     }
     SegmentBenchmark(const std::string& name, int iterations)
             : BaseBenchmark(name, iterations), _pool() {
-        if (FileUtils::check_exist(kSegmentDir)) {
-            FileUtils::remove_all(kSegmentDir);
-        }
-        FileUtils::create_dir(kSegmentDir);
+        io::global_local_filesystem()->delete_and_create_directory(kSegmentDir);
     }
     virtual ~SegmentBenchmark() override {
-        if (FileUtils::check_exist(kSegmentDir)) {
-            FileUtils::remove_all(kSegmentDir);
-        }
+        io::global_local_filesystem()->delete_directory(kSegmentDir);
     }
 
     const Schema& get_schema() { return *_schema; }
@@ -364,7 +322,9 @@ public:
         writer.finalize(&file_size, &index_size);
         file_writer->close();
 
-        Segment::open(fs, path, "", seg_id, {}, &_tablet_schema, res);
+        io::FileReaderOptions reader_options(io::FileCachePolicy::NO_CACHE,
+                                             io::SegmentCachePathPolicy());
+        Segment::open(fs, path, seg_id, {}, &_tablet_schema, reader_options, res);
     }
 
     std::vector<std::vector<std::string>> generate_dataset(int rows_number) {
@@ -399,7 +359,7 @@ private:
     }
 
 private:
-    MemPool _pool;
+    vectorized::Arena _pool;
     TabletSchema _tablet_schema;
     std::shared_ptr<Schema> _schema;
 }; // namespace doris
@@ -467,6 +427,8 @@ public:
         read_opts.stats = &stats;
         std::unique_ptr<RowwiseIterator> iter;
         _segment->new_iterator(get_schema(), read_opts, &iter);
+        // Need modify this case
+        /*
         RowBlockV2 block(get_schema(), 1024);
 
         int left = _dataset.size();
@@ -476,6 +438,7 @@ public:
             iter->next_batch(&block);
             left -= rows_read;
         }
+        */
     }
 
 private:
@@ -512,6 +475,8 @@ public:
         read_opts.stats = &stats;
         std::unique_ptr<RowwiseIterator> iter;
         _segment->new_iterator(get_schema(), read_opts, &iter);
+        // Need modify this case
+        /*
         RowBlockV2 block(get_schema(), 1024);
 
         int left = _dataset.size();
@@ -521,6 +486,7 @@ public:
             iter->next_batch(&block);
             left -= rows_read;
         }
+        */
     }
 
 private:
@@ -620,7 +586,7 @@ int main(int argc, char** argv) {
     gflags::SetUsageMessage(usage);
     google::ParseCommandLineFlags(&argc, &argv, true);
 
-    doris::StoragePageCache::create_global_cache(1 << 30, 10);
+    doris::StoragePageCache::create_global_cache(1 << 30, 10, 0);
 
     doris::MultiBenchmark multi_bm;
     multi_bm.add_bm();

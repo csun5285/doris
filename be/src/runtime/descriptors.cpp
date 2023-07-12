@@ -20,19 +20,20 @@
 
 #include "runtime/descriptors.h"
 
+#include <fmt/format.h>
+#include <gen_cpp/Descriptors_types.h>
 #include <gen_cpp/Types_types.h>
+#include <gen_cpp/descriptors.pb.h>
+#include <stddef.h>
 
+#include <algorithm>
 #include <boost/algorithm/string/join.hpp>
-#include <ios>
-#include <sstream>
+#include <memory>
 
 #include "common/object_pool.h"
-#include "gen_cpp/Descriptors_types.h"
-#include "gen_cpp/descriptors.pb.h"
 #include "util/string_util.h"
-#include "vec/columns/column_nullable.h"
+#include "vec/aggregate_functions/aggregate_function.h"
 #include "vec/data_types/data_type_factory.hpp"
-#include "vec/data_types/data_type_nullable.h"
 
 namespace doris {
 using boost::algorithm::join;
@@ -55,39 +56,37 @@ SlotDescriptor::SlotDescriptor(const TSlotDescriptor& tdesc)
           _type(TypeDescriptor::from_thrift(tdesc.slotType)),
           _parent(tdesc.parent),
           _col_pos(tdesc.columnPos),
-          _tuple_offset(tdesc.byteOffset),
           _null_indicator_offset(tdesc.nullIndicatorByte, tdesc.nullIndicatorBit),
           _col_name(tdesc.colName),
           _col_name_lower_case(to_lower(tdesc.colName)),
           _col_unique_id(tdesc.col_unique_id),
           _slot_idx(tdesc.slotIdx),
-          _slot_size(_type.get_slot_size()),
           _field_idx(-1),
           _is_materialized(tdesc.isMaterialized),
-          _is_key(tdesc.is_key) {}
+          _is_key(tdesc.is_key),
+          _need_materialize(tdesc.need_materialize) {}
 
 SlotDescriptor::SlotDescriptor(const PSlotDescriptor& pdesc)
         : _id(pdesc.id()),
           _type(TypeDescriptor::from_protobuf(pdesc.slot_type())),
           _parent(pdesc.parent()),
           _col_pos(pdesc.column_pos()),
-          _tuple_offset(pdesc.byte_offset()),
           _null_indicator_offset(pdesc.null_indicator_byte(), pdesc.null_indicator_bit()),
           _col_name(pdesc.col_name()),
           _col_name_lower_case(to_lower(pdesc.col_name())),
           _col_unique_id(pdesc.col_unique_id()),
           _slot_idx(pdesc.slot_idx()),
-          _slot_size(_type.get_slot_size()),
           _field_idx(-1),
           _is_materialized(pdesc.is_materialized()),
-          _is_key(pdesc.is_key()) {}
+          _is_key(pdesc.is_key()),
+          _need_materialize(true) {}
 
 void SlotDescriptor::to_protobuf(PSlotDescriptor* pslot) const {
     pslot->set_id(_id);
     pslot->set_parent(_parent);
     _type.to_protobuf(pslot->mutable_slot_type());
     pslot->set_column_pos(_col_pos);
-    pslot->set_byte_offset(_tuple_offset);
+    pslot->set_byte_offset(0);
     pslot->set_null_indicator_byte(_null_indicator_offset.byte_offset);
     pslot->set_null_indicator_bit(_null_indicator_offset.bit_offset);
     DCHECK_LE(_null_indicator_offset.bit_offset, 8);
@@ -113,8 +112,7 @@ vectorized::DataTypePtr SlotDescriptor::get_data_type_ptr() const {
 std::string SlotDescriptor::debug_string() const {
     std::stringstream out;
     out << "Slot(id=" << _id << " type=" << _type << " col=" << _col_pos
-        << ", colname=" << _col_name << " offset=" << _tuple_offset
-        << " null=" << _null_indicator_offset.debug_string() << ")";
+        << ", colname=" << _col_name << " null=" << _null_indicator_offset.debug_string() << ")";
     return out.str();
 }
 
@@ -251,14 +249,14 @@ std::string JdbcTableDescriptor::debug_string() const {
     return fmt::to_string(buf);
 }
 
-TupleDescriptor::TupleDescriptor(const TTupleDescriptor& tdesc)
+TupleDescriptor::TupleDescriptor(const TTupleDescriptor& tdesc, bool own_slots)
         : _id(tdesc.id),
           _table_desc(nullptr),
-          _byte_size(tdesc.byteSize),
           _num_null_bytes(tdesc.numNullBytes),
           _num_materialized_slots(0),
           _slots(),
-          _has_varlen_slots(false) {
+          _has_varlen_slots(false),
+          _own_slots(own_slots) {
     if (false == tdesc.__isset.numNullSlots) {
         //be compatible for existing tables with no nullptr value
         _num_null_slots = 0;
@@ -267,14 +265,14 @@ TupleDescriptor::TupleDescriptor(const TTupleDescriptor& tdesc)
     }
 }
 
-TupleDescriptor::TupleDescriptor(const PTupleDescriptor& pdesc)
+TupleDescriptor::TupleDescriptor(const PTupleDescriptor& pdesc, bool own_slots)
         : _id(pdesc.id()),
           _table_desc(nullptr),
-          _byte_size(pdesc.byte_size()),
           _num_null_bytes(pdesc.num_null_bytes()),
           _num_materialized_slots(0),
           _slots(),
-          _has_varlen_slots(false) {
+          _has_varlen_slots(false),
+          _own_slots(own_slots) {
     if (!pdesc.has_num_null_slots()) {
         //be compatible for existing tables with no nullptr value
         _num_null_slots = 0;
@@ -309,22 +307,11 @@ std::vector<SlotDescriptor*> TupleDescriptor::slots_ordered_by_idx() const {
     return sorted_slots;
 }
 
-bool TupleDescriptor::layout_equals(const TupleDescriptor& other_desc) const {
-    if (byte_size() != other_desc.byte_size()) return false;
-    if (slots().size() != other_desc.slots().size()) return false;
-
-    std::vector<SlotDescriptor*> slots = slots_ordered_by_idx();
-    std::vector<SlotDescriptor*> other_slots = other_desc.slots_ordered_by_idx();
-    for (int i = 0; i < slots.size(); ++i) {
-        if (!slots[i]->layout_equals(*other_slots[i])) return false;
-    }
-    return true;
-}
-
 void TupleDescriptor::to_protobuf(PTupleDescriptor* ptuple) const {
     ptuple->Clear();
     ptuple->set_id(_id);
-    ptuple->set_byte_size(_byte_size);
+    // Useless not set
+    ptuple->set_byte_size(0);
     ptuple->set_num_null_bytes(_num_null_bytes);
     ptuple->set_table_id(-1);
     ptuple->set_num_null_slots(_num_null_slots);
@@ -332,7 +319,7 @@ void TupleDescriptor::to_protobuf(PTupleDescriptor* ptuple) const {
 
 std::string TupleDescriptor::debug_string() const {
     std::stringstream out;
-    out << "Tuple(id=" << _id << " size=" << _byte_size;
+    out << "Tuple(id=" << _id;
     if (_table_desc != nullptr) {
         //out << " " << _table_desc->debug_string();
     }
@@ -497,19 +484,6 @@ bool RowDescriptor::equals(const RowDescriptor& other_desc) const {
     return true;
 }
 
-bool RowDescriptor::layout_is_prefix_of(const RowDescriptor& other_desc) const {
-    if (_tuple_desc_map.size() > other_desc._tuple_desc_map.size()) return false;
-    for (int i = 0; i < _tuple_desc_map.size(); ++i) {
-        if (!_tuple_desc_map[i]->layout_equals(*other_desc._tuple_desc_map[i])) return false;
-    }
-    return true;
-}
-
-bool RowDescriptor::layout_equals(const RowDescriptor& other_desc) const {
-    if (_tuple_desc_map.size() != other_desc._tuple_desc_map.size()) return false;
-    return layout_is_prefix_of(other_desc);
-}
-
 std::string RowDescriptor::debug_string() const {
     std::stringstream ss;
 
@@ -543,10 +517,13 @@ std::string RowDescriptor::debug_string() const {
     return ss.str();
 }
 
-int RowDescriptor::get_column_id(int slot_id) const {
+int RowDescriptor::get_column_id(int slot_id, bool force_materialize_slot) const {
     int column_id_counter = 0;
     for (const auto tuple_desc : _tuple_desc_map) {
         for (const auto slot : tuple_desc->slots()) {
+            if (!force_materialize_slot && !slot->need_materialize()) {
+                continue;
+            }
             if (slot->id() == slot_id) {
                 return column_id_counter;
             }
@@ -665,15 +642,6 @@ SlotDescriptor* DescriptorTbl::get_slot_descriptor(SlotId id) const {
     } else {
         return i->second;
     }
-}
-
-bool SlotDescriptor::layout_equals(const SlotDescriptor& other_desc) const {
-    if (type().type != other_desc.type().type) return false;
-    if (is_nullable() != other_desc.is_nullable()) return false;
-    if (slot_size() != other_desc.slot_size()) return false;
-    if (tuple_offset() != other_desc.tuple_offset()) return false;
-    if (!null_indicator_offset().equals(other_desc.null_indicator_offset())) return false;
-    return true;
 }
 
 std::string DescriptorTbl::debug_string() const {

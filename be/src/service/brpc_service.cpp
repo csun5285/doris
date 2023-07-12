@@ -17,10 +17,19 @@
 
 #include "service/brpc_service.h"
 
+#include <brpc/server.h>
+#include <brpc/ssl_options.h>
+#include <butil/endpoint.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <gflags/gflags_declare.h>
 #include <string.h>
 
+#include <ostream>
+
+#include "common/config.h"
 #include "common/logging.h"
-#include "service/brpc.h"
+#include "service/backend_options.h"
 #include "service/internal_service.h"
 
 namespace brpc {
@@ -49,7 +58,19 @@ Status BRpcService::start(int port, int num_threads) {
         options.num_threads = num_threads;
     }
 
-    if (_server->Start(port, &options) != 0) {
+    if (config::enable_https) {
+        auto sslOptions = options.mutable_ssl_options();
+        sslOptions->default_cert.certificate = config::ssl_certificate_path;
+        sslOptions->default_cert.private_key = config::ssl_private_key_path;
+    }
+
+    butil::EndPoint point;
+    if (butil::str2endpoint(BackendOptions::get_service_bind_address(), port, &point) < 0) {
+        return Status::InternalError("convert address failed, host={}, port={}", "[::0]", port);
+    }
+    LOG(INFO) << "BRPC server bind to host: " << BackendOptions::get_service_bind_address()
+              << ", port: " << port;
+    if (_server->Start(point, &options) != 0) {
         char buf[64];
         LOG(WARNING) << "start brpc failed, errno=" << errno
                      << ", errmsg=" << strerror_r(errno, buf, 64) << ", port=" << port;

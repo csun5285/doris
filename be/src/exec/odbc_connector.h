@@ -16,21 +16,30 @@
 // under the License.
 
 #pragma once
+#include <fmt/format.h>
 #include <sqltypes.h>
+#include <stdint.h>
+#include <stdlib.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/config.h"
 #include "common/status.h"
 #include "exec/table_connector.h"
 
 namespace doris {
+class RuntimeProfile;
+class RuntimeState;
+class TupleDescriptor;
+
 struct ODBCConnectorParam {
     std::string connect_string;
 
     // only use in query
     std::string query_string;
     const TupleDescriptor* tuple_desc;
-
-    // only use in write
-    std::vector<ExprContext*> output_expr_ctxs;
 };
 
 // Because the DataBinding have the mem alloc, so
@@ -63,6 +72,12 @@ public:
     Status exec_write_sql(const std::u16string& insert_stmt,
                           const fmt::memory_buffer& insert_stmt_buffer) override;
 
+    Status exec_stmt_write(vectorized::Block* block,
+                           const vectorized::VExprContextSPtrs& _output_vexpr_ctxs,
+                           uint32_t* num_rows_sent) override {
+        return Status::OK();
+    }
+
     // use in ODBC transaction
     Status begin_trans() override; // should be call after connect and before query or init_to_write
     Status abort_trans() override; // should be call after transaction abort
@@ -70,6 +85,10 @@ public:
 
     const DataBinding& get_column_data(int i) const { return *_columns_data.at(i).get(); }
     Status init_to_write(RuntimeProfile* profile);
+
+    // Now we only treat HLL, CHAR, VARCHAR as big column
+    uint32_t big_column_size_buffer = config::big_column_size_buffer;
+    uint32_t small_column_size_buffer = config::small_column_size_buffer;
 
 private:
     static Status error_status(const std::string& prefix, const std::string& error_msg);

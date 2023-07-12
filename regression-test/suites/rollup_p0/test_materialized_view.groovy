@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 suite("test_materialized_view") {
+
+    // because nereids cannot support rollup correctly forbid it temporary
+    sql """set enable_nereids_planner=false"""
+
     def tbName1 = "test_materialized_view1"
     def tbName2 = "test_materialized_view2"
 
@@ -49,6 +53,7 @@ suite("test_materialized_view") {
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)
@@ -63,6 +68,7 @@ suite("test_materialized_view") {
     while (max_try_secs--) {
         String res = getJobState(tbName2)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)
@@ -95,6 +101,7 @@ suite("test_materialized_view") {
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(2000)

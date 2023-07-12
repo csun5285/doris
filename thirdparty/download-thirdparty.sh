@@ -221,6 +221,15 @@ echo "===== Patching thirdparty archives..."
 ###################################################################################
 PATCHED_MARK="patched_mark"
 
+# abseil patch
+cd "${TP_SOURCE_DIR}/${ABSEIL_SOURCE}"
+if [[ ! -f "${PATCHED_MARK}" ]]; then
+    patch -p1 <"${TP_PATCH_DIR}/absl.patch"
+    touch "${PATCHED_MARK}"
+fi
+cd -
+echo "Finished patching ${ABSEIL_SOURCE}"
+
 # glog patch
 cd "${TP_SOURCE_DIR}/${GLOG_SOURCE}"
 if [[ ! -f "${PATCHED_MARK}" ]]; then
@@ -257,15 +266,6 @@ fi
 cd -
 echo "Finished patching ${LIBEVENT_SOURCE}"
 
-# s2 patch to disable shared library
-cd "${TP_SOURCE_DIR}/${S2_SOURCE}"
-if [[ ! -f "${PATCHED_MARK}" ]]; then
-    patch -p1 <"${TP_PATCH_DIR}/s2geometry-0.9.0.patch"
-    touch "${PATCHED_MARK}"
-fi
-cd -
-echo "Finished patching ${S2_SOURCE}"
-
 # gsasl2 patch to fix link error such as mutilple func defination
 # when link target with kerberos
 cd "${TP_SOURCE_DIR}/${GSASL_SOURCE}"
@@ -286,6 +286,15 @@ fi
 cd -
 echo "Finished patching ${CYRUS_SASL_SOURCE}"
 
+#patch sqltypes.h, change TCAHR to TWCHAR to avoid conflict with clucene TCAHR
+cd "${TP_SOURCE_DIR}/${ODBC_SOURCE}"
+if [[ ! -f ${PATCHED_MARK} ]]; then
+    patch -p1 <"${TP_PATCH_DIR}/sqltypes.h.patch"
+    touch "${PATCHED_MARK}"
+fi
+cd -
+echo "Finished patching ${ODBC_SOURCE}"
+
 # rocksdb patch to fix compile error
 if [[ "${ROCKSDB_SOURCE}" == "rocksdb-5.14.2" ]]; then
     cd "${TP_SOURCE_DIR}/${ROCKSDB_SOURCE}"
@@ -299,14 +308,14 @@ echo "Finished patching ${ROCKSDB_SOURCE}"
 
 # opentelemetry patch is used to solve the problem that threadlocal depends on GLIBC_2.18
 # see: https://github.com/apache/doris/pull/7911
-if [[ "${OPENTELEMETRY_SOURCE}" == "opentelemetry-cpp-1.4.0" ]]; then
+if [[ "${OPENTELEMETRY_SOURCE}" == "opentelemetry-cpp-1.8.3" ]]; then
     rm -rf "${TP_SOURCE_DIR}/${OPENTELEMETRY_SOURCE}/third_party/opentelemetry-proto"/*
     cp -r "${TP_SOURCE_DIR}/${OPENTELEMETRY_PROTO_SOURCE}"/* "${TP_SOURCE_DIR}/${OPENTELEMETRY_SOURCE}/third_party/opentelemetry-proto"
     mkdir -p "${TP_SOURCE_DIR}/${OPENTELEMETRY_SOURCE}/third_party/opentelemetry-proto/.git"
 
     cd "${TP_SOURCE_DIR}/${OPENTELEMETRY_SOURCE}"
     if [[ ! -f "${PATCHED_MARK}" ]]; then
-        patch -p1 <"${TP_PATCH_DIR}/opentelemetry-cpp-1.4.0.patch"
+        patch -p1 <"${TP_PATCH_DIR}/opentelemetry-cpp-1.8.3.patch"
         touch "${PATCHED_MARK}"
     fi
     cd -
@@ -336,24 +345,15 @@ fi
 echo "Finished patching ${LIBRDKAFKA_SOURCE}"
 
 # patch jemalloc, disable JEMALLOC_MANGLE for overloading the memory API.
-if [[ "${JEMALLOC_SOURCE}" = "jemalloc-5.2.1" ]]; then
-    cd "${TP_SOURCE_DIR}/${JEMALLOC_SOURCE}"
+if [[ "${JEMALLOC_DORIS_SOURCE}" = "jemalloc-5.3.0" ]]; then
+    cd "${TP_SOURCE_DIR}/${JEMALLOC_DORIS_SOURCE}"
     if [[ ! -f "${PATCHED_MARK}" ]]; then
         patch -p0 <"${TP_PATCH_DIR}/jemalloc_hook.patch"
         touch "${PATCHED_MARK}"
     fi
     cd -
 fi
-echo "Finished patching ${JEMALLOC_SOURCE}"
-
-#patch sqltypes.h
-cd $TP_SOURCE_DIR/$ODBC_SOURCE
-if [ ! -f $PATCHED_MARK ]; then
-    patch -p1 < $TP_PATCH_DIR/sqltypes.h.patch
-    touch $PATCHED_MARK
-fi
-cd -
-echo "Finished patching $ODBC_SOURCE"
+echo "Finished patching ${JEMALLOC_DORIS_SOURCE}"
 
 # patch hyperscan
 # https://github.com/intel/hyperscan/issues/292
@@ -382,7 +382,6 @@ if [[ ! -f "${PATCHED_MARK}" ]]; then
         else
             bash ./prefetch_crt_dependency.sh
         fi
-        patch -p1 <"${TP_PATCH_DIR}/aws-sdk-cpp-1.9.211.patch"
     else
         bash ./prefetch_crt_dependency.sh
     fi
@@ -391,32 +390,16 @@ fi
 cd -
 echo "Finished patching ${AWS_SDK_SOURCE}"
 
-cd "${TP_SOURCE_DIR}/${BRPC_SOURCE}"
-if [[ ! -f "${PATCHED_MARK}" ]]; then
-    # Currently, there are two types of patches for BRPC in Doris:
-    # 1. brpc-fix-*.patch - These patches are not included in upstream but they can fix some bugs in some specific
-    #    scenarios.
-    # 2. brpc-{VERSION}-*.patch - These patches are included in upstream but they are not in current VERISON. We
-    #    backport some bug fixes to the current VERSION.
-    for file in "${TP_PATCH_DIR}"/brpc-*.patch; do
-        patch -p1 <"${file}"
-    done
-    touch "${PATCHED_MARK}"
-fi
-cd -
-echo "Finished patching ${BRPC_SOURCE}"
-
 # patch jemalloc, change simdjson::dom::element_type::BOOL to BOOLEAN to avoid conflict with odbc macro BOOL
-if [[ "${SIMDJSON_SOURCE}" = "simdjson-1.0.2" ]]; then
+if [[ "${SIMDJSON_SOURCE}" = "simdjson-3.0.1" ]]; then
     cd "${TP_SOURCE_DIR}/${SIMDJSON_SOURCE}"
     if [[ ! -f "${PATCHED_MARK}" ]]; then
-        patch -p1 <"${TP_PATCH_DIR}/simdjson-1.0.2.patch"
+        patch -p1 <"${TP_PATCH_DIR}/simdjson-3.0.1.patch"
         touch "${PATCHED_MARK}"
     fi
     cd -
 fi
 echo "Finished patching ${SIMDJSON_SOURCE}"
-
 
 # patch poco
 if [[ "${POCO_SOURCE}" = "poco-poco-1.9.4-release" ]]; then
@@ -439,3 +422,15 @@ if [[ "${COS_SDK_SOURCE}" = "cos-cpp-sdk-v5-5.5.10" ]]; then
     cd -
 fi
 echo "Finished patching ${COS_SOURCE}"
+
+if [[ "${BRPC_SOURCE}" == 'brpc-1.5.0' ]]; then
+    cd "${TP_SOURCE_DIR}/${BRPC_SOURCE}"
+    if [[ ! -f "${PATCHED_MARK}" ]]; then
+        for patch_file in "${TP_PATCH_DIR}"/brpc-*; do
+            patch -p1 <"${patch_file}"
+        done
+        touch "${PATCHED_MARK}"
+    fi
+    cd -
+fi
+echo "Finished patching ${BRPC_SOURCE}"

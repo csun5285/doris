@@ -21,6 +21,8 @@
 #include "thread.h"
 
 #ifndef __APPLE__
+// IWYU pragma: no_include <bits/types/struct_sched_param.h>
+#include <sched.h>
 #include <sys/prctl.h>
 #else
 #include <pthread.h>
@@ -28,23 +30,32 @@
 #include <cstdint>
 #endif
 
-#include <sys/types.h>
+// IWYU pragma: no_include <bthread/errno.h>
+#include <errno.h> // IWYU pragma: keep
+#include <sys/syscall.h>
+#include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <ostream>
 #include <string>
+#include <vector>
 
 #include "common/logging.h"
 #include "gutil/atomicops.h"
 #include "gutil/dynamic_annotations.h"
 #include "gutil/map-util.h"
-#include "gutil/once.h"
+#include "gutil/stringprintf.h"
 #include "gutil/strings/substitute.h"
-#include "olap/olap_define.h"
+#include "http/web_page_handler.h"
 #include "util/debug/sanitizer_scopes.h"
 #include "util/easy_json.h"
 #include "util/os_util.h"
@@ -65,7 +76,7 @@ __thread Thread* Thread::_tls = nullptr;
 static std::shared_ptr<ThreadMgr> thread_manager;
 //
 // Controls the single (lazy) initialization of thread_manager.
-static GoogleOnceType once = GOOGLE_ONCE_INIT;
+static std::once_flag once;
 
 // A singleton class that tracks all live threads, and groups them together for easy
 // auditing. Used only by Thread.
@@ -378,7 +389,7 @@ int64_t Thread::wait_for_tid() const {
 Status Thread::start_thread(const std::string& category, const std::string& name,
                             const ThreadFunctor& functor, uint64_t flags,
                             scoped_refptr<Thread>* holder) {
-    GoogleOnceInit(&once, &init_threadmgr);
+    std::call_once(once, init_threadmgr);
 
     // Temporary reference for the duration of this function.
     scoped_refptr<Thread> t(new Thread(category, name, functor));

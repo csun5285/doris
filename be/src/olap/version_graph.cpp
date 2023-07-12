@@ -18,13 +18,18 @@
 #include "olap/version_graph.h"
 
 #include <cctz/time_zone.h>
+#include <stddef.h>
 
+#include <algorithm>
+// IWYU pragma: no_include <bits/chrono.h>
+#include <chrono> // IWYU pragma: keep
+#include <list>
 #include <memory>
-#include <queue>
+#include <ostream>
+#include <utility>
 
 #include "common/config.h"
 #include "common/logging.h"
-#include "util/time.h"
 
 namespace doris {
 using namespace ErrorCode;

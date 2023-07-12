@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <pthread.h>
+
 #include <condition_variable>
 #include <ctime>
 #include <list>
@@ -27,14 +29,14 @@
 #include <thread>
 #include <vector>
 
-#include "cloud/io/file_system.h"
+#include "cloud/meta_mgr.h"
 #include "cloud/olap/delete_bitmap_txn_manager.h"
-#include "cloud/olap/segment.h"
 #include "common/status.h"
 #include "gen_cpp/AgentService_types.h"
 #include "gen_cpp/BackendService_types.h"
 #include "gen_cpp/MasterService_types.h"
 #include "gutil/ref_counted.h"
+#include "io/fs/file_system.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/olap_meta.h"
@@ -219,9 +221,6 @@ public:
     void check_cumulative_compaction_config();
 
     Status submit_compaction_task(const TabletSharedPtr& tablet, CompactionType compaction_type);
-    Status submit_quick_compaction_task(TabletSharedPtr tablet);
-    Status submit_seg_compaction_task(BetaRowsetWriter* writer,
-                                      SegCompactionCandidatesSharedPtr segments);
 
     std::unique_ptr<ThreadPool>& tablet_publish_txn_thread_pool() {
         return _tablet_publish_txn_thread_pool;
@@ -296,12 +295,6 @@ private:
     void _parse_default_rowset_type();
 
     void _start_clean_cache();
-
-    // Disk status monitoring. Monitoring unused_flag Road King's new corresponding root_path unused flag,
-    // When the unused mark is detected, the corresponding table information is deleted from the memory, and the disk data does not move.
-    // When the disk status is unusable, but the unused logo is not _push_tablet_into_submitted_compactiondetected, you need to download it from root_path
-    // Reload the data.
-    void _start_disk_stat_monitor();
 
     void _compaction_tasks_producer_callback();
 
@@ -394,7 +387,6 @@ private:
     std::unique_ptr<ThreadPool> _quick_compaction_thread_pool;
     std::unique_ptr<ThreadPool> _base_compaction_thread_pool;
     std::unique_ptr<ThreadPool> _cumu_compaction_thread_pool;
-    std::unique_ptr<ThreadPool> _seg_compaction_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
 

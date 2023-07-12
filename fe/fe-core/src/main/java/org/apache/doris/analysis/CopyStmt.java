@@ -19,13 +19,14 @@ package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.S3Resource;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
+import org.apache.doris.datasource.property.constants.BosProperties;
+import org.apache.doris.datasource.property.constants.S3Properties;
 import org.apache.doris.load.loadv2.LoadTask.MergeType;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
@@ -157,7 +158,7 @@ public class CopyStmt extends DdlStmt {
             dataDescription.analyzeWithoutCheckPriv(db);
         }
         for (int i = 0; i < dataDescription.getFilePaths().size(); i++) {
-            dataDescription.getFilePaths().set(i, brokerDesc.convertPathToS3(dataDescription.getFilePaths().get(i)));
+            dataDescription.getFilePaths().set(i, BosProperties.convertPathToS3(dataDescription.getFilePaths().get(i)));
             dataDescription.getFilePaths()
                     .set(i, ExportStmt.checkPath(dataDescription.getFilePaths().get(i), brokerDesc.getStorageType()));
         }
@@ -188,12 +189,12 @@ public class CopyStmt extends DdlStmt {
         ObjectStoreInfoPB objInfo = stagePB.getObjInfo();
         stagePrefix = objInfo.getPrefix();
         objectInfo = RemoteBase.analyzeStageObjectStoreInfo(stagePB);
-        brokerProperties.put(S3Resource.S3_ENDPOINT, objInfo.getEndpoint());
-        brokerProperties.put(S3Resource.S3_REGION, objInfo.getRegion());
-        brokerProperties.put(S3Resource.S3_ACCESS_KEY, objectInfo.getAk());
-        brokerProperties.put(S3Resource.S3_SECRET_KEY, objectInfo.getSk());
+        brokerProperties.put(S3Properties.Env.ENDPOINT, objInfo.getEndpoint());
+        brokerProperties.put(S3Properties.Env.REGION, objInfo.getRegion());
+        brokerProperties.put(S3Properties.Env.ACCESS_KEY, objectInfo.getAk());
+        brokerProperties.put(S3Properties.Env.SECRET_KEY, objectInfo.getSk());
         if (objectInfo.getToken() != null) {
-            brokerProperties.put(S3Resource.S3_TOKEN, objectInfo.getToken());
+            brokerProperties.put(S3Properties.Env.TOKEN, objectInfo.getToken());
         }
         brokerProperties.put(S3_BUCKET, objInfo.getBucket());
         brokerProperties.put(S3_PREFIX, objInfo.getPrefix());

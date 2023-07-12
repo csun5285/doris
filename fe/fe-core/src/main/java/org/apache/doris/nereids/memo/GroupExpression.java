@@ -18,45 +18,66 @@
 package org.apache.doris.nereids.memo;
 
 import org.apache.doris.common.Pair;
-import org.apache.doris.nereids.analyzer.UnboundRelation;
-import org.apache.doris.nereids.cost.CostEstimate;
+import org.apache.doris.nereids.cost.Cost;
+import org.apache.doris.nereids.metrics.EventChannel;
+import org.apache.doris.nereids.metrics.EventProducer;
+import org.apache.doris.nereids.metrics.consumer.LogConsumer;
+import org.apache.doris.nereids.metrics.event.CostStateUpdateEvent;
 import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
+import org.apache.doris.nereids.trees.expressions.StatementScopeIdGenerator;
+import org.apache.doris.nereids.trees.plans.ObjectId;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.util.Utils;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.statistics.Statistics;
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
+import java.text.DecimalFormat;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Representation for group expression in cascades optimizer.
  */
 public class GroupExpression {
+    private static final EventProducer COST_STATE_TRACER = new EventProducer(CostStateUpdateEvent.class,
+            EventChannel.getDefaultChannel().addConsumers(new LogConsumer(CostStateUpdateEvent.class,
+                    EventChannel.LOG)));
     private double cost = 0.0;
-    private CostEstimate costEstimate = null;
     private Group ownerGroup;
     private final List<Group> children;
     private final Plan plan;
     private final BitSet ruleMasks;
     private boolean statDerived;
 
+    private double estOutputRowCount = -1;
+
+    //Record the rule that generate this plan. It's used for debugging
+    private Rule fromRule;
+
     // Mapping from output properties to the corresponding best cost, statistics, and child properties.
     // key is the physical properties the group expression support for its parent
     // and value is cost and request physical properties to its children.
-    private final Map<PhysicalProperties, Pair<Double, List<PhysicalProperties>>> lowestCostTable;
+    private final Map<PhysicalProperties, Pair<Cost, List<PhysicalProperties>>> lowestCostTable;
     // Each physical group expression maintains mapping incoming requests to the corresponding child requests.
     // key is the output physical properties satisfying the incoming request properties
     // value is the request physical properties
     private final Map<PhysicalProperties, PhysicalProperties> requestPropertiesMap;
+
+    // After mergeGroup(), source Group was cleaned up, but it may be in the Job Stack. So use this to mark and skip it.
+    private boolean isUnused = false;
+
+    private ObjectId id = StatementScopeIdGenerator.newObjectId();
 
     public GroupExpression(Plan plan) {
         this(plan, Lists.newArrayList());
@@ -89,6 +110,10 @@ public class GroupExpression {
         return children.size();
     }
 
+    public void setFromRule(Rule rule) {
+        this.fromRule = rule;
+    }
+
     public Group getOwnerGroup() {
         return ownerGroup;
     }
@@ -106,6 +131,7 @@ public class GroupExpression {
     }
 
     public void setChild(int i, Group group) {
+        child(i).removeParentExpression(this);
         children.set(i, group);
         group.addParentExpression(this);
     }
@@ -138,10 +164,6 @@ public class GroupExpression {
         ruleMasks.set(rule.getRuleType().ordinal());
     }
 
-    public void setApplied(RuleType ruleType) {
-        ruleMasks.set(ruleType.ordinal());
-    }
-
     public void propagateApplied(GroupExpression toGroupExpression) {
         toGroupExpression.ruleMasks.or(ruleMasks);
     }
@@ -154,7 +176,23 @@ public class GroupExpression {
         this.statDerived = statDerived;
     }
 
-    public Map<PhysicalProperties, Pair<Double, List<PhysicalProperties>>> getLowestCostTable() {
+    /**
+     * Check this GroupExpression isUnused. See detail of `isUnused` in its comment.
+     */
+    public boolean isUnused() {
+        if (isUnused) {
+            Preconditions.checkState(children.isEmpty() && ownerGroup == null);
+            return true;
+        }
+        Preconditions.checkState(ownerGroup != null);
+        return false;
+    }
+
+    public void setUnused(boolean isUnused) {
+        this.isUnused = isUnused;
+    }
+
+    public Map<PhysicalProperties, Pair<Cost, List<PhysicalProperties>>> getLowestCostTable() {
         return lowestCostTable;
     }
 
@@ -163,15 +201,22 @@ public class GroupExpression {
         return lowestCostTable.get(require).second;
     }
 
+    public List<PhysicalProperties> getInputPropertiesListOrEmpty(PhysicalProperties require) {
+        Pair<Cost, List<PhysicalProperties>> costAndChildRequire = lowestCostTable.get(require);
+        return costAndChildRequire == null ? ImmutableList.of() : costAndChildRequire.second;
+    }
+
     /**
      * Add a (outputProperties) -> (cost, childrenInputProperties) in lowestCostTable.
      * if the outputProperties exists, will be covered.
+     *
      * @return true if lowest cost table change.
      */
     public boolean updateLowestCostTable(PhysicalProperties outputProperties,
-            List<PhysicalProperties> childrenInputProperties, double cost) {
+            List<PhysicalProperties> childrenInputProperties, Cost cost) {
+        COST_STATE_TRACER.log(CostStateUpdateEvent.of(this, cost.getValue(), outputProperties));
         if (lowestCostTable.containsKey(outputProperties)) {
-            if (lowestCostTable.get(outputProperties).first > cost) {
+            if (lowestCostTable.get(outputProperties).first.getValue() > cost.getValue()) {
                 lowestCostTable.put(outputProperties, Pair.of(cost, childrenInputProperties));
                 return true;
             } else {
@@ -185,10 +230,16 @@ public class GroupExpression {
 
     /**
      * get the lowest cost when satisfy property
+     *
      * @param property property that needs to be satisfied
      * @return Lowest cost to satisfy that property
      */
     public double getCostByProperties(PhysicalProperties property) {
+        Preconditions.checkState(lowestCostTable.containsKey(property));
+        return lowestCostTable.get(property).first.getValue();
+    }
+
+    public Cost getCostValueByProperties(PhysicalProperties property) {
         Preconditions.checkState(lowestCostTable.containsKey(property));
         return lowestCostTable.get(property).first;
     }
@@ -198,20 +249,38 @@ public class GroupExpression {
         this.requestPropertiesMap.put(requiredPropertySet, outputPropertySet);
     }
 
+    /**
+     * Merge GroupExpression.
+     */
+    public void mergeTo(GroupExpression target) {
+        this.ownerGroup.removeGroupExpression(this);
+        this.mergeToNotOwnerRemove(target);
+    }
+
+    /**
+     * Merge GroupExpression, but owner don't remove this GroupExpression.
+     */
+    public void mergeToNotOwnerRemove(GroupExpression target) {
+        // LowestCostTable
+        this.getLowestCostTable()
+                .forEach((properties, pair) -> target.updateLowestCostTable(properties, pair.second, pair.first));
+        // requestPropertiesMap
+        target.requestPropertiesMap.putAll(this.requestPropertiesMap);
+        // ruleMasks
+        target.ruleMasks.or(this.ruleMasks);
+
+        // clear
+        this.children.forEach(child -> child.removeParentExpression(this));
+        this.children.clear();
+        this.ownerGroup = null;
+    }
+
     public double getCost() {
         return cost;
     }
 
     public void setCost(double cost) {
         this.cost = cost;
-    }
-
-    public CostEstimate getCostEstimate() {
-        return costEstimate;
-    }
-
-    public void setCostEstimate(CostEstimate costEstimate) {
-        this.costEstimate = costEstimate;
     }
 
     @Override
@@ -223,10 +292,6 @@ public class GroupExpression {
             return false;
         }
         GroupExpression that = (GroupExpression) o;
-        // TODO: add relation id to UnboundRelation
-        if (plan instanceof UnboundRelation) {
-            return false;
-        }
         return children.equals(that.children) && plan.equals(that.plan)
                 && plan.getLogicalProperties().equals(that.plan.getLogicalProperties());
     }
@@ -236,31 +301,30 @@ public class GroupExpression {
         return Objects.hash(children, plan);
     }
 
-    public StatsDeriveResult childStatistics(int idx) {
-        return new StatsDeriveResult(child(idx).getStatistics());
+    public Statistics childStatistics(int idx) {
+        return new Statistics(child(idx).getStatistics());
+    }
+
+    public void setEstOutputRowCount(double estOutputRowCount) {
+        this.estOutputRowCount = estOutputRowCount;
     }
 
     @Override
     public String toString() {
-        StringBuilder builder = new StringBuilder();
-
+        DecimalFormat format = new DecimalFormat("#,###.##");
+        StringBuilder builder = new StringBuilder("id:");
+        builder.append(id.asInt());
         if (ownerGroup == null) {
             builder.append("OWNER GROUP IS NULL[]");
         } else {
-            builder.append(ownerGroup.getGroupId()).append(" cost=").append((long) cost);
+            builder.append("#").append(ownerGroup.getGroupId().asInt());
         }
-
-        if (costEstimate != null) {
-            builder.append(" est=").append(costEstimate);
-        }
+        builder.append(" cost=").append(format.format((long) cost));
+        builder.append(" estRows=").append(format.format(estOutputRowCount));
         builder.append(" (plan=").append(plan.toString()).append(") children=[");
-        for (Group group : children) {
-            builder.append(group.getGroupId()).append(" ");
-        }
+        builder.append(Joiner.on(", ").join(
+                children.stream().map(Group::getGroupId).collect(Collectors.toList())));
         builder.append("]");
-        if (ownerGroup != null) {
-            builder.append(" stats=").append(ownerGroup.getStatistics());
-        }
         return builder.toString();
     }
 }

@@ -96,11 +96,11 @@ public class CopyIntoTest extends TestWithFeService {
 
         new Expectations(Env.getCurrentInternalCatalog()) {
             {
-                Env.getCurrentInternalCatalog().getStage(StageType.EXTERNAL, anyString, "ex_stage_2", null);
+                Env.getCurrentInternalCatalog().getStage(StageType.EXTERNAL, anyString, "ex_stage_2", anyString);
                 minTimes = 0;
                 result = stages1;
 
-                Env.getCurrentInternalCatalog().getStage(StageType.EXTERNAL, anyString, "ex_stage_3", null);
+                Env.getCurrentInternalCatalog().getStage(StageType.EXTERNAL, anyString, "ex_stage_3", anyString);
                 minTimes = 0;
                 result = stages2;
             }
@@ -218,13 +218,13 @@ public class CopyIntoTest extends TestWithFeService {
         List<String> clusters = Lists.newArrayList("cluster0");
         new Expectations(Env.getCurrentInternalCatalog(), Env.getCurrentSystemInfo()) {
             {
-                Env.getCurrentInternalCatalog().getStage(StageType.INTERNAL, anyString, null, null);
-                minTimes = 0;
-                result = stages;
-
                 Env.getCurrentSystemInfo().getCloudClusterNames();
                 minTimes = 0;
                 result = clusters;
+
+                Env.getCurrentInternalCatalog().getStage(StageType.INTERNAL, anyString, null, null);
+                minTimes = 0;
+                result = stages;
             }
         };
 

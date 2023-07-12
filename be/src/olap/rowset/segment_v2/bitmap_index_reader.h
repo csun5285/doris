@@ -17,32 +17,37 @@
 
 #pragma once
 
-#include <roaring/roaring.hh>
+#include <stdint.h>
 
-#include "cloud/io/file_reader.h"
+#include <memory>
+#include <utility>
+
+#include "io/fs/file_reader.h"
 #include "common/status.h"
 #include "gen_cpp/segment_v2.pb.h"
-#include "olap/column_block.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/common.h"
 #include "olap/rowset/segment_v2/indexed_column_reader.h"
-#include "runtime/mem_pool.h"
+#include "olap/types.h"
+
+namespace roaring {
+class Roaring;
+} // namespace roaring
 
 namespace doris {
-
-class TypeInfo;
 
 namespace segment_v2 {
 
 class BitmapIndexIterator;
-class IndexedColumnReader;
-class IndexedColumnIterator;
+class BitmapIndexPB;
 
 class BitmapIndexReader {
 public:
     explicit BitmapIndexReader(io::FileReaderSPtr file_reader,
                                const BitmapIndexPB* bitmap_index_meta)
             : _file_reader(std::move(file_reader)),
-              _type_info(get_scalar_type_info<OLAP_FIELD_TYPE_VARCHAR>()),
+              _type_info(get_scalar_type_info<FieldType::OLAP_FIELD_TYPE_VARCHAR>()),
               _bitmap_index_meta(bitmap_index_meta) {}
 
     Status load(bool use_page_cache, bool kept_in_memory);
@@ -71,8 +76,7 @@ public:
             : _reader(reader),
               _dict_column_iter(reader->_dict_column_reader.get()),
               _bitmap_column_iter(reader->_bitmap_column_reader.get()),
-              _current_rowid(0),
-              _pool(new MemPool()) {}
+              _current_rowid(0) {}
 
     bool has_null_bitmap() const { return _reader->_has_null; }
 
@@ -109,7 +113,6 @@ private:
     IndexedColumnIterator _dict_column_iter;
     IndexedColumnIterator _bitmap_column_iter;
     rowid_t _current_rowid;
-    std::unique_ptr<MemPool> _pool;
 };
 
 } // namespace segment_v2

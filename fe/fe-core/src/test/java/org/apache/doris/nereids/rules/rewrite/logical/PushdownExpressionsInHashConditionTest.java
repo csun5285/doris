@@ -20,8 +20,8 @@ package org.apache.doris.nereids.rules.rewrite.logical;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.parser.NereidsParser;
 import org.apache.doris.nereids.properties.PhysicalProperties;
-import org.apache.doris.nereids.trees.expressions.NamedExpressionUtil;
-import org.apache.doris.nereids.util.PatternMatchSupported;
+import org.apache.doris.nereids.trees.expressions.StatementScopeIdGenerator;
+import org.apache.doris.nereids.util.MemoPatternMatchSupported;
 import org.apache.doris.nereids.util.PlanChecker;
 import org.apache.doris.utframe.TestWithFeService;
 
@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-public class PushdownExpressionsInHashConditionTest extends TestWithFeService implements PatternMatchSupported {
+public class PushdownExpressionsInHashConditionTest extends TestWithFeService implements MemoPatternMatchSupported {
     @Override
     protected void runBeforeAll() throws Exception {
         createDatabase("test");
@@ -39,7 +39,8 @@ public class PushdownExpressionsInHashConditionTest extends TestWithFeService im
         createTables(
                 "CREATE TABLE IF NOT EXISTS T1 (\n"
                         + "    id bigint,\n"
-                        + "    score bigint\n"
+                        + "    score bigint,\n"
+                        + "    score_int int\n"
                         + ")\n"
                         + "DUPLICATE KEY(id)\n"
                         + "DISTRIBUTED BY HASH(id) BUCKETS 1\n"
@@ -60,7 +61,7 @@ public class PushdownExpressionsInHashConditionTest extends TestWithFeService im
 
     @Override
     protected void runBeforeEach() throws Exception {
-        NamedExpressionUtil.clear();
+        StatementScopeIdGenerator.clear();
     }
 
     @Test
@@ -71,12 +72,10 @@ public class PushdownExpressionsInHashConditionTest extends TestWithFeService im
                 "SELECT * FROM T1 JOIN (SELECT ID, SUM(SCORE) SCORE FROM T2 GROUP BY ID) T ON T1.ID + 1 = T.ID AND T.SCORE < 10",
                 "SELECT * FROM T1 JOIN (SELECT ID, SUM(SCORE) SCORE FROM T2 GROUP BY ID ORDER BY ID) T ON T1.ID + 1 = T.ID AND T.SCORE < 10"
         );
-        testSql.forEach(sql -> {
-            new NereidsPlanner(createStatementCtx(sql)).plan(
-                    new NereidsParser().parseSingle(sql),
-                    PhysicalProperties.ANY
-            );
-        });
+        testSql.forEach(sql -> new NereidsPlanner(createStatementCtx(sql)).plan(
+                new NereidsParser().parseSingle(sql),
+                PhysicalProperties.ANY
+        ));
     }
 
     @Test

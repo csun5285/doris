@@ -17,412 +17,310 @@
 
 package org.apache.doris.nereids.stats;
 
-import org.apache.doris.catalog.Database;
-import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.Table;
-import org.apache.doris.common.CheckedMath;
-import org.apache.doris.common.Id;
+import org.apache.doris.common.Pair;
+import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.Cast;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
-import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.plans.JoinType;
 import org.apache.doris.nereids.trees.plans.algebra.Join;
-import org.apache.doris.nereids.trees.plans.physical.PhysicalHashJoin;
-import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.nereids.util.ExpressionUtils;
 import org.apache.doris.statistics.ColumnStatistic;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.statistics.ColumnStatisticBuilder;
+import org.apache.doris.statistics.Statistics;
+import org.apache.doris.statistics.StatisticsBuilder;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import com.google.common.collect.Lists;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Estimate hash join stats.
  * TODO: Update other props in the ColumnStats properly.
  */
 public class JoinEstimation {
-    private static final Logger LOG = LogManager.getLogger(JoinEstimation.class);
 
-    //LIMIT_RIGHT_WIDTH: the larger RIGHT_WIDTH means right child contains more join node. Although sometimes,
-    // right deep tree could reduce the input tuple number, it is bad for building hash table in parallel. That why
-    // we add penalty if the right child is too wide.
-    private static int LIMIT_RIGHT_WIDTH = 3;
-
-    //AVG_DIM_FACT_RATIO: by average, the number of fact tuples of one dimension. for example, in tpch, in
-    //lineitem, there are 1-7 tuples of the same orderkey, the average is 4.
-    private static int AVG_DIM_FACT_RATIO = 2;
-
-    //REDUCE_TIMES = 1/selectivity
-    //TODO currently, regard selectivity as 0.5, need to be refined.
-    private static int REDUCE_TIMES = 2;
-
-    private static class JoinEstimationResult {
-        public boolean forbiddenReducePropagation = false;
-        public boolean isReducedByHashJoin = false;
-        public double rowCount = 0;
-    }
-
-    private static double estimateInnerJoinV2(Join join, EqualTo equalto,
-            StatsDeriveResult leftStats, StatsDeriveResult rightStats) {
-        SlotReference eqRight = (SlotReference) equalto.child(1).getInputSlots().toArray()[0];
-
-        ColumnStatistic rColumnStats = rightStats.getSlotIdToColumnStats().get(eqRight.getExprId());
-        SlotReference eqLeft = (SlotReference) equalto.child(0).getInputSlots().toArray()[0];
-
-        if (rColumnStats == null) {
-            rColumnStats = rightStats.getSlotIdToColumnStats().get(eqLeft.getExprId());
-        }
-        if (rColumnStats == null) {
-            throw new RuntimeException("estimateInnerJoinV2 cannot find columnStats: " + eqRight);
-        }
-
-        double rowCount = 0;
-        if (rColumnStats.ndv != 0) {
-            rowCount = (leftStats.getRowCount()
-                    * rightStats.getRowCount()
-                    * rColumnStats.selectivity
-                    / rColumnStats.ndv);
-        }
-        rowCount = Math.ceil(rowCount);
-        return rowCount;
-    }
-
-    /**
-     * the basic idea of star-schema is:
-     * 1. fact_table JOIN dimension_table, if dimension table are filtered, the result can be regarded as
-     * applying a filter on fact table.
-     * 2. fact_table JOIN dimension_table, if the dimension table is not filtered, the number of join result tuple
-     * equals to the number of fact tuples.
-     * 3. dimension table JOIN fact table, the number of join result tuple is that of fact table or 2 times
-     * of dimension table.
-     */
-    private static JoinEstimationResult estimateInnerJoin(PhysicalHashJoin join, EqualTo equalto,
-            StatsDeriveResult leftStats, StatsDeriveResult rightStats) {
-        JoinEstimationResult result = new JoinEstimationResult();
-        SlotReference eqLeft = (SlotReference) equalto.child(0);
-        SlotReference eqRight = (SlotReference) equalto.child(1);
-        if ((rightStats.getWidth() == LIMIT_RIGHT_WIDTH && !rightStats.isReduced)
-                || rightStats.getWidth() > LIMIT_RIGHT_WIDTH + 1) {
-            //if the right side is too wide, ignore the filter effect.
-            result.forbiddenReducePropagation = true;
-            //penalty too right deep tree by multiply level
-            result.rowCount = rightStats.getWidth() * (leftStats.getRowCount()
-                    + AVG_DIM_FACT_RATIO * rightStats.getRowCount());
-        } else if (eqLeft.getColumn().isPresent() || eqRight.getColumn().isPresent()) {
-            Set<Slot> rightSlots = ((PhysicalHashJoin<?, ?>) join).child(1).getOutputSet();
-            if ((rightSlots.contains(eqRight)
-                    && eqRight.getColumn().isPresent()
-                    && eqRight.getColumn().get().isKey()
-                    && !compoundKey(eqRight))
-                    || (rightSlots.contains(eqLeft)
-                    && eqLeft.getColumn().isPresent()
-                    && eqLeft.getColumn().get().isKey()
-                    && !compoundKey(eqLeft))) {
-                //fact table JOIN dimension table
-                if (rightStats.isReduced) {
-                    //dimension table is reduced
-                    result.isReducedByHashJoin = true;
-                    //TODO current we regard selectivity as 0.5. After we have more accurate estimated selectivity,
-                    // replace it.
-                    result.rowCount = leftStats.getRowCount() / REDUCE_TIMES;
-                } else {
-                    //dimension table is not reduced, the join result tuple number equals to
-                    // the tuple number of fact table.
-                    result.rowCount = leftStats.getRowCount();
-                }
-            } else {
-                //dimension table JOIN fact table
-                result.rowCount = leftStats.getRowCount() + AVG_DIM_FACT_RATIO * rightStats.getRowCount();
-            }
+    private static EqualTo normalizeHashJoinCondition(EqualTo equalTo, Statistics leftStats, Statistics rightStats) {
+        boolean changeOrder = equalTo.left().getInputSlots().stream().anyMatch(
+                slot -> rightStats.findColumnStatistics(slot) != null
+        );
+        if (changeOrder) {
+            return new EqualTo(equalTo.right(), equalTo.left());
         } else {
-            LOG.debug("HashJoin cost calculation: slot.column is null, star-schema support failed.");
-            result.rowCount = Math.max(leftStats.getRowCount() + rightStats.getRowCount(),
-                    leftStats.getRowCount() * AVG_DIM_FACT_RATIO);
+            return equalTo;
         }
-        return result;
     }
 
-    private static double estimateLeftSemiJoin(double leftCount, double rightCount) {
-        return leftCount - leftCount / Math.max(2, rightCount);
-    }
-
-    /**
-     * estimate join
-     */
-    public static StatsDeriveResult estimateV2(StatsDeriveResult leftStats, StatsDeriveResult rightStats, Join join) {
-        JoinType joinType = join.getJoinType();
-        double rowCount = Double.MAX_VALUE;
-        //TODO the estimation of semi and anti join is not proper, just for tpch q21
-        if (joinType == JoinType.LEFT_SEMI_JOIN || joinType == JoinType.LEFT_ANTI_JOIN) {
-            double rightCount = rightStats.getRowCount();
-            double leftCount = leftStats.getRowCount();
-            if (join.getHashJoinConjuncts().isEmpty()) {
-                rowCount = joinType == JoinType.LEFT_SEMI_JOIN ? leftCount : 0;
-            } else {
-                rowCount = estimateLeftSemiJoin(leftCount, rightCount);
-            }
-        } else if (joinType == JoinType.RIGHT_SEMI_JOIN || joinType == JoinType.RIGHT_ANTI_JOIN) {
-            double rightCount = rightStats.getRowCount();
-            double leftCount = leftStats.getRowCount();
-            if (join.getHashJoinConjuncts().isEmpty()) {
-                rowCount = joinType == JoinType.RIGHT_SEMI_JOIN ? rightCount : 0;
-            } else {
-                rowCount = estimateLeftSemiJoin(rightCount, leftCount);
-            }
-        } else if (joinType == JoinType.INNER_JOIN) {
-            if (join.getHashJoinConjuncts().isEmpty()) {
-                //TODO: consider other join conjuncts
-                rowCount = leftStats.getRowCount() * rightStats.getRowCount();
-            } else {
-                for (Expression joinConjunct : join.getHashJoinConjuncts()) {
-                    double tmpRowCount = estimateInnerJoinV2(join,
-                            (EqualTo) joinConjunct, leftStats, rightStats);
-                    rowCount = Math.min(rowCount, tmpRowCount);
+    private static boolean hashJoinConditionContainsUnknownColumnStats(Statistics leftStats,
+            Statistics rightStats, Join join) {
+        for (Expression expr : join.getHashJoinConjuncts()) {
+            for (Slot slot : expr.getInputSlots()) {
+                ColumnStatistic colStats = leftStats.findColumnStatistics(slot);
+                if (colStats == null) {
+                    colStats = rightStats.findColumnStatistics(slot);
                 }
-            }
-        } else if (joinType == JoinType.LEFT_OUTER_JOIN) {
-            rowCount = leftStats.getRowCount();
-        } else if (joinType == JoinType.RIGHT_OUTER_JOIN) {
-            rowCount = rightStats.getRowCount();
-        } else if (joinType == JoinType.CROSS_JOIN) {
-            rowCount = CheckedMath.checkedMultiply(leftStats.getRowCount(),
-                    rightStats.getRowCount());
-        } else {
-            throw new RuntimeException("joinType is not supported");
-        }
-
-        StatsDeriveResult statsDeriveResult = new StatsDeriveResult(rowCount,
-                rightStats.getWidth() + leftStats.getWidth(), 0, Maps.newHashMap());
-        if (joinType.isRemainLeftJoin()) {
-            statsDeriveResult.merge(leftStats);
-        }
-        if (joinType.isRemainRightJoin()) {
-            statsDeriveResult.merge(rightStats);
-        }
-        statsDeriveResult.setPenalty(0.0);
-        return statsDeriveResult;
-    }
-
-    /**
-     * Do estimate.
-     * // TODO: since we have no column stats here. just use a fix ratio to compute the row count.
-     */
-    public static StatsDeriveResult estimate(StatsDeriveResult leftStats, StatsDeriveResult rightStats, Join join) {
-        if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable().enableNereidsStatsDeriveV2) {
-            return estimateV2(leftStats, rightStats, join);
-        }
-        JoinType joinType = join.getJoinType();
-        // TODO: normalize join hashConjuncts.
-        // List<Expression> hashJoinConjuncts = join.getHashJoinConjuncts();
-        // List<Expression> normalizedConjuncts = hashJoinConjuncts.stream().map(EqualTo.class::cast)
-        //         .map(e -> JoinUtils.swapEqualToForChildrenOrder(e, leftStats.getSlotToColumnStats().keySet()))
-        //         .collect(Collectors.toList());
-        boolean isReducedByHashJoin = false;
-        boolean forbiddenReducePropagation = false;
-        double rowCount;
-        if (joinType == JoinType.LEFT_SEMI_JOIN || joinType == JoinType.LEFT_ANTI_JOIN) {
-            if (rightStats.isReduced && rightStats.getWidth() <= LIMIT_RIGHT_WIDTH) {
-                rowCount = leftStats.getRowCount() / REDUCE_TIMES;
-            } else {
-                rowCount = leftStats.getRowCount() + 1;
-            }
-        } else if (joinType == JoinType.RIGHT_SEMI_JOIN || joinType == JoinType.RIGHT_ANTI_JOIN) {
-            if (leftStats.isReduced) {
-                rowCount = rightStats.getRowCount() / REDUCE_TIMES;
-            } else {
-                rowCount = rightStats.getRowCount() + 1;
-            }
-        } else if (joinType == JoinType.INNER_JOIN) {
-            if (!join.getHashJoinConjuncts().isEmpty() && join instanceof PhysicalHashJoin
-                    && ConnectContext.get().getSessionVariable().isNereidsStarSchemaSupport()) {
-                /*
-                 * Doris does not support primary key and foreign key. But the data may satisfy pk and fk constraints.
-                 * This fact is indicated by session variable `support_star_schema_nereids`.
-                 * If `support_star_schema_nereids` is true, we have the following implications:
-                 * 1. the duplicate key, the unique key and the aggregate key are primary key.
-                 * 2. the inner join is between fact table and dimension table
-                 */
-                //TODO:
-                // 1.currently, we only consider single primary key table. The idea could be expanded to table
-                //   with compound keys, like tpch lineitem/partsupp.
-                // 2.after aggregation, group key is unique. we could use it as primary key.
-                // 3.isReduced should be replaced by selectivity. and we need to refine the propagation of selectivity.
-                JoinEstimationResult better = new JoinEstimationResult();
-                better.rowCount = Long.MAX_VALUE;
-
-                for (Expression equalto : join.getHashJoinConjuncts()) {
-                    JoinEstimationResult result = estimateInnerJoin((PhysicalHashJoin) join,
-                            (EqualTo) equalto, leftStats, rightStats);
-                    if (result.rowCount < better.rowCount) {
-                        better = result;
-                    }
+                if (colStats == null || colStats.isUnKnown) {
+                    return true;
                 }
-                rowCount = better.rowCount;
-                forbiddenReducePropagation = better.forbiddenReducePropagation;
-                isReducedByHashJoin = better.isReducedByHashJoin;
-            } else {
-                double childRowCount = Math.max(leftStats.getRowCount(), rightStats.getRowCount());
-                rowCount = childRowCount;
-            }
-        } else if (joinType == JoinType.LEFT_OUTER_JOIN) {
-            rowCount = leftStats.getRowCount();
-        } else if (joinType == JoinType.RIGHT_OUTER_JOIN) {
-            rowCount = rightStats.getRowCount();
-        } else if (joinType == JoinType.CROSS_JOIN) {
-            rowCount = CheckedMath.checkedMultiply(leftStats.getRowCount(),
-                    rightStats.getRowCount());
-        } else {
-            throw new RuntimeException("joinType is not supported");
-        }
-
-        StatsDeriveResult statsDeriveResult = new StatsDeriveResult(rowCount,
-                rightStats.getWidth() + leftStats.getWidth(),
-                0, Maps.newHashMap());
-        if (joinType.isRemainLeftJoin()) {
-            statsDeriveResult.merge(leftStats);
-        }
-        if (joinType.isRemainRightJoin()) {
-            statsDeriveResult.merge(rightStats);
-        }
-
-        statsDeriveResult.isReduced = !forbiddenReducePropagation && (isReducedByHashJoin || leftStats.isReduced);
-        return statsDeriveResult;
-    }
-
-    private static boolean compoundKey(SlotReference slotReference) {
-        Optional<Database> db = Env.getCurrentEnv().getInternalCatalog().getDb(slotReference.getQualifier().get(0));
-        if (db.isPresent()) {
-            Optional<Table> table = db.get().getTable(slotReference.getQualifier().get(1));
-            if (table.isPresent()) {
-                return table.get().isHasCompoundKey();
             }
         }
         return false;
     }
 
-    private static Expression removeCast(Expression parent) {
-        if (parent instanceof Cast) {
-            return removeCast(((Cast) parent).child());
+    private static Statistics estimateInnerJoin(Statistics leftStats, Statistics rightStats, Join join) {
+        if (hashJoinConditionContainsUnknownColumnStats(leftStats, rightStats, join)) {
+            double rowCount = Math.max(leftStats.getRowCount(), rightStats.getRowCount());
+            rowCount = Math.max(1, rowCount);
+            return new StatisticsBuilder()
+                .setRowCount(rowCount)
+                .putColumnStatistics(leftStats.columnStatistics())
+                .putColumnStatistics(rightStats.columnStatistics())
+                .build();
         }
-        return parent;
-    }
+        /*
+         * When we estimate filter A=B,
+         * if any side of equation, A or B, is almost unique, the confidence level of estimation is high.
+         * But is both sides are not unique, the confidence level is very low.
+         * The equations, whose confidence level is low, are called unTrustEquation.
+         * In order to avoid error propagation, for unTrustEquations, we only use the biggest selectivity.
+         */
+        List<Double> unTrustEqualRatio = Lists.newArrayList();
+        boolean leftBigger = leftStats.getRowCount() > rightStats.getRowCount();
+        List<EqualTo> trustableConditions = join.getHashJoinConjuncts().stream()
+                .map(expression -> (EqualTo) expression)
+                .filter(
+                    expression -> {
+                        // since ndv is not accurate, if ndv/rowcount < almostUniqueThreshold,
+                        // this column is regarded as unique.
+                        double almostUniqueThreshold = 0.9;
+                        EqualTo equal = normalizeHashJoinCondition(expression, leftStats, rightStats);
+                        ColumnStatistic eqLeftColStats = ExpressionEstimation.estimate(equal.left(), leftStats);
+                        ColumnStatistic eqRightColStats = ExpressionEstimation.estimate(equal.right(), rightStats);
+                        double rightStatsRowCount = StatsMathUtil.nonZeroDivisor(rightStats.getRowCount());
+                        double leftStatsRowCount = StatsMathUtil.nonZeroDivisor(leftStats.getRowCount());
+                        boolean trustable = eqRightColStats.ndv / rightStatsRowCount > almostUniqueThreshold
+                                || eqLeftColStats.ndv / leftStatsRowCount > almostUniqueThreshold;
+                        if (!trustable) {
+                            double rNdv = StatsMathUtil.nonZeroDivisor(eqRightColStats.ndv);
+                            double lNdv = StatsMathUtil.nonZeroDivisor(eqLeftColStats.ndv);
+                            if (leftBigger) {
+                                unTrustEqualRatio.add((rightStatsRowCount / rNdv)
+                                        * Math.min(eqLeftColStats.ndv, eqRightColStats.ndv) / lNdv);
+                            } else {
+                                unTrustEqualRatio.add((leftStatsRowCount / lNdv)
+                                        * Math.min(eqLeftColStats.ndv, eqRightColStats.ndv) / rNdv);
+                            }
+                        }
+                        return trustable;
+                    }
+                ).collect(Collectors.toList());
 
-    // TODO: If the condition of Join Plan could any expression in addition to EqualTo type,
-    //       we should handle that properly.
-    private static long getSemiJoinRowCount(StatsDeriveResult leftStats, StatsDeriveResult rightStats,
-            List<Expression> hashConjuncts, JoinType joinType) {
-        double rowCount;
-        if (JoinType.RIGHT_SEMI_JOIN.equals(joinType) || JoinType.RIGHT_ANTI_JOIN.equals(joinType)) {
-            if (rightStats.getRowCount() == -1) {
-                return -1;
+        Statistics innerJoinStats;
+        Statistics crossJoinStats = new StatisticsBuilder()
+                .setRowCount(Math.max(1, leftStats.getRowCount() * rightStats.getRowCount()))
+                .putColumnStatistics(leftStats.columnStatistics())
+                .putColumnStatistics(rightStats.columnStatistics())
+                .build();
+
+        double outputRowCount = 1;
+        if (!trustableConditions.isEmpty()) {
+            List<Pair<Expression, Double>> sortedJoinConditions = join.getHashJoinConjuncts().stream()
+                    .map(expression -> Pair.of(expression, estimateJoinConditionSel(crossJoinStats, expression)))
+                    .sorted((a, b) -> {
+                        double sub = a.second - b.second;
+                        if (sub > 0) {
+                            return 1;
+                        } else if (sub < 0) {
+                            return -1;
+                        } else {
+                            return 0;
+                        }
+                    }).collect(Collectors.toList());
+
+            double sel = 1.0;
+            for (int i = 0; i < sortedJoinConditions.size(); i++) {
+                sel *= Math.pow(sortedJoinConditions.get(i).second, 1 / Math.pow(2, i));
             }
-            rowCount = rightStats.getRowCount();
+            outputRowCount = Math.max(1, crossJoinStats.getRowCount() * sel);
         } else {
-            if (leftStats.getRowCount() == -1) {
-                return -1;
+            outputRowCount = Math.max(leftStats.getRowCount(), rightStats.getRowCount());
+            Optional<Double> ratio = unTrustEqualRatio.stream().max(Double::compareTo);
+            if (ratio.isPresent()) {
+                outputRowCount = Math.max(1, outputRowCount * ratio.get());
             }
-            rowCount = leftStats.getRowCount();
         }
-        Map<Id, ColumnStatistic> leftSlotToColStats = leftStats.getSlotIdToColumnStats();
-        Map<Id, ColumnStatistic> rightSlotToColStats = rightStats.getSlotIdToColumnStats();
-        double minSelectivity = 1.0;
-        for (Expression hashConjunct : hashConjuncts) {
-            // TODO: since we have no column stats here. just use a fix ratio to compute the row count.
-            Expression leftChild = (SlotReference) removeCast(hashConjunct.child(0));
-            if (!(leftChild instanceof Slot)) {
-                continue;
+        innerJoinStats = crossJoinStats.updateRowCountOnly(outputRowCount);
+        if (!join.getOtherJoinConjuncts().isEmpty()) {
+            FilterEstimation filterEstimation = new FilterEstimation();
+            innerJoinStats = filterEstimation.estimate(
+                    ExpressionUtils.and(join.getOtherJoinConjuncts()), innerJoinStats);
+            if (innerJoinStats.getRowCount() <= 0) {
+                innerJoinStats = new StatisticsBuilder(innerJoinStats).setRowCount(1).build();
             }
-            Slot leftSlot = (Slot) leftChild;
-            Expression rightChild = (SlotReference) removeCast(hashConjunct.child(0));
-            if (!(rightChild instanceof Slot)) {
-                continue;
-            }
-            Slot rightSlot = (Slot) rightChild;
-            double lhsNdv = leftSlotToColStats.get(leftSlot.getExprId()).ndv;
-            lhsNdv = Math.min(lhsNdv, leftStats.getRowCount());
-            double rhsNdv = rightSlotToColStats.get(rightSlot.getExprId()).ndv;
-            rhsNdv = Math.min(rhsNdv, rightStats.getRowCount());
-            // Skip conjuncts with unknown NDV on either side.
-            if (lhsNdv == -1 || rhsNdv == -1) {
-                continue;
-            }
-            // TODO: Do we need NULL_AWARE_LEFT_ANTI_JOIN type as stale optimizer?
-            double selectivity = 1.0;
-            switch (joinType) {
-                case LEFT_SEMI_JOIN: {
-                    selectivity = (double) Math.min(lhsNdv, rhsNdv) / (double) (lhsNdv);
-                    break;
-                }
-                case RIGHT_SEMI_JOIN: {
-                    selectivity = (double) Math.min(lhsNdv, rhsNdv) / (double) (rhsNdv);
-                    break;
-                }
-                case LEFT_ANTI_JOIN:
-                    selectivity = (double) (lhsNdv > rhsNdv ? (lhsNdv - rhsNdv) : lhsNdv) / (double) lhsNdv;
-                    break;
-                case RIGHT_ANTI_JOIN: {
-                    selectivity = (double) (rhsNdv > lhsNdv ? (rhsNdv - lhsNdv) : rhsNdv) / (double) rhsNdv;
-                    break;
-                }
-                default:
-                    throw new RuntimeException("joinType is not supported");
-            }
-            minSelectivity = Math.min(minSelectivity, selectivity);
         }
-        Preconditions.checkState(rowCount != -1);
-        return Math.round(rowCount * minSelectivity);
+
+        innerJoinStats.setWidth(leftStats.getWidth() + rightStats.getWidth());
+        innerJoinStats.setPenalty(0);
+        return innerJoinStats;
     }
 
-    private static double getJoinRowCount(StatsDeriveResult leftStats, StatsDeriveResult rightStats,
-            List<Expression> eqConjunctList, JoinType joinType) {
-        double lhsCard = leftStats.getRowCount();
-        double rhsCard = rightStats.getRowCount();
-        Map<Id, ColumnStatistic> leftSlotToColumnStats = leftStats.getSlotIdToColumnStats();
-        Map<Id, ColumnStatistic> rightSlotToColumnStats = rightStats.getSlotIdToColumnStats();
-        if (lhsCard == -1 || rhsCard == -1) {
-            return lhsCard;
+    private static double estimateJoinConditionSel(Statistics crossJoinStats, Expression joinCond) {
+        Statistics statistics = new FilterEstimation().estimate(joinCond, crossJoinStats);
+        return statistics.getRowCount() / crossJoinStats.getRowCount();
+    }
+
+    private static double estimateSemiOrAntiRowCountBySlotsEqual(Statistics leftStats,
+            Statistics rightStats, Join join, EqualTo equalTo) {
+        Expression eqLeft = equalTo.left();
+        Expression eqRight = equalTo.right();
+        ColumnStatistic probColStats = leftStats.findColumnStatistics(eqLeft);
+        ColumnStatistic buildColStats;
+        if (probColStats == null) {
+            probColStats = leftStats.findColumnStatistics(eqRight);
+            buildColStats = rightStats.findColumnStatistics(eqLeft);
+        } else {
+            buildColStats = rightStats.findColumnStatistics(eqRight);
+        }
+        if (probColStats == null || buildColStats == null) {
+            return Double.POSITIVE_INFINITY;
         }
 
-        double result = -1;
-        for (Expression eqJoinConjunct : eqConjunctList) {
-            Expression left = eqJoinConjunct.child(0);
-            if (!(left instanceof SlotReference)) {
-                continue;
-            }
-            Expression right = eqJoinConjunct.child(1);
-            if (!(right instanceof SlotReference)) {
-                continue;
-            }
-            SlotReference leftSlot = (SlotReference) left;
-            ColumnStatistic leftColStats = leftSlotToColumnStats.get(leftSlot.getExprId());
-            if (leftColStats == null) {
-                continue;
-            }
-            SlotReference rightSlot = (SlotReference) right;
-            ColumnStatistic rightColStats = rightSlotToColumnStats.get(rightSlot.getExprId());
-            if (rightColStats == null) {
-                continue;
-            }
-            double leftSideNdv = leftColStats.ndv;
-            double rightSideNdv = rightColStats.ndv;
-            long tmpNdv = (long) Math.max(1, Math.max(leftSideNdv, rightSideNdv));
-            double joinCard = tmpNdv == rhsCard ? lhsCard : CheckedMath.checkedMultiply(
-                    Math.round((lhsCard / Math.max(1, Math.max(leftSideNdv, rightSideNdv)))), rhsCard);
-            if (result == -1) {
-                result = joinCard;
+        double rowCount;
+        if (join.getJoinType().isLeftSemiOrAntiJoin()) {
+            double semiRowCount = StatsMathUtil.divide(leftStats.getRowCount() * buildColStats.ndv,
+                    buildColStats.getOriginalNdv());
+            if (join.getJoinType().isSemiJoin()) {
+                rowCount = semiRowCount;
             } else {
-                result = Math.min(result, joinCard);
+                rowCount = leftStats.getRowCount() - semiRowCount;
+            }
+        } else {
+            //right semi or anti
+            double semiRowCount = StatsMathUtil.divide(rightStats.getRowCount() * probColStats.ndv,
+                    probColStats.getOriginalNdv());
+            if (join.getJoinType().isSemiJoin()) {
+                rowCount = semiRowCount;
+            } else {
+                rowCount = rightStats.getRowCount() - semiRowCount;
             }
         }
-
-        return result;
+        return Math.max(1, rowCount);
     }
+
+    private static Statistics estimateSemiOrAnti(Statistics leftStats, Statistics rightStats, Join join) {
+        if (hashJoinConditionContainsUnknownColumnStats(leftStats, rightStats, join)) {
+            if (join.getJoinType().isLeftSemiOrAntiJoin()) {
+                return new StatisticsBuilder().setRowCount(leftStats.getRowCount())
+                        .putColumnStatistics(leftStats.columnStatistics())
+                        .putColumnStatistics(rightStats.columnStatistics())
+                        .build();
+            } else {
+                //right semi or anti
+                return new StatisticsBuilder().setRowCount(rightStats.getRowCount())
+                        .putColumnStatistics(leftStats.columnStatistics())
+                        .putColumnStatistics(rightStats.columnStatistics())
+                        .build();
+            }
+        }
+        double rowCount = Double.POSITIVE_INFINITY;
+        for (Expression conjunct : join.getHashJoinConjuncts()) {
+            double eqRowCount = estimateSemiOrAntiRowCountBySlotsEqual(leftStats, rightStats,
+                    join, (EqualTo) conjunct);
+            if (rowCount > eqRowCount) {
+                rowCount = eqRowCount;
+            }
+        }
+        if (Double.isInfinite(rowCount)) {
+            //slotsEqual estimation failed, fall back to original algorithm
+            Statistics innerJoinStats = estimateInnerJoin(leftStats, rightStats, join);
+            double baseRowCount =
+                    join.getJoinType().isLeftSemiOrAntiJoin() ? leftStats.getRowCount() : rightStats.getRowCount();
+            rowCount = Math.min(innerJoinStats.getRowCount(), baseRowCount);
+            return innerJoinStats.withRowCount(rowCount);
+        } else {
+            StatisticsBuilder builder;
+            double originalRowCount = leftStats.getRowCount();
+            if (join.getJoinType().isLeftSemiOrAntiJoin()) {
+                builder = new StatisticsBuilder(leftStats);
+                builder.setRowCount(rowCount);
+            } else {
+                //right semi or anti
+                builder = new StatisticsBuilder(rightStats);
+                builder.setRowCount(rowCount);
+                originalRowCount = rightStats.getRowCount();
+            }
+            Statistics outputStats = builder.build();
+            outputStats.fix(rowCount, originalRowCount);
+            return outputStats;
+        }
+    }
+
+    /**
+     * estimate join
+     */
+    public static Statistics estimate(Statistics leftStats, Statistics rightStats, Join join) {
+        JoinType joinType = join.getJoinType();
+        if (joinType.isSemiOrAntiJoin()) {
+            return estimateSemiOrAnti(leftStats, rightStats, join);
+        } else if (joinType == JoinType.INNER_JOIN) {
+            Statistics innerJoinStats = estimateInnerJoin(leftStats, rightStats, join);
+            innerJoinStats = updateJoinResultStatsByHashJoinCondition(innerJoinStats, join);
+            return innerJoinStats;
+        } else if (joinType == JoinType.LEFT_OUTER_JOIN) {
+            Statistics innerJoinStats = estimateInnerJoin(leftStats, rightStats, join);
+            double rowCount = Math.max(leftStats.getRowCount(), innerJoinStats.getRowCount());
+            return innerJoinStats.withRowCount(rowCount);
+        } else if (joinType == JoinType.RIGHT_OUTER_JOIN) {
+            Statistics innerJoinStats = estimateInnerJoin(leftStats, rightStats, join);
+            double rowCount = Math.max(rightStats.getRowCount(), innerJoinStats.getRowCount());
+            return innerJoinStats.withRowCount(rowCount);
+        } else if (joinType == JoinType.FULL_OUTER_JOIN) {
+            Statistics innerJoinStats = estimateInnerJoin(leftStats, rightStats, join);
+            return innerJoinStats.withRowCount(leftStats.getRowCount()
+                    + rightStats.getRowCount() + innerJoinStats.getRowCount());
+        } else if (joinType == JoinType.CROSS_JOIN) {
+            return new StatisticsBuilder()
+                    .setRowCount(leftStats.getRowCount() * rightStats.getRowCount())
+                    .putColumnStatistics(leftStats.columnStatistics())
+                    .putColumnStatistics(rightStats.columnStatistics())
+                    .build();
+        }
+        throw new AnalysisException("join type not supported: " + join.getJoinType());
+    }
+
+    /**
+     * L join R on a = b
+     * after join, a.ndv and b.ndv should be equal to min(a.ndv, b.ndv)
+     */
+    private static Statistics updateJoinResultStatsByHashJoinCondition(Statistics innerStats, Join join) {
+        Map<Expression, ColumnStatistic> updatedCols = new HashMap<>();
+        for (Expression expr : join.getHashJoinConjuncts()) {
+            EqualTo equalTo = (EqualTo) expr;
+            ColumnStatistic leftColStats = ExpressionEstimation.estimate(equalTo.left(), innerStats);
+            ColumnStatistic rightColStats = ExpressionEstimation.estimate(equalTo.right(), innerStats);
+            double minNdv = Math.min(leftColStats.ndv, rightColStats.ndv);
+            leftColStats = new ColumnStatisticBuilder(leftColStats).setNdv(minNdv).build();
+            rightColStats = new ColumnStatisticBuilder(rightColStats).setNdv(minNdv).build();
+            Expression eqLeft = equalTo.left();
+            if (eqLeft instanceof Cast) {
+                eqLeft = eqLeft.child(0);
+            }
+            Expression eqRight = equalTo.right();
+            if (eqRight instanceof Cast) {
+                eqRight = eqRight.child(0);
+            }
+            updatedCols.put(eqLeft, leftColStats);
+            updatedCols.put(eqRight, rightColStats);
+        }
+        updatedCols.entrySet().stream().forEach(
+                entry -> innerStats.addColumnStats(entry.getKey(), entry.getValue())
+        );
+        return innerStats;
+    }
+
 }

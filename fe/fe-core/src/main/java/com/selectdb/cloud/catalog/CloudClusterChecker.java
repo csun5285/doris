@@ -245,7 +245,7 @@ public class CloudClusterChecker extends MasterDaemon {
     @Override
     protected void runAfterCatalogReady() {
         Map<String, List<Backend>> clusterIdToBackend = Env.getCurrentSystemInfo().getCloudClusterIdToBackend();
-        Set<String> allMysqlUserName = Env.getCurrentEnv().getAuth().getUserPrivTable().getAllMysqlUserName();
+        Set<String> allMysqlUserName = Env.getCurrentEnv().getAuth().getAllUsers();
         if (allMysqlUserName != null) {
             //rpc to ms, to get mysql user can use cluster_id
             LOG.info("allMysqlUserName : {}", allMysqlUserName);

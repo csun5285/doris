@@ -20,11 +20,26 @@
 
 #include "vec/data_types/data_type_array.h"
 
-#include "gen_cpp/data.pb.h"
-#include "util/stack_util.h"
+#include <ctype.h>
+#include <gen_cpp/data.pb.h>
+#include <glog/logging.h>
+#include <string.h>
+
+#include <typeinfo>
+#include <utility>
+
+#include "runtime/decimalv2_value.h"
+#include "util/types.h"
+#include "vec/columns/column.h"
 #include "vec/columns/column_array.h"
+#include "vec/columns/column_const.h"
 #include "vec/columns/column_nullable.h"
+#include "vec/common/assert_cast.h"
+#include "vec/common/string_buffer.hpp"
+#include "vec/common/string_ref.h"
+#include "vec/common/typeid_cast.h"
 #include "vec/data_types/data_type_nullable.h"
+#include "vec/io/reader_buffer.h"
 
 namespace doris::vectorized {
 
@@ -39,7 +54,9 @@ MutableColumnPtr DataTypeArray::create_column() const {
 }
 
 Field DataTypeArray::get_default() const {
-    return Array();
+    Array a;
+    a.push_back(nested->get_default());
+    return a;
 }
 
 bool DataTypeArray::equals(const IDataType& rhs) const {
@@ -110,12 +127,14 @@ void get_decimal_value(const IColumn& nested_column, DecimalV2Value& decimal_val
     decimal_value = (DecimalV2Value)(reinterpret_cast<const PackedInt128*>(
                                              nested_col->get_data_at(pos).data)
                                              ->value);
-    return;
 }
 
 void DataTypeArray::to_string(const IColumn& column, size_t row_num, BufferWritable& ostr) const {
-    auto ptr = column.convert_to_full_column_if_const();
-    auto& data_column = assert_cast<const ColumnArray&>(*ptr.get());
+    auto result = check_column_const_set_readability(column, row_num);
+    ColumnPtr ptr = result.first;
+    row_num = result.second;
+
+    auto& data_column = assert_cast<const ColumnArray&>(*ptr);
     auto& offsets = data_column.get_offsets();
 
     size_t offset = offsets[row_num - 1];
@@ -132,11 +151,6 @@ void DataTypeArray::to_string(const IColumn& column, size_t row_num, BufferWrita
             ostr.write("'", 1);
             nested->to_string(nested_column, i, ostr);
             ostr.write("'", 1);
-        } else if (which.is_decimal()) {
-            DecimalV2Value decimal_value;
-            get_decimal_value(nested_column, decimal_value, i);
-            std::string decimal_str = decimal_value.to_string();
-            ostr.write(decimal_str.c_str(), decimal_str.size());
         } else {
             nested->to_string(nested_column, i, ostr);
         }
@@ -145,34 +159,33 @@ void DataTypeArray::to_string(const IColumn& column, size_t row_num, BufferWrita
 }
 
 std::string DataTypeArray::to_string(const IColumn& column, size_t row_num) const {
-    auto ptr = column.convert_to_full_column_if_const();
-    auto& data_column = assert_cast<const ColumnArray&>(*ptr.get());
+    auto result = check_column_const_set_readability(column, row_num);
+    ColumnPtr ptr = result.first;
+    row_num = result.second;
+
+    auto& data_column = assert_cast<const ColumnArray&>(*ptr);
     auto& offsets = data_column.get_offsets();
 
     size_t offset = offsets[row_num - 1];
     size_t next_offset = offsets[row_num];
     const IColumn& nested_column = data_column.get_data();
-    std::stringstream ss;
-    ss << "[";
+    std::string str;
+    str += "[";
     for (size_t i = offset; i < next_offset; ++i) {
         if (i != offset) {
-            ss << ", ";
+            str += ", ";
         }
         WhichDataType which(remove_nullable(nested));
         if (which.is_string_or_fixed_string()) {
-            ss << "'";
-            ss << nested->to_string(nested_column, i);
-            ss << "'";
-        } else if (which.is_decimal()) {
-            DecimalV2Value decimal_value;
-            get_decimal_value(nested_column, decimal_value, i);
-            ss << decimal_value.to_string();
+            str += "'";
+            str += nested->to_string(nested_column, i);
+            str += "'";
         } else {
-            ss << nested->to_string(nested_column, i);
+            str += nested->to_string(nested_column, i);
         }
     }
-    ss << "]";
-    return ss.str();
+    str += "]";
+    return str;
 }
 
 bool next_element_from_string(ReadBuffer& rb, StringRef& output, bool& has_quota) {
@@ -267,6 +280,8 @@ Status DataTypeArray::from_string(ReadBuffer& rb, IColumn* column) const {
         StringRef element(rb.position(), rb.count());
         bool has_quota = false;
         if (!next_element_from_string(rb, element, has_quota)) {
+            // we should do array element column revert if error
+            nested_column.pop_back(element_num);
             return Status::InvalidArgument("Cannot read array element from text '{}'",
                                            element.to_string());
         }
@@ -294,8 +309,8 @@ Status DataTypeArray::from_string(ReadBuffer& rb, IColumn* column) const {
         ReadBuffer read_buffer(const_cast<char*>(element.data), element.size);
         auto st = nested->from_string(read_buffer, &nested_column);
         if (!st.ok()) {
-            // we should do revert if error
-            array_column->pop_back(element_num);
+            // we should do array element column revert if error
+            nested_column.pop_back(element_num);
             return st;
         }
         ++element_num;

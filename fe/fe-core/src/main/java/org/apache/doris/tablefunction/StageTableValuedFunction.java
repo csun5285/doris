@@ -21,12 +21,12 @@ import org.apache.doris.analysis.BrokerDesc;
 import org.apache.doris.analysis.StageProperties;
 import org.apache.doris.analysis.StorageBackend.StorageType;
 import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.S3Resource;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.util.DebugUtil;
+import org.apache.doris.datasource.property.constants.S3Properties;
 import org.apache.doris.load.loadv2.CleanCopyJobTask;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.thrift.TFileType;
@@ -139,14 +139,14 @@ public class StageTableValuedFunction extends ExternalFileTableValuedFunction {
         stagePB = StageUtil.getStage(stage, user, checkAuth);
         objectInfo = RemoteBase.analyzeStageObjectStoreInfo(stagePB);
         locationProperties = Maps.newHashMap();
-        locationProperties.put(S3Resource.S3_ENDPOINT, objectInfo.getEndpoint());
-        locationProperties.put(S3Resource.S3_ACCESS_KEY, objectInfo.getAk());
-        locationProperties.put(S3Resource.S3_SECRET_KEY, objectInfo.getSk());
-        locationProperties.put(S3Resource.S3_REGION, objectInfo.getRegion());
+        locationProperties.put(S3Properties.Env.ENDPOINT, objectInfo.getEndpoint());
+        locationProperties.put(S3Properties.Env.ACCESS_KEY, objectInfo.getAk());
+        locationProperties.put(S3Properties.Env.SECRET_KEY, objectInfo.getSk());
+        locationProperties.put(S3Properties.Env.REGION, objectInfo.getRegion());
         if (objectInfo.getToken() != null) {
-            locationProperties.put(S3Resource.S3_TOKEN, objectInfo.getToken());
+            locationProperties.put(S3Properties.Env.TOKEN, objectInfo.getToken());
         }
-        locationProperties.put(S3Resource.S3_BUCKET, objectInfo.getBucket());
+        locationProperties.put(S3Properties.Env.BUCKET, objectInfo.getBucket());
         StageProperties stageProperties = new StageProperties(stagePB.getPropertiesMap());
         Map<String, String> stageTvfProperties = stageProperties.getStageTvfProperties();
         stageTvfProperties.entrySet().forEach(e -> validParams.putIfAbsent(e.getKey(), e.getValue()));
@@ -163,7 +163,7 @@ public class StageTableValuedFunction extends ExternalFileTableValuedFunction {
 
     @Override
     public String getFilePath() {
-        return "s3://" + locationProperties.get(S3Resource.S3_BUCKET) + "/" + (
+        return "s3://" + locationProperties.get(S3Properties.Env.BUCKET) + "/" + (
                 StringUtils.isEmpty(stagePB.getObjInfo().getPrefix()) ? filePattern
                         : stagePB.getObjInfo().getPrefix() + "/" + filePattern);
     }

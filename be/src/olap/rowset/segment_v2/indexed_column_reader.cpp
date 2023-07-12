@@ -17,12 +17,19 @@
 
 #include "olap/rowset/segment_v2/indexed_column_reader.h"
 
-#include "cloud/io/file_system_map.h"
-#include "cloud/io/local_file_system.h"
+#include <gen_cpp/segment_v2.pb.h>
+
+#include <algorithm>
+
 #include "gutil/strings/substitute.h" // for Substitute
 #include "olap/key_coder.h"
+#include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/encoding_info.h" // for EncodingInfo
+#include "olap/rowset/segment_v2/options.h"
+#include "olap/rowset/segment_v2/page_decoder.h"
 #include "olap/rowset/segment_v2/page_io.h"
+#include "olap/types.h"
+#include "util/block_compression.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -91,10 +98,14 @@ Status IndexedColumnReader::read_page(const PagePointer& pp, PageHandle* handle,
     opts.use_page_cache = _use_page_cache;
     opts.kept_in_memory = _kept_in_memory;
     opts.type = type;
+    if (_is_pk_index) {
+        opts.type = PRIMARY_KEY_INDEX_PAGE;
+    }
     opts.encoding_info = _encoding_info;
-    opts.read_segment_index = true;
     opts.pre_decode = pre_decode;
-    opts.read_segment_index = true;
+    io::IOContext io_ctx;
+    io_ctx.read_segment_index = true;
+    opts.io_ctx = &io_ctx;
 
     return PageIO::read_and_decompress_page(opts, handle, body, footer);
 }
@@ -143,7 +154,8 @@ Status IndexedColumnIterator::seek_to_ordinal(ordinal_t idx) {
         // need to read the data page containing row at idx
         if (_reader->_has_index_page) {
             std::string key;
-            KeyCoderTraits<OLAP_FIELD_TYPE_UNSIGNED_BIGINT>::full_encode_ascending(&idx, &key);
+            KeyCoderTraits<FieldType::OLAP_FIELD_TYPE_UNSIGNED_BIGINT>::full_encode_ascending(&idx,
+                                                                                              &key);
             RETURN_IF_ERROR(_ordinal_iter.seek_at_or_before(key));
             RETURN_IF_ERROR(_read_data_page(_ordinal_iter.current_page_pointer()));
             _current_iter = &_ordinal_iter;
@@ -221,42 +233,6 @@ Status IndexedColumnIterator::seek_at_or_after(const void* key, bool* exact_matc
     _current_ordinal = _data_page.first_ordinal + _data_page.offset_in_page;
     DCHECK(_data_page.contains(_current_ordinal));
     _seeked = true;
-    return Status::OK();
-}
-
-Status IndexedColumnIterator::next_batch(size_t* n, ColumnBlockView* column_view) {
-    DCHECK(_seeked);
-    if (_current_ordinal == _reader->num_values()) {
-        *n = 0;
-        return Status::OK();
-    }
-
-    size_t remaining = *n;
-    while (remaining > 0) {
-        if (!_data_page.has_remaining()) {
-            // trying to read next data page
-            if (!_reader->_has_index_page) {
-                break; // no more data page
-            }
-            bool has_next = _current_iter->move_next();
-            if (!has_next) {
-                break; // no more data page
-            }
-            RETURN_IF_ERROR(_read_data_page(_current_iter->current_page_pointer()));
-        }
-
-        size_t rows_to_read = std::min(_data_page.remaining(), remaining);
-        size_t rows_read = rows_to_read;
-        RETURN_IF_ERROR(_data_page.data_decoder->next_batch(&rows_read, column_view));
-        DCHECK(rows_to_read == rows_read);
-
-        _data_page.offset_in_page += rows_read;
-        _current_ordinal += rows_read;
-        column_view->advance(rows_read);
-        remaining -= rows_read;
-    }
-    *n -= remaining;
-    _seeked = false;
     return Status::OK();
 }
 

@@ -17,20 +17,17 @@
 
 #include "olap/rowset/segment_v2/ordinal_page_index.h"
 
-#include <gtest/gtest.h>
+#include <gen_cpp/segment_v2.pb.h>
+#include <gtest/gtest-message.h>
+#include <gtest/gtest-test-part.h>
 
 #include <iostream>
 #include <memory>
 #include <string>
 
-#include "common/logging.h"
-#include "env/env.h"
-#include "cloud/io/file_reader.h"
-#include "cloud/io/file_system.h"
-#include "cloud/io/file_writer.h"
-#include "cloud/io/local_file_system.h"
-#include "olap/page_cache.h"
-#include "util/file_utils.h"
+#include "gtest/gtest_pred_impl.h"
+#include "io/fs/file_writer.h"
+#include "io/fs/local_file_system.h"
 
 namespace doris {
 namespace segment_v2 {
@@ -40,15 +37,10 @@ public:
     const std::string kTestDir = "./ut_dir/ordinal_page_index_test";
 
     void SetUp() override {
-        if (FileUtils::check_exist(kTestDir)) {
-            EXPECT_TRUE(FileUtils::remove_all(kTestDir).ok());
-        }
-        EXPECT_TRUE(FileUtils::create_dir(kTestDir).ok());
+        EXPECT_TRUE(io::global_local_filesystem()->delete_and_create_directory(kTestDir).ok());
     }
     void TearDown() override {
-        if (FileUtils::check_exist(kTestDir)) {
-            EXPECT_TRUE(FileUtils::remove_all(kTestDir).ok());
-        }
+        EXPECT_TRUE(io::global_local_filesystem()->delete_directory(kTestDir).ok());
     }
 };
 

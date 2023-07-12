@@ -25,6 +25,7 @@
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
+#include "olap/tablet.h"
 
 namespace doris {
 
@@ -41,8 +42,8 @@ static RowsetSharedPtr create_rowset(Version version, int num_segments, bool ove
                                      int data_size) {
     auto rs_meta = std::make_shared<RowsetMeta>();
     rs_meta->set_rowset_type(BETA_ROWSET); // important
-    rs_meta->set_start_version(version.first);
-    rs_meta->set_end_version(version.second);
+    rs_meta->_rowset_meta_pb.set_start_version(version.first);
+    rs_meta->_rowset_meta_pb.set_end_version(version.second);
     rs_meta->set_num_segments(num_segments);
     rs_meta->set_segments_overlap(overlapping ? OVERLAPPING : NONOVERLAPPING);
     rs_meta->set_total_disk_size(data_size);

@@ -22,6 +22,7 @@ import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
 import org.apache.doris.nereids.trees.expressions.Slot;
+import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.algebra.OneRowRelation;
@@ -39,19 +40,26 @@ import java.util.Optional;
  * A relation that contains only one row consist of some constant expressions.
  * e.g. select 100, 'value'
  */
-public class LogicalOneRowRelation extends LogicalLeaf implements OneRowRelation {
-    private final ImmutableList<NamedExpression> projects;
+public class LogicalOneRowRelation extends LogicalLeaf implements OneRowRelation, OutputPrunable {
+
+    private final List<NamedExpression> projects;
+    private final boolean buildUnionNode;
 
     public LogicalOneRowRelation(List<NamedExpression> projects) {
-        this(projects, Optional.empty(), Optional.empty());
+        this(projects, true, Optional.empty(), Optional.empty());
     }
 
-    private LogicalOneRowRelation(List<NamedExpression> projects, Optional<GroupExpression> groupExpression,
-            Optional<LogicalProperties> logicalProperties) {
+    private LogicalOneRowRelation(List<NamedExpression> projects,
+                                  boolean buildUnionNode,
+                                  Optional<GroupExpression> groupExpression,
+                                  Optional<LogicalProperties> logicalProperties) {
         super(PlanType.LOGICAL_ONE_ROW_RELATION, groupExpression, logicalProperties);
         Preconditions.checkArgument(projects.stream().noneMatch(p -> p.containsType(Slot.class)),
                 "OneRowRelation can not contains any slot");
+        Preconditions.checkArgument(projects.stream().noneMatch(p -> p.containsType(AggregateFunction.class)),
+                "OneRowRelation can not contains any aggregate function");
         this.projects = ImmutableList.copyOf(Objects.requireNonNull(projects, "projects can not be null"));
+        this.buildUnionNode = buildUnionNode;
     }
 
     @Override
@@ -71,12 +79,13 @@ public class LogicalOneRowRelation extends LogicalLeaf implements OneRowRelation
 
     @Override
     public Plan withGroupExpression(Optional<GroupExpression> groupExpression) {
-        return new LogicalOneRowRelation(projects, groupExpression, Optional.of(logicalPropertiesSupplier.get()));
+        return new LogicalOneRowRelation(projects, buildUnionNode,
+                groupExpression, Optional.of(logicalPropertiesSupplier.get()));
     }
 
     @Override
     public Plan withLogicalProperties(Optional<LogicalProperties> logicalProperties) {
-        return new LogicalOneRowRelation(projects, Optional.empty(), logicalProperties);
+        return new LogicalOneRowRelation(projects, buildUnionNode, Optional.empty(), logicalProperties);
     }
 
     @Override
@@ -89,7 +98,8 @@ public class LogicalOneRowRelation extends LogicalLeaf implements OneRowRelation
     @Override
     public String toString() {
         return Utils.toSqlString("LogicalOneRowRelation",
-                "projects", projects
+                "projects", projects,
+                "buildUnionNode", buildUnionNode
         );
     }
 
@@ -105,11 +115,34 @@ public class LogicalOneRowRelation extends LogicalLeaf implements OneRowRelation
             return false;
         }
         LogicalOneRowRelation that = (LogicalOneRowRelation) o;
-        return Objects.equals(projects, that.projects);
+        return Objects.equals(projects, that.projects)
+                && Objects.equals(buildUnionNode, that.buildUnionNode);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(projects);
+        return Objects.hash(projects, buildUnionNode);
+    }
+
+    public boolean buildUnionNode() {
+        return buildUnionNode;
+    }
+
+    public LogicalOneRowRelation withProjects(List<NamedExpression> namedExpressions) {
+        return new LogicalOneRowRelation(namedExpressions, buildUnionNode, Optional.empty(), Optional.empty());
+    }
+
+    public Plan withBuildUnionNode(boolean buildUnionNode) {
+        return new LogicalOneRowRelation(projects, buildUnionNode, Optional.empty(), Optional.empty());
+    }
+
+    @Override
+    public List<NamedExpression> getOutputs() {
+        return projects;
+    }
+
+    @Override
+    public Plan pruneOutputs(List<NamedExpression> prunedOutputs) {
+        return withProjects(prunedOutputs);
     }
 }

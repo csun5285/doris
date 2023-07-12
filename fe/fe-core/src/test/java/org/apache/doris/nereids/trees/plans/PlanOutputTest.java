@@ -30,7 +30,8 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalRelation;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.StringType;
 import org.apache.doris.nereids.util.PlanConstructor;
-import org.apache.doris.statistics.StatsDeriveResult;
+import org.apache.doris.nereids.util.RelationUtil;
+import org.apache.doris.statistics.Statistics;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.jupiter.api.Assertions;
@@ -57,7 +58,7 @@ public class PlanOutputTest {
     @Test
     public void testLazyComputeOutput() {
         // not throw exception when create new UnboundRelation
-        UnboundRelation relationPlan = new UnboundRelation(ImmutableList.of("a"));
+        UnboundRelation relationPlan = new UnboundRelation(RelationUtil.newRelationId(), ImmutableList.of("a"));
 
         try {
             // throw exception when getOutput
@@ -85,7 +86,7 @@ public class PlanOutputTest {
     @Test
     public void testPhysicalPlanMustHaveLogicalProperties() {
         Assertions.assertThrows(NullPointerException.class, () ->
-                new PhysicalRelation(RelationId.createGenerator().getNextId(),
+                new PhysicalRelation(RelationUtil.newRelationId(),
                         PlanType.PHYSICAL_OLAP_SCAN, ImmutableList.of("db"), Optional.empty(), null) {
                     @Override
                     public Plan withGroupExpression(Optional<GroupExpression> groupExpression) {
@@ -99,7 +100,7 @@ public class PlanOutputTest {
 
                     @Override
                     public PhysicalPlan withPhysicalPropertiesAndStats(PhysicalProperties physicalProperties,
-                            StatsDeriveResult statsDeriveResult) {
+                            Statistics statsDeriveResult) {
                         return null;
                     }
 

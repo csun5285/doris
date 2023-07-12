@@ -68,7 +68,7 @@ public class LogicalRepeat<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD_T
         super(PlanType.LOGICAL_REPEAT, groupExpression, logicalProperties, child);
         this.groupingSets = Objects.requireNonNull(groupingSets, "groupingSets can not be null")
                 .stream()
-                .map(groupingSet -> ImmutableList.copyOf(groupingSet))
+                .map(ImmutableList::copyOf)
                 .collect(ImmutableList.toImmutableList());
         this.outputExpressions = ImmutableList.copyOf(
                 Objects.requireNonNull(outputExpressions, "outputExpressions can not be null"));
@@ -81,6 +81,11 @@ public class LogicalRepeat<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD_T
 
     @Override
     public List<NamedExpression> getOutputExpressions() {
+        return outputExpressions;
+    }
+
+    @Override
+    public List<NamedExpression> getOutputs() {
         return outputExpressions;
     }
 
@@ -163,6 +168,10 @@ public class LogicalRepeat<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD_T
     public LogicalRepeat<Plan> withNormalizedExpr(List<List<Expression>> groupingSets,
             List<NamedExpression> outputExpressionList, Plan child) {
         return new LogicalRepeat<>(groupingSets, outputExpressionList, child);
+    }
+
+    public LogicalRepeat<Plan> withAggOutputAndChild(List<NamedExpression> newOutput, Plan child) {
+        return new LogicalRepeat<>(groupingSets, newOutput, child);
     }
 
     public boolean canBindVirtualSlot() {

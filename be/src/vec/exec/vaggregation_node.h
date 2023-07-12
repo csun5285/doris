@@ -17,25 +17,72 @@
 
 #pragma once
 
-#include <functional>
-#include <variant>
+#include <assert.h>
+#include <glog/logging.h>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "common/object_pool.h"
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <ostream>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/global_types.h"
+#include "common/status.h"
 #include "exec/exec_node.h"
+#include "util/runtime_profile.h"
 #include "vec/aggregate_functions/aggregate_function.h"
+#include "vec/columns/column.h"
+#include "vec/columns/column_nullable.h"
+#include "vec/columns/column_string.h"
+#include "vec/columns/column_vector_helper.h"
+#include "vec/columns/columns_number.h"
+#include "vec/common/aggregation_common.h"
+#include "vec/common/allocator.h"
+#include "vec/common/arena.h"
+#include "vec/common/assert_cast.h"
 #include "vec/common/columns_hashing.h"
 #include "vec/common/hash_table/fixed_hash_map.h"
+#include "vec/common/hash_table/fixed_hash_table.h"
+#include "vec/common/hash_table/hash.h"
+#include "vec/common/hash_table/partitioned_hash_map.h"
+#include "vec/common/hash_table/ph_hash_map.h"
 #include "vec/common/hash_table/string_hash_map.h"
+#include "vec/common/pod_array.h"
+#include "vec/common/string_ref.h"
+#include "vec/common/uint128.h"
+#include "vec/core/block.h"
+#include "vec/core/block_spill_reader.h"
+#include "vec/core/block_spill_writer.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/core/types.h"
 #include "vec/exprs/vectorized_agg_fn.h"
+#include "vec/exprs/vexpr.h"
+#include "vec/exprs/vexpr_context.h"
 #include "vec/exprs/vslot_ref.h"
 
 namespace doris {
 class TPlanNode;
 class DescriptorTbl;
-class MemPool;
+class ObjectPool;
+class RuntimeState;
+class TupleDescriptor;
+
+namespace pipeline {
+class AggSinkOperator;
+class AggSourceOperator;
+class StreamingAggSinkOperator;
+class StreamingAggSourceOperator;
+} // namespace pipeline
 
 namespace vectorized {
-class VExprContext;
 
 /** Aggregates by concatenating serialized key values.
   * The serialized value differs in that it uniquely allows to deserialize it, having only the position with which it starts.
@@ -53,10 +100,9 @@ struct AggregationMethodSerialized {
     Iterator iterator;
     bool inited = false;
     std::vector<StringRef> keys;
+    size_t keys_memory_usage = 0;
     AggregationMethodSerialized()
-            : _serialized_key_buffer_size(0),
-              _serialized_key_buffer(nullptr),
-              _mem_pool(new MemPool) {}
+            : _serialized_key_buffer_size(0), _serialized_key_buffer(nullptr) {}
 
     using State = ColumnsHashing::HashMethodSerialized<typename Data::value_type, Mapped, true>;
 
@@ -82,12 +128,14 @@ struct AggregationMethodSerialized {
             for (size_t i = 0; i < num_rows; ++i) {
                 keys[i] = serialize_keys_to_pool_contiguous(i, keys_size, key_columns, *_arena);
             }
+            keys_memory_usage = _arena->size();
         } else {
             _arena.reset();
             if (total_bytes > _serialized_key_buffer_size) {
                 _serialized_key_buffer_size = total_bytes;
-                _mem_pool->clear();
-                _serialized_key_buffer = _mem_pool->allocate(_serialized_key_buffer_size, true);
+                _serialize_key_arena.reset(new Arena());
+                _serialized_key_buffer = reinterpret_cast<uint8_t*>(
+                        _serialize_key_arena->alloc(_serialized_key_buffer_size));
             }
 
             for (size_t i = 0; i < num_rows; ++i) {
@@ -99,6 +147,7 @@ struct AggregationMethodSerialized {
             for (const auto& column : key_columns) {
                 column->serialize_vec(keys, num_rows, max_one_row_byte_size);
             }
+            keys_memory_usage = _serialized_key_buffer_size;
         }
         return max_one_row_byte_size;
     }
@@ -125,10 +174,16 @@ struct AggregationMethodSerialized {
         }
     }
 
+    void reset() {
+        _arena.reset();
+        keys_memory_usage = 0;
+        _serialized_key_buffer_size = 0;
+    }
+
 private:
     size_t _serialized_key_buffer_size;
     uint8_t* _serialized_key_buffer;
-    std::unique_ptr<MemPool> _mem_pool;
+    std::unique_ptr<Arena> _serialize_key_arena;
     std::unique_ptr<Arena> _arena;
     static constexpr size_t SERIALIZE_KEYS_MEM_LIMIT_IN_BYTES = 16 * 1024 * 1024; // 16M
 };
@@ -233,7 +288,7 @@ struct AggregationDataWithNullKey : public Base {
     bool& has_null_key_data() { return has_null_key; }
     AggregateDataPtr& get_null_key_data() { return null_key_data; }
     bool has_null_key_data() const { return has_null_key; }
-    const AggregateDataPtr get_null_key_data() const { return null_key_data; }
+    AggregateDataPtr get_null_key_data() const { return null_key_data; }
     size_t size() const { return Base::size() + (has_null_key ? 1 : 0); }
     bool empty() const { return Base::empty() && !has_null_key; }
 
@@ -577,6 +632,7 @@ struct AggregatedDataVariants {
             }
             break;
         case Type::int64_keys_phase2:
+
             if (is_nullable) {
                 _aggregated_method_variant.emplace<
                         AggregationMethodKeysFixed<AggregatedDataWithUInt64KeyPhase2, true>>();
@@ -584,8 +640,10 @@ struct AggregatedDataVariants {
                 _aggregated_method_variant.emplace<
                         AggregationMethodKeysFixed<AggregatedDataWithUInt64KeyPhase2, false>>();
             }
+
             break;
         case Type::int128_keys:
+
             if (is_nullable) {
                 _aggregated_method_variant
                         .emplace<AggregationMethodKeysFixed<AggregatedDataWithUInt128Key, true>>();
@@ -595,6 +653,7 @@ struct AggregatedDataVariants {
             }
             break;
         case Type::int128_keys_phase2:
+
             if (is_nullable) {
                 _aggregated_method_variant.emplace<
                         AggregationMethodKeysFixed<AggregatedDataWithUInt128KeyPhase2, true>>();
@@ -602,8 +661,10 @@ struct AggregatedDataVariants {
                 _aggregated_method_variant.emplace<
                         AggregationMethodKeysFixed<AggregatedDataWithUInt128KeyPhase2, false>>();
             }
+
             break;
         case Type::int256_keys:
+
             if (is_nullable) {
                 _aggregated_method_variant
                         .emplace<AggregationMethodKeysFixed<AggregatedDataWithUInt256Key, true>>();
@@ -611,8 +672,10 @@ struct AggregatedDataVariants {
                 _aggregated_method_variant
                         .emplace<AggregationMethodKeysFixed<AggregatedDataWithUInt256Key, false>>();
             }
+
             break;
         case Type::int256_keys_phase2:
+
             if (is_nullable) {
                 _aggregated_method_variant.emplace<
                         AggregationMethodKeysFixed<AggregatedDataWithUInt256KeyPhase2, true>>();
@@ -647,6 +710,8 @@ public:
         _expand();
     }
 
+    int64_t memory_usage() const { return _arena_pool.size(); }
+
     template <typename KeyType>
     AggregateDataPtr append_data(const KeyType& key) {
         assert(sizeof(KeyType) == _size_of_key);
@@ -676,7 +741,7 @@ public:
         friend class HashTable;
 
     public:
-        IteratorBase() {}
+        IteratorBase() = default;
         IteratorBase(Container* container_, uint32_t index_)
                 : container(container_), index(index_) {
             sub_container_index = index / SUB_CONTAINER_CAPACITY;
@@ -728,7 +793,9 @@ public:
     Iterator end() { return Iterator(this, _total_count); }
 
     void init_once() {
-        if (_inited) return;
+        if (_inited) {
+            return;
+        }
         _inited = true;
         iterator = begin();
     }
@@ -745,7 +812,6 @@ private:
         _value_containers.emplace_back(_current_agg_data);
     }
 
-private:
     static constexpr uint32_t SUB_CONTAINER_CAPACITY = 8192;
     Arena _arena_pool;
     std::vector<char*> _key_containers;
@@ -759,23 +825,71 @@ private:
     bool _inited = false;
 };
 
+struct AggSpillContext {
+    bool has_data = false;
+    bool readers_prepared = false;
+
+    /// stream ids of writers/readers
+    std::vector<int64_t> stream_ids;
+    std::vector<BlockSpillReaderUPtr> readers;
+    RuntimeProfile* runtime_profile;
+
+    size_t read_cursor {};
+
+    Status prepare_for_reading();
+
+    ~AggSpillContext() {
+        for (auto& reader : readers) {
+            if (reader) {
+                reader->close();
+                reader.reset();
+            }
+        }
+    }
+};
+
+struct SpillPartitionHelper {
+    const size_t partition_count_bits;
+    const size_t partition_count;
+    const size_t max_partition_index;
+
+    SpillPartitionHelper(const size_t partition_count_bits_)
+            : partition_count_bits(partition_count_bits_),
+              partition_count(1 << partition_count_bits),
+              max_partition_index(partition_count - 1) {}
+
+    size_t get_index(size_t hash_value) const {
+        return (hash_value >> (32 - partition_count_bits)) & max_partition_index;
+    }
+};
+
 // not support spill
-class AggregationNode : public ::doris::ExecNode {
+class AggregationNode final : public ::doris::ExecNode {
 public:
     using Sizes = std::vector<size_t>;
 
     AggregationNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs);
-    ~AggregationNode();
-    virtual Status init(const TPlanNode& tnode, RuntimeState* state = nullptr);
-    virtual Status prepare(RuntimeState* state);
-    virtual Status open(RuntimeState* state);
-    virtual Status get_next(RuntimeState* state, RowBatch* row_batch, bool* eos);
-    virtual Status get_next(RuntimeState* state, Block* block, bool* eos);
-    virtual Status close(RuntimeState* state);
+    ~AggregationNode() override;
+    Status init(const TPlanNode& tnode, RuntimeState* state = nullptr) override;
+    Status prepare_profile(RuntimeState* state);
+    Status prepare(RuntimeState* state) override;
+    Status open(RuntimeState* state) override;
+    Status alloc_resource(RuntimeState* state) override;
+    Status get_next(RuntimeState* state, Block* block, bool* eos) override;
+    Status close(RuntimeState* state) override;
+    void release_resource(RuntimeState* state) override;
+    Status pull(doris::RuntimeState* state, vectorized::Block* output_block, bool* eos) override;
+    Status sink(doris::RuntimeState* state, vectorized::Block* input_block, bool eos) override;
+    Status do_pre_agg(vectorized::Block* input_block, vectorized::Block* output_block);
+    bool is_streaming_preagg() const { return _is_streaming_preagg; }
 
 private:
+    friend class pipeline::AggSinkOperator;
+    friend class pipeline::StreamingAggSinkOperator;
+    friend class pipeline::AggSourceOperator;
+    friend class pipeline::StreamingAggSourceOperator;
     // group by k1,k2
-    std::vector<VExprContext*> _probe_expr_ctxs;
+    VExprContextSPtrs _probe_expr_ctxs;
     // left / full join will change the key nullable make output/input solt
     // nullable diff. so we need make nullable of it.
     std::vector<size_t> _make_nullable_keys;
@@ -794,9 +908,7 @@ private:
     bool _is_merge;
     bool _is_first_phase;
     bool _use_fixed_length_serialization_opt;
-    std::unique_ptr<MemPool> _mem_pool;
-
-    std::unique_ptr<MemTracker> _data_mem_tracker;
+    std::unique_ptr<Arena> _agg_profile_arena;
 
     size_t _align_aggregate_states = 1;
     /// The offset to the n-th aggregate function in a row of aggregate functions.
@@ -804,11 +916,18 @@ private:
     /// The total size of the row from the aggregate functions.
     size_t _total_size_of_aggregate_states = 0;
 
+    size_t _external_agg_bytes_threshold;
+    size_t _partitioned_threshold = 0;
+
     AggregatedDataVariantsUPtr _agg_data;
+
+    AggSpillContext _spill_context;
+    std::unique_ptr<SpillPartitionHelper> _spill_partition_helper;
 
     ArenaUPtr _agg_arena_pool;
 
     RuntimeProfile::Counter* _build_timer;
+    RuntimeProfile::Counter* _build_table_convert_timer;
     RuntimeProfile::Counter* _serialize_key_timer;
     RuntimeProfile::Counter* _exec_timer;
     RuntimeProfile::Counter* _merge_timer;
@@ -825,6 +944,10 @@ private:
     RuntimeProfile::Counter* _hash_table_input_counter;
     RuntimeProfile::Counter* _max_row_size_counter;
 
+    RuntimeProfile::Counter* _memory_usage_counter;
+    RuntimeProfile::Counter* _hash_table_memory_usage;
+    RuntimeProfile::HighWaterMarkCounter* _serialize_key_arena_memory_usage;
+
     bool _is_streaming_preagg;
     Block _preagg_block = Block();
     bool _should_expand_hash_table = true;
@@ -840,7 +963,7 @@ private:
     std::vector<AggregateDataPtr> _values;
     std::unique_ptr<AggregateDataContainer> _aggregate_data_container;
 
-private:
+    void _release_self_resource(RuntimeState* state);
     /// Return true if we should keep expanding hash tables in the preagg. If false,
     /// the preagg should pass through any rows it can't fit in its tables.
     bool _should_expand_preagg_hash_tables();
@@ -860,22 +983,36 @@ private:
     void _close_without_key();
 
     Status _get_with_serialized_key_result(RuntimeState* state, Block* block, bool* eos);
+    Status _get_result_with_serialized_key_non_spill(RuntimeState* state, Block* block, bool* eos);
+
+    Status _merge_spilt_data();
+
+    Status _get_result_with_spilt_data(RuntimeState* state, Block* block, bool* eos);
+
     Status _serialize_with_serialized_key_result(RuntimeState* state, Block* block, bool* eos);
+    Status _serialize_with_serialized_key_result_non_spill(RuntimeState* state, Block* block,
+                                                           bool* eos);
+    Status _serialize_with_serialized_key_result_with_spilt_data(RuntimeState* state, Block* block,
+                                                                 bool* eos);
+
     Status _pre_agg_with_serialized_key(Block* in_block, Block* out_block);
     Status _execute_with_serialized_key(Block* block);
     Status _merge_with_serialized_key(Block* block);
     void _update_memusage_with_serialized_key();
     void _close_with_serialized_key();
-    void _init_hash_method(std::vector<VExprContext*>& probe_exprs);
+    void _init_hash_method(const VExprContextSPtrs& probe_exprs);
 
     template <typename AggState, typename AggMethod>
     void _pre_serialize_key_if_need(AggState& state, AggMethod& agg_method,
                                     const ColumnRawPtrs& key_columns, const size_t num_rows) {
         if constexpr (ColumnsHashing::IsPreSerializedKeysHashMethodTraits<AggState>::value) {
+            auto old_keys_memory = agg_method.keys_memory_usage;
             SCOPED_TIMER(_serialize_key_timer);
             int64_t row_size = (int64_t)(agg_method.serialize_keys(key_columns, num_rows));
             COUNTER_SET(_max_row_size_counter, std::max(_max_row_size_counter->value(), row_size));
             state.set_serialized_keys(agg_method.keys.data());
+
+            _serialize_key_arena_memory_usage->add(agg_method.keys_memory_usage - old_keys_memory);
         }
     }
 
@@ -936,10 +1073,10 @@ private:
         CHECK(ctxs.size() == 1 && ctxs[0]->root()->is_slot_ref())
                 << "input_exprs_ctxs is invalid, input_exprs_ctx[0]="
                 << ctxs[0]->root()->debug_string();
-        return ((VSlotRef*)ctxs[0]->root())->column_id();
+        return ((VSlotRef*)ctxs[0]->root().get())->column_id();
     }
 
-    template <bool limit>
+    template <bool limit, bool for_spill = false>
     Status _merge_with_serialized_key_helper(Block* block) {
         SCOPED_TIMER(_merge_timer);
 
@@ -947,10 +1084,14 @@ private:
         ColumnRawPtrs key_columns(key_size);
 
         for (size_t i = 0; i < key_size; ++i) {
-            int result_column_id = -1;
-            RETURN_IF_ERROR(_probe_expr_ctxs[i]->execute(block, &result_column_id));
-            block->replace_by_position_if_const(result_column_id);
-            key_columns[i] = block->get_by_position(result_column_id).column.get();
+            if constexpr (for_spill) {
+                key_columns[i] = block->get_by_position(i).column.get();
+            } else {
+                int result_column_id = -1;
+                RETURN_IF_ERROR(_probe_expr_ctxs[i]->execute(block, &result_column_id));
+                block->replace_by_position_if_const(result_column_id);
+                key_columns[i] = block->get_by_position(result_column_id).column.get();
+            }
         }
 
         int rows = block->rows();
@@ -985,13 +1126,15 @@ private:
                                 _deserialize_buffer.data(), (ColumnString*)(column.get()),
                                 _agg_arena_pool.get(), rows);
                     }
+
+                    DEFER({
+                        _aggregate_evaluators[i]->function()->destroy_vec(
+                                _deserialize_buffer.data(), rows);
+                    });
+
                     _aggregate_evaluators[i]->function()->merge_vec_selected(
                             _places.data(), _offsets_of_aggregate_states[i],
                             _deserialize_buffer.data(), _agg_arena_pool.get(), rows);
-
-                    _aggregate_evaluators[i]->function()->destroy_vec(_deserialize_buffer.data(),
-                                                                      rows);
-
                 } else {
                     RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add_selected(
                             block, _offsets_of_aggregate_states[i], _places.data(),
@@ -1002,8 +1145,13 @@ private:
             _emplace_into_hash_table(_places.data(), key_columns, rows);
 
             for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
-                if (_aggregate_evaluators[i]->is_merge()) {
-                    int col_id = _get_slot_column_id(_aggregate_evaluators[i]);
+                if (_aggregate_evaluators[i]->is_merge() || for_spill) {
+                    int col_id;
+                    if constexpr (for_spill) {
+                        col_id = _probe_expr_ctxs.size() + i;
+                    } else {
+                        col_id = _get_slot_column_id(_aggregate_evaluators[i]);
+                    }
                     auto column = block->get_by_position(col_id).column;
                     if (column->is_nullable()) {
                         column = ((ColumnNullable*)column.get())->get_nested_column_ptr();
@@ -1025,13 +1173,15 @@ private:
                                 _deserialize_buffer.data(), (ColumnString*)(column.get()),
                                 _agg_arena_pool.get(), rows);
                     }
+
+                    DEFER({
+                        _aggregate_evaluators[i]->function()->destroy_vec(
+                                _deserialize_buffer.data(), rows);
+                    });
+
                     _aggregate_evaluators[i]->function()->merge_vec(
                             _places.data(), _offsets_of_aggregate_states[i],
                             _deserialize_buffer.data(), _agg_arena_pool.get(), rows);
-
-                    _aggregate_evaluators[i]->function()->destroy_vec(_deserialize_buffer.data(),
-                                                                      rows);
-
                 } else {
                     RETURN_IF_ERROR(_aggregate_evaluators[i]->execute_batch_add(
                             block, _offsets_of_aggregate_states[i], _places.data(),
@@ -1049,6 +1199,19 @@ private:
 
     void _emplace_into_hash_table(AggregateDataPtr* places, ColumnRawPtrs& key_columns,
                                   const size_t num_rows);
+
+    size_t _memory_usage() const;
+
+    Status _reset_hash_table();
+
+    Status _try_spill_disk(bool eos = false);
+
+    template <typename HashTableCtxType, typename HashTableType, typename KeyType>
+    Status _serialize_hash_table_to_block(HashTableCtxType& context, HashTableType& hash_table,
+                                          Block& block, std::vector<KeyType>& keys);
+
+    template <typename HashTableCtxType, typename HashTableType>
+    Status _spill_hash_table(HashTableCtxType& agg_method, HashTableType& hash_table);
 
     void _find_in_hash_table(AggregateDataPtr* places, ColumnRawPtrs& key_columns, size_t num_rows);
 

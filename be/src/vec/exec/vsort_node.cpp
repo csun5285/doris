@@ -17,15 +17,34 @@
 
 #include "vec/exec/vsort_node.h"
 
-#include "common/config.h"
-#include "exec/sort_exec_exprs.h"
-#include "runtime/row_batch.h"
+#include <gen_cpp/Exprs_types.h>
+#include <gen_cpp/Metrics_types.h>
+#include <gen_cpp/PlanNodes_types.h>
+#include <opentelemetry/nostd/shared_ptr.h>
+
+#include <atomic>
+#include <functional>
+#include <ostream>
+#include <string>
+#include <utility>
+
+#include "common/status.h"
+#include "runtime/descriptors.h"
+#include "runtime/memory/mem_tracker.h"
+#include "runtime/query_context.h"
+#include "runtime/runtime_predicate.h"
 #include "runtime/runtime_state.h"
-#include "util/debug_util.h"
+#include "runtime/types.h"
+#include "util/telemetry/telemetry.h"
 #include "vec/common/sort/heap_sorter.h"
 #include "vec/common/sort/topn_sorter.h"
-#include "vec/core/sort_block.h"
-#include "vec/utils/util.hpp"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
+#include "vec/core/sort_description.h"
+
+namespace doris {
+class ObjectPool;
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -39,49 +58,52 @@ Status VSortNode::init(const TPlanNode& tnode, RuntimeState* state) {
     RETURN_IF_ERROR(_vsort_exec_exprs.init(tnode.sort_node.sort_info, _pool));
     _is_asc_order = tnode.sort_node.sort_info.is_asc_order;
     _nulls_first = tnode.sort_node.sort_info.nulls_first;
-    _use_two_phase_read = tnode.sort_node.sort_info.use_two_phase_read;
     const auto& row_desc = child(0)->row_desc();
+
     // If `limit` is smaller than HEAP_SORT_THRESHOLD, we consider using heap sort in priority.
     // To do heap sorting, each income block will be filtered by heap-top row. There will be some
     // `memcpy` operations. To ensure heap sort will not incur performance fallback, we should
     // exclude cases which incoming blocks has string column which is sensitive to operations like
     // `filter` and `memcpy`
     if (_limit > 0 && _limit + _offset < HeapSorter::HEAP_SORT_THRESHOLD &&
-        (tnode.sort_node.use_topn_opt || !row_desc.has_varlen_slots())) {
-        _sorter.reset(new HeapSorter(_vsort_exec_exprs, _limit, _offset, _pool, _is_asc_order,
-                                     _nulls_first, row_desc));
+        (tnode.sort_node.sort_info.use_two_phase_read || tnode.sort_node.use_topn_opt ||
+         !row_desc.has_varlen_slots())) {
+        _sorter = HeapSorter::create_unique(_vsort_exec_exprs, _limit, _offset, _pool,
+                                            _is_asc_order, _nulls_first, row_desc);
         _reuse_mem = false;
-        _use_topn_opt = tnode.sort_node.use_topn_opt;
-        // init runtime predicate
-        if (_use_topn_opt) {
-            auto query_ctx = state->get_query_fragments_ctx();
-            auto first_sort_expr_node = tnode.sort_node.sort_info.ordering_exprs[0].nodes[0];
-            if (first_sort_expr_node.node_type == TExprNodeType::SLOT_REF) {
-                auto first_sort_slot = first_sort_expr_node.slot_ref;
-                for (auto tuple_desc : this->row_desc().tuple_descriptors()) {
-                    if (tuple_desc->id() != first_sort_slot.tuple_id) {
-                        continue;
-                    }
-                    for (auto slot : tuple_desc->slots()) {
-                        if (slot->id() == first_sort_slot.slot_id) {
-                            RETURN_IF_ERROR(query_ctx->get_runtime_predicate().init(
-                                    slot->type().type, _nulls_first[0]));
-                            break;
-                        }
+    } else if (_limit > 0 && row_desc.has_varlen_slots() &&
+               _limit + _offset < TopNSorter::TOPN_SORT_THRESHOLD) {
+        _sorter =
+                TopNSorter::create_unique(_vsort_exec_exprs, _limit, _offset, _pool, _is_asc_order,
+                                          _nulls_first, row_desc, state, _runtime_profile.get());
+    } else {
+        _sorter =
+                FullSorter::create_unique(_vsort_exec_exprs, _limit, _offset, _pool, _is_asc_order,
+                                          _nulls_first, row_desc, state, _runtime_profile.get());
+    }
+    // init runtime predicate
+    _use_topn_opt = tnode.sort_node.use_topn_opt;
+    if (_use_topn_opt) {
+        auto query_ctx = state->get_query_ctx();
+        auto first_sort_expr_node = tnode.sort_node.sort_info.ordering_exprs[0].nodes[0];
+        if (first_sort_expr_node.node_type == TExprNodeType::SLOT_REF) {
+            auto first_sort_slot = first_sort_expr_node.slot_ref;
+            for (auto tuple_desc : this->intermediate_row_desc().tuple_descriptors()) {
+                if (tuple_desc->id() != first_sort_slot.tuple_id) {
+                    continue;
+                }
+                for (auto slot : tuple_desc->slots()) {
+                    if (slot->id() == first_sort_slot.slot_id) {
+                        RETURN_IF_ERROR(query_ctx->get_runtime_predicate().init(slot->type().type,
+                                                                                _nulls_first[0]));
+                        break;
                     }
                 }
             }
-            if (!query_ctx->get_runtime_predicate().inited()) {
-                return Status::InternalError("runtime predicate is not properly initialized");
-            }
         }
-    } else if (_limit > 0 && row_desc.has_varlen_slots() && _limit > 0 &&
-               _limit + _offset < TopNSorter::TOPN_SORT_THRESHOLD) {
-        _sorter.reset(new TopNSorter(_vsort_exec_exprs, _limit, _offset, _pool, _is_asc_order,
-                                     _nulls_first, row_desc));
-    } else {
-        _sorter.reset(new FullSorter(_vsort_exec_exprs, _limit, _offset, _pool, _is_asc_order,
-                                     _nulls_first, row_desc));
+        if (!query_ctx->get_runtime_predicate().inited()) {
+            return Status::InternalError("runtime predicate is not properly initialized");
+        }
     }
 
     _sorter->init_profile(_runtime_profile.get());
@@ -90,108 +112,113 @@ Status VSortNode::init(const TPlanNode& tnode, RuntimeState* state) {
 
 Status VSortNode::prepare(RuntimeState* state) {
     SCOPED_TIMER(_runtime_profile->total_time_counter());
-    _runtime_profile->add_info_string("TOP-N", _limit == -1 ? "false" : "true");
     RETURN_IF_ERROR(ExecNode::prepare(state));
+    _runtime_profile->add_info_string("TOP-N", _limit == -1 ? "false" : "true");
+
+    auto* memory_usage = _runtime_profile->create_child("PeakMemoryUsage", true, true);
+    _runtime_profile->add_child(memory_usage, false, nullptr);
+    _sort_blocks_memory_usage = ADD_COUNTER(memory_usage, "SortBlocks", TUnit::BYTES);
+
     RETURN_IF_ERROR(_vsort_exec_exprs.prepare(state, child(0)->row_desc(), _row_descriptor));
-    _runtime_state = state;
+    return Status::OK();
+}
+
+Status VSortNode::alloc_resource(doris::RuntimeState* state) {
+    RETURN_IF_ERROR(ExecNode::alloc_resource(state));
+    RETURN_IF_ERROR(_vsort_exec_exprs.open(state));
+    RETURN_IF_CANCELLED(state);
+    RETURN_IF_ERROR(state->check_query_state("vsort, while open."));
+
+    return Status::OK();
+}
+
+Status VSortNode::sink(RuntimeState* state, vectorized::Block* input_block, bool eos) {
+    if (input_block->rows() > 0) {
+        RETURN_IF_ERROR(_sorter->append_block(input_block));
+        RETURN_IF_CANCELLED(state);
+        RETURN_IF_ERROR(state->check_query_state("vsort, while sorting input."));
+
+        // update runtime predicate
+        if (_use_topn_opt) {
+            Field new_top = _sorter->get_top_value();
+            if (!new_top.is_null() && new_top != old_top) {
+                auto& sort_description = _sorter->get_sort_description();
+                auto col = input_block->get_by_position(sort_description[0].column_number);
+                bool is_reverse = sort_description[0].direction < 0;
+                auto query_ctx = state->get_query_ctx();
+                RETURN_IF_ERROR(
+                        query_ctx->get_runtime_predicate().update(new_top, col.name, is_reverse));
+                old_top = std::move(new_top);
+            }
+        }
+        if (!_reuse_mem) {
+            input_block->clear();
+        }
+    }
+
+    if (eos) {
+        RETURN_IF_ERROR(_sorter->prepare_for_read());
+        _can_read = true;
+    }
     return Status::OK();
 }
 
 Status VSortNode::open(RuntimeState* state) {
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VSortNode::open");
     SCOPED_TIMER(_runtime_profile->total_time_counter());
     RETURN_IF_ERROR(ExecNode::open(state));
-    RETURN_IF_ERROR(_vsort_exec_exprs.open(state));
-    RETURN_IF_CANCELLED(state);
-    RETURN_IF_ERROR(state->check_query_state("vsort, while open."));
     RETURN_IF_ERROR(child(0)->open(state));
 
     // The child has been opened and the sorter created. Sort the input.
     // The final merge is done on-demand as rows are requested in get_next().
     bool eos = false;
-    std::unique_ptr<Block> upstream_block(new Block());
+    std::unique_ptr<Block> upstream_block = Block::create_unique();
     do {
-        RETURN_IF_ERROR_AND_CHECK_SPAN(
-                child(0)->get_next_after_projects(state, upstream_block.get(), &eos),
-                child(0)->get_next_span(), eos);
-        if (upstream_block->rows() != 0) {
-            // Indicating topn two phase read enabled, some columns maybe pruned in the scann nodes
-            // to ensure everything goes well, we mock some columns for later usage 
-            // those columns will be read in the second phase when everything's ready
-            if (_use_two_phase_read) {
-                // We must not reuse upstream_block,since it's rebuilded.
-                _reuse_mem = false; 
-                _rebuild_block(upstream_block.get());
-            }
-            RETURN_IF_ERROR(_sorter->append_block(upstream_block.get()));
-            RETURN_IF_CANCELLED(state);
-            RETURN_IF_ERROR(state->check_query_state("vsort, while sorting input."));
-            // update runtime predicate
-            if (_use_topn_opt) {
-                Field new_top = _sorter->get_top_value();
-                if (!new_top.is_null() && new_top != old_top) {
-                    auto& sort_description = _sorter->get_sort_description();
-                    auto col = upstream_block->get_by_position(sort_description[0].column_number);
-                    bool is_reverse = sort_description[0].direction < 0;
-                    auto query_ctx = state->get_query_fragments_ctx();
-                    RETURN_IF_ERROR(
-                            query_ctx->get_runtime_predicate().update(new_top, col.name, is_reverse));
-                    old_top = std::move(new_top);
-                }
-            }
-
-            if (!_reuse_mem) {
-                upstream_block.reset(new Block());
-            }
-        }
+        RETURN_IF_ERROR(child(0)->get_next_after_projects(
+                state, upstream_block.get(), &eos,
+                std::bind((Status(ExecNode::*)(RuntimeState*, vectorized::Block*, bool*)) &
+                                  ExecNode::get_next,
+                          _children[0], std::placeholders::_1, std::placeholders::_2,
+                          std::placeholders::_3)));
+        RETURN_IF_CATCH_EXCEPTION(RETURN_IF_ERROR(sink(state, upstream_block.get(), eos)));
     } while (!eos);
+
     child(0)->close(state);
-    RETURN_IF_ERROR(_sorter->prepare_for_read());
+
+    mem_tracker()->consume(_sorter->data_size());
+    COUNTER_UPDATE(_sort_blocks_memory_usage, _sorter->data_size());
+
     return Status::OK();
 }
 
-// find by name
-void VSortNode::_rebuild_block(Block* block) {
-    Block new_block;
-    for (auto slot : child(0)->row_desc().tuple_descriptors()[0]->slots()) {
-        auto type_column = block->try_get_by_name(slot->col_name());
-        if (!type_column) {
-            auto type = slot->get_data_type_ptr();
-            new_block.insert(ColumnWithTypeAndName{
-                    type->create_column_const(block->rows(), type->get_default()), type, slot->col_name()});
-            continue;
-        }
-        new_block.insert(std::move(*type_column));
+Status VSortNode::pull(doris::RuntimeState* state, vectorized::Block* output_block, bool* eos) {
+    RETURN_IF_CATCH_EXCEPTION(RETURN_IF_ERROR(_sorter->get_next(state, output_block, eos)));
+    reached_limit(output_block, eos);
+    if (*eos) {
+        _runtime_profile->add_info_string("Spilled", _sorter->is_spilled() ? "true" : "false");
     }
-    block->swap(new_block);
-}
-
-
-Status VSortNode::get_next(RuntimeState* state, RowBatch* row_batch, bool* eos) {
-    *eos = true;
-    return Status::NotSupported("Not Implemented VSortNode::get_next scalar");
+    return Status::OK();
 }
 
 Status VSortNode::get_next(RuntimeState* state, Block* block, bool* eos) {
-    INIT_AND_SCOPE_GET_NEXT_SPAN(state->get_tracer(), _get_next_span, "VSortNode::get_next");
     SCOPED_TIMER(_runtime_profile->total_time_counter());
 
-    RETURN_IF_ERROR(_sorter->get_next(state, block, eos));
-    reached_limit(block, eos);
-    return Status::OK();
+    return pull(state, block, eos);
 }
 
 Status VSortNode::reset(RuntimeState* state) {
     return Status::OK();
 }
 
+void VSortNode::release_resource(doris::RuntimeState* state) {
+    _vsort_exec_exprs.close(state);
+    _sorter = nullptr;
+    ExecNode::release_resource(state);
+}
+
 Status VSortNode::close(RuntimeState* state) {
     if (is_closed()) {
         return Status::OK();
     }
-    START_AND_SCOPE_SPAN(state->get_tracer(), span, "VSortNode::close");
-    _vsort_exec_exprs.close(state);
-    _sorter = nullptr;
     return ExecNode::close(state);
 }
 

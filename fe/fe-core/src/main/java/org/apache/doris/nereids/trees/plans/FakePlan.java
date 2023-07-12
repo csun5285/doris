@@ -22,6 +22,8 @@ import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
+import org.apache.doris.nereids.util.MutableState;
+import org.apache.doris.nereids.util.MutableState.MultiMutableState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +33,7 @@ import java.util.Optional;
  * Used for unit test only.
  */
 public class FakePlan implements Plan {
+    private MutableState mutableState = new MultiMutableState();
 
     @Override
     public List<Plan> children() {
@@ -100,5 +103,15 @@ public class FakePlan implements Plan {
     @Override
     public Plan withLogicalProperties(Optional<LogicalProperties> logicalProperties) {
         return this;
+    }
+
+    @Override
+    public <T> Optional<T> getMutableState(String key) {
+        return (Optional<T>) Optional.ofNullable(mutableState.get(key));
+    }
+
+    @Override
+    public void setMutableState(String key, Object mutableState) {
+        this.mutableState = this.mutableState.set(key, mutableState);
     }
 }

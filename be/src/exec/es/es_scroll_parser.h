@@ -17,16 +17,19 @@
 
 #pragma once
 
+#include <rapidjson/rapidjson.h>
+
+#include <map>
 #include <string>
+#include <vector>
 
 #include "rapidjson/document.h"
-#include "runtime/descriptors.h"
-#include "runtime/tuple.h"
-#include "vec/core/block.h"
+#include "vec/data_types/data_type.h"
 
 namespace doris {
 
 class Status;
+class TupleDescriptor;
 
 class ScrollParser {
 public:
@@ -35,11 +38,11 @@ public:
 
     Status parse(const std::string& scroll_result, bool exactly_once = false);
     Status fill_columns(const TupleDescriptor* _tuple_desc,
-                        std::vector<vectorized::MutableColumnPtr>& columns, MemPool* mem_pool,
-                        bool* line_eof, const std::map<std::string, std::string>& docvalue_context);
+                        std::vector<vectorized::MutableColumnPtr>& columns, bool* line_eof,
+                        const std::map<std::string, std::string>& docvalue_context);
 
     const std::string& get_scroll_id();
-    int get_size();
+    int get_size() const;
 
 private:
     std::string _scroll_id;

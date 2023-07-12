@@ -21,9 +21,11 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.NotImplementedException;
+import org.apache.doris.mysql.MysqlProto;
 
 import com.google.common.base.Preconditions;
 import org.apache.logging.log4j.LogManager;
@@ -33,6 +35,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.List;
 
 public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr> {
     private static final Logger LOG = LogManager.getLogger(LiteralExpr.class);
@@ -133,6 +136,39 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
 
         Preconditions.checkNotNull(literalExpr);
         return literalExpr;
+    }
+
+    public Expr convertTo(Type targetType) throws AnalysisException {
+        Preconditions.checkArgument(!targetType.equals(Type.INVALID));
+        if (this instanceof NullLiteral) {
+            return NullLiteral.create(targetType);
+        } else if (targetType.isBoolean()) {
+            if (this instanceof StringLiteral || this instanceof JsonLiteral) {
+                return new BoolLiteral(getStringValue());
+            } else {
+                if (getLongValue() != 0) {
+                    return new BoolLiteral(true);
+                } else {
+                    return new BoolLiteral(false);
+                }
+            }
+        } else if (targetType.isIntegerType()) {
+            return new IntLiteral(getLongValue(), targetType);
+        } else if (targetType.isLargeIntType()) {
+            return new LargeIntLiteral(getStringValue());
+        } else if (targetType.isFloatingPointType()) {
+            return new FloatLiteral(getDoubleValue(), targetType);
+        } else if (targetType.isDecimalV2() || targetType.isDecimalV3()) {
+            DecimalLiteral literal = new DecimalLiteral(getStringValue(),
+                    ((ScalarType) targetType).getScalarScale());
+            literal.setType(targetType);
+            return literal;
+        } else if (targetType.isStringType()) {
+            return new StringLiteral(getStringValue());
+        } else if (targetType.isDateType()) {
+            return new StringLiteral(getStringValue()).convertToDate(targetType);
+        }
+        return this;
     }
 
     public static LiteralExpr createInfinity(Type type, boolean isMax) throws AnalysisException {
@@ -258,9 +294,50 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
         return this instanceof NullLiteral;
     }
 
-    @Override
-    public void finalizeImplForNereids() throws AnalysisException {
+    // Port from mysql get_param_length
+    public static int getParmLen(ByteBuffer data) {
+        int maxLen = data.remaining();
+        if (maxLen < 1) {
+            return 0;
+        }
+        // get and advance 1 byte
+        int len = MysqlProto.readInt1(data);
+        if (len == 252) {
+            if (maxLen < 3) {
+                return 0;
+            }
+            // get and advance 2 bytes
+            return MysqlProto.readInt2(data);
+        } else if (len == 253) {
+            if (maxLen < 4) {
+                return 0;
+            }
+            // get and advance 3 bytes
+            return MysqlProto.readInt3(data);
+        } else if (len == 254) {
+            /*
+            In our client-server protocol all numbers bigger than 2^24
+            stored as 8 bytes with uint8korr. Here we always know that
+            parameter length is less than 2^4 so we don't look at the second
+            4 bytes. But still we need to obey the protocol hence 9 in the
+            assignment below.
+            */
+            if (maxLen < 9) {
+                return 0;
+            }
+            len = MysqlProto.readInt4(data);
+            MysqlProto.readFixedString(data, 4);
+            return len;
+        } else if (len == 255) {
+            return 0;
+        } else {
+            return len;
+        }
+    }
 
+    @Override
+    public boolean matchExprs(List<Expr> exprs, SelectStmt stmt, boolean ignoreAlias, TupleDescriptor tuple) {
+        return true;
     }
 
     @Override
@@ -325,49 +402,5 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
             default:
                 return null;
         }
-    }
-
-    // Port from mysql get_param_length
-    public static int getParmLen(ByteBuffer data) {
-        int maxLen = data.remaining();
-        if (maxLen < 1) {
-            return 0;
-        }
-        // get and advance 1 byte
-        int len = data.get();
-        if (len < 251) {
-            return len;
-        }
-        if (maxLen < 3) {
-            return 0;
-        }
-        if (len == 252) {
-            // get and advance 2 bytes
-            return data.getShort();
-        }
-        if (maxLen < 4) {
-            return 0;
-        }
-        if (len == 253) {
-            // get and advance 3 bytes
-            byte[] bytes = new byte[3];
-            data.get(bytes);
-            return ByteBuffer.wrap(bytes).getInt();
-        }
-        if (maxLen < 5) {
-            return 0;
-        }
-        // Must be 254 when here
-        /*
-          In our client-server protocol all numbers bigger than 2^24
-          stored as 8 bytes with uint8korr. Here we always know that
-          parameter length is less than 2^4 so don't look at the second
-          4 bytes. But still we need to obey the protocol hence 9 in the
-          assignment above.
-        */
-        int ret = data.getInt();
-        // advance more useless 4 bytes
-        data.getInt();
-        return ret;
     }
 }

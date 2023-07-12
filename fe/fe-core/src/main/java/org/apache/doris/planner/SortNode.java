@@ -28,10 +28,8 @@ import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.SortInfo;
 import org.apache.doris.analysis.TupleDescriptor;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.NotImplementedException;
 import org.apache.doris.common.UserException;
-import org.apache.doris.common.util.VectorizedUtil;
 import org.apache.doris.statistics.StatisticalType;
 import org.apache.doris.statistics.StatsRecursiveDerive;
 import org.apache.doris.thrift.TExplainLevel;
@@ -65,6 +63,7 @@ public class SortNode extends PlanNode {
     private final SortInfo info;
     private final boolean  useTopN;
     private boolean useTopnOpt;
+    private boolean useTwoPhaseReadOpt;
 
     private boolean  isDefaultLimit;
     // if true, the output of this node feeds an AnalyticNode
@@ -144,13 +143,16 @@ public class SortNode extends PlanNode {
         this.useTopnOpt = useTopnOpt;
     }
 
-    public List<Expr> getResolvedTupleExprs() {
-        return resolvedTupleExprs;
+    public boolean getUseTwoPhaseReadOpt() {
+        return this.useTwoPhaseReadOpt;
     }
 
-    public boolean isUseTopNTwoPhaseOptimize() {
-        return useTopN && useTopnOpt && VectorizedUtil.isVectorized()
-                && hasLimit() && getLimit()  <= Config.topn_two_phase_limit_threshold;
+    public void setUseTwoPhaseReadOpt(boolean useTwoPhaseReadOpt) {
+        this.useTwoPhaseReadOpt = useTwoPhaseReadOpt;
+    }
+
+    public List<Expr> getResolvedTupleExprs() {
+        return resolvedTupleExprs;
     }
 
     @Override
@@ -179,8 +181,12 @@ public class SortNode extends PlanNode {
             output.append(isAsc.next() ? "ASC" : "DESC");
         }
         output.append("\n");
+
         if (useTopnOpt) {
             output.append(detailPrefix + "TOPN OPT\n");
+        }
+        if (useTwoPhaseReadOpt) {
+            output.append(detailPrefix + "OPT TWO PHASE\n");
         }
         output.append(detailPrefix).append("offset: ").append(offset).append("\n");
         return output.toString();
@@ -330,7 +336,13 @@ public class SortNode extends PlanNode {
      */
     public void finalizeForNereids(TupleDescriptor tupleDescriptor,
             List<Expr> outputList, List<Expr> orderingExpr) {
-        resolvedTupleExprs = Lists.newArrayList(orderingExpr);
+        resolvedTupleExprs = Lists.newArrayList();
+        // TODO: should fix the duplicate order by exprs in nereids code later
+        for (Expr order : orderingExpr) {
+            if (!resolvedTupleExprs.contains(order)) {
+                resolvedTupleExprs.add(order);
+            }
+        }
         for (Expr output : outputList) {
             if (!resolvedTupleExprs.contains(output)) {
                 resolvedTupleExprs.add(output);

@@ -38,6 +38,7 @@ public:
         _reset();
     }
 
+    // need exception safety
     void filter_block(IColumn::Filter& filter) {
         Block::filter_block_internal(&block, filter, block.columns());
         _reset();
@@ -75,6 +76,8 @@ public:
 
     HeapSortCursorBlockView& value() { return _reference; }
 
+    int ref_count() const { return _ref_count; }
+
 private:
     ~SharedHeapSortCursorBlockView() noexcept = default;
     int _ref_count;
@@ -110,9 +113,9 @@ public:
         if (_block_view) {
             _block_view->unref();
         }
-    };
+    }
 
-    const size_t row_id() const { return _row_id; }
+    size_t row_id() const { return _row_id; }
 
     const ColumnRawPtrs& sort_columns() const { return _block_view->value().sort_columns; }
 
@@ -163,18 +166,8 @@ struct MergeSortCursorImpl {
         reset(block);
     }
 
-    MergeSortCursorImpl(const Columns& columns, const SortDescription& desc_)
-            : desc(desc_), sort_columns_size(desc.size()) {
-        for (auto& column_desc : desc) {
-            if (!column_desc.column_name.empty()) {
-                LOG(FATAL)
-                        << "SortDesctiption should contain column position if MergeSortCursor was "
-                           "used without header.";
-            }
-        }
-        reset(columns, {});
-    }
-
+    MergeSortCursorImpl(const SortDescription& desc_)
+            : desc(desc_), sort_columns_size(desc.size()) {}
     bool empty() const { return rows == 0; }
 
     /// Set the cursor to the beginning of the new block.
@@ -211,13 +204,13 @@ struct MergeSortCursorImpl {
     virtual Block* block_ptr() { return nullptr; }
 };
 
-using BlockSupplier = std::function<Status(Block**)>;
+using BlockSupplier = std::function<Status(Block*, bool* eos)>;
 
-struct ReceiveQueueSortCursorImpl : public MergeSortCursorImpl {
-    ReceiveQueueSortCursorImpl(const BlockSupplier& block_supplier,
-                               const std::vector<VExprContext*>& ordering_expr,
-                               const std::vector<bool>& is_asc_order,
-                               const std::vector<bool>& nulls_first)
+struct BlockSupplierSortCursorImpl : public MergeSortCursorImpl {
+    BlockSupplierSortCursorImpl(const BlockSupplier& block_supplier,
+                                const VExprContextSPtrs& ordering_expr,
+                                const std::vector<bool>& is_asc_order,
+                                const std::vector<bool>& nulls_first)
             : _ordering_expr(ordering_expr), _block_supplier(block_supplier) {
         sort_columns_size = ordering_expr.size();
 
@@ -229,20 +222,38 @@ struct ReceiveQueueSortCursorImpl : public MergeSortCursorImpl {
         _is_eof = !has_next_block();
     }
 
+    BlockSupplierSortCursorImpl(const BlockSupplier& block_supplier, const SortDescription& desc_)
+            : MergeSortCursorImpl(desc_), _block_supplier(block_supplier) {
+        _is_eof = !has_next_block();
+    }
+
     bool has_next_block() override {
-        auto status = _block_supplier(&_block_ptr);
-        if (status.ok() && _block_ptr != nullptr) {
-            for (int i = 0; status.ok() && i < desc.size(); ++i) {
-                status = _ordering_expr[i]->execute(_block_ptr, &desc[i].column_number);
+        _block.clear();
+        Status status;
+        do {
+            status = _block_supplier(&_block, &_is_eof);
+        } while (_block.empty() && !_is_eof && status.ok());
+        // If status not ok, upper callers could not detect whether it is eof or error.
+        // So that fatal here, and should throw exception in the future.
+        if (status.ok() && !_block.empty()) {
+            if (_ordering_expr.size() > 0) {
+                for (int i = 0; status.ok() && i < desc.size(); ++i) {
+                    // TODO yiguolei: throw exception if status not ok in the future
+                    status = _ordering_expr[i]->execute(&_block, &desc[i].column_number);
+                }
             }
-            MergeSortCursorImpl::reset(*_block_ptr);
+            MergeSortCursorImpl::reset(_block);
             return status.ok();
         }
-        _block_ptr = nullptr;
         return false;
     }
 
-    Block* block_ptr() override { return _block_ptr; }
+    Block* block_ptr() override {
+        if (_is_eof) {
+            return nullptr;
+        }
+        return &_block;
+    }
 
     size_t columns_num() const { return all_columns.size(); }
 
@@ -252,11 +263,11 @@ struct ReceiveQueueSortCursorImpl : public MergeSortCursorImpl {
         for (size_t i = 0; i < num_columns; ++i) {
             columns[i] = all_columns[i]->clone_empty();
         }
-        return _block_ptr->clone_with_columns(std::move(columns));
+        return _block.clone_with_columns(std::move(columns));
     }
 
-    const std::vector<VExprContext*>& _ordering_expr;
-    Block* _block_ptr = nullptr;
+    VExprContextSPtrs _ordering_expr;
+    Block _block;
     BlockSupplier _block_supplier {};
     bool _is_eof = false;
 };

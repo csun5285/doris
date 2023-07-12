@@ -17,15 +17,18 @@
 
 #pragma once
 
+#include <gen_cpp/segment_v2.pb.h>
+
 #include <vector>
 
-#include "cloud/io/file_reader.h"
+#include "io/fs/file_reader.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "gen_cpp/segment_v2.pb.h"
 #include "olap/iterators.h"
 #include "olap/rowset/segment_v2/encoding_info.h"
 #include "olap/rowset/segment_v2/page_handle.h"
+#include "io/io_common.h"
 #include "olap/rowset/segment_v2/page_pointer.h"
 #include "util/slice.h"
 
@@ -34,16 +37,14 @@ namespace doris {
 class BlockCompressionCodec;
 struct OlapReaderStatistics;
 
-namespace fs {
-class ReadableBlock;
-class WritableBlock;
-} // namespace fs
-
 namespace io {
 class FileWriter;
+class FileReader;
 } // namespace io
 
 namespace segment_v2 {
+class EncodingInfo;
+class PageHandle;
 
 struct PageReadOptions {
     // block to read page
@@ -55,17 +56,13 @@ struct PageReadOptions {
     BlockCompressionCodec* codec = nullptr;
     // used to collect IO metrics
     OlapReaderStatistics* stats = nullptr;
-    const TUniqueId* query_id = nullptr;
     // whether to verify page checksum
     bool verify_checksum = true;
     // whether to use page cache in read path
-    bool use_page_cache = true;
+    bool use_page_cache = false;
     // if true, use DURABLE CachePriority in page cache
     // currently used for in memory olap table
     bool kept_in_memory = false;
-    bool use_disposable_cache = false;
-    int64_t expiration_time {0};
-    bool read_segment_index = false;
     // for page cache allocation
     // page types are divided into DATA_PAGE & INDEX_PAGE
     // INDEX_PAGE including index_page, dict_page and short_key_page
@@ -76,7 +73,7 @@ struct PageReadOptions {
     // index_page should not be pre-decoded
     bool pre_decode = true;
 
-    bool disable_file_cache = false;
+    io::IOContext* io_ctx = nullptr; // Ref
 
     void sanity_check() const {
         CHECK_NOTNULL(file_reader);
@@ -126,11 +123,6 @@ public:
     //     `footer' stores the page footer.
     static Status read_and_decompress_page(const PageReadOptions& opts, PageHandle* handle,
                                            Slice* body, PageFooterPB* footer);
-
-    static Status read_and_decompress_pages(const PageReadOptions& opts,
-                                            std::vector<PageHandle>& handles,
-                                            std::vector<Slice>& bodys,
-                                            std::vector<PageFooterPB>& footers);
 };
 
 } // namespace segment_v2

@@ -19,6 +19,7 @@ package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.AggregateFunction;
 import org.apache.doris.catalog.AliasFunction;
+import org.apache.doris.catalog.ArrayType;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.Function.NullableMode;
@@ -94,6 +95,7 @@ public class CreateFunctionStmt extends DdlStmt {
     public static final String IS_RETURN_NULL = "always_nullable";
     private static final Logger LOG = LogManager.getLogger(CreateFunctionStmt.class);
 
+    private SetType type = SetType.DEFAULT;
     private final boolean ifNotExists;
     private final FunctionName functionName;
     private final boolean isAggregate;
@@ -118,9 +120,10 @@ public class CreateFunctionStmt extends DdlStmt {
     // timeout for both connection and read. 10 seconds is long enough.
     private static final int HTTP_TIMEOUT_MS = 10000;
 
-    public CreateFunctionStmt(boolean ifNotExists, boolean isAggregate, FunctionName functionName,
-            FunctionArgsDef argsDef,
-            TypeDef returnType, TypeDef intermediateType, Map<String, String> properties) {
+    public CreateFunctionStmt(SetType type, boolean ifNotExists, boolean isAggregate, FunctionName functionName,
+                              FunctionArgsDef argsDef,
+                              TypeDef returnType, TypeDef intermediateType, Map<String, String> properties) {
+        this.type = type;
         this.ifNotExists = ifNotExists;
         this.functionName = functionName;
         this.isAggregate = isAggregate;
@@ -137,8 +140,9 @@ public class CreateFunctionStmt extends DdlStmt {
         this.originFunction = null;
     }
 
-    public CreateFunctionStmt(boolean ifNotExists, FunctionName functionName, FunctionArgsDef argsDef,
+    public CreateFunctionStmt(SetType type, boolean ifNotExists, FunctionName functionName, FunctionArgsDef argsDef,
             List<String> parameters, Expr originFunction) {
+        this.type = type;
         this.ifNotExists = ifNotExists;
         this.functionName = functionName;
         this.isAlias = true;
@@ -152,6 +156,10 @@ public class CreateFunctionStmt extends DdlStmt {
         this.isAggregate = false;
         this.returnType = new TypeDef(Type.VARCHAR);
         this.properties = ImmutableSortedMap.of();
+    }
+
+    public SetType getType() {
+        return type;
     }
 
     public boolean isIfNotExists() {
@@ -174,23 +182,40 @@ public class CreateFunctionStmt extends DdlStmt {
     public void analyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
 
-        analyzeCommon(analyzer);
-        // check
-        if (isAggregate) {
-            analyzeUda();
-        } else if (isAlias) {
-            analyzeAliasFunction();
+        // https://github.com/apache/doris/issues/17810
+        // this error report in P0 test, so we suspect that it is related to concurrency
+        // add this change to test it.
+        if (Config.use_fuzzy_session_variable) {
+            synchronized (CreateFunctionStmt.class) {
+                analyzeCommon(analyzer);
+                // check
+                if (isAggregate) {
+                    analyzeUda();
+                } else if (isAlias) {
+                    analyzeAliasFunction();
+                } else {
+                    analyzeUdf();
+                }
+            }
         } else {
-            analyzeUdf();
+            analyzeCommon(analyzer);
+            // check
+            if (isAggregate) {
+                analyzeUda();
+            } else if (isAlias) {
+                analyzeAliasFunction();
+            } else {
+                analyzeUdf();
+            }
         }
     }
 
     private void analyzeCommon(Analyzer analyzer) throws AnalysisException {
         // check function name
-        functionName.analyze(analyzer);
+        functionName.analyze(analyzer, this.type);
 
         // check operation privilege
-        if (!Env.getCurrentEnv().getAuth().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)) {
+        if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN");
         }
         // check argument
@@ -545,17 +570,22 @@ public class CreateFunctionStmt extends DdlStmt {
 
     private void checkUdfType(Class clazz, Method method, Type expType, Class pType, String pname)
             throws AnalysisException {
-        if (!(expType instanceof ScalarType)) {
+        Set<Class> javaTypes;
+        if (expType instanceof ScalarType) {
+            ScalarType scalarType = (ScalarType) expType;
+            javaTypes = Type.PrimitiveTypeToJavaClassType.get(scalarType.getPrimitiveType());
+        } else if (expType instanceof ArrayType) {
+            ArrayType arrayType = (ArrayType) expType;
+            javaTypes = Type.PrimitiveTypeToJavaClassType.get(arrayType.getPrimitiveType());
+        } else {
             throw new AnalysisException(
-                    String.format("Method '%s' in class '%s' does not support non-scalar type '%s'",
+                    String.format("Method '%s' in class '%s' does not support type '%s'",
                             method.getName(), clazz.getCanonicalName(), expType));
         }
-        ScalarType scalarType = (ScalarType) expType;
-        Set<Class> javaTypes = Type.PrimitiveTypeToJavaClassType.get(scalarType.getPrimitiveType());
         if (javaTypes == null) {
             throw new AnalysisException(
                     String.format("Method '%s' in class '%s' does not support type '%s'",
-                            method.getName(), clazz.getCanonicalName(), scalarType));
+                            method.getName(), clazz.getCanonicalName(), expType.toString()));
         }
         if (!javaTypes.contains(pType)) {
             throw new AnalysisException(
@@ -630,6 +660,12 @@ public class CreateFunctionStmt extends DdlStmt {
                 break;
             case BITMAP:
                 typeBuilder.setId(Types.PGenericType.TypeId.BITMAP);
+                break;
+            case QUANTILE_STATE:
+                typeBuilder.setId(Types.PGenericType.TypeId.QUANTILE_STATE);
+                break;
+            case AGG_STATE:
+                typeBuilder.setId(Types.PGenericType.TypeId.AGG_STATE);
                 break;
             case DATE:
                 typeBuilder.setId(Types.PGenericType.TypeId.DATE);

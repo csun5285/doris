@@ -17,7 +17,12 @@
 
 package org.apache.doris.catalog;
 
+import org.apache.doris.analysis.DateLiteral;
+import org.apache.doris.analysis.MaxLiteral;
+import org.apache.doris.analysis.PartitionDesc;
+import org.apache.doris.analysis.PartitionValue;
 import org.apache.doris.analysis.SinglePartitionDesc;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.io.Text;
@@ -40,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /*
  * Repository of a partition's related infos
@@ -150,13 +156,15 @@ public class PartitionInfo implements Writable {
 
     public void unprotectHandleNewSinglePartitionDesc(long partitionId, boolean isTemp, PartitionItem partitionItem,
                                                       DataProperty dataProperty, ReplicaAllocation replicaAlloc,
-                                                      boolean isInMemory, boolean isPersistent) {
+                                                      boolean isInMemory, boolean isPersistent, boolean isMutable) {
         setItemInternal(partitionId, isTemp, partitionItem);
         idToDataProperty.put(partitionId, dataProperty);
         idToReplicaAllocation.put(partitionId, replicaAlloc);
         idToInMemory.put(partitionId, isInMemory);
         idToPersistent.put(partitionId, isPersistent);
         idToStoragePolicy.put(partitionId, "");
+        //TODO
+        //idToMutable.put(partitionId, isMutable);
     }
 
     public List<Map.Entry<Long, PartitionItem>> getPartitionItemEntryList(boolean isTemp, boolean isSorted) {
@@ -242,6 +250,14 @@ public class PartitionInfo implements Writable {
         return idToInMemory.get(partitionId);
     }
 
+    public boolean getIsMutable(long partitionId) {
+        return idToDataProperty.get(partitionId).isMutable();
+    }
+
+    public void setIsMutable(long partitionId, boolean isMutable) {
+        idToDataProperty.get(partitionId).setMutable(isMutable);
+    }
+
     public void setIsInMemory(long partitionId, boolean isInMemory) {
         idToInMemory.put(partitionId, isInMemory);
     }
@@ -275,14 +291,15 @@ public class PartitionInfo implements Writable {
     }
 
     public void addPartition(long partitionId, boolean isTemp, PartitionItem item, DataProperty dataProperty,
-                             ReplicaAllocation replicaAlloc, boolean isInMemory, boolean isPersistent) {
-        addPartition(partitionId, dataProperty, replicaAlloc, isInMemory, isPersistent);
+                             ReplicaAllocation replicaAlloc, boolean isInMemory, boolean isPersistent,
+                             boolean isMutable) {
+        addPartition(partitionId, dataProperty, replicaAlloc, isInMemory, isPersistent, isMutable);
         setItemInternal(partitionId, isTemp, item);
     }
 
     public void addPartition(long partitionId, DataProperty dataProperty,
                              ReplicaAllocation replicaAlloc,
-                             boolean isInMemory, boolean isPersistent) {
+                             boolean isInMemory, boolean isPersistent, boolean isMutable) {
         idToDataProperty.put(partitionId, dataProperty);
         idToReplicaAllocation.put(partitionId, replicaAlloc);
         idToInMemory.put(partitionId, isInMemory);
@@ -301,6 +318,22 @@ public class PartitionInfo implements Writable {
 
     public String toSql(OlapTable table, List<Long> partitionId) {
         return "";
+    }
+
+    public PartitionDesc toPartitionDesc(OlapTable olapTable) throws AnalysisException {
+        throw new RuntimeException("Should implement it in derived classes.");
+    }
+
+    static List<PartitionValue> toPartitionValue(PartitionKey partitionKey) {
+        return partitionKey.getKeys().stream().map(expr -> {
+            if (expr == MaxLiteral.MAX_VALUE) {
+                return PartitionValue.MAX_VALUE;
+            } else if (expr instanceof DateLiteral) {
+                return new PartitionValue(expr.getStringValue());
+            } else {
+                return new PartitionValue(expr.getRealValue().toString());
+            }
+        }).collect(Collectors.toList());
     }
 
     public void moveFromTempToFormal(long tempPartitionId) {
@@ -332,7 +365,7 @@ public class PartitionInfo implements Writable {
         out.writeInt(idToDataProperty.size());
         for (Map.Entry<Long, DataProperty> entry : idToDataProperty.entrySet()) {
             out.writeLong(entry.getKey());
-            if (entry.getValue().equals(new DataProperty(TStorageMedium.HDD))) {
+            if (entry.getValue().equals(DataProperty.DEFAULT_HDD_DATA_PROPERTY)) {
                 out.writeBoolean(true);
             } else {
                 out.writeBoolean(false);
@@ -353,7 +386,7 @@ public class PartitionInfo implements Writable {
             long partitionId = in.readLong();
             boolean isDefaultHddDataProperty = in.readBoolean();
             if (isDefaultHddDataProperty) {
-                idToDataProperty.put(partitionId, new DataProperty(TStorageMedium.HDD));
+                idToDataProperty.put(partitionId, new DataProperty(DataProperty.DEFAULT_HDD_DATA_PROPERTY));
             } else {
                 idToDataProperty.put(partitionId, DataProperty.read(in));
             }
@@ -389,6 +422,7 @@ public class PartitionInfo implements Writable {
             buff.append("replica number: ").append(idToReplicaAllocation.get(entry.getKey())).append("; ");
             buff.append("in memory: ").append(idToInMemory.get(entry.getKey()));
             buff.append("persistent: ").append(idToPersistent.get(entry.getKey()));
+            buff.append("is mutable: ").append(idToDataProperty.get(entry.getKey()).isMutable());
         }
 
         return buff.toString();

@@ -23,21 +23,32 @@ import org.apache.doris.analysis.MVRefreshInfo.RefreshTrigger;
 import org.apache.doris.analysis.MVRefreshIntervalTriggerInfo;
 import org.apache.doris.analysis.MVRefreshTriggerInfo;
 import org.apache.doris.catalog.MaterializedView;
+import org.apache.doris.common.FeConstants;
+import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.mtmv.MTMVUtils.TriggerMode;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.mtmv.metadata.MTMVJob.JobSchedule;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 public class MTMVJobFactory {
+    private static final Logger LOG = LogManager.getLogger(MTMVTaskProcessor.class);
+
     public static boolean isGenerateJob(MaterializedView materializedView) {
-        boolean completeRefresh =  materializedView.getRefreshInfo().getRefreshMethod() == RefreshMethod.COMPLETE;
+        boolean completeRefresh = materializedView.getRefreshInfo().getRefreshMethod() == RefreshMethod.COMPLETE;
         BuildMode buildMode = materializedView.getBuildMode();
-        MVRefreshTriggerInfo triggerInfo =  materializedView.getRefreshInfo().getTriggerInfo();
+        MVRefreshTriggerInfo triggerInfo = materializedView.getRefreshInfo().getTriggerInfo();
+        //can not generate a job when creating a temp materialized view.
+        if (materializedView.getName().startsWith(FeConstants.TEMP_MATERIZLIZE_DVIEW_PREFIX)) {
+            return false;
+        }
         if (buildMode == BuildMode.IMMEDIATE) {
             return completeRefresh;
         } else {
@@ -47,14 +58,18 @@ public class MTMVJobFactory {
 
     public static List<MTMVJob> buildJob(MaterializedView materializedView, String dbName) {
         List<MTMVJob> jobs = new ArrayList<>();
-        if (materializedView.getBuildMode() == BuildMode.IMMEDIATE) {
-            jobs.add(genOnceJob(materializedView, dbName));
-        }
-        MVRefreshTriggerInfo triggerInfo =  materializedView.getRefreshInfo().getTriggerInfo();
+        MVRefreshTriggerInfo triggerInfo = materializedView.getRefreshInfo().getTriggerInfo();
+        boolean isRunPeriodJobImmediate = false;
         if (triggerInfo != null && triggerInfo.getRefreshTrigger() == RefreshTrigger.INTERVAL) {
-            jobs.add(genPeriodicalJob(materializedView, dbName));
+            MTMVJob job = genPeriodicalJob(materializedView, dbName);
+            isRunPeriodJobImmediate = MTMVUtils.getDelaySeconds(job) == 0;
+            jobs.add(job);
         }
 
+        // if the PeriodicalJob run immediate since an early start time, don't run the immediate build.
+        if (!isRunPeriodJobImmediate && materializedView.getBuildMode() == BuildMode.IMMEDIATE) {
+            jobs.add(genOnceJob(materializedView, dbName));
+        }
         return jobs;
     }
 
@@ -63,8 +78,8 @@ public class MTMVJobFactory {
         MTMVJob job = new MTMVJob(materializedView.getName() + "_" + uid);
         job.setTriggerMode(TriggerMode.PERIODICAL);
         job.setSchedule(genJobSchedule(materializedView));
-        job.setDbName(dbName);
-        job.setMvName(materializedView.getName());
+        job.setDBName(dbName);
+        job.setMVName(materializedView.getName());
         job.setQuery(materializedView.getQuery());
         job.setCreateTime(MTMVUtils.getNowTimeStamp());
         return job;
@@ -74,8 +89,8 @@ public class MTMVJobFactory {
         String uid = UUID.randomUUID().toString();
         MTMVJob job = new MTMVJob(materializedView.getName() + "_" + uid);
         job.setTriggerMode(TriggerMode.ONCE);
-        job.setDbName(dbName);
-        job.setMvName(materializedView.getName());
+        job.setDBName(dbName);
+        job.setMVName(materializedView.getName());
         job.setQuery(materializedView.getQuery());
         job.setCreateTime(MTMVUtils.getNowTimeStamp());
         return job;
@@ -83,11 +98,11 @@ public class MTMVJobFactory {
 
     private static JobSchedule genJobSchedule(MaterializedView materializedView) {
         MVRefreshIntervalTriggerInfo info = materializedView.getRefreshInfo().getTriggerInfo().getIntervalTrigger();
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         long startTime;
         try {
-            startTime = format.parse(info.getStartTime()).getTime() / 1000;
-        } catch (ParseException e) {
+            LocalDateTime dateTime = LocalDateTime.parse(info.getStartTime(), TimeUtils.DATETIME_FORMAT);
+            startTime = dateTime.toEpochSecond(TimeUtils.TIME_ZONE.getRules().getOffset(dateTime));
+        } catch (DateTimeParseException e) {
             throw new RuntimeException(e);
         }
 

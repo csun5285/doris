@@ -18,7 +18,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
+#include "common/factory_creator.h"
 #include "olap/column_predicate.h"
 #include "olap/rowset/segment_v2/bloom_filter.h"
 #include "olap/rowset/segment_v2/inverted_index_reader.h"
@@ -34,53 +36,13 @@ namespace doris {
  * At parent, it's used for topn runtime predicate.
 */
 class AcceptNullPredicate : public ColumnPredicate {
+    ENABLE_FACTORY_CREATOR(AcceptNullPredicate);
+
 public:
     AcceptNullPredicate(ColumnPredicate* nested)
             : ColumnPredicate(nested->column_id(), nested->opposite()), _nested {nested} {}
 
     PredicateType type() const override { return _nested->type(); }
-
-    void evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size) const override {
-        LOG(FATAL) << "evaluate without flags not supported";
-        // return _nested->evaluate(block, sel, size);
-    }
-
-    void evaluate_or(ColumnBlock* block, uint16_t* sel, uint16_t size, bool* flags)
-        const override {
-        if (block->is_nullable()) {
-            // call evaluate_or and set true for NULL rows
-            _nested->evaluate_or(block, sel, size, flags);
-            for (uint16_t i = 0; i < size; ++i) {
-                uint16_t idx = sel[i];
-                if (!flags[idx] && block->is_null(idx)) {
-                    flags[i] = true;
-                }
-            }
-        } else {
-            _nested->evaluate_or(block, sel, size, flags);
-        }
-    }
-
-    void evaluate_and(ColumnBlock* block, uint16_t* sel, uint16_t size, bool* flags)
-        const override {
-        if (block->is_nullable()) {
-            // copy original flags
-            auto original_flags_buf = std::make_unique<bool[]>(size);
-            auto original_flags = original_flags_buf.get();
-            memcpy(original_flags, flags, size * sizeof(bool));
-
-            // call evaluate_and and restore true for NULL rows
-            _nested->evaluate_and(block, sel, size, flags);
-            for (uint16_t i = 0; i < size; ++i) {
-                uint16_t idx = sel[i];
-                if (original_flags[idx] && !flags[idx] && block->is_null(idx)) {
-                    flags[i] = true;
-                }
-            }
-        } else {
-            _nested->evaluate_and(block, sel, size, flags);
-        }
-    }
 
     Status evaluate(BitmapIndexIterator* iterator, uint32_t num_rows,
                     roaring::Roaring* roaring) const override {
@@ -221,7 +183,7 @@ public:
         }
     }
 
-    // std::string get_search_str() const override { return _nested->get_search_str(); }
+    std::string get_search_str() const override { return _nested->get_search_str(); }
 
     std::string debug_string() const override {
         return "passnull predicate for " + _nested->debug_string();
@@ -243,7 +205,7 @@ private:
         return "passnull predicate for " + _nested->debug_string();
     }
 
-    ColumnPredicate* _nested;
+    std::unique_ptr<ColumnPredicate> _nested;
 };
 
 } //namespace doris

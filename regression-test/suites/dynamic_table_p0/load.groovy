@@ -86,7 +86,7 @@ suite("regression_test_dynamic_table", "dynamic_table"){
             )
             UNIQUE KEY(`id`)
             DISTRIBUTED BY HASH(`id`) BUCKETS 5 
-            properties("replication_num" = "1", "enable_unique_key_merge_on_write" = "false");
+            properties("replication_num" = "1", "enable_unique_key_merge_on_write" = "true");
         """
 
         //stream load src_json
@@ -104,7 +104,7 @@ suite("regression_test_dynamic_table", "dynamic_table"){
                 `answers.date` array<datetime>,
                 `title` string,
 		        INDEX creation_date_idx(`creationdate`) USING INVERTED COMMENT 'creationdate index',
- 		        INDEX title_idx(`title`) USING INVERTED PROPERTIES("parser"="english") COMMENT 'title index',
+ 		        INDEX title_idx(`title`) USING INVERTED PROPERTIES("parser"="standard") COMMENT 'title index',
 		        ...
             )
             DUPLICATE KEY(`qid`)
@@ -116,54 +116,43 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         load_json_data.call(table_name, 'true', 'json', 'true', src_json, 'true')
         sleep(1000)
     }
-
-    def json_load_nested_with_jsonb = {src_json, table_name ->
-        //create table
-        sql "DROP TABLE IF EXISTS ${table_name}"
-        sql """
-            CREATE TABLE IF NOT EXISTS ${table_name} (
-                qid bigint,
-                creationdate datetimev2,
-                `answers` JSONB,
-                ...
-            )
-            DUPLICATE KEY(`qid`)
-            DISTRIBUTED BY RANDOM BUCKETS 5 
-            properties("replication_num" = "1");
-        """
-
-        //stream load src_json
-        load_json_data.call(table_name, 'true', 'json', 'true', src_json, 'true')
-        sleep(1000)
-    }
-    json_load_nested_with_jsonb("es_nested.json", "test_es_nested_json_jsonb")
     json_load("btc_transactions.json", "test_btc_json")
     json_load("ghdata_sample.json", "test_ghdata_json")
     json_load("nbagames_sample.json", "test_nbagames_json")
-    json_load("nbagames_sample.json", "test_nbagames_json_1")
-    json_load("ghdata_sample.json", "test_ghdata_json_1")
     json_load_nested("es_nested.json", "test_es_nested_json")
     json_load_unique("btc_transactions.json", "test_btc_json")
     json_load_unique("ghdata_sample.json", "test_ghdata_json")
     json_load_unique("nbagames_sample.json", "test_nbagames_json")
-    sql """insert into test_ghdata_json_1 select * from test_ghdata_json"""
-    sql """insert into test_nbagames_json_1 select * from test_nbagames_json"""
-    // sql 'sync'
-    // def meta = sql_meta 'select * from test_ghdata_json limit 1'
-    // for (List<String> col_meta in meta) {
-    //     test {
-    //         qt_sql "select count(`${col_meta[0]}`) from test_ghdata_json"
-    //         // check exception message contains
-    //         exception "errCode = 2,"
-    //     }
-    // }
+    sql """insert into test_ghdata_json_unique select * from test_ghdata_json"""
+    sql """insert into test_btc_json_unique select * from test_btc_json"""
 
+    // abnormal cases
+    table_name = "abnormal_cases" 
+    sql """
+            DROP TABLE IF EXISTS ${table_name};
+    """
+    sql """
+            CREATE TABLE IF NOT EXISTS ${table_name} (
+                qid bigint,
+                XXXX bigint,
+		        ...
+            )
+            DUPLICATE KEY(`qid`)
+            DISTRIBUTED BY HASH(`qid`) BUCKETS 5 
+            properties("replication_num" = "1");
+    """
+    load_json_data.call(table_name, 'true', 'json', 'true', "invalid_dimension.json", 'false')
+    load_json_data.call(table_name, 'true', 'json', 'true', "invalid_format.json", 'false')
+    load_json_data.call(table_name, 'true', 'json', 'true', "floating_point.json", 'true')
+    load_json_data.call(table_name, 'true', 'json', 'true', "floating_point2.json", 'true')
+    load_json_data.call(table_name, 'true', 'json', 'true', "floating_point3.json", 'true')
+    load_json_data.call(table_name, 'true', 'json', 'true', "uppercase.json", 'true')
 
     // load more
     table_name = "gharchive";
     sql "DROP TABLE IF EXISTS ${table_name}"
     sql """
-        CREATE TABLE gharchive(
+        CREATE TABLE gharchive (
             created_at datetime NOT NULL COMMENT '',
             id varchar(30) default 'defualt-id' COMMENT '',
             type varchar(50) NULL COMMENT '',
@@ -178,6 +167,7 @@ suite("regression_test_dynamic_table", "dynamic_table"){
         ); 
         """
     def paths = [
+        """${getS3Url() + '/regression/gharchive/2015-01-01-22.json'}""",
         """${getS3Url() + '/regression/gharchive/2015-01-01-16.json'}""",
         """${getS3Url() + '/regression/gharchive/2016-01-01-16.json'}""",
     ]

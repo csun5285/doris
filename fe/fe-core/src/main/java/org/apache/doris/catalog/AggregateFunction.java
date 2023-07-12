@@ -48,8 +48,9 @@ public class AggregateFunction extends Function {
 
     public static ImmutableSet<String> NOT_NULLABLE_AGGREGATE_FUNCTION_NAME_SET = ImmutableSet.of("row_number", "rank",
             "dense_rank", "multi_distinct_count", "multi_distinct_sum", FunctionSet.HLL_UNION_AGG,
-            FunctionSet.HLL_UNION, FunctionSet.BITMAP_UNION, FunctionSet.BITMAP_INTERSECT,
+            FunctionSet.HLL_UNION, FunctionSet.HLL_RAW_AGG, FunctionSet.BITMAP_UNION, FunctionSet.BITMAP_INTERSECT,
             FunctionSet.ORTHOGONAL_BITMAP_INTERSECT, FunctionSet.ORTHOGONAL_BITMAP_INTERSECT_COUNT,
+            FunctionSet.ORTHOGONAL_BITMAP_EXPR_CALCULATE_COUNT, FunctionSet.ORTHOGONAL_BITMAP_EXPR_CALCULATE,
             FunctionSet.INTERSECT_COUNT, FunctionSet.ORTHOGONAL_BITMAP_UNION_COUNT,
             FunctionSet.COUNT, "approx_count_distinct", "ndv", FunctionSet.BITMAP_UNION_INT,
             FunctionSet.BITMAP_UNION_COUNT, "ndv_no_finalize", FunctionSet.WINDOW_FUNNEL, FunctionSet.RETENTION,
@@ -101,7 +102,7 @@ public class AggregateFunction extends Function {
     // empty input in BE).
     private boolean returnsNonNullOnEmpty;
 
-    //use for java-udaf to point the class of user define
+    // use for java-udaf to point the class of user define
     private String symbolName;
 
     // only used for serialization
@@ -153,28 +154,28 @@ public class AggregateFunction extends Function {
     }
 
     public AggregateFunction(FunctionName fnName, List<Type> argTypes,
-                             Type retType, Type intermediateType,
-                             URI location, String updateFnSymbol, String initFnSymbol,
-                             String serializeFnSymbol, String mergeFnSymbol, String getValueFnSymbol,
-                             String removeFnSymbol, String finalizeFnSymbol, boolean vectorized) {
+            Type retType, Type intermediateType,
+            URI location, String updateFnSymbol, String initFnSymbol,
+            String serializeFnSymbol, String mergeFnSymbol, String getValueFnSymbol,
+            String removeFnSymbol, String finalizeFnSymbol, boolean vectorized) {
         this(fnName, argTypes, retType, intermediateType, false, location,
                 updateFnSymbol, initFnSymbol, serializeFnSymbol,
                 mergeFnSymbol, getValueFnSymbol, removeFnSymbol, finalizeFnSymbol, vectorized);
     }
 
     public AggregateFunction(FunctionName fnName, List<Type> argTypes,
-                             Type retType, Type intermediateType, boolean hasVarArgs,
-                             URI location, String updateFnSymbol, String initFnSymbol,
-                             String serializeFnSymbol, String mergeFnSymbol, String getValueFnSymbol,
-                             String removeFnSymbol, String finalizeFnSymbol, boolean vectorized) {
+            Type retType, Type intermediateType, boolean hasVarArgs,
+            URI location, String updateFnSymbol, String initFnSymbol,
+            String serializeFnSymbol, String mergeFnSymbol, String getValueFnSymbol,
+            String removeFnSymbol, String finalizeFnSymbol, boolean vectorized) {
         // only `count` is always not nullable, other aggregate function is always nullable
         super(fnName, argTypes, retType, hasVarArgs, vectorized,
                 AggregateFunction.NOT_NULLABLE_AGGREGATE_FUNCTION_NAME_SET.contains(fnName.getFunction())
                         ? NullableMode.ALWAYS_NOT_NULLABLE :
-                AggregateFunction.ALWAYS_NULLABLE_AGGREGATE_FUNCTION_NAME_SET.contains(fnName.getFunction())
-                        ? NullableMode.ALWAYS_NULLABLE :
-                AggregateFunction.CUSTOM_AGGREGATE_FUNCTION_NAME_SET.contains(fnName.getFunction())
-                        ? NullableMode.CUSTOM : NullableMode.DEPEND_ON_ARGUMENT);
+                        AggregateFunction.ALWAYS_NULLABLE_AGGREGATE_FUNCTION_NAME_SET.contains(fnName.getFunction())
+                                ? NullableMode.ALWAYS_NULLABLE :
+                                AggregateFunction.CUSTOM_AGGREGATE_FUNCTION_NAME_SET.contains(fnName.getFunction())
+                                        ? NullableMode.CUSTOM : NullableMode.DEPEND_ON_ARGUMENT);
         setLocation(location);
         this.intermediateType = (intermediateType.equals(retType)) ? null : intermediateType;
         this.updateFnSymbol = updateFnSymbol;
@@ -218,32 +219,10 @@ public class AggregateFunction extends Function {
             List<Type> argTypes, Type retType, Type intermediateType,
             String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
             String serializeFnSymbol, String finalizeFnSymbol, boolean ignoresDistinct,
-            boolean isAnalyticFn, boolean returnsNonNullOnEmpty) {
-        return createBuiltin(name, argTypes, retType, intermediateType,
-                initFnSymbol, updateFnSymbol, mergeFnSymbol,
-                serializeFnSymbol, finalizeFnSymbol, ignoresDistinct, isAnalyticFn, returnsNonNullOnEmpty, false);
-    }
-
-    public static AggregateFunction createBuiltin(String name,
-            List<Type> argTypes, Type retType, Type intermediateType,
-            String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
-            String serializeFnSymbol, String finalizeFnSymbol, boolean ignoresDistinct,
             boolean isAnalyticFn, boolean returnsNonNullOnEmpty, boolean vectorized) {
         return createBuiltin(name, argTypes, retType, intermediateType, initFnSymbol,
                 updateFnSymbol, mergeFnSymbol, serializeFnSymbol, null, null, finalizeFnSymbol,
                 ignoresDistinct, isAnalyticFn, returnsNonNullOnEmpty, vectorized);
-    }
-
-    public static AggregateFunction createBuiltin(String name,
-            List<Type> argTypes, Type retType, Type intermediateType,
-            String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
-            String serializeFnSymbol, String getValueFnSymbol, String removeFnSymbol,
-            String finalizeFnSymbol, boolean ignoresDistinct, boolean isAnalyticFn,
-            boolean returnsNonNullOnEmpty) {
-        return createBuiltin(name, argTypes, retType, intermediateType,
-                initFnSymbol, updateFnSymbol, mergeFnSymbol,
-                serializeFnSymbol, getValueFnSymbol, removeFnSymbol,
-                finalizeFnSymbol, ignoresDistinct, isAnalyticFn, returnsNonNullOnEmpty, false);
     }
 
     public static AggregateFunction createBuiltin(String name,
@@ -256,17 +235,6 @@ public class AggregateFunction extends Function {
                 initFnSymbol, updateFnSymbol, mergeFnSymbol,
                 serializeFnSymbol, getValueFnSymbol, removeFnSymbol,
                 finalizeFnSymbol, ignoresDistinct, isAnalyticFn, returnsNonNullOnEmpty, vectorized);
-    }
-
-    public static AggregateFunction createBuiltin(String name,
-            List<Type> argTypes, Type retType, Type intermediateType, boolean hasVarArgs,
-            String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
-            String serializeFnSymbol, String getValueFnSymbol, String removeFnSymbol,
-            String finalizeFnSymbol, boolean ignoresDistinct, boolean isAnalyticFn,
-            boolean returnsNonNullOnEmpty) {
-        return createBuiltin(name, argTypes, retType, intermediateType, hasVarArgs, initFnSymbol, updateFnSymbol,
-                mergeFnSymbol, serializeFnSymbol, getValueFnSymbol, removeFnSymbol, finalizeFnSymbol, ignoresDistinct,
-                isAnalyticFn, returnsNonNullOnEmpty, false);
     }
 
     public static AggregateFunction createBuiltin(String name,
@@ -299,7 +267,7 @@ public class AggregateFunction extends Function {
             String getValueFnSymbol, String finalizeFnSymbol) {
         return createAnalyticBuiltin(name, argTypes, retType, intermediateType,
                 initFnSymbol, updateFnSymbol, removeFnSymbol, getValueFnSymbol, finalizeFnSymbol,
-                true, false);
+                true, true);
     }
 
     public static AggregateFunction createAnalyticBuiltin(String name,
@@ -327,12 +295,28 @@ public class AggregateFunction extends Function {
         return fn;
     }
 
+    public AggregateFunction(AggregateFunction other) {
+        super(other);
+        if (other == null) {
+            return;
+        }
+        ignoresDistinct = other.ignoresDistinct;
+        isAnalyticFn = other.isAnalyticFn;
+        isAggregateFn = other.isAggregateFn;
+        returnsNonNullOnEmpty = other.returnsNonNullOnEmpty;
+    }
+
+    @Override
+    public Function clone() {
+        return new AggregateFunction(this);
+    }
+
     // Used to create UDAF
     public AggregateFunction(FunctionName fnName, Type[] argTypes,
-                             Type retType, boolean hasVarArgs, Type intermediateType, URI location,
-                             String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
-                             String serializeFnSymbol, String finalizeFnSymbol,
-                             String getValueFnSymbol, String removeFnSymbol) {
+            Type retType, boolean hasVarArgs, Type intermediateType, URI location,
+            String initFnSymbol, String updateFnSymbol, String mergeFnSymbol,
+            String serializeFnSymbol, String finalizeFnSymbol,
+            String getValueFnSymbol, String removeFnSymbol) {
         super(fnName, Arrays.asList(argTypes), retType, hasVarArgs);
         this.setLocation(location);
         this.intermediateType = (intermediateType.equals(retType)) ? null : intermediateType;
@@ -500,6 +484,10 @@ public class AggregateFunction extends Function {
         return isAnalyticFn;
     }
 
+    public void setIsAnalyticFn(boolean isAnalyticFn) {
+        this.isAnalyticFn = isAnalyticFn;
+    }
+
     public boolean isAggregateFn() {
         return isAggregateFn;
     }
@@ -554,7 +542,13 @@ public class AggregateFunction extends Function {
 
     @Override
     public String toSql(boolean ifNotExists) {
-        StringBuilder sb = new StringBuilder("CREATE AGGREGATE FUNCTION ");
+        StringBuilder sb = new StringBuilder("CREATE ");
+
+        if (this.isGlobal) {
+            sb.append("GLOBAL ");
+        }
+        sb.append("AGGREGATE FUNCTION ");
+
         if (ifNotExists) {
             sb.append("IF NOT EXISTS ");
         }
@@ -595,8 +589,8 @@ public class AggregateFunction extends Function {
     }
 
     @Override
-    public TFunction toThrift(Type realReturnType, Type[] realArgTypes) {
-        TFunction fn = super.toThrift(realReturnType, realArgTypes);
+    public TFunction toThrift(Type realReturnType, Type[] realArgTypes, Boolean[] realArgTypeNullables) {
+        TFunction fn = super.toThrift(realReturnType, realArgTypes, realArgTypeNullables);
         TAggregateFunction aggFn = new TAggregateFunction();
         aggFn.setIsAnalyticOnlyFn(isAnalyticFn && !isAggregateFn);
         aggFn.setUpdateFnSymbol(updateFnSymbol);
@@ -605,13 +599,13 @@ public class AggregateFunction extends Function {
             aggFn.setSerializeFnSymbol(serializeFnSymbol);
         }
         aggFn.setMergeFnSymbol(mergeFnSymbol);
-        if (getValueFnSymbol  != null) {
+        if (getValueFnSymbol != null) {
             aggFn.setGetValueFnSymbol(getValueFnSymbol);
         }
-        if (removeFnSymbol  != null) {
+        if (removeFnSymbol != null) {
             aggFn.setRemoveFnSymbol(removeFnSymbol);
         }
-        if (finalizeFnSymbol  != null) {
+        if (finalizeFnSymbol != null) {
             aggFn.setFinalizeFnSymbol(finalizeFnSymbol);
         }
         if (symbolName != null) {
@@ -686,7 +680,7 @@ public class AggregateFunction extends Function {
         properties.put(CreateFunctionStmt.SERIALIZE_KEY, serializeFnSymbol);
         properties.put(CreateFunctionStmt.FINALIZE_KEY, finalizeFnSymbol);
 
-        //getValueFn and removeFn may be null if not analytic agg
+        // getValueFn and removeFn may be null if not analytic agg
         if (getValueFnSymbol != null) {
             properties.put(CreateFunctionStmt.GET_VALUE_KEY, getValueFnSymbol);
         }

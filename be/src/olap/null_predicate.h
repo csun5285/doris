@@ -17,15 +17,31 @@
 
 #pragma once
 
+#include <glog/logging.h>
 #include <stdint.h>
 
-#include <roaring/roaring.hh>
+#include <ostream>
+#include <string>
+#include <utility>
 
+#include "common/status.h"
 #include "olap/column_predicate.h"
 #include "olap/rowset/segment_v2/bloom_filter.h"
+#include "olap/schema.h"
 #include "olap/wrapper_field.h"
 
+namespace roaring {
+class Roaring;
+} // namespace roaring
+
 namespace doris {
+namespace segment_v2 {
+class BitmapIndexIterator;
+class InvertedIndexIterator;
+} // namespace segment_v2
+namespace vectorized {
+class IColumn;
+} // namespace vectorized
 
 class NullPredicate : public ColumnPredicate {
 public:
@@ -33,14 +49,11 @@ public:
 
     PredicateType type() const override;
 
-    void evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size) const override;
-
-    void evaluate_or(ColumnBlock* block, uint16_t* sel, uint16_t size, bool* flags) const override;
-
-    void evaluate_and(ColumnBlock* block, uint16_t* sel, uint16_t size, bool* flags) const override;
-
     Status evaluate(BitmapIndexIterator* iterator, uint32_t num_rows,
                     roaring::Roaring* roaring) const override;
+
+    Status evaluate(const Schema& schema, InvertedIndexIterator* iterator, uint32_t num_rows,
+                    roaring::Roaring* bitmap) const override;
 
     uint16_t evaluate(const vectorized::IColumn& column, uint16_t* sel,
                       uint16_t size) const override;

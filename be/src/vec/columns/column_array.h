@@ -20,18 +20,58 @@
 
 #pragma once
 
+#include <glog/logging.h>
+#include <stdint.h>
+#include <sys/types.h>
+
+#include <functional>
+#include <ostream>
+#include <string>
+#include <type_traits>
+#include <utility>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/status.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_impl.h"
 #include "vec/columns/column_vector.h"
-#include "vec/common/arena.h"
 #include "vec/common/assert_cast.h"
+#include "vec/common/cow.h"
+#include "vec/common/pod_array_fwd.h"
+#include "vec/common/string_ref.h"
+#include "vec/core/field.h"
 #include "vec/core/types.h"
+
+class SipHash;
+
+namespace doris {
+namespace vectorized {
+class Arena;
+} // namespace vectorized
+} // namespace doris
+
+//TODO: use marcos below to decouple array function calls
+#define ALL_COLUMNS_NUMBER                                                                       \
+    ColumnUInt8, ColumnInt8, ColumnInt16, ColumnInt32, ColumnInt64, ColumnInt128, ColumnFloat32, \
+            ColumnFloat64, ColumnDecimal32, ColumnDecimal64, ColumnDecimal128I, ColumnDecimal128
+#define ALL_COLUMNS_TIME ColumnDate, ColumnDateTime, ColumnDateV2, ColumnDateTimeV2
+#define ALL_COLUMNS_NUMERIC ALL_COLUMNS_NUMBER, ALL_COLUMNS_TIME
+#define ALL_COLUMNS_SIMPLE ALL_COLUMNS_NUMERIC, ColumnString
 
 namespace doris::vectorized {
 
+/** Obtaining array as Field can be slow for large arrays and consume vast amount of memory.
+  * Just don't allow to do it.
+  * You can increase the limit if the following query:
+  *  SELECT range(10000000)
+  * will take less than 500ms on your machine.
+  */
+static constexpr size_t max_array_size_as_field = 1000000;
 /** A column of array values.
   * In memory, it is represented as one column of a nested type, whose size is equal to the sum of the sizes of all arrays,
   *  and as an array of offsets in it, which allows you to get each element.
+  * NOTE: the ColumnArray won't nest multi-layers. That means the nested type will be concrete data-type.
   */
 class ColumnArray final : public COWHelper<IColumn, ColumnArray> {
 private:
@@ -90,6 +130,7 @@ public:
     TypeIndex get_data_type() const override { return TypeIndex::Array; }
     MutableColumnPtr clone_resized(size_t size) const override;
     size_t size() const override;
+    void resize(size_t n) override;
     Field operator[](size_t n) const override;
     void get(size_t n, Field& res) const override;
     StringRef get_data_at(size_t n) const override;
@@ -104,6 +145,7 @@ public:
     void insert_default() override;
     void pop_back(size_t n) override;
     ColumnPtr filter(const Filter& filt, ssize_t result_size_hint) const override;
+    size_t filter(const Filter& filter) override;
     ColumnPtr permute(const Permutation& perm, size_t limit) const override;
     //ColumnPtr index(const IColumn & indexes, size_t limit) const;
     template <typename Type>
@@ -143,6 +185,8 @@ public:
         return assert_cast<const ColumnOffsets&>(*offsets).get_data();
     }
 
+    bool has_equal_offsets(const ColumnArray& other) const;
+
     const ColumnPtr& get_data_ptr() const { return data; }
     ColumnPtr& get_data_ptr() { return data; }
 
@@ -177,21 +221,23 @@ public:
         offsets->clear();
     }
 
+    Status filter_by_selector(const uint16_t* sel, size_t sel_size, IColumn* col_ptr) override;
     size_t get_number_of_dimensions() const {
         const auto* nested_array = check_and_get_column<ColumnArray>(*data);
-        if (!nested_array) return 1;
+        if (!nested_array) {
+            return 1;
+        }
         return 1 +
                nested_array
                        ->get_number_of_dimensions(); /// Every modern C++ compiler optimizes tail recursion.
     }
 
-    void get_indices_of_non_default_rows(Offsets64& indices, size_t from, size_t limit) const override {
+    void get_indices_of_non_default_rows(Offsets64& indices, size_t from,
+                                         size_t limit) const override {
         return get_indices_of_non_default_rows_impl<ColumnArray>(indices, from, limit);
     }
 
     ColumnPtr index(const IColumn& indexes, size_t limit) const override;
-
-    Status filter_by_selector(const uint16_t* sel, size_t sel_size, IColumn* col_ptr) override;
 
 private:
     WrappedPtr data;
@@ -225,9 +271,16 @@ private:
     template <typename T>
     ColumnPtr filter_number(const Filter& filt, ssize_t result_size_hint) const;
 
+    template <typename T>
+    size_t filter_number(const Filter& filter);
+
     ColumnPtr filter_string(const Filter& filt, ssize_t result_size_hint) const;
     ColumnPtr filter_nullable(const Filter& filt, ssize_t result_size_hint) const;
     ColumnPtr filter_generic(const Filter& filt, ssize_t result_size_hint) const;
+
+    size_t filter_string(const Filter& filter);
+    size_t filter_nullable(const Filter& filter);
+    size_t filter_generic(const Filter& filter);
 };
 
 } // namespace doris::vectorized

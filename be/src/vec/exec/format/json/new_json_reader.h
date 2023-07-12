@@ -17,39 +17,73 @@
 
 #pragma once
 
+#include <rapidjson/allocators.h>
 #include <rapidjson/document.h>
-#include <rapidjson/error/en.h>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
-#include <simdjson.h>
+#include <rapidjson/encodings.h>
+#include <rapidjson/rapidjson.h>
+#include <simdjson/common_defs.h>
+#include <simdjson/simdjson.h> // IWYU pragma: keep
+#include <stddef.h>
+#include <stdint.h>
 
-#include "exec/decompressor.h"
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "common/status.h"
+#include "exec/line_reader.h"
+#include "exprs/json_functions.h"
+#include "io/file_factory.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "util/runtime_profile.h"
 #include "vec/common/hash_table/hash_map.h"
+#include "vec/common/string_ref.h"
+#include "vec/core/types.h"
 #include "vec/exec/format/generic_reader.h"
+#include "vec/json/json_parser.h"
+#include "vec/json/simd_json_parser.h"
+
+namespace simdjson {
+namespace fallback {
+namespace ondemand {
+class object;
+} // namespace ondemand
+} // namespace fallback
+} // namespace simdjson
 
 namespace doris {
 
-class FileReader;
-struct JsonPath;
-class LineReader;
 class SlotDescriptor;
+class RuntimeState;
+class TFileRangeDesc;
+class TFileScanRangeParams;
+
+namespace io {
+class FileSystem;
+class IOContext;
+} // namespace io
+struct TypeDescriptor;
 
 namespace vectorized {
 
 struct ScannerCounter;
-template <typename ParserImpl>
-class JSONDataParser;
-class SimdJSONParser;
+class Block;
+class IColumn;
 
 class NewJsonReader : public GenericReader {
+    ENABLE_FACTORY_CREATOR(NewJsonReader);
+
 public:
     NewJsonReader(RuntimeState* state, RuntimeProfile* profile, ScannerCounter* counter,
                   const TFileScanRangeParams& params, const TFileRangeDesc& range,
                   const std::vector<SlotDescriptor*>& file_slot_descs, bool* scanner_eof,
-                  bool is_dynamic_schema = false);
+                  io::IOContext* io_ctx, bool is_dynamic_schema = false);
 
     NewJsonReader(RuntimeProfile* profile, const TFileScanRangeParams& params,
-                  const TFileRangeDesc& range, const std::vector<SlotDescriptor*>& file_slot_descs);
+                  const TFileRangeDesc& range, const std::vector<SlotDescriptor*>& file_slot_descs,
+                  io::IOContext* io_ctx);
     ~NewJsonReader() override = default;
 
     Status init_reader();
@@ -60,8 +94,9 @@ public:
                              std::vector<TypeDescriptor>* col_types) override;
 
 private:
-    Status _create_decompressor();
     Status _get_range_params();
+    void _init_system_properties();
+    void _init_file_description();
     Status _open_file_reader();
     Status _open_line_reader();
     Status _parse_jsonpath_and_json_root();
@@ -104,7 +139,6 @@ private:
 
     std::string _print_json_value(const rapidjson::Value& value);
 
-private:
     Status _read_one_message(std::unique_ptr<uint8_t[]>* file_buf, size_t* read_size);
 
     // simdjson, replace none simdjson function if it is ready
@@ -147,16 +181,13 @@ private:
     ScannerCounter* _counter;
     const TFileScanRangeParams& _params;
     const TFileRangeDesc& _range;
+    FileSystemProperties _system_properties;
+    FileDescription _file_description;
     const std::vector<SlotDescriptor*>& _file_slot_descs;
 
-    // _file_reader_s is for stream load pipe reader,
-    // and _file_reader is for other file reader.
-    // TODO: refactor this to use only shared_ptr or unique_ptr
-    std::unique_ptr<FileReader> _file_reader;
-    std::shared_ptr<FileReader> _file_reader_s;
-    FileReader* _real_file_reader;
+    std::shared_ptr<io::FileSystem> _file_system;
+    io::FileReaderSPtr _file_reader;
     std::unique_ptr<LineReader> _line_reader;
-    std::unique_ptr<Decompressor> _decompressor;
     bool _reader_eof;
 
     // When we fetch range doesn't start from 0 will always skip the first line
@@ -181,9 +212,8 @@ private:
     char _value_buffer[4 * 1024 * 1024]; // 4MB
     char _parse_buffer[512 * 1024];      // 512KB
 
-    typedef rapidjson::GenericDocument<rapidjson::UTF8<>, rapidjson::MemoryPoolAllocator<>,
-                                       rapidjson::MemoryPoolAllocator<>>
-            Document;
+    using Document = rapidjson::GenericDocument<rapidjson::UTF8<>, rapidjson::MemoryPoolAllocator<>,
+                                                rapidjson::MemoryPoolAllocator<>>;
     rapidjson::MemoryPoolAllocator<> _value_allocator;
     rapidjson::MemoryPoolAllocator<> _parse_allocator;
     Document _origin_json_doc;   // origin json document object from parsed json string
@@ -191,13 +221,14 @@ private:
     std::unordered_map<std::string, int> _name_map;
 
     bool* _scanner_eof;
-    TFileFormatType::type _file_format_type;
-    TFileCompressType::type _file_compress_type;
+
+    size_t _current_offset;
+
+    io::IOContext* _io_ctx;
 
     RuntimeProfile::Counter* _bytes_read_counter;
     RuntimeProfile::Counter* _read_timer;
     RuntimeProfile::Counter* _file_read_timer;
-    RuntimeProfile::Counter* _convert_to_doris_col_timer;
 
     bool _is_dynamic_schema = false;
 

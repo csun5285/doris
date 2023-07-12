@@ -17,10 +17,12 @@
 // under the License.
 
 suite("test_from_unixtime") {
-    sql "set enable_vectorized_engine=true"
     sql "set enable_fold_constant_by_be=true"
 
     qt_sql1 "select from_unixtime(1553152255)"
+
+    sql "set enable_nereids_planner=true"
+    qt_weekOfYear "select * from woy where weekofyear(c0)=52 and weekofyear(c1)=52"
 
     sql "set time_zone='+00:00'"
 

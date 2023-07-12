@@ -20,15 +20,41 @@
 
 #pragma once
 
-#ifdef __aarch64__
-#include <sse2neon.h>
-#endif
+#include <glog/logging.h>
+#include <stdint.h>
+#include <sys/types.h>
 
+#include <functional>
+#include <ostream>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+// IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/status.h"
+#include "olap/olap_common.h"
+#include "runtime/define_primitive_type.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_impl.h"
+#include "vec/columns/column_vector.h"
 #include "vec/columns/columns_number.h"
 #include "vec/common/assert_cast.h"
+#include "vec/common/cow.h"
+#include "vec/common/string_ref.h"
 #include "vec/common/typeid_cast.h"
+#include "vec/core/field.h"
+#include "vec/core/types.h"
+
+class SipHash;
+
+namespace doris {
+namespace vectorized {
+class Arena;
+class ColumnSorter;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -81,6 +107,11 @@ public:
     bool get_bool(size_t n) const override {
         return is_null_at(n) ? false : nested_column->get_bool(n);
     }
+    // column must be nullable(uint8)
+    bool get_bool_inline(size_t n) const {
+        return is_null_at(n) ? false
+                             : assert_cast<const ColumnUInt8*>(nested_column.get())->get_bool(n);
+    }
     UInt64 get64(size_t n) const override { return nested_column->get64(n); }
     StringRef get_data_at(size_t n) const override;
 
@@ -110,18 +141,18 @@ public:
     void insert_many_from_not_nullable(const IColumn& src, size_t position, size_t length);
 
     void insert_many_fix_len_data(const char* pos, size_t num) override {
-        get_null_map_column().fill(0, num);
+        _get_null_map_column().fill(0, num);
         get_nested_column().insert_many_fix_len_data(pos, num);
     }
 
     void insert_many_raw_data(const char* pos, size_t num) override {
-        get_null_map_column().fill(0, num);
+        _get_null_map_column().fill(0, num);
         get_nested_column().insert_many_raw_data(pos, num);
     }
 
     void insert_many_dict_data(const int32_t* data_array, size_t start_index, const StringRef* dict,
                                size_t data_num, uint32_t dict_num) override {
-        get_null_map_column().fill(0, data_num);
+        _get_null_map_column().fill(0, data_num);
         get_nested_column().insert_many_dict_data(data_array, start_index, dict, data_num,
                                                   dict_num);
     }
@@ -131,13 +162,13 @@ public:
         if (UNLIKELY(num == 0)) {
             return;
         }
-        get_null_map_column().fill(0, num);
+        _get_null_map_column().fill(0, num);
         get_nested_column().insert_many_continuous_binary_data(data, offsets, num);
     }
 
     void insert_many_binary_data(char* data_array, uint32_t* len_array,
                                  uint32_t* start_offset_array, size_t num) override {
-        get_null_map_column().fill(0, num);
+        _get_null_map_column().fill(0, num);
         get_nested_column().insert_many_binary_data(data_array, len_array, start_offset_array, num);
     }
 
@@ -149,7 +180,7 @@ public:
 
     void insert_many_defaults(size_t length) override {
         get_nested_column().insert_many_defaults(length);
-        _get_null_map_data().resize_fill(get_null_map_data().size() + length, 1);
+        _get_null_map_data().resize_fill(_get_null_map_data().size() + length, 1);
         _has_null = true;
     }
 
@@ -167,6 +198,9 @@ public:
 
     void pop_back(size_t n) override;
     ColumnPtr filter(const Filter& filt, ssize_t result_size_hint) const override;
+
+    size_t filter(const Filter& filter) override;
+
     Status filter_by_selector(const uint16_t* sel, size_t sel_size, IColumn* col_ptr) override;
     ColumnPtr permute(const Permutation& perm, size_t limit) const override;
     //    ColumnPtr index(const IColumn & indexes, size_t limit) const override;
@@ -228,6 +262,11 @@ public:
     bool is_column_array() const override { return get_nested_column().is_column_array(); }
     bool is_fixed_and_contiguous() const override { return false; }
     bool values_have_fixed_size() const override { return nested_column->values_have_fixed_size(); }
+
+    bool is_exclusive() const override {
+        return IColumn::is_exclusive() && nested_column->is_exclusive() && null_map->is_exclusive();
+    }
+
     size_t size_of_value_if_fixed() const override {
         return null_map->size_of_value_if_fixed() + nested_column->size_of_value_if_fixed();
     }
@@ -345,7 +384,7 @@ public:
 private:
     // the two functions will not update `_need_update_has_null`
     ColumnUInt8& _get_null_map_column() { return assert_cast<ColumnUInt8&>(*null_map); }
-    NullMap& _get_null_map_data() { return get_null_map_column().get_data(); }
+    NullMap& _get_null_map_data() { return _get_null_map_column().get_data(); }
 
     WrappedPtr nested_column;
     WrappedPtr null_map;
@@ -360,5 +399,8 @@ private:
 
 ColumnPtr make_nullable(const ColumnPtr& column, bool is_nullable = false);
 ColumnPtr remove_nullable(const ColumnPtr& column);
-
+// check if argument column is nullable. If so, extract its concrete column and set null_map.
+//TODO: use this to replace inner usages.
+// is_single: whether null_map is null map of a ColumnConst
+void check_set_nullable(ColumnPtr&, ColumnVector<UInt8>::MutablePtr& null_map, bool is_single);
 } // namespace doris::vectorized

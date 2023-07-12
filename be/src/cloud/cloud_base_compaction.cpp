@@ -4,7 +4,7 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
-#include "util/trace.h"
+#include "util/thread.h"
 #include "util/uuid_generator.h"
 
 namespace doris {
@@ -97,9 +97,8 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
         std::shared_lock rlock(_tablet->get_header_lock());
         _base_compaction_cnt = _tablet->base_compaction_cnt();
         _cumulative_compaction_cnt = _tablet->cumulative_compaction_cnt();
-        _tablet->pick_candidate_rowsets_to_base_compaction(&_input_rowsets);
+        _input_rowsets = _tablet->pick_candidate_rowsets_to_base_compaction();
     }
-    std::sort(_input_rowsets.begin(), _input_rowsets.end(), Rowset::comparator);
     DCHECK(check_version_continuity(_input_rowsets).ok());
     _filter_input_rowset();
     if (_input_rowsets.size() <= 1) {
@@ -112,12 +111,12 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
         return Status::Error<BE_NO_SUITABLE_VERSION>();
     }
 
-    // 1. cumulative rowset must reach base_compaction_num_cumulative_deltas threshold
-    if (_input_rowsets.size() > config::base_compaction_num_cumulative_deltas) {
+    // 1. cumulative rowset must reach base_compaction_min_rowset_num threshold
+    if (_input_rowsets.size() > config::base_compaction_min_rowset_num) {
         VLOG_NOTICE << "satisfy the base compaction policy. tablet=" << _tablet->full_name()
                     << ", num_cumulative_rowsets=" << _input_rowsets.size() - 1
                     << ", base_compaction_num_cumulative_rowsets="
-                    << config::base_compaction_num_cumulative_deltas;
+                    << config::base_compaction_min_rowset_num;
         return Status::OK();
     }
 
@@ -129,7 +128,7 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
         cumulative_total_size += (*it)->data_disk_size();
     }
 
-    double base_cumulative_delta_ratio = config::base_cumulative_delta_ratio;
+    double base_cumulative_delta_ratio = config::base_compaction_min_data_ratio;
     if (base_size == 0) {
         // base_size == 0 means this may be a base version [0-1], which has no data.
         // set to 1 to void divide by zero
@@ -175,7 +174,7 @@ Status CloudBaseCompaction::execute_compact_impl() {
     int64_t permits = get_compaction_permits();
     using namespace std::chrono;
     auto start = steady_clock::now();
-    RETURN_NOT_OK(do_compaction(permits));
+    RETURN_IF_ERROR(do_compaction(permits));
     LOG_INFO("finish CloudBaseCompaction, tablet_id={}, cost={}ms", _tablet->tablet_id(),
              duration_cast<milliseconds>(steady_clock::now() - start).count())
             .tag("job_id", _uuid)
@@ -186,19 +185,17 @@ Status CloudBaseCompaction::execute_compact_impl() {
             .tag("output_rows", _output_rowset->num_rows())
             .tag("output_segments", _output_rowset->num_segments())
             .tag("output_data_size", _output_rowset->data_disk_size());
-    TRACE("compaction finished");
 
     _state = CompactionState::SUCCESS;
 
     DorisMetrics::instance()->base_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->base_compaction_bytes_total->increment(_input_rowsets_size);
     base_output_size << _output_rowset->data_disk_size();
-    TRACE("save base compaction metrics");
 
     return Status::OK();
 }
 
-Status CloudBaseCompaction::update_tablet_meta(const Merger::Statistics* merger_stats) {
+Status CloudBaseCompaction::modify_rowsets(const Merger::Statistics* merger_stats) {
     // commit compaction job
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();

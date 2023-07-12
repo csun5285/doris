@@ -19,6 +19,8 @@
 
 #include <memory>
 
+#include "common/factory_creator.h"
+
 namespace doris {
 
 class ExecEnv;
@@ -29,6 +31,8 @@ class TLoadTxnCommitRequest;
 class StreamLoadPipe;
 
 class StreamLoadExecutor {
+    ENABLE_FACTORY_CREATOR(StreamLoadExecutor);
+
 public:
     StreamLoadExecutor(ExecEnv* exec_env) : _exec_env(exec_env) {}
 
@@ -44,7 +48,7 @@ public:
 
     virtual void rollback_txn(StreamLoadContext* ctx);
 
-    Status execute_plan_fragment(StreamLoadContext* ctx);
+    Status execute_plan_fragment(std::shared_ptr<StreamLoadContext> ctx);
 
 private:
     void get_commit_request(StreamLoadContext* ctx, TLoadTxnCommitRequest& request);
@@ -53,7 +57,6 @@ private:
     // return true if stat is set, otherwise, return false
     bool collect_load_stat(StreamLoadContext* ctx, TTxnCommitAttachment* attachment);
 
-private:
     ExecEnv* _exec_env;
 };
 

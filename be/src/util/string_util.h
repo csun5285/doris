@@ -20,7 +20,10 @@
 #include <strings.h>
 
 #include <algorithm>
+#include <boost/token_functions.hpp>
 #include <boost/tokenizer.hpp>
+#include <cctype>
+#include <cstddef>
 #include <map>
 #include <set>
 #include <sstream>
@@ -58,7 +61,7 @@ inline bool starts_with(const std::string& value, const std::string& beginning) 
     return value.find(beginning) == 0;
 }
 
-inline bool ends_with(std::string const& value, std::string const& ending) {
+inline bool ends_with(const std::string& value, const std::string& ending) {
     if (ending.size() > value.size()) {
         return false;
     }
@@ -79,7 +82,7 @@ inline std::vector<std::string> split(const std::string& s, const std::string& d
 }
 
 template <typename T>
-inline std::string join(const std::vector<T>& elems, const std::string& delim) {
+std::string join(const std::vector<T>& elems, const std::string& delim) {
     std::stringstream ss;
     for (size_t i = 0; i < elems.size(); ++i) {
         if (i != 0) {
@@ -131,14 +134,14 @@ using StringCaseUnorderedMap =
         std::unordered_map<std::string, T, StringCaseHasher, StringCaseEqual>;
 
 template <typename T>
-inline auto get_json_token(T& path_string) {
+auto get_json_token(T& path_string) {
     return boost::tokenizer<boost::escaped_list_separator<char>>(
             path_string, boost::escaped_list_separator<char>("\\", ".", "\""));
 }
 
 #ifdef USE_LIBCPP
 template <>
-inline auto get_json_token(std::string_view& path_string) = delete;
+auto get_json_token(std::string_view& path_string) = delete;
 #endif
 
 } // namespace doris

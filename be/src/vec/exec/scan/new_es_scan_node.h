@@ -17,9 +17,30 @@
 
 #pragma once
 
-#include "exec/es/es_predicate.h"
-#include "vec/exec/scan/new_es_scanner.h"
+#include <gen_cpp/PlanNodes_types.h>
+
+#include <list>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "common/global_types.h"
+#include "common/status.h"
+#include "util/runtime_profile.h"
 #include "vec/exec/scan/vscan_node.h"
+
+namespace doris {
+class DescriptorTbl;
+class ObjectPool;
+class RuntimeState;
+class TScanRangeParams;
+class TupleDescriptor;
+
+namespace vectorized {
+class VScanner;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -39,10 +60,7 @@ public:
 protected:
     Status _init_profile() override;
     Status _process_conjuncts() override;
-    Status _init_scanners(std::list<VScanner*>* scanners) override;
-
-private:
-    Status build_conjuncts_list();
+    Status _init_scanners(std::list<VScannerSPtr>* scanners) override;
 
 private:
     TupleId _tuple_id;
@@ -54,10 +72,6 @@ private:
 
     std::vector<std::unique_ptr<TEsScanRange>> _scan_ranges;
     std::vector<std::string> _column_names;
-
-    std::vector<EsPredicate*> _predicates;
-    std::vector<int> _predicate_to_conjunct;
-    std::vector<int> _conjunct_to_predicate;
 
     // Profile
     std::unique_ptr<RuntimeProfile> _es_profile;

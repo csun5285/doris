@@ -21,6 +21,8 @@
 
 #include "common/status.h"
 #include "gutil/macros.h"
+#include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_system.h"
 #include "io/fs/path.h"
 #include "util/slice.h"
 
@@ -28,22 +30,26 @@ namespace doris {
 namespace io {
 class FileSystem;
 
+struct FileWriterOptions {
+    int64_t expiration_time = 0;
+    bool is_cold_data = false;
+    bool disable_file_cache = false;
+};
+
 class FileWriter {
 public:
-    FileWriter() = default;
+    FileWriter(Path&& path, FileSystemSPtr fs) : _path(std::move(path)), _fs(fs) {}
     virtual ~FileWriter() = default;
 
     DISALLOW_COPY_AND_ASSIGN(FileWriter);
 
-    virtual Status open() = 0;
-
-    // Normal close. If `sync` is true, wait for all data to persist before returning.
-    virtual Status close(bool sync = true) = 0;
+    // Normal close. Wait for all data to persist before returning.
+    virtual Status close() = 0;
 
     // Abnormal close and remove this file.
     virtual Status abort() = 0;
 
-    virtual Status append(const Slice& data) = 0;
+    Status append(const Slice& data) { return appendv(&data, 1); }
 
     virtual Status appendv(const Slice* data, size_t data_cnt) = 0;
 
@@ -53,12 +59,19 @@ public:
     // FIXME(cyx): Does not seem to be an appropriate interface for file system?
     virtual Status finalize() = 0;
 
-    virtual size_t bytes_appended() const = 0;
+    const Path& path() const { return _path; }
 
-    virtual const Path& path() const = 0;
+    size_t bytes_appended() const { return _bytes_appended; }
+
+    FileSystemSPtr fs() const { return _fs; }
+
+protected:
+    Path _path;
+    size_t _bytes_appended = 0;
+    FileSystemSPtr _fs;
+    bool _closed = false;
+    bool _opened = false;
 };
-
-using FileWriterPtr = std::unique_ptr<FileWriter>;
 
 } // namespace io
 } // namespace doris

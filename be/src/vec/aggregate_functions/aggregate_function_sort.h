@@ -17,15 +17,36 @@
 
 #pragma once
 
+#include <fmt/format.h>
+#include <gen_cpp/data.pb.h>
+#include <gen_cpp/segment_v2.pb.h>
+#include <glog/logging.h>
+#include <stddef.h>
+
+#include <memory>
+#include <new>
+#include <ostream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "runtime/runtime_state.h"
 #include "vec/aggregate_functions/aggregate_function.h"
 #include "vec/columns/column.h"
+#include "vec/core/block.h"
+#include "vec/core/column_with_type_and_name.h"
 #include "vec/core/sort_block.h"
 #include "vec/core/sort_description.h"
+#include "vec/core/types.h"
 #include "vec/io/io_helper.h"
+
+namespace doris {
+namespace vectorized {
+class Arena;
+class BufferReadable;
+class BufferWritable;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -34,7 +55,7 @@ struct AggregateFunctionSortData {
     Block block;
 
     // The construct only support the template compiler, useless
-    AggregateFunctionSortData() {};
+    AggregateFunctionSortData() : sort_desc() {};
     AggregateFunctionSortData(SortDescription sort_desc, const Block& block)
             : sort_desc(std::move(sort_desc)), block(block.clone_empty()) {}
 
@@ -66,7 +87,7 @@ struct AggregateFunctionSortData {
 
         PBlock pblock;
         pblock.ParseFromString(data);
-        new (&block) Block(pblock);
+        block = Block(pblock);
     }
 
     void add(const IColumn** columns, size_t columns_num, size_t row_num) {
@@ -105,8 +126,7 @@ private:
 public:
     AggregateFunctionSort(const AggregateFunctionPtr& nested_func, const DataTypes& arguments,
                           const SortDescription& sort_desc, const RuntimeState* state)
-            : IAggregateFunctionDataHelper<Data, AggregateFunctionSort>(
-                      arguments, nested_func->get_parameters()),
+            : IAggregateFunctionDataHelper<Data, AggregateFunctionSort>(arguments),
               _nested_func(nested_func),
               _arguments(arguments),
               _sort_desc(sort_desc),
@@ -159,7 +179,7 @@ public:
 
     void create(AggregateDataPtr __restrict place) const override {
         new (place) Data(_sort_desc, _block);
-        _nested_func->create(get_nested_place(place));
+        SAFE_CREATE(_nested_func->create(get_nested_place(place)), this->data(place).~Data());
     }
 
     void destroy(AggregateDataPtr __restrict place) const noexcept override {

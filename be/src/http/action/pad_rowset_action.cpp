@@ -17,14 +17,28 @@
 
 #include "http/action/pad_rowset_action.h"
 
+#include <gen_cpp/olap_file.pb.h>
+#include <glog/logging.h>
+#include <stdint.h>
+
+#include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <ostream>
+#include <string>
+#include <vector>
 
 #include "http/http_channel.h"
+#include "http/http_request.h"
+#include "http/http_status.h"
 #include "olap/olap_common.h"
-#include "olap/rowset/beta_rowset_writer.h"
 #include "olap/rowset/rowset.h"
-#include "olap/storage_engine.h"
+#include "olap/rowset/rowset_writer.h"
+#include "olap/rowset/rowset_writer_context.h"
+#include "cloud/olap/storage_engine.h"
+#include "olap/tablet_manager.h"
+#include "util/time.h"
+#include "util/trace.h"
 
 namespace doris {
 
@@ -86,14 +100,16 @@ Status PadRowsetAction::_pad_rowset(TabletSharedPtr tablet, const Version& versi
     }
 
     std::unique_ptr<RowsetWriter> writer;
-    RowsetWriterContext context;
-    context.is_persistent = tablet->is_persistent();
-    context.ttl_seconds = tablet->ttl_seconds();
-    context.txn_id = -1;
-    context.rowset_state = VISIBLE;
-    context.segments_overlap = NONOVERLAPPING;
-    context.tablet_schema = tablet->tablet_schema();
-    RETURN_IF_ERROR(tablet->create_rowset_writer(context, &writer));
+    RowsetWriterContext ctx;
+    ctx.is_persistent = tablet->is_persistent();
+    ctx.ttl_seconds = tablet->ttl_seconds();
+    ctx.txn_id = -1;
+    ctx.version = version;
+    ctx.rowset_state = VISIBLE;
+    ctx.segments_overlap = NONOVERLAPPING;
+    ctx.tablet_schema = tablet->tablet_schema();
+    ctx.newest_write_timestamp = UnixSeconds();
+    RETURN_IF_ERROR(tablet->create_rowset_writer(ctx, &writer));
     auto rowset = writer->build();
     rowset->make_visible(version);
 
@@ -101,6 +117,7 @@ Status PadRowsetAction::_pad_rowset(TabletSharedPtr tablet, const Version& versi
     std::vector<RowsetSharedPtr> to_delete;
     {
         std::unique_lock wlock(tablet->get_header_lock());
+        SCOPED_SIMPLE_TRACE_IF_TIMEOUT(TRACE_TABLET_LOCK_THRESHOLD);
         tablet->modify_rowsets(to_add, to_delete);
         tablet->save_meta();
     }

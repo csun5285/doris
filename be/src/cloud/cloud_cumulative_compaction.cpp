@@ -8,6 +8,7 @@
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
+#include "olap/cumulative_compaction_policy.h"
 #include "util/trace.h"
 #include "util/uuid_generator.h"
 
@@ -149,7 +150,7 @@ Status CloudCumulativeCompaction::execute_compact_impl() {
     int64_t permits = get_compaction_permits();
     using namespace std::chrono;
     auto start = steady_clock::now();
-    RETURN_NOT_OK(do_compaction(permits));
+    RETURN_IF_ERROR(do_compaction(permits));
     LOG_INFO("finish CloudCumulativeCompaction, tablet_id={}, cost={}ms", _tablet->tablet_id(),
              duration_cast<milliseconds>(steady_clock::now() - start).count())
             .tag("job_id", _uuid)
@@ -176,7 +177,7 @@ Status CloudCumulativeCompaction::execute_compact_impl() {
     return Status::OK();
 }
 
-Status CloudCumulativeCompaction::update_tablet_meta(const Merger::Statistics* merger_stats) {
+Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merger_stats) {
     // calculate new cumulative point
     int64_t input_cumulative_point = _tablet->cumulative_layer_point();
     int64_t new_cumulative_point =
@@ -314,8 +315,8 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
     size_t compaction_score = 0;
     StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(
             _tablet.get(), candidate_rowsets,
-            config::max_cumulative_compaction_num_singleton_deltas,
-            config::min_cumulative_compaction_num_singleton_deltas, &_input_rowsets,
+            config::cumulative_compaction_max_deltas,
+            config::cumulative_compaction_min_deltas, &_input_rowsets,
             &_last_delete_version, &compaction_score);
 
     if (_input_rowsets.empty()) {

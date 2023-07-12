@@ -19,16 +19,36 @@
 // and modified by Doris
 
 #pragma once
-#include <vec/columns/column.h>
-#include <vec/columns/subcolumn_tree.h>
-#include <vec/common/hash_table/hash_map.h>
-#include <vec/common/pod_array.h>
-#include <vec/core/field.h>
-#include <vec/core/names.h>
-#include <vec/data_types/data_type.h>
-#include <vec/json/json_parser.h>
-#include "vec/data_types/data_type_nullable.h"
+#include <glog/logging.h>
+#include <sys/types.h>
+
+#include <algorithm>
+#include <memory>
+#include <ostream>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "common/status.h"
+#include "vec/columns/column.h"
+#include "vec/columns/subcolumn_tree.h"
+#include "vec/common/cow.h"
+#include "vec/common/string_ref.h"
+#include "vec/core/field.h"
+#include "vec/core/types.h"
+#include "vec/data_types/data_type.h"
+#include "vec/data_types/data_type_nullable.h"
+#include "vec/json/path_in_data.h"
+
+class SipHash;
+
+namespace doris {
+namespace vectorized {
+class Arena;
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 
@@ -46,7 +66,7 @@ struct FieldInfo {
     /// Number of dimension in array. 0 if field is scalar.
     size_t num_dimensions;
 };
-Status get_field_info(const Field& field, FieldInfo* info);
+void get_field_info(const Field& field, FieldInfo* info);
 /** A column that represents object with dynamic set of subcolumns.
  *  Subcolumns are identified by paths in document and are stored in
  *  a trie-like structure. ColumnObject is not suitable for writing into tables
@@ -89,16 +109,16 @@ public:
 
         /// Inserts a field, which scalars can be arbitrary, but number of
         /// dimensions should be consistent with current common type.
-        /// return Status::InvalidArgument when meet conflict types
-        Status insert(Field field);
+        /// throws InvalidArgument when meet conflict types
+        void insert(Field field);
 
-        Status insert(Field field, FieldInfo info);
+        void insert(Field field, FieldInfo info);
 
         void insertDefault();
 
         void insertManyDefaults(size_t length);
 
-        Status insertRangeFrom(const Subcolumn& src, size_t start, size_t length);
+        void insertRangeFrom(const Subcolumn& src, size_t start, size_t length);
 
         void pop_back(size_t n);
 
@@ -259,12 +279,7 @@ public:
     void for_each_subcolumn(ColumnCallback callback) override;
 
     // Do nothing, call try_insert instead
-    void insert(const Field& field) override {
-        Status st = try_insert(field);
-        if (!st.ok()) {
-            LOG(FATAL) << "insert return ERROR status: " << st;
-        }
-    }
+    void insert(const Field& field) override { try_insert(field); }
 
     void insert_range_from(const IColumn& src, size_t start, size_t length) override;
 
@@ -274,13 +289,12 @@ public:
     void insert_indices_from(const IColumn& src, const int* indices_begin,
                              const int* indices_end) override;
 
-    // Only called in Block::add_row
-    Status try_insert(const Field& field);
+    // May throw execption
+    void try_insert(const Field& field);
 
-    Status try_insert_from(const IColumn& src, size_t n);
+    void try_insert_from(const IColumn& src, size_t n);
 
-    // Only called in Block::add_row
-    Status try_insert_range_from(const IColumn& src, size_t start, size_t length);
+    void try_insert_range_from(const IColumn& src, size_t start, size_t length);
 
     void insert_default() override;
 
@@ -324,7 +338,7 @@ public:
 
     ColumnPtr filter(const Filter&, ssize_t) const override;
 
-    // size_t filter(const Filter&) override;
+    size_t filter(const Filter&) override;
 
     ColumnPtr permute(const Permutation&, size_t) const override {
         LOG(FATAL) << "should not call the method in column object";
