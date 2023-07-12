@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-SET enable_vectorized_engine=true;
-=======
-
->>>>>>> doris/branch-2.0-beta
 
 SELECT COUNT(*) FROM large_records_t1_dk;
 

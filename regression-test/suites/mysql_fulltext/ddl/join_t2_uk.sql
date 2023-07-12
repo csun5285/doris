@@ -6,10 +6,6 @@ CREATE TABLE IF NOT EXISTS join_t2_uk (
 UNIQUE KEY(entity_id)
 DISTRIBUTED BY HASH(entity_id) BUCKETS 3
 PROPERTIES ( 
-<<<<<<< HEAD
-    "replication_num" = "1" 
-=======
     "replication_num" = "1",
     "enable_unique_key_merge_on_write" = "true"
->>>>>>> doris/branch-2.0-beta
 );

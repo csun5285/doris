@@ -30,12 +30,9 @@ suite ("test_agg_keys_schema_change") {
          return jobStateResult[0][9]
     }
 
-<<<<<<< HEAD
     try {
         String[][] backends = sql """ show backends; """
         assertTrue(backends.size() > 0)
-=======
->>>>>>> doris/branch-2.0-beta
         String backend_id;
         def backendId_to_backendIP = [:]
         def backendId_to_backendHttpPort = [:]
@@ -101,18 +98,6 @@ suite ("test_agg_keys_schema_change") {
             ALTER table ${tableName} ADD COLUMN new_key_column INT default "2" 
             """
 
-<<<<<<< HEAD
-        int max_try_time = 600
-        while(max_try_time--){
-            String result = getJobState(tableName)
-            if (result == "FINISHED") {
-                break
-            } else {
-                sleep(1000)
-                if (max_try_time < 1){
-                    println "test timeout," + "state:" + result
-                    assertEquals("FINISHED", result)
-=======
         int max_try_time = 3000
         while (max_try_time--){
             String result = getJobState(tableName)
@@ -122,8 +107,8 @@ suite ("test_agg_keys_schema_change") {
             } else {
                 sleep(100)
                 if (max_try_time < 1){
-                    assertEquals(1,2)
->>>>>>> doris/branch-2.0-beta
+                    println "test timeout," + "state:" + result
+                    assertEquals("FINISHED", result)
                 }
             }
         }
@@ -209,58 +194,6 @@ suite ("test_agg_keys_schema_change") {
                 (5, '2017-10-01', 'Beijing', 10, 1, 1, 32, 20, hll_hash(5), to_bitmap(5))
             """
 
-        // compaction
-<<<<<<< HEAD
-        // String[][] tablets = sql """ show tablets from ${tableName}; """
-        // for (String[] tablet in tablets) {
-        //         String tablet_id = tablet[0]
-        //         backend_id = tablet[2]
-        //         logger.info("run compaction:" + tablet_id)
-        //         StringBuilder sb = new StringBuilder();
-        //         sb.append("curl -X POST http://")
-        //         sb.append(backendId_to_backendIP.get(backend_id))
-        //         sb.append(":")
-        //         sb.append(backendId_to_backendHttpPort.get(backend_id))
-        //         sb.append("/api/compaction/run?tablet_id=")
-        //         sb.append(tablet_id)
-        //         sb.append("&compact_type=cumulative")
-
-        //         String command = sb.toString()
-        //         process = command.execute()
-        //         code = process.waitFor()
-        //         err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        //         out = process.getText()
-        //         logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-        // }
-
-        // wait for all compactions done
-        // for (String[] tablet in tablets) {
-        //         boolean running = true
-        //         do {
-        //             Thread.sleep(100)
-        //             String tablet_id = tablet[0]
-        //             backend_id = tablet[2]
-        //             StringBuilder sb = new StringBuilder();
-        //             sb.append("curl -X GET http://")
-        //             sb.append(backendId_to_backendIP.get(backend_id))
-        //             sb.append(":")
-        //             sb.append(backendId_to_backendHttpPort.get(backend_id))
-        //             sb.append("/api/compaction/run_status?tablet_id=")
-        //             sb.append(tablet_id)
-
-        //             String command = sb.toString()
-        //             process = command.execute()
-        //             code = process.waitFor()
-        //             err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-        //             out = process.getText()
-        //             logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
-        //             assertEquals(code, 0)
-        //             def compactionStatus = parseJson(out.trim())
-        //             assertEquals("success", compactionStatus.status.toLowerCase())
-        //             running = compactionStatus.run_status
-        //         } while (running)
-        // }
-=======
         String[][] tablets = sql """ show tablets from ${tableName}; """
         for (String[] tablet in tablets) {
                 String tablet_id = tablet[0]
@@ -285,8 +218,7 @@ suite ("test_agg_keys_schema_change") {
                     running = compactionStatus.run_status
                 } while (running)
         }
->>>>>>> doris/branch-2.0-beta
-         
+
         qt_sc """ select count(*) from ${tableName} """
 
         qt_sc """  SELECT * FROM schema_change_agg_keys_regression_test WHERE user_id=2 """

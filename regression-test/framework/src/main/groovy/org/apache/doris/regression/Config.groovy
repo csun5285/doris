@@ -369,6 +369,7 @@ class Config {
             configToString(obj.suitePath),
             configToString(obj.dataPath),
             configToString(obj.realDataPath),
+            configToString(obj.sf1DataPath),
             configToString(obj.cacheDataPath),
             configToString(obj.testGroups),
             configToString(obj.excludeGroups),
@@ -377,7 +378,7 @@ class Config {
             configToString(obj.testDirectories),
             configToString(obj.excludeDirectories),
             configToString(obj.pluginPath),
-            configToString(obj.sslCertificatePath)
+            configToString(obj.sslCertificatePath),
             configToString(obj.multiClusterBes),
             configToString(obj.metaServiceToken),
             configToString(obj.multiClusterInstance),
@@ -393,7 +394,7 @@ class Config {
             configToString(obj.stageIamArn),
             configToString(obj.stageIamAk),
             configToString(obj.stageIamSk),
-            configToString(obj.stageIamUserId),
+            configToString(obj.stageIamUserId)
         )
 
         def declareFileNames = config.getClass()

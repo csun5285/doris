@@ -17,51 +17,43 @@
 
 package org.apache.doris.regression.suite
 
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
-import com.google.common.collect.ImmutableList
+import groovy.util.logging.Slf4j
 import org.apache.doris.regression.action.BenchmarkAction
-import org.apache.doris.regression.util.DataUtils
-import org.apache.doris.regression.util.OutputUtils
 import org.apache.doris.regression.action.CreateMVAction
 import org.apache.doris.regression.action.ExplainAction
+import org.apache.doris.regression.action.HttpCliAction
 import org.apache.doris.regression.action.RestoreAction
 import org.apache.doris.regression.action.StreamLoadAction
 import org.apache.doris.regression.action.SuiteAction
 import org.apache.doris.regression.action.TestAction
-import org.apache.doris.regression.action.HttpCliAction
-import org.apache.doris.regression.util.JdbcUtils
+import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.Hdfs
+import org.apache.doris.regression.util.JdbcUtils
+import org.apache.doris.regression.util.OutputUtils
 import org.apache.doris.regression.util.SuiteUtils
+import org.junit.Assert
 import org.junit.jupiter.api.Assertions
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import groovy.util.logging.Slf4j
 
+import java.io.File
+import java.math.BigDecimal;
+import java.sql.PreparedStatement
+import java.sql.ResultSetMetaData
+import java.util.Map;
 import java.util.concurrent.Callable
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.Map;
 import java.util.stream.Collectors
 import java.util.stream.LongStream
-<<<<<<< HEAD
 
-import java.math.BigDecimal;
 import static org.apache.doris.regression.util.DataUtils.sortByToString
-
-import java.io.File
-import java.sql.PreparedStatement
-import java.sql.ResultSetMetaData
-=======
-import static org.apache.doris.regression.util.DataUtils.sortByToString
-
-import java.sql.PreparedStatement
-import java.sql.ResultSetMetaData
-import org.junit.Assert
->>>>>>> doris/branch-2.0-beta
 
 @Slf4j
 class Suite implements GroovyInterceptable {
@@ -211,7 +203,6 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-<<<<<<< HEAD
     List<List<Object>> exec(Object stmt) {
         logger.info("Execute sql: ${stmt}".toString())
         def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
@@ -222,8 +213,6 @@ class Suite implements GroovyInterceptable {
         return JdbcUtils.prepareStatement(context.getConnection(), sql)
     } 
 
-=======
->>>>>>> doris/branch-2.0-beta
     List<List<String>> sql_meta(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (tmp, rsmd) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -536,16 +525,8 @@ class Suite implements GroovyInterceptable {
         action.run()
     }
 
-<<<<<<< HEAD
     void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
-=======
-    PreparedStatement prepareStatement(String sql) {
-        return JdbcUtils.prepareStatement(context.getConnection(), sql)
-    } 
->>>>>>> doris/branch-2.0-beta
-
-    void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         if (context.config.generateOutputFile || context.config.forceGenerateOutputFile) {
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
@@ -553,11 +534,7 @@ class Suite implements GroovyInterceptable {
             } else {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
             }
-<<<<<<< HEAD
-            def (result, meta) = tupleResult;
-=======
             def (result, meta) = tupleResult
->>>>>>> doris/branch-2.0-beta
             if (isOrder) {
                 result = sortByToString(result)
             }
@@ -575,10 +552,7 @@ class Suite implements GroovyInterceptable {
             }
 
             OutputUtils.TagBlockIterator expectCsvResults = context.getOutputIterator().next()
-<<<<<<< HEAD
 
-=======
->>>>>>> doris/branch-2.0-beta
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
