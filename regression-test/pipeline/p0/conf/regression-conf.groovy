@@ -60,7 +60,7 @@ test_ctl,redundant_conjuncts,test_dynamic_partition,test_array_show_create,test_
 excludeDirectories = "backup_restore,compaction, cold_heat_separation, dynamic_table, javaudf_p0, primary_key,\
 tpcds_sf1000_p2,primary_index,github_events_p2,nereids_syntax_p0,schema_change_p0, \
 tpch_sf1_p1/tpch_sf1/nereids,schema_change, cloud/smoke, cloud/recycler, cloud/multi_cluster, cloud/compaction, cloud/cache, load_p0/broker_load, \
-tpch_sf1_p1/tpch_sf1/explain"
+tpch_sf1_p1/tpch_sf1/explain,cloud/abnormal"
 
 customConf1 = "test_custom_conf_value"
 
