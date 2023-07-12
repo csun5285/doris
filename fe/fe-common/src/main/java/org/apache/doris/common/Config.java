@@ -2194,6 +2194,17 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = false)
     public static boolean cloud_use_strong_password = true;
+
+    @ConfField(mutable = true)
+    public static boolean meta_service_connection_pooled = false;
+
+    // A connection will expire after a random time during [base, 2*base), so that the FE
+    // has a chance to connect to a new RS. Set zero to disable it.
+    @ConfField(mutable = true)
+    public static int meta_service_connection_age_base_minutes = 0;
+
+    @ConfField(mutable = true)
+    public static int meta_service_connection_pool_size = 20;
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

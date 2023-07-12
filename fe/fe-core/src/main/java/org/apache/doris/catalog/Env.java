@@ -698,7 +698,7 @@ public class Env {
         }
 
         // Add `!FeConstants.disableInternalSchemaDb` in condition for CopyIntoTest
-        if (!FeConstants.disableInternalSchemaDb) {
+        if (!FeConstants.disableInternalSchemaDb && FeConstants.runningCopyIntoTest) {
             this.analysisManager = new AnalysisManager();
             this.statisticsCleaner = new StatisticsCleaner();
             this.statisticsAutoAnalyzer = new StatisticsAutoAnalyzer();

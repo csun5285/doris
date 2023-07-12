@@ -53,6 +53,8 @@ public class FeConstants {
     // set to true to disable internal schema db
     public static boolean disableInternalSchemaDb = false;
 
+    public static boolean runningCopyIntoTest = false;
+
     // default scheduler interval is 10 seconds
     public static int default_scheduler_interval_millisecond = 10000;
 

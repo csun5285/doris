@@ -21,6 +21,7 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Pair;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.utframe.TestWithFeService;
@@ -58,6 +59,12 @@ public class CopyIntoTest extends TestWithFeService {
 
     @Mocked
     RemoteBase remote = new MockRemote(new ObjectInfo(Provider.COS, "", "", "", "", "", ""));
+
+    @Override
+    protected void beforeCreatingConnectContext() throws Exception {
+        FeConstants.disableInternalSchemaDb = true;
+        FeConstants.runningCopyIntoTest = true;
+    }
 
     @Override
     protected void runBeforeAll() throws Exception {
