@@ -863,21 +863,19 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
     if (to_add.empty()) {
         return;
     }
-    auto add_rowsets_directy = [this](std::vector<RowsetSharedPtr>& add_rowsets,
-                                      bool download_data) {
+    auto add_rowsets_directy = [=](std::vector<RowsetSharedPtr>& add_rowsets) {
         for (auto& rs : add_rowsets) {
-            if (download_data) {
+            if (version_overlap || need_download_data_async) {
 #ifndef BE_TEST
+                // Warmup rowset data in background
                 for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
                     io::S3FileMeta download_file_meta;
                     auto rowset_meta = rs->rowset_meta();
                     constexpr int64_t interval = 600; // 10 mins
-                    // when be restart and receive the load_sync rpc,
-                    // it will sync all historical rowsets first time.
-                    // so we need to filter the old rowsets
-                    // avoid to download the whole table
+                    // When BE restart and receive the `load_sync` rpc, it will sync all historical rowsets first time.
+                    // So we need to filter out the old rowsets avoid to download the whole table.
                     if (need_download_data_async &&
-                        UnixSeconds() - rowset_meta->newest_write_timestamp() >= interval) {
+                        ::time(nullptr) - rowset_meta->newest_write_timestamp() >= interval) {
                         continue;
                     }
                     download_file_meta.file_size = rowset_meta->get_segment_file_size(seg_id);
@@ -958,9 +956,9 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
                 //                                             std::move(to_delete));
             }
         }
-        add_rowsets_directy(to_add_directy, true);
+        add_rowsets_directy(to_add_directy);
     } else {
-        add_rowsets_directy(to_add, need_download_data_async);
+        add_rowsets_directy(to_add);
     }
 
     // Update rowset tree

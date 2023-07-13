@@ -155,29 +155,31 @@ void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_na
 }
 
 void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
-    {
-        {
-            std::lock_guard lock(_mtx);
-            if (_task_queue.size() == _max_size) {
-                _task_queue.pop_front();
+    if (task.task_message.index() == 0) {
+        std::lock_guard lock(_inflight_mtx);
+        for (auto& meta : std::get<0>(task.task_message)) {
+            auto it = _inflight_tablets.find(meta.tablet_id());
+            if (it == _inflight_tablets.end()) {
+                _inflight_tablets.insert({meta.tablet_id(), 1});
+            } else {
+                it->second++;
             }
-            _task_queue.push_back(std::move(task));
         }
-        _empty.notify_all();
     }
-
     {
-        if (task.task_message.index() == 0) {
-            std::lock_guard lock(_inflight_mtx);
-            for (auto meta : std::get<0>(task.task_message)) {
-                auto it = _inflight_tablets.find(meta.tablet_id());
-                if (it == _inflight_tablets.end()) {
-                    _inflight_tablets.insert({meta.tablet_id(), 1});
-                } else {
-                    it->second++;
+        std::lock_guard lock(_mtx);
+        if (_task_queue.size() == _max_size) {
+            if (_task_queue.front().task_message.index() == 1) {
+                auto& s3_file_meta = std::get<1>(_task_queue.front().task_message);
+                if (s3_file_meta.download_callback) {
+                    s3_file_meta.download_callback(
+                            Status::InternalError("The downloader queue is full"));
                 }
             }
+            _task_queue.pop_front();
         }
+        _task_queue.push_back(std::move(task));
+        _empty.notify_all();
     }
 }
 
