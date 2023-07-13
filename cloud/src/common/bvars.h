@@ -198,3 +198,4 @@ extern BvarStatusWithTag<long> g_bvar_checker_num_check_failed;
 extern BvarStatusWithTag<long> g_bvar_checker_check_cost_s;
 extern BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s;
 extern BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms;
+extern BvarStatusWithTag<long> g_bvar_checker_instance_volume;

@@ -142,7 +142,8 @@ int Checker::start() {
             }
             if (stopped()) return;
             using namespace std::chrono;
-            auto ctime_ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+            auto ctime_ms =
+                    duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
             g_bvar_checker_enqueue_cost_s.put(instance_id, ctime_ms / 1000 - enqueue_time_s);
             ret = checker->do_check();
             if (config::enable_inverted_check) {
@@ -354,6 +355,7 @@ int InstanceChecker::do_check() {
     long num_scanned = 0;
     long num_scanned_with_segment = 0;
     long num_check_failed = 0;
+    long instance_volume = 0;
     using namespace std::chrono;
     auto start_time = steady_clock::now();
     std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
@@ -361,69 +363,58 @@ int InstanceChecker::do_check() {
         LOG(INFO) << "check instance objects finished, cost=" << cost
                   << "s. instance_id=" << instance_id_ << " num_scanned=" << num_scanned
                   << " num_scanned_with_segment=" << num_scanned_with_segment
-                  << " num_check_failed=" << num_check_failed;
+                  << " num_check_failed=" << num_check_failed
+                  << " instance_volume=" << instance_volume;
         g_bvar_checker_num_scanned.put(instance_id_, num_scanned);
         g_bvar_checker_num_scanned_with_segment.put(instance_id_, num_scanned_with_segment);
         g_bvar_checker_num_check_failed.put(instance_id_, num_check_failed);
         g_bvar_checker_check_cost_s.put(instance_id_, static_cast<long>(cost));
+        // FIXME(plat1ko): What if some list operation failed?
+        g_bvar_checker_instance_volume.put(instance_id_, instance_volume);
     });
 
-    auto check_rowset_objects = [&](const doris::RowsetMetaPB& rs_meta, std::string_view key) {
-        if (rs_meta.num_segments() == 0) return;
-        auto it = accessor_map_.find(rs_meta.resource_id());
-        if (it == accessor_map_.end()) [[unlikely]] {
-            ++num_check_failed;
-            LOG(WARNING) << "get s3 accessor failed. instance_id=" << instance_id_
-                         << " tablet_id=" << rs_meta.tablet_id()
-                         << " rowset_id=" << rs_meta.rowset_id_v2() << " key=" << key;
-            return;
-        }
-        auto& accessor = it->second;
-        ++num_scanned_with_segment;
-        int ret = 0;
-        if (rs_meta.num_segments() == 1) {
-            auto path = segment_path(rs_meta.tablet_id(), rs_meta.rowset_id_v2(), 0);
-            ret = accessor->exist(path);
-            if (ret == 0) { // exist
-            } else if (ret == 1) {
-                // if rowset kv has been deleted, no data loss
-                ret = key_exist(txn_kv_.get(), key);
-                if (ret != 1) {
+    struct TabletFiles {
+        int64_t tablet_id {0};
+        std::unordered_set<std::string> files;
+    };
+    TabletFiles tablet_files_cache;
+
+    auto check_rowset_objects = [&, this](const doris::RowsetMetaPB& rs_meta,
+                                          std::string_view key) {
+        if (tablet_files_cache.tablet_id != rs_meta.tablet_id()) {
+            long tablet_volume = 0;
+            // Clear cache
+            tablet_files_cache.tablet_id = 0;
+            tablet_files_cache.files.clear();
+            // Get all file paths under this tablet directory
+            for (auto& [_, accessor] : accessor_map_) {
+                std::vector<ObjectMeta> files;
+                int ret = accessor->list(tablet_path_prefix(rs_meta.tablet_id()), &files);
+                if (ret != 0) { // No need to log, because S3Accessor has logged this error
                     ++num_check_failed;
-                    TEST_SYNC_POINT_CALLBACK("InstanceChecker.do_check1", &path);
-                    LOG(WARNING) << "object not exist, path=" << accessor->path() << '/' << path
-                                 << " key=" << hex(key);
+                    return;
                 }
-            } else {
-                // other error, no need to log, because S3Accessor has logged this error
-                ++num_check_failed;
+                for (auto& file : files) {
+                    tablet_files_cache.files.insert(std::move(file.path));
+                    tablet_volume += file.size;
+                }
             }
-            return;
+            tablet_files_cache.tablet_id = rs_meta.tablet_id();
+            instance_volume += tablet_volume;
         }
-        std::vector<std::string> paths;
-        ret = accessor->list(rowset_path_prefix(rs_meta.tablet_id(), rs_meta.rowset_id_v2()),
-                             &paths);
-        if (ret != 0) { // no need to log, because S3Accessor has logged this error
-            ++num_check_failed;
-            return;
-        }
-        std::unordered_set<std::string> path_set;
-        for (auto& p : paths) {
-            path_set.insert(std::move(p));
-        }
+
+        if (rs_meta.num_segments() == 0) return;
+        ++num_scanned_with_segment;
         for (int i = 0; i < rs_meta.num_segments(); ++i) {
             auto path = segment_path(rs_meta.tablet_id(), rs_meta.rowset_id_v2(), i);
-            if (!path_set.count(path)) {
-                // if rowset kv has been deleted, no data loss
-                ret = key_exist(txn_kv_.get(), key);
-                if (ret != 1) {
-                    TEST_SYNC_POINT_CALLBACK("InstanceChecker.do_check2", &path);
-                    ++num_check_failed;
-                    LOG(WARNING) << "object not exist, path=" << accessor->path() << '/' << path
-                                 << " key=" << hex(key);
-                }
-                break;
+            if (tablet_files_cache.files.count(path)) continue;
+            if (1 == key_exist(txn_kv_.get(), key)) {
+                // Rowset has been deleted instead of data loss
+                continue;
             }
+            ++num_check_failed;
+            TEST_SYNC_POINT_CALLBACK("InstanceChecker.do_check1", &path);
+            LOG(WARNING) << "object not exist, path=" << path << " key=" << hex(key);
         }
     };
 
@@ -469,9 +460,9 @@ int InstanceChecker::get_bucket_lifecycle(int64_t* lifecycle_days) {
     int64_t min_lifecycle_days = std::numeric_limits<int64_t>::max();
     int64_t tmp_liefcycle_days = 0;
     for (const auto& [obj_info, accessor] : accessor_map_) {
-        if (accessor->check_bucket_versioning() != 0) { return -1; }
-        if (accessor->get_bucket_lifecycle(&tmp_liefcycle_days) != 0) { return -1; }
-        if (tmp_liefcycle_days < min_lifecycle_days) { min_lifecycle_days = tmp_liefcycle_days; }
+        if (accessor->check_bucket_versioning() != 0) return -1;
+        if (accessor->get_bucket_lifecycle(&tmp_liefcycle_days) != 0) return -1;
+        if (tmp_liefcycle_days < min_lifecycle_days) min_lifecycle_days = tmp_liefcycle_days;
     }
     *lifecycle_days = min_lifecycle_days;
     return 0;

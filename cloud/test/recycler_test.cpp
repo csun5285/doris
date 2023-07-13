@@ -650,7 +650,7 @@ TEST(RecyclerTest, recycle_rowsets) {
     ASSERT_EQ(recycler.recycle_rowsets(), 0);
 
     // check rowset does not exist on obj store
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(tablet_id), &files));
     EXPECT_TRUE(files.empty());
     // check all recycle rowset kv have been deleted
@@ -720,7 +720,7 @@ TEST(RecyclerTest, bench_recycle_rowsets) {
     ASSERT_EQ(recycler.recycle_rowsets(), 0);
 
     // check rowset does not exist on obj store
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(tablet_id), &files));
     ASSERT_TRUE(files.empty());
     // check all recycle rowset kv have been deleted
@@ -787,7 +787,7 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
     ASSERT_EQ(recycler.recycle_tmp_rowsets(), 0);
 
     // check rowset does not exist on obj store
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("data/", &files));
     ASSERT_TRUE(files.empty());
     // check all tmp rowset kv have been deleted
@@ -846,7 +846,7 @@ TEST(RecyclerTest, recycle_tablet) {
     ASSERT_EQ(0, recycler.recycle_tablets(table_id, index_id));
 
     // check rowset does not exist on s3
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(tablet_id), &files));
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
@@ -927,7 +927,7 @@ TEST(RecyclerTest, recycle_indexes) {
     ASSERT_EQ(recycler.recycle_indexes(), 0);
 
     // check rowset does not exist on s3
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("data/", &files));
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
@@ -1039,7 +1039,7 @@ TEST(RecyclerTest, recycle_partitions) {
     ASSERT_EQ(recycler.recycle_partitions(), 0);
 
     // check rowset does not exist on s3
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("data/", &files));
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
@@ -1533,7 +1533,7 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     prefix_and_files_list.emplace_back(internal_accessor, "6/", 10);
     prefix_and_files_list.emplace_back(internal_accessor, "8/", 10);
     for (const auto& [accessor, relative_path, file_num] : prefix_and_files_list) {
-        std::vector<std::string> object_files;
+        std::vector<ObjectMeta> object_files;
         ASSERT_EQ(0, accessor->list(relative_path, &object_files));
         ASSERT_EQ(file_num, object_files.size());
     }
@@ -1620,7 +1620,7 @@ TEST(RecyclerTest, recycle_stage) {
 
     // recycle stage
     ASSERT_EQ(0, recycler.recycle_stage());
-    std::vector<std::string> files;
+    std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("", &files));
     ASSERT_EQ(0, files.size());
     ASSERT_EQ(0, txn_kv->create_txn(&txn));
@@ -1762,14 +1762,14 @@ TEST(CheckerTest, abnormal) {
 
     // Delete some objects
     std::mt19937 gen(std::chrono::system_clock::now().time_since_epoch().count());
-    std::vector<std::string> paths;
+    std::vector<ObjectMeta> files;
     std::vector<std::string> deleted_paths;
-    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10001 + gen() % 100), &paths));
-    deleted_paths.push_back(paths[gen() % paths.size()]);
+    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10001 + gen() % 100), &files));
+    deleted_paths.push_back(files[gen() % files.size()].path);
     ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
-    paths.clear();
-    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10101 + gen() % 100), &paths));
-    deleted_paths.push_back(paths[gen() % paths.size()]);
+    files.clear();
+    ASSERT_EQ(0, accessor->list(tablet_path_prefix(10101 + gen() % 100), &files));
+    deleted_paths.push_back(files[gen() % files.size()].path);
     ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
 
     std::vector<std::string> lost_paths;
@@ -1777,8 +1777,6 @@ TEST(CheckerTest, abnormal) {
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("InstanceChecker.do_check1",
-                      [&lost_paths](void* arg) { lost_paths.push_back(*(std::string*)arg); });
-    sp->set_call_back("InstanceChecker.do_check2",
                       [&lost_paths](void* arg) { lost_paths.push_back(*(std::string*)arg); });
     sp->enable_processing();
 

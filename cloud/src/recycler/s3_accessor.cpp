@@ -193,7 +193,7 @@ int S3Accessor::put_object(const std::string& relative_path, const std::string& 
     return 0;
 }
 
-int S3Accessor::list(const std::string& relative_path, std::vector<std::string>* paths) {
+int S3Accessor::list(const std::string& relative_path, std::vector<ObjectMeta>* files) {
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithPrefix(prefix);
@@ -213,7 +213,7 @@ int S3Accessor::list(const std::string& relative_path, std::vector<std::string>*
         const auto& result = outcome.GetResult();
         VLOG_DEBUG << "get " << result.GetContents().size() << " objects";
         for (const auto& obj : result.GetContents()) {
-            paths->push_back(obj.GetKey().substr(conf_.prefix.size() + 1));
+            files->push_back({obj.GetKey().substr(conf_.prefix.size() + 1), obj.GetSize()});
         }
         is_trucated = result.GetIsTruncated();
         request.SetContinuationToken(result.GetNextContinuationToken());

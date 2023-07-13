@@ -100,3 +100,4 @@ BvarStatusWithTag<long> g_bvar_checker_num_check_failed("checker", "num_check_fa
 BvarStatusWithTag<long> g_bvar_checker_check_cost_s("checker", "check_cost_seconds");
 BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s("checker", "enqueue_cost_seconds");
 BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms("checker", "last_success_time_ms");
+BvarStatusWithTag<long> g_bvar_checker_instance_volume("checker", "instance_volume");

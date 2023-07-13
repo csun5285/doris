@@ -10,6 +10,11 @@ class S3Client;
 
 namespace selectdb {
 
+struct ObjectMeta {
+    std::string path; // Relative path
+    int64_t size {0};
+};
+
 class ObjStoreAccessor {
 public:
     ObjStoreAccessor() = default;
@@ -34,8 +39,7 @@ public:
     virtual int put_object(const std::string& relative_path, const std::string& content) = 0;
 
     // returns 0 for success otherwise error
-    // NOTE: `paths` are relative paths
-    virtual int list(const std::string& relative_path, std::vector<std::string>* paths) = 0;
+    virtual int list(const std::string& relative_path, std::vector<ObjectMeta>* files) = 0;
 
     // return 0 if object exists, 1 if object is not found, negative for error
     virtual int exist(const std::string& relative_path) = 0;
@@ -88,8 +92,7 @@ public:
     int put_object(const std::string& relative_path, const std::string& content) override;
 
     // returns 0 for success otherwise error
-    // NOTE: `paths` are relative paths
-    int list(const std::string& relative_path, std::vector<std::string>* paths) override;
+    int list(const std::string& relative_path, std::vector<ObjectMeta>* ObjectMeta) override;
 
     // return 0 if object exists, 1 if object is not found, otherwise error
     int exist(const std::string& relative_path) override;
@@ -103,6 +106,7 @@ public:
 
     // returns 0 for enabling bucket versioning, otherwise error
     int check_bucket_versioning() override;
+
 private:
     std::string get_key(const std::string& relative_path) const;
     // return empty string if the input key does not start with the prefix of S3 conf
