@@ -693,13 +693,17 @@ public class Env {
         this.policyMgr = new PolicyMgr();
         this.mtmvJobManager = new MTMVJobManager();
         this.extMetaCacheMgr = new ExternalMetaCacheMgr();
+        if (!isCheckpointCatalog && !FeConstants.runningCopyIntoTest) {
+            this.analysisManager = new AnalysisManager();
+        }
         if (Config.isCloudMode()) {
             this.upgradeMgr = new CloudUpgradeMgr();
         }
 
+        LOG.info("env disableInternalSchemaDb {} runningCopyIntoTest {} isCheckpointCatalog {}",
+                FeConstants.disableInternalSchemaDb, FeConstants.runningCopyIntoTest, isCheckpointCatalog);
         // Add `!FeConstants.disableInternalSchemaDb` in condition for CopyIntoTest
-        if (!FeConstants.disableInternalSchemaDb && FeConstants.runningCopyIntoTest) {
-            this.analysisManager = new AnalysisManager();
+        if (!FeConstants.disableInternalSchemaDb && !FeConstants.runningCopyIntoTest) {
             this.statisticsCleaner = new StatisticsCleaner();
             this.statisticsAutoAnalyzer = new StatisticsAutoAnalyzer();
         }
