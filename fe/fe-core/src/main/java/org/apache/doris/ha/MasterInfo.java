@@ -85,9 +85,8 @@ public class MasterInfo implements Writable {
 
     @Override
     public void write(DataOutput out) throws IOException {
-        Text.writeString(out, host);
-        out.writeInt(httpPort);
-        out.writeInt(rpcPort);
+        String json = GsonUtils.GSON.toJson(this);
+        Text.writeString(out, json);
     }
 
     public void readFields(DataInput in) throws IOException {
