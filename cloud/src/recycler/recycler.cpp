@@ -1060,6 +1060,9 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
 int InstanceRecycler::recycle_rowsets() {
     int num_scanned = 0;
     int num_expired = 0;
+    int num_prepare = 0;
+    size_t total_rowset_size = 0;
+    size_t expired_rowset_size = 0;
     std::atomic_int num_recycled = 0;
 
     RecycleRowsetKeyInfo recyc_rs_key_info0 {instance_id_, 0, ""};
@@ -1080,7 +1083,10 @@ int InstanceRecycler::recycle_rowsets() {
                 .tag("instance_id", instance_id_)
                 .tag("num_scanned", num_scanned)
                 .tag("num_expired", num_expired)
-                .tag("num_recycled", num_recycled);
+                .tag("num_recycled", num_recycled)
+                .tag("num_prepare", num_prepare)
+                .tag("total_rowset_meta_size", total_rowset_size)
+                .tag("expired_rowset_meta_size", expired_rowset_size);
     });
 
     std::vector<std::string> rowset_keys;
@@ -1130,6 +1136,7 @@ int InstanceRecycler::recycle_rowsets() {
 
     auto handle_rowset_kv = [&](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
+        total_rowset_size += v.size();
         RecycleRowsetPB rowset;
         if (!rowset.ParseFromArray(v.data(), v.size())) {
             LOG_WARNING("malformed recycle rowset").tag("key", hex(k));
@@ -1142,6 +1149,7 @@ int InstanceRecycler::recycle_rowsets() {
             return 0;
         }
         ++num_expired;
+        expired_rowset_size += v.size();
         if (!rowset.has_type()) {                         // old version `RecycleRowsetPB`
             if (!rowset.has_resource_id()) [[unlikely]] { // impossible
                 LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
@@ -1173,9 +1181,12 @@ int InstanceRecycler::recycle_rowsets() {
                   << " rowset_id=" << rowset_meta->rowset_id_v2() << " version=["
                   << rowset_meta->start_version() << '-' << rowset_meta->end_version()
                   << "] txn_id=" << rowset_meta->txn_id()
-                  << " type=" << RecycleRowsetPB_Type_Name(rowset.type());
+                  << " type=" << RecycleRowsetPB_Type_Name(rowset.type())
+                  << " rowset_meta_size=" << v.size()
+                  << " creation_time" << rowset_meta->creation_time();
         if (rowset.type() == RecycleRowsetPB::PREPARE) {
             // unable to calculate file path, can only be deleted by rowset id prefix
+            num_prepare += 1;
             if (delete_rowset_data_by_prefix(std::string(k), rowset_meta->resource_id(),
                                              rowset_meta->tablet_id(),
                                              rowset_meta->rowset_id_v2()) != 0) {
@@ -1229,6 +1240,8 @@ int InstanceRecycler::recycle_tmp_rowsets() {
     int num_scanned = 0;
     int num_expired = 0;
     int num_recycled = 0;
+    size_t expired_rowset_size = 0;
+    size_t total_rowset_size = 0;
 
     MetaRowsetTmpKeyInfo tmp_rs_key_info0 {instance_id_, 0, 0};
     MetaRowsetTmpKeyInfo tmp_rs_key_info1 {instance_id_, INT64_MAX, 0};
@@ -1248,16 +1261,20 @@ int InstanceRecycler::recycle_tmp_rowsets() {
                 .tag("instance_id", instance_id_)
                 .tag("num_scanned", num_scanned)
                 .tag("num_expired", num_expired)
-                .tag("num_recycled", num_recycled);
+                .tag("num_recycled", num_recycled)
+                .tag("total_rowset_meta_size", total_rowset_size)
+                .tag("expired_rowset_meta_size", expired_rowset_size);
     });
 
     // Elements in `tmp_rowset_keys` has the same lifetime as `it`
     std::vector<std::string_view> tmp_rowset_keys;
     std::vector<doris::RowsetMetaPB> tmp_rowsets;
 
-    auto handle_rowset_kv = [&num_scanned, &num_expired, &tmp_rowset_keys, &tmp_rowsets, this](
-                                    std::string_view k, std::string_view v) -> int {
+    auto handle_rowset_kv = [&num_scanned, &num_expired, &tmp_rowset_keys, &tmp_rowsets,
+                             &expired_rowset_size, &total_rowset_size,
+                             this](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
+        total_rowset_size += v.size();
         doris::RowsetMetaPB rowset;
         if (!rowset.ParseFromArray(v.data(), v.size())) {
             LOG_WARNING("malformed rowset meta").tag("key", hex(k));
@@ -1271,6 +1288,7 @@ int InstanceRecycler::recycle_tmp_rowsets() {
             return 0;
         }
         ++num_expired;
+        expired_rowset_size += v.size();
         if (!rowset.has_resource_id()) {
             if (rowset.num_segments() > 0) [[unlikely]] { // impossible
                 LOG_WARNING("rowset meta has empty resource id").tag("key", k);
@@ -1284,7 +1302,8 @@ int InstanceRecycler::recycle_tmp_rowsets() {
         LOG(INFO) << "delete rowset data, instance_id=" << instance_id_
                   << " tablet_id=" << rowset.tablet_id() << " rowset_id=" << rowset.rowset_id_v2()
                   << " version=[" << rowset.start_version() << '-' << rowset.end_version()
-                  << "] txn_id=" << rowset.txn_id();
+                  << "] txn_id=" << rowset.txn_id() << " rowset_meta_size=" << v.size()
+                  << " creation_time" << rowset.creation_time();
         tmp_rowset_keys.push_back(k);
         if (rowset.num_segments() > 0) { // Skip empty rowset
             tmp_rowsets.push_back(std::move(rowset));

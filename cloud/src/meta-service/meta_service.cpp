@@ -985,9 +985,9 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     // process mow table, check lock and remove pending key
     for (auto table_id : request->mow_table_ids()) {
-        for (auto parition_id : table_id_partition_ids[table_id]) {
+        for (auto partition_id : table_id_partition_ids[table_id]) {
             std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, parition_id});
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
             std::string lock_val;
             ret = txn->get(lock_key, &lock_val);
             LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
@@ -1023,9 +1023,11 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     // Save rowset meta
     num_put_keys += rowsets.size();
     for (auto& i : rowsets) {
+        size_t rowset_size = i.first.size() + i.second.size();
         txn->put(i.first, i.second);
-        put_size += i.first.size() + i.second.size();
-        LOG(INFO) << "xxx put rowset_key=" << hex(i.first) << " txn_id=" << txn_id;
+        put_size += rowset_size;
+        LOG(INFO) << "xxx put rowset_key=" << hex(i.first) << " txn_id=" << txn_id
+                  << " rowset_size=" << rowset_size;
     }
 
     // Save versions
@@ -1079,7 +1081,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     if ((txn_info.prepare_time() + txn_info.timeout_ms()) < commit_time) {
         code = MetaServiceCode::UNDEFINED_ERR;
         msg = fmt::format("txn is expired, not allow to commit txn_id={}", txn_id);
-        LOG(INFO) << msg << " prepapre_time=" << txn_info.prepare_time()
+        LOG(INFO) << msg << " prepare_time=" << txn_info.prepare_time()
                   << " timeout_ms=" << txn_info.timeout_ms() << " commit_time=" << commit_time;
         return;
     }
@@ -2371,7 +2373,8 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
 
     txn->put(prepare_key, prepare_val);
     LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "prepare_rowset_key "
-              << hex(prepare_key);
+              << hex(prepare_key) << " associated commit_rowset_key " << hex(commit_key)
+              << " value_size " << prepare_val.size();
     ret = txn->commit();
     if (ret != 0) {
         code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
@@ -2518,8 +2521,9 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
 
     txn->remove(prepare_key);
     txn->put(commit_key, commit_val);
-    LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "commit_rowset_key "
-              << hex(commit_key);
+    LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "commit_rowset_key " << hex(commit_key)
+              << " delete prepare_rowset_key " << hex(prepare_key) << " value_size "
+              << commit_val.size();
     ret = txn->commit();
     if (ret != 0) {
         code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
