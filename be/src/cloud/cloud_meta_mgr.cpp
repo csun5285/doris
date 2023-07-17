@@ -4,9 +4,12 @@
 #include <brpc/controller.h>
 #include <glog/logging.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <random>
+#include <shared_mutex>
 #include <vector>
 
 #include "common/config.h"
@@ -35,12 +38,14 @@ static constexpr int BRPC_RETRY_TIMES = 3;
             static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())}; \
     std::uniform_int_distribution<uint32_t> u(20, 200);                                          \
     std::uniform_int_distribution<uint32_t> u2(500, 1000);                                       \
+    std::shared_ptr<selectdb::MetaService_Stub> stub;                                            \
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));                                        \
     do {                                                                                         \
         brpc::Controller cntl;                                                                   \
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);                               \
         cntl.set_max_retry(BRPC_RETRY_TIMES);                                                    \
         res.Clear();                                                                             \
-        _stub->rpc_name(&cntl, &req, &res, nullptr);                                             \
+        stub->rpc_name(&cntl, &req, &res, nullptr);                                             \
         if (cntl.Failed())                                                                       \
             return Status::RpcError("failed to {}: {}", __FUNCTION__, cntl.ErrorText());         \
         if (res.status().code() == selectdb::MetaServiceCode::OK)                                \
@@ -57,28 +62,101 @@ static constexpr int BRPC_RETRY_TIMES = 3;
     } while (retry_times--);                                                                     \
     return Status::InternalError("failed to {}: {}", __FUNCTION__, res.status().msg());
 
+class MetaServiceProxy {
+public:
+    static Status get_client(std::shared_ptr<selectdb::MetaService_Stub>* stub) {
+        return get_pooled_client(stub);
+    }
+
+private:
+    static Status get_pooled_client(std::shared_ptr<selectdb::MetaService_Stub>* stub) {
+        static std::once_flag proxies_flag;
+        static size_t num_proxies = 1;
+        static std::atomic<size_t> index(0);
+        static std::unique_ptr<MetaServiceProxy[]> proxies;
+
+        std::call_once(
+                proxies_flag, +[]() {
+                    if (config::meta_service_connection_pooled) {
+                        num_proxies = config::meta_service_connection_pool_size;
+                    }
+                    proxies = std::make_unique<MetaServiceProxy[]>(num_proxies);
+                });
+
+        for (size_t i = 0; i + 1 < num_proxies; ++i) {
+            size_t next_index = index.fetch_add(1, std::memory_order_relaxed) % num_proxies;
+            Status s = proxies[next_index].get(stub);
+            if (s.ok()) return Status::OK();
+        }
+
+        size_t next_index = index.fetch_add(1, std::memory_order_relaxed) % num_proxies;
+        return proxies[next_index].get(stub);
+    }
+
+    static Status init_channel(brpc::Channel* channel) {
+        static std::atomic<size_t> index = 1;
+
+        size_t next_id = index.fetch_add(1, std::memory_order_relaxed);
+        brpc::ChannelOptions options;
+        options.connection_group = fmt::format("ms_{}", next_id);
+        auto endpoint = config::meta_service_endpoint;
+        int ret_code = 0;
+        if (config::meta_service_use_load_balancer) {
+            ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
+        } else {
+            ret_code = channel->Init(endpoint.c_str(), &options);
+        }
+        if (ret_code != 0) {
+            return Status::InternalError("fail to init brpc channel, endpoint: {}", endpoint);
+        }
+        return Status::OK();
+    }
+
+    Status get(std::shared_ptr<selectdb::MetaService_Stub>* stub) {
+        using namespace std::chrono;
+
+        auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        {
+            std::shared_lock lock(_mutex);
+            if (_deadline_ms >= now) {
+                *stub = _stub;
+                return Status::OK();
+            }
+        }
+
+        auto channel = std::make_unique<brpc::Channel>();
+        RETURN_IF_ERROR(init_channel(channel.get()));
+        *stub = std::make_shared<selectdb::MetaService_Stub>(
+                channel.release(), google::protobuf::Service::STUB_OWNS_CHANNEL);
+
+        long deadline = now;
+        if (config::meta_service_connection_age_base_minutes > 0) {
+            std::default_random_engine rng(static_cast<uint32_t>(now));
+            std::uniform_int_distribution<> uni(
+                    config::meta_service_connection_age_base_minutes,
+                    config::meta_service_connection_age_base_minutes * 2);
+            deadline = now + duration_cast<milliseconds>(minutes(uni(rng))).count();
+        } else {
+            deadline = LONG_MAX;
+        }
+
+        // Last one WIN
+        std::unique_lock lock(_mutex);
+        _deadline_ms = deadline;
+        _stub = *stub;
+        return Status::OK();
+    }
+
+    std::shared_mutex _mutex;
+    long _deadline_ms {0};
+    std::shared_ptr<selectdb::MetaService_Stub> _stub;
+};
+
 CloudMetaMgr::CloudMetaMgr() = default;
 
 CloudMetaMgr::~CloudMetaMgr() = default;
 
 Status CloudMetaMgr::open() {
-    brpc::ChannelOptions options;
-    auto channel = std::make_unique<brpc::Channel>();
-    auto endpoint = config::meta_service_endpoint;
-    int ret_code = 0;
-    if (config::meta_service_connection_pooled) {
-        options.connection_type = "pooled";
-    }
-    if (config::meta_service_use_load_balancer) {
-        ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
-    } else {
-        ret_code = channel->Init(endpoint.c_str(), &options);
-    }
-    if (ret_code != 0) {
-        return Status::InternalError("fail to init brpc channel, endpoint: {}", endpoint);
-    }
-    _stub = std::make_unique<selectdb::MetaService_Stub>(
-            channel.release(), google::protobuf::Service::STUB_OWNS_CHANNEL);
     return Status::OK();
 }
 
@@ -86,6 +164,10 @@ Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tab
     VLOG_DEBUG << "send GetTabletRequest, tablet_id: " << tablet_id;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::get_tablet_meta", Status::OK(), tablet_id,
                                       tablet_meta);
+
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     int tried = 0;
 TRY_AGAIN:
     brpc::Controller cntl;
@@ -94,7 +176,7 @@ TRY_AGAIN:
     selectdb::GetTabletResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_tablet_id(tablet_id);
-    _stub->get_tablet(&cntl, &req, &resp, nullptr);
+    stub->get_tablet(&cntl, &req, &resp, nullptr);
     int retry_times = config::meta_service_rpc_retry_times;
     if (cntl.Failed()) {
         if (tried++ < retry_times) {
@@ -124,8 +206,11 @@ TRY_AGAIN:
 
 Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::sync_tablet_rowsets", Status::OK(), tablet);
-    int tried = 0;
 
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
+    int tried = 0;
 TRY_AGAIN:
 
     brpc::Controller cntl;
@@ -152,7 +237,7 @@ TRY_AGAIN:
     req.set_end_version(-1);
     VLOG_DEBUG << "send GetRowsetRequest: " << req.ShortDebugString();
 
-    _stub->get_rowset(&cntl, &req, &resp, nullptr);
+    stub->get_rowset(&cntl, &req, &resp, nullptr);
     int64_t latency = cntl.latency_us();
     g_get_rowset_latency << latency;
     int retry_times = config::meta_service_rpc_retry_times;
@@ -197,8 +282,8 @@ TRY_AGAIN:
     if (tablet->enable_unique_key_merge_on_write()) {
         DeleteBitmap delete_bitmap(tablet_id);
         int64_t old_max_version = req.start_version() - 1;
-        RETURN_IF_ERROR(
-                sync_tablet_delete_bitmap(tablet, old_max_version, resp.rowset_meta(), &delete_bitmap));
+        RETURN_IF_ERROR(sync_tablet_delete_bitmap(tablet, old_max_version, resp.rowset_meta(),
+                                                  &delete_bitmap));
         tablet->tablet_meta()->delete_bitmap().merge(delete_bitmap);
     }
 
@@ -273,12 +358,17 @@ TRY_AGAIN:
     return Status::OK();
 }
 
-Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old_max_version,
-                                               const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
-                                               DeleteBitmap* delete_bitmap) {
+Status CloudMetaMgr::sync_tablet_delete_bitmap(
+        const Tablet* tablet, int64_t old_max_version,
+        const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
+        DeleteBitmap* delete_bitmap) {
     if (rs_metas.empty()) {
         return Status::OK();
     }
+
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     int64_t new_max_version = std::max(old_max_version, rs_metas.rbegin()->end_version());
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
@@ -302,7 +392,7 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(const Tablet* tablet, int64_t old
             req.add_end_versions(new_max_version);
         }
     }
-    _stub->get_delete_bitmap(&cntl, &req, &res, nullptr);
+    stub->get_delete_bitmap(&cntl, &req, &res, nullptr);
     if (cntl.Failed()) {
         return Status::RpcError("failed to get delete bitmap: {}", cntl.ErrorText());
     }
@@ -329,6 +419,9 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                     RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "prepare rowset, tablet_id: " << rs_meta->tablet_id()
                << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
@@ -339,7 +432,7 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
         brpc::Controller cntl;
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
-        _stub->prepare_rowset(&cntl, &req, &resp, nullptr);
+        stub->prepare_rowset(&cntl, &req, &resp, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to prepare rowset: {}", cntl.ErrorText());
         }
@@ -364,6 +457,9 @@ Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                    RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "commit rowset, tablet_id: " << rs_meta->tablet_id()
                << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
@@ -374,7 +470,7 @@ Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
         brpc::Controller cntl;
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
-        _stub->commit_rowset(&cntl, &req, &resp, nullptr);
+        stub->commit_rowset(&cntl, &req, &resp, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to commit rowset: {}", cntl.ErrorText());
         }
@@ -434,12 +530,15 @@ Status CloudMetaMgr::precommit_txn(StreamLoadContext* ctx) {
 }
 
 Status CloudMetaMgr::get_s3_info(std::vector<std::tuple<std::string, S3Conf>>* s3_infos) {
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::GetObjStoreInfoRequest req;
     selectdb::GetObjStoreInfoResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
-    _stub->get_obj_store_info(&cntl, &req, &resp, nullptr);
+    stub->get_obj_store_info(&cntl, &req, &resp, nullptr);
     if (cntl.Failed()) {
         return Status::RpcError("failed to get s3 info: {}", cntl.ErrorText());
     }
@@ -465,6 +564,10 @@ Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job,
                                         selectdb::StartTabletJobResponse* res) {
     VLOG_DEBUG << "prepare_tablet_job: " << job.ShortDebugString();
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::prepare_tablet_job", Status::OK(), job, res);
+
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     selectdb::StartTabletJobRequest req;
     req.mutable_job()->CopyFrom(job);
     req.set_cloud_unique_id(config::cloud_unique_id);
@@ -474,7 +577,7 @@ Status CloudMetaMgr::prepare_tablet_job(const selectdb::TabletJobInfoPB& job,
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
         res->Clear();
-        _stub->start_tablet_job(&cntl, &req, res, nullptr);
+        stub->start_tablet_job(&cntl, &req, res, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to prepare_tablet_job: {}", cntl.ErrorText());
         }
@@ -492,6 +595,10 @@ Status CloudMetaMgr::commit_tablet_job(const selectdb::TabletJobInfoPB& job,
                                        selectdb::FinishTabletJobResponse* res) {
     VLOG_DEBUG << "commit_tablet_job: " << job.ShortDebugString();
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::commit_tablet_job", Status::OK(), job, res);
+
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     selectdb::FinishTabletJobRequest req;
     req.mutable_job()->CopyFrom(job);
     req.set_action(selectdb::FinishTabletJobRequest::COMMIT);
@@ -502,7 +609,7 @@ Status CloudMetaMgr::commit_tablet_job(const selectdb::TabletJobInfoPB& job,
         cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
         cntl.set_max_retry(BRPC_RETRY_TIMES);
         res->Clear();
-        _stub->finish_tablet_job(&cntl, &req, res, nullptr);
+        stub->finish_tablet_job(&cntl, &req, res, nullptr);
         if (cntl.Failed()) {
             return Status::RpcError("failed to commit_tablet_job: {}", cntl.ErrorText());
         }
@@ -538,6 +645,10 @@ Status CloudMetaMgr::lease_tablet_job(const selectdb::TabletJobInfoPB& job) {
 
 Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, const TabletSchema* tablet_schema) {
     VLOG_DEBUG << "send UpdateTabletSchemaRequest, tablet_id: " << tablet_id;
+
+    std::shared_ptr<selectdb::MetaService_Stub> stub;
+    RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
+
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::UpdateTabletSchemaRequest req;
@@ -548,7 +659,7 @@ Status CloudMetaMgr::update_tablet_schema(int64_t tablet_id, const TabletSchema*
     TabletSchemaPB tablet_schema_pb;
     tablet_schema->to_schema_pb(&tablet_schema_pb);
     req.mutable_tablet_schema()->CopyFrom(tablet_schema_pb);
-    _stub->update_tablet_schema(&cntl, &req, &resp, nullptr);
+    stub->update_tablet_schema(&cntl, &req, &resp, nullptr);
     if (cntl.Failed()) {
         return Status::RpcError("failed to update tablet schema: {}", cntl.ErrorText());
     }

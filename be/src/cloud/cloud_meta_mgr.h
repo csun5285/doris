@@ -3,10 +3,6 @@
 #include "cloud/meta_mgr.h"
 #include "olap/rowset/rowset_meta.h"
 
-namespace selectdb {
-class MetaService_Stub;
-} // namespace selectdb
-
 namespace doris::cloud {
 
 class CloudMetaMgr final : public MetaMgr {
@@ -58,7 +54,6 @@ private:
             const Tablet* tablet, int64_t old_max_version,
             const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
             DeleteBitmap* delete_bitmap);
-    std::unique_ptr<selectdb::MetaService_Stub> _stub;
 };
 
 } // namespace doris::cloud

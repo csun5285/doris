@@ -1069,11 +1069,10 @@ DEFINE_String(tmp_file_dirs, "");
 DEFINE_String(cloud_unique_id, "");
 DEFINE_String(meta_service_endpoint, "");
 DEFINE_Bool(meta_service_use_load_balancer, "false");
-DEFINE_Bool(meta_service_connection_pooled, "false");
 DEFINE_mInt32(meta_service_rpc_timeout_ms, "10000");
-DEFINE_Bool(meta_service_use_short_connection, "false");
-// whether to randomly use short connectino if `meta_service_use_short_connection` is true.
-DEFINE_mBool(fuzzy_meta_service_use_short_connection, "false");
+DEFINE_Bool(meta_service_connection_pooled, "false");
+DEFINE_mInt64(meta_service_connection_pool_size, "20");
+DEFINE_mInt32(meta_service_connection_age_base_minutes, "0");
 DEFINE_Int64(tablet_cache_capacity, "10000");
 DEFINE_Int64(tablet_cache_shards, "16");
 DEFINE_mInt32(refresh_s3_info_interval_seconds, "60");

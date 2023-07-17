@@ -1088,15 +1088,12 @@ DECLARE_String(cloud_unique_id);
 DECLARE_String(meta_service_endpoint);
 DECLARE_Bool(meta_service_use_load_balancer);
 // Set the underlying connection type to pooled.
-//
-// Some releated flag:
-// - max_connection_pool_size (default 100): max number of pooled connections to a single endpoint.
-// - idle_timeout_second      (default  10): pooled connections without data transmission for so many seconds will be closed.
 DECLARE_Bool(meta_service_connection_pooled);
+DECLARE_mInt64(meta_service_connection_pool_size);
+// A connection will expire after a random time during [base, 2*base], so that the BE
+// has a chance to connect to a new RS. Set zero to disable it.
+DECLARE_mInt32(meta_service_connection_age_base_minutes);
 DECLARE_mInt32(meta_service_rpc_timeout_ms);
-DECLARE_Bool(meta_service_use_short_connection);
-// whether to randomly use short connectino if `meta_service_use_short_connection` is true.
-DECLARE_mBool(fuzzy_meta_service_use_short_connection);
 DECLARE_Int64(tablet_cache_capacity);
 DECLARE_Int64(tablet_cache_shards);
 DECLARE_mInt32(refresh_s3_info_interval_seconds);
