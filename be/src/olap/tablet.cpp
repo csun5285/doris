@@ -863,7 +863,7 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
     if (to_add.empty()) {
         return;
     }
-    auto add_rowsets_directy = [=](std::vector<RowsetSharedPtr>& add_rowsets) {
+    auto add_rowsets_directy = [=, this](std::vector<RowsetSharedPtr>& add_rowsets) {
         for (auto& rs : add_rowsets) {
             if (version_overlap || need_download_data_async) {
 #ifndef BE_TEST

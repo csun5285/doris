@@ -724,7 +724,7 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
             std::lock_guard lock(_compaction_mtx);
             _submitted_base_compactions[tablet->tablet_id()] = compaction;
         }
-        st = _base_compaction_thread_pool->submit_func([=, compaction = std::move(compaction)]() {
+        st = _base_compaction_thread_pool->submit_func([=, this, compaction = std::move(compaction)]() {
             auto st = compaction->execute_compact();
             if (!st.ok()) {
                 // Error log has been output in `execute_compact`
@@ -777,7 +777,7 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
         _tablet_preparing_cumu_compaction.erase(tablet->tablet_id());
         _submitted_cumu_compactions[tablet->tablet_id()].push_back(compaction);
     }
-    auto erase_submitted_cumu_compaction = [=]() {
+    auto erase_submitted_cumu_compaction = [=, this]() {
         std::lock_guard lock(_compaction_mtx);
         auto it = _submitted_cumu_compactions.find(tablet->tablet_id());
         DCHECK(it != _submitted_cumu_compactions.end());

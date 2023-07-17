@@ -751,6 +751,7 @@ void BackendService::warm_up_tablets(TWarmUpTabletsResponse& response,
             LOG_WARNING("SET_JOB failed.").error(st);
             break;
         }
+        [[fallthrough]];
     }
     case TWarmUpTabletsRequestType::SET_BATCH: {
         LOG_INFO("receive the warm up request.")
