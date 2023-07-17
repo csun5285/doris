@@ -988,7 +988,6 @@ void Tablet::cloud_delete_rowsets(const std::vector<RowsetSharedPtr>& to_delete)
     }
 
     _tablet_meta->cloud_delete_rs_metas(to_delete);
-    cloud::tablet_mgr()->add_to_vacuum_set(tablet_id());
 }
 
 int Tablet::cloud_delete_expired_stale_rowsets() {
@@ -1023,6 +1022,7 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
                 VLOG_DEBUG << "delete stale rowset " << v_ts->version();
             }
         }
+        _reconstruct_version_tracker_if_necessary();
     }
     if (config::enable_file_cache) {
         for (auto& rs : expired_rowsets) {

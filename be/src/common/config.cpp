@@ -1077,7 +1077,7 @@ DEFINE_mBool(fuzzy_meta_service_use_short_connection, "false");
 DEFINE_Int64(tablet_cache_capacity, "10000");
 DEFINE_Int64(tablet_cache_shards, "16");
 DEFINE_mInt32(refresh_s3_info_interval_seconds, "60");
-DEFINE_mInt32(vacuum_stale_rowsets_interval_seconds, "1800");
+DEFINE_mInt32(vacuum_stale_rowsets_interval_seconds, "300");
 DEFINE_mInt32(tablet_sync_interval_seconds, "1800");
 DEFINE_mInt32(schedule_sync_tablets_interval_seconds, "600");
 DEFINE_mInt32(compaction_timeout_seconds, "86400");

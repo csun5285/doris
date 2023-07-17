@@ -208,30 +208,18 @@ void CloudTabletMgr::erase_tablet(int64_t tablet_id) {
 
 void CloudTabletMgr::vacuum_stale_rowsets() {
     LOG_INFO("begin to vacuum stale rowsets");
-    std::vector<int64_t> tablets_to_vacuum;
-    {
-        std::lock_guard lock(_vacuum_set_mtx);
-        tablets_to_vacuum = std::vector<int64_t>(_vacuum_set.begin(), _vacuum_set.end());
-    }
-    int num_vacuumed = 0;
-    for (int64_t tablet_id : tablets_to_vacuum) {
-        auto tablet = _tablet_map->get(tablet_id);
-        if (!tablet) continue;
-        num_vacuumed += tablet->cloud_delete_expired_stale_rowsets();
-        {
-            std::shared_lock tablet_rlock(tablet->get_header_lock());
-            if (!tablet->has_stale_rowsets()) {
-                std::lock_guard lock(_vacuum_set_mtx);
-                _vacuum_set.erase(tablet_id);
-            }
+    std::vector<TabletSharedPtr> tablets_to_vacuum;
+    tablets_to_vacuum.reserve(_tablet_map->size());
+    _tablet_map->traverse([&tablets_to_vacuum](auto& t) {
+        if (t->has_stale_rowsets()) {
+            tablets_to_vacuum.push_back(t);
         }
+    });
+    int num_vacuumed = 0;
+    for (auto& t : tablets_to_vacuum) {
+        num_vacuumed += t->cloud_delete_expired_stale_rowsets();
     }
     LOG_INFO("finish vacuum stale rowsets").tag("num_vacuumed", num_vacuumed);
-}
-
-void CloudTabletMgr::add_to_vacuum_set(int64_t tablet_id) {
-    std::lock_guard lock(_vacuum_set_mtx);
-    _vacuum_set.insert(tablet_id);
 }
 
 std::vector<std::weak_ptr<Tablet>> CloudTabletMgr::get_weak_tablets() {
