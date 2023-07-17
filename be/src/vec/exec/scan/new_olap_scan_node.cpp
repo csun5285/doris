@@ -610,10 +610,15 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
     } else {
         for (auto& scan_range : _scan_ranges) {
             auto tablet_id = scan_range->tablet_id;
+#ifdef CLOUD_MODE
+            TabletSharedPtr tablet;
+            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &tablet));
+#else
             auto [tablet, status] =
                     StorageEngine::instance()->tablet_manager()->get_tablet_and_status(tablet_id,
                                                                                        true);
             RETURN_IF_ERROR(status);
+#endif
 
             std::vector<std::unique_ptr<doris::OlapScanRange>>* ranges = &_cond_ranges;
             int size_based_scanners_per_tablet = 1;
