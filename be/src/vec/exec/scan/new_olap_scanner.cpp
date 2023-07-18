@@ -167,6 +167,17 @@ Status NewOlapScanner::init() {
             }
         }
 
+#ifdef CLOUD_MODE
+        if (_tablet_reader_params.rs_readers.empty()) {
+            std::shared_lock rdlock(_tablet->get_header_lock());
+            RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers({0, _version},
+                                                              &_tablet_reader_params.rs_readers));
+            // Initialize tablet_reader_params
+            RETURN_IF_ERROR(_init_tablet_reader_params(_key_ranges, parent->_olap_filters,
+                                                       parent->_filter_predicates,
+                                                       parent->_push_down_functions));
+        }
+#else
         {
             std::shared_lock rdlock(_tablet->get_header_lock());
             if (_tablet_reader_params.rs_readers.empty()) {
@@ -199,6 +210,7 @@ Status NewOlapScanner::init() {
                                                        parent->_filter_predicates,
                                                        parent->_push_down_functions));
         }
+#endif
     }
 
     // add read columns in profile

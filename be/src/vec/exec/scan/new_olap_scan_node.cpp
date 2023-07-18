@@ -613,6 +613,8 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
 #ifdef CLOUD_MODE
             TabletSharedPtr tablet;
             RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &tablet));
+            int64_t version = strtol(scan_range->version.c_str(), nullptr, 10);
+            RETURN_IF_ERROR(tablet->cloud_sync_rowsets(version));
 #else
             auto [tablet, status] =
                     StorageEngine::instance()->tablet_manager()->get_tablet_and_status(tablet_id,

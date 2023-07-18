@@ -1796,7 +1796,6 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                 auto& saved_column = saved_schema.column(i);
                 auto& column = schema.column(i);
                 if (saved_column.unique_id() != column.unique_id() ||
-                    saved_column.name() != column.name() ||
                     transform(saved_column.type()) != transform(column.type())) {
                     LOG(WARNING) << "existed column: " << saved_column.DebugString()
                                  << "\nto save column: " << column.DebugString();
@@ -1817,7 +1816,6 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                 auto& saved_index = saved_schema.index(i);
                 auto& index = schema.index(i);
                 if (saved_index.index_id() != index.index_id() ||
-                    saved_index.index_name() != index.index_name() ||
                     saved_index.index_type() != index.index_type()) {
                     LOG(WARNING) << "existed index: " << saved_index.DebugString()
                                  << "\nto save index: " << index.DebugString();
