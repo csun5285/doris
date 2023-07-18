@@ -184,6 +184,8 @@ public class DdlExecutor {
             env.alterView((AlterViewStmt) ddlStmt);
         } else if (ddlStmt instanceof CancelAlterTableStmt) {
             env.cancelAlter((CancelAlterTableStmt) ddlStmt);
+        } else if (ddlStmt instanceof CopyStmt) {
+            executeCopyStmt(env, (CopyStmt) ddlStmt);
         } else if (ddlStmt instanceof CancelExportStmt) {
             env.getExportMgr().cancelExportJob((CancelExportStmt) ddlStmt);
         } else if (ddlStmt instanceof CancelLoadStmt) {
