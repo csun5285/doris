@@ -90,7 +90,6 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     _alter_tablet_workers.reset(
             new AlterTableTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
     _alter_tablet_workers->start();
-    CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
     CREATE_AND_START_THREAD(REPORT_TASK, _report_task_workers);
     CREATE_AND_START_POOL(CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers);
