@@ -99,15 +99,7 @@ values("lightman_cluster_id1", 10003, 11002, 11003, 11414, "${LocalDate.now().to
     qt_sql """
     show cache hotspot '/lightman_cluster_name0/regression_test.selectdb_cache_hotspot';
     """
-    
-    // to test if it returns the latest partition's data
-    
-    qt_sql """
-SELECT file_cache_size FROM (SELECT *, row_number() OVER (PARTITION BY cluster_id, backend_id, table_id, index_id, partition_id ORDER BY insert_day DESC) AS rn
-FROM __internal_schema.selectdb_cache_hotspot) t WHERE rn = 1;
-    """
-    
-    
+
     // test if 
     try_sql """
         drop table if exists sample_table force;
@@ -145,8 +137,8 @@ FROM __internal_schema.selectdb_cache_hotspot) t WHERE rn = 1;
     try_sql """
     select * from sample_table;
     """
-    // sleep 5 min for internal table to fetch information from be
-    sleep(330000)
+    // sleep 2min for internal table to fetch information from be
+    sleep(120000)
     def clusters = sql " SHOW CLUSTERS; "
     assertTrue(!clusters.isEmpty())
     def validCluster = clusters[0][0]

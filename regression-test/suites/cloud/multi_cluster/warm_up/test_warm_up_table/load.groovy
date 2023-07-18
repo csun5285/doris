@@ -141,7 +141,7 @@ suite("test_warm_up_table") {
         sql "cancel warm up job where id = ${jobId[0][0]}"
         assertTrue(false);
     }
-
+    sleep(60000)
     def backendIdToAfterWarmUpCacheSize = getCurCacheSize()
     assertTrue(backendIdToAfterWarmUpCacheSize.get(beUniqueIdList[1]) > backendIdToBeforeLoadCacheSize.get(beUniqueIdList[1]));
     sql "use @regression_cluster_name1"
