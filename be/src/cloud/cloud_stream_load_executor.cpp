@@ -39,6 +39,10 @@ Status CloudStreamLoadExecutor::commit_txn(StreamLoadContext* ctx) {
         int64_t tablet_id = ctx->commit_infos.at(0).tabletId;
         TabletSharedPtr tablet;
         cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+        if (tablet == nullptr) {
+            LOG(WARNING) << "failed to get tablet info, tablet_id: " << tablet_id;
+            return Status::InternalError("failed to get tablet info");
+        }
         if (tablet->enable_unique_key_merge_on_write()) {
             return StreamLoadExecutor::commit_txn(ctx);
         }
