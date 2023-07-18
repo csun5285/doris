@@ -1660,10 +1660,8 @@ void AlterTableTaskPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, 
     // Do not need to adjust delete success or not
     // Because if delete failed create rollup will failed
     TTabletId new_tablet_id = 0;
-    TSchemaHash new_schema_hash = 0;
     if (status.ok()) {
         new_tablet_id = agent_task_req.alter_tablet_req_v2.new_tablet_id;
-        new_schema_hash = agent_task_req.alter_tablet_req_v2.new_schema_hash;
         EngineAlterTabletTask engine_task(agent_task_req.alter_tablet_req_v2);
         status = _env->storage_engine()->execute_task(&engine_task);
     }
