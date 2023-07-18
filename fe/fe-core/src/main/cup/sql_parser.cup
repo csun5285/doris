@@ -4225,6 +4225,11 @@ show_param ::=
     {:
         RESULT = new ShowCloudWarmUpStmt(parser.where);
     :}
+    /* Cloud Cluster */
+    | KW_CLUSTERS
+    {:
+        RESULT = new ShowClusterStmt();
+    :}
     ;
 
 opt_tmp ::=

@@ -489,6 +489,8 @@ public class ShowExecutor {
             handleShowAnalyzeTaskStatus();
         } else if (stmt instanceof ShowCloudWarmUpStmt) {
             handleShowCloudWarmUpJob();
+        } else if (stmt instanceof ShowClusterStmt) {
+            handleShowCluster();
         } else {
             handleEmtpy();
         }
