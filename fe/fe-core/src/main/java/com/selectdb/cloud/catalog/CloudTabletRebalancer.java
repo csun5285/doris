@@ -437,7 +437,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
                     Map<String, List<Long>> clusterToBackends =
                             ((CloudReplica) replica).getClusterToBackends();
                     for (Map.Entry<String, List<Long>> entry : clusterToBackends.entrySet()) {
-                        if (!clusterToBes.containsKey(entry.getKey())) {
+                        if (!cluster.equals(entry.getKey())) {
                             continue;
                         }
 
