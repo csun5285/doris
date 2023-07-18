@@ -1122,6 +1122,9 @@ DEFINE_Int32(tablet_calc_delete_bitmap_max_thread, "32");
 
 DEFINE_mBool(enable_parallel_cumu_compaction, "false");
 
+// the maximum condition vatiable wait time for buffered reader
+DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================

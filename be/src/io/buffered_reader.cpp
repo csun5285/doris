@@ -21,6 +21,7 @@
 #include <bvar/window.h>
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 
 #include "common/compiler_util.h"
@@ -45,7 +46,12 @@ bvar::PerSecond<bvar::Adder<uint64_t>> g_bytes_downloaded_per_second("buffered_r
 void PrefetchBuffer::reset_offset(int64_t offset) {
     {
         std::unique_lock lck {_lock};
-        _prefetched.wait(lck, [this]() { return _buffer_status != BufferStatus::PENDING; });
+        if (!_prefetched.wait_for(
+                    lck, std::chrono::milliseconds(config::buffered_reader_read_timeout_ms),
+                    [this]() { return _buffer_status != BufferStatus::PENDING; })) {
+            _prefetch_status = Status::TimedOut("time out when reset prefetch buffer");
+            return;
+        }
         if (_buffer_status == BufferStatus::CLOSED) [[unlikely]] {
             _prefetched.notify_all();
             return;
@@ -67,9 +73,15 @@ void PrefetchBuffer::reset_offset(int64_t offset) {
 void PrefetchBuffer::prefetch_buffer() {
     {
         std::unique_lock lck {_lock};
-        _prefetched.wait(lck, [this]() {
-            return _buffer_status == BufferStatus::RESET || _buffer_status == BufferStatus::CLOSED;
-        });
+        if (!_prefetched.wait_for(
+                    lck, std::chrono::milliseconds(config::buffered_reader_read_timeout_ms),
+                    [this]() {
+                        return _buffer_status == BufferStatus::RESET ||
+                               _buffer_status == BufferStatus::CLOSED;
+                    })) {
+            _prefetch_status = Status::TimedOut("time out when invoking prefetch buffer");
+            return;
+        }
         // in case buffer is already closed
         if (_buffer_status == BufferStatus::CLOSED) [[unlikely]] {
             _prefetched.notify_all();
@@ -103,7 +115,12 @@ void PrefetchBuffer::prefetch_buffer() {
         COUNTER_UPDATE(_remote_read_counter, 1);
     }
     std::unique_lock lck {_lock};
-    _prefetched.wait(lck, [this]() { return _buffer_status == BufferStatus::PENDING; });
+    if (!_prefetched.wait_for(lck,
+                              std::chrono::milliseconds(config::buffered_reader_read_timeout_ms),
+                              [this]() { return _buffer_status == BufferStatus::PENDING; })) {
+        _prefetch_status = Status::TimedOut("time out when invoking prefetch buffer");
+        return;
+    }
     if (!s.ok()) {
         _prefetch_status = std::move(s);
     }
@@ -118,10 +135,15 @@ Status PrefetchBuffer::read_buffer(int64_t off, uint8_t* out, int64_t buf_len,
     {
         std::unique_lock lck {_lock};
         // buffer must be prefetched or it's closed
-        _prefetched.wait(lck, [this]() {
-            return _buffer_status == BufferStatus::PREFETCHED ||
-                   _buffer_status == BufferStatus::CLOSED;
-        });
+        if (!_prefetched.wait_for(
+                    lck, std::chrono::milliseconds(config::buffered_reader_read_timeout_ms),
+                    [this]() {
+                        return _buffer_status == BufferStatus::PREFETCHED ||
+                               _buffer_status == BufferStatus::CLOSED;
+                    })) {
+            _prefetch_status = Status::TimedOut("time out when read prefetch buffer");
+            return _prefetch_status;
+        }
         if (BufferStatus::CLOSED == _buffer_status) [[unlikely]] {
             return Status::OK();
         }
@@ -154,7 +176,12 @@ Status PrefetchBuffer::read_buffer(int64_t off, uint8_t* out, int64_t buf_len,
 void PrefetchBuffer::close() {
     std::unique_lock lck {_lock};
     // in case _reader still tries to write to the buf after we close the buffer
-    _prefetched.wait(lck, [this]() { return _buffer_status != BufferStatus::PENDING; });
+    if (!_prefetched.wait_for(lck,
+                              std::chrono::milliseconds(config::buffered_reader_read_timeout_ms),
+                              [this]() { return _buffer_status != BufferStatus::PENDING; })) {
+        _prefetch_status = Status::TimedOut("time out when close prefetch buffer");
+        return;
+    }
     _buffer_status = BufferStatus::CLOSED;
     _prefetched.notify_all();
 }

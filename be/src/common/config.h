@@ -1135,6 +1135,8 @@ DECLARE_mInt64(max_load_pressure_wait_time_ms);
 DECLARE_Int32(calc_delete_bitmap_worker_count);
 // the count of tablet thread to calc delete bitmap
 DECLARE_Int32(tablet_calc_delete_bitmap_max_thread);
+// the maximum condition vatiable wait time for buffered reader
+DECLARE_mInt32(buffered_reader_read_timeout_ms);
 
 DECLARE_mBool(enable_parallel_cumu_compaction);
 
