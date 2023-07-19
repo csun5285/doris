@@ -446,44 +446,27 @@ Status CsvReader::_line_split_to_values(const Slice& line, bool* success) {
         // Only check for load task. For query task, the non exist column will be filled "null".
         // if actual column number in csv file is not equal to _file_slot_descs.size()
         // then filter this line.
-
-        bool read_by_column_def = false;
-        if (_params.__isset.file_attributes && _params.file_attributes.__isset.read_by_column_def) {
-            read_by_column_def = _params.file_attributes.read_by_column_def;
-        }
-        // read data by column definition, resize _split_values to _src_solt_size
-        if (read_by_column_def) {
-            // fill slots by NULL
-            while (_split_values.size() < _file_slot_descs.size()) {
-                _split_values.emplace_back(_split_values.back().get_data(), 0);
-            }
-            // remove redundant slots
-            while (_split_values.size() > _file_slot_descs.size()) {
-                _split_values.pop_back();
-            }
-        } else {
-            if (_split_values.size() != _file_slot_descs.size()) {
-                std::string cmp_str =
-                        _split_values.size() > _file_slot_descs.size() ? "more than" : "less than";
-                RETURN_IF_ERROR(_state->append_error_msg_to_file(
-                        [&]() -> std::string { return std::string(line.data, line.size); },
-                        [&]() -> std::string {
-                            fmt::memory_buffer error_msg;
-                            fmt::format_to(error_msg, "{} {} {}",
-                                           "actual column number in csv file is ", cmp_str,
-                                           " schema column number.");
-                            fmt::format_to(error_msg, "actual number: {}, column separator: [{}], ",
-                                           _split_values.size(), _value_separator);
-                            fmt::format_to(error_msg,
-                                           "line delimiter: [{}], schema column number: {}; ",
-                                           _line_delimiter, _file_slot_descs.size());
-                            return fmt::to_string(error_msg);
-                        },
-                        &_line_reader_eof));
-                _counter->num_rows_filtered++;
-                *success = false;
-                return Status::OK();
-            }
+        if (_split_values.size() < _file_slot_descs.size()) {
+            std::string cmp_str =
+                    _split_values.size() > _file_slot_descs.size() ? "more than" : "less than";
+            RETURN_IF_ERROR(_state->append_error_msg_to_file(
+                    [&]() -> std::string { return std::string(line.data, line.size); },
+                    [&]() -> std::string {
+                        fmt::memory_buffer error_msg;
+                        fmt::format_to(error_msg, "{} {} {}",
+                                       "actual column number in csv file is ", cmp_str,
+                                       " schema column number.");
+                        fmt::format_to(error_msg, "actual number: {}, column separator: [{}], ",
+                                       _split_values.size(), _value_separator);
+                        fmt::format_to(error_msg,
+                                       "line delimiter: [{}], schema column number: {}; ",
+                                       _line_delimiter, _file_slot_descs.size());
+                        return fmt::to_string(error_msg);
+                    },
+                    &_line_reader_eof));
+            _counter->num_rows_filtered++;
+            *success = false;
+            return Status::OK();
         }
     }
 
