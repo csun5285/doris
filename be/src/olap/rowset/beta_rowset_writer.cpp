@@ -105,7 +105,7 @@ BetaRowsetWriter::~BetaRowsetWriter() {
 
 Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) {
     _context = rowset_writer_context;
-    _rowset_meta.reset(new RowsetMeta);
+    _rowset_meta = std::make_shared<RowsetMeta>(_context.table_id, _context.index_id);
 #ifdef CLOUD_MODE
     if (_context.fs) {
         _rowset_meta->set_fs(_context.fs);
