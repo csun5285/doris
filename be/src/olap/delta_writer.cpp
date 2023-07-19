@@ -239,10 +239,10 @@ Status DeltaWriter::init() {
         RETURN_IF_ERROR(_storage_engine->txn_manager()->prepare_txn(_req.partition_id, _tablet,
                                                                     _req.txn_id, _req.load_id));
     }
+#endif
     if (_tablet->enable_unique_key_merge_on_write() && _delete_bitmap == nullptr) {
         _delete_bitmap.reset(new DeleteBitmap(_tablet->tablet_id()));
     }
-#endif
     // build tablet schema in request level
     _build_current_tablet_schema(_req.index_id, _req.table_schema_param, *_tablet->tablet_schema());
     RowsetWriterContext context;
