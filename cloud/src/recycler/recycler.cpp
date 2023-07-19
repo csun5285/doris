@@ -1152,6 +1152,7 @@ int InstanceRecycler::recycle_rowsets() {
         expired_rowset_size += v.size();
         if (!rowset.has_type()) {                         // old version `RecycleRowsetPB`
             if (!rowset.has_resource_id()) [[unlikely]] { // impossible
+                // in old version, keep this key-value pair and it needs to be checked manually
                 LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
                 return -1;
             }
@@ -1173,8 +1174,13 @@ int InstanceRecycler::recycle_rowsets() {
         // TODO(plat1ko): check rowset not referenced
         auto rowset_meta = rowset.mutable_rowset_meta();
         if (!rowset_meta->has_resource_id()) [[unlikely]] { // impossible
-            LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
-            return -1;
+            if (rowset.type() != RecycleRowsetPB::PREPARE && rowset_meta->num_segments() == 0) {
+                LOG_INFO("recycle rowset that has empty resource id");
+            } else {
+                // other situations, keep this key-value pair and it needs to be checked manually
+                LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
+                return -1;
+            }
         }
         LOG(INFO) << "delete rowset data, instance_id=" << instance_id_
                   << " tablet_id=" << rowset_meta->tablet_id()

@@ -91,6 +91,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     load_id.set_lo(0);
     std::unique_ptr<RowsetWriter> rowset_writer;
     RowsetWriterContext context;
+    context.fs = cloud::latest_fs();
     context.is_persistent = tablet->is_persistent();
     context.ttl_seconds = tablet->ttl_seconds();
     context.txn_id = request.transaction_id;
