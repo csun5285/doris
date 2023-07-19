@@ -128,8 +128,9 @@ void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     auto current_time_second = time(nullptr);
     current_time.tv_sec = current_time_second;
     current_time.tv_nsec = 0;
+    // bthread::countdown_event::timed_wait() should use absolute time
     do {
-        current_time.tv_sec += current_time.tv_sec + 300;
+        current_time.tv_sec += 300;
     } while (0 != _countdown_event.timed_wait(current_time));
 }
 
