@@ -86,6 +86,7 @@ public:
 
     ~DeltaWriter();
 
+    bool initialized() const;
     Status init();
 
     Status write(const vectorized::Block* block, const std::vector<int>& row_idxs,
@@ -194,7 +195,7 @@ private:
     SpinLock _mem_table_tracker_lock;
     std::atomic<uint32_t> _mem_table_num = 1;
 
-    doris::Mutex _lock;
+    mutable doris::Mutex _lock;
 
     // memory consumption snapshot for current delta_writer, only
     // used for std::sort

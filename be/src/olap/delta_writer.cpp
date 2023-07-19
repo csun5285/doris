@@ -152,6 +152,11 @@ void DeltaWriter::_garbage_collection() {
     }
 }
 
+bool DeltaWriter::initialized() const {
+    std::lock_guard l(_lock);
+    return _is_init || _is_cancelled;
+}
+
 Status DeltaWriter::init(const std::vector<DeltaWriter*>& writers) {
     std::vector<std::function<Status()>> tasks;
     tasks.reserve(writers.size());

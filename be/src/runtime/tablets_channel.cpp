@@ -30,10 +30,12 @@
 #include <set>
 #include <thread>
 #include <utility>
+#include <unordered_set>
 
 #include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/logging.h"
+#include "common/status.h"
 #include "exec/tablet_info.h"
 #include "olap/delta_writer.h"
 #include "olap/storage_engine.h"
@@ -451,8 +453,23 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
             _tablet_writers.emplace(tablet.tablet_id(), writer);
         }
     }
+
     _s_tablet_writer_count += _tablet_writers.size();
     DCHECK_EQ(_tablet_writers.size(), request.tablets_size());
+    return Status::OK();
+}
+
+Status TabletsChannel::_init_writes_by_parition_ids(
+        const std::unordered_set<int64_t>& partition_ids) {
+    std::vector<DeltaWriter*> writers;
+    for (auto [tablet_id, writer] : _tablet_writers) {
+        if (partition_ids.count(writer->partition_id()) && !writer->initialized()) {
+            writers.push_back(writer);
+        }
+    }
+    if (writers.size()) {
+        RETURN_IF_ERROR(DeltaWriter::init(writers));
+    }
     return Status::OK();
 }
 
@@ -626,6 +643,19 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
         } else {
             it->second.emplace_back(i);
         }
+    }
+
+    // In CLOUD_MODE, init DeltaWriter will issue RPC, so it's necessary to init writers by batch.
+    std::unordered_set<int64_t> partition_ids;
+    for (auto& [tablet_id, _] : tablet_to_rowidxs) {
+        auto tablet_writer_it = _tablet_writers.find(tablet_id);
+        if (tablet_writer_it == _tablet_writers.end()) {
+            return Status::InternalError("unknown tablet to append data, tablet={}", tablet_id);
+        }
+        partition_ids.insert(tablet_writer_it->second->partition_id());
+    }
+    if (partition_ids.size()) {
+        RETURN_IF_ERROR(_init_writes_by_parition_ids(partition_ids));
     }
 
     auto get_send_data = [&]() { return vectorized::Block(request.block()); };

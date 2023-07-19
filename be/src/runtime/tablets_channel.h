@@ -140,6 +140,7 @@ private:
     // open all writer
     Status _open_all_writers(const PTabletWriterOpenRequest& request,
                              PTabletWriterOpenResult* response);
+    Status _init_writes_by_parition_ids(const std::unordered_set<int64_t>& partition_ids);
 
     // deal with DeltaWriter close_wait(), add tablet to list for return.
     void _close_wait(DeltaWriter* writer,
