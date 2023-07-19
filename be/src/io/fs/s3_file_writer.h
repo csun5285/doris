@@ -99,7 +99,8 @@ private:
     Key _cache_key;
     BlockFileCache* _cache;
 
-    bthread::CountdownEvent _countdown_event;
+    // **Attention** call add_count() before submitting buf to async thread pool
+    bthread::CountdownEvent _countdown_event {0};
 
     std::atomic_bool _failed = false;
     Status _st = Status::OK();
