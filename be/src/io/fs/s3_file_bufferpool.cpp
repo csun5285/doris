@@ -92,7 +92,7 @@ void UploadFileBuffer::append_data(const Slice& data) {
             break;
         }
         // if the buf has no memory reserved, then write to disk first
-        if (!_is_cache_allocated && config::enable_file_cache) {
+        if (!_is_cache_allocated && config::enable_file_cache && _alloc_holder != nullptr) {
             _holder = _alloc_holder();
             bool cache_is_not_enough = false;
             for (auto& segment : _holder->file_segments) {
