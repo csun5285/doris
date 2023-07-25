@@ -21,8 +21,8 @@
 #include <memory>
 #include <utility>
 
-#include "cloud/io/file_reader.h"
-#include "cloud/io/file_system.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_system.h"
 #include "common/config.h"
 #include "common/logging.h" // LOG
 #include "olap/iterators.h"

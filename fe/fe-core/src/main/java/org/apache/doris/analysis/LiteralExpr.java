@@ -294,52 +294,6 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
         return this instanceof NullLiteral;
     }
 
-    // Port from mysql get_param_length
-    public static int getParmLen(ByteBuffer data) {
-        int maxLen = data.remaining();
-        if (maxLen < 1) {
-            return 0;
-        }
-        // get and advance 1 byte
-        int len = MysqlProto.readInt1(data);
-        if (len == 252) {
-            if (maxLen < 3) {
-                return 0;
-            }
-            // get and advance 2 bytes
-            return MysqlProto.readInt2(data);
-        } else if (len == 253) {
-            if (maxLen < 4) {
-                return 0;
-            }
-            // get and advance 3 bytes
-            return MysqlProto.readInt3(data);
-        } else if (len == 254) {
-            /*
-            In our client-server protocol all numbers bigger than 2^24
-            stored as 8 bytes with uint8korr. Here we always know that
-            parameter length is less than 2^4 so we don't look at the second
-            4 bytes. But still we need to obey the protocol hence 9 in the
-            assignment below.
-            */
-            if (maxLen < 9) {
-                return 0;
-            }
-            len = MysqlProto.readInt4(data);
-            MysqlProto.readFixedString(data, 4);
-            return len;
-        } else if (len == 255) {
-            return 0;
-        } else {
-            return len;
-        }
-    }
-
-    @Override
-    public boolean matchExprs(List<Expr> exprs, SelectStmt stmt, boolean ignoreAlias, TupleDescriptor tuple) {
-        return true;
-    }
-
     @Override
     public String toString() {
         return getStringValue();
@@ -393,7 +347,6 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
                 return LiteralExpr.create("1970-01-01 00:00:00", Type.DATETIME);
             // MYSQL_TYPE_STRING
             case 254:
-            case 252:
             case 253:
                 return LiteralExpr.create("", Type.STRING);
             // MYSQL_TYPE_VARCHAR
@@ -402,5 +355,51 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
             default:
                 return null;
         }
+    }
+
+    // Port from mysql get_param_length
+    public static int getParmLen(ByteBuffer data) {
+        int maxLen = data.remaining();
+        if (maxLen < 1) {
+            return 0;
+        }
+        // get and advance 1 byte
+        int len = MysqlProto.readInt1(data);
+        if (len == 252) {
+            if (maxLen < 3) {
+                return 0;
+            }
+            // get and advance 2 bytes
+            return MysqlProto.readInt2(data);
+        } else if (len == 253) {
+            if (maxLen < 4) {
+                return 0;
+            }
+            // get and advance 3 bytes
+            return MysqlProto.readInt3(data);
+        } else if (len == 254) {
+            /*
+            In our client-server protocol all numbers bigger than 2^24
+            stored as 8 bytes with uint8korr. Here we always know that
+            parameter length is less than 2^4 so we don't look at the second
+            4 bytes. But still we need to obey the protocol hence 9 in the
+            assignment below.
+            */
+            if (maxLen < 9) {
+                return 0;
+            }
+            len = MysqlProto.readInt4(data);
+            MysqlProto.readFixedString(data, 4);
+            return len;
+        } else if (len == 255) {
+            return 0;
+        } else {
+            return len;
+        }
+    }
+
+    @Override
+    public boolean matchExprs(List<Expr> exprs, SelectStmt stmt, boolean ignoreAlias, TupleDescriptor tuple) {
+        return true;
     }
 }

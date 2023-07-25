@@ -7,6 +7,7 @@ CteAnchor[cteId= ( CTEId#2=] )
 --------hashAgg[LOCAL]
 ----------PhysicalProject
 ------------hashJoin[INNER_JOIN](catalog_returns.cr_returning_addr_sk = customer_address.ca_address_sk)
+<<<<<<< HEAD
 --------------hashJoin[INNER_JOIN](catalog_returns.cr_returned_date_sk = date_dim.d_date_sk)
 ----------------PhysicalProject
 ------------------PhysicalOlapScan[catalog_returns]
@@ -14,6 +15,17 @@ CteAnchor[cteId= ( CTEId#2=] )
 ------------------PhysicalProject
 --------------------filter((date_dim.d_year = 2002))
 ----------------------PhysicalOlapScan[date_dim]
+=======
+--------------PhysicalDistribute
+----------------PhysicalProject
+------------------hashJoin[INNER_JOIN](catalog_returns.cr_returned_date_sk = date_dim.d_date_sk)
+--------------------PhysicalProject
+----------------------PhysicalOlapScan[catalog_returns]
+--------------------PhysicalDistribute
+----------------------PhysicalProject
+------------------------filter((date_dim.d_year = 2002))
+--------------------------PhysicalOlapScan[date_dim]
+>>>>>>> 2.0.0-rc01
 --------------PhysicalDistribute
 ----------------PhysicalProject
 ------------------PhysicalOlapScan[customer_address]
@@ -23,7 +35,12 @@ CteAnchor[cteId= ( CTEId#2=] )
 --------PhysicalProject
 ----------hashJoin[LEFT_SEMI_JOIN](ctr1.ctr_state = ctr2.ctr_state)(cast(ctr_total_return as DOUBLE) > cast((avg(ctr_total_return) * 1.2) as DOUBLE))
 ------------hashJoin[INNER_JOIN](ctr1.ctr_customer_sk = customer.c_customer_sk)
+<<<<<<< HEAD
 --------------CteConsumer[cteId= ( CTEId#2=] )
+=======
+--------------PhysicalDistribute
+----------------CteConsumer[cteId= ( CTEId#2=] )
+>>>>>>> 2.0.0-rc01
 --------------PhysicalDistribute
 ----------------hashJoin[INNER_JOIN](customer_address.ca_address_sk = customer.c_current_addr_sk)
 ------------------PhysicalProject
@@ -37,6 +54,12 @@ CteAnchor[cteId= ( CTEId#2=] )
 ----------------hashAgg[GLOBAL]
 ------------------PhysicalDistribute
 --------------------hashAgg[LOCAL]
+<<<<<<< HEAD
 ----------------------PhysicalProject
 ------------------------CteConsumer[cteId= ( CTEId#2=] )
+=======
+----------------------PhysicalDistribute
+------------------------PhysicalProject
+--------------------------CteConsumer[cteId= ( CTEId#2=] )
+>>>>>>> 2.0.0-rc01
 

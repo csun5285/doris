@@ -30,6 +30,7 @@
 #include <utility>
 
 #include "common/config.h"
+#include "io/fs/file_reader_writer_fwd.h"
 #include "io/fs/file_writer.h"
 #include "olap/data_dir.h"
 #include "olap/file_header.h"
@@ -247,6 +248,15 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
     if (tablet_schema.__isset.disable_auto_compaction) {
         schema->set_disable_auto_compaction(tablet_schema.disable_auto_compaction);
     }
+    if (tablet_schema.__isset.is_dynamic_schema) {
+        schema->set_is_dynamic_schema(tablet_schema.is_dynamic_schema);
+    }
+
+    if (tablet_schema.__isset.enable_single_replica_compaction) {
+        schema->set_enable_single_replica_compaction(
+                tablet_schema.enable_single_replica_compaction);
+    }
+
     if (tablet_schema.__isset.is_dynamic_schema) {
         schema->set_is_dynamic_schema(tablet_schema.is_dynamic_schema);
     }
@@ -991,6 +1001,22 @@ bool DeleteBitmap::contains(const BitmapKey& bmk, uint32_t row_id) const {
 
 bool DeleteBitmap::contains_agg(const BitmapKey& bmk, uint32_t row_id) const {
     return get_agg(bmk)->contains(row_id);
+}
+
+bool DeleteBitmap::contains_agg_without_cache(const BitmapKey& bmk, uint32_t row_id) const {
+    std::shared_lock l(lock);
+    DeleteBitmap::BitmapKey start {std::get<0>(bmk), std::get<1>(bmk), 0};
+    for (auto it = delete_bitmap.lower_bound(start); it != delete_bitmap.end(); ++it) {
+        auto& [k, bm] = *it;
+        if (std::get<0>(k) != std::get<0>(bmk) || std::get<1>(k) != std::get<1>(bmk) ||
+            std::get<2>(k) > std::get<2>(bmk)) {
+            break;
+        }
+        if (bm.contains(row_id)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int DeleteBitmap::set(const BitmapKey& bmk, const roaring::Roaring& segment_delete_bitmap) {

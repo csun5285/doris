@@ -50,7 +50,7 @@ public class LogicalGenerate<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD
     public LogicalGenerate(List<Function> generators, List<Slot> generatorOutput,
             Optional<GroupExpression> groupExpression,
             Optional<LogicalProperties> logicalProperties, CHILD_TYPE child) {
-        super(PlanType.LOGICAL_FILTER, groupExpression, logicalProperties, child);
+        super(PlanType.LOGICAL_GENERATE, groupExpression, logicalProperties, child);
         this.generators = ImmutableList.copyOf(generators);
         this.generatorOutput = ImmutableList.copyOf(generatorOutput);
     }
@@ -91,9 +91,10 @@ public class LogicalGenerate<CHILD_TYPE extends Plan> extends LogicalUnary<CHILD
     }
 
     @Override
-    public LogicalGenerate<Plan> withLogicalProperties(Optional<LogicalProperties> logicalProperties) {
-        return new LogicalGenerate<>(generators, generatorOutput,
-                Optional.empty(), logicalProperties, child());
+    public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
+            Optional<LogicalProperties> logicalProperties, List<Plan> children) {
+        Preconditions.checkArgument(children.size() == 1);
+        return new LogicalGenerate<>(generators, generatorOutput, groupExpression, logicalProperties, children.get(0));
     }
 
     @Override

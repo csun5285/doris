@@ -19,6 +19,7 @@ PhysicalLimit
 ----------------------------PhysicalProject
 ------------------------------filter((date_dim.d_month_seq >= 1214)(date_dim.d_month_seq <= 1225))
 --------------------------------PhysicalOlapScan[date_dim]
+<<<<<<< HEAD
 --------------PhysicalDistribute
 ----------------PhysicalProject
 ------------------hashAgg[GLOBAL]
@@ -32,4 +33,18 @@ PhysicalLimit
 ------------------------------PhysicalProject
 --------------------------------filter((date_dim.d_month_seq >= 1214)(date_dim.d_month_seq <= 1225))
 ----------------------------------PhysicalOlapScan[date_dim]
+=======
+--------------PhysicalProject
+----------------hashAgg[GLOBAL]
+------------------PhysicalDistribute
+--------------------hashAgg[LOCAL]
+----------------------PhysicalProject
+------------------------hashJoin[INNER_JOIN](catalog_sales.cs_sold_date_sk = date_dim.d_date_sk)
+--------------------------PhysicalProject
+----------------------------PhysicalOlapScan[catalog_sales]
+--------------------------PhysicalDistribute
+----------------------------PhysicalProject
+------------------------------filter((date_dim.d_month_seq >= 1214)(date_dim.d_month_seq <= 1225))
+--------------------------------PhysicalOlapScan[date_dim]
+>>>>>>> 2.0.0-rc01
 

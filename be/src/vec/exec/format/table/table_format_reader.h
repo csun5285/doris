@@ -26,7 +26,6 @@
 
 #include "common/status.h"
 #include "vec/exec/format/generic_reader.h"
-#include "vec/exec/format/parquet/parquet_common.h"
 
 namespace doris {
 class TFileRangeDesc;

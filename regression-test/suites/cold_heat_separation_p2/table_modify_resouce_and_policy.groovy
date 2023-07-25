@@ -34,7 +34,11 @@ suite("table_modify_resouce") {
     // data_sizes is one arrayList<Long>, t is tablet
     def fetchDataSize = { data_sizes, t ->
         def tabletId = t[0]
+<<<<<<< HEAD
         String meta_url = t[16]
+=======
+        String meta_url = t[17]
+>>>>>>> 2.0.0-rc01
         def clos = {  respCode, body ->
             logger.info("test ttl expired resp Code {}", "${respCode}".toString())
             assertEquals("${respCode}".toString(), "200")
@@ -48,6 +52,10 @@ suite("table_modify_resouce") {
     // used as passing out parameter to fetchDataSize
     List<Long> sizes = [-1, -1]
     def tableName = "lineitem4"
+<<<<<<< HEAD
+=======
+    sql """ DROP TABLE IF EXISTS ${tableName} """
+>>>>>>> 2.0.0-rc01
     def stream_load_one_part = { partnum ->
         streamLoad {
             table tableName
@@ -195,12 +203,22 @@ suite("table_modify_resouce") {
     log.info( "test tablets not empty")
     assertTrue(tablets.size() > 0)
     fetchDataSize(sizes, tablets[0])
+<<<<<<< HEAD
+=======
+
+    def try_times = 100
+>>>>>>> 2.0.0-rc01
     while (sizes[0] != 0) {
         log.info( "test local size is not zero, sleep 10s")
         sleep(10000)
         tablets = sql """
         SHOW TABLETS FROM ${tableName}
         """
+<<<<<<< HEAD
+=======
+        try_times -= 1
+        assertTrue(try_times > 0)
+>>>>>>> 2.0.0-rc01
     }
     // 所有的local data size为0
     log.info( "test all local size is zero")

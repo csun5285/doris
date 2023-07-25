@@ -3,7 +3,11 @@ BUILD IMMEDIATE REFRESH COMPLETE
 DISTRIBUTED BY HASH(s_nation, p_category) BUCKETS 6
 PROPERTIES ('replication_num' = '1')
 AS
+<<<<<<< HEAD
 SELECT /*+SET_VAR(parallel_fragment_exec_instance_num=2, batch_size=4096) */  
+=======
+SELECT /*+SET_VAR(parallel_fragment_exec_instance_num=2, parallel_pipeline_task_num=2, batch_size=4096) */
+>>>>>>> 2.0.0-rc01
     d_year,
     s_nation,
     p_category,

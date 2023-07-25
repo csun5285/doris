@@ -676,4 +676,3 @@ public class DeployManager extends MasterDaemon {
         }
     }
 }
-

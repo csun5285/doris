@@ -165,14 +165,12 @@ Status CloudCumulativeCompaction::execute_compact_impl() {
             .tag("cumulative_point", _tablet->cumulative_layer_point())
             .tag("num_rowsets", _tablet->fetch_add_approximate_num_rowsets(0))
             .tag("cumu_num_rowsets", _tablet->fetch_add_approximate_cumu_num_rowsets(0));
-    TRACE("compaction finished");
 
     _state = CompactionState::SUCCESS;
 
     DorisMetrics::instance()->cumulative_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->cumulative_compaction_bytes_total->increment(_input_rowsets_size);
     cumu_output_size << _output_rowset->data_disk_size();
-    TRACE("save cumulative compaction metrics");
 
     return Status::OK();
 }

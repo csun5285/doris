@@ -45,6 +45,7 @@ class JdbcUtils {
         return toStringList(stmt.executeQuery())
     }
 
+<<<<<<< HEAD
     static Tuple2<List<List<Object>>, ResultSetMetaData> executeToList(Connection conn, PreparedStatement stmt) {
         boolean hasResultSet = stmt.execute()
         if (!hasResultSet) {
@@ -54,6 +55,8 @@ class JdbcUtils {
         } 
     }
 
+=======
+>>>>>>> 2.0.0-rc01
     // static Tuple2<List<List<Object>>, ResultSetMetaData> executeToStringList(Connection conn, PreparedStatement stmt) {
     //     boolean hasResultSet = stmt.execute()
     //     if (!hasResultSet) {

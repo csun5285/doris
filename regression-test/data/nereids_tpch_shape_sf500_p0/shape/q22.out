@@ -7,6 +7,7 @@ PhysicalQuickSort
 --------PhysicalDistribute
 ----------hashAgg[LOCAL]
 ------------PhysicalProject
+<<<<<<< HEAD
 --------------hashJoin[RIGHT_ANTI_JOIN](orders.o_custkey = customer.c_custkey)
 ----------------PhysicalDistribute
 ------------------PhysicalProject
@@ -23,4 +24,24 @@ PhysicalQuickSort
 ----------------------------PhysicalProject
 ------------------------------filter((customer.c_acctbal > 0.00)substring(c_phone, 1, 2) IN ('13', '31', '23', '29', '30', '18', '17'))
 --------------------------------PhysicalOlapScan[customer]
+=======
+--------------NestedLoopJoin[INNER_JOIN](cast(c_acctbal as DECIMALV3(38, 4)) > avg(c_acctbal))
+----------------PhysicalProject
+------------------hashJoin[RIGHT_ANTI_JOIN](orders.o_custkey = customer.c_custkey)
+--------------------PhysicalDistribute
+----------------------PhysicalProject
+------------------------PhysicalOlapScan[orders]
+--------------------PhysicalDistribute
+----------------------PhysicalProject
+------------------------filter(substring(c_phone, 1, 2) IN ('13', '31', '23', '29', '30', '18', '17'))
+--------------------------PhysicalOlapScan[customer]
+----------------PhysicalDistribute
+------------------PhysicalAssertNumRows
+--------------------hashAgg[GLOBAL]
+----------------------PhysicalDistribute
+------------------------hashAgg[LOCAL]
+--------------------------PhysicalProject
+----------------------------filter((customer.c_acctbal > 0.00)substring(c_phone, 1, 2) IN ('13', '31', '23', '29', '30', '18', '17'))
+------------------------------PhysicalOlapScan[customer]
+>>>>>>> 2.0.0-rc01
 

@@ -47,29 +47,37 @@ public class GrantStmt extends DdlStmt {
     private String role;
     private TablePattern tblPattern;
     private ResourcePattern resourcePattern;
+    private WorkloadGroupPattern workloadGroupPattern;
     private List<Privilege> privileges;
     // Indicates that these roles are granted to a user
     private List<String> roles;
 
     public GrantStmt(UserIdentity userIdent, String role, TablePattern tblPattern, List<AccessPrivilege> privileges) {
-        this.userIdent = userIdent;
-        this.role = role;
-        this.tblPattern = tblPattern;
-        this.resourcePattern = null;
-        PrivBitSet privs = PrivBitSet.of();
-        for (AccessPrivilege accessPrivilege : privileges) {
-            privs.or(accessPrivilege.toPaloPrivilege());
-        }
-        this.privileges = privs.toPrivilegeList();
+        this(userIdent, role, tblPattern, null, null, privileges, ResourceTypeEnum.GENERAL);
     }
 
     public GrantStmt(UserIdentity userIdent, String role,
             ResourcePattern resourcePattern, List<AccessPrivilege> privileges, ResourceTypeEnum type) {
+        this(userIdent, role, null, resourcePattern, null, privileges,  type);
+    }
+
+    public GrantStmt(UserIdentity userIdent, String role,
+            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilege> privileges) {
+        this(userIdent, role, null, null, workloadGroupPattern, privileges,  ResourceTypeEnum.GENERAL);
+    }
+
+    public GrantStmt(List<String> roles, UserIdentity userIdent) {
+        this.userIdent = userIdent;
+        this.roles = roles;
+    }
+
+    private GrantStmt(UserIdentity userIdent, String role, TablePattern tblPattern, ResourcePattern resourcePattern,
+            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilege> privileges, ResourceTypeEnum type) {
         this.userIdent = userIdent;
         this.role = role;
-        this.tblPattern = null;
+        this.tblPattern = tblPattern;
         this.resourcePattern = resourcePattern;
-        this.resourcePattern.setResourceType(type);
+        this.workloadGroupPattern = workloadGroupPattern;
         PrivBitSet privs = PrivBitSet.of();
         for (AccessPrivilege accessPrivilege : privileges) {
             if (!accessPrivilege.isResource() || type == ResourceTypeEnum.GENERAL) {
@@ -86,11 +94,6 @@ public class GrantStmt extends DdlStmt {
         this.privileges = privs.toPrivilegeList();
     }
 
-    public GrantStmt(List<String> roles, UserIdentity userIdent) {
-        this.userIdent = userIdent;
-        this.roles = roles;
-    }
-
     public UserIdentity getUserIdent() {
         return userIdent;
     }
@@ -101,6 +104,10 @@ public class GrantStmt extends DdlStmt {
 
     public ResourcePattern getResourcePattern() {
         return resourcePattern;
+    }
+
+    public WorkloadGroupPattern getWorkloadGroupPattern() {
+        return workloadGroupPattern;
     }
 
     public boolean hasRole() {
@@ -133,6 +140,8 @@ public class GrantStmt extends DdlStmt {
             tblPattern.analyze(analyzer);
         } else if (resourcePattern != null) {
             resourcePattern.analyze();
+        } else if (workloadGroupPattern != null) {
+            workloadGroupPattern.analyze();
         } else if (roles != null) {
             for (int i = 0; i < roles.size(); i++) {
                 String originalRoleName = roles.get(i);
@@ -149,6 +158,8 @@ public class GrantStmt extends DdlStmt {
             checkTablePrivileges(privileges, role, tblPattern);
         } else if (resourcePattern != null) {
             checkResourcePrivileges(privileges, role, resourcePattern);
+        } else if (workloadGroupPattern != null) {
+            checkWorkloadGroupPrivileges(privileges, role, workloadGroupPattern);
         } else if (roles != null) {
             checkRolePrivileges();
         }
@@ -163,6 +174,7 @@ public class GrantStmt extends DdlStmt {
      * 5.1 User should has GLOBAL level GRANT_PRIV
      * 5.2 or user has DATABASE/TABLE level GRANT_PRIV if grant/revoke to/from certain database or table.
      * 5.3 or user should has 'resource' GRANT_PRIV if grant/revoke to/from certain 'resource'
+     * 5.4 or user should has 'workload group' GRANT_PRIV if grant/revoke to/from certain 'workload group'
      * 6. Can not grant USAGE_PRIV to database or table
      *
      * @param privileges
@@ -228,8 +240,9 @@ public class GrantStmt extends DdlStmt {
             ResourcePattern resourcePattern) throws AnalysisException {
         for (int i = 0; i < Privilege.notBelongToResourcePrivileges.length; i++) {
             if (privileges.contains(Privilege.notBelongToResourcePrivileges[i])) {
-                throw new AnalysisException(String.format("Can not grant/revoke %s to/from any other users or roles",
-                        Privilege.notBelongToResourcePrivileges[i]));
+                throw new AnalysisException(
+                        String.format("Can not grant/revoke %s on resource to/from any other users or roles",
+                                Privilege.notBelongToResourcePrivileges[i]));
             }
         }
 
@@ -243,11 +256,6 @@ public class GrantStmt extends DdlStmt {
             if (resourcePattern.getPrivLevel() == PrivLevel.GLOBAL) {
                 if (!Env.getCurrentEnv().getAccessManager()
                         .checkGlobalPriv(ConnectContext.get(), PrivPredicate.GRANT)) {
-                    ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
-                }
-            } else if (resourcePattern.isGeneralResource()) {
-                if (!Env.getCurrentEnv().getAccessManager().checkResourcePriv(ConnectContext.get(),
-                        resourcePattern.getResourceName(), PrivPredicate.GRANT)) {
                     ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
                 }
             } else {
@@ -266,6 +274,27 @@ public class GrantStmt extends DdlStmt {
                 }
 
             }
+        }
+    }
+
+    public static void checkWorkloadGroupPrivileges(List<Privilege> privileges, String role,
+            WorkloadGroupPattern workloadGroupPattern) throws AnalysisException {
+        for (int i = 0; i < Privilege.notBelongToWorkloadGroupPrivileges.length; i++) {
+            if (privileges.contains(Privilege.notBelongToWorkloadGroupPrivileges[i])) {
+                throw new AnalysisException(
+                        String.format("Can not grant/revoke %s on workload group to/from any other users or roles",
+                                Privilege.notBelongToWorkloadGroupPrivileges[i]));
+            }
+        }
+
+        if (role != null) {
+            // Rule 4
+            if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.GRANT)) {
+                ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
+            }
+        } else if (!Env.getCurrentEnv().getAccessManager().checkWorkloadGroupPriv(ConnectContext.get(),
+                workloadGroupPattern.getworkloadGroupName(), PrivPredicate.GRANT)) {
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
         }
     }
 
@@ -289,6 +318,8 @@ public class GrantStmt extends DdlStmt {
             sb.append(" ON ").append(tblPattern).append(" TO ");
         } else if (resourcePattern != null) {
             sb.append(" ON RESOURCE '").append(resourcePattern).append("' TO ");
+        } else if (workloadGroupPattern != null) {
+            sb.append(" ON WORKLOAD GROUP '").append(workloadGroupPattern).append("' TO ");
         } else {
             sb.append(" TO ");
         }

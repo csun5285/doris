@@ -19,6 +19,7 @@
 // /testing/trino-product-tests/src/main/resources/sql-tests/testcases/tpcds
 // and modified by Doris.
 suite("load") {
+<<<<<<< HEAD
     def tables=["store", "store_returns", "customer", "date_dim", "web_sales",
                 "catalog_sales", "store_sales", "item", "web_returns", "catalog_returns",
                 "catalog_page", "web_site", "customer_address", "customer_demographics",
@@ -46,6 +47,9 @@ suite("load") {
     ]
 
     def specialTables = ["item", "customer_address"]
+=======
+    def tables=["catalog_page"]
+>>>>>>> 2.0.0-rc01
 
     for (String table in tables) {
         sql """ DROP TABLE IF EXISTS $table """
@@ -72,11 +76,14 @@ suite("load") {
             set 'column_separator', '|'
             set 'compress_type', 'GZ'
 
+<<<<<<< HEAD
             if (specialTables.contains(tableName)) {
             set "columns", columnsMap[tableName]
             }
 
 
+=======
+>>>>>>> 2.0.0-rc01
             // relate to ${DORIS_HOME}/regression-test/data/demo/streamload_input.csv.
             // also, you can stream load a http stream, e.g. http://xxx/some.csv
             file """${getS3Url()}/regression/tpcds/sf1/${tableName}.dat.gz"""
@@ -98,5 +105,9 @@ suite("load") {
                 assertTrue(json.NumberLoadedRows > 0 && json.LoadBytes > 0)
             }
         }
+<<<<<<< HEAD
+=======
+        sql """ ANALYZE TABLE $tableName WITH SYNC """
+>>>>>>> 2.0.0-rc01
     }
 }

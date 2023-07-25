@@ -50,4 +50,3 @@ public class IcebergHMSExternalCatalog extends IcebergExternalCatalog {
         catalog = hiveCatalog;
     }
 }
-

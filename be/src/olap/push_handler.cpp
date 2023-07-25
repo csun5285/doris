@@ -32,7 +32,6 @@
 #include <new>
 #include <queue>
 #include <shared_mutex>
-#include <sstream>
 
 #include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
@@ -198,7 +197,13 @@ Status PushHandler::_do_streaming_ingestion(TabletSharedPtr tablet, const TPushR
     if (push_type == PushType::PUSH_FOR_DELETE) {
         DeletePredicatePB del_pred;
         TabletSchema tablet_schema;
-        tablet_schema.update_tablet_columns(*tablet->tablet_schema(), request.columns_desc);
+        tablet_schema.copy_from(*tablet->tablet_schema());
+        if (!request.columns_desc.empty() && request.columns_desc[0].col_unique_id >= 0) {
+            tablet_schema.clear_columns();
+            for (const auto& column_desc : request.columns_desc) {
+                tablet_schema.append_column(TabletColumn(column_desc));
+            }
+        }
         res = DeleteHandler::generate_delete_predicate(tablet_schema, request.delete_conditions,
                                                        &del_pred);
         del_preds.push(del_pred);
@@ -217,7 +222,13 @@ Status PushHandler::_do_streaming_ingestion(TabletSharedPtr tablet, const TPushR
         return Status::Status::Error<TOO_MANY_VERSION>();
     }
     auto tablet_schema = std::make_shared<TabletSchema>();
-    tablet_schema->update_tablet_columns(*tablet->tablet_schema(), request.columns_desc);
+    tablet_schema->copy_from(*tablet->tablet_schema());
+    if (!request.columns_desc.empty() && request.columns_desc[0].col_unique_id >= 0) {
+        tablet_schema->clear_columns();
+        for (const auto& column_desc : request.columns_desc) {
+            tablet_schema->append_column(TabletColumn(column_desc));
+        }
+    }
     RowsetSharedPtr rowset_to_add;
     // writes
     res = _convert_v2(tablet, &rowset_to_add, tablet_schema, push_type);
@@ -269,8 +280,6 @@ Status PushHandler::_convert_v2(TabletSharedPtr cur_tablet, RowsetSharedPtr* cur
         // set this value to OVERLAP_UNKNOWN
         std::unique_ptr<RowsetWriter> rowset_writer;
         RowsetWriterContext context;
-        context.is_persistent = cur_tablet->is_persistent();
-        context.ttl_seconds = cur_tablet->ttl_seconds();
         context.txn_id = _request.transaction_id;
         context.load_id = load_id;
         context.rowset_state = PREPARED;
@@ -424,11 +433,7 @@ Status PushBrokerReader::init() {
         return Status::Error<PUSH_INIT_ERROR>();
     }
     _runtime_state->set_desc_tbl(desc_tbl);
-    status = _runtime_state->init_mem_trackers(dummy_id);
-    if (UNLIKELY(!status.ok())) {
-        LOG(WARNING) << "Failed to init mem trackers, msg: " << status;
-        return Status::Error<PUSH_INIT_ERROR>();
-    }
+    _runtime_state->init_mem_trackers(dummy_id, "PushBrokerReader");
     _runtime_profile = _runtime_state->runtime_profile();
     _runtime_profile->set_name("PushBrokerReader");
 
@@ -470,29 +475,6 @@ Status PushBrokerReader::next(vectorized::Block* block) {
 
 Status PushBrokerReader::close() {
     _ready = false;
-    for (auto ctx : _dest_expr_ctxs) {
-        if (ctx != nullptr) {
-            ctx->close(_runtime_state.get());
-        }
-    }
-
-    for (auto& expr : _push_down_exprs) {
-        expr->close(_runtime_state.get());
-    }
-
-    for (auto& [k, v] : _slot_id_to_filter_conjuncts) {
-        for (auto& ctx : v) {
-            if (ctx != nullptr) {
-                ctx->close(_runtime_state.get());
-            }
-        }
-    }
-
-    for (auto& ctx : _not_single_slot_filter_conjuncts) {
-        if (ctx != nullptr) {
-            ctx->close(_runtime_state.get());
-        }
-    }
     return Status::OK();
 }
 

@@ -192,12 +192,6 @@ public class MysqlProto {
                 channel.setSslMode(true);
                 LOG.debug("switch to ssl mode.");
                 handshakeResponse = channel.fetchOnePacket();
-                capability = new MysqlCapability(MysqlProto.readLowestInt4(handshakeResponse));
-                if (!capability.isClientUseSsl()) {
-                    ErrorReport.report(ErrorCode.ERR_NONSSL_HANDSHAKE_RESPONSE);
-                    sendResponsePacket(context);
-                    return false;
-                }
             } else {
                 handshakeResponse = clientRequestPacket;
             }
@@ -206,6 +200,7 @@ public class MysqlProto {
         }
 
         if (handshakeResponse == null) {
+            // receive response failed.
             return false;
         }
         if (capability.isDeprecatedEOF()) {
@@ -324,15 +319,6 @@ public class MysqlProto {
                 context.getState().setError(ErrorCode.ERR_BAD_DB_ERROR, "Only one dot can be in the name: " + db);
                 return false;
             }
-
-            try {
-                dbName = Env.getCurrentEnv().analyzeCloudCluster(dbName, context);
-            } catch (DdlException e) {
-                context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
-                sendResponsePacket(context);
-                return false;
-            }
-
             String dbFullName = ClusterNamespace.getFullName(context.getClusterName(), dbName);
 
             // check catalog and db exists
@@ -356,31 +342,6 @@ public class MysqlProto {
                 context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
                 sendResponsePacket(context);
                 return false;
-            }
-
-            if (dbName != null && !dbName.isEmpty()) {
-                // check catalog and db exists
-                if (catalogName != null) {
-                    CatalogIf catalogIf = context.getEnv().getCatalogMgr().getCatalogNullable(catalogName);
-                    if (catalogIf == null) {
-                        context.getState().setError(ErrorCode.ERR_BAD_DB_ERROR, "No match catalog in doris: " + db);
-                        return false;
-                    }
-                    if (catalogIf.getDbNullable(dbFullName) == null) {
-                        context.getState().setError(ErrorCode.ERR_BAD_DB_ERROR, "No match database in doris: " + db);
-                        return false;
-                    }
-                }
-                try {
-                    if (catalogName != null) {
-                        context.getEnv().changeCatalog(context, catalogName);
-                    }
-                    Env.getCurrentEnv().changeDb(context, dbFullName);
-                } catch (DdlException e) {
-                    context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
-                    sendResponsePacket(context);
-                    return false;
-                }
             }
         }
 

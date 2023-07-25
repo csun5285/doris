@@ -22,9 +22,7 @@
 #include <memory>
 #include <utility>
 
-#include "io/fs/file_reader.h"
 #include "common/status.h"
-#include "gen_cpp/segment_v2.pb.h"
 #include "io/fs/file_reader_writer_fwd.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/common.h"

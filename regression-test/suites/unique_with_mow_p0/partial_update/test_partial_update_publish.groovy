@@ -61,6 +61,11 @@ suite("test_primary_key_partial_update_publish", "p0") {
         time 10000 // limit inflight 10s
     }
 
+<<<<<<< HEAD
+=======
+    sql "sync"
+
+>>>>>>> 2.0.0-rc01
     qt_select_default """
         select * from ${tableName} order by id;
     """

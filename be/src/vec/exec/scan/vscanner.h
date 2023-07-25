@@ -30,7 +30,6 @@
 #include "runtime/runtime_state.h"
 #include "util/stopwatch.hpp"
 #include "vec/core/block.h"
-#include "vec/exprs/vexpr_fwd.h"
 
 namespace doris {
 class RuntimeProfile;

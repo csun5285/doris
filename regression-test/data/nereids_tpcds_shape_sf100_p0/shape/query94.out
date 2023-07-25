@@ -4,12 +4,21 @@ PhysicalTopN
 --PhysicalTopN
 ----PhysicalProject
 ------hashAgg[GLOBAL]
+<<<<<<< HEAD
 --------hashAgg[LOCAL]
 ----------PhysicalDistribute
 ------------PhysicalProject
 --------------hashJoin[INNER_JOIN](ws1.ws_ship_date_sk = date_dim.d_date_sk)
 ----------------PhysicalProject
 ------------------filter((date_dim.d_date >= 2000-02-01)(cast(d_date as DATETIMEV2(0)) <= cast(days_add(cast('2000-2-01' as DATE), INTERVAL 60 DAY) as DATETIMEV2(0))))
+=======
+--------PhysicalDistribute
+----------hashAgg[LOCAL]
+------------PhysicalProject
+--------------hashJoin[INNER_JOIN](ws1.ws_ship_date_sk = date_dim.d_date_sk)
+----------------PhysicalProject
+------------------filter((date_dim.d_date >= 2000-02-01)(cast(d_date as DATETIMEV2(0)) <= cast(days_add(cast('2000-2-01' as DATEV2), INTERVAL 60 DAY) as DATETIMEV2(0))))
+>>>>>>> 2.0.0-rc01
 --------------------PhysicalOlapScan[date_dim]
 ----------------PhysicalDistribute
 ------------------PhysicalProject

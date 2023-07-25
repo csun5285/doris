@@ -31,8 +31,6 @@ enum class TypeIndex;
 } // namespace vectorized
 } // namespace doris
 
-#include "common/status.h"
-
 namespace doris::vectorized {
 
 /** Get data type that covers all possible values of passed data types.

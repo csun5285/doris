@@ -19,6 +19,7 @@ package org.apache.doris.qe;
 
 import org.apache.doris.analysis.SetVar;
 import org.apache.doris.analysis.StringLiteral;
+import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ExperimentalUtil.ExperimentalType;
@@ -28,7 +29,6 @@ import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.nereids.metrics.Event;
 import org.apache.doris.nereids.metrics.EventSwitchParser;
 import org.apache.doris.qe.VariableMgr.VarAttr;
-import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TResourceLimit;
 import org.apache.doris.thrift.TRuntimeFilterType;
@@ -104,6 +104,7 @@ public class SessionVariable implements Serializable, Writable {
     public static final String ENABLE_COLOCATE_SCAN = "enable_colocate_scan";
     public static final String ENABLE_BUCKET_SHUFFLE_JOIN = "enable_bucket_shuffle_join";
     public static final String PARALLEL_FRAGMENT_EXEC_INSTANCE_NUM = "parallel_fragment_exec_instance_num";
+    public static final String PARALLEL_PIPELINE_TASK_NUM = "parallel_pipeline_task_num";
     public static final String ENABLE_INSERT_STRICT = "enable_insert_strict";
     public static final String MAX_FILTER_RATIO = "max_filter_ratio";
     public static final String STRICT_MODE = "strict_mode";
@@ -196,6 +197,9 @@ public class SessionVariable implements Serializable, Writable {
     public static final long MIN_INSERT_VISIBLE_TIMEOUT_MS = 1000;
 
     public static final String ENABLE_PIPELINE_ENGINE = "enable_pipeline_engine";
+
+    public static final String ENABLE_AGG_STATE = "enable_agg_state";
+
     public static final String ENABLE_RPC_OPT_FOR_PIPELINE = "enable_rpc_opt_for_pipeline";
 
     public static final String ENABLE_SINGLE_DISTINCT_COLUMN_OPT = "enable_single_distinct_column_opt";
@@ -246,6 +250,8 @@ public class SessionVariable implements Serializable, Writable {
     public static final String ENABLE_NEREIDS_TRACE = "enable_nereids_trace";
 
     public static final String ENABLE_DPHYP_TRACE = "enable_dphyp_trace";
+
+    public static final String ENABLE_FOLD_NONDETERMINISTIC_FN = "enable_fold_nondeterministic_fn";
 
     public static final String ENABLE_RUNTIME_FILTER_PRUNE =
             "enable_runtime_filter_prune";
@@ -352,6 +358,18 @@ public class SessionVariable implements Serializable, Writable {
 
     public static final String ENABLE_SCAN_RUN_SERIAL = "enable_scan_node_run_serial";
 
+    public static final String IGNORE_COMPLEX_TYPE_COLUMN = "ignore_column_with_complex_type";
+
+    public static final String EXTERNAL_TABLE_ANALYZE_PART_NUM = "external_table_analyze_part_num";
+
+    public static final String ENABLE_STRONG_CONSISTENCY = "enable_strong_consistency_read";
+
+    public static final String CBO_CPU_WEIGHT = "cbo_cpu_weight";
+
+    public static final String CBO_MEM_WEIGHT = "cbo_mem_weight";
+
+    public static final String CBO_NET_WEIGHT = "cbo_net_weight";
+
     public static final List<String> DEBUG_VARIABLES = ImmutableList.of(
             SKIP_DELETE_PREDICATE,
             SKIP_DELETE_BITMAP,
@@ -388,7 +406,7 @@ public class SessionVariable implements Serializable, Writable {
 
     // query timeout in second.
     @VariableMgr.VarAttr(name = QUERY_TIMEOUT)
-    public int queryTimeoutS = Config.default_query_timeout_second;
+    public int queryTimeoutS = 300;
 
     // The global max_execution_time value provides the default for the session value for new connections.
     // The session value applies to SELECT executions executed within the session that include
@@ -543,6 +561,9 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = PARALLEL_FRAGMENT_EXEC_INSTANCE_NUM, fuzzy = true)
     public int parallelExecInstanceNum = 1;
 
+    @VariableMgr.VarAttr(name = PARALLEL_PIPELINE_TASK_NUM, fuzzy = true)
+    public int parallelPipelineTaskNum = 0;
+
     @VariableMgr.VarAttr(name = ENABLE_INSERT_STRICT, needForward = true)
     public boolean enableInsertStrict = true;
 
@@ -620,7 +641,10 @@ public class SessionVariable implements Serializable, Writable {
     public boolean enableVectorizedEngine = true;
 
     @VariableMgr.VarAttr(name = ENABLE_PIPELINE_ENGINE, fuzzy = true, expType = ExperimentalType.EXPERIMENTAL)
-    public boolean enablePipelineEngine = false;
+    private boolean enablePipelineEngine = true;
+
+    @VariableMgr.VarAttr(name = ENABLE_AGG_STATE, fuzzy = false, expType = ExperimentalType.EXPERIMENTAL)
+    public boolean enableAggState = false;
 
     @VariableMgr.VarAttr(name = ENABLE_PARALLEL_OUTFILE)
     public boolean enableParallelOutfile = false;
@@ -725,7 +749,7 @@ public class SessionVariable implements Serializable, Writable {
      */
     @VariableMgr.VarAttr(name = ENABLE_NEREIDS_PLANNER, needForward = true,
             fuzzy = true, expType = ExperimentalType.EXPERIMENTAL)
-    private boolean enableNereidsPlanner = false;
+    private boolean enableNereidsPlanner = true;
 
     @VariableMgr.VarAttr(name = DISABLE_NEREIDS_RULES, needForward = true)
     private String disableNereidsRules = "";
@@ -930,10 +954,13 @@ public class SessionVariable implements Serializable, Writable {
     public boolean dumpNereidsMemo = false;
 
     @VariableMgr.VarAttr(name = "memo_max_group_expression_size")
-    public int memoMaxGroupExpressionSize = 40000;
+    public int memoMaxGroupExpressionSize = 10000;
 
     @VariableMgr.VarAttr(name = ENABLE_MINIDUMP)
     public boolean enableMinidump = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_FOLD_NONDETERMINISTIC_FN)
+    public boolean enableFoldNondeterministicFn = true;
 
     @VariableMgr.VarAttr(name = TRACE_NEREIDS)
     public boolean traceNereids = false;
@@ -971,6 +998,14 @@ public class SessionVariable implements Serializable, Writable {
     public boolean enableOrcLazyMat = true;
 
     @VariableMgr.VarAttr(
+            name = EXTERNAL_TABLE_ANALYZE_PART_NUM,
+            description = {"收集外表统计信息行数时选取的采样分区数，默认-1表示全部分区",
+                    "Number of sample partition for collecting external table line number, "
+                            + "default -1 means all partitions"},
+            needForward = false)
+    public int externalTableAnalyzePartNum = -1;
+
+    @VariableMgr.VarAttr(
             name = INLINE_CTE_REFERENCED_THRESHOLD
     )
     public int inlineCTEReferencedThreshold = 1;
@@ -980,11 +1015,25 @@ public class SessionVariable implements Serializable, Writable {
     )
     public boolean enableCTEMaterialize = true;
 
+    @VariableMgr.VarAttr(
+            name = IGNORE_COMPLEX_TYPE_COLUMN
+    )
+    public boolean ignoreColumnWithComplexType = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_STRONG_CONSISTENCY, description = {"用以开启强一致读。Doris 默认支持同一个会话内的"
+            + "强一致性，即同一个会话内对数据的变更操作是实时可见的。如需要会话间的强一致读，则需将此变量设置为true。",
+            "Used to enable strong consistent reading. By default, Doris supports strong consistency "
+                    + "within the same session, that is, changes to data within the same session are visible in "
+                    + "real time. If you want strong consistent reads between sessions, set this variable to true. "
+    })
+    public boolean enableStrongConsistencyRead = false;
+
     // If this fe is in fuzzy mode, then will use initFuzzyModeVariables to generate some variables,
     // not the default value set in the code.
     public void initFuzzyModeVariables() {
         Random random = new Random(System.currentTimeMillis());
         this.parallelExecInstanceNum = random.nextInt(8) + 1;
+        this.parallelPipelineTaskNum = random.nextInt(8);
         this.enableCommonExprPushdown = random.nextBoolean();
         this.enableLocalExchange = random.nextBoolean();
         // This will cause be dead loop, disable it first
@@ -1021,24 +1070,41 @@ public class SessionVariable implements Serializable, Writable {
                 this.externalAggPartitionBits = 4;
                 break;
         }
-        // pull_request_id default value is 0
-        if (Config.pull_request_id % 2 == 1) {
-            this.enablePipelineEngine = true;
-            // this.enableFoldConstantByBe = true;
-            // this.enableTwoPhaseReadOpt = false;
-            this.runtimeFilterType |= TRuntimeFilterType.BITMAP.getValue();
-        } else {
-            // this.enablePipelineEngine = false;
-            // this.enableFoldConstantByBe = false;
-            // this.enableTwoPhaseReadOpt = true;
-            this.runtimeFilterType &= ~TRuntimeFilterType.BITMAP.getValue();
+        // pull_request_id default value is 0. When it is 0, use default (global) session variable.
+        if (Config.pull_request_id > 0) {
+            switch (Config.pull_request_id % 4) {
+                case 0:
+                    this.enablePipelineEngine = true;
+                    this.runtimeFilterType |= TRuntimeFilterType.BITMAP.getValue();
+                    this.enableNereidsPlanner = true;
+                    break;
+                case 1:
+                    this.enablePipelineEngine = true;
+                    this.runtimeFilterType |= TRuntimeFilterType.BITMAP.getValue();
+                    this.enableNereidsPlanner = false;
+                    break;
+                case 2:
+                    this.enablePipelineEngine = false;
+                    this.runtimeFilterType &= ~TRuntimeFilterType.BITMAP.getValue();
+                    this.enableNereidsPlanner = true;
+                    break;
+                case 3:
+                    this.enablePipelineEngine = false;
+                    this.runtimeFilterType &= ~TRuntimeFilterType.BITMAP.getValue();
+                    this.enableNereidsPlanner = false;
+                    break;
+                default:
+                    break;
+            }
         }
 
         if (Config.fuzzy_test_type.equals("p0")) {
-            if (Config.pull_request_id % 2 == 1) {
-                this.batchSize = 4064;
-            } else {
-                this.batchSize = 50;
+            if (Config.pull_request_id > 0) {
+                if (Config.pull_request_id % 2 == 1) {
+                    this.batchSize = 4064;
+                } else {
+                    this.batchSize = 50;
+                }
             }
         }
 
@@ -1367,9 +1433,11 @@ public class SessionVariable implements Serializable, Writable {
     }
 
     public int getParallelExecInstanceNum() {
-        if (enablePipelineEngine && parallelExecInstanceNum == 0) {
-            Backend.BeInfoCollector beinfoCollector = Backend.getBeInfoCollector();
-            return beinfoCollector.getParallelExecInstanceNum();
+        if (enablePipelineEngine && parallelPipelineTaskNum == 0) {
+            int size = Env.getCurrentSystemInfo().getMinPipelineExecutorSize();
+            return (size + 1) / 2;
+        } else if (enablePipelineEngine) {
+            return parallelPipelineTaskNum;
         } else {
             return parallelExecInstanceNum;
         }
@@ -1601,10 +1669,6 @@ public class SessionVariable implements Serializable, Writable {
         this.runtimeFilterMaxInNum = runtimeFilterMaxInNum;
     }
 
-    public boolean enablePipelineEngine() {
-        return enablePipelineEngine;
-    }
-
     public void setEnablePipelineEngine(boolean enablePipelineEngine) {
         this.enablePipelineEngine = enablePipelineEngine;
     }
@@ -1756,6 +1820,14 @@ public class SessionVariable implements Serializable, Writable {
 
     public void setEnablePartitionTopN(boolean enablePartitionTopN) {
         this.enablePartitionTopN = enablePartitionTopN;
+    }
+
+    public boolean isEnableFoldNondeterministicFn() {
+        return enableFoldNondeterministicFn;
+    }
+
+    public void setEnableFoldNondeterministicFn(boolean enableFoldNondeterministicFn) {
+        this.enableFoldNondeterministicFn = enableFoldNondeterministicFn;
     }
 
     public boolean isReturnObjectDataAsBinary() {
@@ -1940,6 +2012,10 @@ public class SessionVariable implements Serializable, Writable {
 
     public boolean isShowUserDefaultRole() {
         return showUserDefaultRole;
+    }
+
+    public int getExternalTableAnalyzePartNum() {
+        return externalTableAnalyzePartNum;
     }
 
     /**
@@ -2310,5 +2386,25 @@ public class SessionVariable implements Serializable, Writable {
 
     public boolean isEnableUnifiedLoad() {
         return enableUnifiedLoad;
+    }
+
+    public boolean getEnablePipelineEngine() {
+        return enablePipelineEngine;
+    }
+
+    public static boolean enablePipelineEngine() {
+        ConnectContext connectContext = ConnectContext.get();
+        if (connectContext == null) {
+            return false;
+        }
+        return connectContext.getSessionVariable().enablePipelineEngine;
+    }
+
+    public static boolean enableAggState() {
+        ConnectContext connectContext = ConnectContext.get();
+        if (connectContext == null) {
+            return true;
+        }
+        return connectContext.getSessionVariable().enableAggState;
     }
 }

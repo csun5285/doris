@@ -19,9 +19,12 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite ("k1ap2spa") {
 
+<<<<<<< HEAD
     // because nereids cannot support rollup correctly forbid it temporary
     sql """set enable_nereids_planner=false"""
 
+=======
+>>>>>>> 2.0.0-rc01
     sql """ DROP TABLE IF EXISTS d_table; """
 
     sql """
@@ -43,6 +46,10 @@ suite ("k1ap2spa") {
     createMV("create materialized view k1ap2spa as select abs(k1)+1,sum(abs(k2+1)) from d_table group by abs(k1)+1;")
 
     sql "insert into d_table select -4,-4,-4,'d';"
+<<<<<<< HEAD
+=======
+    sql "insert into d_table(k4,k2) values('d',4);"
+>>>>>>> 2.0.0-rc01
 
     qt_select_star "select * from d_table order by k1;"
 

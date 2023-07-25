@@ -19,6 +19,7 @@ package org.apache.doris.task;
 
 import org.apache.doris.alter.SchemaChangeHandler;
 import org.apache.doris.analysis.DataSortInfo;
+import org.apache.doris.catalog.BinlogConfig;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Index;
@@ -107,6 +108,8 @@ public class CreateReplicaTask extends AgentTask {
 
     private boolean storeRowColumn;
 
+    private BinlogConfig binlogConfig;
+
     public CreateReplicaTask(long backendId, long dbId, long tableId, long partitionId, long indexId, long tabletId,
                              long replicaId, short shortKeyColumnCount, int schemaHash, long version,
                              KeysType keysType, TStorageType storageType,
@@ -123,7 +126,7 @@ public class CreateReplicaTask extends AgentTask {
                              boolean skipWriteIndexOnLoad,
                              boolean storeRowColumn,
                              boolean isDynamicSchema,
-                             boolean isPersistent) {
+                             boolean isPersistent, BinlogConfig binlogConfig) {
         super(null, backendId, TTaskType.CREATE, dbId, tableId, partitionId, indexId, tabletId);
 
         this.replicaId = replicaId;
@@ -162,6 +165,7 @@ public class CreateReplicaTask extends AgentTask {
         this.enableSingleReplicaCompaction = enableSingleReplicaCompaction;
         this.skipWriteIndexOnLoad = skipWriteIndexOnLoad;
         this.storeRowColumn = storeRowColumn;
+        this.binlogConfig = binlogConfig;
     }
 
     public void setIsRecoverTask(boolean isRecoverTask) {
@@ -299,6 +303,11 @@ public class CreateReplicaTask extends AgentTask {
         createTabletReq.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
         createTabletReq.setIsInMemory(isInMemory);
         createTabletReq.setIsPersistent(isPersistent);
+
+        if (binlogConfig != null) {
+            createTabletReq.setBinlogConfig(binlogConfig.toThrift());
+        }
+
         return createTabletReq;
     }
 }

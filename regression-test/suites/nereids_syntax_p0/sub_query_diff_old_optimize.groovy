@@ -22,6 +22,7 @@ suite ("sub_query_diff_old_optimize") {
     """
 
     sql """
+<<<<<<< HEAD
         SET enable_bucket_shuffle_join=false
     """
 
@@ -30,6 +31,8 @@ suite ("sub_query_diff_old_optimize") {
     """
 
     sql """
+=======
+>>>>>>> 2.0.0-rc01
         DROP TABLE IF EXISTS `sub_query_diff_old_optimize_subquery1`
     """
 

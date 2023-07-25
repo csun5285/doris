@@ -60,8 +60,6 @@ class TTransmitDataParams;
 class TUniqueId;
 class TIngestBinlogRequest;
 class TIngestBinlogResult;
-class TLoadSyncRequest;
-class TLoadSyncResponse;
 
 // This class just forward rpc for actual handler
 // make this class because we can bind multiple service on single point

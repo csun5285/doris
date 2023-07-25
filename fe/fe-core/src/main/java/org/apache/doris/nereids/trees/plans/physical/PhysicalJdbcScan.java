@@ -17,12 +17,13 @@
 
 package org.apache.doris.nereids.trees.plans.physical;
 
-import org.apache.doris.catalog.external.ExternalTable;
+import org.apache.doris.catalog.TableIf;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.DistributionSpec;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.properties.PhysicalProperties;
 import org.apache.doris.nereids.trees.plans.ObjectId;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.nereids.util.Utils;
@@ -37,13 +38,13 @@ import java.util.Optional;
  */
 public class PhysicalJdbcScan extends PhysicalRelation {
 
-    private final ExternalTable table;
+    private final TableIf table;
     private final DistributionSpec distributionSpec;
 
     /**
      * Constructor for PhysicalJdbcScan.
      */
-    public PhysicalJdbcScan(ObjectId id, ExternalTable table, List<String> qualifier,
+    public PhysicalJdbcScan(ObjectId id, TableIf table, List<String> qualifier,
                             DistributionSpec distributionSpec, Optional<GroupExpression> groupExpression,
                             LogicalProperties logicalProperties) {
         super(id, PlanType.PHYSICAL_JDBC_SCAN, qualifier, groupExpression, logicalProperties);
@@ -54,7 +55,7 @@ public class PhysicalJdbcScan extends PhysicalRelation {
     /**
      * Constructor for PhysicalJdbcScan.
      */
-    public PhysicalJdbcScan(ObjectId id, ExternalTable table, List<String> qualifier,
+    public PhysicalJdbcScan(ObjectId id, TableIf table, List<String> qualifier,
                             DistributionSpec distributionSpec, Optional<GroupExpression> groupExpression,
                             LogicalProperties logicalProperties, PhysicalProperties physicalProperties,
                             Statistics statistics) {
@@ -101,12 +102,13 @@ public class PhysicalJdbcScan extends PhysicalRelation {
     }
 
     @Override
-    public PhysicalJdbcScan withLogicalProperties(Optional<LogicalProperties> logicalProperties) {
+    public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
+            Optional<LogicalProperties> logicalProperties, List<Plan> children) {
         return new PhysicalJdbcScan(id, table, qualifier, distributionSpec, groupExpression, logicalProperties.get());
     }
 
     @Override
-    public ExternalTable getTable() {
+    public TableIf getTable() {
         return table;
     }
 

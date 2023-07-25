@@ -63,6 +63,7 @@ enum TExprNodeType {
 
   // for schema change
   SCHEMA_CHANGE_EXPR,
+
   // for map 
   MAP_LITERAL,
 
@@ -237,7 +238,7 @@ struct TExprNode {
   29: optional bool is_nullable
   
   30: optional TJsonLiteral json_literal
-  31: optional TSchemaChangeExpr schema_change_expr 
+  31: optional TSchemaChangeExpr schema_change_expr
 
   32: optional TColumnRef column_ref 
   33: optional TMatchPredicate match_predicate

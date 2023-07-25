@@ -41,9 +41,7 @@ struct FlushContext {
     TabletSchemaSPtr flush_schema = nullptr;
     const vectorized::Block* block = nullptr;
     std::optional<int32_t> segment_id = std::nullopt;
-    std::function<Status(int32_t)> generate_delete_bitmap = [](int32_t segment_id) {
-        return Status::OK();
-    };
+    std::function<Status(int32_t)> generate_delete_bitmap;
 };
 
 class RowsetWriter {
@@ -73,12 +71,7 @@ public:
     virtual Status flush_columns(bool is_key) {
         return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
     }
-
     virtual Status final_flush() { return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>(); }
-
-    virtual Status flush_single_memtable(MemTable* memtable, int64_t* flush_size) {
-        return Status::Error<ErrorCode::NOT_IMPLEMENTED_ERROR>();
-    }
 
     virtual Status flush_single_memtable(const vectorized::Block* block, int64_t* flush_size,
                                          const FlushContext* ctx = nullptr) {

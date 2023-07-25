@@ -23,14 +23,15 @@ suite ("sub_query_correlated") {
     """
 
     sql """
-        SET enable_bucket_shuffle_join=false
+        DROP TABLE IF EXISTS `sub_query_correlated_subquery1`
     """
 
     sql """
-        SET disable_colocate_plan=true
+        DROP TABLE IF EXISTS `sub_query_correlated_subquery2`
     """
 
     sql """
+<<<<<<< HEAD
         DROP TABLE IF EXISTS `sub_query_correlated_subquery1`
     """
 
@@ -47,6 +48,16 @@ suite ("sub_query_correlated") {
     """
 
     sql """
+=======
+        DROP TABLE IF EXISTS `sub_query_correlated_subquery3`
+    """
+
+    sql """
+        DROP TABLE IF EXISTS `sub_query_correlated_subquery4`
+    """
+
+    sql """
+>>>>>>> 2.0.0-rc01
         create table if not exists sub_query_correlated_subquery1
         (k1 bigint, k2 bigint)
         duplicate key(k1)
@@ -72,6 +83,7 @@ suite ("sub_query_correlated") {
 
     sql """
         create table if not exists sub_query_correlated_subquery4
+<<<<<<< HEAD
         (k1 bigint, k2 bigint)
         duplicate key(k1)
         distributed by hash(k2) buckets 1
@@ -79,6 +91,26 @@ suite ("sub_query_correlated") {
     """
 
     sql """
+        create table if not exists sub_query_correlated_subquery5
+=======
+>>>>>>> 2.0.0-rc01
+        (k1 bigint, k2 bigint)
+        duplicate key(k1)
+        distributed by hash(k2) buckets 1
+        properties('replication_num' = '1')
+    """
+
+    sql """
+<<<<<<< HEAD
+        insert into sub_query_correlated_subquery1 values (1,2), (1,3), (2,4), (2,5), (3,3), (3,4), (20,2), (22,3), (24,4)
+    """
+
+    sql """
+        insert into sub_query_correlated_subquery2 values ("abc",2),("abc",3),("abcd",2),("abcde",4),("abcdef",5)
+    """
+
+    sql """
+=======
         create table if not exists sub_query_correlated_subquery5
         (k1 bigint, k2 bigint)
         duplicate key(k1)
@@ -95,6 +127,7 @@ suite ("sub_query_correlated") {
     """
 
     sql """
+>>>>>>> 2.0.0-rc01
         insert into sub_query_correlated_subquery3 values (1,"abc",2,3,4), (1,"abcd",3,3,4), (2,"xyz",2,4,2),
                                      (2,"uvw",3,4,2), (2,"uvw",3,4,2), (3,"abc",4,5,3), (3,"abc",4,5,3)
     """
@@ -158,6 +191,7 @@ suite ("sub_query_correlated") {
 
     qt_in_subquery_non_equal_corr """
         select * from sub_query_correlated_subquery1 where sub_query_correlated_subquery1.k1 in (select sub_query_correlated_subquery3.k3 from sub_query_correlated_subquery3 where sub_query_correlated_subquery3.v2 < sub_query_correlated_subquery1.k2) order by k1, k2
+<<<<<<< HEAD
     """
 
     qt_in_subquery_non_equal_corr """
@@ -168,6 +202,18 @@ suite ("sub_query_correlated") {
         select * from sub_query_correlated_subquery1 where not exists (select sub_query_correlated_subquery3.k3 from sub_query_correlated_subquery3 where sub_query_correlated_subquery1.k2 != sub_query_correlated_subquery3.v2) order by k1, k2
     """
 
+=======
+    """
+
+    qt_in_subquery_non_equal_corr """
+        select * from sub_query_correlated_subquery1 where sub_query_correlated_subquery1.k1 in (select sub_query_correlated_subquery3.k3 from sub_query_correlated_subquery3 where sub_query_correlated_subquery3.v2 != sub_query_correlated_subquery1.k2) order by k1, k2
+    """
+
+    qt_not_exist_non_equal_corr """
+        select * from sub_query_correlated_subquery1 where not exists (select sub_query_correlated_subquery3.k3 from sub_query_correlated_subquery3 where sub_query_correlated_subquery1.k2 != sub_query_correlated_subquery3.v2) order by k1, k2
+    """
+
+>>>>>>> 2.0.0-rc01
     qt_exist_non_equal_corr """
         select * from sub_query_correlated_subquery1 where exists (select sub_query_correlated_subquery3.k3 from sub_query_correlated_subquery3 where sub_query_correlated_subquery1.k2 > sub_query_correlated_subquery3.v2) order by k1, k2
     """

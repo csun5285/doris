@@ -67,7 +67,6 @@ public class PrivInfoTest {
         Assert.assertTrue(Arrays.equals(privInfo.getPasswd(), anotherPrivInfo.getPasswd()));
         Assert.assertEquals(privInfo.getPasswordOptions().getExpirePolicySecond(), anotherPrivInfo.getPasswordOptions()
                 .getExpirePolicySecond());
-        Assert.assertEquals(privInfo.getUserId(), anotherPrivInfo.getUserId());
         // 3. delete files
         dis.close();
         file.delete();

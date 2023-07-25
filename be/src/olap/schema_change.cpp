@@ -52,7 +52,7 @@
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/schema.h"
 #include "olap/segment_loader.h"
-#include "cloud/olap/storage_engine.h"
+#include "olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
@@ -272,7 +272,6 @@ Status BlockChanger::change_block(vectorized::Block* ref_block,
     if (_where_expr != nullptr) {
         vectorized::VExprContextSPtr ctx = nullptr;
         RETURN_IF_ERROR(vectorized::VExpr::create_expr_tree(*_where_expr, ctx));
-        Defer defer {[&]() { ctx->close(state); }};
         RETURN_IF_ERROR(ctx->prepare(state, row_desc));
         RETURN_IF_ERROR(ctx->open(state));
 
@@ -289,22 +288,9 @@ Status BlockChanger::change_block(vectorized::Block* ref_block,
     for (int idx = 0; idx < column_size; idx++) {
         int ref_idx = _schema_mapping[idx].ref_column;
 
-        if (ref_idx < 0 && _type != ROLLUP) {
-            // new column, write default value
-            auto value = _schema_mapping[idx].default_value;
-            auto column = new_block->get_by_position(idx).column->assume_mutable();
-            if (value->is_null()) {
-                DCHECK(column->is_nullable());
-                column->insert_many_defaults(row_size);
-            } else {
-                auto type_info = get_type_info(_schema_mapping[idx].new_column);
-                DefaultValueColumnIterator::insert_default_data(type_info.get(), value->size(),
-                                                                value->ptr(), column, row_size);
-            }
-        } else if (_schema_mapping[idx].expr != nullptr) {
+        if (_schema_mapping[idx].expr != nullptr) {
             vectorized::VExprContextSPtr ctx;
             RETURN_IF_ERROR(vectorized::VExpr::create_expr_tree(*_schema_mapping[idx].expr, ctx));
-            Defer defer {[&]() { ctx->close(state); }};
             RETURN_IF_ERROR(ctx->prepare(state, row_desc));
             RETURN_IF_ERROR(ctx->open(state));
 
@@ -324,6 +310,24 @@ Status BlockChanger::change_block(vectorized::Block* ref_block,
                                           ref_block->get_by_position(result_column_id).column));
             }
             swap_idx_map[result_column_id] = idx;
+        } else if (ref_idx < 0) {
+            if (_type != ROLLUP) {
+                // new column, write default value
+                auto value = _schema_mapping[idx].default_value;
+                auto column = new_block->get_by_position(idx).column->assume_mutable();
+                if (value->is_null()) {
+                    DCHECK(column->is_nullable());
+                    column->insert_many_defaults(row_size);
+                } else {
+                    auto type_info = get_type_info(_schema_mapping[idx].new_column);
+                    DefaultValueColumnIterator::insert_default_data(type_info.get(), value->size(),
+                                                                    value->ptr(), column, row_size);
+                }
+            } else {
+                return Status::Error<ErrorCode::INTERNAL_ERROR>(
+                        "rollup job meet invalid ref_column, new_column={}",
+                        _schema_mapping[idx].new_column->name());
+            }
         } else {
             // same type, just swap column
             swap_idx_map[ref_idx] = idx;
@@ -597,6 +601,7 @@ Status VSchemaChangeWithSorting::_internal_sorting(
     context.segments_overlap = segments_overlap;
     context.tablet_schema = new_tablet->tablet_schema();
     context.newest_write_timestamp = newest_write_timestamp;
+    context.write_type = DataWriteType::TYPE_SCHEMA_CHANGE;
     RETURN_IF_ERROR(new_tablet->create_rowset_writer(context, &rowset_writer));
 
     Defer defer {[&]() {
@@ -723,7 +728,13 @@ Status SchemaChangeHandler::_do_process_alter_tablet_v2(const TAlterTabletReqV2&
     std::vector<ColumnId> return_columns;
     // Create a new tablet schema, should merge with dropped columns in light weight schema change
     TabletSchemaSPtr base_tablet_schema = std::make_shared<TabletSchema>();
-    base_tablet_schema->update_tablet_columns(*base_tablet->tablet_schema(), request.columns);
+    base_tablet_schema->copy_from(*base_tablet->tablet_schema());
+    if (!request.columns.empty() && request.columns[0].col_unique_id >= 0) {
+        base_tablet_schema->clear_columns();
+        for (const auto& column : request.columns) {
+            base_tablet_schema->append_column(TabletColumn(column));
+        }
+    }
     // Use tablet schema directly from base tablet, they are the newest schema, not contain
     // dropped column during light weight schema change.
     // But the tablet schema in base tablet maybe not the latest from FE, so that if fe pass through
@@ -817,7 +828,8 @@ Status SchemaChangeHandler::_do_process_alter_tablet_v2(const TAlterTabletReqV2&
                 if (delete_pred->version().first > end_version) {
                     continue;
                 }
-                base_tablet_schema->merge_dropped_columns(delete_pred->tablet_schema());
+                base_tablet_schema->merge_dropped_columns(
+                        base_tablet->tablet_schema(delete_pred->version()));
             }
             res = delete_handler.init(base_tablet_schema, all_del_preds, end_version);
             if (!res) {
@@ -1031,7 +1043,7 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
         }
     }
 
-    // Add filter information in change, and filter column information will be set in parse_request
+    // Add filter information in change, and filter column information will be set in _parse_request
     // And filter some data every time the row block changes
     BlockChanger changer(sc_params.new_tablet->tablet_schema(), *sc_params.desc_tbl);
 
@@ -1039,7 +1051,7 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
     bool sc_directly = false;
 
     // a.Parse the Alter request and convert it into an internal representation
-    Status res = parse_request(sc_params, &changer, &sc_sorting, &sc_directly);
+    Status res = _parse_request(sc_params, &changer, &sc_sorting, &sc_directly);
     LOG(INFO) << "schema change type, sc_sorting: " << sc_sorting
               << ", sc_directly: " << sc_directly
               << ", base_tablet=" << sc_params.base_tablet->full_name()
@@ -1096,6 +1108,7 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
         context.tablet_schema = new_tablet->tablet_schema();
         context.newest_write_timestamp = rs_reader->newest_write_timestamp();
         context.fs = rs_reader->rowset()->rowset_meta()->fs();
+        context.write_type = DataWriteType::TYPE_SCHEMA_CHANGE;
         Status status = new_tablet->create_rowset_writer(context, &rowset_writer);
         if (!status.ok()) {
             res = Status::Error<ROWSET_BUILDER_INIT>();
@@ -1153,7 +1166,7 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
 
 // @static
 // Analyze the mapping of the column and the mapping of the filter key
-Status SchemaChangeHandler::parse_request(const SchemaChangeParams& sc_params,
+Status SchemaChangeHandler::_parse_request(const SchemaChangeParams& sc_params,
                                            BlockChanger* changer, bool* sc_sorting,
                                            bool* sc_directly) {
     changer->set_type(sc_params.alter_tablet_type);

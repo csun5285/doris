@@ -153,6 +153,9 @@ void ScannerScheduler::_schedule_thread(int queue_id) {
 }
 
 void ScannerScheduler::_schedule_scanners(ScannerContext* ctx) {
+    MonotonicStopWatch watch;
+    watch.reset();
+    watch.start();
     ctx->incr_num_ctx_scheduling(1);
     if (ctx->done()) {
         ctx->update_num_running(0, -1);
@@ -224,7 +227,7 @@ void ScannerScheduler::_schedule_scanners(ScannerContext* ctx) {
 #else
     // Only OlapScanner uses bthread scanner
     // Todo: Make other scanners support bthread scanner
-    if (dynamic_pointer_cast<NewOlapScanner>(*iter) == nullptr) {
+    if (dynamic_cast<NewOlapScanner*>(*iter) == nullptr) {
         return submit_to_thread_pool();
     }
     ctx->incr_num_scanner_scheduling(this_run.size());
@@ -257,6 +260,7 @@ void ScannerScheduler::_schedule_scanners(ScannerContext* ctx) {
         }
     }
 #endif
+    ctx->incr_ctx_scheduling_time(watch.elapsed_time());
 }
 
 void ScannerScheduler::_scanner_scan(ScannerScheduler* scheduler, ScannerContext* ctx,
@@ -265,7 +269,7 @@ void ScannerScheduler::_scanner_scan(ScannerScheduler* scheduler, ScannerContext
 #if !defined(USE_BTHREAD_SCANNER)
     Thread::set_self_name("_scanner_scan");
 #else
-    if (dynamic_pointer_cast<NewOlapScanner>(scanner) == nullptr) {
+    if (dynamic_cast<NewOlapScanner*>(scanner) == nullptr) {
         Thread::set_self_name("_scanner_scan");
     }
 #endif

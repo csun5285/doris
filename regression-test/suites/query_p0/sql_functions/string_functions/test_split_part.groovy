@@ -67,4 +67,8 @@ suite("test_split_part") {
   qt_non_const4 """
       select *, split_part(test_t, ',c', part) from test_split_part_non_const order by id, name, age;
   """
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 2.0.0-rc01

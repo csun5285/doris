@@ -32,6 +32,7 @@ suite("test_create_dynamic_table", "dynamic_table") {
        }
     }
     sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+<<<<<<< HEAD
     expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, ...) ENGINE = Olap DUPLICATE KEY(x) DISTRIBUTED BY HASH(y) BUCKETS 1 PROPERTIES("replication_num" = "1");;""", "success")
     sql "DROP TABLE IF EXISTS dynamic_table_create_test"
     expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, ...) ENGINE = Olap DUPLICATE KEY(x) DISTRIBUTED BY RANDOM BUCKETS 1 PROPERTIES("replication_num" = "1");;""", "success")
@@ -45,5 +46,20 @@ suite("test_create_dynamic_table", "dynamic_table") {
     expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, z array<int>, ...) ENGINE = Olap DUPLICATE KEY(x, y) DISTRIBUTED BY HASH(x, y) BUCKETS 2 PROPERTIES("replication_num" = "1");;""", "success");
     sql "DROP TABLE IF EXISTS dynamic_table_create_test"
     expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, z array<date>, ...) ENGINE = Olap DUPLICATE KEY(x, y)  PARTITION BY RANGE(x, y) (partition `p1` values less than ("1000", "1000")) DISTRIBUTED BY HASH(x, y) BUCKETS 2 PROPERTIES("replication_num" = "1");;""", "success")
+=======
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int) ENGINE = Olap DUPLICATE KEY(x) DISTRIBUTED BY HASH(y) BUCKETS 1 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int) ENGINE = Olap DUPLICATE KEY(x) DISTRIBUTED BY RANDOM BUCKETS 1 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int) ENGINE = Olap DUPLICATE KEY(x)  PARTITION BY RANGE(y) (partition `p1` values less than ("1000")) DISTRIBUTED BY RANDOM BUCKETS 1 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int) ENGINE = Olap DUPLICATE KEY(x)  PARTITION BY RANGE(x) (partition `p1` values less than ("1000")) DISTRIBUTED BY RANDOM BUCKETS 1 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int) ENGINE = Olap DUPLICATE KEY(x, y)  PARTITION BY RANGE(x, y) (partition `p1` values less than ("1000", "1000")) DISTRIBUTED BY RANDOM BUCKETS 1 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, z array<int>) ENGINE = Olap DUPLICATE KEY(x, y) DISTRIBUTED BY HASH(x, y) BUCKETS 2 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success");
+    sql "DROP TABLE IF EXISTS dynamic_table_create_test"
+    expect_result("""CREATE TABLE dynamic_table_create_test (x int, y int, z array<date>) ENGINE = Olap DUPLICATE KEY(x, y)  PARTITION BY RANGE(x, y) (partition `p1` values less than ("1000", "1000")) DISTRIBUTED BY HASH(x, y) BUCKETS 2 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");;""", "success")
+>>>>>>> 2.0.0-rc01
     sql "DROP TABLE IF EXISTS dynamic_table_create_test"
 }

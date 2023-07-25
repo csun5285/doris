@@ -30,11 +30,15 @@ suite("q2") {
 
 
     
+<<<<<<< HEAD
     def result = sql "show backends;"
     if (result.size() != 1) {
         print("backends num: ${result.size()}");
         return;
     }
+=======
+sql 'set be_number_for_test=3'
+>>>>>>> 2.0.0-rc01
 
 
     qt_select """

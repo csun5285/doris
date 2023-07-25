@@ -26,10 +26,11 @@ import org.apache.doris.common.util.Util;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.LogicalProperties;
-import org.apache.doris.nereids.rules.mv.AbstractSelectMaterializedIndexRule;
+import org.apache.doris.nereids.rules.rewrite.mv.AbstractSelectMaterializedIndexRule;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.plans.ObjectId;
+import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.PreAggStatus;
 import org.apache.doris.nereids.trees.plans.algebra.CatalogRelation;
@@ -229,8 +230,9 @@ public class LogicalOlapScan extends LogicalRelation implements CatalogRelation,
     }
 
     @Override
-    public LogicalOlapScan withLogicalProperties(Optional<LogicalProperties> logicalProperties) {
-        return new LogicalOlapScan(id, (Table) table, qualifier, Optional.empty(), logicalProperties,
+    public Plan withGroupExprLogicalPropChildren(Optional<GroupExpression> groupExpression,
+            Optional<LogicalProperties> logicalProperties, List<Plan> children) {
+        return new LogicalOlapScan(id, (Table) table, qualifier, groupExpression, logicalProperties,
                 selectedPartitionIds, partitionPruned, selectedTabletIds,
                 selectedIndexId, indexSelected, preAggStatus, manuallySpecifiedPartitions,
                 hints, cacheSlotWithSlotName);
@@ -298,7 +300,7 @@ public class LogicalOlapScan extends LogicalRelation implements CatalogRelation,
     @Override
     public List<Slot> computeOutput() {
         if (selectedIndexId != ((OlapTable) table).getBaseIndexId()) {
-            return getOutputByMvIndex(selectedIndexId);
+            return getOutputByIndex(selectedIndexId);
         }
         List<Column> otherColumns = new ArrayList<>();
         if (!Util.showHiddenColumns() && getTable().hasDeleteSign()
@@ -322,13 +324,14 @@ public class LogicalOlapScan extends LogicalRelation implements CatalogRelation,
      * Get the slot under the index,
      * and create a new slotReference for the slot that has not appeared in the materialized view.
      */
-    public List<Slot> getOutputByMvIndex(long indexId) {
+    public List<Slot> getOutputByIndex(long indexId) {
         OlapTable olapTable = (OlapTable) table;
         // PhysicalStorageLayerAggregateTest has no visible index
-        if (-1 == indexId) {
+        // when we have a partitioned table without any partition, visible index is empty
+        if (-1 == indexId || olapTable.getVisibleIndexIdToMeta().get(indexId) == null) {
             return olapTable.getIndexMetaByIndexId(indexId).getSchema()
-                .stream().map(s -> generateUniqueSlot(s, indexId == ((OlapTable) table).getBaseIndexId()))
-                .collect(Collectors.toList());
+                    .stream().map(s -> generateUniqueSlot(s, indexId == ((OlapTable) table).getBaseIndexId()))
+                    .collect(Collectors.toList());
         }
         return olapTable.getVisibleIndexIdToMeta().get(indexId).getSchema()
                 .stream()
@@ -339,7 +342,7 @@ public class LogicalOlapScan extends LogicalRelation implements CatalogRelation,
     private Slot generateUniqueSlot(Column column, boolean isBaseIndex) {
         String name = isBaseIndex ? column.getName()
                 : AbstractSelectMaterializedIndexRule.parseMvColumnToMvName(column.getName(),
-                column.isAggregated() ? Optional.of(column.getAggregationType().toSql()) : Optional.empty());
+                        column.isAggregated() ? Optional.of(column.getAggregationType().toSql()) : Optional.empty());
         if (cacheSlotWithSlotName.containsKey(name)) {
             return cacheSlotWithSlotName.get(name);
         }

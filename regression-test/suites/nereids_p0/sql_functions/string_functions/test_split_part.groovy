@@ -29,5 +29,9 @@ suite("test_split_part") {
     """
   }
 
+<<<<<<< HEAD
   qt_1 "select split_part(k8, '1', 1), k8, split_part(concat(k8, '12'), '1', 1) from test_query_db.test order by k8 limit 2;"
+=======
+  qt_1 "select split_part(k8, '1', 1), k8, split_part(concat(k8, '12'), '1', 1) from nereids_test_query_db.test order by k8 limit 2;"
+>>>>>>> 2.0.0-rc01
 }

@@ -18,6 +18,7 @@
 #pragma once
 
 #include <aws/core/utils/memory/stl/AWSStringStream.h>
+#include <bthread/countdown_event.h>
 
 #include <cstddef>
 #include <list>
@@ -26,10 +27,10 @@
 
 #include "common/status.h"
 #include "io/cache/block/block_file_cache_fwd.h"
-#include "io/fs/s3_file_bufferpool.h"
 #include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/path.h"
+#include "io/fs/s3_file_bufferpool.h"
 #include "util/s3_util.h"
 #include "util/slice.h"
 
@@ -75,45 +76,7 @@ private:
     Status _close();
 
 private:
-    class WaitGroup {
-    public:
-        WaitGroup() = default;
-
-        ~WaitGroup() = default;
-
-        WaitGroup(const WaitGroup&) = delete;
-        WaitGroup(WaitGroup&&) = delete;
-        void operator=(const WaitGroup&) = delete;
-        void operator=(WaitGroup&&) = delete;
-        // add one counter indicating one more concurrent worker
-        void add(int count = 1) { _count += count; }
-
-        // decrease count if one concurrent worker finished it's work
-        void done() {
-            _count--;
-            if (_count.load() <= 0) {
-                _cv.notify_all();
-            }
-        }
-
-        // wait for all concurrent workers finish their work and return true
-        // would return false if timeout, default timeout would be 5min
-        bool wait(int64_t timeout_seconds = 300) {
-            if (_count.load() <= 0) {
-                return true;
-            }
-            std::unique_lock<std::mutex> lck {_lock};
-            _cv.wait_for(lck, std::chrono::seconds(timeout_seconds),
-                         [this]() { return _count.load() <= 0; });
-            return _count.load() <= 0;
-        }
-
-    private:
-        std::mutex _lock;
-        std::condition_variable _cv;
-        std::atomic_int64_t _count {0};
-    };
-    void _wait_until_finish(std::string task_name);
+    void _wait_until_finish(std::string_view task_name);
     Status _complete();
     Status _create_multi_upload_request();
     void _put_object(UploadFileBuffer& buf);
@@ -126,7 +89,6 @@ private:
 
     std::shared_ptr<Aws::S3::S3Client> _client;
     std::string _upload_id;
-    size_t _bytes_appended {0};
     size_t _index_offset {0};
 
     // Current Part Num for CompletedPart
@@ -137,7 +99,7 @@ private:
     Key _cache_key;
     BlockFileCache* _cache;
 
-    WaitGroup _wait;
+    bthread::CountdownEvent _countdown_event;
 
     std::atomic_bool _failed = false;
     Status _st = Status::OK();
@@ -147,6 +109,7 @@ private:
     int64_t _expiration_time;
     bool _is_cold_data;
     bool _disable_file_cache = false;
+    bool _aborted = false;
 };
 
 } // namespace io

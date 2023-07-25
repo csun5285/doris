@@ -35,8 +35,6 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -59,36 +57,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 public class ProfileManager {
     private static final Logger LOG = LogManager.getLogger(ProfileManager.class);
     private static volatile ProfileManager INSTANCE = null;
-    // private static final int ARRAY_SIZE = 100;
-    // private static final int TOTAL_LEN = 1000 * ARRAY_SIZE ;
-    // just use for load profile and export profile
-    public static final String JOB_ID = "Job ID";
-    public static final String QUERY_ID = "Query ID";
-    public static final String START_TIME = "Start Time";
-    public static final String END_TIME = "End Time";
-    public static final String TOTAL_TIME = "Total";
-    public static final String QUERY_TYPE = "Query Type";
-    public static final String QUERY_STATE = "Query State";
-    public static final String DORIS_VERSION = "Doris Version";
-    public static final String USER = "User";
-    public static final String DEFAULT_DB = "Default Db";
-    public static final String SQL_STATEMENT = "Sql Statement";
-    public static final String IS_CACHED = "Is Cached";
-
-    public static final String TOTAL_INSTANCES_NUM = "Total Instances Num";
-
-    public static final String INSTANCES_NUM_PER_BE = "Instances Num Per BE";
-
-    public static final String TRACE_ID = "Trace ID";
 
     public enum ProfileType {
         QUERY,
         LOAD,
     }
-
-    public static final List<String> PROFILE_HEADERS = Collections.unmodifiableList(
-            Arrays.asList(JOB_ID, QUERY_ID, USER, DEFAULT_DB, SQL_STATEMENT, QUERY_TYPE,
-                    START_TIME, END_TIME, TOTAL_TIME, QUERY_STATE, TRACE_ID));
 
     public static class ProfileElement {
         public ProfileElement(RuntimeProfile profile) {

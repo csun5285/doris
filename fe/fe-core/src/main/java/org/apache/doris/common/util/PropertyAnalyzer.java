@@ -99,13 +99,12 @@ public class PropertyAnalyzer {
 
     public static final String PROPERTIES_FILE_CACHE_TTL_SECONDS = "file_cache_ttl_seconds";
 
-    public static final String PROPERTIES_DYNAMIC_SCHEMA = "dynamic_schema";
-
     public static final String PROPERTIES_REMOTE_STORAGE_RESOURCE = "remote_storage_resource";
 
     // _auto_bucket can only set in create table stmt rewrite bucket and can not be changed
     public static final String PROPERTIES_AUTO_BUCKET = "_auto_bucket";
     public static final String PROPERTIES_ESTIMATE_PARTITION_SIZE = "estimate_partition_size";
+    public static final String PROPERTIES_DYNAMIC_SCHEMA = "deprecated_dynamic_schema";
 
     public static final String PROPERTIES_TABLET_TYPE = "tablet_type";
 
@@ -518,7 +517,7 @@ public class PropertyAnalyzer {
         if (value.equalsIgnoreCase("false")) {
             return false;
         }
-        throw new AnalysisException(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE + " must be true or false");
+        throw new AnalysisException(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE + " must be `true` or `false`");
     }
 
     public static Boolean analyzeDisableAutoCompaction(Map<String, String> properties) throws AnalysisException {

@@ -102,7 +102,6 @@ public class BackendsProcDir implements ProcDirInterface {
             List<Comparable> backendInfo = Lists.newArrayList();
             backendInfo.add(String.valueOf(backendId));
             backendInfo.add(backend.getHost());
-
             backendInfo.add(String.valueOf(backend.getHeartbeatPort()));
             backendInfo.add(String.valueOf(backend.getBePort()));
             backendInfo.add(String.valueOf(backend.getHttpPort()));

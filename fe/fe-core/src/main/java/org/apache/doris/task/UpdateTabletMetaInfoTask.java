@@ -48,7 +48,6 @@ public class UpdateTabletMetaInfoTask extends AgentTask {
     private BinlogConfig binlogConfig = null; // null means not to update binlog config
     // For ReportHandler
     private List<TTabletMetaInfo> tabletMetaInfos;
-
     private TTabletMetaType metaType;
 
     // <tablet id, tablet schema hash, tablet in memory>
@@ -80,7 +79,6 @@ public class UpdateTabletMetaInfoTask extends AgentTask {
                 -1L, -1L, -1L, -1L, -1L);
         this.tabletMetaInfos = tabletMetaInfos;
     }
-
 
     public UpdateTabletMetaInfoTask(long backendId,
                                     List<Triple<Long, Integer, Boolean>> tabletMap,

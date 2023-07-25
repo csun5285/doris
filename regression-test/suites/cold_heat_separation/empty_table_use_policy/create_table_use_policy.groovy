@@ -29,8 +29,12 @@ suite("create_table_use_policy") {
         DISTRIBUTED BY HASH (k1) BUCKETS 3
         PROPERTIES(
             "storage_policy" = "not_exist_policy",
+<<<<<<< HEAD
             "replication_num" = "1",
             "enable_unique_key_merge_on_write" = "false"
+=======
+            "replication_num" = "1"
+>>>>>>> 2.0.0-rc01
         );
     """
 
@@ -86,8 +90,12 @@ suite("create_table_use_policy") {
         DISTRIBUTED BY HASH (k1) BUCKETS 3
         PROPERTIES(
             "storage_policy" = "test_create_table_use_policy",
+<<<<<<< HEAD
             "replication_num" = "1",
             "enable_unique_key_merge_on_write" = "false"
+=======
+            "replication_num" = "1"
+>>>>>>> 2.0.0-rc01
         );
     """
 

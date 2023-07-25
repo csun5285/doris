@@ -122,7 +122,7 @@ Status BrokerFileSystem::open_file_internal(const Path& file, int64_t file_size,
         Status status;
         try {
             (*_client)->openReader(*response, request);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->openReader(*response, request);
@@ -157,7 +157,7 @@ Status BrokerFileSystem::delete_file_impl(const Path& file) {
 
         try {
             (*_client)->deletePath(del_rep, del_req);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->deletePath(del_rep, del_req);
         }
@@ -197,7 +197,7 @@ Status BrokerFileSystem::exists_impl(const Path& path, bool* res) const {
 
         try {
             (*_client)->checkPathExist(check_rep, check_req);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->checkPathExist(check_rep, check_req);
         }
@@ -229,7 +229,7 @@ Status BrokerFileSystem::file_size_impl(const Path& path, int64_t* file_size) co
         TBrokerFileSizeResponse resp;
         try {
             (*_client)->fileSize(resp, req);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->fileSize(resp, req);
         }
@@ -270,7 +270,7 @@ Status BrokerFileSystem::list_impl(const Path& dir, bool only_file, std::vector<
 
         try {
             (*_client)->listPath(list_rep, list_req);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->listPath(list_rep, list_req);
         }
@@ -320,7 +320,7 @@ Status BrokerFileSystem::rename_impl(const Path& orig_name, const Path& new_name
 
         try {
             (*_client)->renamePath(op_status, rename_req);
-        } catch (apache::thrift::transport::TTransportException& e) {
+        } catch (apache::thrift::transport::TTransportException&) {
             RETURN_IF_ERROR((*_client).reopen());
             (*_client)->renamePath(op_status, rename_req);
         }

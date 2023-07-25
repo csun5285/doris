@@ -27,6 +27,7 @@ PhysicalTopN
 ----------------------------------PhysicalDistribute
 ------------------------------------PhysicalProject
 --------------------------------------PhysicalOlapScan[store]
+<<<<<<< HEAD
 ----------------------PhysicalDistribute
 ------------------------PhysicalProject
 --------------------------hashAgg[GLOBAL]
@@ -44,6 +45,24 @@ PhysicalTopN
 ------------------------------------PhysicalDistribute
 --------------------------------------PhysicalProject
 ----------------------------------------PhysicalOlapScan[store]
+=======
+----------------------PhysicalProject
+------------------------hashAgg[GLOBAL]
+--------------------------PhysicalDistribute
+----------------------------hashAgg[LOCAL]
+------------------------------PhysicalProject
+--------------------------------hashJoin[INNER_JOIN](store_returns.sr_store_sk = store.s_store_sk)
+----------------------------------hashJoin[INNER_JOIN](store_returns.sr_returned_date_sk = date_dim.d_date_sk)
+------------------------------------PhysicalProject
+--------------------------------------PhysicalOlapScan[store_returns]
+------------------------------------PhysicalDistribute
+--------------------------------------PhysicalProject
+----------------------------------------filter((date_dim.d_date <= 1998-09-04)(date_dim.d_date >= 1998-08-05))
+------------------------------------------PhysicalOlapScan[date_dim]
+----------------------------------PhysicalDistribute
+------------------------------------PhysicalProject
+--------------------------------------PhysicalOlapScan[store]
+>>>>>>> 2.0.0-rc01
 ------------------PhysicalProject
 --------------------NestedLoopJoin[CROSS_JOIN]
 ----------------------PhysicalProject
@@ -89,6 +108,7 @@ PhysicalTopN
 ----------------------------------PhysicalDistribute
 ------------------------------------PhysicalProject
 --------------------------------------PhysicalOlapScan[web_page]
+<<<<<<< HEAD
 ----------------------PhysicalDistribute
 ------------------------PhysicalProject
 --------------------------hashAgg[GLOBAL]
@@ -106,4 +126,22 @@ PhysicalTopN
 ------------------------------------PhysicalDistribute
 --------------------------------------PhysicalProject
 ----------------------------------------PhysicalOlapScan[web_page]
+=======
+----------------------PhysicalProject
+------------------------hashAgg[GLOBAL]
+--------------------------PhysicalDistribute
+----------------------------hashAgg[LOCAL]
+------------------------------PhysicalProject
+--------------------------------hashJoin[INNER_JOIN](web_returns.wr_web_page_sk = web_page.wp_web_page_sk)
+----------------------------------hashJoin[INNER_JOIN](web_returns.wr_returned_date_sk = date_dim.d_date_sk)
+------------------------------------PhysicalProject
+--------------------------------------PhysicalOlapScan[web_returns]
+------------------------------------PhysicalDistribute
+--------------------------------------PhysicalProject
+----------------------------------------filter((date_dim.d_date >= 1998-08-05)(date_dim.d_date <= 1998-09-04))
+------------------------------------------PhysicalOlapScan[date_dim]
+----------------------------------PhysicalDistribute
+------------------------------------PhysicalProject
+--------------------------------------PhysicalOlapScan[web_page]
+>>>>>>> 2.0.0-rc01
 

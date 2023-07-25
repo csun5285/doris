@@ -151,7 +151,7 @@ Status DataDir::read_cluster_id(const std::string& cluster_id_path, int32_t* clu
     if (exists) {
         std::string content;
         RETURN_IF_ERROR(
-                io::read_file_to_string(io::global_local_filesystem(), cluster_id_path, &content));
+                io::global_local_filesystem()->read_file_to_string(cluster_id_path, &content));
         if (content.size() > 0) {
             *cluster_id = std::stoi(content);
         } else {
@@ -357,6 +357,9 @@ Status DataDir::_check_incompatible_old_format_tablet() {
 
 // TODO(ygl): deal with rowsets and tablets when load failed
 Status DataDir::load() {
+#ifdef CLOUD_MODE
+    CHECK(false) << "MUST NOT call DataDir::load in CLOUD MODE";
+#else
     LOG(INFO) << "start to load tablets from " << _path;
 
     // load rowset meta from meta env and create rowset
@@ -454,6 +457,21 @@ Status DataDir::load() {
         }
     }
 
+    auto load_pending_publish_info_func = [](int64_t tablet_id, int64_t publish_version,
+                                             const string& info) {
+        PendingPublishInfoPB pending_publish_info_pb;
+        bool parsed = pending_publish_info_pb.ParseFromString(info);
+        if (!parsed) {
+            LOG(WARNING) << "parse pending publish info failed, tablt_id: " << tablet_id
+                         << " publish_version: " << publish_version;
+        }
+        StorageEngine::instance()->add_async_publish_task(
+                pending_publish_info_pb.partition_id(), tablet_id, publish_version,
+                pending_publish_info_pb.transaction_id(), true);
+        return true;
+    };
+    TabletMetaManager::traverse_pending_publish(_meta, load_pending_publish_info_func);
+
     // traverse rowset
     // 1. add committed rowset to txn map
     // 2. add visible rowset to tablet
@@ -534,6 +552,7 @@ Status DataDir::load() {
               << ", invalid rowset num: " << invalid_rowset_counter;
 
     return Status::OK();
+#endif
 }
 
 void DataDir::add_pending_ids(const std::string& id) {

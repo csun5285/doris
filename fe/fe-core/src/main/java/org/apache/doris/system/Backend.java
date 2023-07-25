@@ -48,7 +48,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -121,6 +120,14 @@ public class Backend implements Writable {
 
     private boolean isSmoothUpgradeSrc = false; // This be process is old process when doing smooth upgrade
     private boolean isSmoothUpgradeDst = false; // This be process is new process when doing smooth upgrade
+    // cpu cores
+    @SerializedName("cpuCores")
+    private int cpuCores = 1;
+
+    // from config::pipeline_executor_size , default equal cpuCores
+    @SerializedName("pipelineExecutorSize")
+    private int pipelineExecutorSize = 1;
+
     // Counter of heartbeat failure.
     // Once a heartbeat failed, increase this counter by one.
     // And if it reaches Config.max_backend_heartbeat_failure_tolerance_count, this backend
@@ -330,6 +337,14 @@ public class Backend implements Writable {
         this.brpcPort = brpcPort;
     }
 
+    public void setCpuCores(int cpuCores) {
+        this.cpuCores = cpuCores;
+    }
+
+    public void setPipelineExecutorSize(int pipelineExecutorSize) {
+        this.pipelineExecutorSize = pipelineExecutorSize;
+    }
+
     public long getLastUpdateMs() {
         return this.lastUpdateMs;
     }
@@ -344,6 +359,14 @@ public class Backend implements Writable {
 
     public void setLastStartTime(long currentTime) {
         this.lastStartTime = currentTime;
+    }
+
+    public int getCputCores() {
+        return cpuCores;
+    }
+
+    public int getPipelineExecutorSize() {
+        return pipelineExecutorSize;
     }
 
     public long getLastMissingHeartbeatTime() {
@@ -591,6 +614,20 @@ public class Backend implements Writable {
         }
     }
 
+    public boolean updateCpuInfo(int cpuCores, int pipelineExecutorSize) {
+        boolean isChanged = false;
+
+        if (this.cpuCores != cpuCores) {
+            this.cpuCores = cpuCores;
+            isChanged = true;
+        }
+        if (this.pipelineExecutorSize != pipelineExecutorSize) {
+            this.pipelineExecutorSize = pipelineExecutorSize;
+            isChanged = true;
+        }
+        return isChanged;
+    }
+
     /**
      * In old version, there is only one tag for a Backend, and it is a "location" type tag.
      * But in new version, a Backend can have multi tag, so we need to put locationTag to
@@ -658,7 +695,7 @@ public class Backend implements Writable {
      * handle Backend's heartbeat response.
      * return true if any port changed, or alive state is changed.
      */
-    public boolean handleHbResponse(BackendHbResponse hbResponse) {
+    public boolean handleHbResponse(BackendHbResponse hbResponse, boolean isReplay) {
         boolean isChanged = false;
         if (hbResponse.getStatus() == HbStatus.OK) {
             if (!this.version.equals(hbResponse.getVersion())) {
@@ -707,7 +744,8 @@ public class Backend implements Writable {
             this.backendStatus.lastFragmentUpdateTime = hbResponse.getLastFragmentUpdateTime();
         } else {
             // Only set backend to dead if the heartbeat failure counter exceed threshold.
-            if (++this.heartbeatFailureCounter >= Config.max_backend_heartbeat_failure_tolerance_count) {
+            // And if it is a replay process, must set backend to dead.
+            if (isReplay || ++this.heartbeatFailureCounter >= Config.max_backend_heartbeat_failure_tolerance_count) {
                 if (isAlive.compareAndSet(true, false)) {
                     isChanged = true;
                     LOG.warn("{} is dead,", this.toString());
@@ -809,63 +847,4 @@ public class Backend implements Writable {
         return "{" + new PrintableMap<>(tagMap, ":", true, false).toString() + "}";
     }
 
-    public static BeInfoCollector getBeInfoCollector() {
-        return BeInfoCollector.get();
-    }
-
-    public static class BeInfoCollector {
-        private int numCores = 1;
-        private static volatile BeInfoCollector instance = null;
-        private static final Map<Long, BeInfoCollector> Info = new ConcurrentHashMap<>();
-
-        private BeInfoCollector(int numCores) {
-            this.numCores = numCores;
-        }
-
-        public static BeInfoCollector get() {
-            if (instance == null) {
-                synchronized (BeInfoCollector.class) {
-                    if (instance == null) {
-                        instance = new BeInfoCollector(Integer.MAX_VALUE);
-                    }
-                }
-            }
-            return instance;
-        }
-
-        public int getNumCores() {
-            return numCores;
-        }
-
-        public void clear() {
-            Info.clear();
-        }
-
-        public void addBeInfo(long beId, int numCores) {
-            Info.put(beId, new BeInfoCollector(numCores));
-        }
-
-        public void dropBeInfo(long beId) {
-            Info.remove(beId);
-        }
-
-        public int getMinNumCores() {
-            int minNumCores = Integer.MAX_VALUE;
-            for (BeInfoCollector beinfo : Info.values()) {
-                minNumCores = Math.min(minNumCores, beinfo.getNumCores());
-            }
-            return Math.max(1, minNumCores);
-        }
-
-        public int getParallelExecInstanceNum() {
-            if (getMinNumCores() == Integer.MAX_VALUE) {
-                return 1;
-            }
-            return (getMinNumCores() + 1) / 2;
-        }
-
-        public BeInfoCollector getBeInfoCollectorById(long beId) {
-            return Info.get(beId);
-        }
-    }
 }

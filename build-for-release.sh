@@ -110,6 +110,20 @@ echo "Get params:
 
 ARCH="$(uname -m)"
 
+<<<<<<< HEAD
+=======
+if [[ "${ARCH}" == "aarch64" ]]; then
+    ARCH="arm64"
+elif [[ "${ARCH}" == "x86_64" ]]; then
+    ARCH="x64"
+else
+    echo "Unknown arch: ${ARCH}"
+    exit 1
+fi
+
+echo "ARCH: ${ARCH}"
+
+>>>>>>> 2.0.0-rc01
 ORI_OUTPUT="${ROOT}/output"
 
 FE="fe"
@@ -117,7 +131,11 @@ BE="be"
 EXT="extensions"
 PACKAGE="apache-doris-${VERSION}-bin-${ARCH}"
 
+<<<<<<< HEAD
 if [[ "${_USE_AVX2}" == "0" && "${ARCH}" == "x86_64" ]]; then
+=======
+if [[ "${_USE_AVX2}" == "0" ]]; then
+>>>>>>> 2.0.0-rc01
     PACKAGE="${PACKAGE}-noavx2"
 fi
 

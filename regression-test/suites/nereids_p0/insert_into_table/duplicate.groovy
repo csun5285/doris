@@ -26,54 +26,102 @@ suite("nereids_insert_duplicate") {
 
     sql '''insert into dup_t
             select * except(kaint) from src'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_11 'select * from dup_t order by id, kint'
 
     sql '''insert into dup_t with label label_dup_cte
             with cte as (select * except(kaint) from src)
             select * from cte'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_12 'select * from dup_t order by id, kint'
 
     sql '''insert into dup_t partition (p1, p2) with label label_dup
             select * except(kaint) from src where id < 4'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_13 'select * from dup_t order by id, kint'
 
     sql '''insert into dup_light_sc_t
             select * except(kaint) from src'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_21 'select * from dup_light_sc_t order by id, kint'
 
     sql '''insert into dup_light_sc_t with label label_dup_light_sc_cte
             with cte as (select * except(kaint) from src)
             select * from cte'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_22 'select * from dup_light_sc_t order by id, kint'
 
     sql '''insert into dup_light_sc_t partition (p1, p2) with label label_dup_light_sc
             select * except(kaint) from src where id < 4'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_23 'select * from dup_light_sc_t order by id, kint'
 
     sql '''insert into dup_not_null_t
             select * except(kaint) from src where id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_31 'select * from dup_not_null_t order by id, kint'
 
     sql '''insert into dup_not_null_t with label label_dup_not_null_cte
             with cte as (select * except(kaint) from src)
             select * from cte where id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_32 'select * from dup_not_null_t order by id, kint'
 
     sql '''insert into dup_not_null_t partition (p1, p2) with label label_dup_not_null
             select * except(kaint) from src where id < 4 and id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_33 'select * from dup_not_null_t order by id, kint'
 
     sql '''insert into dup_light_sc_not_null_t
             select * except(kaint) from src where id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_41 'select * from dup_light_sc_not_null_t order by id, kint'
 
     sql '''insert into dup_light_sc_not_null_t with label label_dup_light_sc_not_null_cte
             with cte as (select * except(kaint) from src)
             select * from cte where id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_42 'select * from dup_light_sc_not_null_t order by id, kint'
 
     sql '''insert into dup_light_sc_not_null_t partition (p1, p2) with label label_dup_light_sc_not_null
             select * except(kaint) from src where id < 4 and id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_43 'select * from dup_light_sc_not_null_t order by id, kint'
 
     // test light_schema_change
@@ -82,9 +130,17 @@ suite("nereids_insert_duplicate") {
 
     sql '''insert into dup_light_sc_t
             select * except(kaint) from src'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_lsc1 'select * from dup_light_sc_t order by id, kint'
 
     sql '''insert into dup_light_sc_not_null_t
             select * except(kaint) from src where id is not null'''
+<<<<<<< HEAD
+=======
+    sql 'sync'
+>>>>>>> 2.0.0-rc01
     qt_lsc2 'select * from dup_light_sc_not_null_t order by id, kint'
 }

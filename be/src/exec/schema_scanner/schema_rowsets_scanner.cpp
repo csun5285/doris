@@ -30,7 +30,11 @@
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_meta.h"
+#ifdef CLOUD_MODE
 #include "cloud/olap/storage_engine.h"
+#else
+#include "olap/storage_engine.h"
+#endif
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "runtime/define_primitive_type.h"

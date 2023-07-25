@@ -604,6 +604,7 @@ public final class MetricRepo {
             }
         };
         DORIS_METRIC_REGISTER.addMetrics(txnReplicaNum);
+        DORIS_METRIC_REGISTER.addMetrics(publishTxnNum);
         DB_GAUGE_PUBLISH_TXN_NUM = addLabeledMetrics("db",
                 () -> new GaugeMetricImpl<>("publish_txn_num", MetricUnit.NOUNIT, "number of publish transactions"));
         COUNTER_ROUTINE_LOAD_ROWS = new LongCounterMetric("routine_load_rows", MetricUnit.ROWS,

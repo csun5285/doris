@@ -19,9 +19,12 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite ("test_dup_mv_year") {
 
+<<<<<<< HEAD
     // because nereids cannot support rollup correctly forbid it temporary
     sql """set enable_nereids_planner=false"""
 
+=======
+>>>>>>> 2.0.0-rc01
     sql """ DROP TABLE IF EXISTS d_table; """
 
     sql """

@@ -19,7 +19,6 @@
 
 #include <stdint.h>
 
-#include <functional>
 #include <string>
 
 namespace doris {

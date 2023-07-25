@@ -436,6 +436,7 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         jobProperties.put(LoadStmt.LOAD_PARALLELISM, Config.default_load_parallelism);
         jobProperties.put(LoadStmt.SEND_BATCH_PARALLELISM, 1);
         jobProperties.put(LoadStmt.LOAD_TO_SINGLE_TABLET, false);
+        jobProperties.put(LoadStmt.PRIORITY, LoadTask.Priority.NORMAL);
     }
 
     public void isJobTypeRead(boolean jobTypeRead) {
@@ -1284,6 +1285,10 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
 
     public int getSendBatchParallelism() {
         return (int) jobProperties.get(LoadStmt.SEND_BATCH_PARALLELISM);
+    }
+
+    public LoadTask.Priority getPriority() {
+        return (LoadTask.Priority) jobProperties.get(LoadStmt.PRIORITY);
     }
 
     public boolean isSingleTabletLoadPerSink() {

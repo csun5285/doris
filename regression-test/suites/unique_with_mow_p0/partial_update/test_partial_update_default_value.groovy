@@ -52,8 +52,16 @@ suite("test_primary_key_partial_update_default_value", "p0") {
         file 'default.csv'
         time 10000 // limit inflight 10s
     }
+<<<<<<< HEAD
     qt_select_default """
         select * from ${tableName}
+=======
+
+    sql "sync"
+
+    qt_select_default """
+        select * from ${tableName} order by id;
+>>>>>>> 2.0.0-rc01
     """
 
     // drop drop

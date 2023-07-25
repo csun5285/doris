@@ -17,6 +17,7 @@ ex_tb1
 ex_tb0
 ex_tb1
 
+<<<<<<< HEAD
 -- !select --
 doris_test
 
@@ -145,3 +146,5 @@ test1
 test_insert
 test_insert2
 
+=======
+>>>>>>> 2.0.0-rc01

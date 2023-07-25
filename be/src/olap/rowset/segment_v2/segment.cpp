@@ -52,6 +52,7 @@
 #include "runtime/query_context.h"
 #include "runtime/runtime_predicate.h"
 #include "runtime/runtime_state.h"
+#include "util/bvar_helper.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
 #include "util/slice.h" // Slice
@@ -62,7 +63,13 @@
 #include "vec/olap/vgeneric_iterators.h"
 
 namespace doris {
+
 using namespace ErrorCode;
+
+namespace io {
+class FileCacheManager;
+class FileReaderOptions;
+} // namespace io
 
 namespace segment_v2 {
 class InvertedIndexIterator;
@@ -145,6 +152,7 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
             }
         }
     }
+
     if (read_options.runtime_state != nullptr) {
         _disable_file_cache = read_options.runtime_state->query_options().disable_file_cache;
     }
@@ -175,6 +183,7 @@ Status Segment::_parse_footer() {
     io::IOContext io_ctx;
     io_ctx.read_segment_index = true;
     io_ctx.disable_file_cache = _disable_file_cache;
+
     RETURN_IF_ERROR(
             _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read, &io_ctx));
     DCHECK_EQ(bytes_read, 12);
@@ -349,10 +358,8 @@ Status Segment::new_inverted_index_iterator(const TabletColumn& tablet_column,
                                             std::unique_ptr<InvertedIndexIterator>* iter) {
     auto col_unique_id = tablet_column.unique_id();
     if (_column_readers.count(col_unique_id) > 0 && index_meta) {
-        InvertedIndexIterator* it;
         RETURN_IF_ERROR(_column_readers.at(col_unique_id)
-                                ->new_inverted_index_iterator(index_meta, stats, &it));
-        iter->reset(it);
+                                ->new_inverted_index_iterator(index_meta, stats, iter));
         return Status::OK();
     }
     return Status::OK();
@@ -365,7 +372,9 @@ Status Segment::lookup_row_key(const Slice& key, bool with_seq_col, RowLocation*
     if (has_seq_col && with_seq_col) {
         seq_col_length = _tablet_schema->column(_tablet_schema->sequence_col_idx()).length() + 1;
     }
-    Slice key_without_seq = Slice(key.get_data(), key.get_size() - seq_col_length);
+
+    Slice key_without_seq =
+            Slice(key.get_data(), key.get_size() - (with_seq_col ? seq_col_length : 0));
 
     DCHECK(_pk_index_reader != nullptr);
     if (!_pk_index_reader->check_present(key_without_seq)) {
@@ -380,6 +389,7 @@ Status Segment::lookup_row_key(const Slice& key, bool with_seq_col, RowLocation*
     }
     row_location->row_id = index_iterator->get_current_ordinal();
     row_location->segment_id = _segment_id;
+    row_location->rowset_id = _rowset_id;
 
     if (has_seq_col) {
         size_t num_to_read = 1;
@@ -398,6 +408,10 @@ Status Segment::lookup_row_key(const Slice& key, bool with_seq_col, RowLocation*
         // compare key
         if (key_without_seq.compare(sought_key_without_seq) != 0) {
             return Status::NotFound("Can't find key in the segment");
+        }
+
+        if (!with_seq_col) {
+            return Status::OK();
         }
 
         // compare sequence id

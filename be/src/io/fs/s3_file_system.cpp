@@ -386,12 +386,7 @@ Status S3FileSystem::rename_dir_impl(const Path& orig_name, const Path& new_name
 }
 
 Status S3FileSystem::upload_impl(const Path& local_file, const Path& remote_file) {
-    auto client = get_client();
-    CHECK_S3_CLIENT(client);
-
-    Aws::Transfer::TransferManagerConfiguration transfer_config(_executor.get());
-    transfer_config.s3Client = client;
-    auto transfer_manager = Aws::Transfer::TransferManager::Create(transfer_config);
+    auto transfer_manager = get_transfer_manager();
 
     auto start = std::chrono::steady_clock::now();
 
@@ -418,17 +413,12 @@ Status S3FileSystem::upload_impl(const Path& local_file, const Path& remote_file
 
 Status S3FileSystem::batch_upload_impl(const std::vector<Path>& local_files,
                                        const std::vector<Path>& remote_files) {
-    auto client = get_client();
-    CHECK_S3_CLIENT(client);
-
     if (local_files.size() != remote_files.size()) {
         return Status::InvalidArgument("local_files.size({}) != remote_files.size({})",
                                        local_files.size(), remote_files.size());
     }
 
-    Aws::Transfer::TransferManagerConfiguration transfer_config(_executor.get());
-    transfer_config.s3Client = client;
-    auto transfer_manager = Aws::Transfer::TransferManager::Create(transfer_config);
+    auto transfer_manager = get_transfer_manager();
 
     std::vector<std::shared_ptr<Aws::Transfer::TransferHandle>> handles;
     for (int i = 0; i < local_files.size(); ++i) {

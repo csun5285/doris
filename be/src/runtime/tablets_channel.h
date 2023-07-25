@@ -34,7 +34,6 @@
 
 #include "common/status.h"
 #include "util/bitmap.h"
-#include "util/lock.h"
 #include "util/runtime_profile.h"
 #include "util/spinlock.h"
 #include "util/uid_util.h"
@@ -121,11 +120,10 @@ public:
 
     int64_t mem_consumption();
 
-    void get_writers_mem_consumption_snapshot(
-            std::multimap<int64_t, int64_t, std::greater<int64_t>>* mem_consumptions) {
-        std::lock_guard<SpinLock> l(_tablet_writers_lock);
-        *mem_consumptions = _mem_consumptions;
-    }
+    void refresh_profile();
+
+    void get_active_memtable_mem_consumption(
+            std::multimap<int64_t, int64_t, std::greater<int64_t>>* mem_consumptions);
 
     void flush_memtable_async(int64_t tablet_id);
     void wait_flush(int64_t tablet_id);
@@ -204,10 +202,6 @@ private:
     bool _is_high_priority = false;
 
     bool _write_single_replica = false;
-
-    // mem -> tablet_id
-    // sort by memory size
-    std::multimap<int64_t, int64_t, std::greater<int64_t>> _mem_consumptions;
 
     RuntimeProfile* _profile;
     RuntimeProfile::Counter* _add_batch_number_counter = nullptr;

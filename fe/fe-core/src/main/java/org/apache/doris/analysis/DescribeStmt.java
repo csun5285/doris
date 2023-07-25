@@ -132,7 +132,11 @@ public class DescribeStmt extends ShowStmt {
                         "NONE"
                 );
                 if (column.getOriginType().isDatetimeV2()) {
-                    row.set(1, "DATETIME");
+                    StringBuilder typeStr = new StringBuilder("DATETIME");
+                    if (((ScalarType) column.getOriginType()).getScalarScale() > 0) {
+                        typeStr.append("(").append(((ScalarType) column.getOriginType()).getScalarScale()).append(")");
+                    }
+                    row.set(1, typeStr.toString());
                 } else if (column.getOriginType().isDateV2()) {
                     row.set(1, "DATE");
                 }
@@ -212,7 +216,6 @@ public class DescribeStmt extends ShowStmt {
                                     column.getName(),
                                     column.getOriginType().toString(),
                                     column.getOriginType().toString(),
-                                    column.getOriginType().toString(),
                                     column.isAllowNull() ? "Yes" : "No",
                                     ((Boolean) column.isKey()).toString(),
                                     column.getDefaultValue() == null
@@ -224,13 +227,12 @@ public class DescribeStmt extends ShowStmt {
                                     "");
 
                             if (column.getOriginType().isDatetimeV2()) {
-                                row.set(3, "DATETIME");
-                            } else if (column.getOriginType().isDateV2()) {
-                                row.set(3, "DATE");
-                            }
-
-                            if (column.getOriginType().isDatetimeV2()) {
-                                row.set(3, "DATETIME");
+                                StringBuilder typeStr = new StringBuilder("DATETIME");
+                                if (((ScalarType) column.getOriginType()).getScalarScale() > 0) {
+                                    typeStr.append("(").append(((ScalarType) column.getOriginType()).getScalarScale())
+                                            .append(")");
+                                }
+                                row.set(3, typeStr.toString());
                             } else if (column.getOriginType().isDateV2()) {
                                 row.set(3, "DATE");
                             }

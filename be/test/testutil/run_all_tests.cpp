@@ -15,17 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include <gtest/gtest.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <memory>
 #include <string>
 
+#include "common/config.h"
+#include "common/logging.h"
 #include "common/sync_point.h"
+#include "gtest/gtest_pred_impl.h"
 #include "olap/page_cache.h"
 #include "olap/segment_loader.h"
-#include "olap/tablet_schema.h"
 #include "olap/tablet_schema_cache.h"
 #include "runtime/exec_env.h"
 #include "runtime/memory/thread_mem_tracker_mgr.h"

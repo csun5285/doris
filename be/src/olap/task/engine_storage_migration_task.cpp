@@ -38,7 +38,11 @@
 #include "olap/olap_define.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/snapshot_manager.h"
+#ifdef CLOUD_MODE
 #include "cloud/olap/storage_engine.h"
+#else
+#include "olap/storage_engine.h"
+#endif
 #include "olap/tablet_manager.h"
 #include "olap/txn_manager.h"
 #include "util/doris_metrics.h"

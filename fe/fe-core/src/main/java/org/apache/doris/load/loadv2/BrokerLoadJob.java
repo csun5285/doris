@@ -34,6 +34,7 @@ import org.apache.doris.common.LabelAlreadyUsedException;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.Version;
 import org.apache.doris.common.profile.Profile;
 import org.apache.doris.common.profile.SummaryProfile.SummaryBuilder;
 import org.apache.doris.common.util.DebugUtil;
@@ -133,7 +134,7 @@ public class BrokerLoadJob extends BulkLoadJob {
     }
 
     protected LoadTask createPendingTask() {
-        return new BrokerLoadPendingTask(this, fileGroupAggInfo.getAggKeyToFileGroups(), brokerDesc);
+        return new BrokerLoadPendingTask(this, fileGroupAggInfo.getAggKeyToFileGroups(), brokerDesc, getPriority());
     }
 
     /**
@@ -231,7 +232,7 @@ public class BrokerLoadJob extends BulkLoadJob {
                         isStrictMode(), transactionId, this, getTimeZone(), getTimeout(),
                         getLoadParallelism(), getSendBatchParallelism(),
                         getMaxFilterRatio() <= 0, enableProfile ? jobProfile : null, isSingleTabletLoadPerSink(),
-                        useNewLoadScanNode());
+                        useNewLoadScanNode(), getPriority());
 
                 UUID uuid = UUID.randomUUID();
                 TUniqueId loadId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
@@ -419,6 +420,7 @@ public class BrokerLoadJob extends BulkLoadJob {
         long currentTimestamp = System.currentTimeMillis();
         SummaryBuilder builder = new SummaryBuilder();
         builder.profileId(String.valueOf(id));
+        builder.dorisVersion(Version.DORIS_BUILD_VERSION);
         builder.taskType(ProfileType.LOAD.name());
         builder.startTime(TimeUtils.longToTimeString(createTimestamp));
         if (isFinished) {

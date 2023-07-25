@@ -139,6 +139,10 @@ PROPERTIES
 );
 ```
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 2.0.0-rc01
 7. Create a repository named minio_repo via temporary security credentials.
 
 <version since="1.2"></version>
@@ -166,16 +170,22 @@ ON LOCATION "s3://backet1/"
 PROPERTIES
 (
 <<<<<<< HEAD
+<<<<<<< HEAD
     "AWS_ACCESS_KEY" = "ak",
     "AWS_SECRET_KEY" = "sk",
     "AWS_ENDPOINT" = "http://cos.ap-beijing.myqcloud.com",
     "AWS_REGION" = "ap-beijing"
 =======
+=======
+>>>>>>> 2.0.0-rc01
     "s3.access_key" = "ak",
     "s3.secret_key" = "sk",
     "s3.endpoint" = "http://cos.ap-beijing.myqcloud.com",
     "s3.region" = "ap-beijing"
+<<<<<<< HEAD
 >>>>>>> doris/branch-2.0-beta
+=======
+>>>>>>> 2.0.0-rc01
 );
 ```
 

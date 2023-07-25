@@ -12,6 +12,7 @@ PhysicalTopN
 ------------------hashAgg[LOCAL]
 --------------------PhysicalProject
 ----------------------hashJoin[INNER_JOIN](web_sales.ws_item_sk = item.i_item_sk)
+<<<<<<< HEAD
 ------------------------hashJoin[INNER_JOIN](web_sales.ws_sold_date_sk = date_dim.d_date_sk)
 --------------------------PhysicalProject
 ----------------------------PhysicalOlapScan[web_sales]
@@ -19,6 +20,16 @@ PhysicalTopN
 ----------------------------PhysicalProject
 ------------------------------filter((date_dim.d_date <= 1998-05-06)(date_dim.d_date >= 1998-04-06))
 --------------------------------PhysicalOlapScan[date_dim]
+=======
+------------------------PhysicalDistribute
+--------------------------hashJoin[INNER_JOIN](web_sales.ws_sold_date_sk = date_dim.d_date_sk)
+----------------------------PhysicalProject
+------------------------------PhysicalOlapScan[web_sales]
+----------------------------PhysicalDistribute
+------------------------------PhysicalProject
+--------------------------------filter((date_dim.d_date <= 1998-05-06)(date_dim.d_date >= 1998-04-06))
+----------------------------------PhysicalOlapScan[date_dim]
+>>>>>>> 2.0.0-rc01
 ------------------------PhysicalDistribute
 --------------------------PhysicalProject
 ----------------------------filter(i_category IN ('Books', 'Sports', 'Men'))

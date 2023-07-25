@@ -34,6 +34,7 @@ public class LoadProcDir implements ProcDirInterface {
             .add("EtlStartTime").add("EtlFinishTime").add("LoadStartTime").add("LoadFinishTime")
             .add("URL").add("JobDetails").add("TransactionId").add("ErrorTablets").add("User").add("Comment")
             .build();
+
     public static final ImmutableList<String> COPY_TITLE_NAMES = new ImmutableList.Builder<String>()
             .add("Id").addAll(TITLE_NAMES).add("TableName").add("Files").build();
 
@@ -103,7 +104,13 @@ public class LoadProcDir implements ProcDirInterface {
     }
 
     public static int analyzeColumn(String columnName) throws AnalysisException {
-        return analyzeColumn(TITLE_NAMES, columnName);
+        for (String title : TITLE_NAMES) {
+            if (title.equalsIgnoreCase(columnName)) {
+                return TITLE_NAMES.indexOf(title);
+            }
+        }
+
+        throw new AnalysisException("Title name[" + columnName + "] does not exist");
     }
 
     public static int analyzeCopyColumn(String columnName) throws AnalysisException {

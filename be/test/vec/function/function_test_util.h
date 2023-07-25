@@ -45,8 +45,6 @@
 #include "vec/data_types/data_type.h"
 #include "vec/data_types/data_type_nullable.h"
 #include "vec/data_types/data_type_number.h"
-#include "vec/data_types/data_type_string.h"
-#include "vec/data_types/data_type_time.h"
 #include "vec/functions/simple_function_factory.h"
 
 namespace doris {

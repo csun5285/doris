@@ -116,7 +116,7 @@ public class IndexChangeJob implements Writable {
         this.jobState = JobState.WAITING_TXN;
     }
 
-    public IndexChangeJob(long jobId, long dbId, long tableId, String tableName) {
+    public IndexChangeJob(long jobId, long dbId, long tableId, String tableName) throws AnalysisException {
         this.jobId = jobId;
         this.dbId = dbId;
         this.tableId = tableId;
@@ -124,6 +124,7 @@ public class IndexChangeJob implements Writable {
 
         this.createTimeMs = System.currentTimeMillis();
         this.jobState = JobState.WAITING_TXN;
+        this.watershedTxnId = Env.getCurrentGlobalTransactionMgr().getNextTransactionId(dbId);
     }
 
     public long getJobId() {
@@ -243,12 +244,6 @@ public class IndexChangeJob implements Writable {
 
     protected void runWaitingTxnJob() throws AlterCancelException {
         Preconditions.checkState(jobState == JobState.WAITING_TXN, jobState);
-        // TODO(wangyue): may be not work in cloud, just make compile succ
-        try {
-            this.watershedTxnId = Env.getCurrentGlobalTransactionMgr().getNextTransactionId(dbId);
-        } catch (AnalysisException e) {
-            throw new AlterCancelException(e.getMessage());
-        }
         try {
             if (!isPreviousLoadFinished()) {
                 LOG.info("wait transactions before {} to be finished, inverted index job: {}", watershedTxnId, jobId);
@@ -294,7 +289,7 @@ public class IndexChangeJob implements Writable {
                             partitionId, originIndexId, originTabletId,
                             originSchemaHash, olapTable.getIndexes(),
                             alterInvertedIndexes, originSchemaColumns,
-                            isDropOp, taskSignature);
+                            isDropOp, taskSignature, jobId);
                     invertedIndexBatchTask.addTask(alterInvertedIndexTask);
                 }
             } // end for tablet

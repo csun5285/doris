@@ -13,6 +13,7 @@ PhysicalTopN
 --------------------hashAgg[LOCAL]
 ----------------------PhysicalProject
 ------------------------hashJoin[INNER_JOIN](store_sales.ss_addr_sk = customer_address.ca_address_sk)
+<<<<<<< HEAD
 --------------------------hashJoin[INNER_JOIN](store_sales.ss_item_sk = item.i_item_sk)
 ----------------------------PhysicalProject
 ------------------------------hashJoin[INNER_JOIN](store_sales.ss_sold_date_sk = date_dim.d_date_sk)
@@ -30,6 +31,26 @@ PhysicalTopN
 ----------------------------------PhysicalProject
 ------------------------------------filter(i_color IN ('powder', 'green', 'cyan'))
 --------------------------------------PhysicalOlapScan[item]
+=======
+--------------------------PhysicalDistribute
+----------------------------hashJoin[INNER_JOIN](store_sales.ss_item_sk = item.i_item_sk)
+------------------------------PhysicalProject
+--------------------------------hashJoin[INNER_JOIN](store_sales.ss_sold_date_sk = date_dim.d_date_sk)
+----------------------------------PhysicalProject
+------------------------------------PhysicalOlapScan[store_sales]
+----------------------------------PhysicalDistribute
+------------------------------------PhysicalProject
+--------------------------------------filter((date_dim.d_year = 2000)(date_dim.d_moy = 2))
+----------------------------------------PhysicalOlapScan[date_dim]
+------------------------------PhysicalDistribute
+--------------------------------hashJoin[LEFT_SEMI_JOIN](item.i_item_id = item.i_item_id)
+----------------------------------PhysicalProject
+------------------------------------PhysicalOlapScan[item]
+----------------------------------PhysicalDistribute
+------------------------------------PhysicalProject
+--------------------------------------filter(i_color IN ('powder', 'green', 'cyan'))
+----------------------------------------PhysicalOlapScan[item]
+>>>>>>> 2.0.0-rc01
 --------------------------PhysicalDistribute
 ----------------------------PhysicalProject
 ------------------------------filter((customer_address.ca_gmt_offset = -6.00))
@@ -58,9 +79,16 @@ PhysicalTopN
 ------------------------------------PhysicalProject
 --------------------------------------filter(i_color IN ('powder', 'green', 'cyan'))
 ----------------------------------------PhysicalOlapScan[item]
+<<<<<<< HEAD
 --------------------------PhysicalProject
 ----------------------------filter((customer_address.ca_gmt_offset = -6.00))
 ------------------------------PhysicalOlapScan[customer_address]
+=======
+--------------------------PhysicalDistribute
+----------------------------PhysicalProject
+------------------------------filter((customer_address.ca_gmt_offset = -6.00))
+--------------------------------PhysicalOlapScan[customer_address]
+>>>>>>> 2.0.0-rc01
 --------------PhysicalProject
 ----------------hashAgg[GLOBAL]
 ------------------PhysicalDistribute

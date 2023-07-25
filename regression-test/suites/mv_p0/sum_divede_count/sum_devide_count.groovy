@@ -19,9 +19,12 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite ("sum_devide_count") {
 
+<<<<<<< HEAD
     // because nereids cannot support rollup correctly forbid it temporary
     sql """set enable_nereids_planner=false"""
 
+=======
+>>>>>>> 2.0.0-rc01
     sql """ DROP TABLE IF EXISTS d_table; """
 
     sql """
@@ -40,11 +43,14 @@ suite ("sum_devide_count") {
     sql "insert into d_table select 2,2,2,'b';"
     sql "insert into d_table select 3,-3,null,'c';"
 
+<<<<<<< HEAD
     test {
         sql "create materialized view kavg as select k1,k4,avg(k2) from d_table group by k1,k4;"
         exception "errCode = 2,"
     }
 
+=======
+>>>>>>> 2.0.0-rc01
     createMV ("create materialized view kavg as select k1,k4,sum(k2),count(k2) from d_table group by k1,k4;")
 
     sql "insert into d_table select -4,-4,-4,'d';"

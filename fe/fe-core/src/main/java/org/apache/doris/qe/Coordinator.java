@@ -36,7 +36,6 @@ import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.ListUtil;
 import org.apache.doris.common.util.RuntimeProfile;
 import org.apache.doris.common.util.TimeUtils;
-import org.apache.doris.common.util.VectorizedUtil;
 import org.apache.doris.load.loadv2.LoadJob;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
@@ -64,6 +63,7 @@ import org.apache.doris.planner.SetOperationNode;
 import org.apache.doris.planner.UnionNode;
 import org.apache.doris.planner.external.ExternalScanNode;
 import org.apache.doris.planner.external.FileQueryScanNode;
+import org.apache.doris.planner.external.FileScanNode;
 import org.apache.doris.proto.InternalService;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentResult;
 import org.apache.doris.proto.InternalService.PExecPlanFragmentStartRequest;
@@ -112,12 +112,10 @@ import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
-import com.google.common.collect.HashMultimap;
 import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 import com.google.common.hash.Funnel;
@@ -196,6 +194,7 @@ public class Coordinator {
     private final Map<PlanFragmentId, FragmentExecParams> fragmentExecParamsMap = Maps.newHashMap();
 
     private final List<PlanFragment> fragments;
+    private int instanceTotalNum;
 
     private Map<Long, BackendExecStates> beToExecStates = Maps.newHashMap();
     private Map<Long, PipelineExecContexts> beToPipelineExecCtxs = Maps.newHashMap();
@@ -205,7 +204,7 @@ public class Coordinator {
     private final Map<Pair<Integer, Long>, PipelineExecContext> pipelineExecContexts = new HashMap<>();
     // backend which state need to be checked when joining this coordinator.
     // It is supposed to be the subset of backendExecStates.
-    private final Multimap<TUniqueId, BackendExecState> needCheckBackendExecStates = HashMultimap.create();
+    private final List<BackendExecState> needCheckBackendExecStates = Lists.newArrayList();
     private final List<PipelineExecContext> needCheckPipelineExecContexts = Lists.newArrayList();
     private ResultReceiver receiver;
     private final List<ScanNode> scanNodes;
@@ -277,6 +276,7 @@ public class Coordinator {
     // True if all scan node are ExternalScanNode.
     private boolean isAllExternalScan = true;
 
+    // CLOUD_MODE_BEGIN
     private static class BackendHash implements Funnel<Backend> {
         @Override
         public void funnel(Backend backend, PrimitiveSink primitiveSink) {
@@ -295,6 +295,7 @@ public class Coordinator {
             }
         }
     }
+    // CLOUD_MODE_END
 
     // Used for query/insert
     public Coordinator(ConnectContext context, Analyzer analyzer, Planner planner,
@@ -338,7 +339,9 @@ public class Coordinator {
 
         this.returnedAllResults = false;
         this.enableShareHashTableForBroadcastJoin = context.getSessionVariable().enableShareHashTableForBroadcastJoin;
-        this.enablePipelineEngine = context.getSessionVariable().enablePipelineEngine;
+        // Only enable pipeline query engine in query, not load
+        this.enablePipelineEngine = context.getSessionVariable().getEnablePipelineEngine()
+                && (fragments.size() > 0 && fragments.get(0).getSink() instanceof ResultSink);
         initQueryOptions(context);
 
         setFromUserProperty(context);
@@ -406,10 +409,8 @@ public class Coordinator {
 
     private void initQueryOptions(ConnectContext context) {
         this.queryOptions = context.getSessionVariable().toThrift();
-        this.queryOptions.setEnablePipelineEngine(VectorizedUtil.isPipeline());
+        this.queryOptions.setEnablePipelineEngine(SessionVariable.enablePipelineEngine());
         this.queryOptions.setBeExecVersion(Config.be_exec_version);
-        this.queryOptions.setMysqlRowBinaryFormat(
-                    context.getMysqlChannel().useServerPrepStmts());
         this.queryOptions.setQueryTimeout(context.getExecTimeout());
         this.queryOptions.setExecutionTimeout(context.getExecTimeout());
         this.queryOptions.setEnableScanNodeRunSerial(context.getSessionVariable().isEnableScanRunSerial());
@@ -510,6 +511,10 @@ public class Coordinator {
             }
         }
         return result;
+    }
+
+    public int getInstanceTotalNum() {
+        return instanceTotalNum;
     }
 
     // Initialize
@@ -733,6 +738,7 @@ public class Coordinator {
                 // 1. set up exec states
                 int instanceNum = params.instanceExecParams.size();
                 Preconditions.checkState(instanceNum > 0);
+                instanceTotalNum += instanceNum;
                 List<TExecPlanFragmentParams> tParams = params.toThrift(backendIdx);
 
                 // 2. update memory limit for colocate join
@@ -770,7 +776,7 @@ public class Coordinator {
 
                     backendExecStates.add(execState);
                     if (needCheckBackendState) {
-                        needCheckBackendExecStates.put(tParam.params.fragment_instance_id, execState);
+                        needCheckBackendExecStates.add(execState);
                         if (LOG.isDebugEnabled()) {
                             LOG.debug("add need check backend {} for fragment, {} job: {}",
                                     execState.backend.getId(), fragment.getFragmentId().asInt(), jobId);
@@ -1730,8 +1736,16 @@ public class Coordinator {
                             return scanNode.getId().asInt() == planNodeId;
                         }).findFirst();
 
+                        // disable shared scan optimization if one of conditions below is met:
+                        // 1. Use non-pipeline engine
+                        // 2. Number of scan ranges is larger than instances
+                        // 3. This fragment has a colocated scan node
+                        // 4. This fragment has a FileScanNode
+                        // 5. Disable shared scan optimization by session variable
                         if (!enablePipelineEngine || perNodeScanRanges.size() > parallelExecInstanceNum
-                                || (node.isPresent() && node.get().getShouldColoScan())) {
+                                || (node.isPresent() && node.get().getShouldColoScan())
+                                || (node.isPresent() && node.get() instanceof FileScanNode)
+                                || Config.disable_shared_scan) {
                             int expectedInstanceNum = 1;
                             if (parallelExecInstanceNum > 1) {
                                 //the scan instance num should not larger than the tablets num
@@ -2311,7 +2325,7 @@ public class Coordinator {
             }
         }
 
-        if (params.isSetLoadedRows()) {
+        if (params.isSetLoadedRows() && jobId != -1) {
             Env.getCurrentEnv().getLoadManager().updateJobProgress(
                     jobId, params.getBackendId(), params.getQueryId(), params.getFragmentInstanceId(),
                     params.getLoadedRows(), params.getLoadedBytes(), params.isDone());
@@ -2372,6 +2386,14 @@ public class Coordinator {
                     return false;
                 }
             }
+        } else {
+            for (BackendExecState backendExecState : needCheckBackendExecStates) {
+                if (!backendExecState.isBackendStateHealthy()) {
+                    queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend "
+                            + backendExecState.backend.getId() + " is down");
+                    return false;
+                }
+            }
         }
         return true;
     }
@@ -2415,7 +2437,8 @@ public class Coordinator {
         // check whether the node fragment is bucket shuffle join fragment
         private boolean isBucketShuffleJoin(int fragmentId, PlanNode node) {
             if (ConnectContext.get() != null) {
-                if (!ConnectContext.get().getSessionVariable().isEnableBucketShuffleJoin()) {
+                if (!ConnectContext.get().getSessionVariable().isEnableBucketShuffleJoin()
+                        && !ConnectContext.get().getSessionVariable().isEnableNereidsPlanner()) {
                     return false;
                 }
             }
@@ -2874,9 +2897,13 @@ public class Coordinator {
                             this.initiated, this.done, this.hasCanceled, backend.getId(),
                             DebugUtil.printId(localParam.fragment_instance_id), cancelReason.name());
                 }
-                if (fragmentInstancesMap.get(localParam.fragment_instance_id).getIsCancel()) {
+
+                RuntimeProfile profile = fragmentInstancesMap.get(localParam.fragment_instance_id);
+                if (profile.getIsDone() || profile.getIsCancel()) {
                     continue;
                 }
+
+                this.hasCanceled = true;
                 try {
                     Span span = ConnectContext.get() != null
                             ? ConnectContext.get().getTracer().spanBuilder("cancelPlanFragmentAsync")
@@ -2898,7 +2925,10 @@ public class Coordinator {
                     return false;
                 }
             }
-            this.hasCanceled = true;
+            if (!this.hasCanceled) {
+                return false;
+            }
+
             for (int i = 0; i < this.numInstances; i++) {
                 fragmentInstancesMap.get(rpcParams.local_params.get(i).fragment_instance_id).setIsCancel(true);
             }
@@ -3157,13 +3187,6 @@ public class Coordinator {
                 params.setBuildHashTableForBroadcastJoin(instanceExecParam.buildHashTableForBroadcastJoin);
                 params.params.setQueryId(queryId);
                 params.params.setFragmentInstanceId(instanceExecParam.instanceId);
-                if (!scanNodes.isEmpty()) {
-                    final StringBuilder sb = new StringBuilder().append("olap_tables: ");
-                    scanNodes.stream().filter(x -> (x instanceof OlapScanNode))
-                        .map(x -> ((OlapScanNode) x).getOlapTable())
-                        .forEach(t -> sb.append(t.getName()).append(":").append(t.getId()).append(" "));
-                    params.setDbName(sb.toString());
-                }
                 Map<Integer, List<TScanRangeParams>> scanRanges = instanceExecParam.perNodeScanRanges;
                 if (scanRanges == null) {
                     scanRanges = Maps.newHashMap();

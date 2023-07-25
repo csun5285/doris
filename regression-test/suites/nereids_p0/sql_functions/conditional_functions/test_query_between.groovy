@@ -18,7 +18,11 @@
 suite("test_query_between", "query,p0") {
     sql "SET enable_nereids_planner=true"
     sql "SET enable_fallback_to_original_planner=false"
+<<<<<<< HEAD
     sql"use test_query_db"
+=======
+    sql"use nereids_test_query_db"
+>>>>>>> 2.0.0-rc01
 
     def tableName = "test"
     qt_between1 "select if(k1 between 1 and 2, 2, 0) as wj from ${tableName} order by wj"

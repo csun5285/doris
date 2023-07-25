@@ -56,10 +56,15 @@ suite("bucket-shuffle-join") {
     sql """insert into shuffle_join_t2 values("1","1","1");"""
     sql """insert into shuffle_join_t2 values("1","1","1");"""
 
+<<<<<<< HEAD
     sql """analyze table shuffle_join_t1;"""
     sql """analyze table shuffle_join_t2;"""
 
     Thread.sleep(2000)
+=======
+    sql """analyze table shuffle_join_t1 with sync;"""
+    sql """analyze table shuffle_join_t2 with sync;"""
+>>>>>>> 2.0.0-rc01
 
     explain {
         sql("select * from shuffle_join_t1 t1 left join shuffle_join_t2 t2 on t1.a = t2.a;")

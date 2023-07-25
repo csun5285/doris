@@ -112,6 +112,8 @@ struct AddBatchCounter {
 // It's very error-prone to guarantee the handler capture vars' & this closure's destruct sequence.
 // So using create() to get the closure pointer is recommended. We can delete the closure ptr before the capture vars destruction.
 // Delete this point is safe, don't worry about RPC callback will run after ReusableClosure deleted.
+// "Ping-Pong" between sender and receiver, `try_set_in_flight` when send, `clear_in_flight` after rpc failure or callback,
+// then next send will start, and it will wait for the rpc callback to complete when it is destroyed.
 template <typename T>
 class ReusableClosure final : public google::protobuf::Closure {
 public:
@@ -119,7 +121,7 @@ public:
     ~ReusableClosure() override {
         // shouldn't delete when Run() is calling or going to be called, wait for current Run() done.
         join();
-        SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
+        SCOPED_TRACK_MEMORY_TO_UNKNOWN();
         cntl.Reset();
     }
 
@@ -147,7 +149,7 @@ public:
 
     // plz follow this order: reset() -> set_in_flight() -> send brpc batch
     void reset() {
-        SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
+        SCOPED_TRACK_MEMORY_TO_UNKNOWN();
         cntl.Reset();
         cid = cntl.call_id();
     }
@@ -232,6 +234,8 @@ public:
 
     void open_partition_wait();
 
+    bool open_partition_finished() const;
+
     Status add_block(vectorized::Block* block, const Payload* payload, bool is_append = false);
 
     int try_send_and_fetch_status(RuntimeState* state,
@@ -245,6 +249,22 @@ public:
     // 1. mark_close()->close_wait() PS. close_wait() will block waiting for the last AddBatch rpc response.
     // 2. just cancel()
     void mark_close();
+
+    bool is_send_data_rpc_done() const;
+
+    bool is_closed() const { return _is_closed; }
+    bool is_cancelled() const { return _cancelled; }
+    std::string get_cancel_msg() {
+        std::stringstream ss;
+        ss << "close wait failed coz rpc error";
+        {
+            std::lock_guard<doris::SpinLock> l(_cancel_msg_lock);
+            if (_cancel_msg != "") {
+                ss << ". " << _cancel_msg;
+            }
+        }
+        return ss.str();
+    }
 
     // two ways to stop channel:
     // 1. mark_close()->close_wait() PS. close_wait() will block waiting for the last AddBatch rpc response.
@@ -343,8 +363,6 @@ protected:
     std::atomic<int64_t> _serialize_batch_ns {0};
     std::atomic<int64_t> _queue_push_lock_ns {0};
     std::atomic<int64_t> _actual_consume_ns {0};
-    std::atomic<int64_t> _load_pressure_block_ns {0};
-    std::atomic<int64_t> _load_pressure_wait_time {0};
 
     VNodeChannelStat _stat;
     // lock to protect _is_closed.
@@ -361,11 +379,6 @@ protected:
     RuntimeState* _state;
     // rows number received per tablet, tablet_id -> rows_num
     std::vector<std::pair<int64_t, int64_t>> _tablets_received_rows;
-
-    // CLOUD_MODE upload metrics
-    friend class OlapTableSink;
-    int64_t _build_rowset_latency_ms = 0;
-    int64_t _commit_rowset_latency_ms = 0;
 
     std::unique_ptr<vectorized::MutableBlock> _cur_mutable_block;
     PTabletWriterAddBlockRequest _cur_add_block_request;
@@ -472,6 +485,9 @@ public:
 
     Status open(RuntimeState* state) override;
 
+    void try_close(RuntimeState* state, Status exec_status) override;
+    // if true, all node channels rpc done, can start close().
+    bool is_close_done() override;
     Status close(RuntimeState* state, Status close_status) override;
     Status send(RuntimeState* state, vectorized::Block* block, bool eos = false) override;
 
@@ -497,6 +513,9 @@ private:
     void _generate_row_distribution_payload(ChannelDistributionPayload& payload,
                                             const VOlapTablePartition* partition,
                                             uint32_t tablet_index, int row_idx, size_t row_cnt);
+    Status _single_partition_generate(RuntimeState* state, vectorized::Block* block,
+                                      ChannelDistributionPayload& channel_to_payload,
+                                      size_t num_rows, int32_t filtered_rows);
 
     // make input data valid for OLAP table
     // return number of invalid/filtered rows.
@@ -525,6 +544,12 @@ private:
                        bool& stop_processing, bool& is_continue);
 
     void _open_partition(const VOlapTablePartition* partition);
+
+    Status _cancel_channel_and_check_intolerable_failure(Status status, const std::string& err_msg,
+                                                         const std::shared_ptr<IndexChannel> ich,
+                                                         const std::shared_ptr<VNodeChannel> nch);
+
+    void _cancel_all_channel(Status status);
 
     std::shared_ptr<MemTracker> _mem_tracker;
 
@@ -619,8 +644,12 @@ private:
     int64_t _load_channel_timeout_s = 0;
 
     int32_t _send_batch_parallelism = 1;
-    // Save the status of close() method
+    // Save the status of try_close() and close() method
     Status _close_status;
+    bool _try_close = false;
+    bool _prepare = false;
+
+    std::atomic<bool> _open_partition_done {false};
 
     // User can change this config at runtime, avoid it being modified during query or loading process.
     bool _transfer_large_data_by_brpc = false;

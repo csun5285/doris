@@ -157,6 +157,10 @@ public class Tablet extends MetaObject implements Writable {
         cooldownConfLock.writeLock().unlock();
     }
 
+    public long getCooldownReplicaId() {
+        return cooldownReplicaId;
+    }
+
     public Pair<Long, Long> getCooldownConf() {
         cooldownConfLock.readLock().lock();
         try {

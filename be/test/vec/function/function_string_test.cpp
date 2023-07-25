@@ -30,7 +30,6 @@
 #include "util/encryption_util.h"
 #include "vec/core/field.h"
 #include "vec/core/types.h"
-#include "vec/data_types/data_type_array.h"
 #include "vec/data_types/data_type_date_time.h"
 #include "vec/data_types/data_type_nullable.h"
 #include "vec/data_types/data_type_number.h"

@@ -137,7 +137,8 @@ Status VerticalBetaRowsetWriter::_flush_columns(
         _segment_num_rows.resize(_cur_writer_idx + 1);
         _segment_num_rows[_cur_writer_idx] = _segment_writers[_cur_writer_idx]->row_count();
     }
-    _total_index_size += static_cast<int64_t>(index_size);
+    _total_index_size +=
+            static_cast<int64_t>(index_size) + (*segment_writer)->get_inverted_index_file_size();
     return Status::OK();
 }
 
@@ -159,10 +160,9 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     // of _num_segment and _next_segment_id with BetaRowsetWriter.
     // i.e. _next_segment_id means next available segment id,
     // and _num_segment means num of flushed segments.
-    int segment_id = _num_segment.fetch_add(1);
     allocate_segment_id();
     auto path =
-            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, segment_id);
+            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, _num_segment++);
     auto fs = _rowset_meta->fs();
     if (!fs) {
         return Status::Error<INIT_FAILED>();
@@ -179,11 +179,11 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     writer_options.enable_unique_key_merge_on_write = _context.enable_unique_key_merge_on_write;
     writer_options.rowset_ctx = &_context;
     writer->reset(new segment_v2::SegmentWriter(
-            file_writer.get(), segment_id, _context.tablet_schema, _context.tablet,
+            file_writer.get(), _num_segment, _context.tablet_schema, _context.tablet,
             _context.data_dir, _context.max_rows_per_segment, writer_options, nullptr));
     {
         std::lock_guard<SpinLock> l(_lock);
-        _file_writers.push_back({segment_id, std::move(file_writer)});
+        _file_writers.push_back(std::move(file_writer));
     }
 
     auto s = (*writer)->init(column_ids, is_key);
@@ -204,7 +204,7 @@ Status VerticalBetaRowsetWriter::final_flush() {
             LOG(WARNING) << "Fail to finalize segment footer, " << st;
             return st;
         }
-        _total_data_size += segment_size;
+        _total_data_size += segment_size + segment_writer->get_inverted_index_file_size();
         segment_writer.reset();
     }
     return Status::OK();

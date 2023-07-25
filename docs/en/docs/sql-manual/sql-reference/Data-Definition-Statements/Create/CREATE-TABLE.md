@@ -50,6 +50,7 @@ distribution_desc
 
 #### column_definition_list
 
+<<<<<<< HEAD
     Column definition list:
 
     `column_definition[, column_definition]`
@@ -160,33 +161,127 @@ distribution_desc
 
         ```sql
         INDEX index_name (col_name) [USING BITMAP] COMMENT'xxxxxx'
+=======
+Column definition list:
+
+`column_definition[, column_definition]`
+
+* `column_definition`
+
+    Column definition:
+
+    `column_name column_type [KEY] [aggr_type] [NULL] [default_value] [column_comment]`
+
+    * `column_type`
+
+        Column type, the following types are supported:
+
+        ```
+        TINYINT (1 byte)
+            Range: -2^7 + 1 ~ 2^7-1
+        SMALLINT (2 bytes)
+            Range: -2^15 + 1 ~ 2^15-1
+        INT (4 bytes)
+            Range: -2^31 + 1 ~ 2^31-1
+        BIGINT (8 bytes)
+            Range: -2^63 + 1 ~ 2^63-1
+        LARGEINT (16 bytes)
+            Range: -2^127 + 1 ~ 2^127-1
+        FLOAT (4 bytes)
+            Support scientific notation
+        DOUBLE (12 bytes)
+            Support scientific notation
+        DECIMAL[(precision, scale)] (16 bytes)
+            The decimal type with guaranteed precision. The default is DECIMAL(10, 0)
+            precision: 1 ~ 27
+            scale: 0 ~ 9
+            Where the integer part is 1 ~ 18
+            Does not support scientific notation
+        DATE (3 bytes)
+            Range: 0000-01-01 ~ 9999-12-31
+        DATETIME (8 bytes)
+            Range: 0000-01-01 00:00:00 ~ 9999-12-31 23:59:59
+        CHAR[(length)]
+            Fixed-length character string. Length range: 1 ~ 255. Default is 1
+        VARCHAR[(length)]
+            Variable length character string. Length range: 1 ~ 65533. Default is 1
+        HLL (1~16385 bytes)
+            HyperLogLog column type, do not need to specify the length and default value. The length is controlled within the system according to the degree of data aggregation.
+            Must be used with HLL_UNION aggregation type.
+        BITMAP
+            The bitmap column type does not need to specify the length and default value. Represents a collection of integers, and the maximum number of elements supported is 2^64-1.
+            Must be used with BITMAP_UNION aggregation type.
+>>>>>>> 2.0.0-rc01
         ```
 
-        Example:
+    * `aggr_type`
 
-        ```sql
-        INDEX idx1 (k1) USING BITMAP COMMENT "This is a bitmap index1",
-        INDEX idx2 (k2) USING BITMAP COMMENT "This is a bitmap index2",
-        ...
+        Aggregation type, the following aggregation types are supported:
+
+        ```
+        SUM: Sum. Applicable numeric types.
+        MIN: Find the minimum value. Suitable for numeric types.
+        MAX: Find the maximum value. Suitable for numeric types.
+        REPLACE: Replace. For rows with the same dimension column, the index column will be imported in the order of import, and the last imported will replace the first imported.
+        REPLACE_IF_NOT_NULL: non-null value replacement. The difference with REPLACE is that there is no replacement for null values. It should be noted here that the default value should be NULL, not an empty string. If it is an empty string, you should replace it with an empty string.
+        HLL_UNION: The aggregation method of HLL type columns, aggregated by HyperLogLog algorithm.
+        BITMAP_UNION: The aggregation mode of BIMTAP type columns, which performs the union aggregation of bitmaps.
         ```
 
+<<<<<<< HEAD
 #### engine_type
+=======
+    * `default_value`
+>>>>>>> 2.0.0-rc01
 
-    Table engine type. All types in this document are OLAP. For other external table engine types, see [CREATE EXTERNAL TABLE](./CREATE-EXTERNAL-TABLE.md) document. Example:
+        Default value of the column. If the load data does not specify a value for this column, the system will assign a default value to this column.
+        
+        The syntax is: `default default_value`。
+        
+        Currently, the default value supports two forms:
 
-    `ENGINE=olap`
+        1. The user specifies a fixed value, such as:
 
+        ```SQL
+        	k1 INT DEFAULT '1',
+            k2 CHAR(10) DEFAULT 'aaaa'
+        ```
+        2. Keywords are provided by the system. Currently, the following keywords are supported: 
+        
+        ```SQL
+            // This keyword is used only for DATETIME type. If the value is missing, the system assigns the current timestamp.
+            dt DATETIME DEFAULT CURRENT_TIMESTAMP
+        ```
+
+    Example:
+
+        ```
+        k1 TINYINT,
+        k2 DECIMAL(10,2) DEFAULT "10.5",
+        k4 BIGINT NULL DEFAULT "1000" COMMENT "This is column k4",
+        v1 VARCHAR(10) REPLACE NOT NULL,
+        v2 BITMAP BITMAP_UNION,
+        v3 HLL HLL_UNION,
+        v4 INT SUM NOT NULL DEFAULT "1" COMMENT "This is column v4"
+        ```
+
+<<<<<<< HEAD
 #### keys_type
+=======
+#### index_definition_list
+>>>>>>> 2.0.0-rc01
 
-    Data model.
+Index list definition:
 
-    `key_type(col1, col2, ...)`
+`index_definition[, index_definition]`
 
-    `key_type` supports the following models:
+* `index_definition`
 
-    * DUPLICATE KEY (default): The subsequent specified column is the sorting column.
-    * AGGREGATE KEY: The specified column is the dimension column.
-    * UNIQUE KEY: The subsequent specified column is the primary key column.
+    Index definition:
+
+    ```sql
+    INDEX index_name (col_name) [USING BITMAP] COMMENT'xxxxxx'
+    ```
 
     <version since="2.0">
     NOTE: when set table property `"enable_duplicate_without_keys_by_default" = "true"`, will create a duplicate model without sorting columns and prefix indexes by default.
@@ -194,15 +289,49 @@ distribution_desc
 
     Example:
 
+    ```sql
+    INDEX idx1 (k1) USING BITMAP COMMENT "This is a bitmap index1",
+    INDEX idx2 (k2) USING BITMAP COMMENT "This is a bitmap index2",
+    ...
     ```
-    DUPLICATE KEY(col1, col2),
-    AGGREGATE KEY(k1, k2, k3),
-    UNIQUE KEY(k1, k2)
-    ```
+
+<<<<<<< HEAD
+#### table_comment
+=======
+#### engine_type
+>>>>>>> 2.0.0-rc01
+
+Table engine type. All types in this document are OLAP. For other external table engine types, see [CREATE EXTERNAL TABLE](./CREATE-EXTERNAL-TABLE.md) document. Example:
+
+    `ENGINE=olap`
+
+#### keys_type
+
+Data model.
+
+`key_type(col1, col2, ...)`
+
+`key_type` supports the following models:
+
+* DUPLICATE KEY (default): The subsequent specified column is the sorting column.
+* AGGREGATE KEY: The specified column is the dimension column.
+* UNIQUE KEY: The subsequent specified column is the primary key column.
+
+<version since="2.0">
+NOTE: when set table property `"enable_duplicate_without_keys_by_default" = "true"`, will create a duplicate model without sorting columns and prefix indexes by default.
+</version>
+
+Example:
+
+```
+DUPLICATE KEY(col1, col2),
+AGGREGATE KEY(k1, k2, k3),
+UNIQUE KEY(k1, k2)
+```
 
 #### table_comment
 
-    Table notes. Example:
+Table notes. Example:
 
     ```
     COMMENT "This is my first DORIS table"
@@ -210,45 +339,46 @@ distribution_desc
 
 #### partition_info
 
-    Partition information supports three writing methods:
+Partition information supports three writing methods:
 
-    1. LESS THAN: Only define the upper boundary of the partition. The lower bound is determined by the upper bound of the previous partition.
+1. LESS THAN: Only define the upper boundary of the partition. The lower bound is determined by the upper bound of the previous partition.
 
-        ```
-        PARTITION BY RANGE(col1[, col2, ...])
-        (
-            PARTITION partition_name1 VALUES LESS THAN MAXVALUE|("value1", "value2", ...),
-            PARTITION partition_name2 VALUES LESS THAN MAXVALUE|("value1", "value2", ...)
-        )
-        ```
+    ```
+    PARTITION BY RANGE(col1[, col2, ...])
+    (
+        PARTITION partition_name1 VALUES LESS THAN MAXVALUE|("value1", "value2", ...),
+        PARTITION partition_name2 VALUES LESS THAN MAXVALUE|("value1", "value2", ...)
+    )
+    ```
 
-    2. FIXED RANGE: Define the left closed and right open interval of the zone.
+2. FIXED RANGE: Define the left closed and right open interval of the zone.
 
-        ```
-        PARTITION BY RANGE(col1[, col2, ...])
-        (
-            PARTITION partition_name1 VALUES [("k1-lower1", "k2-lower1", "k3-lower1",...), ("k1-upper1", "k2-upper1", "k3-upper1", ... )),
-            PARTITION partition_name2 VALUES [("k1-lower1-2", "k2-lower1-2", ...), ("k1-upper1-2", MAXVALUE, ))
-        )
-        ```
+    ```
+    PARTITION BY RANGE(col1[, col2, ...])
+    (
+        PARTITION partition_name1 VALUES [("k1-lower1", "k2-lower1", "k3-lower1",...), ("k1-upper1", "k2-upper1", "k3-upper1", ... )),
+        PARTITION partition_name2 VALUES [("k1-lower1-2", "k2-lower1-2", ...), ("k1-upper1-2", MAXVALUE, ))
+    )
+    ```
            
 <version since="1.2.0">
     
-    3. MULTI RANGE：Multi build RANGE partitions,Define the left closed and right open interval of the zone, Set the time unit and step size, the time unit supports year, month, day, week and hour.
+3. MULTI RANGE：Multi build RANGE partitions,Define the left closed and right open interval of the zone, Set the time unit and step size, the time unit supports year, month, day, week and hour.
 
-        ```
-        PARTITION BY RANGE(col)
-        (
-           FROM ("2000-11-14") TO ("2021-11-14") INTERVAL 1 YEAR,
-           FROM ("2021-11-14") TO ("2022-11-14") INTERVAL 1 MONTH,
-           FROM ("2022-11-14") TO ("2023-01-03") INTERVAL 1 WEEK,
-           FROM ("2023-01-03") TO ("2023-01-14") INTERVAL 1 DAY
-        )
-        ```
+    ```
+    PARTITION BY RANGE(col)
+    (
+       FROM ("2000-11-14") TO ("2021-11-14") INTERVAL 1 YEAR,
+       FROM ("2021-11-14") TO ("2022-11-14") INTERVAL 1 MONTH,
+       FROM ("2022-11-14") TO ("2023-01-03") INTERVAL 1 WEEK,
+       FROM ("2023-01-03") TO ("2023-01-14") INTERVAL 1 DAY
+    )
+    ```
     
 </version>
 
 
+<<<<<<< HEAD
     4. MULTI RANGE：Multi build integer RANGE partitions,Define the left closed and right open interval of the zone, and step size。
 
         ```
@@ -257,11 +387,22 @@ distribution_desc
             FROM (1) TO (100) INTERVAL 10
         )
         ```
+=======
+4. MULTI RANGE：Multi build integer RANGE partitions,Define the left closed and right open interval of the zone, and step size。
+
+    ```
+    PARTITION BY RANGE(int_col)
+    (
+        FROM (1) TO (100) INTERVAL 10
+    )
+    ```
+>>>>>>> 2.0.0-rc01
     
 #### distribution_desc
 
-    Define the data bucketing method.
+Define the data bucketing method.
 
+<<<<<<< HEAD
     1) Hash
        Syntax:
        `DISTRIBUTED BY HASH (k1[,k2 ...]) [BUCKETS num|auto]`
@@ -274,91 +415,115 @@ distribution_desc
        Use random numbers for bucketing.
 
 #### rollup_list
+=======
+1. Hash
+   Syntax:
+   `DISTRIBUTED BY HASH (k1[,k2 ...]) [BUCKETS num|auto]`
+   Explain:
+   Hash bucketing using the specified key column. 
 
-    Multiple materialized views (ROLLUP) can be created at the same time as the table is built.
+2. Random
+   Syntax:
+   `DISTRIBUTED BY RANDOM [BUCKETS num|auto]`
+   Explain:
+   Use random numbers for bucketing.
+>>>>>>> 2.0.0-rc01
 
-    `ROLLUP (rollup_definition[, rollup_definition, ...])`
+#### rollup_list
 
-    * `rollup_definition`
+Multiple materialized views (ROLLUP) can be created at the same time as the table is built.
 
-        `rollup_name (col1[, col2, ...]) [DUPLICATE KEY(col1[, col2, ...])] [PROPERTIES("key" = "value")]`
+`ROLLUP (rollup_definition[, rollup_definition, ...])`
 
-        Example:
+* `rollup_definition`
 
-        ```
-        ROLLUP (
-            r1 (k1, k3, v1, v2),
-            r2 (k1, v1)
-        )
-        ```
+    `rollup_name (col1[, col2, ...]) [DUPLICATE KEY(col1[, col2, ...])] [PROPERTIES("key" = "value")]`
+
+    Example:
+
+<<<<<<< HEAD
+#### properties
+=======
+    ```
+    ROLLUP (
+        r1 (k1, k3, v1, v2),
+        r2 (k1, v1)
+    )
+    ```
+>>>>>>> 2.0.0-rc01
 
 #### properties
 
-    Set table properties. The following attributes are currently supported:
+Set table properties. The following attributes are currently supported:
 
-    * `replication_num`
+* `replication_num`
 
-        Number of copies. The default number of copies is 3. If the number of BE nodes is less than 3, you need to specify that the number of copies is less than or equal to the number of BE nodes.
-        
-        After version 0.15, this attribute will be automatically converted to the `replication_allocation` attribute, such as:
-
-        `"replication_num" = "3"` will be automatically converted to `"replication_allocation" = "tag.location.default:3"`
-
-    * `replication_allocation`
-
-         Set the copy distribution according to Tag. This attribute can completely cover the function of the `replication_num` attribute.
-
-    * `storage_medium/storage_cooldown_time`
-
-        Data storage medium. `storage_medium` is used to declare the initial storage medium of the table data, and `storage_cooldown_time` is used to set the expiration time. Example:
-
-        ```
-        "storage_medium" = "SSD",
-        "storage_cooldown_time" = "2020-11-20 00:00:00"
-        ```
-
-        This example indicates that the data is stored in the SSD and will be automatically migrated to the HDD storage after the expiration of 2020-11-20 00:00:00.
-
-    * `colocate_with`
-
-        When you need to use the Colocation Join function, use this parameter to set the Colocation Group.
-
-        `"colocate_with" = "group1"`
-
-    * `bloom_filter_columns`
-
-        The user specifies the list of column names that need to be added to the Bloom Filter index. The Bloom Filter index of each column is independent, not a composite index.
-
-        `"bloom_filter_columns" = "k1, k2, k3"`
-
-    * `in_memory`
-
-        Deprecated.
-
-    * `function_column.sequence_col`
-
-        When using the UNIQUE KEY model, you can specify a sequence column. When the KEY columns are the same, REPLACE will be performed according to the sequence column (the larger value replaces the smaller value, otherwise it cannot be replaced)
-
-       The `function_column.sequence_col` is used to specify the mapping of the sequence column to a column in the table, which can be integral and time (DATE, DATETIME). The type of this column cannot be changed after creation. If `function_column.sequence_col` is set, `function_column.sequence_type` is ignored.
-
-        `"function_column.sequence_col" ='column_name'`
-
-    * `function_column.sequence_type`
-
-        When using the UNIQUE KEY model, you can specify a sequence column. When the KEY columns are the same, REPLACE will be performed according to the sequence column (the larger value replaces the smaller value, otherwise it cannot be replaced)
-
-        Here we only need to specify the type of sequence column, support time type or integer type. Doris will create a hidden sequence column.
-
-        `"function_column.sequence_type" ='Date'`
-
-    * `compression`
-
-        The default compression method for Doris tables is LZ4. After version 1.1, it is supported to specify the compression method as ZSTD to obtain a higher compression ratio.
+   Number of copies. The default number of copies is 3. If the number of BE nodes is less than 3, you need to specify that the number of copies is less than or equal to the number of BE nodes.
     
-        `"compression"="zstd"`
+   After version 0.15, this attribute will be automatically converted to the `replication_allocation` attribute, such as:
 
-    * `light_schema_change`
+   `"replication_num" = "3"` will be automatically converted to `"replication_allocation" = "tag.location.default:3"`
 
+* `replication_allocation`
+
+    Set the copy distribution according to Tag. This attribute can completely cover the function of the `replication_num` attribute.
+
+* `storage_medium/storage_cooldown_time`
+
+   Data storage medium. `storage_medium` is used to declare the initial storage medium of the table data, and `storage_cooldown_time` is used to set the expiration time. Example:
+
+   ```
+   "storage_medium" = "SSD",
+   "storage_cooldown_time" = "2020-11-20 00:00:00"
+   ```
+
+   This example indicates that the data is stored in the SSD and will be automatically migrated to the HDD storage after the expiration of 2020-11-20 00:00:00.
+
+* `colocate_with`
+
+   When you need to use the Colocation Join function, use this parameter to set the Colocation Group.
+
+   `"colocate_with" = "group1"`
+
+* `bloom_filter_columns`
+
+   The user specifies the list of column names that need to be added to the Bloom Filter index. The Bloom Filter index of each column is independent, not a composite index.
+
+   `"bloom_filter_columns" = "k1, k2, k3"`
+
+<<<<<<< HEAD
+        Deprecated.
+=======
+* `in_memory`
+
+   Deprecated.
+
+* `function_column.sequence_col`
+>>>>>>> 2.0.0-rc01
+
+   When using the UNIQUE KEY model, you can specify a sequence column. When the KEY columns are the same, REPLACE will be performed according to the sequence column (the larger value replaces the smaller value, otherwise it cannot be replaced)
+
+  The `function_column.sequence_col` is used to specify the mapping of the sequence column to a column in the table, which can be integral and time (DATE, DATETIME). The type of this column cannot be changed after creation. If `function_column.sequence_col` is set, `function_column.sequence_type` is ignored.
+
+   `"function_column.sequence_col" ='column_name'`
+
+* `function_column.sequence_type`
+
+   When using the UNIQUE KEY model, you can specify a sequence column. When the KEY columns are the same, REPLACE will be performed according to the sequence column (the larger value replaces the smaller value, otherwise it cannot be replaced)
+
+   Here we only need to specify the type of sequence column, support time type or integer type. Doris will create a hidden sequence column.
+
+   `"function_column.sequence_type" ='Date'`
+
+* `compression`
+
+   The default compression method for Doris tables is LZ4. After version 1.1, it is supported to specify the compression method as ZSTD to obtain a higher compression ratio.
+
+   `"compression"="zstd"`
+
+* `light_schema_change`
+
+<<<<<<< HEAD
         Whether to use the Light Schema Change optimization.
         
         If set to true, the addition and deletion of value columns can be done more quickly and synchronously.
@@ -366,13 +531,17 @@ distribution_desc
         `"light_schema_change"="true"`
 
         This feature is enabled by default after v1.2.1.
+=======
+   Whether to use the Light Schema Change optimization.
+>>>>>>> 2.0.0-rc01
     
-    * `disable_auto_compaction`
+   If set to true, the addition and deletion of value columns can be done more quickly and synchronously.
 
-        Whether to disable automatic compaction for this table.
+   `"light_schema_change"="true"`
 
-        If this property is set to 'true', the background automatic compaction process will skip all the tables of this table.
+   This feature is enabled by default after v2.0.0.
 
+<<<<<<< HEAD
         `"disable_auto_compaction" = "false"`
 
     * `enable_single_replica_compaction`
@@ -411,6 +580,52 @@ distribution_desc
         * `dynamic_partition.create_history_partition`: Whether to create a history partition.
         * `dynamic_partition.history_partition_num`: Specify the number of historical partitions to be created.
         * `dynamic_partition.reserved_history_periods`: Used to specify the range of reserved history periods.
+=======
+* `disable_auto_compaction`
+
+   Whether to disable automatic compaction for this table.
+
+   If this property is set to 'true', the background automatic compaction process will skip all the tables of this table.
+
+   `"disable_auto_compaction" = "false"`
+
+* `enable_single_replica_compaction`
+
+   Whether to enable single replica compaction for this table.
+
+   If this property is set to 'true', all replicas of the tablet will only have one replica performing compaction, while the others fetch rowsets from that replica.
+
+   `"enable_single_replica_compaction" = "false"`
+
+* `enable_duplicate_without_keys_by_default`
+
+   When `true`, if Unique, Aggregate, or Duplicate is not specified when creating a table, a Duplicate model table without sorting columns and prefix indexes will be created by default.
+
+   `"enable_duplicate_without_keys_by_default" = "false"`
+
+* `skip_write_index_on_load`
+
+   Whether to enable skip inverted index on load for this table.
+
+   If this property is set to 'true', skip writting index (only inverted index now) on first time load and delay writting 
+   index to compaction. It can reduce CPU and IO resource usage for high throughput load.
+
+   `"skip_write_index_on_load" = "false"`
+
+* Dynamic partition related
+
+   The relevant parameters of dynamic partition are as follows:
+
+* `dynamic_partition.enable`: Used to specify whether the dynamic partition function at the table level is enabled. The default is true.
+* `dynamic_partition.time_unit:` is used to specify the time unit for dynamically adding partitions, which can be selected as DAY (day), WEEK (week), MONTH (month), YEAR (year), HOUR (hour).
+* `dynamic_partition.start`: Used to specify how many partitions to delete forward. The value must be less than 0. The default is Integer.MIN_VALUE.
+* `dynamic_partition.end`: Used to specify the number of partitions created in advance. The value must be greater than 0.
+* `dynamic_partition.prefix`: Used to specify the partition name prefix to be created. For example, if the partition name prefix is ​​p, the partition name will be automatically created as p20200108.
+* `dynamic_partition.buckets`: Used to specify the number of partition buckets that are automatically created.
+* `dynamic_partition.create_history_partition`: Whether to create a history partition.
+* `dynamic_partition.history_partition_num`: Specify the number of historical partitions to be created.
+* `dynamic_partition.reserved_history_periods`: Used to specify the range of reserved history periods.
+>>>>>>> 2.0.0-rc01
     
 ### Example
 
@@ -636,7 +851,7 @@ distribution_desc
     ```
 
 11. Set the table hot and cold separation policy through the `storage_policy` property.
-```
+    ```sql
         CREATE TABLE IF NOT EXISTS create_table_use_created_policy 
         (
             k1 BIGINT,
@@ -649,11 +864,11 @@ distribution_desc
             "storage_policy" = "test_create_table_use_policy",
             "replication_num" = "1"
         );
-```
+    ```
 NOTE: Need to create the s3 resource and storage policy before the table can be successfully associated with the migration policy 
 
 12. Add a hot and cold data migration strategy for the table partition
-```
+    ```sql
         CREATE TABLE create_table_partion_use_created_policy
         (
             k1 DATE,
@@ -663,13 +878,13 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
             PARTITION p1 VALUES LESS THAN ("2022-01-01") ("storage_policy" = "test_create_table_partition_use_policy_1" ,"replication_num"="1"),
             PARTITION p2 VALUES LESS THAN ("2022-02-01") ("storage_policy" = "test_create_table_partition_use_policy_2" ,"replication_num"="1")
         ) DISTRIBUTED BY HASH(k2) BUCKETS 1;
-```
+    ```
 NOTE: Need to create the s3 resource and storage policy before the table can be successfully associated with the migration policy 
 
 <version since="1.2.0">
 
 13. Multi Partition by a partition desc
-```
+    ```sql
         CREATE TABLE create_table_multi_partion_date
         (
             k1 DATE,
@@ -685,8 +900,8 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
         PROPERTIES(
             "replication_num" = "1"
         );
-```
-```
+    ```
+    ```sql
         CREATE TABLE create_table_multi_partion_date_hour
         (
             k1 DATETIME,
@@ -698,8 +913,13 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
         PROPERTIES(
             "replication_num" = "1"
         );
+<<<<<<< HEAD
 ```
 ```
+=======
+    ```
+    ```sql
+>>>>>>> 2.0.0-rc01
         CREATE TABLE create_table_multi_partion_integer
         (
             k1 BIGINT,
@@ -711,7 +931,11 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
         PROPERTIES(
             "replication_num" = "1"
         );
+<<<<<<< HEAD
 ```
+=======
+    ```
+>>>>>>> 2.0.0-rc01
 
 NOTE: Multi Partition can be mixed with conventional manual creation of partitions. When using, you need to limit the partition column to only one, The default maximum number of partitions created in multi partition is 4096, This parameter can be adjusted in fe configuration `max_multi_partition_num`.
 
@@ -721,7 +945,11 @@ NOTE: Multi Partition can be mixed with conventional manual creation of partitio
 
 14. Add a duplicate without sorting column table
 
+<<<<<<< HEAD
 ```sql
+=======
+    ```sql
+>>>>>>> 2.0.0-rc01
     CREATE TABLE example_db.table_hash
     (
         k1 DATE,
@@ -741,7 +969,11 @@ NOTE: Multi Partition can be mixed with conventional manual creation of partitio
         "replication_num" = "1",
         "enable_duplicate_without_keys_by_default" = "true"
     );
+<<<<<<< HEAD
 ```
+=======
+    ```
+>>>>>>> 2.0.0-rc01
 
 </version>
 

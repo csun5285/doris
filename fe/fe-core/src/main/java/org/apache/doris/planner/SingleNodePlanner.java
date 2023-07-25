@@ -67,12 +67,12 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Reference;
 import org.apache.doris.common.UserException;
-import org.apache.doris.common.util.VectorizedUtil;
 import org.apache.doris.planner.external.FileQueryScanNode;
 import org.apache.doris.planner.external.HiveScanNode;
-import org.apache.doris.planner.external.HudiScanNode;
 import org.apache.doris.planner.external.MaxComputeScanNode;
+import org.apache.doris.planner.external.hudi.HudiScanNode;
 import org.apache.doris.planner.external.iceberg.IcebergScanNode;
+import org.apache.doris.planner.external.paimon.PaimonScanNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rewrite.mvrewrite.MVSelectFailedException;
 import org.apache.doris.statistics.StatisticalType;
@@ -180,8 +180,12 @@ public class SingleNodePlanner {
         if (LOG.isTraceEnabled()) {
             LOG.trace("desctbl: " + analyzer.getDescTbl().debugString());
         }
+        long sqlSelectLimit = -1;
+        if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
+            sqlSelectLimit = ConnectContext.get().getSessionVariable().sqlSelectLimit;
+        }
         PlanNode singleNodePlan = createQueryPlan(queryStmt, analyzer,
-                ctx.getQueryOptions().getDefaultOrderByLimit());
+                ctx.getQueryOptions().getDefaultOrderByLimit(), sqlSelectLimit);
         Preconditions.checkNotNull(singleNodePlan);
         analyzer.getDescTbl().materializeIntermediateSlots();
         return singleNodePlan;
@@ -241,7 +245,7 @@ public class SingleNodePlanner {
      * Create plan tree for single-node execution. Generates PlanNodes for the
      * Select/Project/Join/Union [All]/Group by/Having/Order by clauses of the query stmt.
      */
-    private PlanNode createQueryPlan(QueryStmt stmt, Analyzer analyzer, long defaultOrderByLimit)
+    private PlanNode createQueryPlan(QueryStmt stmt, Analyzer analyzer, long defaultOrderByLimit, long sqlSelectLimit)
             throws UserException {
         long newDefaultOrderByLimit = defaultOrderByLimit;
         long defaultLimit = analyzer.getContext().getSessionVariable().defaultOrderByLimit;
@@ -275,7 +279,10 @@ public class SingleNodePlanner {
             }
         } else {
             Preconditions.checkState(stmt instanceof SetOperationStmt);
-            root = createSetOperationPlan((SetOperationStmt) stmt, analyzer, newDefaultOrderByLimit);
+            root = createSetOperationPlan((SetOperationStmt) stmt, analyzer, newDefaultOrderByLimit, sqlSelectLimit);
+        }
+        if (ConnectContext.get().getExecutor() != null) {
+            ConnectContext.get().getExecutor().getSummaryProfile().setQueryJoinReorderFinishTime();
         }
 
         // Avoid adding a sort node if the sort tuple has no materialized slots.
@@ -301,9 +308,16 @@ public class SingleNodePlanner {
             root = new SortNode(ctx.getNextNodeId(), root, stmt.getSortInfo(),
                     useTopN);
             ((SortNode) root).setDefaultLimit(limit == -1);
-            ((SortNode) root).setOffset(stmt.getOffset());
+            root.setOffset(stmt.getOffset());
             if (useTopN) {
-                root.setLimit(limit != -1 ? limit : newDefaultOrderByLimit);
+                if (sqlSelectLimit >= 0 && sqlSelectLimit < Long.MAX_VALUE) {
+                    newDefaultOrderByLimit = Math.min(newDefaultOrderByLimit, sqlSelectLimit);
+                }
+                if (newDefaultOrderByLimit == Long.MAX_VALUE) {
+                    root.setLimit(limit);
+                } else {
+                    root.setLimit(limit != -1 ? limit : newDefaultOrderByLimit);
+                }
             } else {
                 root.setLimit(limit);
             }
@@ -313,7 +327,11 @@ public class SingleNodePlanner {
             // from SelectStmt outside
             root = addUnassignedConjuncts(analyzer, root);
         } else {
-            root.setLimitAndOffset(stmt.getLimit(), stmt.getOffset());
+            if (!stmt.hasLimit() && sqlSelectLimit >= 0 && sqlSelectLimit < Long.MAX_VALUE) {
+                root.setLimitAndOffset(sqlSelectLimit, stmt.getOffset());
+            } else {
+                root.setLimitAndOffset(stmt.getLimit(), stmt.getOffset());
+            }
             root.computeStats(analyzer);
         }
 
@@ -322,7 +340,7 @@ public class SingleNodePlanner {
             root = createAssertRowCountNode(root, stmt.getAssertNumRowsElement(), analyzer);
         }
 
-        if (analyzer.hasEmptyResultSet()) {
+        if (analyzer.hasEmptyResultSet() || root.getLimit() == 0) {
             // Must clear the scanNodes, otherwise we will get NPE in Coordinator::computeScanRangeAssignment
             Set<TupleId> scanTupleIds = new HashSet<>(root.getAllScanTupleIds());
             scanNodes.removeIf(scanNode -> scanTupleIds.contains(scanNode.getTupleIds().get(0)));
@@ -614,7 +632,9 @@ public class SingleNodePlanner {
             List<SlotId> conjunctSlotIds = Lists.newArrayList();
             if (allConjuncts != null) {
                 for (Expr conjunct : allConjuncts) {
-                    conjunct.getIds(null, conjunctSlotIds);
+                    if (!conjunct.isAuxExpr()) {
+                        conjunct.getIds(null, conjunctSlotIds);
+                    }
                 }
                 for (SlotDescriptor slot : selectStmt.getTableRefs().get(0).getDesc().getSlots()) {
                     if (!slot.getColumn().isKey()) {
@@ -1182,8 +1202,7 @@ public class SingleNodePlanner {
                 materializeTableResultForCrossJoinOrCountStar(ref, analyzer);
                 PlanNode plan = createTableRefNode(analyzer, ref, selectStmt);
                 turnOffPreAgg(aggInfo, selectStmt, analyzer, plan);
-                if (VectorizedUtil.isVectorized()
-                        && ConnectContext.get().getSessionVariable().enablePushDownNoGroupAgg) {
+                if (ConnectContext.get().getSessionVariable().enablePushDownNoGroupAgg) {
                     pushDownAggNoGrouping(aggInfo, selectStmt, analyzer, plan);
                 }
 
@@ -1231,8 +1250,7 @@ public class SingleNodePlanner {
             // selectStmt.seondSubstituteInlineViewExprs(analyzer.getChangeResSmap());
 
             turnOffPreAgg(aggInfo, selectStmt, analyzer, root);
-            if (VectorizedUtil.isVectorized()
-                    && ConnectContext.get().getSessionVariable().enablePushDownNoGroupAgg) {
+            if (ConnectContext.get().getSessionVariable().enablePushDownNoGroupAgg) {
                 pushDownAggNoGrouping(aggInfo, selectStmt, analyzer, root);
             }
 
@@ -1329,11 +1347,10 @@ public class SingleNodePlanner {
         return root;
     }
 
-    public boolean selectMaterializedView(QueryStmt queryStmt, Analyzer analyzer)
-            throws UserException, MVSelectFailedException {
+    public boolean selectMaterializedView(QueryStmt queryStmt, Analyzer analyzer) throws UserException {
         boolean selectFailed = false;
         boolean haveError = false;
-        String errorMsg = "select fail reason: ";
+        StringBuilder errorMsg = new StringBuilder("select fail reason: ");
         if (queryStmt instanceof SelectStmt) {
             SelectStmt selectStmt = (SelectStmt) queryStmt;
             Set<TupleId> disableTuplesMVRewriter = Sets.newHashSet();
@@ -1387,9 +1404,9 @@ public class SingleNodePlanner {
                         }
                     } catch (Exception e) {
                         if (haveError) {
-                            errorMsg += ",";
+                            errorMsg.append(",");
                         }
-                        errorMsg += e.getMessage();
+                        errorMsg.append(e.getMessage());
                         haveError = true;
                         tupleSelectFailed = true;
                     }
@@ -1408,7 +1425,7 @@ public class SingleNodePlanner {
             }
         }
         if (haveError) {
-            throw new MVSelectFailedException(errorMsg);
+            throw new MVSelectFailedException(errorMsg.toString());
         }
         return selectFailed;
     }
@@ -1655,7 +1672,7 @@ public class SingleNodePlanner {
             }
         }
 
-        PlanNode rootNode = createQueryPlan(inlineViewRef.getViewStmt(), inlineViewRef.getAnalyzer(), -1);
+        PlanNode rootNode = createQueryPlan(inlineViewRef.getViewStmt(), inlineViewRef.getAnalyzer(), -1, -1);
         // TODO: we should compute the "physical layout" of the view's descriptor, so that
         // the avg row size is available during optimization; however, that means we need to
         // select references to its resultExprs from the enclosing scope(s)
@@ -1668,17 +1685,6 @@ public class SingleNodePlanner {
         ExprSubstitutionMap outputSmap = ExprSubstitutionMap.compose(
                 inlineViewRef.getSmap(), rootNode.getOutputSmap(), analyzer);
 
-        if (analyzer.isOuterJoined(inlineViewRef.getId()) && !VectorizedUtil.isVectorized()) {
-            rootNode.setWithoutTupleIsNullOutputSmap(outputSmap);
-            // Exprs against non-matched rows of an outer join should always return NULL.
-            // Make the rhs exprs of the output smap nullable, if necessary. This expr wrapping
-            // must be performed on the composed smap, and not on the inline view's smap,
-            // because the rhs exprs must first be resolved against the physical output of
-            // 'planRoot' to correctly determine whether wrapping is necessary.
-            List<Expr> nullableRhs = TupleIsNullPredicate.wrapExprs(
-                    outputSmap.getRhs(), rootNode.getTupleIds(), null, analyzer);
-            outputSmap = new ExprSubstitutionMap(outputSmap.getLhs(), nullableRhs);
-        }
         // Set output smap of rootNode *before* creating a SelectNode for proper resolution.
         rootNode.setOutputSmap(outputSmap, analyzer);
         if (rootNode instanceof UnionNode && ((UnionNode) rootNode).isConstantUnion()) {
@@ -1988,7 +1994,7 @@ public class SingleNodePlanner {
             case BROKER:
                 throw new RuntimeException("Broker external table is not supported, try to use table function please");
             case ELASTICSEARCH:
-                scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "EsScanNode");
+                scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc());
                 break;
             case HIVE:
                 throw new RuntimeException("Hive external table is not supported, try to use hive catalog please");
@@ -2019,13 +2025,16 @@ public class SingleNodePlanner {
             case ICEBERG_EXTERNAL_TABLE:
                 scanNode = new IcebergScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
                 break;
+            case PAIMON_EXTERNAL_TABLE:
+                scanNode = new PaimonScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
+                break;
             case MAX_COMPUTE_EXTERNAL_TABLE:
                 // TODO: support max compute scan node
                 scanNode = new MaxComputeScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "MCScanNode",
                         StatisticalType.MAX_COMPUTE_SCAN_NODE, true);
                 break;
             case ES_EXTERNAL_TABLE:
-                scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc(), "EsScanNode", true);
+                scanNode = new EsScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
                 break;
             case JDBC_EXTERNAL_TABLE:
                 scanNode = new JdbcScanNode(ctx.getNextNodeId(), tblRef.getDesc(), true);
@@ -2244,7 +2253,7 @@ public class SingleNodePlanner {
      */
     private SetOperationNode createSetOperationPlan(
             Analyzer analyzer, SetOperationStmt setOperationStmt, List<SetOperationStmt.SetOperand> setOperands,
-            PlanNode result, long defaultOrderByLimit)
+            PlanNode result, long defaultOrderByLimit, long sqlSelectLimit)
             throws UserException, AnalysisException {
         SetOperationNode setOpNode;
         SetOperationStmt.Operation operation = null;
@@ -2303,7 +2312,7 @@ public class SingleNodePlanner {
                     continue;
                 }
             }
-            PlanNode opPlan = createQueryPlan(queryStmt, op.getAnalyzer(), defaultOrderByLimit);
+            PlanNode opPlan = createQueryPlan(queryStmt, op.getAnalyzer(), defaultOrderByLimit, sqlSelectLimit);
             // There may still be unassigned conjuncts if the operand has an order by + limit.
             // Place them into a SelectNode on top of the operand's plan.
             opPlan = addUnassignedConjuncts(analyzer, opPlan.getTupleIds(), opPlan);
@@ -2333,7 +2342,7 @@ public class SingleNodePlanner {
      * use a union node (this is tricky because a union materializes a new tuple).
      */
     private PlanNode createSetOperationPlan(
-            SetOperationStmt setOperationStmt, Analyzer analyzer, long defaultOrderByLimit)
+            SetOperationStmt setOperationStmt, Analyzer analyzer, long defaultOrderByLimit, long sqlSelectLimit)
             throws UserException, AnalysisException {
         // TODO(zc): get unassigned conjuncts
         // List<Expr> conjuncts =
@@ -2403,10 +2412,10 @@ public class SingleNodePlanner {
                     if (operation == SetOperationStmt.Operation.INTERSECT
                             || operation == SetOperationStmt.Operation.EXCEPT) {
                         result = createSetOperationPlan(analyzer, setOperationStmt, partialOperands, result,
-                                defaultOrderByLimit);
+                                defaultOrderByLimit, sqlSelectLimit);
                     } else {
                         result = createUnionPartialSetOperationPlan(analyzer, setOperationStmt, partialOperands, result,
-                                defaultOrderByLimit);
+                                defaultOrderByLimit, sqlSelectLimit);
                     }
                     partialOperands.clear();
                 }
@@ -2420,10 +2429,10 @@ public class SingleNodePlanner {
             if (operation == SetOperationStmt.Operation.INTERSECT
                     || operation == SetOperationStmt.Operation.EXCEPT) {
                 result = createSetOperationPlan(analyzer, setOperationStmt, partialOperands, result,
-                        defaultOrderByLimit);
+                        defaultOrderByLimit, sqlSelectLimit);
             } else {
                 result = createUnionPartialSetOperationPlan(analyzer, setOperationStmt, partialOperands, result,
-                        defaultOrderByLimit);
+                        defaultOrderByLimit, sqlSelectLimit);
             }
         }
 
@@ -2441,7 +2450,7 @@ public class SingleNodePlanner {
     // while the left-hand child(a)'s operation is null
     private PlanNode createUnionPartialSetOperationPlan(Analyzer analyzer, SetOperationStmt setOperationStmt,
                                                         List<SetOperationStmt.SetOperand> setOperands,
-                                                        PlanNode result, long defaultOrderByLimit)
+                                                        PlanNode result, long defaultOrderByLimit, long sqlSelectLimit)
             throws UserException {
         boolean hasDistinctOps = false;
         boolean hasAllOps = false;
@@ -2460,7 +2469,7 @@ public class SingleNodePlanner {
         // create DISTINCT tree
         if (hasDistinctOps) {
             result = createSetOperationPlan(
-                    analyzer, setOperationStmt, distinctOps, result, defaultOrderByLimit);
+                    analyzer, setOperationStmt, distinctOps, result, defaultOrderByLimit, sqlSelectLimit);
             result = new AggregationNode(ctx.getNextNodeId(), result,
                     setOperationStmt.getDistinctAggInfo());
             result.init(analyzer);
@@ -2468,7 +2477,7 @@ public class SingleNodePlanner {
         // create ALL tree
         if (hasAllOps) {
             result = createSetOperationPlan(analyzer, setOperationStmt, allOps,
-                    result, defaultOrderByLimit);
+                    result, defaultOrderByLimit, sqlSelectLimit);
         }
         return result;
     }
@@ -2762,6 +2771,12 @@ public class SingleNodePlanner {
                             }
                         }
                     }
+                }
+                GroupByClause groupByClause = stmt.getGroupByClause();
+                List<Expr> exprs = groupByClause.getGroupingExprs();
+                if (!exprs.contains(sourceExpr)) {
+                    isAllSlotReferToGroupBys = false;
+                    break;
                 }
             }
 

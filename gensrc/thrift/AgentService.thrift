@@ -201,6 +201,15 @@ struct TAlterInvertedIndexReq {
     10: optional i64 expiration
 }
 
+struct TTabletGcBinlogInfo {
+    1: optional Types.TTabletId tablet_id
+    2: optional i64 version
+}
+
+struct TGcBinlogReq {
+    1: optional list<TTabletGcBinlogInfo> tablet_gc_binlog_infos
+}
+
 struct TStorageMigrationReqV2 {
     1: optional Types.TTabletId base_tablet_id
     2: optional Types.TTabletId new_tablet_id
@@ -291,6 +300,16 @@ struct TUploadReq {
     6: optional string location // root path
 }
 
+struct TRemoteTabletSnapshot {
+    1: optional i64 local_tablet_id
+    2: optional string local_snapshot_path
+    3: optional i64 remote_tablet_id
+    4: optional i64 remote_be_id
+    5: optional Types.TNetworkAddress remote_be_addr
+    6: optional string remote_snapshot_path
+    7: optional string remote_token
+}
+
 struct TDownloadReq {
     1: required i64 job_id
     2: required map<string, string> src_dest_map
@@ -298,6 +317,7 @@ struct TDownloadReq {
     4: optional map<string, string> broker_prop
     5: optional Types.TStorageBackendType storage_backend = Types.TStorageBackendType.BROKER
     6: optional string location // root path
+    7: optional list<TRemoteTabletSnapshot> remote_tablet_snapshots
 }
 
 struct TSnapshotRequest {
@@ -382,7 +402,7 @@ struct TRecoverTabletReq {
 enum TTabletMetaType {
     PARTITIONID,
     INMEMORY,
-    PERSISTENT
+    PERSISTENT,
     BINLOG_CONFIG
 }
 
@@ -392,6 +412,7 @@ struct TTabletMetaInfo {
     3: optional Types.TPartitionId partition_id
     // 4: optional TTabletMetaType Deprecated_meta_type
     5: optional bool is_in_memory
+
     6: optional string storage_policy;
     7: optional bool is_persistent
     // 6: optional string Deprecated_storage_policy
@@ -455,6 +476,8 @@ struct TAgentTaskRequest {
     30: optional TAlterInvertedIndexReq alter_inverted_index_req
     31: optional TPushCooldownConfReq push_cooldown_conf
     32: optional TPushStoragePolicyReq push_storage_policy_req
+    33: optional TGcBinlogReq gc_binlog_req
+
     // CLOUD
     1000: optional TCalcDeleteBitmapRequest calc_delete_bitmap_req
 }

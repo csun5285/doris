@@ -54,4 +54,8 @@ suite("test_subquery") {
         select * from (select k1, -1 as c from test_query_db.test union all select k1, -2 as c from test_query_db.baseall) t 
         where t.c > 0;
         """
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 2.0.0-rc01

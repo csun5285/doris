@@ -54,7 +54,6 @@ public class BackendClause extends AlterClause {
             HostInfo hostInfo = SystemInfoService.getHostAndPort(hostPort);
             hostInfos.add(hostInfo);
         }
-
         Preconditions.checkState(!hostInfos.isEmpty());
     }
 

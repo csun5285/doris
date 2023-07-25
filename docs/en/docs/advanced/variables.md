@@ -460,6 +460,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `experimental_enable_agg_state`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `enable_bucket_shuffle_join`
 
 TODO
@@ -592,6 +604,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `enable_fold_nondeterministic_fn`
+
+TODO
+
+Type: `boolean`
+
+Default: `true`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `enable_function_pushdown`
 
 TODO
@@ -629,6 +653,18 @@ Read Only: `false`
 Global only: `false`
 
 ### `enable_minidump`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Read Only: `false`
+
+Global only: `false`
+
+### `enable_multi_cluster_sync_load`
 
 TODO
 
@@ -725,18 +761,6 @@ Read Only: `false`
 Global only: `false`
 
 ### `enable_partition_cache`
-
-TODO
-
-Type: `boolean`
-
-Default: `false`
-
-Read Only: `false`
-
-Global only: `false`
-
-### `experimental_enable_pipeline_engine`
 
 TODO
 
@@ -856,6 +880,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `enable_strong_consistency_read`
+
+Used to enable strong consistent reading. By default, Doris supports strong consistency within the same session, that is, changes to data within the same session are visible in real time. If you want strong consistent reads between sessions, set this variable to true. 
+
+Type: `boolean`
+
+Default: `false`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `enable_two_phase_read_opt`
 
 TODO
@@ -964,6 +1000,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `external_table_analyze_part_num`
+
+Number of sample partition for collecting external table line number, default -1 means all partitions
+
+Type: `int`
+
+Default: `-1`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `extract_wide_range_expr`
 
 TODO
@@ -1055,6 +1103,18 @@ TODO
 Type: `long`
 
 Default: `2147483646`
+
+Read Only: `false`
+
+Global only: `false`
+
+### `ignore_column_with_complex_type`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
 
 Read Only: `false`
 
@@ -1246,7 +1306,7 @@ TODO
 
 Type: `int`
 
-Default: `40000`
+Default: `10000`
 
 Read Only: `false`
 
@@ -1319,6 +1379,18 @@ TODO
 Type: `int`
 
 Default: `1`
+
+Read Only: `false`
+
+Global only: `false`
+
+### `parallel_pipeline_task_num`
+
+TODO
+
+Type: `int`
+
+Default: `0`
 
 Read Only: `false`
 
@@ -1438,7 +1510,7 @@ TODO
 
 Type: `int`
 
-Default: `1800`
+Default: `300`
 
 Read Only: `false`
 

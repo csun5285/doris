@@ -54,5 +54,12 @@ suite("test_csv_with_double_quotes", "p0") {
         set 'trim_double_quotes', 'true'
 
         file 'csv_with_double_quotes.csv'
+<<<<<<< HEAD
+=======
+    }
+
+    sql "sync"
+    qt_sql "select * from ${tableName} order by k1, k2"
+>>>>>>> 2.0.0-rc01
     sql """ DROP TABLE IF EXISTS ${tableName} """
 }

@@ -213,6 +213,7 @@ create table doris_test.ex_tb19 (
     datetime_value datetime,
     timestamp_value timestamp
 ) engine=innodb charset=utf8;
+<<<<<<< HEAD
 
 create table doris_test.ex_tb20 (
     decimal_normal decimal(38, 5),
@@ -283,3 +284,96 @@ create table doris_test.all_types (
   `varbinary` varbinary(12),
   `enum` enum('Value1', 'Value2', 'Value3')
 ) engine=innodb charset=utf8;
+=======
+
+create table doris_test.ex_tb20 (
+    decimal_normal decimal(38, 5),
+    decimal_unsigned decimal(37, 5) unsigned,
+    decimal_out1 decimal(39, 5),
+    decimal_unsigned_out1 decimal(38, 5) unsigned,
+    decimal_long decimal(65, 5),
+    decimal_unsigned_long decimal(65, 5) unsigned
+) engine=innodb charset=utf8;
+
+create table doris_test.test_insert (
+    `id` varchar(128) NULL,
+    `name` varchar(128) NULL,
+    `age` int NULL
+) engine=innodb charset=utf8;
+
+
+create table doris_test.test_insert2 (
+    id varchar(128) NULL,
+    k1 boolean,
+    k2 char(100),
+    k3 varchar(128),
+    k4 date,
+    k5 float,
+    k6 tinyint,
+    k7 smallint,
+    k8 int,
+    k9 bigint,
+    k10 double,
+    k11 decimal(10, 3),
+    k12 time,
+    k13 year,
+    k14 datetime,
+    k15 timestamp
+) engine=innodb charset=utf8;
+
+create table doris_test.all_types (
+  `tinyint_u` tinyint unsigned,
+  `smallint_u` smallint unsigned,
+  `mediumint_u` mediumint unsigned,
+  `int_u` int unsigned,
+  `bigint_u` bigint unsigned,
+  `decimal_u` decimal(18, 5) unsigned,
+  `double_u` double unsigned,
+  `float_u` float unsigned,
+  `boolean` boolean,
+  `tinyint` tinyint,
+  `smallint` smallint,
+  `year` year,
+  `mediumint` mediumint,
+  `int` int,
+  `bigint` bigint,
+  `date` date,
+  `timestamp` timestamp(4),
+  `datetime` datetime,
+  `float` float,
+  `double` double,
+  `decimal` decimal(12, 4),
+  `char` char(5),
+  `varchar` varchar(10),
+  `time` time(4),
+  `text` text,
+  `blob` blob,
+  `json` json,
+  `set` set('Option1', 'Option2', 'Option3'),
+  `bit` bit(6),
+  `binary` binary(12),
+  `varbinary` varbinary(12),
+  `enum` enum('Value1', 'Value2', 'Value3')
+) engine=innodb charset=utf8;
+
+CREATE TABLE `doris_test`.`auto_default_t` (
+    `id` bigint NOT NULL AUTO_INCREMENT,
+    `name` varchar(64) DEFAULT NULL,
+    `dt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) engine=innodb charset=utf8;
+
+CREATE TABLE doris_test.dt (
+  `timestamp0` timestamp(0) DEFAULT CURRENT_TIMESTAMP(0),
+  `timestamp1` timestamp(1) DEFAULT CURRENT_TIMESTAMP(1),
+  `timestamp2` timestamp(2) DEFAULT CURRENT_TIMESTAMP(2),
+  `timestamp3` timestamp(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `timestamp4` timestamp(4) DEFAULT CURRENT_TIMESTAMP(4),
+  `timestamp5` timestamp(5) DEFAULT CURRENT_TIMESTAMP(5),
+  `timestamp6` timestamp(6) DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=INNODB CHARSET=utf8;
+
+CREATE TABLE doris_test.dt_null (
+  `dt` datetime NOT NULL
+) ENGINE=INNODB CHARSET=utf8;
+>>>>>>> 2.0.0-rc01

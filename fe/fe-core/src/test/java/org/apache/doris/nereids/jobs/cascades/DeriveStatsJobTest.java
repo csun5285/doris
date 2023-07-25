@@ -67,7 +67,7 @@ public class DeriveStatsJobTest {
         }
         Statistics statistics = cascadesContext.getMemo().getRoot().getStatistics();
         Assertions.assertNotNull(statistics);
-        Assertions.assertTrue(Precision.equals(0.5, statistics.getRowCount(), 0.1));
+        Assertions.assertTrue(Precision.equals(1, statistics.getRowCount(), 0.1));
     }
 
     private LogicalOlapScan constructOlapSCan() {
@@ -81,8 +81,9 @@ public class DeriveStatsJobTest {
             }};
 
         OlapTable table1 = PlanConstructor.newOlapTable(tableId1, "t1", 0);
-        return new LogicalOlapScan(RelationUtil.newRelationId(), table1, Collections.emptyList()).withLogicalProperties(
-                Optional.of(new LogicalProperties(() -> ImmutableList.of(slot1))));
+        return (LogicalOlapScan) new LogicalOlapScan(RelationUtil.newRelationId(), table1,
+                Collections.emptyList()).withGroupExprLogicalPropChildren(Optional.empty(),
+                Optional.of(new LogicalProperties(() -> ImmutableList.of(slot1))), ImmutableList.of());
     }
 
     private LogicalAggregate constructAgg(Plan child) {

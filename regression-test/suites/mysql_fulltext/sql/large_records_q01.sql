@@ -1,4 +1,8 @@
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 2.0.0-rc01
 SELECT COUNT(*) FROM large_records_t1_uk;
 
 SELECT FTS_DOC_ID FROM large_records_t1_uk WHERE a MATCH_ANY 'row35col2word49' OR b MATCH_ANY 'row35col2word49' order by FTS_DOC_ID;

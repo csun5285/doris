@@ -73,6 +73,11 @@ suite("load") {
                 assertTrue(json.NumberLoadedRows > 0 && json.LoadBytes > 0)
             }
         }
+<<<<<<< HEAD
+=======
+
+        sql """ ANALYZE TABLE $tableName WITH SYNC """
+>>>>>>> 2.0.0-rc01
     }
 
     def table = "revenue1"

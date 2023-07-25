@@ -35,7 +35,11 @@ suite("test_create_table") {
                     "enable_unique_key_merge_on_write" = "true"
              );
         """
+<<<<<<< HEAD
         exception "only support unique key table"
+=======
+        exception "enable_unique_key_merge_on_write property only support unique key table"
+>>>>>>> 2.0.0-rc01
     }
 
     // duplicate table with enable_unique_key_merge_on_write property
@@ -54,7 +58,11 @@ suite("test_create_table") {
                     "enable_unique_key_merge_on_write" = "false"
              );
         """
+<<<<<<< HEAD
         exception "only support unique key table"
+=======
+        exception "enable_unique_key_merge_on_write property only support unique key table"
+>>>>>>> 2.0.0-rc01
     }
 
     // agg table with enable_unique_key_merge_on_write property
@@ -73,7 +81,11 @@ suite("test_create_table") {
                     "enable_unique_key_merge_on_write" = "true"
              );
         """
+<<<<<<< HEAD
         exception "only support unique key table"
+=======
+        exception "enable_unique_key_merge_on_write property only support unique key table"
+>>>>>>> 2.0.0-rc01
     }
 
     // agg table with enable_unique_key_merge_on_write property
@@ -92,6 +104,12 @@ suite("test_create_table") {
                     "enable_unique_key_merge_on_write" = "false"
              );
         """
+<<<<<<< HEAD
         exception "only support unique key table"
     }
 }
+=======
+        exception "enable_unique_key_merge_on_write property only support unique key table"
+    }
+}
+>>>>>>> 2.0.0-rc01

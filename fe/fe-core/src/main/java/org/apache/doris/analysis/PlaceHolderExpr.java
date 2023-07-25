@@ -39,7 +39,7 @@ public class PlaceHolderExpr extends LiteralExpr {
     int mysqlTypeCode = -1;
 
     public PlaceHolderExpr() {
-        type = Type.UNSUPPORTED;
+
     }
 
     public void setTypeCode(int mysqlTypeCode) {
@@ -164,10 +164,7 @@ public class PlaceHolderExpr extends LiteralExpr {
 
     @Override
     public String toSqlImpl() {
-        if (this.lExpr == null) {
-            return "?";
-        }
-        return "_placeholder_(" + this.lExpr.toSqlImpl() + ")";
+        return getStringValue();
     }
 
     @Override

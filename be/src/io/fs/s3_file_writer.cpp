@@ -40,16 +40,17 @@
 #include <glog/logging.h>
 
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 #include "common/config.h"
 #include "common/status.h"
+#include "io/cache/block/block_file_cache.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/path.h"
 #include "io/fs/s3_file_bufferpool.h"
 #include "io/fs/s3_file_system.h"
-#include "io/cache/block/block_file_cache.h"
-#include "io/cache/block/block_file_cache_factory.h"
 #include "util/defer_op.h"
 #include "util/doris_metrics.h"
 #include "util/runtime_profile.h"
@@ -117,13 +118,19 @@ S3FileWriter::~S3FileWriter() {
     s3_file_being_written << -1;
 }
 
-void S3FileWriter::_wait_until_finish(std::string task_name) {
+void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     auto msg =
             fmt::format("{} multipart upload already takes 5 min, bucket={}, key={}, upload_id={}",
-                        std::move(task_name), _bucket, _path.native(), _upload_id);
-    while (!_wait.wait(300)) {
-        LOG(WARNING) << msg;
-    }
+                        task_name, _bucket, _path.native(), _upload_id);
+    timespec current_time;
+    // We don't need high accuracy here, so we use time(nullptr)
+    // since it's the fastest way to get current time(second)
+    auto current_time_second = time(nullptr);
+    current_time.tv_sec = current_time_second;
+    current_time.tv_nsec = 0;
+    do {
+        current_time.tv_sec += current_time.tv_sec + 300;
+    } while (0 != _countdown_event.timed_wait(current_time));
 }
 
 Status S3FileWriter::_open() {
@@ -146,10 +153,10 @@ Status S3FileWriter::_open() {
 
 Status S3FileWriter::abort() {
     _failed = true;
-    if (_closed || !_opened) {
+    _closed = true;
+    if (_aborted) {
         return Status::OK();
     }
-    Defer defer {[&]() { _closed = true; }};
     // we need to reclaim the memory
     if (_pending_buf) {
         _pending_buf->on_finish();
@@ -170,6 +177,7 @@ Status S3FileWriter::abort() {
         LOG(INFO) << "Abort multipart upload successfully"
                   << "bucket=" << _bucket << ", key=" << _path.native()
                   << ", upload_id=" << _upload_id;
+        _aborted = true;
         return Status::OK();
     }
     return Status::IOError("failed to abort multipart upload(bucket={}, key={}, upload_id={}): {}",
@@ -177,13 +185,19 @@ Status S3FileWriter::abort() {
 }
 
 Status S3FileWriter::close() {
-    Defer defer {[&]() { _closed = true; }};
     if (_closed) {
-        return Status::OK();
+        _wait_until_finish("close");
+        return _st;
     }
+    Defer defer {[&]() { _closed = true; }};
     VLOG_DEBUG << "S3FileWriter::close, path: " << _path.native();
     if (_pending_buf != nullptr) {
-        _wait.add();
+        if (_upload_id.empty()) {
+            auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
+            DCHECK(buf != nullptr);
+            buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
+        }
+        _countdown_event.add_count();
         _pending_buf->submit();
         _pending_buf = nullptr;
     }
@@ -198,6 +212,9 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     for (size_t i = 0; i < data_cnt; i++) {
         size_t data_size = data[i].get_size();
         for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
+            if (_failed) {
+                return _st;
+            }
             if (!_pending_buf) {
                 auto builder = FileBufferBuilder();
                 builder.set_type(BufferType::UPLOAD)
@@ -215,7 +232,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                                 _failed = true;
                                 this->_st = std::move(s);
                             }
-                            _wait.done();
+                            _countdown_event.signal();
                         })
                         .set_is_done([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
@@ -243,7 +260,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                     RETURN_IF_ERROR(_open());
                 }
                 _cur_part_num++;
-                _wait.add();
+                _countdown_event.add_count();
                 _pending_buf->submit();
                 _pending_buf = nullptr;
             }
@@ -261,7 +278,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     upload_request.WithBucket(_bucket).WithKey(_key).WithPartNumber(part_num).WithUploadId(
             _upload_id);
 
-    auto _stream_ptr = buf.get_stream();
+    const auto& _stream_ptr = buf.get_stream();
 
     upload_request.SetBody(buf.get_stream());
 
@@ -329,7 +346,7 @@ Status S3FileWriter::_complete() {
     }
     // upload id is empty means there was no multipart upload
     if (_upload_id.empty()) {
-        _wait.wait();
+        _wait_until_finish("finish put object");
         return _st;
     }
     CompleteMultipartUploadRequest complete_request;
@@ -369,7 +386,7 @@ Status S3FileWriter::finalize() {
             DCHECK(buf != nullptr);
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
-        _wait.add();
+        _countdown_event.add_count();
         _pending_buf->submit();
         _pending_buf = nullptr;
     }

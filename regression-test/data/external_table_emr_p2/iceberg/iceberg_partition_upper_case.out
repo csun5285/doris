@@ -26,31 +26,64 @@ Shanghai
 -- !orcupper5 --
 2	k2_2	k3_2	Beijing
 
+<<<<<<< HEAD
+=======
+-- !orcupper6 --
+1	k2_1	k3_1	Beijing
+
+-- !orcupper7 --
+1	k2_1	k3_1	Beijing
+2	k2_2	k3_2	Beijing
+
+>>>>>>> 2.0.0-rc01
 -- !orclower1 --
 1	k2_1	k3_1	Beijing
 2	k2_2	k3_2	Beijing
 3	k2_3	k3_3	Shanghai
 4	k2_4	k3_4	Shanghai
 
+<<<<<<< HEAD
 -- !orclower1 --
+=======
+-- !orclower2 --
+>>>>>>> 2.0.0-rc01
 1	Beijing
 2	Beijing
 3	Shanghai
 4	Shanghai
 
+<<<<<<< HEAD
 -- !orclower1 --
+=======
+-- !orclower3 --
+>>>>>>> 2.0.0-rc01
 1	k2_1
 2	k2_2
 3	k2_3
 4	k2_4
 
+<<<<<<< HEAD
 -- !orclower1 --
+=======
+-- !orclower4 --
+>>>>>>> 2.0.0-rc01
 Beijing
 Beijing
 Shanghai
 Shanghai
 
+<<<<<<< HEAD
 -- !orclower1 --
+=======
+-- !orclower5 --
+2	k2_2	k3_2	Beijing
+
+-- !orclower6 --
+1	k2_1	k3_1	Beijing
+
+-- !orclower7 --
+1	k2_1	k3_1	Beijing
+>>>>>>> 2.0.0-rc01
 2	k2_2	k3_2	Beijing
 
 -- !parquetupper1 --
@@ -84,6 +117,16 @@ Shanghai
 3	k2_3	k3_3	Shanghai
 4	k2_4	k3_4	Shanghai
 
+<<<<<<< HEAD
+=======
+-- !parquetupper7 --
+1	k2_1	k3_1	Beijing
+
+-- !parquetupper8 --
+1	k2_1	k3_1	Beijing
+2	k2_2	k3_2	Beijing
+
+>>>>>>> 2.0.0-rc01
 -- !parquetlower1 --
 1	k2_1	k3_1	Beijing
 2	k2_2	k3_2	Beijing
@@ -115,3 +158,13 @@ Shanghai
 3	k2_3	k3_3	Shanghai
 4	k2_4	k3_4	Shanghai
 
+<<<<<<< HEAD
+=======
+-- !parquetupper7 --
+1	k2_1	k3_1	Beijing
+
+-- !parquetupper8 --
+1	k2_1	k3_1	Beijing
+2	k2_2	k3_2	Beijing
+
+>>>>>>> 2.0.0-rc01

@@ -350,6 +350,7 @@ suite("test_broker_load_p2", "p2") {
             }
         }
     }
+<<<<<<< HEAD
 
     // test unified load
     if (enabled != null && enabled.equalsIgnoreCase("true")) {
@@ -413,5 +414,7 @@ suite("test_broker_load_p2", "p2") {
             sql """ set enable_unified_load=false; """
         }
     }
+=======
+>>>>>>> 2.0.0-rc01
 }
 

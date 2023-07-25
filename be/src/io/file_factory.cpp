@@ -109,8 +109,8 @@ Status FileFactory::create_file_writer(TFileType::type type, ExecEnv* env,
 }
 
 Status FileFactory::create_file_reader(RuntimeProfile* profile,
-                                       const FileSystemProperties& system_properties,
-                                       const FileDescription& file_description,
+                                       const io::FileSystemProperties& system_properties,
+                                       const io::FileDescription& file_description,
                                        std::shared_ptr<io::FileSystem>* file_system,
                                        io::FileReaderSPtr* file_reader,
                                        io::FileReaderOptions reader_options) {
@@ -183,7 +183,7 @@ Status FileFactory::create_s3_reader(const std::map<std::string, std::string>& p
 
 Status FileFactory::create_broker_reader(const TNetworkAddress& broker_addr,
                                          const std::map<std::string, std::string>& prop,
-                                         const FileDescription& file_description,
+                                         const io::FileDescription& file_description,
                                          std::shared_ptr<io::FileSystem>* broker_file_system,
                                          io::FileReaderSPtr* reader,
                                          const io::FileReaderOptions& reader_options) {

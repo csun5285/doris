@@ -24,6 +24,7 @@
 
 #include "common/logging.h"
 #include "common/sync_point.h"
+#include "olap/cumulative_compaction_time_series_policy.h"
 #include "olap/olap_common.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
@@ -235,7 +236,7 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         const int64_t max_compaction_score, const int64_t min_compaction_score,
         std::vector<RowsetSharedPtr>* input_rowsets, Version* last_delete_version,
         size_t* compaction_score) {
-    int64_t promotion_size = tablet->cumulative_promotion_size();
+    size_t promotion_size = tablet->cumulative_promotion_size();
     auto max_version = tablet->max_version().first;
     int transient_size = 0;
     *compaction_score = 0;
@@ -387,6 +388,9 @@ int64_t SizeBasedCumulativeCompactionPolicy::new_cumulative_point(
 
 std::shared_ptr<CumulativeCompactionPolicy>
 CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy() {
+    if (config::compaction_policy == CUMULATIVE_TIME_SERIES_POLICY) {
+        return std::make_shared<TimeSeriesCumulativeCompactionPolicy>();
+    }
     return std::make_shared<SizeBasedCumulativeCompactionPolicy>();
 }
 

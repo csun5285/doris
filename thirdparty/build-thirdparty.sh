@@ -1453,6 +1453,7 @@ build_benchmark() {
 
     mkdir -p "${TP_INCLUDE_DIR}/benchmark"
     cp "${TP_SOURCE_DIR}/${BENCHMARK_SOURCE}/include/benchmark/benchmark.h" "${TP_INCLUDE_DIR}/benchmark/"
+    cp "${TP_SOURCE_DIR}/${BENCHMARK_SOURCE}/include/benchmark/export.h" "${TP_INCLUDE_DIR}/benchmark/"
     cp "${TP_SOURCE_DIR}/${BENCHMARK_SOURCE}/build/src/libbenchmark.a" "${TP_LIB_DIR}"
 }
 
@@ -1610,6 +1611,9 @@ build_cos_sdk() {
     cmake .. -DTP_INSTALL_DIR=${TP_INSTALL_DIR} -DCMAKE_BUILD_TYPE=Release
     make -j "${PARALLEL}"
     cp ./lib/libcossdk.a "${TP_INSTALL_DIR}/lib64/"
+    rm -rf "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/*.a"
+    find ./hadoop-dist/target/hadoop-3.3.4/lib/native/ -type f ! -name '*.a' -exec cp {} "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/" \;
+    find ./hadoop-dist/target/hadoop-3.3.4/lib/native/ -type l -exec cp -P {} "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/" \;
 }
 
 if [[ "${#packages[@]}" -eq 0 ]]; then

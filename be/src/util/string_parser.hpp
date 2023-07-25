@@ -38,7 +38,6 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/status.h"
-#include "runtime/primitive_type.h"
 #include "runtime/large_int_value.h"
 #include "vec/common/int_exp.h"
 #include "vec/data_types/data_type_decimal.h"

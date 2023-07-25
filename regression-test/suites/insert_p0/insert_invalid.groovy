@@ -52,7 +52,11 @@ suite("insert_invalid") {
 
     test {
         sql """ insert into datatype_invalid select * from datatype_invalid_base;"""
+<<<<<<< HEAD
         exception "Invalid value in strict mode"
+=======
+        exception "Invalid value"
+>>>>>>> 2.0.0-rc01
     }
 
     // test insert select: invalid value
@@ -74,7 +78,11 @@ suite("insert_invalid") {
     """
     test {
         sql """ insert into datatype_invalid select * from datatype_invalid_base;"""
+<<<<<<< HEAD
         exception "Invalid value in strict mode"
+=======
+        exception "Invalid value"
+>>>>>>> 2.0.0-rc01
     }
 
     // test insert select: invalid value
@@ -96,7 +104,11 @@ suite("insert_invalid") {
     """
     test {
         sql """ insert into datatype_invalid select * from datatype_invalid_base;"""
+<<<<<<< HEAD
         exception "Invalid value in strict mode"
+=======
+        exception "Invalid value"
+>>>>>>> 2.0.0-rc01
     }
 
     // test insert select: null into not nullable
@@ -148,7 +160,11 @@ suite("insert_invalid") {
     """
     test {
         sql """ insert into datatype_invalid values ('2022-02-29', 'a'); """
+<<<<<<< HEAD
         exception "Invalid value in strict mode"
+=======
+        exception "Invalid value"
+>>>>>>> 2.0.0-rc01
     }
 
     sql """ set enable_insert_strict=false; """

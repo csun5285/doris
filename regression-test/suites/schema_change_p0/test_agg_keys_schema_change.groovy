@@ -30,9 +30,12 @@ suite ("test_agg_keys_schema_change") {
          return jobStateResult[0][9]
     }
 
+<<<<<<< HEAD
     try {
         String[][] backends = sql """ show backends; """
         assertTrue(backends.size() > 0)
+=======
+>>>>>>> 2.0.0-rc01
         String backend_id;
         def backendId_to_backendIP = [:]
         def backendId_to_backendHttpPort = [:]
@@ -107,8 +110,12 @@ suite ("test_agg_keys_schema_change") {
             } else {
                 sleep(100)
                 if (max_try_time < 1){
+<<<<<<< HEAD
                     println "test timeout," + "state:" + result
                     assertEquals("FINISHED", result)
+=======
+                    assertEquals(1,2)
+>>>>>>> 2.0.0-rc01
                 }
             }
         }

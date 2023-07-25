@@ -139,6 +139,13 @@ public class SortInfo {
         return materializedOrderingExprs;
     }
 
+    public void addMaterializedOrderingExpr(Expr expr) {
+        if (materializedOrderingExprs == null) {
+            materializedOrderingExprs = Lists.newArrayList();
+        }
+        materializedOrderingExprs.add(expr);
+    }
+
     public List<Expr> getSortTupleSlotExprs() {
         return sortTupleSlotExprs;
     }
@@ -264,6 +271,9 @@ public class SortInfo {
                 sortTupleExprs.add(origSlotRef);
             }
         }
+        // backup before substitute orderingExprs
+        origOrderingExprs = orderingExprs;
+
         // backup before substitute orderingExprs
         origOrderingExprs = orderingExprs;
 

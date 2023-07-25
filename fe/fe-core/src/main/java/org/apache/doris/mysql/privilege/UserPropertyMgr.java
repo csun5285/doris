@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -206,6 +207,15 @@ public class UserPropertyMgr implements Writable {
             return null;
         }
         return existProperty.getWorkloadGroup();
+    }
+
+    public Pair<Boolean, String> isWorkloadGroupInUse(String groupName) {
+        for (Entry<String, UserProperty> entry : propertyMap.entrySet()) {
+            if (entry.getValue().getWorkloadGroup().equals(groupName)) {
+                return Pair.of(true, entry.getKey());
+            }
+        }
+        return Pair.of(false, "");
     }
 
     private UserProperty getLdapPropertyIfNull(String qualifiedUser, UserProperty existProperty) {

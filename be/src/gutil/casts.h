@@ -89,7 +89,7 @@ inline To down_cast(From* f) {        // so we only accept pointers
 // or the reference form. If you call down_cast with a const T&, the
 // compiler will just bind From to const T.
 template <typename To, typename From>
-To down_cast(From& f) {
+ To down_cast(From& f) {
     COMPILE_ASSERT(std::is_reference<To>::value, target_type_not_a_reference);
     using ToAsPointer = typename std::remove_reference<To>::type*;
     if (false) {

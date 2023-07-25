@@ -49,7 +49,11 @@
 #include "http/http_request.h"
 #include "http/utils.h"
 #include "io/fs/stream_load_pipe.h"
+#ifdef CLOUD_MODE
 #include "cloud/olap/storage_engine.h"
+#else
+#include "olap/storage_engine.h"
+#endif
 #include "runtime/client_cache.h"
 #include "runtime/exec_env.h"
 #include "runtime/load_path_mgr.h"
@@ -334,7 +338,7 @@ Status StreamLoadAction::_on_header(HttpRequest* http_req, std::shared_ptr<Strea
         try {
             ctx->timeout_second = std::stoi(http_req->header(HTTP_TIMEOUT));
         } catch (const std::invalid_argument& e) {
-            return Status::InvalidArgument("Invalid timeout format");
+            return Status::InvalidArgument("Invalid timeout format, {}", e.what());
         }
     }
     if (!http_req->header(HTTP_COMMENT).empty()) {
@@ -470,7 +474,7 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         try {
             request.__set_execMemLimit(std::stoll(http_req->header(HTTP_EXEC_MEM_LIMIT)));
         } catch (const std::invalid_argument& e) {
-            return Status::InvalidArgument("Invalid mem limit format");
+            return Status::InvalidArgument("Invalid mem limit format, {}", e.what());
         }
     }
     if (!http_req->header(HTTP_JSONPATHS).empty()) {
@@ -527,7 +531,7 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
             request.__set_send_batch_parallelism(
                     std::stoi(http_req->header(HTTP_SEND_BATCH_PARALLELISM)));
         } catch (const std::invalid_argument& e) {
-            return Status::InvalidArgument("Invalid send_batch_parallelism format");
+            return Status::InvalidArgument("Invalid send_batch_parallelism format, {}", e.what());
         }
     }
 

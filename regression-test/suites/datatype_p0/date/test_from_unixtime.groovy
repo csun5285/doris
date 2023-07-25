@@ -21,9 +21,12 @@ suite("test_from_unixtime") {
 
     qt_sql1 "select from_unixtime(1553152255)"
 
+<<<<<<< HEAD
     sql "set enable_nereids_planner=true"
     qt_weekOfYear "select * from woy where weekofyear(c0)=52 and weekofyear(c1)=52"
 
+=======
+>>>>>>> 2.0.0-rc01
     sql "set time_zone='+00:00'"
 
     qt_sql2 "select from_unixtime(1553152255)"

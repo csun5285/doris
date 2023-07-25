@@ -43,7 +43,7 @@ void PadSegmentAction::handle(HttpRequest* req) {
     try {
         tablet_id = std::stol(tablet_id_str);
         segment_id = std::stoi(segment_id_str);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         HttpChannel::send_reply(req, HttpStatus::BAD_REQUEST, "invalid tablet_id or segment_id");
         return;
     }

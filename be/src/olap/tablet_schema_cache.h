@@ -36,6 +36,7 @@ public:
     TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaPB& schema);
 
     TabletSchemaSPtr insert(int64_t index_id, const TabletSchemaSPtr& schema);
+
     static void stop_and_join() {
         DCHECK(_s_instance != nullptr);
         _s_instance->stop();
@@ -54,6 +55,7 @@ private:
 private:
     static inline TabletSchemaCache* _s_instance = nullptr;
     std::mutex _mtx;
+
     using Key = std::pair<int64_t, int32_t>; // [index_id, schema_version]
     struct HashOfKey {
         size_t operator()(const Key& key) const {

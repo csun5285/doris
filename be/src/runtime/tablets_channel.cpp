@@ -75,11 +75,9 @@ TabletsChannel::~TabletsChannel() {
 void TabletsChannel::_init_profile(RuntimeProfile* profile) {
     _profile =
             profile->create_child(fmt::format("TabletsChannel {}", _key.to_string()), true, true);
-    profile->add_child(_profile, false, nullptr);
     _add_batch_number_counter = ADD_COUNTER(_profile, "NumberBatchAdded", TUnit::UNIT);
 
     auto* memory_usage = _profile->create_child("PeakMemoryUsage", true, true);
-    _profile->add_child(memory_usage, false, nullptr);
     _slave_replica_timer = ADD_TIMER(_profile, "SlaveReplicaTime");
     _memory_usage_counter = memory_usage->AddHighWaterMarkCounter("Total", TUnit::BYTES);
     _write_memory_usage_counter = memory_usage->AddHighWaterMarkCounter("Write", TUnit::BYTES);
@@ -94,7 +92,7 @@ void TabletsChannel::_init_profile(RuntimeProfile* profile) {
 
 Status TabletsChannel::open(const PTabletWriterOpenRequest& request,
                             PTabletWriterOpenResult* response) {
-    std::lock_guard l(_lock);
+    std::lock_guard<std::mutex> l(_lock);
     if (_state == kOpened) {
         // Normal case, already open by other sender
         return Status::OK();
@@ -387,15 +385,8 @@ int64_t TabletsChannel::mem_consumption() {
         std::lock_guard<SpinLock> l(_tablet_writers_lock);
         _mem_consumptions.clear();
         for (auto& it : _tablet_writers) {
-            int64_t write_mem = it.second->mem_consumption(MemType::WRITE);
-            write_mem_usage += write_mem;
-            int64_t flush_mem = it.second->mem_consumption(MemType::FLUSH);
-            flush_mem_usage += flush_mem;
-            if (write_mem > max_tablet_write_mem_usage) max_tablet_write_mem_usage = write_mem;
-            if (flush_mem > max_tablet_flush_mem_usage) max_tablet_flush_mem_usage = flush_mem;
-            if (write_mem + flush_mem > max_tablet_mem_usage)
-                max_tablet_mem_usage = write_mem + flush_mem;
-            _mem_consumptions.emplace(write_mem + flush_mem, it.first);
+            int64_t writer_mem = it.second->mem_consumption(MemType::ALL);
+            mem_usage += writer_mem;
         }
     }
     COUNTER_SET(_memory_usage_counter, write_mem_usage + flush_mem_usage);
@@ -545,6 +536,16 @@ Status TabletsChannel::open_all_writers_for_partition(const OpenPartitionRequest
         wrequest.is_high_priority = _is_high_priority;
         wrequest.table_schema_param = _schema;
 
+        DeltaWriter* writer = nullptr;
+        auto st = DeltaWriter::open(&wrequest, &writer, _profile, _load_id);
+        if (!st.ok()) {
+            auto err_msg = fmt::format(
+                    "open delta writer failed, tablet_id={}"
+                    ", txn_id={}, partition_id={}, err={}",
+                    tablet.tablet_id(), _txn_id, tablet.partition_id(), st.to_string());
+            LOG(WARNING) << err_msg;
+            return Status::InternalError(err_msg);
+        }
         {
             std::lock_guard<SpinLock> l(_tablet_writers_lock);
 
@@ -725,7 +726,7 @@ void TabletsChannel::flush_memtable_async(int64_t tablet_id) {
 
 void TabletsChannel::wait_flush(int64_t tablet_id) {
     {
-        std::lock_guard l(_lock);
+        std::lock_guard<std::mutex> l(_lock);
         if (_state == kFinished) {
             // TabletsChannel is closed without LoadChannel's lock,
             // therefore it's possible for reduce_mem_usage() to be called right after close()
@@ -751,7 +752,7 @@ void TabletsChannel::wait_flush(int64_t tablet_id) {
     }
 
     {
-        std::lock_guard l(_lock);
+        std::lock_guard<std::mutex> l(_lock);
         _reducing_tablets.erase(tablet_id);
     }
 }

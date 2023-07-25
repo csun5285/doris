@@ -55,6 +55,11 @@ suite("load") {
         sql new File("""${context.file.parent}/ddl/${table}.sql""").text
     }
 
+<<<<<<< HEAD
+=======
+    sql "set exec_mem_limit=8G;"
+
+>>>>>>> 2.0.0-rc01
     for (String tableName in tables) {
         streamLoad {
             // you can skip db declaration, because a default db has already been
@@ -74,9 +79,16 @@ suite("load") {
             set "columns", columnsMap[tableName]
             }
 
+<<<<<<< HEAD
             // relate to ${DORIS_HOME}/regression-test/data/demo/streamload_input.csv.
             // also, you can stream load a http stream, e.g. http://xxx/some.csv
             file """${getS3Url() + '/regression/tpcds/sf1-new/' + tableName}.dat.gz"""
+=======
+
+            // relate to ${DORIS_HOME}/regression-test/data/demo/streamload_input.csv.
+            // also, you can stream load a http stream, e.g. http://xxx/some.csv
+            file """${getS3Url()}/regression/tpcds/sf1/${tableName}.dat.gz"""
+>>>>>>> 2.0.0-rc01
 
             time 10000 // limit inflight 10s
 

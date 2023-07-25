@@ -26,8 +26,12 @@ suite("add_table_policy_by_alter_table") {
         UNIQUE KEY(k1)
         DISTRIBUTED BY HASH (k1) BUCKETS 3
         PROPERTIES(
+<<<<<<< HEAD
             "replication_num" = "1",
             "enable_unique_key_merge_on_write" = "false"
+=======
+            "replication_num" = "1"
+>>>>>>> 2.0.0-rc01
         );
     """
     assertEquals(create_table_not_have_policy_result.size(), 1);

@@ -28,7 +28,6 @@ class StreamLoadContext;
 class Status;
 class TTxnCommitAttachment;
 class TLoadTxnCommitRequest;
-class StreamLoadPipe;
 
 class StreamLoadExecutor {
     ENABLE_FACTORY_CREATOR(StreamLoadExecutor);

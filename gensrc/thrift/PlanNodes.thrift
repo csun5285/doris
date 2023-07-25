@@ -121,6 +121,7 @@ enum TFileFormatType {
     FORMAT_JSON_LZ4FRAME,
     FORMAT_JSON_LZOP,
     FORMAT_JSON_DEFLATE,
+    FORMAT_AVRO,
 }
 
 // In previous versions, the data compression format and file format were stored together, as TFileFormatType,
@@ -308,11 +309,26 @@ struct TPaimonFileDesc {
 
 
 struct THudiFileDesc {
-    1: optional string basePath;
-    2: optional string dataFilePath;
-    3: optional list<string> deltaFilePaths;
-    // Deprecated
-    4: optional Exprs.TExpr file_select_conjunct;
+    1: optional string instant_time;
+    2: optional string serde;
+    3: optional string input_format;
+    4: optional string base_path;
+    5: optional string data_file_path;
+    6: optional i64 data_file_length;
+    7: optional list<string> delta_logs;
+    8: optional list<string> column_names;
+    9: optional list<string> column_types;
+    10: optional list<string> nested_fields;
+}
+
+struct TTransactionalHiveDeleteDeltaDesc {
+    1: optional string directory_location
+    2: optional list<string> file_names
+}
+
+struct TTransactionalHiveDesc {
+    1: optional string partition
+    2: optional list<TTransactionalHiveDeleteDeltaDesc> delete_deltas
 }
 
 struct TTableFormatFileDesc {
@@ -320,6 +336,7 @@ struct TTableFormatFileDesc {
     2: optional TIcebergFileDesc iceberg_params
     3: optional THudiFileDesc hudi_params
     4: optional TPaimonFileDesc paimon_params
+    5: optional TTransactionalHiveDesc transactional_hive_params
 }
 
 struct TFileScanRangeParams {
@@ -425,10 +442,15 @@ struct TBackendsMetadataParams {
   1: optional string cluster_name
 }
 
+struct TFrontendsMetadataParams {
+  1: optional string cluster_name
+}
+
 struct TMetaScanRange {
   1: optional Types.TMetadataType metadata_type
   2: optional TIcebergMetadataParams iceberg_params
   3: optional TBackendsMetadataParams backends_params
+  4: optional TFrontendsMetadataParams frontends_params
 }
 
 // Specification of an individual data range which is held in its entirety
@@ -568,6 +590,7 @@ struct TSchemaScanNode {
 struct TMetaScanNode {
   1: required Types.TTupleId tuple_id
   2: optional Types.TMetadataType metadata_type
+  3: optional Types.TUserIdentity current_user_ident
 }
 
 struct TTestExternalScanNode {

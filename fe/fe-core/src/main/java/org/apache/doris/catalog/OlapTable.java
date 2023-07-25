@@ -356,8 +356,8 @@ public class OlapTable extends Table {
             Preconditions.checkState(storageType == TStorageType.COLUMN);
         }
 
-        MaterializedIndexMeta indexMeta = new MaterializedIndexMeta(indexId, schema, schemaVersion,
-                schemaHash, shortKeyColumnCount, storageType, keysType, origStmt, indexes);
+        MaterializedIndexMeta indexMeta = new MaterializedIndexMeta(indexId, schema, schemaVersion, schemaHash,
+                shortKeyColumnCount, storageType, keysType, origStmt, indexes, getQualifiedDbName());
         try {
             indexMeta.parseStmt(analyzer);
         } catch (Exception e) {
@@ -1053,6 +1053,15 @@ public class OlapTable extends Table {
         return null;
     }
 
+    public Column getRowStoreCol() {
+        for (Column column : getBaseSchema(true)) {
+            if (column.isRowStoreColumn()) {
+                return column;
+            }
+        }
+        return null;
+    }
+
     public Boolean hasSequenceCol() {
         return getSequenceCol() != null;
     }
@@ -1399,8 +1408,7 @@ public class OlapTable extends Table {
                 this.partitionInfo.addPartition(partitionId, true,
                         tempRangeInfo.getItem(partitionId), tempRangeInfo.getDataProperty(partitionId),
                         tempRangeInfo.getReplicaAllocation(partitionId), tempRangeInfo.getIsInMemory(partitionId),
-                        tempRangeInfo.getIsPersistent(partitionId),
-                        tempRangeInfo.getIsMutable(partitionId));
+                        tempRangeInfo.getIsPersistent(partitionId), tempRangeInfo.getIsMutable(partitionId));
             }
         }
         tempPartitions.unsetPartitionInfo();
@@ -1489,8 +1497,8 @@ public class OlapTable extends Table {
         DataProperty dataProperty = partitionInfo.getDataProperty(oldPartition.getId());
         ReplicaAllocation replicaAlloc = partitionInfo.getReplicaAllocation(oldPartition.getId());
         boolean isInMemory = partitionInfo.getIsInMemory(oldPartition.getId());
-        boolean isPersistent = partitionInfo.getIsPersistent(oldPartition.getId());
         boolean isMutable = partitionInfo.getIsMutable(oldPartition.getId());
+        boolean isPersistent = partitionInfo.getIsPersistent(oldPartition.getId());
 
         if (partitionInfo.getType() == PartitionType.RANGE
                 || partitionInfo.getType() == PartitionType.LIST) {
@@ -1500,8 +1508,8 @@ public class OlapTable extends Table {
                     replicaAlloc, isInMemory, isPersistent, isMutable);
         } else {
             partitionInfo.dropPartition(oldPartition.getId());
-            partitionInfo.addPartition(newPartition.getId(), dataProperty, replicaAlloc, isInMemory,
-                    isPersistent, isMutable);
+            partitionInfo.addPartition(newPartition.getId(), dataProperty,
+                    replicaAlloc, isInMemory, isPersistent, isMutable);
         }
 
         return oldPartition;
@@ -1531,28 +1539,9 @@ public class OlapTable extends Table {
         return replicaCount;
     }
 
-    public void checkStableAndNormal(String clusterName) throws DdlException {
+    public void checkNormalStateForAlter() throws DdlException {
         if (state != OlapTableState.NORMAL) {
-            throw new DdlException("Table[" + name + "]'s state is not NORMAL. "
-                    + "Do not allow doing materialized view");
-        }
-
-        //In cloud mode we just return true, because
-        //we don't need tabletScheduler
-        if (Config.isCloudMode()) {
-            return;
-        }
-
-        // check if all tablets are healthy, and no tablet is in tablet scheduler
-        boolean isStable = isStable(Env.getCurrentSystemInfo(),
-                Env.getCurrentEnv().getTabletScheduler(),
-                clusterName);
-        if (!isStable) {
-            throw new DdlException("table [" + name + "] is not stable."
-                    + " Some tablets of this table may not be healthy or are being "
-                    + "scheduled."
-                    + " You need to repair the table first"
-                    + " or stop cluster balance. See 'help admin;'.");
+            throw new DdlException("Table[" + name + "]'s state is not NORMAL. Do not allow doing ALTER ops");
         }
     }
 
@@ -1776,14 +1765,6 @@ public class OlapTable extends Table {
         return "";
     }
 
-    public boolean getEnableLightSchemaChange() {
-        if (tableProperty != null) {
-            return tableProperty.getUseSchemaLightChange();
-        }
-        // property is set false by default
-        return false;
-    }
-
     public Boolean isPersistent() {
         if (tableProperty != null) {
             return tableProperty.isPersistent();
@@ -1812,8 +1793,16 @@ public class OlapTable extends Table {
             tableProperty = new TableProperty(new HashMap<>());
         }
         tableProperty.modifyTableProperties(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS,
-                Long.valueOf(ttlSeconds).toString());
+                                            Long.valueOf(ttlSeconds).toString());
         tableProperty.buildTTLSeconds();
+    }
+
+    public boolean getEnableLightSchemaChange() {
+        if (tableProperty != null) {
+            return tableProperty.getUseSchemaLightChange();
+        }
+        // property is set false by default
+        return false;
     }
 
     public void setEnableLightSchemaChange(boolean enableLightSchemaChange) {
@@ -1848,7 +1837,7 @@ public class OlapTable extends Table {
     }
 
     public boolean isCcrEnable() {
-        return tableProperty != null ?  tableProperty.isCcrEnable() : false;
+        return tableProperty != null && tableProperty.isCcrEnable();
     }
 
     public void setDisableAutoCompaction(boolean disableAutoCompaction) {

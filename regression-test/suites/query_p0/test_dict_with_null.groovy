@@ -46,4 +46,8 @@ suite("dict_with_null", "query") {
     qt_sql2 "select * from test_dict_with_null where c_string < 'dfg'"
     qt_sql3 "select * from test_dict_with_null where c_string = 'abc'"
     qt_sql4 "select * from test_dict_with_null where c_string is null order by c_int desc"
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 2.0.0-rc01

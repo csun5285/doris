@@ -37,14 +37,6 @@
         using T = _A;                                               \
     };
 
-#define TYPEID_MAP(_A)                                              \
-    template <>                                                     \
-    inline constexpr TypeIndex TypeToTypeIndex<_A> = TypeIndex::_A; \
-    template <>                                                     \
-    struct TypeIndexToTypeHelper<TypeIndex::_A> : std::true_type {  \
-        using T = _A;                                               \
-    };
-
 /** Checks type by comparing typeid.
   * The exact match of the type is checked. That is, cast to the ancestor will be unsuccessful.
   * In the rest, behaves like a dynamic_cast.

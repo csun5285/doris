@@ -82,7 +82,10 @@ suite("aggregate_strategies") {
         explain {
             sql """
             select
+<<<<<<< HEAD
                 /*+SET_VAR(disable_nereids_rules='ONE_PHASE_AGGREGATE_SINGLE_DISTINCT_TO_MULTI,TWO_PHASE_AGGREGATE_SINGLE_DISTINCT_TO_MULTI,THREE_PHASE_AGGREGATE_WITH_DISTINCT, FOUR_PHASE_AGGREGATE_WITH_DISTINCT')*/
+=======
+>>>>>>> 2.0.0-rc01
                 count(distinct id)
                 from $tableName
             """
@@ -90,6 +93,7 @@ suite("aggregate_strategies") {
             notContains "STREAMING"
         }
 
+<<<<<<< HEAD
         explain {
             sql """
             select count(*)
@@ -107,13 +111,25 @@ suite("aggregate_strategies") {
             sql """select
                 /*+SET_VAR(disable_nereids_rules='TWO_PHASE_AGGREGATE_WITH_DISTINCT')*/
                 count(distinct id)
+=======
+        // test multi_distinct
+        test {
+            sql """select
+                count(distinct name)
+>>>>>>> 2.0.0-rc01
                 from $tableName"""
             result([[5L]])
         }
 
+<<<<<<< HEAD
         test {
             sql """select
                 /*+SET_VAR(disable_nereids_rules='THREE_PHASE_AGGREGATE_WITH_DISTINCT')*/
+=======
+        // test four phase distinct
+        test {
+            sql """select
+>>>>>>> 2.0.0-rc01
                 count(distinct id)
                 from $tableName"""
             result([[5L]])
@@ -213,4 +229,10 @@ suite("aggregate_strategies") {
     }
 
     qt_sql_distinct_same_col """SELECT COUNT(DISTINCT id, id) FROM test_bucket10_table GROUP BY id """
+<<<<<<< HEAD
+=======
+
+    sql "set experimental_enable_pipeline_engine=true"
+    qt_sql_distinct_same_col2 """SELECT COUNT(DISTINCT id, id) FROM test_bucket10_table GROUP BY id """
+>>>>>>> 2.0.0-rc01
 }

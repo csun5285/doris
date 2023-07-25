@@ -30,7 +30,9 @@
 #include "common/logging.h"
 #include "common/status.h"
 #include "io/cache/block/block_file_cache_profile.h"
+#include "io/cache/file_cache_manager.h"
 #include "io/fs/file_reader_options.h"
+#include "io/fs/file_system.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "io/fs/remote_file_system.h"
@@ -45,6 +47,8 @@
 
 namespace doris {
 using namespace ErrorCode;
+
+using io::FileCacheManager;
 
 std::string BetaRowset::segment_file_path(int segment_id) {
 #ifdef BE_TEST
@@ -128,6 +132,9 @@ Status BetaRowset::get_segments_size(std::vector<size_t>* segments_size) {
         segments_size->push_back(file_size);
     }
     return Status::OK();
+}
+Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments) {
+    return load_segments(0, num_segments(), segments);
 }
 
 Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments,
@@ -224,7 +231,7 @@ void BetaRowset::do_close() {
 
 Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
                                  size_t new_rowset_start_seg_id,
-                                 std::set<int32_t>* without_index_column_uids) {
+                                 std::set<int32_t>* without_index_uids) {
     DCHECK(is_local());
     auto fs = _rowset_meta->fs();
     if (!fs) {
@@ -249,44 +256,40 @@ Status BetaRowset::link_files_to(const std::string& dir, RowsetId new_rowset_id,
                          << "to=" << dst_path << ", errno=" << Errno::no();
             return Status::Error<OS_ERROR>();
         }
-        for (auto& column : _schema->columns()) {
-            if (without_index_column_uids != nullptr &&
-                without_index_column_uids->count(column.unique_id())) {
+        for (auto& index : _schema->indexes()) {
+            if (index.index_type() != IndexType::INVERTED) {
                 continue;
             }
-            const TabletIndex* index_meta = _schema->get_inverted_index(column.unique_id());
-            if (index_meta) {
-                std::string inverted_index_src_file_path =
-                        InvertedIndexDescriptor::get_index_file_name(src_path,
-                                                                     index_meta->index_id());
-                std::string inverted_index_dst_file_path =
-                        InvertedIndexDescriptor::get_index_file_name(dst_path,
-                                                                     index_meta->index_id());
 
-                bool need_to_link = true;
-                if (_schema->skip_write_index_on_load()) {
-                    local_fs->exists(inverted_index_src_file_path, &need_to_link);
-                    if (!need_to_link) {
-                        LOG(INFO) << "skip create hard link to not existed file="
-                                  << inverted_index_src_file_path;
-                    }
-                }
+            auto index_id = index.index_id();
+            if (without_index_uids != nullptr && without_index_uids->count(index_id)) {
+                continue;
+            }
 
-                if (need_to_link) {
-                    if (!local_fs->link_file(inverted_index_src_file_path,
-                                             inverted_index_dst_file_path)
-                                 .ok()) {
-                        LOG(WARNING)
-                                << "fail to create hard link. from=" << inverted_index_src_file_path
-                                << ", "
-                                << "to=" << inverted_index_dst_file_path
-                                << ", errno=" << Errno::no();
-                        return Status::Error<OS_ERROR>();
-                    }
-                    LOG(INFO) << "success to create hard link. from="
-                              << inverted_index_src_file_path << ", "
-                              << "to=" << inverted_index_dst_file_path;
+            std::string inverted_index_src_file_path =
+                    InvertedIndexDescriptor::get_index_file_name(src_path, index_id);
+            std::string inverted_index_dst_file_path =
+                    InvertedIndexDescriptor::get_index_file_name(dst_path, index_id);
+            bool need_to_link = true;
+            if (_schema->skip_write_index_on_load()) {
+                local_fs->exists(inverted_index_src_file_path, &need_to_link);
+                if (!need_to_link) {
+                    LOG(INFO) << "skip create hard link to not existed file="
+                              << inverted_index_src_file_path;
                 }
+            }
+            if (need_to_link) {
+                if (!local_fs->link_file(inverted_index_src_file_path, inverted_index_dst_file_path)
+                             .ok()) {
+                    LOG(WARNING) << "fail to create hard link. from="
+                                 << inverted_index_src_file_path << ", "
+                                 << "to=" << inverted_index_dst_file_path
+                                 << ", errno=" << Errno::no();
+                    return Status::Error<OS_ERROR>();
+                }
+                LOG(INFO) << "success to create hard link. from=" << inverted_index_src_file_path
+                          << ", "
+                          << "to=" << inverted_index_dst_file_path;
             }
         }
     }

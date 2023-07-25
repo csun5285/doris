@@ -31,6 +31,7 @@
 #include "common/status.h"
 #include "io/fs/file_reader_options.h"
 #include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/fs_utils.h"
 
 namespace doris {
 namespace io {
@@ -40,19 +41,6 @@ class FileWriter;
 class ExecEnv;
 class RuntimeProfile;
 class RuntimeState;
-
-struct FileSystemProperties {
-    TFileType::type system_type;
-    std::map<std::string, std::string> properties;
-    THdfsParams hdfs_params;
-    std::vector<TNetworkAddress> broker_addresses;
-};
-
-struct FileDescription {
-    std::string path;
-    int64_t start_offset;
-    int64_t file_size;
-};
 
 class FileFactory {
     ENABLE_FACTORY_CREATOR(FileFactory);
@@ -70,9 +58,9 @@ public:
 
     /// Create FileReader
     static Status create_file_reader(
-            RuntimeProfile* profile, const FileSystemProperties& system_properties,
-            const FileDescription& file_description, std::shared_ptr<io::FileSystem>* file_system,
-            io::FileReaderSPtr* file_reader,
+            RuntimeProfile* profile, const io::FileSystemProperties& system_properties,
+            const io::FileDescription& file_description,
+            std::shared_ptr<io::FileSystem>* file_system, io::FileReaderSPtr* file_reader,
             io::FileReaderOptions reader_options = NO_CACHE_READER_OPTIONS);
 
     // Create FileReader for stream load pipe
@@ -91,7 +79,7 @@ public:
 
     static Status create_broker_reader(const TNetworkAddress& broker_addr,
                                        const std::map<std::string, std::string>& prop,
-                                       const FileDescription& file_description,
+                                       const io::FileDescription& file_description,
                                        std::shared_ptr<io::FileSystem>* hdfs_file_system,
                                        io::FileReaderSPtr* reader,
                                        const io::FileReaderOptions& reader_options);

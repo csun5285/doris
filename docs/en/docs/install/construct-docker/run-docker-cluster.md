@@ -77,12 +77,21 @@ For the sake of presentation, this chapter only demonstrates scripts written in 
 From the version of `Apache Doris 1.2.1 Docker Image`, the interface list of each process image is as follows:
 
 | process name | interface name | interface definition | interface example |
+<<<<<<< HEAD
 | -------------- |-------------| ------------------- | -------------------------------------------------------------- |
 | FE\BE\BROKER    | FE_SERVERS | FE node main information | fe1:172.20.80.2:9010,fe2:172.20.80.3:9010,fe3:172.20.80.4:9010 |
 | FE | FE_ID       | FE node ID | 1 |
 | BE | BE_ADDR     | BE node main information | 172.20.80.5:9050 |
 | BE | NODE_ROLE | BE node type | computation |
 | BROKER | BROKER_ADDR | Main information of BROKER node | 172.20.80.6:8000 |
+=======
+|--------------|----------------|---------------|------------------|
+| FE           | BE             | BROKER | FE_SERVERS | FE node main information | fe1:172.20.80.2:9010,fe2:172.20.80.3:9010,fe3:172.20.80.4:9010 |
+| FE           | FE_ID          | FE node ID | 1 |
+| BE           | BE_ADDR        | BE node main information | 172.20.80.5:9050 |
+| BE           | NODE_ROLE      | BE node type | computation |
+| BROKER       | BROKER_ADDR    | Main information of BROKER node | 172.20.80.6:8000 |
+>>>>>>> 2.0.0-rc01
 
 Note that the above interface must fill in the information, otherwise the process cannot be started.
 
@@ -100,6 +109,7 @@ Note that the above interface must fill in the information, otherwise the proces
 
 #### Docker Run command
 
+<<<<<<< HEAD
 Create a subnet bridge
 
 ``` shell
@@ -141,11 +151,42 @@ apache/doris:1.2.1-be-x86_64  # if CPU does not support AVX2, use
 > Use `docker logs -f be` to check the backend for error messages.
 
 3FE & 3BE run command template can be downloaded [here](https://github.com/apache/doris/tree/master/docker/runtime/docker-compose-demo/build-cluster/rum-command/3fe_3be.sh).
+=======
+1FE & 1BE Command Templates
+
+Note that you need to modify `${intranet IP of the current machine}` to replace it with the intranet IP of the current machine
+
+```shell
+docker run -itd \
+--name=fe \
+--env FE_SERVERS="fe1:${intranet IP of the current machine}:9010" \
+--env FE_ID=1 \
+-p 8030:8030\
+-p 9030:9030 \
+-v /data/fe/doris-meta:/opt/apache-doris/fe/doris-meta \
+-v /data/fe/log:/opt/apache-doris/fe/log \
+--net=host \
+apache/doris:2.0.0_alpha-fe-x86_64
+
+docker run -itd \
+--name=be\
+--env FE_SERVERS="fe1:${intranet IP of the current machine}:9010" \
+--env BE_ADDR="${Intranet IP of the current machine}:9050" \
+-p 8040:8040 \
+-v /data/be/storage:/opt/apache-doris/be/storage \
+-v /data/be/log:/opt/apache-doris/be/log \
+--net=host \
+apache/doris:2.0.0_alpha-be-x86_64
+```
+
+3FE & 3BE Run command template if needed [click here](https://github.com/apache/doris/tree/master/docker/runtime/docker-compose-demo/build-cluster/rum-command/3fe_3be .sh) to access downloads.
+>>>>>>> 2.0.0-rc01
 
 #### Docker Compose script
 
 1FE & 1BE template
 
+<<<<<<< HEAD
 ```yaml
 version: '3'
 services:
@@ -193,6 +234,38 @@ networks:
 ```
 
 3FE & 3BE Docker Compose file can be downloaded [here](https://github.com/apache/doris/tree/master/docker/runtime/docker-compose-demo/build-cluster/docker-compose/3fe_3be/docker-compose.yaml).
+=======
+Note that you need to modify `${intranet IP of the current machine}` to replace it with the intranet IP of the current machine
+
+```yaml
+version: "3"
+services:
+   fe:
+     image: apache/doris:2.0.0_alpha-fe-x86_64
+     hostname: fe
+     environment:
+      - FE_SERVERS=fe1:${intranet IP of the current machine}:9010
+      - FE_ID=1
+     volumes:
+      - /data/fe/doris-meta/:/opt/apache-doris/fe/doris-meta/
+      - /data/fe/log/:/opt/apache-doris/fe/log/
+     network_mode: host
+   be:
+     image: apache/doris:2.0.0_alpha-be-x86_64
+     hostname: be
+     environment:
+      - FE_SERVERS=fe1:${intranet IP of the current machine}:9010
+      - BE_ADDR=${intranet IP of the current machine}:9050
+     volumes:
+      - /data/be/storage/:/opt/apache-doris/be/storage/
+      - /data/be/script/:/docker-entrypoint-initdb.d/
+     depends_on:
+       -fe
+     network_mode: host
+```
+
+3FE & 3BE Docker Compose script template if needed [click here](https://github.com/apache/doris/tree/master/docker/runtime/docker-compose-demo/build-cluster/docker-compose/ 3fe_3be/docker-compose.yaml) access to download.
+>>>>>>> 2.0.0-rc01
 
 ## Deploy Doris Docker
 
@@ -216,7 +289,10 @@ sysctl -w vm.max_map_count=2000000
 ```
 
 Then `exit` exits and creates the Doris Docker cluster.
+<<<<<<< HEAD
 
 ## Unfinished business
 
 1. Compose Demo List
+=======
+>>>>>>> 2.0.0-rc01

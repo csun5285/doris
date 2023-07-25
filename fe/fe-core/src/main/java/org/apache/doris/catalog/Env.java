@@ -31,6 +31,7 @@ import org.apache.doris.analysis.AdminCleanTrashStmt;
 import org.apache.doris.analysis.AdminCompactTableStmt;
 import org.apache.doris.analysis.AdminSetConfigStmt;
 import org.apache.doris.analysis.AdminSetReplicaStatusStmt;
+import org.apache.doris.analysis.AlterDatabasePropertyStmt;
 import org.apache.doris.analysis.AlterDatabaseQuotaStmt;
 import org.apache.doris.analysis.AlterDatabaseQuotaStmt.QuotaType;
 import org.apache.doris.analysis.AlterDatabaseRename;
@@ -38,7 +39,6 @@ import org.apache.doris.analysis.AlterMaterializedViewStmt;
 import org.apache.doris.analysis.AlterSystemStmt;
 import org.apache.doris.analysis.AlterTableStmt;
 import org.apache.doris.analysis.AlterViewStmt;
-import org.apache.doris.analysis.AnalyzeTblStmt;
 import org.apache.doris.analysis.BackupStmt;
 import org.apache.doris.analysis.CancelAlterSystemStmt;
 import org.apache.doris.analysis.CancelAlterTableStmt;
@@ -82,13 +82,13 @@ import org.apache.doris.analysis.TableRenameClause;
 import org.apache.doris.analysis.TruncateTableStmt;
 import org.apache.doris.analysis.UninstallPluginStmt;
 import org.apache.doris.backup.BackupHandler;
+import org.apache.doris.binlog.BinlogGcer;
 import org.apache.doris.binlog.BinlogManager;
 import org.apache.doris.blockrule.SqlBlockRuleMgr;
 import org.apache.doris.catalog.ColocateTableIndex.GroupId;
 import org.apache.doris.catalog.DistributionInfo.DistributionInfoType;
 import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
 import org.apache.doris.catalog.MetaIdGenerator.IdGeneratorBuffer;
-import org.apache.doris.catalog.OlapTable.OlapTableState;
 import org.apache.doris.catalog.Replica.ReplicaStatus;
 import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.clone.ColocateTableCheckerAndBalancer;
@@ -159,6 +159,7 @@ import org.apache.doris.load.loadv2.LoadJobScheduler;
 import org.apache.doris.load.loadv2.LoadLoadingChecker;
 import org.apache.doris.load.loadv2.LoadManager;
 import org.apache.doris.load.loadv2.LoadManagerAdapter;
+import org.apache.doris.load.loadv2.LoadTask;
 import org.apache.doris.load.loadv2.ProgressManager;
 import org.apache.doris.load.routineload.RoutineLoadManager;
 import org.apache.doris.load.routineload.RoutineLoadScheduler;
@@ -177,6 +178,7 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.persist.AlterMultiMaterializedView;
 import org.apache.doris.persist.BackendReplicasInfo;
 import org.apache.doris.persist.BackendTabletsInfo;
+import org.apache.doris.persist.BinlogGcInfo;
 import org.apache.doris.persist.CleanQueryStatsInfo;
 import org.apache.doris.persist.DropPartitionInfo;
 import org.apache.doris.persist.EditLog;
@@ -214,7 +216,6 @@ import org.apache.doris.resource.Tag;
 import org.apache.doris.resource.workloadgroup.WorkloadGroupMgr;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.statistics.AnalysisManager;
-import org.apache.doris.statistics.AnalysisTaskScheduler;
 import org.apache.doris.statistics.StatisticsAutoAnalyzer;
 import org.apache.doris.statistics.StatisticsCache;
 import org.apache.doris.statistics.StatisticsCleaner;
@@ -229,6 +230,7 @@ import org.apache.doris.task.AgentTaskExecutor;
 import org.apache.doris.task.CompactionTask;
 import org.apache.doris.task.DropReplicaTask;
 import org.apache.doris.task.MasterTaskExecutor;
+import org.apache.doris.task.PriorityMasterTaskExecutor;
 import org.apache.doris.thrift.BackendService;
 import org.apache.doris.thrift.TCompressionType;
 import org.apache.doris.thrift.TNetworkAddress;
@@ -429,7 +431,7 @@ public class Env {
 
     // Thread pools for pending and loading task, separately
     private MasterTaskExecutor pendingLoadTaskScheduler;
-    private MasterTaskExecutor loadingLoadTaskScheduler;
+    private PriorityMasterTaskExecutor<LoadTask> loadingLoadTaskScheduler;
 
     private LoadJobScheduler loadJobScheduler;
     private CleanCopyJobScheduler cleanCopyJobScheduler;
@@ -472,6 +474,8 @@ public class Env {
     private StatisticsCleaner statisticsCleaner;
 
     private BinlogManager binlogManager;
+
+    private BinlogGcer binlogGcer;
 
     /**
      * TODO(tsy): to be removed after load refactor
@@ -663,8 +667,8 @@ public class Env {
         // The loadingLoadTaskScheduler's queue size is unlimited, so that it can receive all loading tasks
         // created after pending tasks finish. And don't worry about the high concurrency, because the
         // concurrency is limited by Config.desired_max_waiting_jobs and Config.async_loading_load_task_pool_size.
-        this.loadingLoadTaskScheduler = new MasterTaskExecutor("loading-load-task-scheduler",
-                Config.async_loading_load_task_pool_size, Integer.MAX_VALUE, !isCheckpointCatalog);
+        this.loadingLoadTaskScheduler = new PriorityMasterTaskExecutor<>("loading-load-task-scheduler",
+                Config.async_loading_load_task_pool_size, LoadTask.COMPARATOR, LoadTask.class, !isCheckpointCatalog);
 
         this.loadJobScheduler = new LoadJobScheduler();
         this.cleanCopyJobScheduler = new CleanCopyJobScheduler();
@@ -697,18 +701,16 @@ public class Env {
             this.upgradeMgr = new CloudUpgradeMgr();
         }
 
-        // Add `!FeConstants.disableInternalSchemaDb` in condition for CopyIntoTest
-        if (!FeConstants.disableInternalSchemaDb && FeConstants.runningCopyIntoTest) {
-            this.analysisManager = new AnalysisManager();
-            this.statisticsCleaner = new StatisticsCleaner();
-            this.statisticsAutoAnalyzer = new StatisticsAutoAnalyzer();
-        }
+        this.analysisManager = new AnalysisManager();
+        this.statisticsCleaner = new StatisticsCleaner();
+        this.statisticsAutoAnalyzer = new StatisticsAutoAnalyzer();
         this.globalFunctionMgr = new GlobalFunctionMgr();
         this.workloadGroupMgr = new WorkloadGroupMgr();
         this.queryStats = new QueryStats();
         this.loadManagerAdapter = new LoadManagerAdapter();
         this.hiveTransactionMgr = new HiveTransactionMgr();
         this.binlogManager = new BinlogManager();
+        this.binlogGcer = new BinlogGcer();
     }
 
     public static void destroyCheckpoint() {
@@ -832,12 +834,12 @@ public class Env {
         return hiveTransactionMgr;
     }
 
-    public static HiveTransactionMgr getCurrentHiveTransactionMgr() {
-        return getCurrentEnv().getHiveTransactionMgr();
-    }
-
     public CacheHotspotManager getCacheHotspotMgr() {
         return cacheHotspotMgr;
+    }
+
+    public static HiveTransactionMgr getCurrentHiveTransactionMgr() {
+        return getCurrentEnv().getHiveTransactionMgr();
     }
 
     // Use tryLock to avoid potential dead lock
@@ -945,7 +947,6 @@ public class Env {
             // If not using bdb, we need to notify the FE type transfer manually.
             notifyNewFETypeTransfer(FrontendNodeType.MASTER);
         }
-
         if (statisticsCleaner != null) {
             statisticsCleaner.start();
         }
@@ -1115,20 +1116,6 @@ public class Env {
                     }
                     storage.writeFrontendRoleAndNodeName(role, nodeName);
                     LOG.info("forward compatibility. role: {}, node name: {}", role.name(), nodeName);
-                } else {
-                    // nodeName should be like "192.168.1.1_9217_1620296111213"
-                    // and the selfNode should be the prefix of nodeName.
-                    // If not, it means that the ip used last time is different from this time, which is not allowed.
-                    // But is metadata_failure_recovery is true,
-                    // we will not check it because this may be a FE migration.
-                    String[] split = nodeName.split("_");
-                    if (Config.metadata_failure_recovery.equals("false") && !selfNode.getHost().equalsIgnoreCase(
-                            split[0])) {
-                        throw new IOException(
-                                "the self host " + selfNode.getHost() + " does not equal to the host in ROLE" + " file "
-                                        + split[0] + ". You need to set 'priority_networks' config"
-                                        + " in fe.conf to match the host " + split[0]);
-                    }
                 }
                 // Notice:
                 // With the introduction of FQDN, the nodeName is no longer bound to an IP address,
@@ -1303,7 +1290,7 @@ public class Env {
                 // For upgrade compatibility, the host parameter name remains the same
                 // and the new hostname parameter is added
                 String url = "http://" + NetUtils.getHostPortInAccessibleFormat(helperNode.getHost(), Config.http_port)
-                        + "/role?host=" + selfNode.getHost() + "&hostname=" + selfNode.getHost()
+                        + "/role?host=" + selfNode.getHost()
                         + "&port=" + selfNode.getPort();
                 HttpURLConnection conn = HttpURLUtil.getConnectionWithNodeIdent(url);
                 if (conn.getResponseCode() != 200) {
@@ -1646,6 +1633,9 @@ public class Env {
         // start mtmv jobManager
         mtmvJobManager.start();
         getRefreshManager().start();
+
+        // binlog gcer
+        binlogGcer.start();
     }
 
     // start threads that should running on all FE
@@ -2213,6 +2203,12 @@ public class Env {
         return checksum;
     }
 
+    public long loadAnalysisManager(DataInputStream in, long checksum) throws IOException {
+        this.analysisManager = AnalysisManager.readFields(in);
+        LOG.info("finished replay AnalysisMgr from image");
+        return checksum;
+    }
+
     // Only called by checkpoint thread
     // return the latest image file's absolute path
     public String saveImage() throws IOException {
@@ -2494,6 +2490,11 @@ public class Env {
 
         this.binlogManager.write(out, checksum);
         LOG.info("Save binlogs to image");
+        return checksum;
+    }
+
+    public long saveAnalysisMgr(CountingDataOutputStream dos, long checksum) throws IOException {
+        analysisManager.write(dos);
         return checksum;
     }
 
@@ -2789,9 +2790,7 @@ public class Env {
             if (Config.enable_fqdn_mode && StringUtils.isEmpty(host)) {
                 throw new DdlException("frontend's hostName should not be empty while enable_fqdn_mode is true");
             }
-            if (Strings.isNullOrEmpty(nodeName)) {
-                nodeName = genFeNodeName(host, editLogPort, false /* new name style */);
-            }
+            nodeName = genFeNodeName(host, editLogPort, false /* new name style */);
 
             if (removedFrontends.contains(nodeName)) {
                 throw new DdlException("frontend name already exists " + nodeName + ". Try again");
@@ -2952,6 +2951,15 @@ public class Env {
         getInternalCatalog().replayAlterDatabaseQuota(dbName, quota, quotaType);
     }
 
+    public void alterDatabaseProperty(AlterDatabasePropertyStmt stmt) throws DdlException {
+        getInternalCatalog().alterDatabaseProperty(stmt);
+    }
+
+    public void replayAlterDatabaseProperty(String dbName, Map<String, String> properties)
+            throws MetaNotFoundException {
+        getInternalCatalog().replayAlterDatabaseProperty(dbName, properties);
+    }
+
     public void renameDatabase(AlterDatabaseRename stmt) throws DdlException {
         getInternalCatalog().renameDatabase(stmt);
     }
@@ -3018,6 +3026,10 @@ public class Env {
 
     public void replayRecoverPartition(RecoverInfo info) throws MetaNotFoundException, DdlException {
         getInternalCatalog().replayRecoverPartition(info);
+    }
+
+    public void replayGcBinlog(BinlogGcInfo binlogGcInfo) {
+        binlogManager.replayGc(binlogGcInfo);
     }
 
     public static void getDdlStmt(TableIf table, List<String> createTableStmt, List<String> addPartitionStmt,
@@ -3276,7 +3288,7 @@ public class Env {
             }
 
             // unique key table with merge on write
-            if (olapTable.getKeysType() == KeysType.UNIQUE_KEYS && !olapTable.getEnableUniqueKeyMergeOnWrite()) {
+            if (olapTable.getKeysType() == KeysType.UNIQUE_KEYS && olapTable.getEnableUniqueKeyMergeOnWrite()) {
                 sb.append(",\n\"").append(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE).append("\" = \"");
                 sb.append(olapTable.getEnableUniqueKeyMergeOnWrite()).append("\"");
             }
@@ -3762,12 +3774,6 @@ public class Env {
                 sb.append(olapTable.getSequenceType().toString()).append("\"");
             }
 
-            // unique key table with merge on write
-            if (olapTable.getEnableUniqueKeyMergeOnWrite()) {
-                sb.append(",\n\"").append(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE).append("\" = \"");
-                sb.append(olapTable.getEnableUniqueKeyMergeOnWrite()).append("\"");
-            }
-
             sb.append("\n)");
         } else if (table.getType() == TableType.MYSQL) {
             MysqlTable mysqlTable = (MysqlTable) table;
@@ -3859,7 +3865,8 @@ public class Env {
             sb.append("\"max_docvalue_fields\" = \"").append(esTable.getMaxDocValueFields()).append("\",\n");
             sb.append("\"enable_keyword_sniff\" = \"").append(esTable.isEnableKeywordSniff()).append("\",\n");
             sb.append("\"nodes_discovery\" = \"").append(esTable.isNodesDiscovery()).append("\",\n");
-            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\"\n");
+            sb.append("\"http_ssl_enabled\" = \"").append(esTable.isHttpSslEnabled()).append("\",\n");
+            sb.append("\"like_push_down\" = \"").append(esTable.isLikePushDown()).append("\"\n");
             sb.append(")");
         } else if (table.getType() == TableType.HIVE) {
             HiveTable hiveTable = (HiveTable) table;
@@ -3888,7 +3895,8 @@ public class Env {
             addTableComment(jdbcTable, sb);
             sb.append("\nPROPERTIES (\n");
             sb.append("\"resource\" = \"").append(jdbcTable.getResourceName()).append("\",\n");
-            sb.append("\"table\" = \"").append(jdbcTable.getJdbcTable()).append("\"");
+            sb.append("\"table\" = \"").append(jdbcTable.getJdbcTable()).append("\",\n");
+            sb.append("\"table_type\" = \"").append(jdbcTable.getJdbcTypeName()).append("\"");
             sb.append("\n)");
         }
 
@@ -4577,9 +4585,7 @@ public class Env {
             try {
                 if (table instanceof OlapTable) {
                     OlapTable olapTable = (OlapTable) table;
-                    if (olapTable.getState() != OlapTableState.NORMAL) {
-                        throw new DdlException("Table[" + olapTable.getName() + "] is under " + olapTable.getState());
-                    }
+                    olapTable.checkNormalStateForAlter();
                 }
 
                 String oldTableName = table.getName();
@@ -4762,10 +4768,7 @@ public class Env {
     public void renameRollup(Database db, OlapTable table, RollupRenameClause renameClause) throws DdlException {
         table.writeLockOrDdlException();
         try {
-            if (table.getState() != OlapTableState.NORMAL) {
-                throw new DdlException("Table[" + table.getName() + "] is under " + table.getState());
-            }
-
+            table.checkNormalStateForAlter();
             String rollupName = renameClause.getRollupName();
             // check if it is base table name
             if (rollupName.equals(table.getName())) {
@@ -4823,10 +4826,7 @@ public class Env {
     public void renamePartition(Database db, OlapTable table, PartitionRenameClause renameClause) throws DdlException {
         table.writeLockOrDdlException();
         try {
-            if (table.getState() != OlapTableState.NORMAL) {
-                throw new DdlException("Table[" + table.getName() + "] is under " + table.getState());
-            }
-
+            table.checkNormalStateForAlter();
             if (table.getPartitionInfo().getType() != PartitionType.RANGE
                     && table.getPartitionInfo().getType() != PartitionType.LIST) {
                 throw new DdlException(
@@ -4881,10 +4881,7 @@ public class Env {
 
     private void renameColumn(Database db, OlapTable table, String colName,
                               String newColName, boolean isReplay) throws DdlException {
-        if (table.getState() != OlapTableState.NORMAL) {
-            throw new DdlException("Table[" + table.getName() + "] is under " + table.getState());
-        }
-
+        table.checkNormalStateForAlter();
         if (colName.equalsIgnoreCase(newColName)) {
             throw new DdlException("Same column name");
         }
@@ -5195,7 +5192,7 @@ public class Env {
 
         ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
                 newBinlogConfig.toProperties());
-        editLog.logModifyInMemory(info);
+        editLog.logUpdateBinlogConfig(info);
     }
 
     public void replayModifyTableProperty(short opCode, ModifyTablePropertyOperationLog info)
@@ -5484,6 +5481,10 @@ public class Env {
 
     public boolean isNullResultWithOneNullParamFunction(String funcName) {
         return functionSet.isNullResultWithOneNullParamFunctions(funcName);
+    }
+
+    public boolean isAggFunctionName(String name) {
+        return functionSet.isAggFunctionName(name);
     }
 
     @Deprecated
@@ -6176,19 +6177,7 @@ public class Env {
                 stmt.isIfExists());
     }
 
-    public AnalysisTaskScheduler getAnalysisJobScheduler() {
-        return analysisManager.taskScheduler;
-    }
-
     // SELECTDB_CODE_END
-
-    // TODO:
-    //  1. handle partition level analysis statement properly
-    //  2. support sample job
-    //  3. support period job
-    public void createAnalysisJob(AnalyzeTblStmt analyzeTblStmt) throws DdlException {
-        analysisManager.createAnalysisJob(analyzeTblStmt);
-    }
 
     public AnalysisManager getAnalysisManager() {
         return analysisManager;

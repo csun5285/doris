@@ -19,11 +19,16 @@ suite("test_join", "nereids_p0") {
     sql "SET enable_nereids_planner=true"
     sql "SET enable_fallback_to_original_planner=false"
     sql 'set parallel_fragment_exec_instance_num = 2;'
+<<<<<<< HEAD
     sql"use test_query_db"
+=======
+    sql"use nereids_test_query_db"
+>>>>>>> 2.0.0-rc01
 
     def tbName1 = "test"
     def tbName2 = "baseall"
     def tbName3 = "bigtable"
+<<<<<<< HEAD
     def empty_name = "empty"
 
     sql"drop view if exists empty"
@@ -36,6 +41,8 @@ suite("test_join", "nereids_p0") {
     qt_agg_sql4 """select /*+SET_VAR(disable_nereids_rules='THREE_PHASE_AGGREGATE_WITH_COUNT_DISTINCT_MULTI')*/ count(distinct k1, NULL) from test;"""
     qt_agg_sql5 """select /*+SET_VAR(disable_nereids_rules='THREE_PHASE_AGGREGATE_WITH_COUNT_DISTINCT_MULTI')*/ count(distinct k1, NULL), avg(k2) from baseall;"""
     qt_agg_sql6 """select /*+SET_VAR(disable_nereids_rules='THREE_PHASE_AGGREGATE_WITH_COUNT_DISTINCT_MULTI')*/ k1,count(distinct k2,k3),min(k4),count(*) from baseall group by k1 order by k1;"""
+=======
+>>>>>>> 2.0.0-rc01
 
     order_sql """select j.*, d.* from ${tbName2} j full outer join ${tbName1} d on (j.k1=d.k1) order by j.k1, j.k2, j.k3, j.k4, d.k1, d.k2
             limit 100"""
@@ -121,8 +128,14 @@ suite("test_join", "nereids_p0") {
     // Ocurrs time out with specified time 299969 MILLISECONDS
 
     List selected =  ["a.k1, b.k1, a.k2, b.k2, a.k3, b.k3", "count(a.k1), count(b.k1), count(a.k2), count(b.k2), count(*)"]
+<<<<<<< HEAD
 
     for( i in selected) {
+=======
+    List join_types = ["inner", "left outer", "right outer", ""]
+
+    for (i in selected) {
+>>>>>>> 2.0.0-rc01
         qt_join28"""select ${i} from ${tbName1} a join ${tbName2} b 
                 on a.k1 = b.k1 order by 1, 2, 3, 4, 5 limit 65535"""
         qt_join29"""select ${i} from ${tbName1} a join ${tbName2} b 
@@ -182,6 +195,7 @@ suite("test_join", "nereids_p0") {
                 order by 1, 2, 3, 4, 5 limit 65535"""
     }
 
+<<<<<<< HEAD
     // test_left_join
     String i = "a.k1, b.k1, a.k2, b.k2, a.k3, b.k3"
     qt_left_join1"""select ${i} from ${tbName1} a left join ${tbName2} b 
@@ -1181,6 +1195,8 @@ suite("test_join", "nereids_p0") {
 
 
 
+=======
+>>>>>>> 2.0.0-rc01
     // join null value
     def table_1 = "join_null_value_left_table"
     def table_2 = "join_null_value_right_table"

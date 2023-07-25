@@ -213,6 +213,13 @@ public class TableProperty implements Writable {
     public TableProperty buildStoreRowColumn() {
         storeRowColumn = Boolean.parseBoolean(
                 properties.getOrDefault(PropertyAnalyzer.PROPERTIES_STORE_ROW_COLUMN, "false"));
+        // Remove deprecated prefix and try again
+        String deprecatedPrefix = "deprecated_";
+        if (!storeRowColumn && PropertyAnalyzer.PROPERTIES_STORE_ROW_COLUMN.startsWith(deprecatedPrefix)) {
+            storeRowColumn = Boolean.parseBoolean(
+                properties.getOrDefault(
+                    PropertyAnalyzer.PROPERTIES_STORE_ROW_COLUMN.substring(deprecatedPrefix.length()), "false"));
+        }
         return this;
     }
 
@@ -371,16 +378,16 @@ public class TableProperty implements Writable {
         return isPersistent;
     }
 
-    public boolean isDynamicSchema() {
-        return isDynamicSchema;
-    }
-
     public boolean isAutoBucket() {
         return Boolean.parseBoolean(properties.getOrDefault(PropertyAnalyzer.PROPERTIES_AUTO_BUCKET, "false"));
     }
 
     public String getEstimatePartitionSize() {
         return properties.getOrDefault(PropertyAnalyzer.PROPERTIES_ESTIMATE_PARTITION_SIZE, "");
+    }
+
+    public boolean isDynamicSchema() {
+        return isDynamicSchema;
     }
 
     public TStorageFormat getStorageFormat() {

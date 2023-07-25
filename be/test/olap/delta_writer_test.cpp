@@ -47,6 +47,7 @@
 #include "olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
+#include "olap/task/engine_publish_version_task.h"
 #include "olap/txn_manager.h"
 #include "runtime/decimalv2_value.h"
 #include "runtime/define_primitive_type.h"
@@ -410,10 +411,6 @@ static TDescriptorTable create_descriptor_tablet_with_sequence_col() {
             TSlotDescriptorBuilder().type(TYPE_TINYINT).column_name("k1").column_pos(0).build());
     tuple_builder.add_slot(
             TSlotDescriptorBuilder().type(TYPE_SMALLINT).column_name("k2").column_pos(1).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_DATETIME).column_name("v1").column_pos(2).build());
-    tuple_builder.add_slot(
-            TSlotDescriptorBuilder().type(TYPE_DATEV2).column_name("v2").column_pos(3).build());
     tuple_builder.add_slot(TSlotDescriptorBuilder()
                                    .type(TYPE_DATETIME)
                                    .column_name("v1")
@@ -614,9 +611,10 @@ TEST_F(TestDeltaWriter, vec_write) {
     for (auto& tablet_rs : tablet_related_rs) {
         std::cout << "start to publish txn" << std::endl;
         RowsetSharedPtr rowset = tablet_rs.second;
+        TabletPublishStatistics stats;
         res = k_engine->txn_manager()->publish_txn(meta, write_req.partition_id, write_req.txn_id,
                                                    write_req.tablet_id, write_req.schema_hash,
-                                                   tablet_rs.first.tablet_uid, version);
+                                                   tablet_rs.first.tablet_uid, version, &stats);
         ASSERT_TRUE(res.ok());
         std::cout << "start to add inc rowset:" << rowset->rowset_id()
                   << ", num rows:" << rowset->num_rows() << ", version:" << rowset->version().first
@@ -729,9 +727,10 @@ TEST_F(TestDeltaWriter, vec_sequence_col) {
 
     std::cout << "start to publish txn" << std::endl;
     RowsetSharedPtr rowset = tablet_related_rs.begin()->second;
+    TabletPublishStatistics pstats;
     res = k_engine->txn_manager()->publish_txn(
             meta, write_req.partition_id, write_req.txn_id, write_req.tablet_id,
-            write_req.schema_hash, tablet_related_rs.begin()->first.tablet_uid, version);
+            write_req.schema_hash, tablet_related_rs.begin()->first.tablet_uid, version, &pstats);
     ASSERT_TRUE(res.ok());
     std::cout << "start to add inc rowset:" << rowset->rowset_id()
               << ", num rows:" << rowset->num_rows() << ", version:" << rowset->version().first

@@ -292,8 +292,12 @@ suite("test_external_brown", "p2") {
         sql """
             create catalog if not exists ${catalog_name} properties (
                 'type'='hms',
+<<<<<<< HEAD
                 'hive.metastore.uris' = 'thrift://${extHiveHmsHost}:${extHiveHmsPort}',
                 'hive.exec.orc.split.strategy' = 'BI'
+=======
+                'hive.metastore.uris' = 'thrift://${extHiveHmsHost}:${extHiveHmsPort}'
+>>>>>>> 2.0.0-rc01
             );
         """
         logger.info("catalog " + catalog_name + " created")

@@ -48,7 +48,7 @@ public class TableFunctionNode extends PlanNode {
 
     // The output slot ids of TableFunctionNode
     // Only the slot whose id is in this list will be output by TableFunctionNode
-    // private List<SlotId> outputSlotIds = Lists.newArrayList();
+    private List<SlotId> outputSlotIds = Lists.newArrayList();
 
     public TableFunctionNode(PlanNodeId id, PlanNode inputNode, TupleId lateralViewTupleId,
             ArrayList<Expr> fnCallExprList, List<SlotId> outputSlotIds) {
@@ -120,7 +120,8 @@ public class TableFunctionNode extends PlanNode {
         }
         Set<SlotRef> outputSlotRef = Sets.newHashSet();
         // case1
-        List<Expr> baseTblResultExprs = selectStmt.getResultExprs();
+        List<Expr> baseTblResultExprs = Expr.substituteList(selectStmt.getResultExprs(),
+                outputSmap, analyzer, false);
         for (Expr resultExpr : baseTblResultExprs) {
             // find all slotRef bound by tupleIds in resultExpr
             resultExpr.getSlotRefsBoundByTupleIds(tupleIds, outputSlotRef);
@@ -150,7 +151,6 @@ public class TableFunctionNode extends PlanNode {
 
     @Override
     public void init(Analyzer analyzer) throws UserException {
-        outputSlotIds = Lists.newArrayList();
         super.init(analyzer);
         fnCallExprList = new ArrayList<>(lateralViewRefs.stream().map(e -> e.getFnExpr()).collect(Collectors.toList()));
         Set<SlotRef> outputSlotRef = Sets.newHashSet();

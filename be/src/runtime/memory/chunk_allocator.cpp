@@ -25,7 +25,6 @@
 
 #include "common/config.h"
 #include "common/status.h"
-#include "runtime/memory/chunk.h"
 #include "runtime/memory/system_allocator.h"
 #include "runtime/thread_context.h"
 #include "util/bit_util.h"

@@ -36,8 +36,13 @@
 2
 
 -- !stream_load_json5 --
+<<<<<<< HEAD
 9	apache	\N
 10	doris	\N
+=======
+9	apache
+10	doris
+>>>>>>> 2.0.0-rc01
 
 -- !stream_load_json6 --
 2

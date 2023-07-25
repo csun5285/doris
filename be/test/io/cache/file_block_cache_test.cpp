@@ -328,7 +328,6 @@ void test_file_cache(io::FileCacheType cache_type) {
                          io::FileBlock::State::DOWNLOADED);
             assert_range(20, segments[2], io::FileBlock::Range(17, 20),
                          io::FileBlock::State::DOWNLOADED);
-
             assert_range(21, segments[3], io::FileBlock::Range(21, 21),
                          io::FileBlock::State::EMPTY);
 
@@ -497,7 +496,6 @@ void test_file_cache(io::FileCacheType cache_type) {
             ASSERT_TRUE(segments[1]->state() == io::FileBlock::State::DOWNLOADING);
             assert_range(38, segments[2], io::FileBlock::Range(24, 26),
                          io::FileBlock::State::DOWNLOADED);
-
 
             bool lets_start_download = false;
             std::mutex mutex;
