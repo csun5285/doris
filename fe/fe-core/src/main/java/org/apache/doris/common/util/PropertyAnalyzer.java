@@ -974,26 +974,17 @@ public class PropertyAnalyzer {
 
     public static boolean analyzeUniqueKeyMergeOnWrite(Map<String, String> properties) throws AnalysisException {
         if (properties == null || properties.isEmpty()) {
-            // enable merge on write by default
-            return true;
-        }
-        String value = properties.getOrDefault(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE, "true");
-        properties.remove(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE);
-        if (value.equals("false")) {
             return false;
         }
-        /*
-        if (Config.isCloudMode()) {
-            if (Config.merge_on_write_forced_to_false) {
-                LOG.info("merge on write is forced to false in cloud mode, origin value {}", value);
-                return false;
-            } else {
-                throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `false`");
-            }
+        String value = properties.get(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE);
+        if (value == null) {
+            return false;
         }
-        */
+        properties.remove(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE);
         if (value.equals("true")) {
             return true;
+        } else if (value.equals("false")) {
+            return false;
         }
         throw new AnalysisException(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " must be `true` or `false`");
     }

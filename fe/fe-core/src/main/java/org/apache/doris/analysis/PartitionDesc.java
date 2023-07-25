@@ -108,7 +108,7 @@ public class PartitionDesc {
                 if (columnDef.getName().equals(partitionCol)) {
                     if (!columnDef.isKey() && (columnDef.getAggregateType() != AggregateType.NONE
                             || enableUniqueKeyMergeOnWrite)) {
-                        throw new AnalysisException("The partition column could not be aggregated column"+ columnDef.toString() + "|" + enableUniqueKeyMergeOnWrite );
+                        throw new AnalysisException("The partition column could not be aggregated column");
                     }
                     if (columnDef.getType().isFloatingPointType()) {
                         throw new AnalysisException("Floating point type column can not be partition column");
