@@ -443,17 +443,6 @@ Status BetaRowsetWriter::_do_add_block(const vectorized::Block* block,
     return Status::OK();
 }
 
-Status BetaRowsetWriter::_do_add_block(const vectorized::Block* block,
-                                       std::unique_ptr<segment_v2::SegmentWriter>* segment_writer,
-                                       size_t row_offset, size_t input_row_num) {
-    auto s = (*segment_writer)->append_block(block, row_offset, input_row_num);
-    if (UNLIKELY(!s.ok())) {
-        LOG(WARNING) << "failed to append block: " << s.to_string();
-        return Status::Error<WRITER_DATA_WRITE_ERROR>();
-    }
-    return Status::OK();
-}
-
 Status BetaRowsetWriter::_add_block(const vectorized::Block* block,
                                     std::unique_ptr<segment_v2::SegmentWriter>* segment_writer,
                                     const FlushContext* flush_ctx) {
@@ -578,18 +567,17 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
 }
 
 RowsetSharedPtr BetaRowsetWriter::build() {
+    Status status;
     // make sure all segments are flushed
     DCHECK_EQ(_num_segment, _next_segment_id);
-    // TODO(lingbin): move to more better place, or in a CreateBlockBatch?
-    for (auto& file_writer : _file_writers) {
-        Status status = file_writer->close();
+    for (auto& [_, file_writer] : _file_writers) {
+        status = file_writer->close();
         if (!status.ok()) {
             LOG(WARNING) << "failed to close file writer, path=" << file_writer->path()
                          << " res=" << status;
             return nullptr;
         }
     }
-    Status status;
     status = wait_flying_segcompaction();
     if (!status.ok()) {
         LOG(WARNING) << "segcompaction failed when build new rowset 1st wait, res=" << status;
@@ -798,12 +786,6 @@ Status BetaRowsetWriter::_do_create_segment_writer(
         {
             std::lock_guard<SpinLock> l(_lock);
             _file_writers.push_back({segment_id, std::move(file_writer)});
-        }
-        auto s = (*writer)->init(flush_ctx);
-        if (!s.ok()) {
-            LOG(WARNING) << "failed to init segment writer: " << s.to_string();
-            writer->reset(nullptr);
-            return s;
         }
         auto s = (*writer)->init(flush_ctx);
         if (!s.ok()) {

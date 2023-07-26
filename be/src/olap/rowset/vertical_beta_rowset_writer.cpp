@@ -160,9 +160,10 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     // of _num_segment and _next_segment_id with BetaRowsetWriter.
     // i.e. _next_segment_id means next available segment id,
     // and _num_segment means num of flushed segments.
+    int segment_id = _num_segment.fetch_add(1);
     allocate_segment_id();
     auto path =
-            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, _num_segment++);
+            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, segment_id);
     auto fs = _rowset_meta->fs();
     if (!fs) {
         return Status::Error<INIT_FAILED>();
@@ -179,11 +180,11 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     writer_options.enable_unique_key_merge_on_write = _context.enable_unique_key_merge_on_write;
     writer_options.rowset_ctx = &_context;
     writer->reset(new segment_v2::SegmentWriter(
-            file_writer.get(), _num_segment, _context.tablet_schema, _context.tablet,
+            file_writer.get(), segment_id, _context.tablet_schema, _context.tablet,
             _context.data_dir, _context.max_rows_per_segment, writer_options, nullptr));
     {
         std::lock_guard<SpinLock> l(_lock);
-        _file_writers.push_back(std::move(file_writer));
+        _file_writers.push_back({segment_id, std::move(file_writer)});
     }
 
     auto s = (*writer)->init(column_ids, is_key);

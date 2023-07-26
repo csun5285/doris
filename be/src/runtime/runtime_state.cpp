@@ -26,13 +26,13 @@
 
 #include <string>
 
+#include "io/cache/block/block_file_cache_factory.h"
+#include "io/fs/s3_file_system.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "common/status.h"
-#include "io/cache/block/block_file_cache_factory.h"
-#include "io/fs/s3_file_system.h"
 #include "runtime/exec_env.h"
 #include "runtime/load_path_mgr.h"
 #include "runtime/memory/mem_tracker_limiter.h"
@@ -67,6 +67,7 @@ RuntimeState::RuntimeState(const TUniqueId& fragment_instance_id,
           _load_job_id(-1),
           _normal_row_number(0),
           _error_row_number(0),
+          _error_log_file_path(""),
           _error_log_file(nullptr) {
     Status status = init(fragment_instance_id, query_options, query_globals, exec_env);
     DCHECK(status.ok());
@@ -92,6 +93,7 @@ RuntimeState::RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
           _num_finished_scan_range(0),
           _normal_row_number(0),
           _error_row_number(0),
+          _error_log_file_path(""),
           _error_log_file(nullptr) {
     if (fragment_exec_params.__isset.runtime_filter_params) {
         _runtime_filter_mgr->set_runtime_filter_params(fragment_exec_params.runtime_filter_params);
@@ -100,35 +102,6 @@ RuntimeState::RuntimeState(const TPlanFragmentExecParams& fragment_exec_params,
             init(fragment_exec_params.fragment_instance_id, query_options, query_globals, exec_env);
     DCHECK(status.ok());
     _query_contexts = io::FileCacheFactory::instance().get_query_context_holders(_query_id);
-}
-
-RuntimeState::RuntimeState(const TPipelineInstanceParams& pipeline_params,
-                           const TUniqueId& query_id, const TQueryOptions& query_options,
-                           const TQueryGlobals& query_globals, ExecEnv* exec_env)
-        : _profile("Fragment " + print_id(pipeline_params.fragment_instance_id)),
-          _load_channel_profile("<unnamed>"),
-          _obj_pool(new ObjectPool()),
-          _runtime_filter_mgr(new RuntimeFilterMgr(query_id, this)),
-          _data_stream_recvrs_pool(new ObjectPool()),
-          _unreported_error_idx(0),
-          _query_id(query_id),
-          _is_cancelled(false),
-          _per_fragment_instance_idx(0),
-          _num_rows_load_total(0),
-          _num_rows_load_filtered(0),
-          _num_rows_load_unselected(0),
-          _num_print_error_rows(0),
-          _num_bytes_load_total(0),
-          _num_finished_scan_range(0),
-          _normal_row_number(0),
-          _error_row_number(0),
-          _error_log_file(nullptr) {
-    if (pipeline_params.__isset.runtime_filter_params) {
-        _runtime_filter_mgr->set_runtime_filter_params(pipeline_params.runtime_filter_params);
-    }
-    Status status =
-            init(pipeline_params.fragment_instance_id, query_options, query_globals, exec_env);
-    DCHECK(status.ok());
 }
 
 RuntimeState::RuntimeState(const TPipelineInstanceParams& pipeline_params,
@@ -349,7 +322,8 @@ Status RuntimeState::check_query_state(const std::string& msg) {
     return query_status();
 }
 
-const int64_t MAX_ERROR_NUM = 50;
+constexpr std::string_view ERROR_FILE_NAME = "error_log";
+constexpr int64_t MAX_ERROR_NUM = 50;
 
 Status RuntimeState::create_error_log_file() {
 #ifdef CLOUD_MODE

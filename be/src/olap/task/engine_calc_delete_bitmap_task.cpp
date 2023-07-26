@@ -89,7 +89,7 @@ Status EngineCalcDeleteBitmapTask::finish() {
             auto tablet_calc_delete_bitmap_ptr = std::make_shared<TabletCalcDeleteBitmapTask>(
                     this, tablet, transaction_id, version, &total_task_num);
             auto submit_st =
-                    StorageEngine::instance()->tablet_calc_delete_bitmap_thread_pool()->submit_func(
+                    StorageEngine::instance()->calc_delete_bitmap_thread_pool()->submit_func(
                             [=]() { tablet_calc_delete_bitmap_ptr->handle(); });
             CHECK(submit_st.ok());
         }

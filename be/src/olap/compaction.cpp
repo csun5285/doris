@@ -31,13 +31,14 @@
 #include <shared_mutex>
 #include <utility>
 
-#include "cloud/utils.h"
 #include "cloud/meta_mgr.h"
+#include "cloud/olap/storage_engine.h"
+#include "cloud/utils.h"
 #include "common/config.h"
 #include "common/status.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_system.h"
 #include "io/fs/remote_file_system.h"
-#include "io/cache/block/block_file_cache_factory.h"
 #include "olap/cumulative_compaction_policy.h"
 #include "olap/cumulative_compaction_time_series_policy.h"
 #include "olap/data_dir.h"
@@ -48,7 +49,7 @@
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_writer_context.h"
 #include "olap/rowset/segment_v2/inverted_index_compaction.h"
-#include "cloud/olap/storage_engine.h"
+#include "olap/rowset/segment_v2/inverted_index_desc.h"
 #include "olap/storage_policy.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
@@ -493,7 +494,7 @@ Status Compaction::construct_output_rowset_writer(RowsetWriterContext& ctx, bool
     ctx.is_persistent = _tablet->is_persistent();
     ctx.ttl_seconds = _tablet->ttl_seconds();
     ctx.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
-                     std::numeric_limits<int64_t>::max(); // MUST be positive
+                 std::numeric_limits<int64_t>::max(); // MUST be positive
 #endif
     ctx.version = _output_version;
     ctx.rowset_state = VISIBLE;

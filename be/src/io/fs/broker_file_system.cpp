@@ -38,6 +38,7 @@
 #include "io/fs/broker_file_reader.h"
 #include "io/fs/broker_file_writer.h"
 #include "io/fs/file_reader.h"
+#include "io/fs/file_reader_options.h"
 #include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
@@ -102,10 +103,10 @@ Status BrokerFileSystem::create_file_impl(const Path& path, FileWriterPtr* write
     return Status::OK();
 }
 
-Status BrokerFileSystem::open_file_internal(const Path& file, int64_t file_size,
-                                            FileReaderSPtr* reader) {
-    int64_t fsize = file_size;
-    if (fsize < 0) {
+Status BrokerFileSystem::open_file_internal(const Path& file, FileReaderSPtr* reader,
+                                            const FileReaderOptions* opts) {
+    int64_t fsize = opts ? opts->file_size : -1;
+    if (fsize <= 0) {
         RETURN_IF_ERROR(file_size_impl(file, &fsize));
     }
 
@@ -407,7 +408,7 @@ Status BrokerFileSystem::upload_with_checksum_impl(const Path& local_file, const
 Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& local_file) {
     // 1. open remote file for read
     FileReaderSPtr broker_reader = nullptr;
-    RETURN_IF_ERROR(open_file_internal(remote_file, -1, &broker_reader));
+    RETURN_IF_ERROR(open_file_internal(remote_file, &broker_reader, nullptr));
 
     // 2. remove the existing local file if exist
     if (std::filesystem::remove(local_file)) {
@@ -444,7 +445,7 @@ Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& loca
 Status BrokerFileSystem::direct_download_impl(const Path& remote_impl, std::string* content) {
     // 1. open remote file for read
     FileReaderSPtr broker_reader = nullptr;
-    RETURN_IF_ERROR(open_file_internal(remote_impl, -1, &broker_reader));
+    RETURN_IF_ERROR(open_file_internal(remote_impl, &broker_reader, nullptr));
 
     constexpr size_t buf_sz = 1024 * 1024;
     std::unique_ptr<char[]> read_buf(new char[buf_sz]);

@@ -1299,7 +1299,6 @@ void PushTaskPool::_push_worker_thread_callback() {
     }
 }
 
-#ifndef CLOUD_MODE
 CreateTableTaskPool::CreateTableTaskPool(ExecEnv* env, ThreadModel thread_model)
         : TaskWorkerPool(TaskWorkerType::CREATE_TABLE, env, *env->master_info(), thread_model) {
     _worker_count = config::create_tablet_worker_count;
@@ -1436,6 +1435,9 @@ PublishVersionTaskPool::PublishVersionTaskPool(ExecEnv* env, ThreadModel thread_
 }
 
 void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
+#ifdef CLOUD_MODE
+    CHECK(false) << "MUST NOT call _publish_version_worker_thread_callback in CLOUD MODE";
+#else
     while (_is_work) {
         TAgentTaskRequest agent_task_req;
         {
@@ -1557,6 +1559,7 @@ void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
         _finish_task(finish_task_request);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
     }
+#endif
 }
 
 ClearTransactionTaskPool::ClearTransactionTaskPool(ExecEnv* env, ThreadModel thread_model)
@@ -1733,6 +1736,9 @@ void AlterTableTaskPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, 
 }
 
 void TaskWorkerPool::_gc_binlog_worker_thread_callback() {
+#ifdef CLOUD_MODE
+    CHECK(false) << "MUST NOT call _gc_binlog_worker_thread_callback in CLOUD MODE";
+#else
     while (_is_work) {
         TAgentTaskRequest agent_task_req;
         {
@@ -1765,6 +1771,7 @@ void TaskWorkerPool::_gc_binlog_worker_thread_callback() {
 
         StorageEngine::instance()->gc_binlogs(gc_tablet_infos);
     }
+#endif
 }
 
 CloneTaskPool::CloneTaskPool(ExecEnv* env, ThreadModel thread_model)
@@ -1929,7 +1936,6 @@ Status StorageMediumMigrateTaskPool::_check_migrate_request(const TStorageMedium
 
     return Status::OK();
 }
-#endif // !CLOUD_MODE
 
 #ifdef CLOUD_MODE
 void TaskWorkerPool::_calc_delete_bimtap_worker_thread_callback() {

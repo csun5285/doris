@@ -221,7 +221,7 @@ private:
     class StringDictFilterImpl : public orc::StringDictFilter {
     public:
         StringDictFilterImpl(OrcReader* orc_reader) : _orc_reader(orc_reader) {}
-        ~StringDictFilterImpl() override = default;
+        virtual ~StringDictFilterImpl() override = default;
 
         virtual void fillDictFilterColumnNames(
                 std::unique_ptr<orc::StripeInformation> current_strip_information,

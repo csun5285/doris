@@ -69,6 +69,7 @@
 #include "util/defer_op.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
+#include "util/brpc_client_cache.h"
 
 namespace apache {
 namespace thrift {

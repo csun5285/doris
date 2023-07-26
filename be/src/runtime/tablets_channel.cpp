@@ -376,6 +376,18 @@ void TabletsChannel::_close_wait(DeltaWriter* writer,
 #endif // !CLOUD_MODE
 
 int64_t TabletsChannel::mem_consumption() {
+    int64_t mem_usage = 0;
+    {
+        std::lock_guard<SpinLock> l(_tablet_writers_lock);
+        for (auto& it : _tablet_writers) {
+            int64_t writer_mem = it.second->mem_consumption(MemType::ALL);
+            mem_usage += writer_mem;
+        }
+    }
+    return mem_usage;
+}
+
+void TabletsChannel::refresh_profile() {
     int64_t write_mem_usage = 0;
     int64_t flush_mem_usage = 0;
     int64_t max_tablet_mem_usage = 0;
@@ -383,10 +395,15 @@ int64_t TabletsChannel::mem_consumption() {
     int64_t max_tablet_flush_mem_usage = 0;
     {
         std::lock_guard<SpinLock> l(_tablet_writers_lock);
-        _mem_consumptions.clear();
         for (auto& it : _tablet_writers) {
-            int64_t writer_mem = it.second->mem_consumption(MemType::ALL);
-            mem_usage += writer_mem;
+            int64_t write_mem = it.second->mem_consumption(MemType::WRITE);
+            write_mem_usage += write_mem;
+            int64_t flush_mem = it.second->mem_consumption(MemType::FLUSH);
+            flush_mem_usage += flush_mem;
+            if (write_mem > max_tablet_write_mem_usage) max_tablet_write_mem_usage = write_mem;
+            if (flush_mem > max_tablet_flush_mem_usage) max_tablet_flush_mem_usage = flush_mem;
+            if (write_mem + flush_mem > max_tablet_mem_usage)
+                max_tablet_mem_usage = write_mem + flush_mem;
         }
     }
     COUNTER_SET(_memory_usage_counter, write_mem_usage + flush_mem_usage);
@@ -395,7 +412,16 @@ int64_t TabletsChannel::mem_consumption() {
     COUNTER_SET(_max_tablet_memory_usage_counter, max_tablet_mem_usage);
     COUNTER_SET(_max_tablet_write_memory_usage_counter, max_tablet_write_mem_usage);
     COUNTER_SET(_max_tablet_flush_memory_usage_counter, max_tablet_flush_mem_usage);
-    return write_mem_usage + flush_mem_usage;
+}
+
+void TabletsChannel::get_active_memtable_mem_consumption(
+        std::multimap<int64_t, int64_t, std::greater<int64_t>>* mem_consumptions) {
+    mem_consumptions->clear();
+    std::lock_guard<SpinLock> l(_tablet_writers_lock);
+    for (auto& it : _tablet_writers) {
+        int64_t active_memtable_mem = it.second->active_memtable_mem_consumption();
+        mem_consumptions->emplace(active_memtable_mem, it.first);
+    }
 }
 
 // Old logic,used for opening all writers of all partitions.

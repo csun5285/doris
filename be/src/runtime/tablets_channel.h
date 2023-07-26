@@ -154,7 +154,7 @@ private:
     TabletsChannelKey _key;
 
     // make execute sequence
-    doris::Mutex _lock;
+    std::mutex _lock;
 
     SpinLock _tablet_writers_lock;
 

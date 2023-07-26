@@ -39,7 +39,7 @@
 #include "olap/rowset/rowset_meta_manager.h"
 #include "olap/schema_change.h"
 #include "olap/segment_loader.h"
-#include "olap/storage_engine.h"
+#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
 #include "olap/task/engine_publish_version_task.h"

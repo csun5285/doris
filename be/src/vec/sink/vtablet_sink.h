@@ -363,6 +363,7 @@ protected:
     std::atomic<int64_t> _serialize_batch_ns {0};
     std::atomic<int64_t> _queue_push_lock_ns {0};
     std::atomic<int64_t> _actual_consume_ns {0};
+    std::atomic<int64_t> _load_pressure_block_ns {0};
 
     VNodeChannelStat _stat;
     // lock to protect _is_closed.
@@ -382,6 +383,7 @@ protected:
 
     std::unique_ptr<vectorized::MutableBlock> _cur_mutable_block;
     PTabletWriterAddBlockRequest _cur_add_block_request;
+    std::atomic<int64_t> _load_pressure_wait_time = 0;
 
     using AddBlockReq =
             std::pair<std::unique_ptr<vectorized::MutableBlock>, PTabletWriterAddBlockRequest>;

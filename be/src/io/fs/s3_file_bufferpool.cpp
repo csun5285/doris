@@ -279,16 +279,17 @@ std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
     return nullptr;
 }
 
-S3FileBufferPool::S3FileBufferPool() {
+void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write_buffer_size,
+                            ThreadPool* thread_pool) {
     // the nums could be one configuration
-    size_t buf_num = config::s3_write_buffer_whole_size / config::s3_write_buffer_size;
-    DCHECK((config::s3_write_buffer_size >= 5 * 1024 * 1024) &&
-           (config::s3_write_buffer_whole_size > config::s3_write_buffer_size));
+    size_t buf_num = s3_write_buffer_whole_size / s3_write_buffer_size;
+    DCHECK((s3_write_buffer_size >= 5 * 1024 * 1024) &&
+           (s3_write_buffer_whole_size > s3_write_buffer_size));
     LOG_INFO("S3 file buffer pool with {} buffers", buf_num);
-    _whole_mem_buffer = std::make_unique<char[]>(config::s3_write_buffer_whole_size);
+    _whole_mem_buffer = std::make_unique<char[]>(s3_write_buffer_whole_size);
     for (size_t i = 0; i < buf_num; i++) {
-        Slice s {_whole_mem_buffer.get() + i * config::s3_write_buffer_size,
-                 static_cast<size_t>(config::s3_write_buffer_size)};
+        Slice s {_whole_mem_buffer.get() + i * s3_write_buffer_size,
+                 static_cast<size_t>(s3_write_buffer_size)};
         // auto buf = std::make_shared<S3FileBuffer>(s);
         _free_raw_buffers.emplace_back(s);
     }

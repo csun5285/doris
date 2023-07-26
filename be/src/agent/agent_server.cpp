@@ -207,7 +207,8 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
             HANDLE_TYPE(TTaskType::COMPACTION, _submit_table_compaction_workers, compaction_req);
             HANDLE_TYPE(TTaskType::PUSH_STORAGE_POLICY, _push_storage_policy_workers,
                         push_storage_policy_req);
-            HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers, calc_delete_bitmap_req);
+            HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers,
+                        calc_delete_bitmap_req);
 
         case TTaskType::REALTIME_PUSH:
         case TTaskType::PUSH:

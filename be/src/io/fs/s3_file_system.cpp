@@ -56,6 +56,8 @@
 
 #include <algorithm>
 
+#include "io/fs/file_reader_options.h"
+
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 // IWYU pragma: no_include <bits/chrono.h>
@@ -173,9 +175,9 @@ Status S3FileSystem::create_file_impl(const Path& file, FileWriterPtr* writer,
     return Status::OK();
 }
 
-Status S3FileSystem::open_file_internal(const Path& file, int64_t file_size,
-                                        FileReaderSPtr* reader) {
-    int64_t fsize = file_size;
+Status S3FileSystem::open_file_internal(const Path& file, FileReaderSPtr* reader,
+                                        const FileReaderOptions* opts) {
+    int64_t fsize = opts ? opts->file_size : -1;
     if (fsize < 0) {
         RETURN_IF_ERROR(file_size_impl(file, &fsize));
     }

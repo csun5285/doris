@@ -1027,7 +1027,7 @@ Status SegmentIterator::_init_return_column_iterators() {
             iter_opts.stats = _opts.stats;
             iter_opts.use_page_cache = _opts.use_page_cache;
             iter_opts.file_reader = _file_reader.get();
-            iter_opts.io_ctx = _opts.io_ctx;
+            iter_opts.io_ctx = &_opts.io_ctx;
             // If the col is predicate column, then should read the last page to check
             // if the column is full dict encoding
             iter_opts.is_predicate_column = tmp_is_pred_column[cid];

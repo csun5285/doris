@@ -30,7 +30,7 @@ inline std::string_view CUMULATIVE_TIME_SERIES_POLICY = "time_series";
 /// Condition 3: the time interval between compactions exceeds the value specified by parameter _compaction_time_threshold_seconds
 /// The conditions are evaluated sequentially, starting with Condition 1.
 /// If any condition is met, the compaction score calculation or selection of input rowsets will be successful.
-class TimeSeriesCumulativeCompactionPolicy final : public CumulativeCompactionPolicy {
+class TimeSeriesCumulativeCompactionPolicy : public CumulativeCompactionPolicy {
 public:
     TimeSeriesCumulativeCompactionPolicy() = default;
     ~TimeSeriesCumulativeCompactionPolicy() {}

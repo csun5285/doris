@@ -81,8 +81,7 @@ protected:
 
     // The derived class should implement this method.
     // if file_size < 0, the file size should be fetched from file system
-    virtual Status open_file_internal(const Path& file, int64_t file_size,
-                                      FileReaderSPtr* reader) = 0;
+    virtual Status open_file_internal(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts) = 0;
 };
 
 using RemoteFileSystemSPtr = std::shared_ptr<RemoteFileSystem>;

@@ -38,7 +38,7 @@ struct FileSystemProperties {
 
 struct FileDescription {
     std::string path;
-    int64_t start_offset;
+    int64_t start_offset = 0;
     // length of the file in bytes.
     // -1 means unset.
     // If the file length is not set, the file length will be fetched from the file system.

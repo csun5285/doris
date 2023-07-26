@@ -73,6 +73,7 @@ using strings::SkipWhitespace;
 namespace doris {
 using namespace ErrorCode;
 
+#ifndef CLOUD_MODE
 #define RETURN_IF_ERROR_(status, stmt) \
     do {                               \
         status = (stmt);               \
@@ -80,6 +81,7 @@ using namespace ErrorCode;
             return status;             \
         }                              \
     } while (false)
+#endif
 
 EngineCloneTask::EngineCloneTask(const TCloneReq& clone_req, const TMasterInfo& master_info,
                                  int64_t signature, std::vector<TTabletInfo>* tablet_infos)
@@ -104,6 +106,9 @@ Status EngineCloneTask::execute() {
 }
 
 Status EngineCloneTask::_do_clone() {
+#ifdef CLOUD_MODE
+    CHECK(false) << "MUST NOT call EngineCloneTask::_do_clone in CLOUD MODE";
+#else
     Status status = Status::OK();
     string src_file_path;
     TBackend src_host;
@@ -215,6 +220,7 @@ Status EngineCloneTask::_do_clone() {
         io::global_local_filesystem()->delete_file(header_path);
     }
     return _set_tablet_info(is_new_tablet);
+#endif
 }
 
 Status EngineCloneTask::_set_tablet_info(bool is_new_tablet) {

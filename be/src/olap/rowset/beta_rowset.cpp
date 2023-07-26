@@ -133,9 +133,6 @@ Status BetaRowset::get_segments_size(std::vector<size_t>* segments_size) {
     }
     return Status::OK();
 }
-Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments) {
-    return load_segments(0, num_segments(), segments);
-}
 
 Status BetaRowset::load_segments(std::vector<segment_v2::SegmentSharedPtr>* segments,
                                  bool is_lazy_open, bool disable_file_cache) {

@@ -26,7 +26,6 @@
 
 #include "common/config.h"
 #include "runtime/define_primitive_type.h"
-#include "util/trace.h"
 #include "vec/columns/column_array.h"
 #include "vec/columns/column_dictionary.h"
 #include "vec/columns/column_map.h"

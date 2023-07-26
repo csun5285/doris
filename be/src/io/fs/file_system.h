@@ -77,6 +77,7 @@ public:
     // And derived classes should implement all xxx_impl methods.
     Status create_file(const Path& file, FileWriterPtr* writer,
                        const FileWriterOptions* opts = nullptr);
+    // FIXME(plat1ko): Will deprecate in future
     Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
                      FileReaderSPtr* reader);
     Status open_file(const Path& file, FileReaderSPtr* reader,

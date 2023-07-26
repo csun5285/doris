@@ -36,7 +36,6 @@
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
-#include "util/trace.h"
 
 namespace doris {
 namespace io {

@@ -172,9 +172,6 @@ Status VScanNode::alloc_resource(RuntimeState* state) {
     RETURN_IF_ERROR(ExecNode::alloc_resource(state));
     RETURN_IF_ERROR(_acquire_runtime_filter());
     RETURN_IF_ERROR(_process_conjuncts());
-    if (_eos) {
-        return Status::OK();
-    }
 
     if (_is_pipeline_scan) {
         if (_should_create_scanner) {
@@ -389,9 +386,7 @@ Status VScanNode::_normalize_conjuncts() {
     M(DECIMAL64)                    \
     M(DECIMAL128I)                  \
     M(DECIMALV2)                    \
-    M(BOOLEAN)                      \
-    M(FLOAT)                        \
-    M(DOUBLE)
+    M(BOOLEAN)
             APPLY_FOR_PRIMITIVE_TYPE(M)
 #undef M
         default: {
@@ -641,7 +636,6 @@ bool VScanNode::_is_predicate_acting_on_slot(
         return false;
     }
     *slot_desc = entry->second.first;
-    _conjuct_column_unique_ids.emplace((*slot_desc)->col_unique_id());
     DCHECK(child_contains_slot != nullptr);
     if (child_contains_slot->type().type != (*slot_desc)->type().type ||
         child_contains_slot->type().precision != (*slot_desc)->type().precision ||
@@ -1186,8 +1180,7 @@ Status VScanNode::_change_value_range(ColumnValueRange<PrimitiveType>& temp_rang
                          (PrimitiveType == TYPE_BIGINT) || (PrimitiveType == TYPE_LARGEINT) ||
                          (PrimitiveType == TYPE_DECIMAL32) || (PrimitiveType == TYPE_DECIMAL64) ||
                          (PrimitiveType == TYPE_DECIMAL128I) || (PrimitiveType == TYPE_STRING) ||
-                         (PrimitiveType == TYPE_BOOLEAN) || (PrimitiveType == TYPE_DATEV2) ||
-                         (PrimitiveType == TYPE_FLOAT) || (PrimitiveType == TYPE_DOUBLE)) {
+                         (PrimitiveType == TYPE_BOOLEAN) || (PrimitiveType == TYPE_DATEV2)) {
         if constexpr (IsFixed) {
             func(temp_range,
                  reinterpret_cast<typename PrimitiveTypeTraits<PrimitiveType>::CppType*>(value));

@@ -32,6 +32,5 @@ endif()
 add_library(Util STATIC
     ${UTIL_FILES}
 )
-target_link_libraries(Util cityhash)
 
 pch_reuse(Util)

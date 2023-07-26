@@ -33,7 +33,6 @@
 #include "runtime/thread_context.h"
 #include "util/doris_metrics.h"
 #include "util/time.h"
-#include "util/trace.h"
 
 namespace doris {
 using namespace ErrorCode;
