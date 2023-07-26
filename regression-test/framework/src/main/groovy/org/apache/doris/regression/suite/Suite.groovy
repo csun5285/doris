@@ -23,15 +23,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
-<<<<<<< HEAD
 import groovy.util.logging.Slf4j
-import org.apache.doris.regression.action.BenchmarkAction
-=======
 import com.google.common.collect.ImmutableList
 import org.apache.doris.regression.action.BenchmarkAction
 import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.OutputUtils
->>>>>>> 2.0.0-rc01
 import org.apache.doris.regression.action.CreateMVAction
 import org.apache.doris.regression.action.ExplainAction
 import org.apache.doris.regression.action.HttpCliAction
@@ -41,14 +37,9 @@ import org.apache.doris.regression.action.SuiteAction
 import org.apache.doris.regression.action.TestAction
 import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.Hdfs
-<<<<<<< HEAD
 import org.apache.doris.regression.util.JdbcUtils
-import org.apache.doris.regression.util.OutputUtils
-import org.apache.doris.regression.util.SuiteUtils
 import org.junit.Assert
-=======
 import org.apache.doris.regression.util.SuiteUtils
->>>>>>> 2.0.0-rc01
 import org.junit.jupiter.api.Assertions
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -65,13 +56,6 @@ import java.util.stream.Collectors
 import java.util.stream.LongStream
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
-<<<<<<< HEAD
-=======
-import java.sql.PreparedStatement
-import java.sql.ResultSetMetaData
-import org.junit.Assert
-
->>>>>>> 2.0.0-rc01
 @Slf4j
 class Suite implements GroovyInterceptable {
     final SuiteContext context
@@ -224,18 +208,12 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-<<<<<<< HEAD
     List<List<Object>> exec(Object stmt) {
         logger.info("Execute sql: ${stmt}".toString())
         def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
         return result
     }
 
-    PreparedStatement prepareStatement(String sql) {
-        return JdbcUtils.prepareStatement(context.getConnection(), sql)
-    } 
-
-=======
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}target_sql: ${sqlStr}".toString())
         def (result, meta) = JdbcUtils.executeToList(context.getTargetConnection(this), sqlStr)
@@ -245,7 +223,6 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
->>>>>>> 2.0.0-rc01
     List<List<String>> sql_meta(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (tmp, rsmd) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -478,7 +455,6 @@ class Suite implements GroovyInterceptable {
         }
         return;
     } 
-<<<<<<< HEAD
 
     String getProvider() {
         String s3Endpoint = context.config.otherConfigs.get("s3Endpoint")
@@ -494,8 +470,6 @@ class Suite implements GroovyInterceptable {
         }
         return ""
     }
-=======
->>>>>>> 2.0.0-rc01
 
     int getTotalLine(String filePath) {
         def file = new File(filePath)
@@ -561,16 +535,12 @@ class Suite implements GroovyInterceptable {
         action.run()
     }
 
-<<<<<<< HEAD
-    void quickRunTest(String tag, Object arg, boolean isOrder = false) {
-        logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
-=======
     PreparedStatement prepareStatement(String sql) {
         return JdbcUtils.prepareStatement(context.getConnection(), sql)
     } 
 
     void quickRunTest(String tag, Object arg, boolean isOrder = false) {
->>>>>>> 2.0.0-rc01
+        logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
         if (context.config.generateOutputFile || context.config.forceGenerateOutputFile) {
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
@@ -596,10 +566,6 @@ class Suite implements GroovyInterceptable {
             }
 
             OutputUtils.TagBlockIterator expectCsvResults = context.getOutputIterator().next()
-<<<<<<< HEAD
-
-=======
->>>>>>> 2.0.0-rc01
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
@@ -640,11 +606,7 @@ class Suite implements GroovyInterceptable {
         logger.info("Execute tag: ${tag}, sql: ${stmt}".toString())
         quickRunTest(tag, stmt) 
     }
-<<<<<<< HEAD
-
-=======
     
->>>>>>> 2.0.0-rc01
     @Override
     Object invokeMethod(String name, Object args) {
         // qt: quick test
@@ -671,7 +633,6 @@ class Suite implements GroovyInterceptable {
         }
     }
 
-<<<<<<< HEAD
     def token = context.config.metaServiceToken
     def instance_id = context.config.multiClusterInstance
     def get_be_metric = { ip, port, field ->
@@ -912,7 +873,8 @@ class Suite implements GroovyInterceptable {
 
     public void resetConnection() {
         context.resetConnection()
-=======
+    }
+    
     Boolean checkSnapshotFinish() {
         String checkSQL = "SHOW BACKUP FROM " + context.dbName
         int size = sql(checkSQL).size()
@@ -931,7 +893,6 @@ class Suite implements GroovyInterceptable {
         logger.info("Now row is ${row}")
 
         return (row[4] as String) == "FINISHED"
->>>>>>> 2.0.0-rc01
     }
 }
 

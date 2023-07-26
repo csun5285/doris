@@ -7,21 +7,9 @@ PhysicalTopN
 --------filter((partsupp.ps_supplycost = min(ps_supplycost) OVER(PARTITION BY p_partkey)))
 ----------PhysicalWindow
 ------------PhysicalQuickSort
-<<<<<<< HEAD
---------------PhysicalProject
-----------------hashJoin[INNER_JOIN](supplier.s_suppkey = partsupp.ps_suppkey)
-------------------hashJoin[INNER_JOIN](part.p_partkey = partsupp.ps_partkey)
---------------------PhysicalProject
-----------------------PhysicalOlapScan[partsupp]
---------------------PhysicalProject
-----------------------filter((part.p_size = 15)(p_type like '%BRASS'))
-------------------------PhysicalOlapScan[part]
-------------------PhysicalDistribute
-=======
 --------------PhysicalDistribute
 ----------------PhysicalProject
 ------------------hashJoin[INNER_JOIN](supplier.s_suppkey = partsupp.ps_suppkey)
->>>>>>> 2.0.0-rc01
 --------------------PhysicalProject
 ----------------------hashJoin[INNER_JOIN](supplier.s_nationkey = nation.n_nationkey)
 ------------------------PhysicalOlapScan[supplier]
@@ -33,8 +21,6 @@ PhysicalTopN
 ------------------------------PhysicalProject
 --------------------------------filter((region.r_name = 'EUROPE'))
 ----------------------------------PhysicalOlapScan[region]
-<<<<<<< HEAD
-=======
 --------------------PhysicalDistribute
 ----------------------PhysicalProject
 ------------------------hashJoin[INNER_JOIN](part.p_partkey = partsupp.ps_partkey)
@@ -43,5 +29,4 @@ PhysicalTopN
 --------------------------PhysicalProject
 ----------------------------filter((part.p_size = 15)(p_type like '%BRASS'))
 ------------------------------PhysicalOlapScan[part]
->>>>>>> 2.0.0-rc01
 

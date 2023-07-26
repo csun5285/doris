@@ -342,7 +342,7 @@ suite("test_stream_load", "p0") {
     sql """truncate table ${tableName3}"""
     sql """sync"""
 
-    // load part of columns. NOTE: Load result is different from Doris
+    // load part of columns
     streamLoad {
         table "${tableName3}"
 
@@ -358,16 +358,11 @@ suite("test_stream_load", "p0") {
             }
             log.info("Stream load result: ${result}".toString())
             def json = parseJson(result)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(2500, json.NumberLoadedRows)
+            assertEquals("fail", json.Status.toLowerCase())
+            assertEquals(0, json.NumberLoadedRows)
         }
     }
-<<<<<<< HEAD
-    sql """truncate table ${tableName3}"""
-    sql """sync"""
-=======
     sql "sync"
->>>>>>> 2.0.0-rc01
 
     // load with skip 2 columns, with gzip
     streamLoad {
@@ -838,8 +833,6 @@ suite("test_stream_load", "p0") {
     
     sql "sync"
     order_qt_sql1 "select * from ${tableName9} order by k1, k2"
-<<<<<<< HEAD
-=======
 
     // test common user
     def tableName13 = "test_common_user"
@@ -949,6 +942,5 @@ suite("test_stream_load", "p0") {
     // parse k1 default value
     assertEquals(res[0][0], 1)
     assertEquals(res[1][0], 1)
->>>>>>> 2.0.0-rc01
 }
 

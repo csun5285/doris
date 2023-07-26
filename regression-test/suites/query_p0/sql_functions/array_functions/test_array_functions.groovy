@@ -225,8 +225,6 @@ suite("test_array_functions") {
     qt_select "SELECT k1, array_pushfront(k10, null) FROM ${tableName} ORDER BY k1"
     qt_select "SELECT k1, array_pushfront(k12, null) FROM ${tableName} ORDER BY k1"
 
-<<<<<<< HEAD
-=======
     qt_select "SELECT k1, array_pushback(k2, k1) FROM ${tableName} ORDER BY k1"
     qt_select "SELECT k1, array_pushback(k2, 1) FROM ${tableName} ORDER BY k1"
     qt_select "SELECT k1, array_pushback(k3, 'a') FROM ${tableName} ORDER BY k1"
@@ -240,7 +238,6 @@ suite("test_array_functions") {
     qt_select "SELECT k1, array_pushback(k10, null) FROM ${tableName} ORDER BY k1"
     qt_select "SELECT k1, array_pushback(k12, null) FROM ${tableName} ORDER BY k1"
 
->>>>>>> 2.0.0-rc01
     qt_select "select k2, bitmap_to_string(bitmap_from_array(k2)) from ${tableName} order by k1;"
     
     def tableName3 = "tbl_test_array_set"

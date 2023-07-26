@@ -196,19 +196,9 @@ suite("test_materialized_view_lazy_open", "rollup") {
     }
 
     sql "insert into ${tbName1} values('2000-05-20', 1.5, 'test', 1);"
-<<<<<<< HEAD
-    sql "insert into ${tbName1} values('2000-05-20', 1.5, 'test', 1);"
-    sql "insert into ${tbName1} values('2010-05-20', 1.5, 'test', 1);"
     sql "insert into ${tbName1} values('2010-05-20', 1.5, 'test', 1);"
 
     sql "insert into ${tbName2} values('2000-05-20', 1.5, 'test', 1);"
-    sql "insert into ${tbName2} values('2000-05-20', 1.5, 'test', 1);"
-    sql "insert into ${tbName2} values('2010-05-20', 1.5, 'test', 1);"
-=======
-    sql "insert into ${tbName1} values('2010-05-20', 1.5, 'test', 1);"
-
-    sql "insert into ${tbName2} values('2000-05-20', 1.5, 'test', 1);"
->>>>>>> 2.0.0-rc01
     sql "insert into ${tbName2} values('2010-05-20', 1.5, 'test', 1);"
 
     sql "insert into ${tbName3} values('2000-05-20', 1.5, 'test', 1);"

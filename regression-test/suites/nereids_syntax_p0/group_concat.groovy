@@ -21,22 +21,14 @@ suite("group_concat") {
 
 
     test {
-<<<<<<< HEAD
-        sql """select /*+SET_VAR(disable_nereids_rules='TWO_PHASE_AGGREGATE_WITHOUT_DISTINCT')*/
-=======
         sql """select
->>>>>>> 2.0.0-rc01
                  group_concat(cast(number as string), ',' order by number)
                from numbers('number'='10')"""
         result([["0,1,2,3,4,5,6,7,8,9"]])
     }
 
     test {
-<<<<<<< HEAD
-        sql """select /*+SET_VAR(disable_nereids_rules='ONE_PHASE_AGGREGATE_WITHOUT_DISTINCT')*/
-=======
         sql """select
->>>>>>> 2.0.0-rc01
                  group_concat(cast(number as string), ',' order by number)
                from numbers('number'='10')"""
         result([["0,1,2,3,4,5,6,7,8,9"]])
@@ -44,11 +36,7 @@ suite("group_concat") {
 
     test {
         sql "select group_concat(cast(number as string)) from numbers('number'='10')"
-<<<<<<< HEAD
-        result([["0, 1, 2, 3, 4, 5, 6, 7, 8, 9"]])
-=======
         result([["0,1,2,3,4,5,6,7,8,9"]])
->>>>>>> 2.0.0-rc01
     }
 
     test {

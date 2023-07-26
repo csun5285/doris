@@ -10,8 +10,4 @@ DISTRIBUTED BY HASH(id) BUCKETS 3
 PROPERTIES ( 
     "replication_num" = "1",
     "enable_unique_key_merge_on_write" = "true"
-<<<<<<< HEAD
 );
-=======
-);
->>>>>>> 2.0.0-rc01

@@ -51,16 +51,11 @@ suite("test_primary_key_partial_update_orc", "p0") {
         file 'update.orc'
         time 10000 // limit inflight 10s
     }
-<<<<<<< HEAD
-    qt_select_0 """
-        select * from ${tableName};
-=======
 
     sql "sync"
 
     qt_select_0 """
         select * from ${tableName} order by col_0;
->>>>>>> 2.0.0-rc01
     """
 
     // drop drop

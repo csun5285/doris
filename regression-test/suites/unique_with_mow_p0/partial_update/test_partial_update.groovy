@@ -52,10 +52,6 @@ suite("test_primary_key_partial_update", "p0") {
         file 'basic.csv'
         time 10000 // limit inflight 10s
     }
-<<<<<<< HEAD
-    qt_select_default """
-        select * from ${tableName}
-=======
 
     sql "sync"
 
@@ -98,7 +94,6 @@ suite("test_primary_key_partial_update", "p0") {
 
     qt_partial_update_in_one_stream_load """
         select * from ${tableName} order by id;
->>>>>>> 2.0.0-rc01
     """
 
     // drop drop

@@ -40,13 +40,8 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
-<<<<<<< HEAD
-            expected_finished_num = alter_res.size();
-            finished_num = 0;
-=======
             def expected_finished_num = alter_res.size();
             def finished_num = 0;
->>>>>>> 2.0.0-rc01
             for (int i = 0; i < expected_finished_num; i++) {
                 logger.info(table_name + " build index job state: " + alter_res[i][7] + i)
                 if (alter_res[i][7] == "FINISHED") {
@@ -56,11 +51,6 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
             if (finished_num == expected_finished_num) {
                 logger.info(table_name + " all build index jobs finished, detail: " + alter_res)
                 break
-<<<<<<< HEAD
-            } else {
-                finished_num = 0;
-=======
->>>>>>> 2.0.0-rc01
             }
             useTime = t
             sleep(delta_time)
@@ -91,10 +81,6 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
     // show index of create table
     def show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
-<<<<<<< HEAD
-    assertEquals(show_result.size(), 2)
-=======
->>>>>>> 2.0.0-rc01
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
 
@@ -151,10 +137,6 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
     // show index after add index
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
-<<<<<<< HEAD
-    assertEquals(show_result.size(), 3)
-=======
->>>>>>> 2.0.0-rc01
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
     assertEquals(show_result[2][2], "idx_desc")
@@ -232,10 +214,6 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
 
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
-<<<<<<< HEAD
-    assertEquals(show_result.size(), 2)
-=======
->>>>>>> 2.0.0-rc01
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
 
@@ -265,10 +243,6 @@ suite("test_add_drop_index_with_delete_data", "inverted_index"){
     // show index after add index
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
-<<<<<<< HEAD
-    assertEquals(show_result.size(), 3)
-=======
->>>>>>> 2.0.0-rc01
     assertEquals(show_result[0][2], "idx_id")
     assertEquals(show_result[1][2], "idx_name")
     assertEquals(show_result[2][2], "idx_desc")

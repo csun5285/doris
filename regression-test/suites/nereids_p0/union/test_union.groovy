@@ -18,11 +18,7 @@
 suite("test_union") {
     sql "SET enable_nereids_planner=true"
     sql "SET enable_fallback_to_original_planner=false"
-<<<<<<< HEAD
-    def db = "test_query_db"
-=======
     def db = "nereids_test_query_db"
->>>>>>> 2.0.0-rc01
     sql "use ${db}"
 
 //    order_qt_select "select k1, k2 from baseall union select k2, k3 from test"

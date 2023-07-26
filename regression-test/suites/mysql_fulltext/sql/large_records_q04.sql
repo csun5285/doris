@@ -1,8 +1,5 @@
 
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.0-rc01
 SELECT COUNT(*) FROM large_records_t2_dk;
 
 SELECT FTS_DOC_ID FROM large_records_t2_dk WHERE b like '%row300col2word30%';
@@ -28,8 +25,4 @@ SELECT COUNT(*) from large_records_t2_dk
     WHERE a MATCH_ANY 'row5col2word49 row5col2word40' OR b MATCH_ANY 'row5col2word49 row5col2word40';
 
 SELECT COUNT(*) from large_records_t2_dk 
-<<<<<<< HEAD
     WHERE a MATCH_ALL 'ROW35col2WORD49' OR b MATCH_ALL 'ROW35col2WORD49';
-=======
-    WHERE a MATCH_ALL 'ROW35col2WORD49' OR b MATCH_ALL 'ROW35col2WORD49';
->>>>>>> 2.0.0-rc01

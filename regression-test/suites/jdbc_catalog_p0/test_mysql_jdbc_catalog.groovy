@@ -48,12 +48,9 @@ suite("test_mysql_jdbc_catalog", "p0") {
         String ex_tb20 = "ex_tb20";
         String test_insert = "test_insert";
         String test_insert2 = "test_insert2";
-<<<<<<< HEAD
-=======
         String auto_default_t = "auto_default_t";
         String dt = "dt";
         String dt_null = "dt_null";
->>>>>>> 2.0.0-rc01
 
         sql """drop catalog if exists ${catalog_name} """
 
@@ -61,11 +58,7 @@ suite("test_mysql_jdbc_catalog", "p0") {
             "type"="jdbc",
             "user"="root",
             "password"="123456",
-<<<<<<< HEAD
-            "jdbc_url" = "jdbc:mysql://127.0.0.1:${mysql_port}/doris_test?useSSL=false",
-=======
             "jdbc_url" = "jdbc:mysql://127.0.0.1:${mysql_port}/doris_test?useSSL=false&zeroDateTimeBehavior=convertToNull",
->>>>>>> 2.0.0-rc01
             "driver_url" = "https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com/jdbc_driver/mysql-connector-java-8.0.25.jar",
             "driver_class" = "com.mysql.cj.jdbc.Driver"
         );"""
@@ -108,13 +101,10 @@ suite("test_mysql_jdbc_catalog", "p0") {
         order_qt_ex_tb18  """ select * from ${ex_tb18} order by num_tinyint; """
         order_qt_ex_tb19  """ select * from ${ex_tb19} order by date_value; """
         order_qt_ex_tb20  """ select * from ${ex_tb20} order by decimal_normal; """
-<<<<<<< HEAD
-=======
         order_qt_information_schema """ show tables from information_schema; """
         order_qt_auto_default_t """insert into ${auto_default_t}(name) values('a'); """
         order_qt_dt """select * from ${dt}; """
         order_qt_dt_null """select * from ${dt_null} order by 1; """
->>>>>>> 2.0.0-rc01
 
         // test insert
         String uuid1 = UUID.randomUUID().toString();

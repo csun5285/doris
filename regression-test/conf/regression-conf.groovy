@@ -25,11 +25,6 @@ defaultDb = "regression_test"
 // at each time we connect.
 // add allowLoadLocalInfile so that the jdbc can execute mysql load data from client.
 jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
-<<<<<<< HEAD
-jdbcUser = "root"
-jdbcPassword = ""
-
-=======
 targetJdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
 jdbcUser = "root"
 jdbcPassword = ""
@@ -39,7 +34,6 @@ feTargetThriftAddress = "127.0.0.1:9020"
 feSyncerUser = "root"
 feSyncerPassword = ""
 
->>>>>>> 2.0.0-rc01
 feHttpAddress = "127.0.0.1:8030"
 feHttpUser = "root"
 feHttpPassword = ""
@@ -75,11 +69,7 @@ excludeGroups = ""
 // this suites will not be executed
 excludeSuites = "test_broker_load"
 // this directories will not be executed
-<<<<<<< HEAD
 excludeDirectories = "segcompaction_p1, cloud/abnormal"
-=======
-excludeDirectories = "segcompaction_p2"
->>>>>>> 2.0.0-rc01
 
 customConf1 = "test_custom_conf_value"
 
@@ -119,14 +109,11 @@ es_6_port=19200
 es_7_port=29200
 es_8_port=39200
 
-<<<<<<< HEAD
 // be1_ip:be1_heartbeat_port:be1_http_port:be1_unique_id:be1_brpc_port,be2_ip:be2_heartbeat_port:be2_http_port:be2_unique_id:be2_brpc_port
 multiClusterBes = "127.0.0.1:9712:9711:be_1_id:9000,127.0.0.1:9732:9731:be_2_id:9000"
 metaServiceToken = "greedisgood9999"
 multiClusterInstance = "test_instance_id"
 cacheDataPath = "/tmp"
-=======
->>>>>>> 2.0.0-rc01
 
 //hive  catalog test config for bigdata
 enableExternalHiveTest = false
@@ -161,7 +148,6 @@ s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
 s3Region = "ap-hongkong"
 
-<<<<<<< HEAD
 // stage iam test
 stageIamEndpoint = ""
 stageIamRegion = ""
@@ -179,8 +165,6 @@ stageIamSk = ""
 
 // used for cos, which sdk does not return arn, so construct arn by user id.
 stageIamUserId = ""
-=======
->>>>>>> 2.0.0-rc01
 // If the failure suite num exceeds this config
 // all following suite will be skipped to fast quit the run.
 // <=0 means no limit.

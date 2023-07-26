@@ -21,10 +21,7 @@
 defaultDb = "regression_test"
 
 jdbcUrl = "jdbc:mysql://172.19.0.2:9132/?useLocalSessionState=true&allowLoadLocalInfile=true"
-<<<<<<< HEAD
-=======
 targetJdbcUrl = "jdbc:mysql://172.19.0.2:9132/?useLocalSessionState=true&allowLoadLocalInfile=true"
->>>>>>> 2.0.0-rc01
 jdbcUser = "root"
 jdbcPassword = ""
 

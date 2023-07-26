@@ -25,17 +25,8 @@ suite ("test_agg_keys_schema_change") {
     
     def tableName = "schema_change_agg_keys_regression_test"
 
-    def getJobState = { tbName ->
-         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tbName}' ORDER BY createtime DESC LIMIT 1 """
-         return jobStateResult[0][9]
-    }
-
-<<<<<<< HEAD
     try {
-        String[][] backends = sql """ show backends; """
-        assertTrue(backends.size() > 0)
-=======
->>>>>>> 2.0.0-rc01
+
         String backend_id;
         def backendId_to_backendIP = [:]
         def backendId_to_backendHttpPort = [:]
@@ -110,12 +101,7 @@ suite ("test_agg_keys_schema_change") {
             } else {
                 sleep(100)
                 if (max_try_time < 1){
-<<<<<<< HEAD
-                    println "test timeout," + "state:" + result
-                    assertEquals("FINISHED", result)
-=======
                     assertEquals(1,2)
->>>>>>> 2.0.0-rc01
                 }
             }
         }
@@ -201,6 +187,7 @@ suite ("test_agg_keys_schema_change") {
                 (5, '2017-10-01', 'Beijing', 10, 1, 1, 32, 20, hll_hash(5), to_bitmap(5))
             """
 
+        // compaction
         String[][] tablets = sql """ show tablets from ${tableName}; """
         for (String[] tablet in tablets) {
                 String tablet_id = tablet[0]
@@ -225,7 +212,7 @@ suite ("test_agg_keys_schema_change") {
                     running = compactionStatus.run_status
                 } while (running)
         }
-
+         
         qt_sc """ select count(*) from ${tableName} """
 
         qt_sc """  SELECT * FROM schema_change_agg_keys_regression_test WHERE user_id=2 """

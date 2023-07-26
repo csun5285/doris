@@ -48,8 +48,6 @@ suite("test_insert") {
     """
 
     qt_sql1 "select * from ${insert_tbl} order by 1, 2, 3, 4"
-<<<<<<< HEAD
-=======
 
     def insert_tbl_dft = "test_insert_dft_tbl"
     sql """ DROP TABLE IF EXISTS ${insert_tbl_dft}"""
@@ -90,5 +88,4 @@ suite("test_insert") {
     sql """ insert into ${insert_tbl_dft} values() """
     
     qt_select """ select k1,k2,k3,k4,k5,k6,k8,k10,k11,k12 from ${insert_tbl_dft} """
->>>>>>> 2.0.0-rc01
 }

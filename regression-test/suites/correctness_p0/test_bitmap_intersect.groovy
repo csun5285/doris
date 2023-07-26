@@ -16,7 +16,7 @@
  // under the License.
 
  suite("test_bitmap_intersect") {
-     def tableName = "test_bitmap_intersect"
+     def tableName = "test_bitmap"
 
 
      sql """ DROP TABLE IF EXISTS ${tableName} """

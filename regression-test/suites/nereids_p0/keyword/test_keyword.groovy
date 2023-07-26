@@ -18,11 +18,7 @@
 suite("test_keyword", "query,p0") {
     sql "SET enable_nereids_planner=true"
     sql "SET enable_fallback_to_original_planner=false"
-<<<<<<< HEAD
-    sql("use test_query_db")
-=======
     sql("use nereids_test_query_db")
->>>>>>> 2.0.0-rc01
 
     def tableName1 = "test"
     def tableName2 = "baseall"

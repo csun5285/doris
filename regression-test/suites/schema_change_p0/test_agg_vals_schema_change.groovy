@@ -19,10 +19,6 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite ("test_agg_vals_schema_change") {
     def tableName = "schema_change_agg_vals_regression_test"
-    def getJobState = { tbName ->
-         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tbName}' ORDER BY createtime DESC LIMIT 1 """
-         return jobStateResult[0][9]
-    }
 
     try {
 
@@ -100,20 +96,6 @@ suite ("test_agg_vals_schema_change") {
         ALTER table ${tableName} ADD COLUMN new_column INT MAX default "1" 
         """
 
-    int max_try_time = 600
-    while(max_try_time--){
-        String result = getJobState(tableName)
-        if (result == "FINISHED") {
-            break
-        } else {
-            sleep(1000)
-            if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
-            }
-        }
-    }
-
     qt_sc """ SELECT * FROM ${tableName} WHERE user_id=2 """
 
     sql """ INSERT INTO ${tableName} VALUES
@@ -141,21 +123,6 @@ suite ("test_agg_vals_schema_change") {
     sql """
           ALTER TABLE ${tableName} DROP COLUMN last_visit_date
           """
-
-    max_try_time = 600
-    while(max_try_time--){
-        String result = getJobState(tableName)
-        if (result == "FINISHED") {
-            break
-        } else {
-            sleep(1000)
-            if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
-            }
-        }
-    }
-
     qt_sc """ select * from ${tableName} where user_id = 3 """
 
     sql """ INSERT INTO ${tableName} VALUES

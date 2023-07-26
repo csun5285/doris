@@ -76,7 +76,7 @@ suite("test_agg_keys_schema_change_datev2") {
            )
            AGGREGATE  KEY(`datek1`,`datek2`)
            DISTRIBUTED BY HASH(`datek1`) BUCKETS 1
-           PROPERTIES("replication_num" = "1", "light_schema_change" = "true");
+           PROPERTIES("replication_num" = "1", "light_schema_change" = "false");
         """
     // datev2
     sql """ insert into ${tbName} values('2022-01-02', '2022-01-02 11:11:11', '2022-01-02', '2022-01-02 11:11:11');"""
@@ -100,10 +100,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }
@@ -123,10 +122,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }
@@ -153,10 +151,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }
@@ -176,10 +173,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }
@@ -206,10 +202,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }
@@ -237,10 +232,9 @@ suite("test_agg_keys_schema_change_datev2") {
             sleep(3000)
             break
         } else {
-            sleep(1000)
+            sleep(100)
             if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                assertEquals(1,2)
             }
         }
     }

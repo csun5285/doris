@@ -125,9 +125,6 @@ suite("test_external_pg", "p2") {
 
         def res4 = sql """select * from ${pgTableNameCustomer} a  join ${pgTableNameSupplier} b on a.c_nation =b.s_nation limit 5;"""
         logger.info("recoding select: " + res4.toString())
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.0-rc01
     }
 }

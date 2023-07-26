@@ -16,10 +16,7 @@
 // under the License.
 
 suite("test_inlineview_with_project") {
-<<<<<<< HEAD
-=======
     sql "set enable_nereids_planner=false"
->>>>>>> 2.0.0-rc01
     sql """
         drop table if exists cir_1756_t1;
     """
@@ -325,8 +322,6 @@ suite("test_inlineview_with_project") {
     sql """
         drop table if exists ods_table4;
     """
-<<<<<<< HEAD
-=======
 
     sql """
         drop table if exists cir2824_table;
@@ -387,5 +382,4 @@ suite("test_inlineview_with_project") {
     sql """
         drop table if exists cir2824_table;
     """
->>>>>>> 2.0.0-rc01
 }

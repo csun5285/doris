@@ -119,4 +119,3 @@ suite("sort") {
     sql "insert into sort_default_value values (4, null)"
     qt_sql "select * from sort_default_value order by k1 limit 10"
 }
-

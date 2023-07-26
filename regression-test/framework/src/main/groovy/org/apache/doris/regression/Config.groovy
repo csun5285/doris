@@ -123,7 +123,6 @@ class Config {
     Config() {}
 
     Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
-<<<<<<< HEAD
            String feHttpAddress, String feHttpUser, String feHttpPassword,
            String feCloudHttpAddress, String feCloudHttpUser, String feCloudHttpPassword, String instanceId,
            String cloudUniqueId, String metaServiceHttpAddress, String recycleServiceHttpAddress, String suitePath,
@@ -133,13 +132,6 @@ class Config {
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
            String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId) {
-=======
-           String feSourceThriftAddress, String feTargetThriftAddress, String feSyncerUser, String feSyncerPassword,
-           String feHttpAddress, String feHttpUser, String feHttpPassword, String metaServiceHttpAddress,
-           String suitePath, String dataPath, String realDataPath, String cacheDataPath, Boolean enableCacheData,
-           String testGroups, String excludeGroups, String testSuites, String excludeSuites,
-           String testDirectories, String excludeDirectories, String pluginPath, String sslCertificatePath) {
->>>>>>> 2.0.0-rc01
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -171,7 +163,6 @@ class Config {
         this.excludeDirectories = excludeDirectories
         this.pluginPath = pluginPath
         this.sslCertificatePath = sslCertificatePath
-<<<<<<< HEAD
         this.multiClusterBes = multiClusterBes
         this.metaServiceToken = metaServiceToken
         this.multiClusterInstance = multiClusterInstance
@@ -188,8 +179,6 @@ class Config {
         this.stageIamAk = stageIamAk
         this.stageIamSk = stageIamSk
         this.stageIamUserId = stageIamUserId
-=======
->>>>>>> 2.0.0-rc01
     }
 
     static Config fromCommandLine(CommandLine cmd) {
@@ -426,7 +415,6 @@ class Config {
             configToString(obj.testDirectories),
             configToString(obj.excludeDirectories),
             configToString(obj.pluginPath),
-<<<<<<< HEAD
             configToString(obj.sslCertificatePath),
             configToString(obj.multiClusterBes),
             configToString(obj.metaServiceToken),
@@ -444,9 +432,6 @@ class Config {
             configToString(obj.stageIamAk),
             configToString(obj.stageIamSk),
             configToString(obj.stageIamUserId)
-=======
-            configToString(obj.sslCertificatePath)
->>>>>>> 2.0.0-rc01
         )
 
         def declareFileNames = config.getClass()
@@ -560,11 +545,11 @@ class Config {
             log.info("Set metaServiceHttpAddress to '${config.metaServiceHttpAddress}' because not specify.".toString())
         }
 
-<<<<<<< HEAD
         if (config.recycleServiceHttpAddress == null) {
             config.recycleServiceHttpAddress = "127.0.0.1:5001"
             log.info("Set recycleServiceHttpAddress to '${config.recycleServiceHttpAddress}' because not specify.".toString())
-=======
+        }
+        
         if (config.feSyncerUser == null) {
             config.feSyncerUser = "root"
             log.info("Set feSyncerUser to '${config.feSyncerUser}' because not specify.".toString())
@@ -573,7 +558,6 @@ class Config {
         if (config.feSyncerPassword == null) {
             config.feSyncerPassword = ""
             log.info("Set feSyncerPassword to empty because not specify.".toString())
->>>>>>> 2.0.0-rc01
         }
 
         if (config.feHttpUser == null) {
@@ -808,10 +792,6 @@ class Config {
         }
         urlWithDb = addSslUrl(urlWithDb);
         urlWithDb = addTimeoutUrl(urlWithDb);
-<<<<<<< HEAD
-=======
-
->>>>>>> 2.0.0-rc01
         return urlWithDb
     }
 

@@ -106,11 +106,7 @@ suite("test_json_load_and_function", "p0") {
     // insert into invalid json rows with enable_insert_strict=true
     // expect excepiton and no rows not changed
     sql """ set enable_insert_strict = true """
-<<<<<<< HEAD
-    success = true
-=======
     def success = true
->>>>>>> 2.0.0-rc01
     try {
         sql """INSERT INTO ${testTable} VALUES(26, '')"""
     } catch(Exception ex) {

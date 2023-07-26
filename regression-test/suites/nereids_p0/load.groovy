@@ -15,19 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-<<<<<<< HEAD
-suite("load_test_query_db") {
-    sql "SET enable_nereids_planner=true"
-    sql "SET enable_fallback_to_original_planner=false"
-    // init query case data
-    def dbName = "test_query_db"
-=======
 suite("load_nereids_test_query_db") {
     sql "SET enable_nereids_planner=true"
     sql "SET enable_fallback_to_original_planner=false"
     // init query case data
     def dbName = "nereids_test_query_db"
->>>>>>> 2.0.0-rc01
     sql "DROP DATABASE IF EXISTS ${dbName}"
     sql "CREATE DATABASE ${dbName}"
     sql "USE $dbName"
@@ -122,13 +114,9 @@ suite("load_nereids_test_query_db") {
     def baseall_count = sql "select count(*) from ${dbName}.baseall"
     assertEquals(16, baseall_count[0][0])
     def test_count = sql "select count(*) from ${dbName}.test"
-<<<<<<< HEAD
-    assertEquals(3, test_count[0][0])  
-=======
     assertEquals(3, test_count[0][0])
 
     sql"drop view if exists empty"
     sql"create view empty as select * from baseall where k1 = 0"
->>>>>>> 2.0.0-rc01
 }
 

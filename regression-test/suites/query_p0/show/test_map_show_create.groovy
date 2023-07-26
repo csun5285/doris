@@ -61,12 +61,8 @@ suite("test_map_show_create", "query") {
 
         create_test_table.call(testTable)
 
-<<<<<<< HEAD
-        qt_select "SHOW CREATE TABLE ${testTable}"
-=======
         def res = sql "SHOW CREATE TABLE ${testTable}"
         assertTrue(res.size() != 0)
->>>>>>> 2.0.0-rc01
         qt_select "select count(k2), count(k3), count(k4), count(k5), count(k6) from ${testTable}"
     } finally {
         try_sql("DROP TABLE IF EXISTS ${testTable}")

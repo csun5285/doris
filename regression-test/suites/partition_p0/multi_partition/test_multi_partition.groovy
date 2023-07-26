@@ -321,8 +321,6 @@ suite("test_multi_partition") {
     assertEquals(result2.size(), 16)
     sql "drop table multi_par8"
 
-<<<<<<< HEAD
-=======
 
     sql "drop table if exists multi_par9"
     sql """
@@ -455,5 +453,4 @@ suite("test_multi_partition") {
     assertEquals(result2.size(), 45)
     sql "drop table multi_par12"
 
->>>>>>> 2.0.0-rc01
 }

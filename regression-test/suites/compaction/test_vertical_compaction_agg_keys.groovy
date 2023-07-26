@@ -73,10 +73,7 @@ suite("test_vertical_compaction_agg_keys") {
         sql """ INSERT INTO ${tableName} VALUES
              (1, '2017-10-01', '2017-10-01', '2017-10-01 11:11:11.110000', '2017-10-01 11:11:11.110111', 'Beijing', 10, 1, '2020-01-02', '2020-01-02', '2017-10-01 11:11:11.160000', '2017-10-01 11:11:11.100111', '2020-01-02', 1, 31, 19, hll_hash(2), to_bitmap(2))
             """
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.0-rc01
         sql """
             DELETE from ${tableName} where user_id < 0
             """
@@ -141,10 +138,7 @@ suite("test_vertical_compaction_agg_keys") {
             do {
                 Thread.sleep(1000)
                 String tablet_id = tablet[0]
-<<<<<<< HEAD
-=======
                 backend_id = tablet[2]
->>>>>>> 2.0.0-rc01
                 (code, out, err) = be_get_compaction_status(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
                 logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
                 assertEquals(code, 0)

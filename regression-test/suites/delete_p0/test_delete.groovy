@@ -177,8 +177,6 @@ suite("test_delete") {
     qt_check_data6 """
         select k1, v1 from delete_test_tb order by v1;
     """
-<<<<<<< HEAD
-=======
 
     sql """ DROP TABLE IF EXISTS delete_test_tb2 """
     sql """
@@ -220,5 +218,4 @@ suite("test_delete") {
 
     sql """ delete from  delete_test_tb2 where k1 is null and k2 = 4.45; """
     qt_check_numeric4 """ select k1, k2, v1 from delete_test_tb2 order by k1, k2; """;
->>>>>>> 2.0.0-rc01
 }

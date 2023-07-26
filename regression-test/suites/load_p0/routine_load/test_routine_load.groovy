@@ -16,10 +16,6 @@
 // under the License.
 
 suite("test_routine_load") {
-    try {
-        // todo: test routine load, need kafka
-        sql "show routine load"
-    } catch (Exception e) {
-        assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
-    }
+    // todo: test routine load, need kafka
+    sql "show routine load"
 }

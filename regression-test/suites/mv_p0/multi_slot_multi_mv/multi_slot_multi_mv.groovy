@@ -17,12 +17,6 @@
 
 suite ("multi_slot_multi_mv") {
 
-<<<<<<< HEAD
-    // because nereids cannot support rollup correctly forbid it temporary
-    sql """set enable_nereids_planner=false"""
-
-=======
->>>>>>> 2.0.0-rc01
     sql """ DROP TABLE IF EXISTS d_table; """
 
     sql """

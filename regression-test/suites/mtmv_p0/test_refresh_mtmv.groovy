@@ -19,10 +19,7 @@ suite("test_refresh_mtmv") {
     def tableName = "t_test_refresh_mtmv_user"
     def tableNamePv = "t_test_refresh_mtmv_user_pv"
     def mvName = "multi_mv_test_refresh_mtmv"
-<<<<<<< HEAD
-=======
     def mvNameDemand = "multi_mv_test_refresh_demand_mtmv"
->>>>>>> 2.0.0-rc01
 
     sql """drop table if exists `${tableName}`"""
     sql """drop table if exists `${tableNamePv}`"""
@@ -86,8 +83,6 @@ suite("test_refresh_mtmv") {
     sql """
         DROP MATERIALIZED VIEW ${mvName}
     """
-<<<<<<< HEAD
-=======
 
     sql """drop materialized view if exists ${mvNameDemand}"""
 
@@ -112,5 +107,4 @@ suite("test_refresh_mtmv") {
     sql """
         DROP MATERIALIZED VIEW ${mvNameDemand}
     """
->>>>>>> 2.0.0-rc01
 }

@@ -50,13 +50,8 @@ suite("test_index_match_select", "inverted_index_select"){
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
-<<<<<<< HEAD
-            expected_finished_num = alter_res.size();
-            finished_num = 0;
-=======
             def expected_finished_num = alter_res.size();
             def finished_num = 0;
->>>>>>> 2.0.0-rc01
             for (int i = 0; i < expected_finished_num; i++) {
                 logger.info(table_name + " build index job state: " + alter_res[i][7] + i)
                 if (alter_res[i][7] == "FINISHED") {
@@ -66,11 +61,6 @@ suite("test_index_match_select", "inverted_index_select"){
             if (finished_num == expected_finished_num) {
                 logger.info(table_name + " all build index jobs finished, detail: " + alter_res)
                 break
-<<<<<<< HEAD
-            } else {
-                finished_num = 0;
-=======
->>>>>>> 2.0.0-rc01
             }
             useTime = t
             sleep(delta_time)

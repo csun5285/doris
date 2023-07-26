@@ -216,11 +216,7 @@ suite("test_colocate_join") {
             (20220101, 101, 202, 200, 100);"""
 
     explain {
-<<<<<<< HEAD
-        sql("select /*+SET_VAR(parallel_fragment_exec_instance_num=1)*/ " +
-=======
         sql("select /*+SET_VAR(parallel_fragment_exec_instance_num=1,parallel_pipeline_task_num=1)*/ " +
->>>>>>> 2.0.0-rc01
                 " sum_col1,sum_col2 " +
                 "from " +
                 "(select datekey,sum(sum_col1) as sum_col1  from test_query_colocate where datekey=20220101 group by datekey) t1 " +

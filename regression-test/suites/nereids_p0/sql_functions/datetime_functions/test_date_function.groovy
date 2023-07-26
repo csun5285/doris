@@ -295,12 +295,9 @@ suite("test_date_function") {
     qt_sql """ select second('2018-12-31 23:59:59') """
     qt_sql """ select second('2018-12-31 00:00:00') """
 
-<<<<<<< HEAD
-=======
     // MICROSECOND
     qt_sql """ select microsecond(cast('1999-01-02 10:11:12.067890' as datetimev2(6))); """
 
->>>>>>> 2.0.0-rc01
     // STR_TO_DATE
     sql """ truncate table ${tableName} """
     sql """ insert into ${tableName} values ("2014-12-21 12:34:56")  """
@@ -389,8 +386,6 @@ suite("test_date_function") {
     qt_sql """ select yearweek('1989-03-21', 6) """
     qt_sql """ select yearweek('1989-03-21', 7) """
 
-<<<<<<< HEAD
-=======
 
     // microsecond
     sql """ drop table ${tableName} """
@@ -403,7 +398,6 @@ suite("test_date_function") {
 
     qt_sql """ select microsecond(k1) from ${tableName}; """
 
->>>>>>> 2.0.0-rc01
     // qt_sql """ select count(*) from (select * from numbers("number" = "200")) tmp1 WHERE 0 <= UNIX_TIMESTAMP(); """
 
     sql """ drop table ${tableName} """
@@ -641,12 +635,9 @@ suite("test_date_function") {
                 from ${tableName};
     """
     sql """ DROP TABLE IF EXISTS ${tableName}; """
-<<<<<<< HEAD
-=======
 
     test {
         sql "select cast('20230631' as date), cast('20230632' as date)"
         result([[null, null]])
     }
->>>>>>> 2.0.0-rc01
 }

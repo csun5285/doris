@@ -229,13 +229,6 @@ china
 america
 cana
 fre
-<<<<<<< HEAD
-
--- !q51 --
-
--- !q52 --
-=======
->>>>>>> 2.0.0-rc01
 
 -- !q24 --
 zhangsan	1
@@ -462,13 +455,6 @@ china
 america
 cana
 fre
-<<<<<<< HEAD
-
--- !q51 --
-
--- !q52 --
-=======
->>>>>>> 2.0.0-rc01
 
 -- !q24 --
 zhangsan	1
@@ -695,13 +681,6 @@ china
 america
 cana
 fre
-<<<<<<< HEAD
-
--- !q51 --
-
--- !q52 --
-=======
->>>>>>> 2.0.0-rc01
 
 -- !after_refresh --
 2022-11-24	2022-11-24	zVhHON3m5L	ecmOZhvo5C	2022-11-24
@@ -714,12 +693,4 @@ fre
 2022-11-25	2022-11-25	zVOQFPxGhP	V0FTqkqsma	2022-11-25
 2022-11-25	2022-11-25	zj9uWRywHa	5F8hzYcY8G	2022-11-25
 2022-11-25	2022-11-25	zvs3b72ERY	zorbigHkYB	2022-11-25
-
--- !student --
-124	lisi	13	f	abcdefh	13056781234
-123	zhangsan	12	m	abcdefg	13012345678
-
--- !tvf_student --
-124	lisi	13	f	abcdefh	13056781234
-123	zhangsan	12	m	abcdefg	13012345678
 

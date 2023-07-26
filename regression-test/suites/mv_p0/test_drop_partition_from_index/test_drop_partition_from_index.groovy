@@ -24,10 +24,7 @@ suite("sql_drop_partition_from_index") {
     def testMv = "test_mv"
 
     try {
-<<<<<<< HEAD
-=======
     sql """DROP DATABASE IF EXISTS ${testDb}"""
->>>>>>> 2.0.0-rc01
     sql """CREATE DATABASE IF NOT EXISTS ${testDb}"""
     sql """USE ${testDb}"""
     sql """
@@ -61,13 +58,8 @@ suite("sql_drop_partition_from_index") {
      sql""" ALTER TABLE ${testTable} DROP PARTITION p1 FROM INDEX ${testTable} """
      qt_select """ SELECT k1, k2+k3 FROM ${testTable} PARTITION(p1) """
     } finally {
-<<<<<<< HEAD
-     sql """ DROP MATERIALIZED VIEW ${testMv} ON ${testTable} """
-     sql """ DROP TABLE ${testTable} """
-=======
      sql """ DROP MATERIALIZED VIEW IF EXISTS ${testMv} ON ${testTable} """
      sql """ DROP TABLE IF EXISTS ${testTable} """
->>>>>>> 2.0.0-rc01
      sql """ DROP DATABASE ${testDb} """
     }
 }

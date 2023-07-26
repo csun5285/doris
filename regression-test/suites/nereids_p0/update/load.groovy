@@ -16,10 +16,7 @@
 // under the License.
 
 suite("load") {
-<<<<<<< HEAD
-=======
     sql 'drop table if exists t1'
->>>>>>> 2.0.0-rc01
     sql '''
         create table t1 (
             id int,
@@ -36,10 +33,7 @@ suite("load") {
         );
     '''
 
-<<<<<<< HEAD
-=======
     sql 'drop table if exists t2'
->>>>>>> 2.0.0-rc01
     sql '''
         create table t2 (
             id int,
@@ -54,10 +48,7 @@ suite("load") {
         );
     '''
 
-<<<<<<< HEAD
-=======
     sql 'drop table if exists t3'
->>>>>>> 2.0.0-rc01
     sql '''
         create table t3 (
             id int

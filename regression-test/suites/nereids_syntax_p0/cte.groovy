@@ -237,8 +237,6 @@ suite("cte") {
      
     """
 
-<<<<<<< HEAD
-=======
     qt_cte13 """
             SELECT abs(dd.s_suppkey)
             FROM (
@@ -273,7 +271,6 @@ suite("cte") {
                 ORDER BY dd.s_suppkey;
     """
 
->>>>>>> 2.0.0-rc01
     test {
         sql = "WITH cte1 (a1, A1) AS (SELECT * FROM supplier) SELECT * FROM cte1"
 

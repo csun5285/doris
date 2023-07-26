@@ -48,10 +48,6 @@ suite("test_chinese_analyzer"){
 
     sql "INSERT INTO $indexTblName VALUES (1, '我来到北京清华大学'), (2, '我爱你中国'), (3, '人民可以得到更多实惠');"
     qt_sql "SELECT * FROM $indexTblName WHERE c MATCH '我爱你' ORDER BY id;"
-<<<<<<< HEAD
-    qt_sql "SELECT * FROM $indexTblName WHERE c MATCH '我' ORDER BY id;"
-=======
->>>>>>> 2.0.0-rc01
     qt_sql "SELECT * FROM $indexTblName WHERE c MATCH '清华' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName WHERE c MATCH '大学' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName WHERE c MATCH '清华大学' ORDER BY id;"
@@ -77,16 +73,10 @@ suite("test_chinese_analyzer"){
 
     sql "INSERT INTO $indexTblName2 VALUES (1, '我来到北京清华大学'), (2, '我爱你中国'), (3, '人民可以得到更多实惠');"
     qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '我爱你' ORDER BY id;"
-<<<<<<< HEAD
-    qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '我' ORDER BY id;"
-=======
->>>>>>> 2.0.0-rc01
     qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '清华' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '大学' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '清华大学' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName2 WHERE c MATCH '人民' ORDER BY id;"
-<<<<<<< HEAD
-=======
 
     def indexTblName3 = "chinese_analyzer_test3"
 
@@ -120,5 +110,4 @@ suite("test_chinese_analyzer"){
     qt_sql "SELECT * FROM $indexTblName3 WHERE c MATCH_PHRASE '陕西西安' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName3 WHERE c MATCH_PHRASE '陕西省西安市' ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName3 WHERE c MATCH 'information' ORDER BY id;"
->>>>>>> 2.0.0-rc01
 }

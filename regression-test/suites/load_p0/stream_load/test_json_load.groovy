@@ -524,44 +524,8 @@ suite("test_json_load", "p0") {
                             '[\"$.id\", \"$.code\", \"$.city\"]', '$.item', '', 'true', 'invalid_nest_json_array2.json', true) 
         load_json_data.call('test_json_load_case16_2', 'true', '', 'json', 'id, code, city',
                             '[\"$.id\", \"$.code\", \"$.city[2]\"]', '$.item', '', 'true', 'invalid_nest_json_array3.json', true) 
-<<<<<<< HEAD
 
-        test_invalid_json_array_table.call(testTable)
-        load_json_data.call('test_json_load_case17', 'true', '', 'json', '', '',
-                '', '', '', 'invalid_json_array.json', false, 0)
-        load_json_data.call('test_json_load_case17_1', 'true', '', 'json', '', '',
-                '$.item', '', '', 'invalid_json_array1.json', false, 0)
-        load_json_data.call('test_json_load_case17_2', 'true', '', 'json', '', '',
-                '$.item', '', '', 'invalid_json_array2.json', false, 0)
-        load_json_data.call('test_json_load_case17_3', 'true', '', 'json', '', '',
-                '$.item', '', '', 'invalid_json_array3.json', false, 0)
         sql "sync"
-        qt_select18 "select * from ${testTable} order by id"
-
-    } finally {
-        try_sql("DROP TABLE IF EXISTS ${testTable}")
-    }
-=======
->>>>>>> 2.0.0-rc01
-
-    // case19: test case sensitive json load
-     try {
-        sql "DROP TABLE IF EXISTS ${testTable}"
-
-        create_test_table1.call(testTable)
-        load_json_data.call('test_json_load_case19', 'false', 'true', 'json', 'Id, cIty, CodE', '',
-                '', '', '', 'case_sensitive_json.json', false, 2)
-        sql "sync"
-<<<<<<< HEAD
-        qt_select19 "select * from ${testTable} order by id"
-
-    } finally {
-        try_sql("DROP TABLE IF EXISTS ${testTable}")
-    }
-
-    // case20: import json with BOM file
-    try {
-=======
         qt_select18 "select * from ${testTable} order by id"
 
     } finally {
@@ -570,12 +534,9 @@ suite("test_json_load", "p0") {
 
     // case19: test case sensitive json load
      try {
->>>>>>> 2.0.0-rc01
         sql "DROP TABLE IF EXISTS ${testTable}"
 
         create_test_table1.call(testTable)
-<<<<<<< HEAD
-=======
         load_json_data.call('test_json_load_case19', 'false', 'true', 'json', 'Id, cIty, CodE', '',
                 '', '', '', 'case_sensitive_json.json', false, 2)
         sql "sync"
@@ -590,7 +551,6 @@ suite("test_json_load", "p0") {
         sql "DROP TABLE IF EXISTS ${testTable}"
         
         create_test_table1.call(testTable)
->>>>>>> 2.0.0-rc01
 
         load_json_data.call('test_json_load_case1_2', 'true', '', 'json', '', '', '', '', '', 'simple_json_bom.json')
 

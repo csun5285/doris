@@ -2401,8 +2401,6 @@ centaurean/density	988
 google/boringssl	976
 woboq/woboq_codebrowser	916
 
-<<<<<<< HEAD
-=======
 -- !60 --
 00000000000004a9b86e267361898666ede4eaaa
 00000000000004a9b86e267361898666ede4eaaa
@@ -2441,7 +2439,6 @@ ffffe3898bb6b0b4d2c5d162873d7687f57d8ca6
 
 -- !63 --
 
->>>>>>> 2.0.0-rc01
 -- !01 --
 Homebrew/homebrew-core	33	15
 pocoproject/poco	28	14
@@ -4844,8 +4841,6 @@ centaurean/density	988
 google/boringssl	976
 woboq/woboq_codebrowser	916
 
-<<<<<<< HEAD
-=======
 -- !60 --
 00000000000004a9b86e267361898666ede4eaaa
 00000000000004a9b86e267361898666ede4eaaa
@@ -4883,4 +4878,3 @@ ffffe3898bb6b0b4d2c5d162873d7687f57d8ca6
 \N
 
 -- !63 --
->>>>>>> 2.0.0-rc01

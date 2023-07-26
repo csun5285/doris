@@ -43,28 +43,16 @@ suite("agg_4_phase") {
         (0, 0, "aa", 10), (1, 1, "bb",20), (2, 2, "cc", 30), (1, 1, "bb",20);
     """
     def test_sql = """
-<<<<<<< HEAD
-        select /*+SET_VAR(disable_nereids_rules='THREE_PHASE_AGGREGATE_WITH_DISTINCT,TWO_PHASE_AGGREGATE_WITH_DISTINCT')*/ 
-            count(distinct name), sum(age) 
-=======
         select
             count(distinct id)
->>>>>>> 2.0.0-rc01
         from agg_4_phase_tbl;
         """
     explain{
         sql(test_sql)
-<<<<<<< HEAD
-        contains "6:VAGGREGATE (merge finalize)"
-        contains "5:VEXCHANGE"
-        contains "4:VAGGREGATE (update serialize)"
-        contains "3:VAGGREGATE (merge serialize)"
-=======
         contains "5:VAGGREGATE (merge finalize)"
         contains "4:VEXCHANGE"
         contains "3:VAGGREGATE (update serialize)"
         contains "2:VAGGREGATE (merge serialize)"
->>>>>>> 2.0.0-rc01
         contains "1:VAGGREGATE (update serialize)"
     }
     qt_4phase (test_sql)

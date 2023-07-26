@@ -30,12 +30,8 @@ suite("test_cast_as_time") {
          "storage_format" = "V2"
         );
     """
-<<<<<<< HEAD
-     sql """
-=======
     sql 'set enable_nereids_planner=true'
     sql """
->>>>>>> 2.0.0-rc01
         insert into tbl_cast_as_time values(300,'19:18:17')
     """
     sql """

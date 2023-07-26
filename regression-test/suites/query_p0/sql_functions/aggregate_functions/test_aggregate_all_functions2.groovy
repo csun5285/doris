@@ -49,11 +49,8 @@ suite("test_aggregate_all_functions2") {
         file "../../baseall.txt"
     }
 
-<<<<<<< HEAD
-=======
     sql "sync"
 
->>>>>>> 2.0.0-rc01
     qt_select_approx_count_distinct1 """ SELECT approx_count_distinct(k0) FROM baseall """
     qt_select_approx_count_distinct2 """ SELECT approx_count_distinct(k1) FROM baseall """
     qt_select_collect_set1 """ SELECT size(collect_set(k10,5)) FROM baseall """

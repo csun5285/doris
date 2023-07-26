@@ -31,9 +31,6 @@ suite('test_cast') {
         sql "select cast(${datetime} as int), cast(${datetime} as bigint), cast(${datetime} as float), cast(${datetime} as double)"
         result([[869930357, 20200101123445l, ((float) 20200101123445l), ((double) 20200101123445l)]])
     }
-<<<<<<< HEAD
-}
-=======
 
     def tbl = "test_cast"
 
@@ -91,4 +88,3 @@ suite('test_cast') {
         result([[101]])
     }
 }
->>>>>>> 2.0.0-rc01

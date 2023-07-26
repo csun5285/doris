@@ -7,14 +7,7 @@ CREATE TABLE IF NOT EXISTS large_records_t3_uk (
 )
 UNIQUE KEY(FTS_DOC_ID)
 DISTRIBUTED BY HASH(FTS_DOC_ID) BUCKETS 3
-<<<<<<< HEAD
-PROPERTIES (
-    "replication_num" = "1",
-    "enable_unique_key_merge_on_write" = "true"
-);
-=======
 PROPERTIES ( 
     "replication_num" = "1",
     "enable_unique_key_merge_on_write" = "true"
 );
->>>>>>> 2.0.0-rc01

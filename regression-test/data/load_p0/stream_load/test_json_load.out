@@ -102,29 +102,6 @@
 200	changsha	3456789
 
 -- !select10 --
-<<<<<<< HEAD
-\N	\N	\N
-200	changsha	3456789
-19210	\N	\N
-12811110	\N	\N
-171171710	\N	\N
-
--- !select11 --
-1	beijing	2345671
-2	shanghai	2345672
-3	guangzhou	2345673
-4	shenzhen	2345674
-5	hangzhou	2345675
-6	nanjing	2345676
-7	wuhan	2345677
-8	chengdu	2345678
-9	xian	2345679
-10	hefei	23456710
-200	changsha	3456789
-
--- !select12 --
-1	\N	2345671
-=======
 \N		0
 200	changsha	3456789
 19210		0
@@ -146,23 +123,15 @@
 
 -- !select12 --
 1		2345671
->>>>>>> 2.0.0-rc01
 2	shanghai	2345672
 3	beijing	2345673
 4	shenzhen	2345674
 5	hangzhou	2345675
 6	nanjing	2345676
-<<<<<<< HEAD
-7	\N	2345677
-8	chengdu	2345678
-9	\N	2345679
-10	\N	23456710
-=======
 7		2345677
 8	chengdu	2345678
 9		2345679
 10		23456710
->>>>>>> 2.0.0-rc01
 200	changsha	3456789
 
 -- !select13 --
@@ -175,17 +144,6 @@
 200	hangzhou	12345
 
 -- !select14 --
-<<<<<<< HEAD
-10	2345671	\N
-10	beijing	2345671
-20	2345672	\N
-20	shanghai	2345672
-30	2345673	\N
-40	2345674	\N
-40	shenzhen	2345674
-50	2345675	\N
-50	{"guangzhou":1,"code":2345675}	\N
-=======
 10	2345671	0
 10	beijing	2345671
 20	2345672	0
@@ -195,13 +153,17 @@
 40	shenzhen	2345674
 50	2345675	0
 50	{"guangzhou":1,"code":2345675}	0
->>>>>>> 2.0.0-rc01
 50	["guangzhou"]	2345675
 50	guangzhou	2345675
 50	{"guangzhou":1}	2345675
 200	changsha	3456789
 
--- !select16 --
+-- !select15 --
+10	beijing	2345671
+20	shanghai	2345672
+30	hangzhou	2345673
+40	shenzhen	2345674
+50	guangzhou	2345675
 200	changsha	3456789
 
 -- !select16 --

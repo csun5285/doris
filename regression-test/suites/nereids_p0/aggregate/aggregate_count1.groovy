@@ -73,8 +73,6 @@ suite("aggregate_count1", "query") {
                     (SELECT virtuleUniqKey as  max_virtuleUniqKey FROM t1 ORDER BY proportion DESC LIMIT 1 ) tableWithMaxId
             ORDER BY identityCode) t_a76fe3e829ddb51;
             """
-<<<<<<< HEAD
-=======
     sql """set experimental_enable_pipeline_engine=true"""
     qt_select2 """ SELECT count(1) FROM (WITH t1 AS (
                  WITH t AS (
@@ -107,6 +105,5 @@ suite("aggregate_count1", "query") {
         sql("verbose select count() from aggregate_count1 where country > 'GET' and covid > 1;")
         notContains "projections: country"
     }
->>>>>>> 2.0.0-rc01
     sql "drop table aggregate_count1"
 }

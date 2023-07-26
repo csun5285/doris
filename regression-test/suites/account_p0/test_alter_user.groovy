@@ -160,13 +160,5 @@ suite("test_alter_user", "account") {
     result1 = connect(user = 'test_auth_user4', password = '12345', url = context.config.jdbcUrl) {
         sql 'select 1'
     }
-
-    // 7. drop roles and users
-    sql """drop role if exists test_auth_role1"""
-    sql """drop role if exists test_auth_role2"""
-    sql """drop user if exists test_auth_user1"""
-    sql """drop user if exists test_auth_user2"""
-    sql """drop user if exists test_auth_user3"""
-    sql """drop user if exists test_auth_user4"""
 }
 

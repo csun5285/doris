@@ -354,13 +354,10 @@ class StreamLoadAction implements SuiteAction {
             def jsonSlurper = new JsonSlurper()
             def parsed = jsonSlurper.parseText(responseText)
             String status = parsed.Status
-<<<<<<< HEAD
             if (twoPhaseCommit) {
                 status = parsed.status
                 return status;
             }
-=======
->>>>>>> 2.0.0-rc01
             long txnId = parsed.TxnId
             if (!status.equalsIgnoreCase("Publish Timeout")) {
                 return status;

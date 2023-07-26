@@ -17,41 +17,15 @@
 
 suite("test_dynamic_table", "dynamic_table"){
 
-<<<<<<< HEAD
-    def create_none_dynamic_table_result = "fail"
-    try {
-        sql """
-                CREATE TABLE IF NOT EXISTS t_dynamic1
-                (
-                    ... 
-                )
-                DISTRIBUTED BY HASH(`name`) BUCKETS 10
-                PROPERTIES("replication_num" = "1")
-            """
-        create_none_dynamic_table_result = "success"
-    } catch(Exception ex) {
-        logger.info("create none dynamic table result: " + ex)
-    }
-    assertEquals(create_none_dynamic_table_result, "fail")
-
-=======
->>>>>>> 2.0.0-rc01
     def create_dynamic_table_assign_not_exist_key_result = "fail"
     try {
         sql """
                 CREATE TABLE IF NOT EXISTS t_dynamic1
                 (
                     name varchar(50),
-<<<<<<< HEAD
-                    ... 
-                )
-                DISTRIBUTED BY HASH(`id`) BUCKETS 10
-                PROPERTIES("replication_num" = "1")
-=======
                 )
                 DISTRIBUTED BY HASH(`id`) BUCKETS 10
                 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true")
->>>>>>> 2.0.0-rc01
             """
         create_dynamic_table_assign_not_exist_key_result = "success"
     } catch(Exception ex) {
@@ -64,20 +38,11 @@ suite("test_dynamic_table", "dynamic_table"){
     sql """
         CREATE TABLE IF NOT EXISTS ${TbName1}
                 (
-<<<<<<< HEAD
-                    name varchar(50),
-                    ... 
-                )
-                DUPLICATE KEY(`name`)
-                DISTRIBUTED BY HASH(`name`) BUCKETS 10
-                PROPERTIES("replication_num" = "1")
-=======
                     name varchar(50)
                 )
                 DUPLICATE KEY(`name`)
                 DISTRIBUTED BY HASH(`name`) BUCKETS 10
                 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true")
->>>>>>> 2.0.0-rc01
         """
 
     def TbName2 = "test_ceate_dymanic_table_2"
@@ -90,20 +55,11 @@ suite("test_dynamic_table", "dynamic_table"){
                     date datetime,
                     index id_idx(`id`) USING INVERTED COMMENT 'id index',
                     index name_idx(`name`) USING INVERTED PROPERTIES("parser"="english") COMMENT 'name index',
-<<<<<<< HEAD
-                    index date_idx(`date`) COMMENT 'date index',
-                    ... 
-                )
-                DUPLICATE KEY(`id`)
-                DISTRIBUTED BY HASH(`id`) BUCKETS 10
-                PROPERTIES("replication_num" = "1")
-=======
                     index date_idx(`date`) COMMENT 'date index'
                 )
                 DUPLICATE KEY(`id`)
                 DISTRIBUTED BY HASH(`id`) BUCKETS 10
                 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true")
->>>>>>> 2.0.0-rc01
         """
 
     def TbName3 = "test_ceate_dymanic_table_3"
@@ -111,20 +67,11 @@ suite("test_dynamic_table", "dynamic_table"){
     sql """
         CREATE TABLE IF NOT EXISTS ${TbName3}
                 (
-<<<<<<< HEAD
-                    `repo.id` int,
-                    ... 
-                )
-                DUPLICATE KEY(`repo.id`)
-                DISTRIBUTED BY HASH(`repo.id`) BUCKETS 10
-                PROPERTIES("replication_num" = "1");
-=======
                     `repo.id` int
                 )
                 DUPLICATE KEY(`repo.id`)
                 DISTRIBUTED BY HASH(`repo.id`) BUCKETS 10
                 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");
->>>>>>> 2.0.0-rc01
         """
 
     
@@ -134,20 +81,11 @@ suite("test_dynamic_table", "dynamic_table"){
         sql """
             CREATE TABLE IF NOT EXISTS ${TbName4}
                 (
-<<<<<<< HEAD
-                    repo.id int,
-                    ... 
-                )
-                DUPLICATE KEY(`repo.id`)
-                DISTRIBUTED BY HASH(`repo.id`) BUCKETS 10
-                PROPERTIES("replication_num" = "1");
-=======
                     repo.id int
                 )
                 DUPLICATE KEY(`repo.id`)
                 DISTRIBUTED BY HASH(`repo.id`) BUCKETS 10
                 PROPERTIES("replication_num" = "1", "deprecated_dynamic_schema" = "true");
->>>>>>> 2.0.0-rc01
             """
         create_children_colume_without_single_quota_result = "success"
     }catch(Exception ex) {
@@ -164,20 +102,11 @@ suite("test_dynamic_table", "dynamic_table"){
                 date datetime,
                 `name.list` array<int>,
                 tag ARRAY<NOT_NULL(ARRAY<text>)>,
-<<<<<<< HEAD
-                data ARRAY<ARRAY<NOT_NULL(ARRAY<date>)>>,
-                ...
-            )
-            DUPLICATE KEY(`date`)
-            DISTRIBUTED BY HASH(`date`) BUCKETS 10
-            PROPERTIES("replication_num" = "3");
-=======
                 data ARRAY<ARRAY<NOT_NULL(ARRAY<date>)>>
             )
             DUPLICATE KEY(`date`)
             DISTRIBUTED BY HASH(`date`) BUCKETS 10
             PROPERTIES("replication_num" = "3", "deprecated_dynamic_schema" = "true");
->>>>>>> 2.0.0-rc01
             """
     }catch(Exception ex) {
         logger.info("create array table, result: " + ex)
