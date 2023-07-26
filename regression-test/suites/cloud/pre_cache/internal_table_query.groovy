@@ -121,22 +121,13 @@ values("lightman_cluster_id1", 10003, 11002, 11003, 11414, "${LocalDate.now().to
     sql """
     select * from sample_table;
     """
-    // get higher qpd
-    try_sql """
-    select * from sample_table;
-    """
-    try_sql """
-    select * from sample_table;
-    """
-    try_sql """
-    select * from sample_table;
-    """
-    try_sql """
-    select * from sample_table;
-    """
-    try_sql """
-    select * from sample_table;
-    """
+    
+    for (i in 0 .. 1000) {
+        // get higher qpd
+        try_sql """
+        select * from sample_table;
+        """
+    }
     // sleep 2min for internal table to fetch information from be
     sleep(120000)
     def clusters = sql " SHOW CLUSTERS; "

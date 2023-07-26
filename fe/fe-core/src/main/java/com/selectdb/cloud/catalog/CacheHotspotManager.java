@@ -220,7 +220,7 @@ public class CacheHotspotManager extends MasterDaemon {
 
     private void insertIntoTable(String clusterId, long tableId, long indexId, long fileCacheSize,
             THotPartition partition, Backend backend) {
-        LOG.info("table id {}, index id {}", tableId, indexId);
+        LOG.info("table id {}, index id {}, partition id {}", tableId, indexId, partition.partition_id);
         LocalDateTime now = LocalDateTime.now();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
         DateTimeFormatter dateformatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -252,6 +252,7 @@ public class CacheHotspotManager extends MasterDaemon {
         Optional<Partition> op = t.getPartitionNames().stream().map(t::getPartition)
                                 .filter(p -> p.getId() == partition.partition_id).findAny();
         if (!op.isPresent()) {
+            LOG.warn("partition id {} is invalid", tableId);
             return;
         }
         params.put("partition_name", op.get().getName());

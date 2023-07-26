@@ -81,7 +81,7 @@ void TabletHotspot::get_top_n_hot_partition(std::vector<THotTableMessage>* hot_t
             }
         }
     });
-    static constexpr int N = 50;
+    constexpr int N = 50;
     int return_partitions = 0;
     auto get_return_partitions =
             [=, &return_partitions](
@@ -93,7 +93,7 @@ void TabletHotspot::get_top_n_hot_partition(std::vector<THotTableMessage>* hot_t
                     msg.index_id = key.second;
                     for (auto& [partition_id, value] : partition_to_value) {
                         if (return_partitions > N) {
-                            break;
+                            return;
                         }
                         THotPartition hot_partition;
                         hot_partition.__set_partition_id(partition_id);
