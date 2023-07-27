@@ -62,19 +62,26 @@ list(REMOVE_ITEM UT_FILES
 )
 
 set(CLOUD_TEST_FILES
-    cloud/cloud_compaction_test.cpp
-    cloud/cloud_tablet_mgr_test.cpp
-    cloud/cloud_tablet_test.cpp
-    cloud/cloud_prefetch_test.cpp
-    cloud/cumulative_compaction_policy_test.cpp
-    cloud/fork_and_join_test.cpp
-    cloud/cloud_tablet_hotspot_test.cpp
-    cloud/cloud_warm_up_job_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_compaction_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_tablet_mgr_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_tablet_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_prefetch_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cumulative_compaction_policy_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/fork_and_join_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_tablet_hotspot_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_warm_up_job_test.cpp
 )
 
 if (CLOUD_MODE)
     list(REMOVE_ITEM UT_FILES
-        # TODO
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/delta_writer_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/timestamped_version_tracker_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/cumulative_compaction_policy_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/cumulative_compaction_time_series_policy_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/engine_storage_migration_task_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/tablet_cooldown_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/tablet_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/txn_manager_test.cpp
     )
 else()
     list(REMOVE_ITEM UT_FILES
