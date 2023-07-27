@@ -123,10 +123,11 @@ class Config {
     Config() {}
 
     Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
+           String feSourceThriftAddress, String feTargetThriftAddress, String feSyncerUser, String feSyncerPassword,
            String feHttpAddress, String feHttpUser, String feHttpPassword,
            String feCloudHttpAddress, String feCloudHttpUser, String feCloudHttpPassword, String instanceId,
            String cloudUniqueId, String metaServiceHttpAddress, String recycleServiceHttpAddress, String suitePath,
-           String dataPath, String realDataPath, String sf1DataPath, String cacheDataPath, String testGroups,
+           String dataPath, String realDataPath, String cacheDataPath, Boolean enableCacheData, String testGroups,
            String excludeGroups, String testSuites, String excludeSuites, String testDirectories, String excludeDirectories,
            String pluginPath, String sslCertificatePath, String multiClusterBes, String metaServiceToken, String multiClusterInstance,
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
