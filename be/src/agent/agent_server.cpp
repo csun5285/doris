@@ -125,7 +125,7 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     _storage_medium_migrate_workers.reset(
             new StorageMediumMigrateTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
     _storage_medium_migrate_workers->start();
-#endif
+#endif // BE_TEST
     CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
     CREATE_AND_START_POOL(CHECK_CONSISTENCY, _check_consistency_workers);
     CREATE_AND_START_POOL(UPLOAD, _upload_workers);
@@ -141,8 +141,8 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     CREATE_AND_START_THREAD(REPORT_OLAP_TABLE, _report_tablet_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
     CREATE_AND_START_POOL(PUSH_STORAGE_POLICY, _push_storage_policy_workers);
-#endif // CLOUD_MODE
     CREATE_AND_START_THREAD(GC_BINLOG, _gc_binlog_workers);
+#endif // CLOUD_MODE
 #undef CREATE_AND_START_POOL
 #undef CREATE_AND_START_THREAD
 
