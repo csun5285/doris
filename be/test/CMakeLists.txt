@@ -58,6 +58,7 @@ list(REMOVE_ITEM UT_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/jsonb_value_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/large_int_value_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/io/s3_file_writer_test.cpp # FIXME(AlexYue)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_file_cache.cpp
 )
 
 set(CLOUD_TEST_FILES

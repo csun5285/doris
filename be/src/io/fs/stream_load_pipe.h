@@ -76,6 +76,8 @@ public:
 
     FileSystemSPtr fs() const override { return nullptr; }
 
+    size_t get_queue_size() { return _buf_queue.size(); }
+
 protected:
     Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                         const IOContext* io_ctx) override;
