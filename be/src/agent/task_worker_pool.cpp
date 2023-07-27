@@ -1692,10 +1692,8 @@ void AlterTableTaskPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, 
     // Do not need to adjust delete success or not
     // Because if delete failed create rollup will failed
     TTabletId new_tablet_id = 0;
-    TSchemaHash new_schema_hash = 0;
     if (status.ok()) {
         new_tablet_id = agent_task_req.alter_tablet_req_v2.new_tablet_id;
-        new_schema_hash = agent_task_req.alter_tablet_req_v2.new_schema_hash;
         EngineAlterTabletTask engine_task(agent_task_req.alter_tablet_req_v2);
         status = _env->storage_engine()->execute_task(&engine_task);
     }
@@ -1710,14 +1708,8 @@ void AlterTableTaskPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, 
     finish_task_request->__set_task_type(task_type);
     finish_task_request->__set_signature(signature);
 
-    std::vector<TTabletInfo> finish_tablet_infos;
-    if (status.ok()) {
-        TTabletInfo tablet_info;
-        status = _get_tablet_info(new_tablet_id, new_schema_hash, signature, &tablet_info);
-        if (status.ok()) {
-            finish_tablet_infos.push_back(tablet_info);
-        }
-    }
+    // Finish tablet infos is useless for alter task
+    //std::vector<TTabletInfo> finish_tablet_infos;}
 
     if (!status.ok() && !status.is<NOT_IMPLEMENTED_ERROR>()) {
         LOG_WARNING("failed to {}", process_name)
@@ -1726,7 +1718,7 @@ void AlterTableTaskPool::_alter_tablet(const TAgentTaskRequest& agent_task_req, 
                 .tag("new_tablet_id", new_tablet_id)
                 .error(status);
     } else {
-        finish_task_request->__set_finish_tablet_infos(finish_tablet_infos);
+        // finish_task_request->__set_finish_tablet_infos(finish_tablet_infos);
         LOG_INFO("successfully {}", process_name)
                 .tag("signature", agent_task_req.signature)
                 .tag("base_tablet_id", agent_task_req.alter_tablet_req_v2.base_tablet_id)
