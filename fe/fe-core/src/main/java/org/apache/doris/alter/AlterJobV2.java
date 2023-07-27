@@ -89,8 +89,12 @@ public abstract class AlterJobV2 implements Writable {
     protected long timeoutMs = -1;
     @SerializedName(value = "cloudClusterName")
     protected String cloudClusterName = "";
+    @SerializedName(value = "rawSql")
+    protected String rawSql;
 
-    public AlterJobV2(long jobId, JobType jobType, long dbId, long tableId, String tableName, long timeoutMs) {
+    public AlterJobV2(String rawSql, long jobId, JobType jobType, long dbId, long tableId, String tableName,
+                      long timeoutMs) {
+        this.rawSql = rawSql;
         this.jobId = jobId;
         this.type = jobType;
         this.dbId = dbId;
@@ -273,5 +277,9 @@ public abstract class AlterJobV2 implements Writable {
     public static AlterJobV2 read(DataInput in) throws IOException {
         String json = Text.readString(in);
         return GsonUtils.GSON.fromJson(json, AlterJobV2.class);
+    }
+
+    public String toJson() {
+        return GsonUtils.GSON.toJson(this);
     }
 }

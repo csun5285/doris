@@ -277,6 +277,9 @@ private:
 
     static Status _convert_historical_rowsets(const SchemaChangeParams& sc_params);
 
+    static Status _parse_request(const SchemaChangeParams& sc_params, BlockChanger* changer,
+                                 bool* sc_sorting, bool* sc_directly);
+
     // Initialization Settings for creating a default value
     static Status _init_column_mapping(ColumnMapping* column_mapping,
                                        const TabletColumn& column_schema, const std::string& value);

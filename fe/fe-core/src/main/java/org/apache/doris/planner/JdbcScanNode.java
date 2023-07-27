@@ -30,7 +30,6 @@ import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.JdbcTable;
-import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.catalog.external.JdbcExternalTable;
 import org.apache.doris.common.AnalysisException;
@@ -77,7 +76,7 @@ public class JdbcScanNode extends ExternalScanNode {
             tbl = (JdbcTable) (desc.getTable());
         }
         jdbcType = tbl.getJdbcTableType();
-        tableName = OdbcTable.databaseProperName(jdbcType, tbl.getJdbcTable());
+        tableName = JdbcTable.databaseProperName(jdbcType, tbl.getJdbcTable());
     }
 
     @Override
@@ -127,7 +126,7 @@ public class JdbcScanNode extends ExternalScanNode {
         for (SlotRef slotRef : slotRefs) {
             SlotRef slotRef1 = (SlotRef) slotRef.clone();
             slotRef1.setTblName(null);
-            slotRef1.setLabel(OdbcTable.databaseProperName(jdbcType, slotRef1.getColumnName()));
+            slotRef1.setLabel(JdbcTable.databaseProperName(jdbcType, slotRef1.getColumnName()));
             sMap.put(slotRef, slotRef1);
         }
 
@@ -148,7 +147,7 @@ public class JdbcScanNode extends ExternalScanNode {
                 continue;
             }
             Column col = slot.getColumn();
-            columns.add(OdbcTable.databaseProperName(jdbcType, col.getName()));
+            columns.add(JdbcTable.databaseProperName(jdbcType, col.getName()));
         }
         if (0 == columns.size()) {
             columns.add("*");
@@ -193,6 +192,7 @@ public class JdbcScanNode extends ExternalScanNode {
                 || jdbcType == TOdbcTableType.CLICKHOUSE
                 || jdbcType == TOdbcTableType.SAP_HANA
                 || jdbcType == TOdbcTableType.TRINO
+                || jdbcType == TOdbcTableType.PRESTO
                 || jdbcType == TOdbcTableType.OCEANBASE)) {
             sql.append(" LIMIT ").append(limit);
         }
@@ -302,8 +302,8 @@ public class JdbcScanNode extends ExternalScanNode {
                 return filter;
             }
         }
-        if (tableType.equals(TOdbcTableType.TRINO) && expr.contains(DateLiteral.class)
-                && (expr instanceof BinaryPredicate)) {
+        if ((tableType.equals(TOdbcTableType.TRINO) || tableType.equals(TOdbcTableType.PRESTO))
+                && expr.contains(DateLiteral.class) && (expr instanceof BinaryPredicate)) {
             ArrayList<Expr> children = expr.getChildren();
             if (children.get(1).isConstant() && (children.get(1).getType().isDate()) || children
                     .get(1).getType().isDateV2()) {
@@ -324,4 +324,3 @@ public class JdbcScanNode extends ExternalScanNode {
         return expr.toMySql();
     }
 }
-

@@ -47,12 +47,11 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.planner.DataPartition;
 import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.ExportSink;
+import org.apache.doris.planner.JdbcTableSink;
 import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rewrite.ExprRewriter;
 import org.apache.doris.service.FrontendOptions;
-import org.apache.doris.tablefunction.StageTableValuedFunction;
-import org.apache.doris.tablefunction.TableValuedFunctionIf;
 import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionState;
@@ -65,12 +64,11 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -96,19 +94,17 @@ import java.util.stream.Collectors;
 public class NativeInsertStmt extends InsertStmt {
 
     private static final Logger LOG = LogManager.getLogger(InsertStmt.class);
-    private static final String SET_VAR_KEY = "set_var";
 
     private static final String SHUFFLE_HINT = "SHUFFLE";
     private static final String NOSHUFFLE_HINT = "NOSHUFFLE";
 
-    private final TableName tblName;
+    protected final TableName tblName;
     private final PartitionNames targetPartitionNames;
     // parsed from targetPartitionNames.
     private List<Long> targetPartitionIds;
-    private final List<String> targetColumnNames;
+    protected List<String> targetColumnNames;
     private QueryStmt queryStmt;
     private final List<String> planHints;
-    private final Map<String, String> insertHints = new HashMap<>();
     private Boolean isRepartition;
 
     // set after parse all columns and expr in query statement
@@ -117,7 +113,7 @@ public class NativeInsertStmt extends InsertStmt {
 
     private final Map<String, Expr> exprByName = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
 
-    private Table targetTable;
+    protected Table targetTable;
 
     private DatabaseIf db;
     private long transactionId;
@@ -138,20 +134,12 @@ public class NativeInsertStmt extends InsertStmt {
 
     private boolean isValuesOrConstantSelect;
 
-    private boolean userSetLabel = false;
-    private boolean stageCopyBegan = false;
-
     private boolean isPartialUpdate = false;
 
     private HashSet<String> partialUpdateCols = new HashSet<String>();
 
-    public NativeInsertStmt(InsertTarget target, String label, List<String> cols,
-                            InsertSource source, List<String> hints) {
-        this(target, label, cols, source, hints, null);
-    }
-
     public NativeInsertStmt(InsertTarget target, String label, List<String> cols, InsertSource source,
-            List<String> hints, Map<String, Map<String, String>> insertHints) {
+            List<String> hints) {
         super(new LabelName(null, label), null, null);
         this.tblName = target.getTblName();
         this.targetPartitionNames = target.getPartitionNames();
@@ -174,17 +162,6 @@ public class NativeInsertStmt extends InsertStmt {
         this.targetColumnNames = targetColumnNames;
         this.isValuesOrConstantSelect = (queryStmt instanceof SelectStmt
                 && ((SelectStmt) queryStmt).getTableRefs().isEmpty());
-    }
-
-    public NativeInsertStmt(NativeInsertStmt other) {
-        super(other.label, other.properties, other.comments);
-        this.tblName = other.tblName;
-        this.targetPartitionNames = other.targetPartitionNames;
-        this.label = other.label;
-        this.queryStmt = other.queryStmt;
-        this.planHints = other.planHints;
-        this.targetColumnNames = other.targetColumnNames;
-        this.isValuesOrConstantSelect = other.isValuesOrConstantSelect;
     }
 
     public NativeInsertStmt(InsertTarget target, String label, List<String> cols, InsertSource source,
@@ -277,8 +254,7 @@ public class NativeInsertStmt extends InsertStmt {
         return isTransactionBegin;
     }
 
-    @Override
-    public void analyze(Analyzer analyzer) throws UserException {
+    protected void preCheckAnalyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
 
         if (targetTable == null) {
@@ -302,6 +278,20 @@ public class NativeInsertStmt extends InsertStmt {
         if (targetPartitionNames != null) {
             targetPartitionNames.analyze(analyzer);
         }
+    }
+
+    /**
+     * translate load related stmt to`insert into xx select xx from tvf` semantic
+     */
+    protected void convertSemantic(Analyzer analyzer) throws UserException {
+        // do nothing
+    }
+
+    @Override
+    public void analyze(Analyzer analyzer) throws UserException {
+        preCheckAnalyze(analyzer);
+
+        convertSemantic(analyzer);
 
         // set target table and
         analyzeTargetTable(analyzer);
@@ -331,7 +321,6 @@ public class NativeInsertStmt extends InsertStmt {
                         Lists.newArrayList(targetTable.getId()), label.getLabelName(),
                         new TxnCoordinator(TxnSourceType.FE, FrontendOptions.getLocalHostAddress()),
                         sourceType, timeoutSecond);
-                afterBeginTxn();
             }
             isTransactionBegin = true;
         }
@@ -346,8 +335,7 @@ public class NativeInsertStmt extends InsertStmt {
         }
     }
 
-    private void analyzeTargetTable(Analyzer analyzer) throws AnalysisException {
-        // Get table
+    protected void initTargetTable(Analyzer analyzer) throws AnalysisException {
         if (targetTable == null) {
             DatabaseIf db = analyzer.getEnv().getCatalogMgr()
                     .getCatalog(tblName.getCtl()).getDbOrAnalysisException(tblName.getDb());
@@ -360,6 +348,11 @@ public class NativeInsertStmt extends InsertStmt {
                 throw new AnalysisException("Not support insert target table.");
             }
         }
+    }
+
+    private void analyzeTargetTable(Analyzer analyzer) throws AnalysisException {
+        // Get table
+        initTargetTable(analyzer);
 
         if (targetTable instanceof OlapTable) {
             OlapTable olapTable = (OlapTable) targetTable;
@@ -419,6 +412,9 @@ public class NativeInsertStmt extends InsertStmt {
 
         // check columns of target table
         for (Column col : baseColumns) {
+            if (col.isAutoInc()) {
+                continue;
+            }
             if (isPartialUpdate && !partialUpdateCols.contains(col.getName())) {
                 continue;
             }
@@ -434,6 +430,7 @@ public class NativeInsertStmt extends InsertStmt {
     private void analyzeSubquery(Analyzer analyzer) throws UserException {
         // Analyze columns mentioned in the statement.
         Set<String> mentionedColumns = Sets.newTreeSet(String.CASE_INSENSITIVE_ORDER);
+        List<String> realTargetColumnNames;
         if (targetColumnNames == null) {
             // the mentioned columns are columns which are visible to user, so here we use
             // getBaseSchema(), not getFullSchema()
@@ -452,11 +449,11 @@ public class NativeInsertStmt extends InsertStmt {
                 }
                 targetColumns.add(col);
             }
-            // hll column mush in mentionedColumns
+            // hll column must in mentionedColumns
             for (Column col : targetTable.getBaseSchema()) {
                 if (col.getType().isObjectStored() && !mentionedColumns.contains(col.getName())) {
-                    throw new AnalysisException(" object-stored column " + col.getName()
-                            + " mush in insert into columns");
+                    throw new AnalysisException(
+                            "object-stored column " + col.getName() + " must in insert into columns");
                 }
             }
         }
@@ -516,8 +513,25 @@ public class NativeInsertStmt extends InsertStmt {
 
         // parse query statement
         queryStmt.setFromInsert(true);
-        userSetLabel = !StringUtils.isEmpty(label.getLabelName());
         queryStmt.analyze(analyzer);
+
+        // deal with this case: insert into tbl values();
+        // should try to insert default values for all columns in tbl if set
+        if (isValuesOrConstantSelect) {
+            final ValueList valueList = ((SelectStmt) queryStmt).getValueList();
+            if (valueList != null && valueList.getFirstRow().isEmpty() && CollectionUtils.isEmpty(targetColumnNames)) {
+                final int rowSize = mentionedColumns.size();
+                final List<String> colLabels = queryStmt.getColLabels();
+                final List<Expr> resultExprs = queryStmt.getResultExprs();
+                Preconditions.checkState(resultExprs.isEmpty(), "result exprs should be empty.");
+                for (int i = 0; i < rowSize; i++) {
+                    resultExprs.add(new IntLiteral(1));
+                    final DefaultValueExpr defaultValueExpr = new DefaultValueExpr();
+                    valueList.getFirstRow().add(defaultValueExpr);
+                    colLabels.add(defaultValueExpr.toColumnLabel());
+                }
+            }
+        }
 
         // check if size of select item equal with columns mentioned in statement
         if (mentionedColumns.size() != queryStmt.getResultExprs().size()) {
@@ -527,11 +541,21 @@ public class NativeInsertStmt extends InsertStmt {
         // Check if all columns mentioned is enough
         checkColumnCoverage(mentionedColumns, targetTable.getBaseSchema());
 
+        realTargetColumnNames = targetColumns.stream().map(column -> column.getName()).collect(Collectors.toList());
         Map<String, Expr> slotToIndex = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
-        List<Column> baseColumns = targetTable.getBaseSchema();
-        int size = Math.min(baseColumns.size(), queryStmt.getResultExprs().size());
-        for (int i = 0; i < size; i++) {
-            slotToIndex.put(baseColumns.get(i).getName(), queryStmt.getResultExprs().get(i));
+        for (int i = 0; i < queryStmt.getResultExprs().size(); i++) {
+            slotToIndex.put(realTargetColumnNames.get(i), queryStmt.getResultExprs().get(i)
+                    .checkTypeCompatibility(targetTable.getColumn(realTargetColumnNames.get(i)).getType()));
+        }
+
+        for (Column column : targetTable.getBaseSchema()) {
+            if (!slotToIndex.containsKey(column.getName())) {
+                if (column.getDefaultValue() == null) {
+                    slotToIndex.put(column.getName(), new NullLiteral());
+                } else {
+                    slotToIndex.put(column.getName(), new StringLiteral(column.getDefaultValue()));
+                }
+            }
         }
 
         // handle VALUES() or SELECT constant list
@@ -745,6 +769,9 @@ public class NativeInsertStmt extends InsertStmt {
             }
             if (exprByName.containsKey(col.getName())) {
                 resultExprByName.add(Pair.of(col.getName(), exprByName.get(col.getName())));
+            } else if (targetTable.getType().equals(TableIf.TableType.JDBC_EXTERNAL_TABLE)) {
+                // For JdbcTable,we do not need to generate plans for columns that are not specified at write time
+                continue;
             } else {
                 // process sequence col, map sequence column to other column
                 if (targetTable instanceof OlapTable && ((OlapTable) targetTable).hasSequenceCol()
@@ -796,6 +823,15 @@ public class NativeInsertStmt extends InsertStmt {
                     table.getLineDelimiter(),
                     brokerDesc);
             dataPartition = dataSink.getOutputPartition();
+        } else if (targetTable instanceof JdbcTable) {
+            //for JdbcTable,we need to pass the currently written column to `JdbcTableSink`
+            //to generate the prepare insert statment
+            List<String> insertCols = Lists.newArrayList();
+            for (Column column : targetColumns) {
+                insertCols.add(column.getName());
+            }
+            dataSink = new JdbcTableSink((JdbcTable) targetTable, insertCols);
+            dataPartition = DataPartition.UNPARTITIONED;
         } else {
             dataSink = DataSink.createDataSink(targetTable);
             dataPartition = DataPartition.UNPARTITIONED;
@@ -877,62 +913,6 @@ public class NativeInsertStmt extends InsertStmt {
             return RedirectStatus.NO_FORWARD;
         } else {
             return RedirectStatus.FORWARD_WITH_SYNC;
-        }
-    }
-
-    @Override
-    public String toSql() {
-        return null;
-    }
-
-    public Map<String, String> getInsertHints() {
-        return insertHints;
-    }
-
-    public void afterBeginTxn() throws AnalysisException {
-        if (userSetLabel || queryStmt == null || !(queryStmt instanceof SelectStmt)) {
-            return;
-        }
-        SelectStmt selectStmt = (SelectStmt) queryStmt;
-        FromClause fromClause = selectStmt.fromClause;
-        List<TableRef> tableRefs = fromClause.getTableRefs();
-        if (tableRefs == null) {
-            return;
-        }
-        for (TableRef tableRef : tableRefs) {
-            if (tableRef instanceof TableValuedFunctionRef) {
-                TableValuedFunctionRef tableValuedFunctionRef = (TableValuedFunctionRef) tableRef;
-                TableValuedFunctionIf tableFunction = tableValuedFunctionRef.getTableFunction();
-                if (tableFunction instanceof StageTableValuedFunction) {
-                    StageTableValuedFunction stageTableValuedFunction
-                            = (StageTableValuedFunction) tableFunction;
-                    stageTableValuedFunction.parseFile(targetTable.getId());
-                    stageCopyBegan = true;
-                }
-            }
-        }
-    }
-
-    public void afterFinishTxn(boolean success) {
-        if (!stageCopyBegan || queryStmt == null || !(queryStmt instanceof SelectStmt)) {
-            return;
-        }
-        SelectStmt selectStmt = (SelectStmt) queryStmt;
-        FromClause fromClause = selectStmt.fromClause;
-        List<TableRef> tableRefs = fromClause.getTableRefs();
-        if (tableRefs == null) {
-            return;
-        }
-        for (TableRef tableRef : tableRefs) {
-            if (tableRef instanceof TableValuedFunctionRef) {
-                TableValuedFunctionRef tableValuedFunctionRef = (TableValuedFunctionRef) tableRef;
-                TableValuedFunctionIf tableFunction = tableValuedFunctionRef.getTableFunction();
-                if (tableFunction instanceof StageTableValuedFunction) {
-                    StageTableValuedFunction stageTableValuedFunction
-                            = (StageTableValuedFunction) tableFunction;
-                    stageTableValuedFunction.finishCopy(success);
-                }
-            }
         }
     }
 }

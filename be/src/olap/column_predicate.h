@@ -19,9 +19,7 @@
 
 #include <roaring/roaring.hh>
 
-#include "olap/schema.h"
 #include "olap/rowset/segment_v2/bitmap_index_reader.h"
-#include "olap/rowset/segment_v2/inverted_index_reader.h"
 #include "olap/rowset/segment_v2/bloom_filter.h"
 #include "olap/rowset/segment_v2/inverted_index_reader.h"
 #include "olap/schema.h"
@@ -51,10 +49,9 @@ enum class PredicateType {
     NOT_IN_LIST = 8,
     IS_NULL = 9,
     IS_NOT_NULL = 10,
-    BF = 11, // BloomFilter
+    BF = 11,            // BloomFilter
     BITMAP_FILTER = 12, // BitmapFilter
-    MATCH = 13, // fulltext match
-    RANGE = 14, // range predicate for bkd index
+    MATCH = 13,         // fulltext match
 };
 
 inline std::string type_to_string(PredicateType type) {
@@ -182,6 +179,10 @@ public:
 
     virtual bool evaluate_and(const BloomFilter* bf) const { return true; }
 
+    virtual bool evaluate_and(const StringRef* dict_words, const size_t dict_count) const {
+        return true;
+    }
+
     virtual bool can_do_bloom_filter() const { return false; }
 
     // used to evaluate pre read column in lazy materialization
@@ -252,8 +253,6 @@ public:
             return "bf";
         case PredicateType::MATCH:
             return "match";
-        case PredicateType::RANGE:
-            return "range";
         default:
             return "unknown";
         }

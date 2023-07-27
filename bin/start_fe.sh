@@ -179,13 +179,10 @@ done
 # make sure the doris-fe.jar is at first order, so that some classed
 # with same qualified name can be loaded priority from doris-fe.jar
 CLASSPATH="${DORIS_FE_JAR}:${CLASSPATH}"
-export CLASSPATH="${CLASSPATH}:${DORIS_HOME}/lib:${DORIS_HOME}/conf"
-
-if [[ "${OPT_VERSION}" != "" ]]; then
-    export DORIS_LOG_TO_STDERR=1
-    "${JAVA}" -XX:OnOutOfMemoryError="kill -9 %p" org.apache.doris.PaloFe ${OPT_VERSION:+${OPT_VERSION}} "$@" </dev/null
-    exit 0
+if [[ -n "${HADOOP_CONF_DIR}" ]]; then
+    CLASSPATH="${HADOOP_CONF_DIR}:${CLASSPATH}"
 fi
+export CLASSPATH="${DORIS_HOME}/conf:${CLASSPATH}:${DORIS_HOME}/lib"
 
 pidfile="${PID_DIR}/fe.pid"
 

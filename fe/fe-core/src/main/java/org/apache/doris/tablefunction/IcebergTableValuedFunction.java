@@ -156,4 +156,3 @@ public class IcebergTableValuedFunction extends MetadataTableValuedFunction {
         return Lists.newArrayList();
     }
 }
-

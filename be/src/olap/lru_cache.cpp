@@ -357,7 +357,9 @@ Cache::Handle* LRUCache::insert(const CacheKey& key, uint32_t hash, void* value,
     e->charge = charge;
     e->key_length = key.size();
     e->total_size = (_type == LRUCacheType::SIZE ? handle_size + charge : 1);
-    //DCHECK(_type == LRUCacheType::SIZE || bytes != -1) << " _type " << _type;
+#ifndef CLOUD_MODE
+    DCHECK(_type == LRUCacheType::SIZE || bytes != -1) << " _type " << _type;
+#endif
     e->bytes = (_type == LRUCacheType::SIZE ? handle_size + charge : handle_size + bytes);
     e->hash = hash;
     e->refs = 2; // one for the returned handle, one for LRUCache.
@@ -548,6 +550,13 @@ ShardedLRUCache::ShardedLRUCache(const std::string& name, size_t total_capacity,
     INT_ATOMIC_COUNTER_METRIC_REGISTER(_entity, cache_lookup_count);
     INT_ATOMIC_COUNTER_METRIC_REGISTER(_entity, cache_hit_count);
     INT_DOUBLE_METRIC_REGISTER(_entity, cache_hit_ratio);
+
+    _hit_count_bvar.reset(new bvar::Adder<uint64_t>("doris_cache", _name));
+    _hit_count_per_second.reset(new bvar::PerSecond<bvar::Adder<uint64_t>>(
+            "doris_cache", _name + "_persecond", _hit_count_bvar.get(), 60));
+    _lookup_count_bvar.reset(new bvar::Adder<uint64_t>("doris_cache", _name));
+    _lookup_count_per_second.reset(new bvar::PerSecond<bvar::Adder<uint64_t>>(
+            "doris_cache", _name + "_persecond", _lookup_count_bvar.get(), 60));
 }
 
 ShardedLRUCache::ShardedLRUCache(const std::string& name, size_t total_capacity, LRUCacheType type,

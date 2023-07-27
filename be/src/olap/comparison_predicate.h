@@ -258,6 +258,19 @@ public:
         }
     }
 
+    bool evaluate_and(const StringRef* dict_words, const size_t count) const override {
+        if constexpr (std::is_same_v<T, StringRef>) {
+            for (size_t i = 0; i != count; ++i) {
+                if (_operator(dict_words[i], _value) ^ _opposite) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return true;
+    }
+
     bool can_do_bloom_filter() const override { return PT == PredicateType::EQ; }
 
     void evaluate_or(const vectorized::IColumn& column, const uint16_t* sel, uint16_t size,
@@ -530,7 +543,6 @@ private:
                         return _opposite ? size : 0;
                     }
                 }
-
                 uint16_t new_size = 0;
 #define EVALUATE_WITH_NULL_IMPL(IDX) \
     _opposite ^ (!null_map[IDX] && _operator(pred_col_data[IDX], dict_code))

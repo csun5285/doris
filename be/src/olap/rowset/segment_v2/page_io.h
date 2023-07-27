@@ -21,14 +21,14 @@
 
 #include <vector>
 
-#include "io/fs/file_reader.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "gen_cpp/segment_v2.pb.h"
+#include "io/fs/file_reader.h"
+#include "io/io_common.h"
 #include "olap/iterators.h"
 #include "olap/rowset/segment_v2/encoding_info.h"
 #include "olap/rowset/segment_v2/page_handle.h"
-#include "io/io_common.h"
 #include "olap/rowset/segment_v2/page_pointer.h"
 #include "util/slice.h"
 

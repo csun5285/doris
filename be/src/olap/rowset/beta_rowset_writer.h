@@ -125,7 +125,9 @@ public:
 
     Status wait_flying_segcompaction() override;
 
-    const std::vector<std::pair<int, io::FileWriterPtr>>& get_file_writers() const { return _file_writers; }
+    const std::vector<std::pair<int, io::FileWriterPtr>>& get_file_writers() const {
+        return _file_writers;
+    }
 
 private:
     Status _do_add_block(const vectorized::Block* block,

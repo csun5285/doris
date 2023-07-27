@@ -69,18 +69,25 @@ public class MysqlChannel {
     protected String remoteIp;
     protected boolean isSend;
 
-    // mysql useServerPrepStmts
-    private boolean useServerPrepStmts;
-    // mysql flag CLIENT_DEPRECATE_EOF
-    private boolean clientDeprecatedEOF;
     protected boolean isSslMode;
     protected boolean isSslHandshaking;
     private SSLEngine sslEngine;
 
     protected volatile MysqlSerializer serializer;
 
+    // mysql flag CLIENT_DEPRECATE_EOF
+    private boolean clientDeprecatedEOF;
+
     protected MysqlChannel() {
         // For DummyMysqlChannel
+    }
+
+    public void setClientDeprecatedEOF() {
+        clientDeprecatedEOF = true;
+    }
+
+    public boolean clientDeprecatedEOF() {
+        return clientDeprecatedEOF;
     }
 
     public MysqlChannel(StreamConnection connection) {
@@ -112,22 +119,6 @@ public class MysqlChannel {
         this.remainingBuffer.flip();
         this.tempBuffer = ByteBuffer.allocate(16 * 1024);
         this.sslHeaderByteBuffer = ByteBuffer.allocate(SSL_PACKET_HEADER_LEN);
-    }
-
-    public void setUseServerPrepStmts() {
-        useServerPrepStmts = true;
-    }
-
-    public void setClientDeprecatedEOF() {
-        clientDeprecatedEOF = true;
-    }
-
-    public boolean useServerPrepStmts() {
-        return useServerPrepStmts;
-    }
-
-    public boolean clientDeprecatedEOF() {
-        return clientDeprecatedEOF;
     }
 
     public void setSequenceId(int sequenceId) {

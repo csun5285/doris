@@ -28,6 +28,7 @@ import org.apache.doris.analysis.CreateIndexClause;
 import org.apache.doris.analysis.DropColumnClause;
 import org.apache.doris.analysis.DropIndexClause;
 import org.apache.doris.analysis.IndexDef;
+import org.apache.doris.analysis.IndexDef.IndexType;
 import org.apache.doris.analysis.ModifyColumnClause;
 import org.apache.doris.analysis.ModifyTablePropertiesClause;
 import org.apache.doris.analysis.ReorderColumnsClause;
@@ -1171,15 +1172,9 @@ public class SchemaChangeHandler extends AlterHandler {
         }
     }
 
-    private void createJob(long dbId, OlapTable olapTable, Map<Long, LinkedList<Column>> indexSchemaMap,
+    private void createJob(String rawSql, long dbId, OlapTable olapTable, Map<Long, LinkedList<Column>> indexSchemaMap,
                            Map<String, String> propertyMap, List<Index> indexes) throws UserException {
-        if (olapTable.getState() == OlapTableState.ROLLUP) {
-            throw new DdlException("Table[" + olapTable.getName() + "]'s is doing ROLLUP job");
-        }
-
         checkReplicaCount(olapTable);
-        // for now table's state can only be NORMAL
-        Preconditions.checkState(olapTable.getState() == OlapTableState.NORMAL, olapTable.getState().name());
 
         // process properties first
         // for now. properties has 3 options
@@ -1468,8 +1463,9 @@ public class SchemaChangeHandler extends AlterHandler {
         long bufferSize = IdGeneratorUtil.getBufferSizeForAlterTable(olapTable, changedIndexIdToSchema.keySet());
         IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
         long jobId = idGeneratorBuffer.getNextId();
-        SchemaChangeJobV2 schemaChangeJob = new SchemaChangeJobV2(jobId, dbId, olapTable.getId(), olapTable.getName(),
-                timeoutSecond * 1000);
+        SchemaChangeJobV2 schemaChangeJob =
+                new SchemaChangeJobV2(rawSql, jobId, dbId, olapTable.getId(), olapTable.getName(),
+                        timeoutSecond * 1000);
         schemaChangeJob.setBloomFilterInfo(hasBfChange, bfColumns, bfFpp);
         schemaChangeJob.setAlterIndexInfo(hasIndexChange, indexes);
         // If StorageFormat is set to TStorageFormat.V2
@@ -1750,10 +1746,12 @@ public class SchemaChangeHandler extends AlterHandler {
     }
 
     @Override
-    public void process(List<AlterClause> alterClauses, String clusterName, Database db, OlapTable olapTable)
+    public void process(String rawSql, List<AlterClause> alterClauses, String clusterName, Database db,
+                        OlapTable olapTable)
             throws UserException {
         olapTable.writeLockOrDdlException();
         try {
+            olapTable.checkNormalStateForAlter();
             //alterClauses can or cannot light schema change
             boolean lightSchemaChange = true;
             boolean lightIndexChange = false;
@@ -1906,19 +1904,19 @@ public class SchemaChangeHandler extends AlterHandler {
                     // do nothing, properties are already in propertyMap
                 } else if (alterClause instanceof CreateIndexClause) {
                     CreateIndexClause createIndexClause = (CreateIndexClause) alterClause;
-                    // IndexDef indexDef = createIndexClause.getIndexDef();
-                    // Index index = createIndexClause.getIndex();
+                    IndexDef indexDef = createIndexClause.getIndexDef();
+                    Index index = createIndexClause.getIndex();
                     if (processAddIndex(createIndexClause, olapTable, newIndexes)) {
                         return;
                     }
                     lightSchemaChange = false;
 
-                    // if (indexDef.isInvertedIndex()) {
-                    //     alterIndexes.add(index);
-                    //     isDropIndex = false;
-                    //     // now only support light index change for inverted index
-                    //     lightIndexChange = true;
-                    // }
+                    if (indexDef.isInvertedIndex()) {
+                        alterIndexes.add(index);
+                        isDropIndex = false;
+                        // now only support light index change for inverted index
+                        lightIndexChange = true;
+                    }
                 } else if (alterClause instanceof BuildIndexClause) {
                     BuildIndexClause buildIndexClause = (BuildIndexClause) alterClause;
                     IndexDef indexDef = buildIndexClause.getIndexDef();
@@ -1963,21 +1961,21 @@ public class SchemaChangeHandler extends AlterHandler {
                     }
                     lightSchemaChange = false;
 
-                    // DropIndexClause dropIndexClause = (DropIndexClause) alterClause;
-                    // List<Index> existedIndexes = olapTable.getIndexes();
-                    // Index found = null;
-                    // for (Index existedIdx : existedIndexes) {
-                    //     if (existedIdx.getIndexName().equalsIgnoreCase(dropIndexClause.getIndexName())) {
-                    //         found = existedIdx;
-                    //         break;
-                    //     }
-                    // }
-                    // IndexDef.IndexType indexType = found.getIndexType();
-                    // if (indexType == IndexType.INVERTED) {
-                    //     alterIndexes.add(found);
-                    //     isDropIndex = true;
-                    //     lightIndexChange = true;
-                    // }
+                    DropIndexClause dropIndexClause = (DropIndexClause) alterClause;
+                    List<Index> existedIndexes = olapTable.getIndexes();
+                    Index found = null;
+                    for (Index existedIdx : existedIndexes) {
+                        if (existedIdx.getIndexName().equalsIgnoreCase(dropIndexClause.getIndexName())) {
+                            found = existedIdx;
+                            break;
+                        }
+                    }
+                    IndexDef.IndexType indexType = found.getIndexType();
+                    if (indexType == IndexType.INVERTED) {
+                        alterIndexes.add(found);
+                        isDropIndex = true;
+                        lightIndexChange = true;
+                    }
                 } else {
                     Preconditions.checkState(false);
                 }
@@ -1991,18 +1989,18 @@ public class SchemaChangeHandler extends AlterHandler {
             if (lightSchemaChange) {
                 long jobId = Env.getCurrentEnv().getNextId();
                 //for schema change add/drop value column optimize, direct modify table meta.
-                modifyTableLightSchemaChange(db, olapTable, indexSchemaMap, newIndexes,
+                modifyTableLightSchemaChange(rawSql, db, olapTable, indexSchemaMap, newIndexes,
                                              null, isDropIndex, jobId, false);
             } else if (lightIndexChange) {
                 long jobId = Env.getCurrentEnv().getNextId();
                 //for schema change add/drop inverted index optimize, direct modify table meta firstly.
-                modifyTableLightSchemaChange(db, olapTable, indexSchemaMap, newIndexes,
+                modifyTableLightSchemaChange(rawSql, db, olapTable, indexSchemaMap, newIndexes,
                                              alterIndexes, isDropIndex, jobId, false);
             } else if (buildIndexChange) {
                 buildOrDeleteTableInvertedIndices(db, olapTable, indexSchemaMap,
                                                   alterIndexes, invertedIndexOnPartitions, false);
             } else {
-                createJob(db.getId(), olapTable, indexSchemaMap, propertyMap, newIndexes);
+                createJob(rawSql, db.getId(), olapTable, indexSchemaMap, propertyMap, newIndexes);
             }
         } finally {
             olapTable.writeUnlock();
@@ -2159,74 +2157,7 @@ public class SchemaChangeHandler extends AlterHandler {
     }
 
     /**
-     * Update all tablet' ttl_seconds property of table
-     */
-    // public void updateTableTtlSecondsMeta(Database db, String tableName, Map<String, String> properties)
-    //         throws UserException {
-    //     if (!properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
-    //         return;
-    //     }
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
-    //     if (ttlSeconds == olapTable.getTTLSeconds()) {
-    //         LOG.info("ttlSeconds == olapTable.getTTLSeconds()"
-    //                 + ttlSeconds + " " + olapTable.getTTLSeconds());
-    //         return;
-    //     }
-    //     List<Partition> partitions = Lists.newArrayList();
-    //     olapTable.readLock();
-    //     try {
-    //         partitions.addAll(olapTable.getPartitions());
-    //     } finally {
-    //         olapTable.readUnlock();
-    //     }
-    //     for (Partition partition : partitions) {
-    //         updateCloudTableTtlSecondsMeta(db, olapTable.getName(), partition.getName(), ttlSeconds);
-    //     }
-
-    //     olapTable.writeLockOrDdlException();
-    //     try {
-    //         Env.getCurrentEnv().modifyTableTtlSecondsMeta(db, olapTable, properties);
-    //     } finally {
-    //         olapTable.writeUnlock();
-    //     }
-    // }
-
-    /**
-     * Update all partitions' persistent property of table
-     */
-    // public void updateTablePersistentMeta(Database db, String tableName, Map<String, String> properties)
-    //         throws UserException {
-    //     List<Partition> partitions = Lists.newArrayList();
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     olapTable.readLock();
-    //     try {
-    //         partitions.addAll(olapTable.getPartitions());
-    //     } finally {
-    //         olapTable.readUnlock();
-    //     }
-
-    //     boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
-    //     if (isPersistent == olapTable.isPersistent()) {
-    //         LOG.info("isPersistent == olapTable.isPersistent()"
-    //                 + isPersistent + " " + olapTable.isPersistent());
-    //         return;
-    //     }
-
-    //     for (Partition partition : partitions) {
-    //         updatePartitionPersistentMeta(db, olapTable.getName(), partition.getName(), isPersistent);
-    //     }
-
-    //     olapTable.writeLockOrDdlException();
-    //     try {
-    //         Env.getCurrentEnv().modifyTablePersistentMeta(db, olapTable, properties);
-    //     } finally {
-    //         olapTable.writeUnlock();
-    //     }
-    // }
-
-    /**
-     * Update some specified partitions' in-memory property of table
+     * Update some specified partitions' properties of table
      */
     public void updatePartitionsProperties(Database db, String tableName, List<String> partitionNames,
                                            Map<String, String> properties) throws DdlException, MetaNotFoundException {
@@ -2264,320 +2195,6 @@ public class SchemaChangeHandler extends AlterHandler {
             }
         }
     }
-
-    /**
-     * Update some specified partitions' persistent property of table
-     */
-    // public void updatePartitionsPersistentMeta(Database db, String tableName, List<String> partitionNames,
-    //         Map<String, String> properties) throws DdlException, MetaNotFoundException {
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
-    //     if (isPersistent == olapTable.isPersistent()) {
-    //         LOG.info("isPersistent == olapTable.isPersistent()"
-    //                 + isPersistent + " " + olapTable.isPersistent());
-    //         return;
-    //     }
-
-    //     for (String partitionName : partitionNames) {
-    //         try {
-    //             updatePartitionPersistentMeta(db, olapTable.getName(), partitionName, isPersistent);
-    //         } catch (Exception e) {
-    //             String errMsg = "Failed to update partition[" + partitionName + "]'s 'isPersistent' property. "
-    //                     + "The reason is [" + e.getMessage() + "]";
-    //             throw new DdlException(errMsg);
-    //         }
-    //     }
-    // }
-
-    /**
-     * Update one specified partition's in-memory property by partition name of table
-     * This operation may return partial successfully, with a exception to inform user to retry
-     */
-    // public void updatePartitionInMemoryMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         String storagePolicy,
-    //         boolean isInMemory) throws UserException {
-    //     if (Config.isCloudMode()) {
-    //         updateCloudPartitionInMemoryMeta(db, tableName, partitionName, isInMemory);
-    //         return;
-    //     }
-    //     // be id -> <tablet id,schemaHash>
-    //     Map<Long, Set<Pair<Long, Integer>>> beIdToTabletIdWithHash = Maps.newHashMap();
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     olapTable.readLock();
-    //     try {
-    //         Partition partition = olapTable.getPartition(partitionName);
-    //         if (partition == null) {
-    //             throw new DdlException(
-    //                     "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
-    //         }
-
-    //         for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
-    //             int schemaHash = olapTable.getSchemaHashByIndexId(index.getId());
-    //             for (Tablet tablet : index.getTablets()) {
-    //                 for (Replica replica : tablet.getReplicas()) {
-    //                     Set<Pair<Long, Integer>> tabletIdWithHash = beIdToTabletIdWithHash.computeIfAbsent(
-    //                             replica.getBackendId(), k -> Sets.newHashSet());
-    //                     tabletIdWithHash.add(Pair.of(tablet.getId(), schemaHash));
-    //                 }
-    //             }
-    //         }
-    //     } finally {
-    //         olapTable.readUnlock();
-    //     }
-
-    //     int totalTaskNum = beIdToTabletIdWithHash.keySet().size();
-    //     MarkedCountDownLatch<Long, Set<Pair<Long, Integer>>> countDownLatch =
-    //     new MarkedCountDownLatch<>(totalTaskNum);
-    //     AgentBatchTask batchTask = new AgentBatchTask();
-    //     for (Map.Entry<Long, Set<Pair<Long, Integer>>> kv : beIdToTabletIdWithHash.entrySet()) {
-    //         countDownLatch.addMark(kv.getKey(), kv.getValue());
-    //         UpdateTabletMetaInfoTask task = new UpdateTabletMetaInfoTask(kv.getKey(), kv.getValue(), isInMemory,
-    //                 storagePolicyId, binlogConfig, countDownLatch);
-    //         batchTask.addTask(task);
-    //     }
-    //     if (!FeConstants.runningUnitTest) {
-    //         // send all tasks and wait them finished
-    //         AgentTaskQueue.addBatchTask(batchTask);
-    //         AgentTaskExecutor.submit(batchTask);
-    //         LOG.info("send update tablet meta task for table {}, partitions {}, number: {}", tableName,
-    //         partitionName,
-    //                 batchTask.getTaskNum());
-
-    //         // estimate timeout
-    //         long timeout = Config.tablet_create_timeout_second * 1000L * totalTaskNum;
-    //         timeout = Math.min(timeout, Config.max_create_table_timeout_second * 1000);
-    //         boolean ok = false;
-    //         try {
-    //             ok = countDownLatch.await(timeout, TimeUnit.MILLISECONDS);
-    //         } catch (InterruptedException e) {
-    //             LOG.warn("InterruptedException: ", e);
-    //         }
-
-    //         if (!ok || !countDownLatch.getStatus().ok()) {
-    //             String errMsg = "Failed to update partition[" + partitionName + "]. tablet meta.";
-    //             // clear tasks
-    //             AgentTaskQueue.removeBatchTask(batchTask, TTaskType.UPDATE_TABLET_META_INFO);
-
-    //             if (!countDownLatch.getStatus().ok()) {
-    //                 errMsg += " Error: " + countDownLatch.getStatus().getErrorMsg();
-    //             } else {
-    //                 List<Map.Entry<Long, Set<Pair<Long, Integer>>>> unfinishedMarks = countDownLatch.getLeftMarks();
-    //                 // only show at most 3 results
-    //                 List<Map.Entry<Long, Set<Pair<Long, Integer>>>> subList = unfinishedMarks.subList(0,
-    //                         Math.min(unfinishedMarks.size(), 3));
-    //                 if (!subList.isEmpty()) {
-    //                     errMsg += " Unfinished mark: " + Joiner.on(", ").join(subList);
-    //                 }
-    //             }
-    //             errMsg += ". This operation maybe partial successfully, You should retry until success.";
-    //             LOG.warn(errMsg);
-    //             throw new DdlException(errMsg);
-    //         }
-    //     }
-    // }
-
-    // public void updateCloudPartitionInMemoryMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         boolean isInMemory) throws UserException {
-    //     UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
-    //     param.isInMemory = isInMemory;
-    //     param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
-    //     updateCloudPartitionMeta(db, tableName, partitionName, param);
-    // }
-
-    // public void updateCloudTableTtlSecondsMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         long ttlSeconds) throws UserException {
-    //     UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
-    //     param.ttlSeconds = ttlSeconds;
-    //     param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
-    //     updateCloudPartitionMeta(db, tableName, partitionName, param);
-    // }
-
-    // private static class UpdatePartitionMetaParam {
-    //     public enum TabletMetaType {
-    //         INMEMORY,
-    //         PERSISTENT,
-    //         TTL_SECONDS,
-    //     }
-
-    //     TabletMetaType type;
-    //     boolean isPersistent = false;
-    //     boolean isInMemory = false;
-    //     long ttlSeconds = 0;
-    // }
-
-    // public void updateCloudPartitionMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         UpdatePartitionMetaParam param) throws UserException {
-    //     List<Long> tabletIds = new ArrayList<>();
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     olapTable.readLock();
-    //     try {
-    //         Partition partition = olapTable.getPartition(partitionName);
-    //         if (partition == null) {
-    //             throw new DdlException(
-    //                     "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
-    //         }
-    //         for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
-    //             for (Tablet tablet : index.getTablets()) {
-    //                 tabletIds.add(tablet.getId());
-    //             }
-    //         }
-    //     } finally {
-    //         olapTable.readUnlock();
-    //     }
-    //     for (int index = 0; index < tabletIds.size();) {
-    //         int nextIndex = tabletIds.size() - index > Config.cloud_txn_tablet_batch_size
-    //                 ? index + Config.cloud_txn_tablet_batch_size
-    //                 : tabletIds.size();
-    //         SelectdbCloud.UpdateTabletRequest.Builder requestBuilder = SelectdbCloud.UpdateTabletRequest.
-    //         newBuilder();
-    //         while (index < nextIndex) {
-    //             SelectdbCloud.TabletMetaInfoPB.Builder infoBuilder = SelectdbCloud.TabletMetaInfoPB.newBuilder();
-    //             infoBuilder.setTabletId(tabletIds.get(index));
-    //             switch (param.type) {
-    //                 case PERSISTENT:
-    //                     infoBuilder.setIsPersistent(param.isPersistent);
-    //                     break;
-    //                 case INMEMORY:
-    //                     infoBuilder.setIsInMemory(param.isInMemory);
-    //                     break;
-    //                 case TTL_SECONDS:
-    //                     infoBuilder.setTtlSeconds(param.ttlSeconds);
-    //                     break;
-    //                 default:
-    //                     throw new RuntimeException("Unknown TabletMetaType");
-    //             }
-    //             SelectdbCloud.TabletMetaInfoPB tabletMetaInfo = infoBuilder.build();
-    //             requestBuilder.addTabletMetaInfos(tabletMetaInfo);
-    //             index++;
-    //         }
-    //         requestBuilder.setCloudUniqueId(Config.cloud_unique_id);
-    //         SelectdbCloud.UpdateTabletRequest updateTabletReq = requestBuilder.build();
-    //         LOG.info("UpdateTabletRequest: {} ", updateTabletReq);
-
-    //         String metaEndPoint = Config.meta_service_endpoint;
-    //         String[] splitMetaEndPoint = metaEndPoint.split(":");
-    //         TNetworkAddress metaAddress = new TNetworkAddress(splitMetaEndPoint[0],
-    //                 Integer.parseInt(splitMetaEndPoint[1]));
-
-    //         SelectdbCloud.UpdateTabletResponse response;
-    //         try {
-    //             response = MetaServiceProxy.getInstance().updateTablet(metaAddress, updateTabletReq);
-    //         } catch (RpcException e) {
-    //             throw new RuntimeException(e);
-    //         }
-    //         LOG.info("response: {} ", response);
-
-    //         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
-    //             throw new DdlException(response.getStatus().getMsg());
-    //         }
-    //     }
-    // }
-
-    // public void updateCloudPartitionPersistentMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         boolean isPersistent) throws UserException {
-    //     UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
-    //     param.isPersistent = isPersistent;
-    //     param.type = UpdatePartitionMetaParam.TabletMetaType.PERSISTENT;
-    //     updateCloudPartitionMeta(db, tableName, partitionName, param);
-    // }
-
-    /**
-     * Update one specified partition's persistent property by partition name of table
-     * This operation may return partial successfully, with a exception to inform user to retry
-     */
-    // public void updatePartitionPersistentMeta(Database db,
-    //         String tableName,
-    //         String partitionName,
-    //         boolean isPersistent) throws UserException {
-    //     if (Config.isCloudMode()) {
-    //         updateCloudPartitionPersistentMeta(db, tableName, partitionName, isPersistent);
-    //         return;
-    //     }
-    //     // be id -> <tablet id,schemaHash>
-    //     Map<Long, Set<Pair<Long, Integer>>> beIdToTabletIdWithHash = Maps.newHashMap();
-    //     OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
-    //     olapTable.readLock();
-    //     try {
-    //         Partition partition = olapTable.getPartition(partitionName);
-    //         if (partition == null) {
-    //             throw new DdlException(
-    //                     "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
-    //         }
-
-    //         for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
-    //             int schemaHash = olapTable.getSchemaHashByIndexId(index.getId());
-    //             for (Tablet tablet : index.getTablets()) {
-    //                 for (Replica replica : tablet.getReplicas()) {
-    //                     Set<Pair<Long, Integer>> tabletIdWithHash = beIdToTabletIdWithHash.computeIfAbsent(
-    //                             replica.getBackendId(), k -> Sets.newHashSet());
-    //                     tabletIdWithHash.add(Pair.of(tablet.getId(), schemaHash));
-    //                 }
-    //             }
-    //         }
-    //     } finally {
-    //         olapTable.readUnlock();
-    //     }
-
-    //     int totalTaskNum = beIdToTabletIdWithHash.keySet().size();
-    //     MarkedCountDownLatch<Long, Set<Pair<Long, Integer>>> countDownLatch =
-    //     new MarkedCountDownLatch<>(totalTaskNum);
-    //     AgentBatchTask batchTask = new AgentBatchTask();
-    //     for (Map.Entry<Long, Set<Pair<Long, Integer>>> kv : beIdToTabletIdWithHash.entrySet()) {
-    //         countDownLatch.addMark(kv.getKey(), kv.getValue());
-    //         UpdateTabletMetaInfoTask task = new UpdateTabletMetaInfoTask(kv.getKey(), kv.getValue(),
-    //                 isPersistent, countDownLatch);
-    //         batchTask.addTask(task);
-    //     }
-    //     if (!FeConstants.runningUnitTest) {
-    //         // send all tasks and wait them finished
-    //         AgentTaskQueue.addBatchTask(batchTask);
-    //         AgentTaskExecutor.submit(batchTask);
-    //         LOG.info("send update tablet meta task for table {}, partitions {}, number: {}",
-    //         tableName, partitionName,
-    //                 batchTask.getTaskNum());
-
-    //         // estimate timeout
-    //         long timeout = Config.tablet_create_timeout_second * 1000L * totalTaskNum;
-    //         timeout = Math.min(timeout, Config.max_create_table_timeout_second * 1000);
-    //         boolean ok = false;
-    //         try {
-    //             ok = countDownLatch.await(timeout, TimeUnit.MILLISECONDS);
-    //         } catch (InterruptedException e) {
-    //             LOG.warn("InterruptedException: ", e);
-    //         }
-
-    //         if (!ok || !countDownLatch.getStatus().ok()) {
-    //             String errMsg = "Failed to update partition[" + partitionName + "]. tablet meta.";
-    //             // clear tasks
-    //             AgentTaskQueue.removeBatchTask(batchTask, TTaskType.UPDATE_TABLET_META_INFO);
-
-    //             if (!countDownLatch.getStatus().ok()) {
-    //                 errMsg += " Error: " + countDownLatch.getStatus().getErrorMsg();
-    //             } else {
-    //                 List<Map.Entry<Long, Set<Pair<Long, Integer>>>> unfinishedMarks = countDownLatch.getLeftMarks();
-    //                 // only show at most 3 results
-    //                 List<Map.Entry<Long, Set<Pair<Long, Integer>>>> subList = unfinishedMarks.subList(0,
-    //                         Math.min(unfinishedMarks.size(), 3));
-    //                 if (!subList.isEmpty()) {
-    //                     errMsg += " Unfinished mark: " + Joiner.on(", ").join(subList);
-    //                 }
-    //             }
-    //             errMsg += ". This operation maybe partial successfully, You should retry until success.";
-    //             LOG.warn(errMsg);
-    //             throw new DdlException(errMsg);
-    //         }
-    //     }
-    // }
 
     /**
      * Update one specified partition's properties by partition name of table
@@ -2846,20 +2463,13 @@ public class SchemaChangeHandler extends AlterHandler {
     }
 
     // the invoker should keep table's write lock
-    public void modifyTableLightSchemaChange(Database db, OlapTable olapTable,
+    public void modifyTableLightSchemaChange(String rawSql, Database db, OlapTable olapTable,
                                              Map<Long, LinkedList<Column>> indexSchemaMap, List<Index> indexes,
                                              List<Index> alterIndexes, boolean isDropIndex,
                                              long jobId, boolean isReplay)
             throws DdlException {
 
         LOG.debug("indexSchemaMap:{}, indexes:{}", indexSchemaMap, indexes);
-        if (olapTable.getState() == OlapTableState.ROLLUP) {
-            throw new DdlException("Table[" + olapTable.getName() + "]'s is doing ROLLUP job");
-        }
-
-        // for now table's state can only be NORMAL
-        Preconditions.checkState(olapTable.getState() == OlapTableState.NORMAL, olapTable.getState().name());
-
         // for bitmapIndex
         boolean hasIndexChange = false;
         Set<Index> newSet = new HashSet<>(indexes);
@@ -2882,7 +2492,7 @@ public class SchemaChangeHandler extends AlterHandler {
 
         //for compatibility, we need create a finished state schema change job v2
 
-        SchemaChangeJobV2 schemaChangeJob = new SchemaChangeJobV2(jobId, db.getId(), olapTable.getId(),
+        SchemaChangeJobV2 schemaChangeJob = new SchemaChangeJobV2(rawSql, jobId, db.getId(), olapTable.getId(),
                 olapTable.getName(), 1000);
 
         for (Map.Entry<Long, List<Column>> entry : changedIndexIdToSchema.entrySet()) {
@@ -2911,9 +2521,8 @@ public class SchemaChangeHandler extends AlterHandler {
 
         if (alterIndexes != null) {
             if (!isReplay) {
-                TableAddOrDropInvertedIndicesInfo info = new TableAddOrDropInvertedIndicesInfo(
-                        db.getId(), olapTable.getId(), indexSchemaMap, indexes,
-                        alterIndexes, isDropIndex, jobId);
+                TableAddOrDropInvertedIndicesInfo info = new TableAddOrDropInvertedIndicesInfo(rawSql, db.getId(),
+                        olapTable.getId(), indexSchemaMap, indexes, alterIndexes, isDropIndex, jobId);
                 LOG.debug("logModifyTableAddOrDropInvertedIndices info:{}", info);
                 Env.getCurrentEnv().getEditLog().logModifyTableAddOrDropInvertedIndices(info);
 
@@ -2936,7 +2545,7 @@ public class SchemaChangeHandler extends AlterHandler {
                     olapTable.getName(), jobId, isReplay);
         } else {
             if (!isReplay) {
-                TableAddOrDropColumnsInfo info = new TableAddOrDropColumnsInfo(db.getId(), olapTable.getId(),
+                TableAddOrDropColumnsInfo info = new TableAddOrDropColumnsInfo(rawSql, db.getId(), olapTable.getId(),
                         indexSchemaMap, indexes, jobId);
                 LOG.debug("logModifyTableAddOrDropColumns info:{}", info);
                 Env.getCurrentEnv().getEditLog().logModifyTableAddOrDropColumns(info);
@@ -2958,7 +2567,7 @@ public class SchemaChangeHandler extends AlterHandler {
         OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableId, TableType.OLAP);
         olapTable.writeLock();
         try {
-            modifyTableLightSchemaChange(db, olapTable, indexSchemaMap, indexes, null, false, jobId, true);
+            modifyTableLightSchemaChange("", db, olapTable, indexSchemaMap, indexes, null, false, jobId, true);
         } catch (DdlException e) {
             // should not happen
             LOG.warn("failed to replay modify table add or drop or modify columns", e);
@@ -3089,7 +2698,7 @@ public class SchemaChangeHandler extends AlterHandler {
         OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableId, TableType.OLAP);
         olapTable.writeLock();
         try {
-            modifyTableLightSchemaChange(db, olapTable, indexSchemaMap, newIndexes,
+            modifyTableLightSchemaChange("", db, olapTable, indexSchemaMap, newIndexes,
                                              alterIndexes, isDropIndex, jobId, true);
         } catch (UserException e) {
             // should not happen
@@ -3178,17 +2787,6 @@ public class SchemaChangeHandler extends AlterHandler {
         return false;
     }
 
-    public void replayIndexChangeJob(IndexChangeJob indexChangeJob) throws MetaNotFoundException {
-        if (!indexChangeJob.isDone() && !runnableSchemaChangeJobV2.containsKey(indexChangeJob.getJobId())) {
-            runnableIndexChangeJob.put(indexChangeJob.getJobId(), indexChangeJob);
-        }
-        indexChangeJobs.put(indexChangeJob.getJobId(), indexChangeJob);
-        indexChangeJob.replay(indexChangeJob);
-        if (indexChangeJob.isDone()) {
-            runnableIndexChangeJob.remove(indexChangeJob.getJobId());
-        }
-    }
-
     public boolean updateBinlogConfig(Database db, OlapTable olapTable, List<AlterClause> alterClauses)
             throws DdlException, UserException {
         // TODO(Drogon): check olapTable read binlog thread safety
@@ -3266,5 +2864,16 @@ public class SchemaChangeHandler extends AlterHandler {
         }
 
         return false;
+    }
+
+    public void replayIndexChangeJob(IndexChangeJob indexChangeJob) throws MetaNotFoundException {
+        if (!indexChangeJob.isDone() && !runnableSchemaChangeJobV2.containsKey(indexChangeJob.getJobId())) {
+            runnableIndexChangeJob.put(indexChangeJob.getJobId(), indexChangeJob);
+        }
+        indexChangeJobs.put(indexChangeJob.getJobId(), indexChangeJob);
+        indexChangeJob.replay(indexChangeJob);
+        if (indexChangeJob.isDone()) {
+            runnableIndexChangeJob.remove(indexChangeJob.getJobId());
+        }
     }
 }

@@ -21,6 +21,7 @@ import org.apache.doris.analysis.PasswordOptions;
 import org.apache.doris.analysis.ResourcePattern;
 import org.apache.doris.analysis.TablePattern;
 import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.analysis.WorkloadGroupPattern;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.io.Text;
@@ -42,6 +43,8 @@ public class PrivInfo implements Writable {
     private TablePattern tblPattern;
     @SerializedName(value = "resourcePattern")
     private ResourcePattern resourcePattern;
+    @SerializedName(value = "workloadGroupPattern")
+    private WorkloadGroupPattern workloadGroupPattern;
     @SerializedName(value = "privs")
     private PrivBitSet privs;
     @SerializedName(value = "passwd")
@@ -80,6 +83,7 @@ public class PrivInfo implements Writable {
         this.userIdent = userIdent;
         this.tblPattern = tablePattern;
         this.resourcePattern = null;
+        this.workloadGroupPattern = null;
         this.privs = privs;
         this.passwd = passwd;
         this.role = role;
@@ -90,7 +94,19 @@ public class PrivInfo implements Writable {
             byte[] passwd, String role) {
         this.userIdent = userIdent;
         this.tblPattern = null;
+        this.workloadGroupPattern = null;
         this.resourcePattern = resourcePattern;
+        this.privs = privs;
+        this.passwd = passwd;
+        this.role = role;
+    }
+
+    public PrivInfo(UserIdentity userIdent, WorkloadGroupPattern workloadGroupPattern, PrivBitSet privs,
+            byte[] passwd, String role) {
+        this.userIdent = userIdent;
+        this.tblPattern = null;
+        this.resourcePattern = null;
+        this.workloadGroupPattern = workloadGroupPattern;
         this.privs = privs;
         this.passwd = passwd;
         this.role = role;
@@ -112,6 +128,10 @@ public class PrivInfo implements Writable {
 
     public ResourcePattern getResourcePattern() {
         return resourcePattern;
+    }
+
+    public WorkloadGroupPattern getWorkloadGroupPattern() {
+        return workloadGroupPattern;
     }
 
     public PrivBitSet getPrivs() {

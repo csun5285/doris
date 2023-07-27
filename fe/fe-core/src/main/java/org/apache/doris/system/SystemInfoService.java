@@ -34,6 +34,7 @@ import org.apache.doris.common.io.CountingDataOutputStream;
 import org.apache.doris.common.util.NetUtils;
 import org.apache.doris.ha.FrontendNodeType;
 import org.apache.doris.metric.MetricRepo;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.thrift.TNodeInfo;
@@ -610,9 +611,6 @@ public class SystemInfoService {
             throw new DdlException("Backend[" + backendId + "] does not exist");
         }
         dropBackend(backend.getHost(), backend.getHeartbeatPort());
-        // update BeInfoCollector
-        Backend.BeInfoCollector beinfoCollector = Backend.getBeInfoCollector();
-        beinfoCollector.dropBeInfo(backendId);
     }
 
     // final entry of dropping backend
@@ -718,6 +716,14 @@ public class SystemInfoService {
 
     public List<Long> getAllBackendIds() {
         return getAllBackendIds(false);
+    }
+
+    public int getBackendsNumber(boolean needAlive) {
+        int beNumber = ConnectContext.get().getSessionVariable().getBeNumberForTest();
+        if (beNumber < 0) {
+            beNumber = getAllBackendIds(needAlive).size();
+        }
+        return beNumber;
     }
 
     public List<Long> getAllBackendIds(boolean needAlive) {
@@ -1130,9 +1136,6 @@ public class SystemInfoService {
         ImmutableMap<Long, AtomicLong> newIdToReportVersion = ImmutableMap.copyOf(copiedReportVersions);
         idToReportVersionRef = newIdToReportVersion;
 
-        // update BeInfoCollector
-        Backend.BeInfoCollector beinfoCollector = Backend.getBeInfoCollector();
-        beinfoCollector.dropBeInfo(backend.getId());
         if (Config.isCloudMode()) {
             List<Backend> toDel = new ArrayList<>();
             toDel.add(backend);
@@ -1156,6 +1159,8 @@ public class SystemInfoService {
             memoryBe.setLastUpdateMs(be.getLastUpdateMs());
             memoryBe.setLastStartTime(be.getLastStartTime());
             memoryBe.setDisks(be.getDisks());
+            memoryBe.setCpuCores(be.getCputCores());
+            memoryBe.setPipelineExecutorSize(be.getPipelineExecutorSize());
         }
     }
 
@@ -1177,7 +1182,7 @@ public class SystemInfoService {
 
     public void checkAvailableCapacity() throws DdlException {
         if (getAvailableCapacityB() <= 0L) {
-            throw new DdlException("System has no available disk capacity");
+            throw new DdlException("System has no available disk capacity or no available BE nodes");
         }
     }
 
@@ -1363,5 +1368,19 @@ public class SystemInfoService {
             LOG.warn("rpcToMetaGetClusterInfo exception: {}", e.getMessage());
             throw new RuntimeException(e);
         }
+    }
+
+    public int getMinPipelineExecutorSize() {
+        if (idToBackendRef.size() == 0) {
+            return 1;
+        }
+        int minPipelineExecutorSize = Integer.MAX_VALUE;
+        for (Backend be : idToBackendRef.values()) {
+            int size = be.getPipelineExecutorSize();
+            if (size > 0) {
+                minPipelineExecutorSize = Math.min(minPipelineExecutorSize, size);
+            }
+        }
+        return minPipelineExecutorSize;
     }
 }

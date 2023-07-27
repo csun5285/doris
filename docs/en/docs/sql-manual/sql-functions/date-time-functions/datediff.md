@@ -29,10 +29,14 @@ under the License.
 ### Description
 #### Syntax
 
+<<<<<<< HEAD
 `DATETIME DATEDIFF (DATETIME expr1, DATETIME expr2)`
+=======
+`INT DATEDIFF (DATETIME expr1, DATETIME expr2)`
+>>>>>>> 2.0.0-rc01
 
 
-Expr1 - expr2 is calculated and the result is accurate to the sky.
+Calculate expr1 - expr2, the result is accurate to the unit of a day.
 
 Expr1 and expr2 parameters are valid date or date/time expressions.
 

@@ -1,6 +1,6 @@
 ---
 {
-    "title": "变量",
+    "title": "������",
     "language": "zh-CN"
 }
 ---
@@ -24,31 +24,31 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# 变量
+# ������
 
-本文档主要介绍当前支持的变量（variables）。
+���������������������������������������������variables������
 
-Doris 中的变量参考 MySQL 中的变量设置。但部分变量仅用于兼容一些 MySQL 客户端协议，并不产生其在 MySQL 数据库中的实际意义。
+Doris ������������������ MySQL ��������������������������������������������������������� MySQL ������������������������������������ MySQL ������������������������������
 
-## 变量设置与查看
+## ���������������������
 
-### 查看
+### ������
 
-可以通过 `SHOW VARIABLES [LIKE 'xxx'];` 查看所有或指定的变量。如：
+������������ `SHOW VARIABLES [LIKE 'xxx'];` ���������������������������������������
 
 ```sql
 SHOW VARIABLES;
 SHOW VARIABLES LIKE '%time_zone%';
 ```
 
-### 设置
+### ������
 
-部分变量可以设置全局生效或仅当前会话生效。
+���������������������������������������������������������������
 
-注意，在 1.1 版本之前，设置全局生效后，后续新的会话连接中会沿用设置值，但当前会话中的值不变。
-而在 1.1 版本（含）之后，设置全局生效后，后续新的会话连接中会沿用设置值，当前会话中的值也会改变。
+������������ 1.1 ������������������������������������������������������������������������������������������������������������������������
+������ 1.1 ������������������������������������������������������������������������������������������������������������������������������������
 
-仅当前会话生效，通过 `SET var_name=xxx;` 语句来设置。如：
+������������������������������ `SET var_name=xxx;` ������������������������
 
 ```sql
 SET exec_mem_limit = 137438953472;
@@ -56,15 +56,15 @@ SET forward_to_master = true;
 SET time_zone = "Asia/Shanghai";
 ```
 
-全局生效，通过 `SET GLOBAL var_name=xxx;` 设置。如：
+��������������������� `SET GLOBAL var_name=xxx;` ���������������
 
 ```sql
 SET GLOBAL exec_mem_limit = 137438953472
 ```
 
-> 注1：只有 ADMIN 用户可以设置变量的全局生效。
+> ���1��������� ADMIN ������������������������������������������
 
-既支持当前会话生效又支持全局生效的变量包括：
+������������������������������������������������������������������
 
 - `time_zone`
 - `wait_timeout`
@@ -78,38 +78,38 @@ SET GLOBAL exec_mem_limit = 137438953472
 - `insert_visible_timeout_ms`
 - `enable_fold_constant_by_be`
 
-只支持全局生效的变量包括：
+���������������������������������������
 
 - `default_rowset_type`
 - `default_password_lifetime`
 - `password_history`
 - `validate_password_policy`
 
-同时，变量设置也支持常量表达式。如：
+������������������������������������������������������
 
 ```sql
 SET exec_mem_limit = 10 * 1024 * 1024 * 1024;
 SET forward_to_master = concat('tr', 'u', 'e');
 ```
 
-### 在查询语句中设置变量
+### ������������������������������
 
-在一些场景中，我们可能需要对某些查询有针对性的设置变量。 通过使用SET_VAR提示可以在查询中设置会话变量（在单个语句内生效）。例子：
+������������������������������������������������������������������������������������ ������������SET_VAR������������������������������������������������������������������������������������
 
 ```sql
 SELECT /*+ SET_VAR(exec_mem_limit = 8589934592) */ name FROM people ORDER BY name;
 SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 ```
 
-注意注释必须以/*+ 开头，并且只能跟随在SELECT之后。
+���������������������/*+ ������������������������������SELECT���������
 
-## 支持的变量
+## ���������������
 
-> 注：
+> ������
 > 
-> 以下内容由 `docs/generate-config-and-variable-doc.sh` 自动生成。
+> ��������������� `docs/generate-config-and-variable-doc.sh` ���������������
 > 
-> 如需修改，请修改 `fe/fe-core/src/main/java/org/apache/doris/qe/SessionVariable.java` 和 `fe/fe-core/src/main/java/org/apache/doris/qe/GlobalVariable.java` 中的描述信息。
+> ������������������������ `fe/fe-core/src/main/java/org/apache/doris/qe/SessionVariable.java` ��� `fe/fe-core/src/main/java/org/apache/doris/qe/GlobalVariable.java` ���������������������
 
 ### `SQL_AUTO_IS_NULL`
 
@@ -459,6 +459,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `experimental_enable_agg_state`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `enable_bucket_shuffle_join`
 
 待补充
@@ -591,6 +603,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `enable_fold_nondeterministic_fn`
+
+待补充
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `enable_function_pushdown`
 
 待补充
@@ -628,6 +652,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 仅全局变量：`false`
 
 ### `enable_minidump`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `enable_multi_cluster_sync_load`
 
 待补充
 
@@ -724,18 +760,6 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 仅全局变量：`false`
 
 ### `enable_partition_cache`
-
-待补充
-
-类型：`boolean`
-
-默认值：`false`
-
-只读变量：`false`
-
-仅全局变量：`false`
-
-### `experimental_enable_pipeline_engine`
 
 待补充
 
@@ -855,6 +879,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `enable_strong_consistency_read`
+
+用以开启强一致读。Doris 默认支持同一个会话内的强一致性，即同一个会话内对数据的变更操作是实时可见的。如需要会话间的强一致读，则需将此变量设置为true。
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `enable_two_phase_read_opt`
 
 待补充
@@ -963,6 +999,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `external_table_analyze_part_num`
+
+收集外表统计信息行数时选取的采样分区数，默认-1表示全部分区
+
+类型：`int`
+
+默认值：`-1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `extract_wide_range_expr`
 
 待补充
@@ -1054,6 +1102,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 类型：`long`
 
 默认值：`2147483646`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `ignore_column_with_complex_type`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
 
 只读变量：`false`
 
@@ -1245,7 +1305,7 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 类型：`int`
 
-默认值：`40000`
+默认值：`10000`
 
 只读变量：`false`
 
@@ -1318,6 +1378,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 类型：`int`
 
 默认值：`1`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `parallel_pipeline_task_num`
+
+待补充
+
+类型：`int`
+
+默认值：`0`
 
 只读变量：`false`
 
@@ -1437,7 +1509,7 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 类型：`int`
 
-默认值：`1800`
+默认值：`300`
 
 只读变量：`false`
 

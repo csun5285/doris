@@ -31,6 +31,7 @@
 
 #include "common/status.h"
 #include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/fs_utils.h"
 #include "io/fs/path.h"
 #include "olap/olap_common.h"
 namespace doris {
@@ -74,8 +75,13 @@ class FileSystem : public std::enable_shared_from_this<FileSystem> {
 public:
     // The following are public interface.
     // And derived classes should implement all xxx_impl methods.
-    Status create_file(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts = nullptr);
-    Status open_file(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts = nullptr);
+    Status create_file(const Path& file, FileWriterPtr* writer,
+                       const FileWriterOptions* opts = nullptr);
+    // FIXME(plat1ko): Will deprecate in future
+    Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
+                     FileReaderSPtr* reader);
+    Status open_file(const Path& file, FileReaderSPtr* reader,
+                     const FileReaderOptions* opts = nullptr);
     Status create_directory(const Path& dir, bool failed_if_exists = false);
     Status delete_file(const Path& file);
     Status delete_directory(const Path& dir);
@@ -106,10 +112,12 @@ public:
 
 protected:
     /// create file and return a FileWriter
-    virtual Status create_file_impl(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts) = 0;
+    virtual Status create_file_impl(const Path& file, FileWriterPtr* writer,
+                                    const FileWriterOptions* opts) = 0;
 
     /// open file and return a FileReader
-    virtual Status open_file_impl(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts) = 0;
+    virtual Status open_file_impl(const Path& file, FileReaderSPtr* reader,
+                                  const FileReaderOptions* opts) = 0;
 
     /// create directory recursively
     virtual Status create_directory_impl(const Path& dir, bool failed_if_exists = false) = 0;

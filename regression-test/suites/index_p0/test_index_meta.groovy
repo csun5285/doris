@@ -15,11 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import groovy.json.JsonException
 import groovy.json.JsonOutput
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_index_meta", "p0") {
+suite("index_meta", "p0") {
     // prepare test table
     def timeout = 120000
     def delta_time = 1000

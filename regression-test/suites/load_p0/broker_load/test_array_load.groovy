@@ -137,11 +137,9 @@ suite("test_array_load", "load_p0") {
                             DATA INFILE("${hdfsFilePath}")
                             INTO TABLE ${testTablex}
                             FORMAT as "${format}")
-                        with HDFS (
-                        "fs.defaultFS"="${hdfsFs}",
-                        "hadoop.username"="${hdfsUser}",
-                        "password"="{hdfsPasswd}"
-                        )
+                        with BROKER "${brokerName}" (
+                        "username"="${hdfsUser}",
+                        "password"="${hdfsPasswd}")
                         PROPERTIES  (
                         "timeout"="1200",
                         "max_filter_ratio"="0.1");
@@ -159,11 +157,9 @@ suite("test_array_load", "load_p0") {
                             INTO TABLE ${testTablex}
                             COLUMNS TERMINATED BY "/"
                             FORMAT as "${format}")
-                        with HDFS (
-                        "fs.defaultFS"="${hdfsFs}",
-                        "hadoop.username"="${hdfsUser}",
-                        "password"="{hdfsPasswd}"
-                        )
+                        with BROKER "${brokerName}" (
+                        "username"="${hdfsUser}",
+                        "password"="${hdfsPasswd}")
                         PROPERTIES  (
                         "timeout"="1200",
                         "max_filter_ratio"="0.1");
@@ -269,7 +265,7 @@ suite("test_array_load", "load_p0") {
             def test_load_label = UUID.randomUUID().toString().replaceAll("-", "")
             load_from_hdfs.call(testTable, test_load_label, hdfs_json_file_path, "json",
                                 brokerName, hdfsUser, hdfsPasswd)
-
+            
             check_load_result.call(test_load_label, testTable)
 
         } finally {

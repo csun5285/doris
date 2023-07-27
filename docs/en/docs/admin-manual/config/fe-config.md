@@ -220,7 +220,7 @@ The path of the FE audit log file, used to store fe.audit.log
 
 Type: `String`
 
-Default: `null/log`
+Default: `/mnt/disk1/dengxin/selectdb-core/log`
 
 Mutable: `false`
 
@@ -369,6 +369,18 @@ TODO
 Type: `double`
 
 Default: `0.05`
+
+Mutable: `true`
+
+Master only: `false`
+
+### `batch_insert_cluster_cache_hotspot_num`
+
+TODO
+
+Type: `long`
+
+Default: `50`
 
 Mutable: `true`
 
@@ -722,6 +734,18 @@ Mutable: `true`
 
 Master only: `false`
 
+### `cloud_meta_service_rpc_failed_retry_times`
+
+TODO
+
+Type: `int`
+
+Default: `200`
+
+Mutable: `false`
+
+Master only: `false`
+
 ### `cloud_rebalance_number_threshold`
 
 TODO
@@ -806,6 +830,42 @@ Mutable: `true`
 
 Master only: `false`
 
+### `cloud_use_strong_password`
+
+TODO
+
+Type: `boolean`
+
+Default: `true`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `cloud_warm_up_job_scheduler_interval_millisecond`
+
+TODO
+
+Type: `int`
+
+Default: `1000`
+
+Mutable: `true`
+
+Master only: `true`
+
+### `cloud_warm_up_timeout_second`
+
+TODO
+
+Type: `int`
+
+Default: `2592000`
+
+Mutable: `true`
+
+Master only: `true`
+
 ### `cluster_id`
 
 Cluster id used for internal authentication. Usually a random integer generated when master FE start at first time. You can also specify one.
@@ -836,7 +896,7 @@ TODO
 
 Type: `boolean`
 
-Default: `false`
+Default: `true`
 
 Mutable: `true`
 
@@ -896,7 +956,7 @@ The path of the user-defined configuration file, used to store fe_custom.conf. T
 
 Type: `String`
 
-Default: `${Env.DORIS_HOME}/conf`
+Default: `/mnt/disk1/dengxin/selectdb-core/conf`
 
 Mutable: `false`
 
@@ -1192,11 +1252,23 @@ Master only: `false`
 
 ### `disable_nested_complex_type`
 
-TODO
+Now default set to true, not support create complex type(array/struct/map) nested complex type when we create table, only support array type nested array
 
 Type: `boolean`
 
 Default: `true`
+
+Mutable: `true`
+
+Master only: `true`
+
+### `disable_shared_scan`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
 
 Mutable: `true`
 
@@ -1468,6 +1540,18 @@ Mutable: `false`
 
 Master only: `false`
 
+### `enable_check_physical_memory`
+
+TODO
+
+Type: `boolean`
+
+Default: `true`
+
+Mutable: `false`
+
+Master only: `false`
+
 ### `enable_concurrent_update`
 
 TODO
@@ -1539,6 +1623,18 @@ Default: `false`
 Mutable: `false`
 
 Master only: `false`
+
+### `enable_fetch_cluster_cache_hotspot`
+
+TODO
+
+Type: `boolean`
+
+Default: `true`
+
+Mutable: `true`
+
+Master only: `true`
 
 ### `enable_force_drop_redundant_replica`
 
@@ -1696,6 +1792,18 @@ Mutable: `false`
 
 Master only: `true`
 
+### `enable_odbc_table`
+
+Whether to enable the ODBC appearance function, it is disabled by default, and the ODBC appearance is an obsolete feature. Please use the JDBC Catalog
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `true`
+
+Master only: `true`
+
 ### `enable_outfile_to_local`
 
 TODO
@@ -1798,7 +1906,7 @@ TODO
 
 Type: `boolean`
 
-Default: `true`
+Default: `false`
 
 Mutable: `false`
 
@@ -1972,6 +2080,18 @@ Mutable: `false`
 
 Master only: `false`
 
+### `fetch_cluster_cache_hotspot_interval_ms`
+
+TODO
+
+Type: `long`
+
+Default: `600000`
+
+Mutable: `true`
+
+Master only: `false`
+
 ### `fetch_stream_load_record_interval_second`
 
 The interval of FE fetch stream load record from BE.
@@ -2080,6 +2200,18 @@ Mutable: `false`
 
 Master only: `true`
 
+### `history_cloud_warm_up_job_keep_max_second`
+
+TODO
+
+Type: `int`
+
+Default: `604800`
+
+Mutable: `true`
+
+Master only: `true`
+
 ### `history_job_keep_max_second`
 
 For ALTER, EXPORT jobs, remove the finished job if expired.
@@ -2099,6 +2231,18 @@ TODO
 Type: `long`
 
 Default: `10`
+
+Mutable: `true`
+
+Master only: `false`
+
+### `hive_stats_partition_sample_size`
+
+Sample size for hive row count estimation.
+
+Type: `int`
+
+Default: `3000`
 
 Mutable: `true`
 
@@ -2254,7 +2398,7 @@ The path to save jdbc drivers. When creating JDBC Catalog,if the specified drive
 
 Type: `String`
 
-Default: `null/jdbc_drivers`
+Default: `/mnt/disk1/dengxin/selectdb-core/jdbc_drivers`
 
 Mutable: `false`
 
@@ -2386,7 +2530,7 @@ The key store path of FE https service
 
 Type: `String`
 
-Default: `null/conf/ssl/doris_ssl_certificate.keystore`
+Default: `/mnt/disk1/dengxin/selectdb-core/conf/ssl/doris_ssl_certificate.keystore`
 
 Mutable: `false`
 
@@ -2724,7 +2868,7 @@ TODO
 
 Type: `int`
 
-Default: `10`
+Default: `64`
 
 Mutable: `false`
 
@@ -2790,7 +2934,7 @@ Mutable: `false`
 
 Master only: `false`
 
-### `max_hive_table_catch_num`
+### `max_hive_table_cache_num`
 
 Max cache number of hive table to partition names list.
 
@@ -3000,7 +3144,7 @@ Maximum concurrent running txn num including prepare, commit txns under a single
 
 Type: `int`
 
-Default: `100`
+Default: `1000`
 
 Mutable: `true`
 
@@ -3144,7 +3288,7 @@ The directory to save Doris meta data
 
 Type: `String`
 
-Default: `null/doris-meta`
+Default: `/mnt/disk1/dengxin/selectdb-core/doris-meta`
 
 Mutable: `false`
 
@@ -3159,6 +3303,42 @@ Type: `int`
 Default: `1000`
 
 Mutable: `false`
+
+Master only: `false`
+
+### `meta_service_connection_age_base_minutes`
+
+TODO
+
+Type: `int`
+
+Default: `0`
+
+Mutable: `true`
+
+Master only: `false`
+
+### `meta_service_connection_pool_size`
+
+TODO
+
+Type: `int`
+
+Default: `20`
+
+Mutable: `true`
+
+Master only: `false`
+
+### `meta_service_connection_pooled`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `true`
 
 Master only: `false`
 
@@ -3420,7 +3600,7 @@ TODO
 
 Type: `String`
 
-Default: `null/mysql_ssl_default_certificate/ca_certificate.p12`
+Default: `/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/ca_certificate.p12`
 
 Mutable: `false`
 
@@ -3444,7 +3624,7 @@ TODO
 
 Type: `String`
 
-Default: `null/mysql_ssl_default_certificate/server_certificate.p12`
+Default: `/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/server_certificate.p12`
 
 Mutable: `false`
 
@@ -3516,7 +3696,7 @@ The installation directory of the plugin
 
 Type: `String`
 
-Default: `null/plugins`
+Default: `/mnt/disk1/dengxin/selectdb-core/plugins`
 
 Mutable: `false`
 
@@ -3892,7 +4072,7 @@ TODO
 
 Type: `String`
 
-Default: `null/small_files`
+Default: `/mnt/disk1/dengxin/selectdb-core/small_files`
 
 Mutable: `false`
 
@@ -3916,7 +4096,7 @@ Spark dir for Spark Load
 
 Type: `String`
 
-Default: `null/lib/spark2x`
+Default: `/mnt/disk1/dengxin/selectdb-core/lib/spark2x`
 
 Mutable: `true`
 
@@ -3928,7 +4108,7 @@ Spark launcher log dir
 
 Type: `String`
 
-Default: `null/log/spark_launcher_log`
+Default: `/mnt/disk1/dengxin/selectdb-core/log/spark_launcher_log`
 
 Mutable: `false`
 
@@ -4001,30 +4181,6 @@ TODO
 Type: `int`
 
 Default: `1`
-
-Mutable: `false`
-
-Master only: `false`
-
-### `statistic_job_scheduler_execution_interval_ms`
-
-TODO
-
-Type: `int`
-
-Default: `1000`
-
-Mutable: `false`
-
-Master only: `false`
-
-### `statistic_task_scheduler_execution_interval_ms`
-
-TODO
-
-Type: `int`
-
-Default: `1000`
 
 Mutable: `false`
 
@@ -4192,7 +4348,7 @@ The path of the FE log file, used to store fe.log
 
 Type: `String`
 
-Default: `null/log`
+Default: `/mnt/disk1/dengxin/selectdb-core/log`
 
 Mutable: `false`
 
@@ -4206,7 +4362,21 @@ Type: `String`
 
 Default: `INFO`
 
-Options: `INFO`, `WARNING`, `ERROR`, `FATAL`
+Options: `INFO`, `WARN`, `ERROR`, `FATAL`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `sys_log_mode`
+
+The output mode of FE log, and NORMAL mode is the default output mode, which means the logs are synchronized and contain location information. BRIEF mode is synchronized and does not contain location information. ASYNC mode is asynchronous and does not contain location information. The performance of the three log output modes increases in sequence
+
+Type: `String`
+
+Default: `NORMAL`
+
+Options: `NORMAL`, `BRIEF`, `ASYNC`
 
 Mutable: `false`
 
@@ -4388,7 +4558,7 @@ The directory to save Doris temp data
 
 Type: `String`
 
-Default: `null/temp_dir`
+Default: `/mnt/disk1/dengxin/selectdb-core/temp_dir`
 
 Mutable: `false`
 
@@ -4556,7 +4726,7 @@ Yarn client path
 
 Type: `String`
 
-Default: `null/lib/yarn-client/hadoop/bin/yarn`
+Default: `/mnt/disk1/dengxin/selectdb-core/lib/yarn-client/hadoop/bin/yarn`
 
 Mutable: `false`
 
@@ -4568,7 +4738,7 @@ Yarn config path
 
 Type: `String`
 
-Default: `null/lib/yarn-config`
+Default: `/mnt/disk1/dengxin/selectdb-core/lib/yarn-config`
 
 Mutable: `false`
 

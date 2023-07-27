@@ -134,6 +134,7 @@ public class TabletInvertedIndex {
                              List<Triple<Long, Integer, Boolean>> tabletToPersistent,
                              List<CooldownConf> cooldownConfToPush,
                              List<CooldownConf> cooldownConfToUpdate) {
+        List<Pair<TabletMeta, TTabletInfo>> cooldownTablets = new ArrayList<>();
         long stamp = readLock();
         long start = System.currentTimeMillis();
         try {
@@ -210,8 +211,11 @@ public class TabletInvertedIndex {
                             }
 
                             if (Config.enable_storage_policy && backendTabletInfo.isSetCooldownTerm()) {
-                                handleCooldownConf(tabletMeta, backendTabletInfo, cooldownConfToPush,
-                                        cooldownConfToUpdate);
+                                // Place tablet info in a container and process it outside of read lock to avoid
+                                // deadlock with OlapTable lock
+                                synchronized (cooldownTablets) {
+                                    cooldownTablets.add(Pair.of(tabletMeta, backendTabletInfo));
+                                }
                                 replica.setCooldownMetaId(backendTabletInfo.getCooldownMetaId());
                                 replica.setCooldownTerm(backendTabletInfo.getCooldownTerm());
                             }
@@ -338,6 +342,7 @@ public class TabletInvertedIndex {
         } finally {
             readUnlock(stamp);
         }
+        cooldownTablets.forEach(p -> handleCooldownConf(p.first, p.second, cooldownConfToPush, cooldownConfToUpdate));
 
         long end = System.currentTimeMillis();
         LOG.info("finished to do tablet diff with backend[{}]. sync: {}."
@@ -434,9 +439,7 @@ public class TabletInvertedIndex {
         if (cooldownConf.first <= 0) { // invalid cooldownReplicaId
             CooldownConf conf = new CooldownConf(tabletMeta.getDbId(), tabletMeta.getTableId(),
                     tabletMeta.getPartitionId(), tabletMeta.getIndexId(), beTabletInfo.tablet_id, cooldownConf.second);
-            synchronized (cooldownConfToUpdate) {
-                cooldownConfToUpdate.add(conf);
-            }
+            cooldownConfToUpdate.add(conf);
             return;
         }
 
@@ -457,17 +460,13 @@ public class TabletInvertedIndex {
         if (!replicaAlive) {
             CooldownConf conf = new CooldownConf(tabletMeta.getDbId(), tabletMeta.getTableId(),
                     tabletMeta.getPartitionId(), tabletMeta.getIndexId(), beTabletInfo.tablet_id, cooldownConf.second);
-            synchronized (cooldownConfToUpdate) {
-                cooldownConfToUpdate.add(conf);
-            }
+            cooldownConfToUpdate.add(conf);
             return;
         }
 
         if (beTabletInfo.getCooldownTerm() < cooldownConf.second) {
             CooldownConf conf = new CooldownConf(beTabletInfo.tablet_id, cooldownConf.first, cooldownConf.second);
-            synchronized (cooldownConfToPush) {
-                cooldownConfToPush.add(conf);
-            }
+            cooldownConfToPush.add(conf);
             return;
         }
     }

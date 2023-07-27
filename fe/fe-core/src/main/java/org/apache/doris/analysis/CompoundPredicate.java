@@ -274,6 +274,11 @@ public class CompoundPredicate extends Predicate {
     }
 
     @Override
+    public String toString() {
+        return toSqlImpl();
+    }
+
+    @Override
     public boolean containsSubPredicate(Expr subExpr) throws AnalysisException {
         if (op.equals(Operator.AND)) {
             for (Expr child : children) {
@@ -287,6 +292,9 @@ public class CompoundPredicate extends Predicate {
 
     @Override
     public Expr replaceSubPredicate(Expr subExpr) {
+        if (toSqlWithoutTbl().equals(subExpr.toSqlWithoutTbl())) {
+            return null;
+        }
         if (op.equals(Operator.AND)) {
             Expr lhs = children.get(0);
             Expr rhs = children.get(1);
@@ -298,10 +306,5 @@ public class CompoundPredicate extends Predicate {
             }
         }
         return this;
-    }
-
-    @Override
-    public String toString() {
-        return toSqlImpl();
     }
 }

@@ -17,19 +17,20 @@
 
 {% materialization incremental, adapter='doris' %}
   {% set unique_key = config.get('unique_key', validator=validation.any[list]) %}
+<<<<<<< HEAD
   {%- set inserts_only = config.get('inserts_only') -%}
 
+=======
+  {% set strategy = dbt_doris_validate_get_incremental_strategy(config) %}
+  {% set full_refresh_mode = (should_full_refresh()) %}
+>>>>>>> 2.0.0-rc01
   {% set target_relation = this.incorporate(type='table') %}
-
-
   {% set existing_relation = load_relation(this) %}
   {% set tmp_relation = make_temp_relation(this) %}
-
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
-
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
-
   {% set to_drop = [] %}
+<<<<<<< HEAD
 
   {% if unique_key is none or inserts_only  %}
         {% set build_sql = tmp_insert(tmp_relation, target_relation, unique_key=none) %}
@@ -59,14 +60,65 @@
              from_relation=tmp_relation,
              to_relation=target_relation) %}
       {% set build_sql = tmp_insert(tmp_relation, target_relation, unique_key=unique_key) %}
+=======
+  {#-- append or no unique key --#}
+
+
+  {% if unique_key is none or strategy == 'append'  %}
+        {#-- create table first --#}
+        {% if existing_relation is none  %}
+            {% set build_sql = doris__create_table_as(False, target_relation, sql) %}
+        {% elif existing_relation.is_view or full_refresh_mode %}
+            {#-- backup data before drop old table #}
+            {% set backup_identifier = existing_relation.identifier ~ "__dbt_backup" %}
+            {% set backup_relation = existing_relation.incorporate(path={"identifier": backup_identifier}) %}
+            {% do adapter.drop_relation(backup_relation) %} {#-- likes 'drop table if exists ... ' --#}
+            {% do adapter.rename_relation(target_relation, backup_relation) %}
+            {% set build_sql = doris__create_table_as(False, target_relation, sql) %}
+            {% do to_drop.append(backup_relation) %}
+        {#-- append data --#}
+        {% else %}
+            {% do run_query(create_table_as(True, tmp_relation, sql)) %}
+            {% set build_sql = tmp_insert(tmp_relation, target_relation, unique_key=none) %}
+        {% endif %}
+  {#-- insert overwrite --#}
+  {% elif strategy == 'insert_overwrite' %}
+        {#-- create table first --#}
+        {% if existing_relation is none  %}
+            {% set build_sql = doris__create_unique_table_as(False, target_relation, sql) %}
+        {#-- insert data refresh --#}
+        {% elif existing_relation.is_view or full_refresh_mode %}
+            {#-- backup data before drop old table #}
+            {% set backup_identifier = existing_relation.identifier ~ "__dbt_backup" %}
+            {% set backup_relation = existing_relation.incorporate(path={"identifier": backup_identifier}) %}
+            {% do adapter.drop_relation(backup_relation) %} {#-- likes 'drop table if exists ... ' --#}
+            {% do adapter.rename_relation(target_relation, backup_relation) %}
+            {% set build_sql = doris__create_unique_table_as(False, target_relation, sql) %}
+            {% do to_drop.append(backup_relation) %}
+        {#-- append data --#}
+        {% else %}
+          {#-- check doris unique table  --#}
+          {% if not is_unique_model(target_relation) %}
+                {% do exceptions.raise_compiler_error("doris table:"~ target_relation ~ ", model must be 'UNIQUE'" ) %}
+          {% endif %}
+          {#-- create temp duplicate table for this incremental task  --#}
+          {% do run_query(create_table_as(True, tmp_relation, sql)) %}
+          {% do to_drop.append(tmp_relation) %}
+          {% do adapter.expand_target_column_types(
+                 from_relation=tmp_relation,
+                 to_relation=target_relation) %}
+          {% set build_sql = tmp_insert(tmp_relation, target_relation, unique_key=unique_key) %}
+        {% endif %}
+  {% else %}
+          {#-- never  --#}
+>>>>>>> 2.0.0-rc01
   {% endif %}
 
   {% call statement("main") %}
       {{ build_sql }}
   {% endcall %}
 
-
-  {% do persist_docs(target_relation, model) %}
+  {#--  {% do persist_docs(target_relation, model) %}  #}
   {{ run_hooks(post_hooks, inside_transaction=True) }}
   {% do adapter.commit() %}
   {% for rel in to_drop %}
@@ -74,5 +126,20 @@
   {% endfor %}
   {{ run_hooks(post_hooks, inside_transaction=False) }}
   {{ return({'relations': [target_relation]}) }}
-
 {%- endmaterialization %}
+<<<<<<< HEAD
+=======
+
+{% macro dbt_doris_validate_get_incremental_strategy(config) %}
+  {#-- Find and validate the incremental strategy #}
+  {%- set strategy = config.get('incremental_strategy') or 'insert_overwrite' -%}
+  {% set invalid_strategy_msg -%}
+    Invalid incremental strategy provided: {{ strategy }}
+    Expected one of: 'append', 'insert_overwrite'
+  {%- endset %}
+  {% if strategy not in ['append', 'insert_overwrite'] %}
+    {% do exceptions.raise_compiler_error(invalid_strategy_msg) %}
+  {% endif %}
+  {% do return (strategy) %}
+{% endmacro %}
+>>>>>>> 2.0.0-rc01

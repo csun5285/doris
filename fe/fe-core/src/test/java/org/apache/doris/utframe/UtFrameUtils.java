@@ -213,9 +213,9 @@ public class UtFrameUtils {
     public static void createDorisCluster(String runningDir, int backendNum) throws EnvVarNotSetException, IOException,
             FeStartException, NotInitException, DdlException, InterruptedException {
         FeConstants.disableInternalSchemaDb = true;
-        List<Backend> bes = Lists.newArrayList();
         int port = createMetaServer(MockedMetaServerFactory.METASERVER_DEFAULT_IP);
         int feRpcPort = startFEServer(runningDir, port);
+        List<Backend> bes = Lists.newArrayList();
         for (int i = 0; i < backendNum; i++) {
             bes.add(createBackend("127.0.0.1", feRpcPort));
         }

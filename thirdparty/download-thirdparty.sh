@@ -423,7 +423,7 @@ if [[ "${COS_SDK_SOURCE}" = "cos-cpp-sdk-v5-5.5.10" ]]; then
 fi
 echo "Finished patching ${COS_SOURCE}"
 
-if [[ "${BRPC_SOURCE}" == 'brpc-1.5.0' ]]; then
+if [[ "${BRPC_SOURCE}" == 'brpc-1.4.0' ]]; then
     cd "${TP_SOURCE_DIR}/${BRPC_SOURCE}"
     if [[ ! -f "${PATCHED_MARK}" ]]; then
         for patch_file in "${TP_PATCH_DIR}"/brpc-*; do

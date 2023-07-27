@@ -537,6 +537,18 @@ public class SlotRef extends Expr {
     }
 
     @Override
+    public String toString() {
+        StringBuilder builder = new StringBuilder();
+        if (tblName != null) {
+            builder.append(tblName).append(".");
+        }
+        if (label != null) {
+            builder.append(label);
+        }
+        return builder.toString();
+    }
+
+    @Override
     public boolean haveMvSlot(TupleId tid) {
         if (!isBound(tid)) {
             return false;
@@ -587,18 +599,6 @@ public class SlotRef extends Expr {
     }
 
     @Override
-    public String toString() {
-        StringBuilder builder = new StringBuilder();
-        if (tblName != null) {
-            builder.append(tblName).append(".");
-        }
-        if (label != null) {
-            builder.append(label);
-        }
-        return builder.toString();
-    }
-
-    @Override
     public Expr getResultValue(boolean foldSlot) throws AnalysisException {
         if (!foldSlot) {
             return this;
@@ -618,5 +618,10 @@ public class SlotRef extends Expr {
             return expr;
         }
         return this;
+    }
+
+    @Override
+    public void replaceSlot(TupleDescriptor tuple) {
+        desc = tuple.getColumnSlot(col);
     }
 }

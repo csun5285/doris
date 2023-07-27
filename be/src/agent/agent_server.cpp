@@ -124,7 +124,7 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     _storage_medium_migrate_workers.reset(
             new StorageMediumMigrateTaskPool(exec_env, TaskWorkerPool::ThreadModel::MULTI_THREADS));
     _storage_medium_migrate_workers->start();
-#endif
+#endif // BE_TEST
     CREATE_AND_START_POOL(ALTER_INVERTED_INDEX, _alter_inverted_index_workers);
     CREATE_AND_START_POOL(CHECK_CONSISTENCY, _check_consistency_workers);
     CREATE_AND_START_POOL(UPLOAD, _upload_workers);
@@ -140,6 +140,7 @@ AgentServer::AgentServer(ExecEnv* exec_env, const TMasterInfo& master_info)
     CREATE_AND_START_THREAD(REPORT_OLAP_TABLE, _report_tablet_workers);
     CREATE_AND_START_POOL(SUBMIT_TABLE_COMPACTION, _submit_table_compaction_workers);
     CREATE_AND_START_POOL(PUSH_STORAGE_POLICY, _push_storage_policy_workers);
+    CREATE_AND_START_THREAD(GC_BINLOG, _gc_binlog_workers);
 #endif // CLOUD_MODE
 #undef CREATE_AND_START_POOL
 #undef CREATE_AND_START_THREAD
@@ -205,7 +206,8 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
             HANDLE_TYPE(TTaskType::COMPACTION, _submit_table_compaction_workers, compaction_req);
             HANDLE_TYPE(TTaskType::PUSH_STORAGE_POLICY, _push_storage_policy_workers,
                         push_storage_policy_req);
-            HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers, calc_delete_bitmap_req);
+            HANDLE_TYPE(TTaskType::CALCULATE_DELETE_BITMAP, _calc_delete_bimtap_workers,
+                        calc_delete_bitmap_req);
 
         case TTaskType::REALTIME_PUSH:
         case TTaskType::PUSH:
@@ -249,6 +251,14 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
                 ret_st = Status::InvalidArgument(
                         "task(signature={}) has wrong request member = push_cooldown_conf",
                         signature);
+            }
+            break;
+        case TTaskType::GC_BINLOG:
+            if (task.__isset.gc_binlog_req) {
+                _gc_binlog_workers->submit_task(task);
+            } else {
+                ret_st = Status::InvalidArgument(
+                        "task(signature={}) has wrong request member = gc_binlog_req", signature);
             }
             break;
         default:

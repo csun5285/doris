@@ -80,7 +80,8 @@ public:
         PUSH_COOLDOWN_CONF,
         PUSH_STORAGE_POLICY,
         ALTER_INVERTED_INDEX,
-        CALCULATE_DELETE_BITMAP
+        CALCULATE_DELETE_BITMAP,
+        GC_BINLOG,
     };
 
     enum ReportType { TASK, DISK, TABLET };
@@ -144,6 +145,8 @@ public:
             return "ALTER_INVERTED_INDEX";
         case CALCULATE_DELETE_BITMAP:
             return "CALCULATE_DELETE_BITMAP";
+        case GC_BINLOG:
+            return "GC_BINLOG";
         default:
             return "Unknown";
         }
@@ -204,11 +207,13 @@ protected:
     void _calc_delete_bimtap_worker_thread_callback();
 #endif
 
-    void _alter_inverted_index(const TAgentTaskRequest& alter_inverted_index_request, int64_t signature,
-                            const TTaskType::type task_type, TFinishTaskRequest* finish_task_request);
+    void _gc_binlog_worker_thread_callback();
 
     void _alter_tablet(const TAgentTaskRequest& alter_tablet_request, int64_t signature,
                        const TTaskType::type task_type, TFinishTaskRequest* finish_task_request);
+    void _alter_inverted_index(const TAgentTaskRequest& alter_inverted_index_request,
+                               int64_t signature, const TTaskType::type task_type,
+                               TFinishTaskRequest* finish_task_request);
 
     void _handle_report(const TReportRequest& request, ReportType type);
 
@@ -258,6 +263,18 @@ protected:
     DISALLOW_COPY_AND_ASSIGN(TaskWorkerPool);
 }; // class TaskWorkerPool
 
+class PushTaskPool : public TaskWorkerPool {
+public:
+    enum class PushWokerType { LOAD_V2, DELETE };
+    PushTaskPool(ExecEnv* env, ThreadModel thread_model, PushWokerType type);
+    void _push_worker_thread_callback();
+
+    DISALLOW_COPY_AND_ASSIGN(PushTaskPool);
+
+private:
+    PushWokerType _push_worker_type;
+};
+
 class CreateTableTaskPool : public TaskWorkerPool {
 public:
     CreateTableTaskPool(ExecEnv* env, ThreadModel thread_model);
@@ -272,18 +289,6 @@ public:
     void _drop_tablet_worker_thread_callback();
 
     DISALLOW_COPY_AND_ASSIGN(DropTableTaskPool);
-};
-
-class PushTaskPool : public TaskWorkerPool {
-public:
-    enum class PushWokerType { LOAD_V2, DELETE };
-    PushTaskPool(ExecEnv* env, ThreadModel thread_model, PushWokerType type);
-    void _push_worker_thread_callback();
-
-    DISALLOW_COPY_AND_ASSIGN(PushTaskPool);
-
-private:
-    PushWokerType _push_worker_type;
 };
 
 class PublishVersionTaskPool : public TaskWorkerPool {

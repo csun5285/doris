@@ -38,7 +38,6 @@ import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.UserException;
 import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.planner.external.FederationBackendPolicy;
@@ -202,12 +201,7 @@ public class FileLoadScanNode extends FileScanNode {
                 .needLoadAvailable()
                 .build();
         FederationBackendPolicy localBackendPolicy = new FederationBackendPolicy();
-        if (Config.isCloudMode()) {
-            localBackendPolicy.cloudInit();
-        } else {
-            localBackendPolicy.init(policy);
-        }
-
+        localBackendPolicy.init(policy);
         for (int i = 0; i < contexts.size(); ++i) {
             FileLoadScanNode.ParamCreateContext context = contexts.get(i);
             LoadScanProvider scanProvider = scanProviders.get(i);

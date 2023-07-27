@@ -78,35 +78,41 @@ if [[ "${MAX_FILE_COUNT}" -lt 65536 ]]; then
 fi
 
 # add java libs
-for f in "${DORIS_HOME}/lib"/*.jar; do
+for f in "${DORIS_HOME}/lib/java_extensions"/*.jar; do
     if [[ -z "${DORIS_CLASSPATH}" ]]; then
         export DORIS_CLASSPATH="${f}"
     else
-        export DORIS_CLASSPATH="${f}:${DORIS_CLASSPATH}"
+        export DORIS_CLASSPATH="${DORIS_CLASSPATH}:${f}"
     fi
 done
 
 if [[ -d "${DORIS_HOME}/lib/hadoop_hdfs/" ]]; then
     # add hadoop libs
     for f in "${DORIS_HOME}/lib/hadoop_hdfs/common"/*.jar; do
-        DORIS_CLASSPATH="${f}:${DORIS_CLASSPATH}"
+        DORIS_CLASSPATH="${DORIS_CLASSPATH}:${f}"
     done
     for f in "${DORIS_HOME}/lib/hadoop_hdfs/common/lib"/*.jar; do
-        DORIS_CLASSPATH="${f}:${DORIS_CLASSPATH}"
+        DORIS_CLASSPATH="${DORIS_CLASSPATH}:${f}"
     done
     for f in "${DORIS_HOME}/lib/hadoop_hdfs/hdfs"/*.jar; do
-        DORIS_CLASSPATH="${f}:${DORIS_CLASSPATH}"
+        DORIS_CLASSPATH="${DORIS_CLASSPATH}:${f}"
     done
     for f in "${DORIS_HOME}/lib/hadoop_hdfs/hdfs/lib"/*.jar; do
-        DORIS_CLASSPATH="${f}:${DORIS_CLASSPATH}"
+        DORIS_CLASSPATH="${DORIS_CLASSPATH}:${f}"
     done
+fi
+
+if [[ -n "${HADOOP_CONF_DIR}" ]]; then
+    export DORIS_CLASSPATH="${HADOOP_CONF_DIR}:${DORIS_CLASSPATH}"
 fi
 
 # the CLASSPATH and LIBHDFS_OPTS is used for hadoop libhdfs
 # and conf/ dir so that hadoop libhdfs can read .xml config file in conf/
-export CLASSPATH="${DORIS_HOME}/conf/:${DORIS_CLASSPATH}"
+export CLASSPATH="${DORIS_HOME}/conf/:${DORIS_CLASSPATH}:${CLASSPATH}"
 # DORIS_CLASSPATH is for self-managed jni
 export DORIS_CLASSPATH="-Djava.class.path=${DORIS_CLASSPATH}"
+
+export LD_LIBRARY_PATH="${DORIS_HOME}/lib/hadoop_hdfs/native:${LD_LIBRARY_PATH}"
 
 jdk_version() {
     local java_cmd="${1}"
@@ -133,10 +139,8 @@ jdk_version() {
 
 # export env variables from be.conf
 #
-# UDF_RUNTIME_DIR
 # LOG_DIR
 # PID_DIR
-export UDF_RUNTIME_DIR="${DORIS_HOME}/lib/udf-runtime"
 export LOG_DIR="${DORIS_HOME}/log"
 PID_DIR="$(
     cd "${curdir}"
@@ -183,12 +187,6 @@ if [[ ! -d "${LOG_DIR}" ]]; then
     mkdir -p "${LOG_DIR}"
 fi
 
-if [[ ! -d "${UDF_RUNTIME_DIR}" ]]; then
-    mkdir -p "${UDF_RUNTIME_DIR}"
-fi
-
-rm -f "${UDF_RUNTIME_DIR}"/*
-
 pidfile="${PID_DIR}/be.pid"
 
 if [[ -f "${pidfile}" ]]; then
@@ -206,7 +204,7 @@ echo "start time: $(date)" >>"${LOG_DIR}/be.out"
 if [[ ! -f '/bin/limit3' ]]; then
     LIMIT=''
 else
-    LIMIT="/bin/limit3 -c 0 -n 1000000"
+    LIMIT="/bin/limit3 -c 0 -n 65536"
 fi
 
 ## If you are not running in aws cloud, disable this env since https://github.com/aws/aws-sdk-cpp/issues/1410.
@@ -272,18 +270,18 @@ java_version="$(
 CUR_DATE=$(date +%Y%m%d-%H%M%S)
 LOG_PATH="-DlogPath=${DORIS_HOME}/log/jni.log"
 COMMON_OPTS="-Dsun.java.command=DorisBE -XX:-CriticalJNINatives"
-JDBC_OPTS="-DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDEL_TIME=300000"
+JDBC_OPTS="-DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDEL_TIME=300000 -DJDBC_MAX_WAIT_TIME=5000"
 
 if [[ "${java_version}" -gt 8 ]]; then
-    if [[ -z ${JAVA_OPTS} ]]; then
-        JAVA_OPTS="-Xmx1024m ${LOG_PATH} -Xloggc:${DORIS_HOME}/log/be.gc.log.${CUR_DATE} ${COMMON_OPTS} ${JDBC_OPTS}"
-    fi
-    final_java_opt="${JAVA_OPTS}"
-else
     if [[ -z ${JAVA_OPTS_FOR_JDK_9} ]]; then
         JAVA_OPTS_FOR_JDK_9="-Xmx1024m ${LOG_PATH} -Xlog:gc:${DORIS_HOME}/log/be.gc.log.${CUR_DATE} ${COMMON_OPTS} ${JDBC_OPTS}"
     fi
     final_java_opt="${JAVA_OPTS_FOR_JDK_9}"
+else
+    if [[ -z ${JAVA_OPTS} ]]; then
+        JAVA_OPTS="-Xmx1024m ${LOG_PATH} -Xloggc:${DORIS_HOME}/log/be.gc.log.${CUR_DATE} ${COMMON_OPTS} ${JDBC_OPTS}"
+    fi
+    final_java_opt="${JAVA_OPTS}"
 fi
 
 if [[ "${MACHINE_OS}" == "Darwin" ]]; then
@@ -307,6 +305,8 @@ export LIBHDFS_OPTS="${final_java_opt}"
 
 # see https://github.com/apache/doris/blob/master/docs/zh-CN/community/developer-guide/debug-tool.md#jemalloc-heap-profile
 export JEMALLOC_CONF="percpu_arena:percpu,background_thread:true,metadata_thp:auto,muzzy_decay_ms:30000,dirty_decay_ms:30000,oversize_threshold:0,lg_tcache_max:16,prof_prefix:jeprof.out"
+export AWS_EC2_METADATA_DISABLED=true
+export AWS_MAX_ATTEMPTS=2
 
 if [[ "${RUN_DAEMON}" -eq 1 ]]; then
     nohup ${LIMIT:+${LIMIT}} "${DORIS_HOME}/lib/doris_be" "$@" >>"${LOG_DIR}/be.out" 2>&1 </dev/null &

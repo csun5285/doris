@@ -226,8 +226,8 @@ public:
         return _tablet_publish_txn_thread_pool;
     }
 
-    std::unique_ptr<ThreadPool>& tablet_calc_delete_bitmap_thread_pool() {
-        return _tablet_calc_delete_bitmap_thread_pool;
+    std::unique_ptr<ThreadPool>& calc_delete_bitmap_thread_pool() {
+        return _calc_delete_bitmap_thread_pool;
     }
 
 private:
@@ -392,7 +392,7 @@ private:
 
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;
 
-    std::unique_ptr<ThreadPool> _tablet_calc_delete_bitmap_thread_pool;
+    std::unique_ptr<ThreadPool> _calc_delete_bitmap_thread_pool;
 
     mutable std::mutex _compaction_mtx;
     // tablet_id -> submitted base compaction, guarded by `_compaction_mtx`

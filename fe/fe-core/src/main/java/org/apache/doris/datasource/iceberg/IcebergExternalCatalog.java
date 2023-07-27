@@ -116,4 +116,3 @@ public abstract class IcebergExternalCatalog extends ExternalCatalog {
         return catalog.loadTable(TableIdentifier.of(dbName, tblName));
     }
 }
-

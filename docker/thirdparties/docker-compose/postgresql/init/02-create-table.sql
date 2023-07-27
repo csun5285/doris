@@ -145,6 +145,7 @@ CREATE TABLE catalog_pg_test.test11 (
    polygon_value polygon,
    circle_value circle
 );
+<<<<<<< HEAD
 
 CREATE TABLE catalog_pg_test.test12 (
    ID INT NOT NULL,
@@ -157,7 +158,29 @@ CREATE TABLE catalog_pg_test.test_insert (
    age int
 );
 
+=======
+
+CREATE TABLE catalog_pg_test.test12 (
+   ID INT NOT NULL,
+   uuid_value uuid
+);
+
+CREATE TABLE catalog_pg_test.test_insert (
+   id varchar(128),
+   name varchar(128),
+   age int
+);
+
+>>>>>>> 2.0.0-rc01
 CREATE TABLE catalog_pg_test.wkb_test (
    id SERIAL PRIMARY KEY,
    location bytea
 );
+<<<<<<< HEAD
+=======
+
+CREATE TABLE catalog_pg_test.dt_test (
+    ts_field TIMESTAMP(3),
+    tzt_field TIMESTAMPTZ(3)
+);
+>>>>>>> 2.0.0-rc01

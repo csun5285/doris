@@ -31,7 +31,6 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.Util;
-import org.apache.doris.common.util.VectorizedUtil;
 import org.apache.doris.load.BrokerFileGroup;
 import org.apache.doris.load.Load;
 import org.apache.doris.load.loadv2.LoadTask;
@@ -39,7 +38,6 @@ import org.apache.doris.planner.FileLoadScanNode;
 import org.apache.doris.task.LoadTaskInfo;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TFileAttributes;
-import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileScanRangeParams;
 import org.apache.doris.thrift.TFileScanSlotInfo;
@@ -69,6 +67,9 @@ public class LoadScanProvider {
         return null;
     }
 
+    public TFileType getLocationType() throws DdlException, MetaNotFoundException {
+        return null;
+    }
 
     public Map<String, String> getLocationProperties() throws MetaNotFoundException, DdlException {
         return null;
@@ -85,9 +86,7 @@ public class LoadScanProvider {
         ctx.timezone = analyzer.getTimezone();
 
         TFileScanRangeParams params = new TFileScanRangeParams();
-        params.setFormatType(
-                formatType(fileGroupInfo.getFileGroup().getFileFormat(), fileGroupInfo.getFileGroup().getCompressType(),
-                        ""));
+        params.setFormatType(formatType(fileGroupInfo.getFileGroup().getFileFormat(), ""));
         params.setCompressType(fileGroupInfo.getFileGroup().getCompressType());
         params.setStrictMode(fileGroupInfo.isStrictMode());
         params.setProperties(fileGroupInfo.getBrokerDesc().getProperties());
@@ -191,8 +190,8 @@ public class LoadScanProvider {
         List<Integer> srcSlotIds = Lists.newArrayList();
         Load.initColumns(fileGroupInfo.getTargetTable(), columnDescs, context.fileGroup.getColumnToHadoopFunction(),
                 context.exprMap, analyzer, context.srcTupleDescriptor, context.srcSlotDescByName, srcSlotIds,
-                formatType(context.fileGroup.getFileFormat(), context.fileGroup.getCompressType(), ""),
-                fileGroupInfo.getHiddenColumns(), VectorizedUtil.isVectorized(), fileGroupInfo.isPartialUpdate());
+                formatType(context.fileGroup.getFileFormat(), ""), fileGroupInfo.getHiddenColumns(),
+                fileGroupInfo.isPartialUpdate());
 
         int columnCountFromPath = 0;
         if (context.fileGroup.getColumnNamesFromPath() != null) {
@@ -211,8 +210,7 @@ public class LoadScanProvider {
         }
     }
 
-    public static TFileFormatType formatType(String fileFormat, TFileCompressType compressType, String path)
-            throws UserException {
+    private TFileFormatType formatType(String fileFormat, String path) throws UserException {
         if (fileFormat != null) {
             String lowerFileFormat = fileFormat.toLowerCase();
             if (lowerFileFormat.equals("parquet")) {
@@ -220,43 +218,13 @@ public class LoadScanProvider {
             } else if (lowerFileFormat.equals("orc")) {
                 return TFileFormatType.FORMAT_ORC;
             } else if (lowerFileFormat.equals("json")) {
-                if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                        || compressType == TFileCompressType.PLAIN) {
-                    return TFileFormatType.FORMAT_JSON;
-                } else if (compressType == TFileCompressType.GZ) {
-                    return TFileFormatType.FORMAT_JSON_GZ;
-                } else if (compressType == TFileCompressType.LZO) {
-                    return TFileFormatType.FORMAT_JSON_LZO;
-                } else if (compressType == TFileCompressType.BZ2) {
-                    return TFileFormatType.FORMAT_JSON_BZ2;
-                } else if (compressType == TFileCompressType.LZ4FRAME) {
-                    return TFileFormatType.FORMAT_JSON_LZ4FRAME;
-                }  else if (compressType == TFileCompressType.DEFLATE) {
-                    return TFileFormatType.FORMAT_JSON_DEFLATE;
-                }
-                throw new UserException(
-                        "Not supported file format: " + fileFormat + ", and compression: " + compressType);
+                return TFileFormatType.FORMAT_JSON;
                 // csv/csv_with_name/csv_with_names_and_types treat as csv format
             } else if (lowerFileFormat.equals(FeConstants.csv) || lowerFileFormat.equals(FeConstants.csv_with_names)
                     || lowerFileFormat.equals(FeConstants.csv_with_names_and_types)
                     // TODO: Add TEXTFILE to TFileFormatType to Support hive text file format.
                     || lowerFileFormat.equals(FeConstants.text)) {
-                if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                        || compressType == TFileCompressType.PLAIN) {
-                    return TFileFormatType.FORMAT_CSV_PLAIN;
-                } else if (compressType == TFileCompressType.GZ) {
-                    return TFileFormatType.FORMAT_CSV_GZ;
-                } else if (compressType == TFileCompressType.LZO) {
-                    return TFileFormatType.FORMAT_CSV_LZO;
-                } else if (compressType == TFileCompressType.BZ2) {
-                    return TFileFormatType.FORMAT_CSV_BZ2;
-                } else if (compressType == TFileCompressType.LZ4FRAME) {
-                    return TFileFormatType.FORMAT_CSV_LZ4FRAME;
-                }  else if (compressType == TFileCompressType.DEFLATE) {
-                    return TFileFormatType.FORMAT_CSV_DEFLATE;
-                }
-                throw new UserException(
-                        "Not supported file format: " + fileFormat + ", and compression: " + compressType);
+                return TFileFormatType.FORMAT_CSV_PLAIN;
             } else {
                 throw new UserException("Not supported file format: " + fileFormat);
             }

@@ -131,7 +131,8 @@ public class DiskRebalanceTest {
         };
         // Test mock validation
         Assert.assertEquals(111, Env.getCurrentGlobalTransactionMgr().getNextTransactionId(2));
-        Assert.assertTrue(Env.getCurrentGlobalTransactionMgr().isPreviousTransactionsFinished(1, 2, Lists.newArrayList(3L)));
+        Assert.assertTrue(
+                Env.getCurrentGlobalTransactionMgr().isPreviousTransactionsFinished(1, 2, Lists.newArrayList(3L)));
     }
 
     private void generateStatisticMap() {

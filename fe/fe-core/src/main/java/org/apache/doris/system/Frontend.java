@@ -178,10 +178,6 @@ public class Frontend implements Writable {
         return GsonUtils.GSON.fromJson(json, Frontend.class);
     }
 
-    public HostInfo toHostInfo() {
-        return new HostInfo(host, editLogPort);
-    }
-
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
@@ -193,5 +189,9 @@ public class Frontend implements Writable {
 
     public void setHost(String host) {
         this.host = host;
+    }
+
+    public HostInfo toHostInfo() {
+        return new HostInfo(host, editLogPort);
     }
 }

@@ -43,7 +43,6 @@
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/rowset/rowset.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "olap/tablet_meta_manager.h"
@@ -62,6 +61,12 @@
 #include "util/time.h"
 #include "util/trace.h"
 #include "util/uid_util.h"
+
+#ifdef CLOUD_MODE
+#include "cloud/olap/storage_engine.h"
+#else
+#include "olap/storage_engine.h"
+#endif
 
 namespace doris {
 class CumulativeCompactionPolicy;
@@ -856,7 +861,7 @@ Status TabletManager::load_tablet_from_dir(DataDir* store, TTabletId tablet_id,
     }
 
     TabletMetaSharedPtr tablet_meta(new TabletMeta());
-    if (tablet_meta->create_from_file(header_path) != Status::OK()) {
+    if (!tablet_meta->create_from_file(header_path).ok()) {
         LOG(WARNING) << "fail to load tablet_meta. file_path=" << header_path;
         return Status::Error<ENGINE_LOAD_INDEX_TABLE_ERROR>();
     }
@@ -911,7 +916,7 @@ Status TabletManager::build_all_report_tablets_info(std::map<TTabletId, TTablet>
     for (auto& tablet : tablets) {
         auto& t_tablet = (*tablets_info)[tablet->tablet_id()];
         TTabletInfo& tablet_info = t_tablet.tablet_infos.emplace_back();
-        tablet->build_tablet_report_info(&tablet_info, true);
+        tablet->build_tablet_report_info(&tablet_info, true, true);
         // find expired transaction corresponding to this tablet
         TabletInfo tinfo(tablet->tablet_id(), tablet->schema_hash(), tablet->tablet_uid());
         auto find = expire_txn_map.find(tinfo);

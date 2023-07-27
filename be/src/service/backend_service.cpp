@@ -66,10 +66,10 @@
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/stream_load_recorder.h"
 #include "util/arrow/row_batch.h"
-#include "util/brpc_client_cache.h"
 #include "util/defer_op.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
+#include "util/brpc_client_cache.h"
 
 namespace apache {
 namespace thrift {
@@ -435,6 +435,7 @@ void BackendService::check_pre_cache(TCheckPreCacheResponse& response,
 
 void BackendService::ingest_binlog(TIngestBinlogResult& result,
                                    const TIngestBinlogRequest& request) {
+    constexpr uint64_t kMaxTimeoutMs = 1000;
     TStatus tstatus;
     Defer defer {[&result, &tstatus]() { result.__set_status(tstatus); }};
 
@@ -447,49 +448,49 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     }
 
     /// Check args: txn_id, remote_tablet_id, binlog_version, remote_host, remote_port, partition_id, load_id
-    if (request.__isset.txn_id) {
+    if (!request.__isset.txn_id) {
         LOG(WARNING) << "txn_id is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("txn_id is empty");
         return;
     }
-    if (request.__isset.remote_tablet_id) {
+    if (!request.__isset.remote_tablet_id) {
         LOG(WARNING) << "remote_tablet_id is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("remote_tablet_id is empty");
         return;
     }
-    if (request.__isset.binlog_version) {
+    if (!request.__isset.binlog_version) {
         LOG(WARNING) << "binlog_version is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("binlog_version is empty");
         return;
     }
-    if (request.__isset.remote_host) {
+    if (!request.__isset.remote_host) {
         LOG(WARNING) << "remote_host is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("remote_host is empty");
         return;
     }
-    if (request.__isset.remote_port) {
+    if (!request.__isset.remote_port) {
         LOG(WARNING) << "remote_port is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("remote_port is empty");
         return;
     }
-    if (request.__isset.partition_id) {
+    if (!request.__isset.partition_id) {
         LOG(WARNING) << "partition_id is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
         tstatus.error_msgs.emplace_back("partition_id is empty");
         return;
     }
-    if (request.__isset.load_id) {
+    if (!request.__isset.load_id) {
         LOG(WARNING) << "load_id is empty";
         tstatus.__set_status_code(TStatusCode::ANALYSIS_ERROR);
         tstatus.__isset.error_msgs = true;
@@ -536,7 +537,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     std::string binlog_info;
     auto get_binlog_info_cb = [&get_binlog_info_url, &binlog_info](HttpClient* client) {
         RETURN_IF_ERROR(client->init(get_binlog_info_url));
-        client->set_timeout_ms(10); // 10ms
+        client->set_timeout_ms(kMaxTimeoutMs);
         return client->execute(&binlog_info);
     };
     status = HttpClient::execute_with_retry(max_retry, 1, get_binlog_info_cb);
@@ -560,7 +561,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     std::string rowset_meta_str;
     auto get_rowset_meta_cb = [&get_rowset_meta_url, &rowset_meta_str](HttpClient* client) {
         RETURN_IF_ERROR(client->init(get_rowset_meta_url));
-        client->set_timeout_ms(10); // 10ms
+        client->set_timeout_ms(kMaxTimeoutMs);
         return client->execute(&rowset_meta_str);
     };
     status = HttpClient::execute_with_retry(max_retry, 1, get_rowset_meta_cb);
@@ -579,7 +580,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     }
     // rewrite rowset meta
     rowset_meta_pb.set_tablet_id(local_tablet_id);
-    rowset_meta_pb.set_partition_id(local_tablet->tablet_meta()->partition_id());
+    rowset_meta_pb.set_partition_id(partition_id);
     rowset_meta_pb.set_tablet_schema_hash(local_tablet->tablet_meta()->schema_hash());
     rowset_meta_pb.set_txn_id(txn_id);
     rowset_meta_pb.set_rowset_state(RowsetStatePB::COMMITTED);
@@ -607,7 +608,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
         auto get_segment_file_size_cb = [&get_segment_file_size_url,
                                          &segment_file_size](HttpClient* client) {
             RETURN_IF_ERROR(client->init(get_segment_file_size_url));
-            client->set_timeout_ms(10); // 10ms
+            client->set_timeout_ms(kMaxTimeoutMs);
             RETURN_IF_ERROR(client->head());
             return client->get_content_length(&segment_file_size);
         };

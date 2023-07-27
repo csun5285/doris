@@ -152,7 +152,28 @@ public class BackendServiceClient {
     }
 
     public void shutdown() {
-        channel.shutdown();
+        if (!channel.isShutdown()) {
+            channel.shutdown();
+            try {
+                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                    LOG.warn("Timed out gracefully shutting down connection: {}. ", channel);
+                }
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+
+        if (!channel.isTerminated()) {
+            channel.shutdownNow();
+            try {
+                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
+                    LOG.warn("Timed out forcefully shutting down connection: {}. ", channel);
+                }
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+
         LOG.warn("shut down backend service client: {}", address);
     }
 

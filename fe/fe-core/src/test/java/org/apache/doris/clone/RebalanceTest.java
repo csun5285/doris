@@ -143,7 +143,8 @@ public class RebalanceTest {
         };
         // Test mock validation
         Assert.assertEquals(111, Env.getCurrentGlobalTransactionMgr().getNextTransactionId(2));
-        Assert.assertTrue(Env.getCurrentGlobalTransactionMgr().isPreviousTransactionsFinished(1, 2, Lists.newArrayList(3L)));
+        Assert.assertTrue(
+                Env.getCurrentGlobalTransactionMgr().isPreviousTransactionsFinished(1, 2, Lists.newArrayList(3L)));
 
         List<Long> beIds = Lists.newArrayList(10001L, 10002L, 10003L, 10004L);
         beIds.forEach(id -> systemInfoService.addBackend(RebalancerTestUtil.createBackend(id, 2048, 0)));

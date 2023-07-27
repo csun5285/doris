@@ -50,6 +50,9 @@ public:
     Compaction(const TabletSharedPtr& tablet, const std::string& label);
     virtual ~Compaction();
 
+    // This is only for http CompactionAction
+    Status compact();
+
     virtual Status prepare_compact() = 0;
     Status execute_compact();
     virtual Status execute_compact_impl() = 0;
@@ -57,6 +60,8 @@ public:
     void set_input_rowset(const std::vector<RowsetSharedPtr>& rowsets);
     RowsetSharedPtr output_rowset();
 #endif
+
+    RuntimeProfile* runtime_profile() const { return _profile.get(); }
 
 protected:
     virtual Status pick_rowsets_to_compact() = 0;
@@ -69,6 +74,7 @@ protected:
     // update and persistent tablet meta
     virtual Status modify_rowsets(const Merger::Statistics* stats = nullptr);
     virtual void garbage_collection();
+    void gc_output_rowset();
 
     Status construct_output_rowset_writer(RowsetWriterContext& ctx, bool is_vertical = false);
     Status construct_input_rowset_readers();
@@ -87,6 +93,8 @@ protected:
     bool is_rowset_tidy(std::string& pre_max_key, const RowsetSharedPtr& rhs);
     void build_basic_info();
     void file_cache_garbage_collection();
+
+    void init_profile(const std::string& label);
 
 protected:
     // the root tracker for this compaction
@@ -112,6 +120,19 @@ protected:
     int64_t _newest_write_timestamp;
     RowIdConversion _rowid_conversion;
     TabletSchemaSPtr _cur_tablet_schema;
+
+    std::unique_ptr<RuntimeProfile> _profile;
+
+    RuntimeProfile::Counter* _input_rowsets_data_size_counter = nullptr;
+    RuntimeProfile::Counter* _input_rowsets_counter = nullptr;
+    RuntimeProfile::Counter* _input_row_num_counter = nullptr;
+    RuntimeProfile::Counter* _input_segments_num_counter = nullptr;
+    RuntimeProfile::Counter* _merged_rows_counter = nullptr;
+    RuntimeProfile::Counter* _filtered_rows_counter = nullptr;
+    RuntimeProfile::Counter* _output_rowset_data_size_counter = nullptr;
+    RuntimeProfile::Counter* _output_row_num_counter = nullptr;
+    RuntimeProfile::Counter* _output_segments_num_counter = nullptr;
+    RuntimeProfile::Counter* _merge_rowsets_latency_timer = nullptr;
 
     // CLOUD_MODE
     // expiration time of this compaction

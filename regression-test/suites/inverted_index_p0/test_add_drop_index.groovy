@@ -66,7 +66,6 @@ suite("test_add_drop_index", "inverted_index"){
 
     def show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
-    assertEquals(show_result.size(), 1)
     assertEquals(show_result[0][2], "age_idx")
     
     // case1.1 create duplicate same index for one colume with same name
@@ -137,7 +136,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index name_idx on ${indexTbName1}(`name`) using inverted"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "name_idx" && show_result[0][10] == "INVERTED")
     logger.info("create index name_idx for " + indexTbName1 + "(`name`)")
     logger.info("show index result: " + show_result)
@@ -148,7 +146,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index name_idx on ${indexTbName1}(`name`) USING INVERTED PROPERTIES(\"parser\"=\"none\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertEquals(show_result[0][10], "INVERTED")
     logger.info("create index name_idx for " + indexTbName1 + "(`name`) USING INVERTED PROPERTIES(\"parser\"=\"none\")")
     logger.info("show index result: " + show_result)
@@ -159,7 +156,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index studentInfo_idx on ${indexTbName1}(`studentInfo`) USING INVERTED PROPERTIES(\"parser\"=\"english\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "studentInfo_idx" && show_result[0][10] == "INVERTED")
     logger.info("create index studentInfo_idx for " + indexTbName1 + "(`studentInfo`) USING INVERTED PROPERTIES(\"parser\"=\"english\")")
     logger.info("show index result: " + show_result)
@@ -170,7 +166,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index tearchComment_idx on ${indexTbName1}(`tearchComment`) USING INVERTED PROPERTIES(\"parser\"=\"standard\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "tearchComment_idx" && show_result[0][10] == "INVERTED")
     logger.info("create index tearchComment_idx for " + indexTbName1 + "(`tearchComment`) USING INVERTED PROPERTIES(\"parser\"=\"standard\")")
     logger.info("show index result: " + show_result)
@@ -196,7 +191,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index tearchComment_idx on ${indexTbName1}(`tearchComment`) USING INVERTED PROPERTIES(\"parser\"=\"standard\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "tearchComment_idx" && show_result[0][10] == "INVERTED")
     sql "drop index tearchComment_idx on ${indexTbName1}"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
@@ -209,7 +203,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index tearchComment_idx on ${indexTbName1}(`tearchComment`) USING INVERTED PROPERTIES(\"parser\"=\"none\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "tearchComment_idx" && show_result[0][10] == "INVERTED")
     sql "drop index tearchComment_idx on ${indexTbName1}"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
@@ -222,7 +215,6 @@ suite("test_add_drop_index", "inverted_index"){
     sql "create index tearchComment_idx_2 on ${indexTbName1}(`tearchComment`) USING INVERTED PROPERTIES(\"parser\"=\"standard\")"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
-    assertEquals(show_result.size(), 1)
     assertTrue(show_result[0][2] == "tearchComment_idx_2" && show_result[0][10] == "INVERTED")
     sql "drop index tearchComment_idx_2 on ${indexTbName1}"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)

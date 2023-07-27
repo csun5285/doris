@@ -38,7 +38,6 @@
 #include "vec/data_types/data_type_nullable.h"
 #include "vec/data_types/data_type_number.h"
 #include "vec/data_types/data_type_time.h"
-#include "vec/data_types/data_type_time_v2.h"
 #include "vec/data_types/number_traits.h"
 #include "vec/functions/function.h"
 #include "vec/functions/simple_function_factory.h"

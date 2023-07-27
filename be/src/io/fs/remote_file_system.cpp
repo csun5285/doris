@@ -77,7 +77,7 @@ Status RemoteFileSystem::open_file_impl(const Path& path, FileReaderSPtr* reader
     if (!opts) {
         opts = &FileReaderOptions::DEFAULT;
     }
-    RETURN_IF_ERROR(open_file_internal(path, opts->file_size, &raw_reader));
+    RETURN_IF_ERROR(open_file_internal(path, &raw_reader, opts));
     switch (opts->cache_type) {
     case io::FileCachePolicy::NO_CACHE: {
         *reader = raw_reader;

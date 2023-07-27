@@ -126,6 +126,7 @@ public:
     int64_t partition_id() const;
 
     int64_t mem_consumption(MemType mem);
+    int64_t active_memtable_mem_consumption();
 
     // Wait all memtable in flush queue to be flushed
     Status wait_flush();
@@ -134,21 +135,15 @@ public:
 
     int32_t schema_hash() { return _tablet->schema_hash(); }
 
+    // CLOUD
     void update_tablet_stats();
-
-    void save_mem_consumption_snapshot();
-
-    int64_t get_memtable_consumption_inflush() const;
-
-    int64_t get_memtable_consumption_snapshot() const;
+    // CLOUD
+    void set_tablet_load_rowset_num_info(
+            google::protobuf::RepeatedPtrField<PTabletLoadRowsetInfo>* tablet_info);
 
     void finish_slave_tablet_pull_rowset(int64_t node_id, bool is_succeed);
 
-    // metrics
     int64_t total_received_rows() const { return _total_received_rows; }
-
-    void set_tablet_load_rowset_num_info(
-            google::protobuf::RepeatedPtrField<PTabletLoadRowsetInfo>* tablet_info);
 
 private:
     DeltaWriter(WriteRequest* req, StorageEngine* storage_engine, RuntimeProfile* profile,
@@ -195,14 +190,7 @@ private:
     SpinLock _mem_table_tracker_lock;
     std::atomic<uint32_t> _mem_table_num = 1;
 
-    mutable doris::Mutex _lock;
-
-    // memory consumption snapshot for current delta_writer, only
-    // used for std::sort
-    int64_t _mem_consumption_snapshot = 0;
-    // memory consumption snapshot for current memtable, only
-    // used for std::sort
-    int64_t _memtable_consumption_snapshot = 0;
+    mutable std::mutex _lock;
 
     std::unordered_set<int64_t> _unfinished_slave_node;
     PSuccessSlaveTabletNodeIds _success_slave_node_ids;
@@ -216,8 +204,6 @@ private:
 
     // total rows num written by DeltaWriter
     int64_t _total_received_rows = 0;
-    // rows num merged by memtable
-    int64_t _merged_rows = 0;
 
     RuntimeProfile* _profile = nullptr;
     RuntimeProfile::Counter* _lock_timer = nullptr;

@@ -94,6 +94,7 @@ template <bool is_binary_format>
 MysqlRowBuffer<is_binary_format>::~MysqlRowBuffer() {
     if (_buf != _default_buf) {
         delete[] _buf;
+        _buf = _default_buf;
     }
 }
 
@@ -529,16 +530,6 @@ template <bool is_binary_format>
 int MysqlRowBuffer<is_binary_format>::push_null() {
     if (_dynamic_mode) {
         // for nested type
-        return 0;
-    }
-
-    if constexpr (is_binary_format) {
-        uint offset = (_field_pos + 2) / 8 + 1;
-        uint bit = (1 << ((_field_pos + 2) & 7));
-        /* Room for this as it's allocated start_binary_row*/
-        char* to = (char*)_buf + offset;
-        *to = (char)((uchar)*to | (uchar)bit);
-        _field_pos++;
         return 0;
     }
 

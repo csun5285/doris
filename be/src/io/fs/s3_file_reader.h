@@ -25,6 +25,7 @@
 
 #include "common/status.h"
 #include "io/fs/file_reader.h"
+#include "io/fs/file_system.h"
 #include "io/fs/path.h"
 #include "io/fs/s3_file_system.h"
 #include "util/slice.h"

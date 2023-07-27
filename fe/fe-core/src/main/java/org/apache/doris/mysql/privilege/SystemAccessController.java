@@ -46,6 +46,10 @@ public class SystemAccessController {
         return auth.checkCloudPriv(currentUser, resourceName, wanted, type);
     }
 
+    public boolean checkWorkloadGroupPriv(UserIdentity currentUser, String workloadGroupName, PrivPredicate wanted) {
+        return auth.checkWorkloadGroupPriv(currentUser, workloadGroupName, wanted);
+    }
+
     /*
      * Check if current user has certain privilege.
      * This method will check the given privilege levels

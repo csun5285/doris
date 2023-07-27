@@ -52,7 +52,6 @@ import org.apache.doris.catalog.MaterializedView;
 import org.apache.doris.catalog.MysqlTable;
 import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.OlapTable;
-import org.apache.doris.catalog.OlapTable.OlapTableState;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.Replica;
@@ -70,7 +69,6 @@ import org.apache.doris.common.util.DynamicPartitionUtil;
 import org.apache.doris.common.util.MetaLockUtils;
 import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.mtmv.MTMVJobFactory;
-import org.apache.doris.mtmv.MTMVUtils.TaskSubmitStatus;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.persist.AlterMultiMaterializedView;
 import org.apache.doris.persist.AlterViewInfo;
@@ -158,16 +156,14 @@ public class Alter {
         }
     }
 
-    public void processRefreshMaterializedView(RefreshMaterializedViewStmt stmt) throws DdlException {
+    public void processRefreshMaterializedView(RefreshMaterializedViewStmt stmt)
+            throws DdlException, MetaNotFoundException {
         if (stmt.getRefreshMethod() != RefreshMethod.COMPLETE) {
             throw new DdlException("Now only support REFRESH COMPLETE.");
         }
         String db = stmt.getMvName().getDb();
         String tbl = stmt.getMvName().getTbl();
-        TaskSubmitStatus status = Env.getCurrentEnv().getMTMVJobManager().refreshMTMVTask(db, tbl);
-        if (status != TaskSubmitStatus.SUBMITTED) {
-            throw new DdlException("Refresh MaterializedView with " + status.toString());
-        }
+        Env.getCurrentEnv().getMTMVJobManager().refreshMTMV(db, tbl);
     }
 
     private boolean processAlterOlapTable(AlterTableStmt stmt, OlapTable olapTable, List<AlterClause> alterClauses,
@@ -189,11 +185,7 @@ public class Alter {
             db.checkQuota();
         }
 
-        if (olapTable.getState() != OlapTableState.NORMAL) {
-            throw new DdlException(
-                    "Table[" + olapTable.getName() + "]'s state is not NORMAL. Do not allow doing ALTER ops");
-        }
-
+        olapTable.checkNormalStateForAlter();
         boolean needProcessOutsideTableLock = false;
         if (currentAlterOps.checkTableStoragePolicy(alterClauses)) {
             String tableStoragePolicy = olapTable.getStoragePolicy();
@@ -227,7 +219,7 @@ public class Alter {
             ((SchemaChangeHandler) schemaChangeHandler).updateBinlogConfig(db, olapTable, alterClauses);
         } else if (currentAlterOps.hasSchemaChangeOp()) {
             // if modify storage type to v2, do schema change to convert all related tablets to segment v2 format
-            schemaChangeHandler.process(alterClauses, clusterName, db, olapTable);
+            schemaChangeHandler.process(stmt.toSql(), alterClauses, clusterName, db, olapTable);
         } else if (currentAlterOps.hasRollupOp()) {
             materializedViewHandler.process(alterClauses, clusterName, db, olapTable);
         } else if (currentAlterOps.hasPartitionOp()) {
@@ -253,11 +245,10 @@ public class Alter {
                         }
                     }
                     Map<String, String> properties = clause.getProperties();
-                    if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
-                        boolean isInMemory = !properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY) ? false :
+                    if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+                        boolean isInMemory =
                                 Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
-                        if (isInMemory == true) {
+                        if (isInMemory) {
                             throw new UserException("Not support set 'in_memory'='true' now!");
                         }
                         needProcessOutsideTableLock = true;
@@ -508,12 +499,9 @@ public class Alter {
                 List<String> partitionNames = clause.getPartitionNames();
                 // currently, only in memory and storage policy property could reach here
                 Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
                 ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
                         db, tableName, partitionNames, properties);
-                // ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsPersistentMeta(
-                //         db, tableName, partitionNames, properties);
                 OlapTable olapTable = (OlapTable) table;
                 olapTable.writeLockOrDdlException();
                 try {
@@ -523,14 +511,10 @@ public class Alter {
                 }
             } else if (alterClause instanceof ModifyTablePropertiesClause) {
                 Map<String, String> properties = alterClause.getProperties();
+                // currently, only in memory and storage policy property could reach here
                 Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                         || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_CCR_ENABLE)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
-                // ((SchemaChangeHandler) schemaChangeHandler).updateTableInMemoryMeta(db, tableName, properties);
-                // ((SchemaChangeHandler) schemaChangeHandler).updateTablePersistentMeta(db, tableName, properties);
-                // ((SchemaChangeHandler) schemaChangeHandler).updateTableTtlSecondsMeta(db, tableName, properties);
+                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_CCR_ENABLE));
                 ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
@@ -788,10 +772,7 @@ public class Alter {
             throws DdlException, AnalysisException {
         Preconditions.checkArgument(olapTable.isWriteLockHeldByCurrentThread());
         List<ModifyPartitionInfo> modifyPartitionInfos = Lists.newArrayList();
-        if (olapTable.getState() != OlapTableState.NORMAL) {
-            throw new DdlException("Table[" + olapTable.getName() + "]'s state is not NORMAL");
-        }
-
+        olapTable.checkNormalStateForAlter();
         for (String partitionName : partitionNames) {
             Partition partition = olapTable.getPartition(partitionName, isTempPartition);
             if (partition == null) {
@@ -820,11 +801,12 @@ public class Alter {
         // 3. tablet type
         TTabletType tTabletType =
                 PropertyAnalyzer.analyzeTabletType(properties);
+
+        // modify meta here
         // 4. persistent
         boolean newPersistent = PropertyAnalyzer.analyzeBooleanProp(properties,
                 PropertyAnalyzer.PROPERTIES_PERSISTENT, false);
 
-        // modify meta here
         PartitionInfo partitionInfo = olapTable.getPartitionInfo();
         for (String partitionName : partitionNames) {
             Partition partition = olapTable.getPartition(partitionName, isTempPartition);
@@ -894,7 +876,6 @@ public class Alter {
             Optional.ofNullable(info.getStoragePolicy()).filter(p -> !p.isEmpty())
                     .ifPresent(p -> partitionInfo.setStoragePolicy(info.getPartitionId(), p));
             partitionInfo.setIsInMemory(info.getPartitionId(), info.isInMemory());
-            partitionInfo.setIsPersistent(info.getPartitionId(), info.isPersistent());
 
             Map<String, String> tblProperties = info.getTblProperties();
             if (tblProperties != null && !tblProperties.isEmpty()) {

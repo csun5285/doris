@@ -17,17 +17,53 @@
 
 package org.apache.doris.planner.external;
 
-import lombok.Data;
+import org.apache.doris.datasource.hive.AcidInfo;
+import org.apache.doris.spi.Split;
+
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.mapred.FileSplit;
 
-@Data
+import java.util.List;
+
 public class HiveSplit extends FileSplit {
-    public HiveSplit() {}
 
-    public HiveSplit(Path file, long start, long length, String[] hosts) {
-        super(file, start, length, hosts);
+    public HiveSplit(Path path, long start, long length, long fileLength,
+            long modificationTime, String[] hosts, List<String> partitionValues, AcidInfo acidInfo) {
+        super(path, start, length, fileLength, modificationTime, hosts, partitionValues);
+        this.acidInfo = acidInfo;
     }
 
-    protected TableFormatType tableFormatType;
+    public HiveSplit(Path path, long start, long length, long fileLength, String[] hosts, AcidInfo acidInfo) {
+        super(path, start, length, fileLength, hosts, null);
+        this.acidInfo = acidInfo;
+    }
+
+    @Override
+    public Object getInfo() {
+        return acidInfo;
+    }
+
+    private AcidInfo acidInfo;
+
+    public boolean isACID() {
+        return acidInfo != null;
+    }
+
+    public static class HiveSplitCreator implements SplitCreator {
+
+        private AcidInfo acidInfo;
+
+        public HiveSplitCreator(AcidInfo acidInfo) {
+            this.acidInfo = acidInfo;
+        }
+
+        public HiveSplitCreator() {
+            this(null);
+        }
+
+        @Override
+        public Split create(Path path, long start, long length, long fileLength, long modificationTime, String[] hosts,
+                List<String> partitionValues) {
+            return new HiveSplit(path, start, length, fileLength, modificationTime, hosts, partitionValues, acidInfo);
+        }
+    }
 }

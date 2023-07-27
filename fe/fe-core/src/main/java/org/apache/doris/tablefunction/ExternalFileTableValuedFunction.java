@@ -87,8 +87,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     protected static final String DEFAULT_LINE_DELIMITER = "\n";
     public static final String FORMAT = "format";
     public static final String COMPRESS = "compress";
-    protected static final String COLUMN_SEPARATOR = "column_separator";
-    protected static final String LINE_DELIMITER = "line_delimiter";
+    public static final String COLUMN_SEPARATOR = "column_separator";
+    public static final String LINE_DELIMITER = "line_delimiter";
     protected static final String JSON_ROOT = "json_root";
     protected static final String JSON_PATHS = "jsonpaths";
     protected static final String STRIP_OUTER_ARRAY = "strip_outer_array";
@@ -106,7 +106,6 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
 
     protected static final ImmutableSet<String> FILE_FORMAT_PROPERTIES = new ImmutableSet.Builder<String>()
             .add(FORMAT)
-            .add(COMPRESS)
             .add(JSON_ROOT)
             .add(JSON_PATHS)
             .add(STRIP_OUTER_ARRAY)
@@ -168,7 +167,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     public String getFsName() {
         TFileType fileType = getTFileType();
         if (fileType == TFileType.FILE_HDFS) {
-            return locationProperties.get(HdfsTableValuedFunction.HADOOP_FS_NAME);
+            return locationProperties.get(HdfsResource.HADOOP_FS_NAME);
         } else if (fileType == TFileType.FILE_S3) {
             return locationProperties.get(S3Properties.ENDPOINT);
         }
@@ -207,6 +206,9 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
                 break;
             case "json":
                 this.fileFormatType = TFileFormatType.FORMAT_JSON;
+                break;
+            case "avro":
+                this.fileFormatType = TFileFormatType.FORMAT_AVRO;
                 break;
             default:
                 throw new AnalysisException("format:" + formatString + " is not supported.");
@@ -447,7 +449,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
         fileScanRangeParams.setFileAttributes(getFileAttributes());
         if (getTFileType() == TFileType.FILE_HDFS) {
             THdfsParams tHdfsParams = HdfsResource.generateHdfsParam(locationProperties);
-            String fsNmae = getLocationProperties().get(HdfsTableValuedFunction.HADOOP_FS_NAME);
+            String fsNmae = getLocationProperties().get(HdfsResource.HADOOP_FS_NAME);
             tHdfsParams.setFsName(fsNmae);
             fileScanRangeParams.setHdfsParams(tHdfsParams);
         }

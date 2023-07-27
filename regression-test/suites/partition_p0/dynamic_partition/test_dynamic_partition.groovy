@@ -104,10 +104,8 @@ suite("test_dynamic_partition") {
             "dynamic_partition.create_history_partition"="true",
             "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
         """
-        if (context.config.metaServiceHttpAddress.isEmpty()) {
         // check exception message contains
         exception "errCode = 2,"
-        }
     }
     sql "drop table if exists dy_par_bad"
     sql """
@@ -147,10 +145,8 @@ suite("test_dynamic_partition") {
             "dynamic_partition.create_history_partition"="true",
             "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
         """
-        if (context.config.metaServiceHttpAddress.isEmpty()) {
         // check exception message contains
         exception "errCode = 2,"
-        }
     }
     sql "drop table if exists dy_par_bad"
 }

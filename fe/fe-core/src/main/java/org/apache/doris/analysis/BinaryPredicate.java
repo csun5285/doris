@@ -442,16 +442,6 @@ public class BinaryPredicate extends Predicate implements Writable {
                 return Type.fromPrimitiveType(t2);
             }
         }
-        // NOTE:when column type is cast in schema, we cannot cast it to float even in query,
-        // so we need to getAssignmentCompatibleType to float here.
-        if (t1 == PrimitiveType.DOUBLE && t2 == PrimitiveType.DOUBLE) {
-            return Type.getAssignmentCompatibleType(getChild(0).getType(), getChild(1).getType(), false);
-        }
-
-        if ((t1.isDecimalV3Type() && !t2.isStringType() && !t2.isFloatingPointType())
-                || (t2.isDecimalV3Type() && !t1.isStringType() && !t1.isFloatingPointType())) {
-            return Type.getAssignmentCompatibleType(getChild(0).getType(), getChild(1).getType(), false);
-        }
 
         if ((t1.isDecimalV3Type() && !t2.isStringType() && !t2.isFloatingPointType())
                 || (t2.isDecimalV3Type() && !t1.isStringType() && !t1.isFloatingPointType())) {
@@ -478,13 +468,12 @@ public class BinaryPredicate extends Predicate implements Writable {
     @Override
     public void analyzeImpl(Analyzer analyzer) throws AnalysisException {
         super.analyzeImpl(analyzer);
-        // Ignore placeholder, when it type is invalid.
-        // Invalid type could happen when analyze prepared point query select statement,
-        // since the value is occupied but not assigned
-        if ((getChild(0) instanceof PlaceHolderExpr && getChild(0).type == Type.UNSUPPORTED)
-                || (getChild(1) instanceof PlaceHolderExpr && getChild(1).type == Type.UNSUPPORTED)) {
+
+        // Ignore placeholder
+        if (getChild(0) instanceof PlaceHolderExpr || getChild(1) instanceof PlaceHolderExpr) {
             return;
         }
+
         for (Expr expr : children) {
             if (expr instanceof Subquery) {
                 Subquery subquery = (Subquery) expr;

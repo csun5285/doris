@@ -70,8 +70,8 @@ public class IndexDef {
             this.properties = properties;
         }
         if (indexType == IndexType.NGRAM_BF) {
-            properties.putIfAbsent(NGRAM_SIZE_KEY, DEFAULT_NGRAM_SIZE);
-            properties.putIfAbsent(NGRAM_BF_SIZE_KEY, DEFAULT_NGRAM_BF_SIZE);
+            this.properties.putIfAbsent(NGRAM_SIZE_KEY, DEFAULT_NGRAM_SIZE);
+            this.properties.putIfAbsent(NGRAM_BF_SIZE_KEY, DEFAULT_NGRAM_BF_SIZE);
         }
     }
 
@@ -101,8 +101,8 @@ public class IndexDef {
             if (Strings.isNullOrEmpty(indexName)) {
                 throw new AnalysisException("index name cannot be blank.");
             }
-            if (indexName.length() > 128) {
-                throw new AnalysisException("index name too long, the index name length at most is 128.");
+            if (indexName.length() > 64) {
+                throw new AnalysisException("index name too long, the index name length at most is 64.");
             }
             TreeSet<String> distinct = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
             distinct.addAll(columns);
@@ -122,23 +122,25 @@ public class IndexDef {
         if (tableName != null && !tableName.isEmpty()) {
             sb.append(" ON ").append(tableName);
         }
-        sb.append(" (");
-        boolean first = true;
-        for (String col : columns) {
-            if (first) {
-                first = false;
-            } else {
-                sb.append(",");
+        if (columns != null && columns.size() > 0) {
+            sb.append(" (");
+            boolean first = true;
+            for (String col : columns) {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append(",");
+                }
+                sb.append("`" + col + "`");
             }
-            sb.append("`" + col + "`");
+            sb.append(")");
         }
-        sb.append(")");
         if (indexType != null) {
             sb.append(" USING ").append(indexType.toString());
         }
         if (properties != null && properties.size() > 0) {
             sb.append(" PROPERTIES(");
-            first = true;
+            boolean first = true;
             for (Map.Entry<String, String> e : properties.entrySet()) {
                 if (first) {
                     first = false;
@@ -217,8 +219,7 @@ public class IndexDef {
                 colType = ((ArrayType) column.getType()).getItemType().getPrimitiveType();
             }
             if (!(colType.isDateType() || colType.isDecimalV2Type() || colType.isDecimalV3Type()
-                    || colType.isFixedPointType() || colType.isStringType() || colType == PrimitiveType.BOOLEAN
-                    || (indexType == IndexType.INVERTED && colType.isFloatingPointType()))) {
+                    || colType.isFixedPointType() || colType.isStringType() || colType == PrimitiveType.BOOLEAN)) {
                 throw new AnalysisException(colType + " is not supported in " + indexType.toString() + " index. "
                         + "invalid column: " + indexColName);
             } else if (indexType == IndexType.INVERTED

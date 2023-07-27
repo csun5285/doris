@@ -139,7 +139,7 @@ A few suggested rules for defining columns include:
 
 ### Partitioning and Bucketing
 
-Doris supports two layers of data partitioning. The first level is Partition, including range partitioning and list partitioning. The second is Bucket (Tablet), which only supports hash partitioning.
+Doris supports two layers of data partitioning. The first level is Partition, including range partitioning and list partitioning. The second is Bucket (Tablet), including hash and random partitioning.
 
 It is also possible to use one layer of data partitioning, If you do not write the partition statement when creating the table, Doris will generate a default partition at this time, which is transparent to the user. In this case, it only supports data bucketing.
 
@@ -154,6 +154,8 @@ It is also possible to use one layer of data partitioning, If you do not write t
    #### Range Partitioning
 
    * Partitioning columns are usually time columns for easy management of old and new data.
+
+   * Range partitioning support column type: [DATE,DATETIME,TINYINT,SMALLINT,INT,BIGINT,LARGEINT]
 
    * Range partitioning supports specifying only the upper bound by `VALUES LESS THAN (...)`. The system will use the upper bound of the previous partition as the lower bound of the next partition, and generate a left-closed right-open interval. It also supports specifying both the upper and lower bounds by `VALUES [...)`, and generate a left-closed right-open interval.
 

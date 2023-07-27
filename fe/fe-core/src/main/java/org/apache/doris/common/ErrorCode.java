@@ -1195,7 +1195,22 @@ public enum ErrorCode {
             "Cluster %s not exist, use SQL 'SHOW CLUSTERS' to get a valid cluster"),
 
     ERR_NONSSL_HANDSHAKE_RESPONSE(5094, new byte[] {'4', '2', '0', '0'},
-            "SSL mode on but received non-ssl handshake response from client.");
+            "SSL mode on but received non-ssl handshake response from client."),
+
+    ERR_MORE_THAN_ONE_AUTO_INCREMENT_COLUMN(5095, new byte[]{'4', '2', '0', '0', '0'},
+            "there can be at most one auto increment column in OlapTable."),
+
+    ERR_AUTO_INCREMENT_COLUMN_NULLABLE(5096, new byte[]{'4', '2', '0', '0', '0'},
+            "the auto increment column should be NOT NULL."),
+
+    ERR_AUTO_INCREMENT_COLUMN_WITH_DEFAULT_VALUE(5097, new byte[]{'4', '2', '0', '0', '0'},
+            "the auto increment column can't have default value."),
+
+    ERR_AUTO_INCREMENT_COLUMN_NOT_BIGINT_TYPE(5098, new byte[]{'4', '2', '0', '0', '0'},
+            "the auto increment must be BIGINT type."),
+
+    ERR_AUTO_INCREMENT_COLUMN_NOT_INT_DUPLICATE_TABLE(5099, new byte[]{'4', '2', '0', '0', '0'},
+            "the auto increment is only supported in duplicate table.");
 
     // This is error code
     private final int code;

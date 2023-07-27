@@ -20,11 +20,6 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite ("test_uniq_keys_schema_change") {
     def tableName = "schema_change_uniq_keys_regression_test"
 
-    def getJobState = { tbName ->
-         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tbName}' ORDER BY createtime DESC LIMIT 1 """
-         return jobStateResult[0][9]
-    }
-
     try {
         String backend_id;
         def backendId_to_backendIP = [:]
@@ -95,20 +90,6 @@ suite ("test_uniq_keys_schema_change") {
         ALTER table ${tableName} ADD COLUMN new_column INT default "1" 
         """
 
-    int max_try_time = 600
-    while(max_try_time--){
-        String result = getJobState(tableName)
-        if (result == "FINISHED") {
-            break
-        } else {
-            sleep(1000)
-            if (max_try_time < 1){
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
-            }
-        }
-    }
-
     sql """ SELECT * FROM ${tableName} WHERE user_id=2 """
 
     sql """ INSERT INTO ${tableName} (`user_id`,`date`,`city`,`age`,`sex`,`last_visit_date`,`last_update_date`,
@@ -153,56 +134,6 @@ suite ("test_uniq_keys_schema_change") {
         """
 
     // compaction
-    // String[][] tablets = sql """ show tablets from ${tableName}; """
-    // for (String[] tablet in tablets) {
-    //         String tablet_id = tablet[0]
-    //         backend_id = tablet[2]
-    //         logger.info("run compaction:" + tablet_id)
-    //         StringBuilder sb = new StringBuilder();
-    //         sb.append("curl -X POST http://")
-    //         sb.append(backendId_to_backendIP.get(backend_id))
-    //         sb.append(":")
-    //         sb.append(backendId_to_backendHttpPort.get(backend_id))
-    //         sb.append("/api/compaction/run?tablet_id=")
-    //         sb.append(tablet_id)
-    //         sb.append("&compact_type=cumulative")
-
-    //         String command = sb.toString()
-    //         process = command.execute()
-    //         code = process.waitFor()
-    //         err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-    //         out = process.getText()
-    //         logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-    //         //assertEquals(code, 0)
-    // }
-
-    // wait for all compactions done
-    // for (String[] tablet in tablets) {
-    //         boolean running = true
-    //         do {
-    //             Thread.sleep(100)
-    //             String tablet_id = tablet[0]
-    //             backend_id = tablet[2]
-    //             StringBuilder sb = new StringBuilder();
-    //             sb.append("curl -X GET http://")
-    //             sb.append(backendId_to_backendIP.get(backend_id))
-    //             sb.append(":")
-    //             sb.append(backendId_to_backendHttpPort.get(backend_id))
-    //             sb.append("/api/compaction/run_status?tablet_id=")
-    //             sb.append(tablet_id)
-
-    //             String command = sb.toString()
-    //             process = command.execute()
-    //             code = process.waitFor()
-    //             err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-    //             out = process.getText()
-    //             logger.info("Get compaction status: code=" + code + ", out=" + out + ", err=" + err)
-    //             assertEquals(code, 0)
-    //             def compactionStatus = parseJson(out.trim())
-    //             assertEquals("success", compactionStatus.status.toLowerCase())
-    //             running = compactionStatus.run_status
-    //         } while (running)
-    // }
     String[][] tablets = sql """ show tablets from ${tableName}; """
     for (String[] tablet in tablets) {
             String tablet_id = tablet[0]

@@ -28,7 +28,11 @@
 #include "http/http_request.h"
 #include "http/http_status.h"
 #include "olap/data_dir.h"
+#ifdef CLOUD_MODE
 #include "cloud/olap/storage_engine.h"
+#else
+#include "olap/storage_engine.h"
+#endif
 #include "olap/tablet_manager.h"
 #include "olap/task/engine_storage_migration_task.h"
 

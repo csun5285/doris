@@ -162,18 +162,18 @@ public class CreateTableStmt extends DdlStmt {
     }
 
     public CreateTableStmt(boolean ifNotExists,
-                           boolean isExternal,
-                           TableName tableName,
-                           List<ColumnDef> columnDefinitions,
-                           List<IndexDef> indexDefs,
-                           String engineName,
-                           KeysDesc keysDesc,
-                           PartitionDesc partitionDesc,
-                           DistributionDesc distributionDesc,
-                           Map<String, String> properties,
-                           Map<String, String> extProperties,
-                           String comment, List<AlterClause> rollupAlterClauseList,
-                           boolean isDynamicSchema) {
+            boolean isExternal,
+            TableName tableName,
+            List<ColumnDef> columnDefinitions,
+            List<IndexDef> indexDefs,
+            String engineName,
+            KeysDesc keysDesc,
+            PartitionDesc partitionDesc,
+            DistributionDesc distributionDesc,
+            Map<String, String> properties,
+            Map<String, String> extProperties,
+            String comment, List<AlterClause> rollupAlterClauseList,
+            boolean isDynamicSchema) {
         this.tableName = tableName;
         if (columnDefinitions == null) {
             this.columnDefs = Lists.newArrayList();
@@ -411,7 +411,7 @@ public class CreateTableStmt extends DdlStmt {
                         PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE + " property only support unique key table");
             }
             if (keysDesc.getKeysType() == KeysType.UNIQUE_KEYS) {
-                enableUniqueKeyMergeOnWrite = true;
+                enableUniqueKeyMergeOnWrite = false;
                 if (properties != null) {
                     // `analyzeXXX` would modify `properties`, which will be used later,
                     // so we just clone a properties map here.
@@ -464,7 +464,18 @@ public class CreateTableStmt extends DdlStmt {
         }
         // add a hidden column as row store
         if (properties != null && PropertyAnalyzer.analyzeStoreRowColumn(new HashMap<>(properties))) {
-            columnDefs.add(ColumnDef.newRowStoreColumnDef());
+            if (keysDesc != null && keysDesc.getKeysType() == KeysType.AGG_KEYS) {
+                throw new AnalysisException("Aggregate table can't support row column now");
+            }
+            if (keysDesc != null && keysDesc.getKeysType() == KeysType.UNIQUE_KEYS) {
+                if (enableUniqueKeyMergeOnWrite) {
+                    columnDefs.add(ColumnDef.newRowStoreColumnDef(AggregateType.NONE));
+                } else {
+                    columnDefs.add(ColumnDef.newRowStoreColumnDef(AggregateType.REPLACE));
+                }
+            } else {
+                columnDefs.add(ColumnDef.newRowStoreColumnDef(null));
+            }
         }
         if (Config.enable_hidden_version_column_by_default && keysDesc != null
                 && keysDesc.getKeysType() == KeysType.UNIQUE_KEYS) {
@@ -528,7 +539,7 @@ public class CreateTableStmt extends DdlStmt {
             if (partitionDesc != null) {
                 if (partitionDesc instanceof ListPartitionDesc || partitionDesc instanceof RangePartitionDesc
                         || partitionDesc instanceof ColumnPartitionDesc) {
-                    partitionDesc.analyze(columnDefs, properties, keysDesc);
+                    partitionDesc.analyze(columnDefs, properties);
                 } else {
                     throw new AnalysisException("Currently only support range"
                             + " and list partition with engine type olap");
@@ -626,6 +637,10 @@ public class CreateTableStmt extends DdlStmt {
         if (engineName.equals("mysql") || engineName.equals("odbc") || engineName.equals("broker")
                 || engineName.equals("elasticsearch") || engineName.equals("hive")
                 || engineName.equals("iceberg") || engineName.equals("hudi") || engineName.equals("jdbc")) {
+            if (engineName.equals("odbc") && !Config.enable_odbc_table) {
+                throw new AnalysisException("ODBC table is deprecated, use JDBC instead. Or you can set "
+                    + "`enable_odbc_table=true` in fe.conf to enable ODBC again.");
+            }
             if (!isExternal) {
                 // this is for compatibility
                 isExternal = true;

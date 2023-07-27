@@ -43,18 +43,17 @@ suite("test_alter_table_column_with_delete") {
             ALTER TABLE ${tbName1} 
             MODIFY COLUMN value1 varchar(22);
         """
-
-    int max_try_secs = 600
+    int max_try_secs = 120
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
             sleep(3000)
             break
         } else {
-            Thread.sleep(1000)
+            Thread.sleep(500)
             if (max_try_secs < 1) {
-                println "test timeout," + "state:" + result
-                assertEquals("FINISHED", result)
+                println "test timeout," + "state:" + res
+                assertEquals("FINISHED",res)
             }
         }
     }

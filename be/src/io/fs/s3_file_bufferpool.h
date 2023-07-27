@@ -29,10 +29,10 @@
 #include "common/status.h"
 #include "io/cache/block/block_file_segment.h"
 #include "util/slice.h"
+#include "util/threadpool.h"
 
 namespace doris {
 namespace io {
-
 enum class BufferType { DOWNLOAD, UPLOAD };
 
 struct OperationState {
@@ -321,8 +321,13 @@ struct FileBufferBuilder {
 
 class S3FileBufferPool {
 public:
-    S3FileBufferPool();
+    S3FileBufferPool() = default;
     ~S3FileBufferPool() = default;
+
+    // should be called one and only once
+    // at startup
+    void init(int32_t s3_write_buffer_whole_size, int32_t s3_write_buffer_size,
+              ThreadPool* thread_pool);
 
     /**
     *

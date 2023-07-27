@@ -24,7 +24,10 @@ import com.google.common.util.concurrent.MoreExecutors
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
+import com.google.common.collect.ImmutableList
 import org.apache.doris.regression.action.BenchmarkAction
+import org.apache.doris.regression.util.DataUtils
+import org.apache.doris.regression.util.OutputUtils
 import org.apache.doris.regression.action.CreateMVAction
 import org.apache.doris.regression.action.ExplainAction
 import org.apache.doris.regression.action.HttpCliAction
@@ -35,9 +38,8 @@ import org.apache.doris.regression.action.TestAction
 import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.Hdfs
 import org.apache.doris.regression.util.JdbcUtils
-import org.apache.doris.regression.util.OutputUtils
-import org.apache.doris.regression.util.SuiteUtils
 import org.junit.Assert
+import org.apache.doris.regression.util.SuiteUtils
 import org.junit.jupiter.api.Assertions
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -52,7 +54,6 @@ import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.stream.Collectors
 import java.util.stream.LongStream
-
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
 @Slf4j
@@ -194,6 +195,10 @@ class Suite implements GroovyInterceptable {
         return context.connect(user, password, url, actionSupplier)
     }
 
+    Syncer getSyncer() {
+        return context.getSyncer(this)
+    }
+
     List<List<Object>> sql(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
         def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -209,9 +214,14 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-    PreparedStatement prepareStatement(String sql) {
-        return JdbcUtils.prepareStatement(context.getConnection(), sql)
-    } 
+    List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
+        logger.info("Execute ${isOrder ? "order_" : ""}target_sql: ${sqlStr}".toString())
+        def (result, meta) = JdbcUtils.executeToList(context.getTargetConnection(this), sqlStr)
+        if (isOrder) {
+            result = DataUtils.sortByToString(result)
+        }
+        return result
+    }
 
     List<List<String>> sql_meta(String sqlStr, boolean isOrder = false) {
         logger.info("Execute ${isOrder ? "order_" : ""}sql: ${sqlStr}".toString())
@@ -525,6 +535,10 @@ class Suite implements GroovyInterceptable {
         action.run()
     }
 
+    PreparedStatement prepareStatement(String sql) {
+        return JdbcUtils.prepareStatement(context.getConnection(), sql)
+    } 
+
     void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
         if (context.config.generateOutputFile || context.config.forceGenerateOutputFile) {
@@ -552,7 +566,6 @@ class Suite implements GroovyInterceptable {
             }
 
             OutputUtils.TagBlockIterator expectCsvResults = context.getOutputIterator().next()
-
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
                 tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
@@ -593,7 +606,7 @@ class Suite implements GroovyInterceptable {
         logger.info("Execute tag: ${tag}, sql: ${stmt}".toString())
         quickRunTest(tag, stmt) 
     }
-
+    
     @Override
     Object invokeMethod(String name, Object args) {
         // qt: quick test
@@ -860,6 +873,26 @@ class Suite implements GroovyInterceptable {
 
     public void resetConnection() {
         context.resetConnection()
+    }
+    
+    Boolean checkSnapshotFinish() {
+        String checkSQL = "SHOW BACKUP FROM " + context.dbName
+        int size = sql(checkSQL).size()
+        logger.info("Now size is ${size}")
+        List<Object> row = sql(checkSQL)[size-1]
+        logger.info("Now row is ${row}")
+
+        return (row[3] as String) == "FINISHED"
+    }
+
+    Boolean checkRestoreFinish() {
+        String checkSQL = "SHOW RESTORE FROM " + context.dbName
+        int size = sql(checkSQL).size()
+        logger.info("Now size is ${size}")
+        List<Object> row = sql(checkSQL)[size-1]
+        logger.info("Now row is ${row}")
+
+        return (row[4] as String) == "FINISHED"
     }
 }
 

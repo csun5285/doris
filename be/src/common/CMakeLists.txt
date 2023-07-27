@@ -18,16 +18,8 @@
 # where to put generated libraries
 set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/src/common")
 
-add_library(Common STATIC
-  daemon.cpp
-  status.cpp
-  resource_tls.cpp
-  logconfig.cpp
-  sync_point.cpp
-  config.cpp
-  exception.cpp
-  version_internal.cpp
-)
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS *.cpp)
+add_library(Common STATIC ${SRC_FILES})
 
 pch_reuse(Common)
 

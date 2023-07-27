@@ -27,6 +27,7 @@ import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
 import org.apache.doris.analysis.TupleDescriptor;
+import org.apache.doris.catalog.BinlogConfig;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
@@ -149,12 +150,14 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         super(JobType.ROLLUP);
     }
 
-    public RollupJobV2(long jobId, long dbId, long tableId, String tableName, long timeoutMs, long baseIndexId,
-            long rollupIndexId, String baseIndexName, String rollupIndexName, List<Column> rollupSchema,
-            Column whereColumn,
-            int baseSchemaHash, int rollupSchemaHash, KeysType rollupKeysType, short rollupShortKeyColumnCount,
-            OriginStatement origStmt) throws AnalysisException {
-        super(jobId, JobType.ROLLUP, dbId, tableId, tableName, timeoutMs);
+    public RollupJobV2(String rawSql, long jobId, long dbId, long tableId, String tableName, long timeoutMs,
+                       long baseIndexId,
+                       long rollupIndexId, String baseIndexName, String rollupIndexName, List<Column> rollupSchema,
+                       Column whereColumn,
+                       int baseSchemaHash, int rollupSchemaHash, KeysType rollupKeysType,
+                       short rollupShortKeyColumnCount,
+                       OriginStatement origStmt) throws AnalysisException {
+        super(rawSql, jobId, JobType.ROLLUP, dbId, tableId, tableName, timeoutMs);
         if (Config.isCloudMode()) {
             ConnectContext context = ConnectContext.get();
             if (context != null) {
@@ -239,6 +242,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
         tbl.readLock();
         try {
+            BinlogConfig binlogConfig = new BinlogConfig(tbl.getBinlogConfig());
             Preconditions.checkState(tbl.getState() == OlapTableState.ROLLUP);
             for (Map.Entry<Long, MaterializedIndex> entry : this.partitionIdToRollupIndex.entrySet()) {
                 long partitionId = entry.getKey();
@@ -273,11 +277,13 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 null,
                                 tbl.getCompressionType(),
                                 tbl.getEnableUniqueKeyMergeOnWrite(), tbl.getStoragePolicy(),
-                                tbl.disableAutoCompaction(), tbl.isPersistent(),
+                                tbl.disableAutoCompaction(),
                                 tbl.enableSingleReplicaCompaction(),
                                 tbl.skipWriteIndexOnLoad(),
                                 tbl.storeRowColumn(),
-                                tbl.isDynamicSchema());
+                                tbl.isDynamicSchema(),
+                                tbl.isPersistent(),
+                                binlogConfig);
                         createReplicaTask.setBaseTablet(tabletIdMap.get(rollupTabletId), baseSchemaHash);
                         if (this.storageFormat != null) {
                             createReplicaTask.setStorageFormat(this.storageFormat);
@@ -518,6 +524,12 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                         rollupColumns.add(column);
                     }
 
+                    Expr whereClause = null;
+                    if (whereColumn != null) {
+                        whereClause = whereColumn.getDefineExpr();
+                        rollupColumns.add(whereColumn);
+                    }
+
                     for (Column column : rollupColumns) {
                         SlotDescriptor destSlotDesc = descTable.addSlotDescriptor(destTupleDesc);
                         destSlotDesc.setIsMaterialized(true);
@@ -529,15 +541,15 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
                     for (Column column : rollupColumns) {
                         if (column.getDefineExpr() != null) {
-                            defineExprs.put(column.getName(), column.getDefineExpr());
+                            if (whereColumn != column) {
+                                defineExprs.put(column.getName(), column.getDefineExpr());
+                            }
+
                             List<SlotRef> slots = new ArrayList<>();
                             column.getDefineExpr().collect(SlotRef.class, slots);
 
                             for (SlotRef slot : slots) {
                                 SlotDescriptor slotDesc = descMap.get(slot.getColumnName());
-                                if (slotDesc == null) {
-                                    slotDesc = descMap.get(column.getName());
-                                }
                                 if (slotDesc == null) {
                                     throw new AlterCancelException("slotDesc is null, slot=" + slot.getColumnName()
                                             + ", column=" + column.getName());
@@ -548,10 +560,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                     }
 
                     List<Replica> rollupReplicas = rollupTablet.getReplicas();
-                    Expr whereClause = null;
-                    if (whereColumn != null) {
-                        whereClause = whereColumn.getDefineExpr();
-                    }
+
                     for (Replica rollupReplica : rollupReplicas) {
                         if (rollupReplica.getBackendId() < 0) {
                             LOG.warn("replica:{}, backendId: {}", rollupReplica, rollupReplica.getBackendId());
@@ -622,7 +631,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                 throw new AlterCancelException(msg);
             }
             for (AgentTask task : tasks) {
-                if (task.getFailedTimes() >= 3) {
+                if (task.getFailedTimes() > 0) {
                     task.setFinished(true);
                     AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.ALTER, task.getSignature());
                     LOG.warn("rollup task failed after try three times: " + task.getErrorMsg());
@@ -635,9 +644,8 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                             .getReplicaAllocation(task.getPartitionId()).getTotalReplicaNum();
                     int failedTaskCount = failedAgentTasks.get(task.getTabletId()).size();
                     if (expectSucceedTaskNum - failedTaskCount < expectSucceedTaskNum / 2 + 1) {
-                        throw new AlterCancelException(
-                                "rollup tasks failed on same tablet reach threshold "
-                                        + failedAgentTasks.get(task.getTabletId()));
+                        throw new AlterCancelException("rollup tasks failed on same tablet reach threshold "
+                                + failedAgentTasks.get(task.getTabletId()) + ", reason=" + task.getErrorMsg());
                     }
                 }
             }
@@ -1036,5 +1044,10 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
 
         LOG.info("dropCloudRollupIndex finished, dbId:{}, tableId:{}, jobId:{}, rollupIndexList:{}",
                 dbId, tableId, jobId, rollupIndexList);
+    }
+
+    @Override
+    public String toJson() {
+        return GsonUtils.GSON.toJson(this);
     }
 }

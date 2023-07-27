@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "gtest/gtest_pred_impl.h"
+#include "io/fs/file_reader_options.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
 #include "olap/primary_key_index.h"

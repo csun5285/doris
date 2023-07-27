@@ -28,6 +28,9 @@ import org.apache.doris.task.MasterTask;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Comparator;
+
+
 public abstract class LoadTask extends MasterTask {
 
     public enum MergeType {
@@ -41,7 +44,25 @@ public abstract class LoadTask extends MasterTask {
         LOADING
     }
 
+    public enum Priority {
+        HIGH(0),
+        NORMAL(1),
+        LOW(2);
+
+        Priority(int value) {
+            this.value = value;
+        }
+
+        private final int value;
+
+        public int getValue() {
+            return value;
+        }
+    }
+
     private static final Logger LOG = LogManager.getLogger(LoadTask.class);
+    public static final Comparator<LoadTask> COMPARATOR = Comparator.comparing(LoadTask::getPriorityValue)
+                .thenComparingLong(LoadTask::getSignature);
 
     protected TaskType taskType;
     protected LoadTaskCallback callback;
@@ -50,11 +71,13 @@ public abstract class LoadTask extends MasterTask {
     protected int retryTime = 1;
     private volatile boolean done = false;
     protected long startTimeMs = 0;
+    protected final Priority priority;
 
-    public LoadTask(LoadTaskCallback callback, TaskType taskType) {
+    public LoadTask(LoadTaskCallback callback, TaskType taskType, Priority priority) {
         this.taskType = taskType;
         this.signature = Env.getCurrentEnv().getNextId();
         this.callback = callback;
+        this.priority = priority;
     }
 
     @Override
@@ -125,4 +148,9 @@ public abstract class LoadTask extends MasterTask {
     public void setStartTimeMs(long startTimeMs) {
         this.startTimeMs = startTimeMs;
     }
+
+    public int getPriorityValue() {
+        return this.priority.value;
+    }
+
 }

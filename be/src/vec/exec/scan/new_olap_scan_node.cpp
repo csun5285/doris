@@ -43,6 +43,9 @@
 #include "exec/exec_node.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_reader.h"
+#ifndef CLOUD_MODE
+#include "olap/storage_engine.h"
+#endif
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "runtime/decimalv2_value.h"
@@ -148,6 +151,7 @@ Status NewOlapScanNode::_init_profile() {
 
     _stats_filtered_counter = ADD_COUNTER(_segment_profile, "RowsStatsFiltered", TUnit::UNIT);
     _bf_filtered_counter = ADD_COUNTER(_segment_profile, "RowsBloomFilterFiltered", TUnit::UNIT);
+    _dict_filtered_counter = ADD_COUNTER(_segment_profile, "RowsDictFiltered", TUnit::UNIT);
     _del_filtered_counter = ADD_COUNTER(_scanner_profile, "RowsDelFiltered", TUnit::UNIT);
     _conditions_filtered_counter =
             ADD_COUNTER(_segment_profile, "RowsConditionsFiltered", TUnit::UNIT);
@@ -444,9 +448,6 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
 
     if (!_olap_scan_node.output_column_unique_ids.empty()) {
         for (auto uid : _olap_scan_node.output_column_unique_ids) {
-            if (uid < 0) {
-                continue;
-            }
             _maybe_read_column_ids.emplace(uid);
         }
     }
@@ -495,6 +496,7 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
             Status acquire_reader_st =
                     tablet->cloud_capture_rs_readers({0, version}, &rowset_readers_vector[i]);
 #else
+
             std::shared_lock rdlock(tablet->get_header_lock());
             // acquire tablet rowset readers at the beginning of the scan node
             // to prevent this case: when there are lots of olap scanners to run for example 10000
@@ -528,6 +530,7 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
                 key_ranges, rs_readers, rs_reader_seg_offsets, _need_agg_finalize,
                 _scanner_profile.get());
 
+        RETURN_IF_ERROR(scanner->prepare(_state, _conjuncts));
         scanner->set_compound_filters(_compound_filters);
         scanners->push_back(scanner);
         return Status::OK();

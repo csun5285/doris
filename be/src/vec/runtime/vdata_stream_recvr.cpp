@@ -97,10 +97,7 @@ Status VDataStreamRecvr::SenderQueue::_inner_get_batch_without_lock(Block* block
 
     if (!_pending_closures.empty()) {
         auto closure_pair = _pending_closures.front();
-        {
-            SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
-            closure_pair.first->Run();
-        }
+        closure_pair.first->Run();
         _pending_closures.pop_front();
 
         closure_pair.second.stop();
@@ -259,11 +256,8 @@ void VDataStreamRecvr::SenderQueue::cancel() {
 
     {
         std::lock_guard<std::mutex> l(_lock);
-        {
-            SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
-            for (auto closure_pair : _pending_closures) {
-                closure_pair.first->Run();
-            }
+        for (auto closure_pair : _pending_closures) {
+            closure_pair.first->Run();
         }
         _pending_closures.clear();
     }
@@ -277,11 +271,8 @@ void VDataStreamRecvr::SenderQueue::close() {
         std::lock_guard<std::mutex> l(_lock);
         _is_cancelled = true;
 
-        {
-            SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(ExecEnv::GetInstance()->orphan_mem_tracker());
-            for (auto closure_pair : _pending_closures) {
-                closure_pair.first->Run();
-            }
+        for (auto closure_pair : _pending_closures) {
+            closure_pair.first->Run();
         }
         _pending_closures.clear();
     }
@@ -329,9 +320,8 @@ VDataStreamRecvr::VDataStreamRecvr(
     }
 
     // Initialize the counters
-    auto* memory_usage = _profile->create_child("PeakMemoryUsage", true, true);
-    _profile->add_child(memory_usage, false, nullptr);
-    _blocks_memory_usage = memory_usage->AddHighWaterMarkCounter("Blocks", TUnit::BYTES);
+    _memory_usage_counter = ADD_LABEL_COUNTER(_profile, "MemoryUsage");
+    _blocks_memory_usage = _profile->AddHighWaterMarkCounter("Blocks", TUnit::BYTES, "MemoryUsage");
     _bytes_received_counter = ADD_COUNTER(_profile, "BytesReceived", TUnit::BYTES);
     _local_bytes_received_counter = ADD_COUNTER(_profile, "LocalBytesReceived", TUnit::BYTES);
 

@@ -176,7 +176,7 @@ struct TQueryOptions {
   51: optional bool enable_new_shuffle_hash_method
 
   52: optional i32 be_exec_version = 0
-  
+
   53: optional i32 partitioned_hash_join_rows_threshold = 0
 
   54: optional bool enable_share_hash_table_for_broadcast_join
@@ -196,7 +196,7 @@ struct TQueryOptions {
   60: optional i32 partitioned_hash_agg_rows_threshold = 0
 
   61: optional bool enable_file_cache = false
-  
+
   62: optional i32 insert_timeout = 14400
 
   63: optional i32 execution_timeout = 3600
@@ -309,7 +309,7 @@ struct TQueryGlobals {
   1: required string now_string
 
   // To support timezone in Doris. timestamp_ms is the millisecond uinix timestamp for
-  // this query to calculate time zone relative function 
+  // this query to calculate time zone relative function
   2: optional i64 timestamp_ms
 
   // time_zone is the timezone this query used.
@@ -421,6 +421,8 @@ struct TExecPlanFragmentParams {
   21: optional bool build_hash_table_for_broadcast_join = false;
 
   22: optional list<Types.TUniqueId> instances_sharing_hash_table;
+
+  23: optional string table_name;
 }
 
 struct TExecPlanFragmentParamsList {
@@ -585,6 +587,7 @@ struct TCondition {
     // In delete condition, the different column may have same column name, need
     // using unique id to distinguish them
     4:  optional i32 column_unique_id
+
     // SELECTDB_CODE_BEGIN
     5:  optional TCompoundType compound_type = TCompoundType.UNKNOWN
     6:  optional bool marked_by_runtime_filter = false

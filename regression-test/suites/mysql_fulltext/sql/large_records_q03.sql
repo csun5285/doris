@@ -1,4 +1,5 @@
 
+
 SELECT COUNT(*) FROM large_records_t2_uk;
 
 SELECT FTS_DOC_ID FROM large_records_t2_uk WHERE b like '%row300col2word30%';

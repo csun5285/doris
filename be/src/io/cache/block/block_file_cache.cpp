@@ -22,31 +22,32 @@
 
 #include <glog/logging.h>
 // IWYU pragma: no_include <bits/chrono.h>
+#include <sys/statfs.h>
+
 #include <chrono> // IWYU pragma: keep
 #include <filesystem>
-#include <system_error>
-#include <sys/statfs.h>
 #include <utility>
 
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
+#include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
-#include "util/time.h"
-#include "common/sync_point.h"
 
 namespace fs = std::filesystem;
 
 namespace doris {
 namespace io {
 
-BlockFileCache::BlockFileCache(const std::string& cache_base_path, const FileCacheSettings& cache_settings)
+BlockFileCache::BlockFileCache(const std::string& cache_base_path,
+                               const FileCacheSettings& cache_settings)
         : _cache_base_path(cache_base_path),
           _total_size(cache_settings.total_size),
           _max_file_block_size(cache_settings.max_file_block_size),
           _max_query_cache_size(cache_settings.max_query_cache_size) {
     _cur_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(_cache_base_path.c_str(),
-                                                               "file_cache_cache_size", 0);
+                                                                     "file_cache_cache_size", 0);
     _cur_ttl_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
             _cache_base_path.c_str(), "file_cache_ttl_cache_size", 0);
     _cur_normal_queue_element_count_metrics = std::make_shared<bvar::Status<size_t>>(
@@ -185,7 +186,7 @@ BlockFileCache::QueryFileCacheContextPtr BlockFileCache::get_or_set_query_contex
 }
 
 void BlockFileCache::QueryFileCacheContext::remove(const Key& key, size_t offset,
-                                               std::lock_guard<doris::Mutex>& cache_lock) {
+                                                   std::lock_guard<doris::Mutex>& cache_lock) {
     auto pair = std::make_pair(key, offset);
     auto record = records.find(pair);
     DCHECK(record != records.end());
@@ -195,7 +196,7 @@ void BlockFileCache::QueryFileCacheContext::remove(const Key& key, size_t offset
 }
 
 void BlockFileCache::QueryFileCacheContext::reserve(const Key& key, size_t offset, size_t size,
-                                                std::lock_guard<doris::Mutex>& cache_lock) {
+                                                    std::lock_guard<doris::Mutex>& cache_lock) {
     auto pair = std::make_pair(key, offset);
     if (records.find(pair) == records.end()) {
         auto queue_iter = lru_queue.add(key, offset, size, cache_lock);
@@ -211,8 +212,8 @@ Status BlockFileCache::initialize() {
 Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_is_initialized) {
         std::error_code ec;
-        if (bool is_exist = std::filesystem::exists(_cache_base_path, ec);  is_exist && !ec) {
-            _cache_background_load_thread = std::thread([&](){
+        if (bool is_exist = std::filesystem::exists(_cache_base_path, ec); is_exist && !ec) {
+            _cache_background_load_thread = std::thread([&]() {
                 _lazy_open_done = false;
                 Status st = load_cache_info_into_memory();
                 if (!st) [[unlikely]] {
@@ -264,11 +265,11 @@ Status BlockFileCache::reinitialize() {
 }
 
 void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, bool move_iter_flag,
-                            std::lock_guard<doris::Mutex>& cache_lock) {
+                              std::lock_guard<doris::Mutex>& cache_lock) {
     auto file_block = cell.file_block;
     DCHECK(!(file_block->is_downloaded() &&
-             fs::file_size(get_path_in_local_cache(file_block->key(), file_block->expiration_time(), file_block->offset(),
-                                                   cell.cache_type)) == 0))
+             fs::file_size(get_path_in_local_cache(file_block->key(), file_block->expiration_time(),
+                                                   file_block->offset(), cell.cache_type)) == 0))
             << "Cannot have zero size downloaded file segments. Current file segment: "
             << file_block->range().to_string();
 
@@ -286,8 +287,8 @@ void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, boo
     cell.update_atime();
 }
 
-BlockFileCache::FileBlockCell* BlockFileCache::get_cell(const Key& key, size_t offset,
-                                                    std::lock_guard<doris::Mutex>& /* cache_lock */) {
+BlockFileCache::FileBlockCell* BlockFileCache::get_cell(
+        const Key& key, size_t offset, std::lock_guard<doris::Mutex>& /* cache_lock */) {
     auto it = _files.find(key);
     if (it == _files.end()) {
         return nullptr;
@@ -303,12 +304,14 @@ BlockFileCache::FileBlockCell* BlockFileCache::get_cell(const Key& key, size_t o
 }
 
 bool BlockFileCache::need_to_move(FileCacheType cell_type, FileCacheType query_type) const {
-    return query_type != FileCacheType::DISPOSABLE || cell_type == FileCacheType::DISPOSABLE ? true : false;
+    return query_type != FileCacheType::DISPOSABLE || cell_type == FileCacheType::DISPOSABLE
+                   ? true
+                   : false;
 }
 
 FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
-                                  const FileBlock::Range& range,
-                                  std::lock_guard<doris::Mutex>& cache_lock) {
+                                    const FileBlock::Range& range,
+                                    std::lock_guard<doris::Mutex>& cache_lock) {
     /// Given range = [left, right] and non-overlapping ordered set of file segments,
     /// find list [segment1, ..., segmentN] of segments which intersect with given range.
     auto it = _files.find(key);
@@ -323,7 +326,8 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
             // cache miss
             return {};
         } else if (ec) [[unlikely]] {
-            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path << " error=" << ec.message();
+            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path
+                         << " error=" << ec.message();
             return {};
         }
 
@@ -333,7 +337,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
 
         // load key into mem
         std::error_code dec;
-        std::filesystem::directory_iterator check_it (key_path, dec);
+        std::filesystem::directory_iterator check_it(key_path, dec);
         if (dec) [[unlikely]] {
             LOG(ERROR) << "fail to directory_iterator=" << std::strerror(dec.value());
             return {};
@@ -355,7 +359,8 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                         std::error_code ec;
                         std::filesystem::remove(check_it->path(), ec);
                         if (ec) [[unlikely]] {
-                            LOG(WARNING) << "filesystem error, failed to remove file, file=" << check_it->path() << " error=" << ec.message();
+                            LOG(WARNING) << "filesystem error, failed to remove file, file="
+                                         << check_it->path() << " error=" << ec.message();
                         }
                         continue;
                     } else {
@@ -376,7 +381,8 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 std::error_code ec;
                 std::filesystem::remove(check_it->path(), ec);
                 if (ec) [[unlikely]] {
-                    LOG(WARNING) << "filesystem error, failed to remove file, file=" << check_it->path() << " error=" << ec.message();
+                    LOG(WARNING) << "filesystem error, failed to remove file, file="
+                                 << check_it->path() << " error=" << ec.message();
                 }
                 continue;
             }
@@ -414,10 +420,12 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
         if (bool is_exist = std::filesystem::exists(key_path, ec); is_exist && !ec) {
             std::filesystem::remove_all(key_path, ec);
             if (ec) [[unlikely]] {
-                LOG(WARNING) << "filesystem error, failed to remove_all file, file=" << key_path << " error=" << ec.message();
+                LOG(WARNING) << "filesystem error, failed to remove_all file, file=" << key_path
+                             << " error=" << ec.message();
             }
         } else if (ec) [[unlikely]] {
-            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path << " error=" << ec.message();
+            LOG(WARNING) << "filesystem error, failed to exists file, file=" << key_path
+                         << " error=" << ec.message();
         }
         return {};
     }
@@ -451,8 +459,9 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                                 get_path_in_local_cache(key, context.expiration_time), ec);
         if (ec) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
-                         << get_path_in_local_cache(key, iter->second) << " to file="
-                         << get_path_in_local_cache(key, context.expiration_time) << " error=" << ec.message();
+                         << get_path_in_local_cache(key, iter->second)
+                         << " to file=" << get_path_in_local_cache(key, context.expiration_time)
+                         << " error=" << ec.message();
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
@@ -525,8 +534,9 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
 }
 
 FileBlocks BlockFileCache::split_range_into_cells(const Key& key, const CacheContext& context,
-                                                size_t offset, size_t size, FileBlock::State state,
-                                                std::lock_guard<doris::Mutex>& cache_lock) {
+                                                  size_t offset, size_t size,
+                                                  FileBlock::State state,
+                                                  std::lock_guard<doris::Mutex>& cache_lock) {
     DCHECK(size > 0);
 
     auto current_pos = offset;
@@ -543,9 +553,9 @@ FileBlocks BlockFileCache::split_range_into_cells(const Key& key, const CacheCon
                         ? state
                         : FileBlock::State::SKIP_CACHE;
         if (UNLIKELY(state == FileBlock::State::SKIP_CACHE)) {
-            auto file_block =
-                    std::make_shared<FileBlock>(current_pos, current_size, key, this,
-                                                FileBlock::State::SKIP_CACHE, context.cache_type, context.expiration_time);
+            auto file_block = std::make_shared<FileBlock>(
+                    current_pos, current_size, key, this, FileBlock::State::SKIP_CACHE,
+                    context.cache_type, context.expiration_time);
             file_blocks.push_back(std::move(file_block));
         } else {
             auto* cell = add_cell(key, context, current_pos, current_size, state, cache_lock);
@@ -565,9 +575,9 @@ FileBlocks BlockFileCache::split_range_into_cells(const Key& key, const CacheCon
 }
 
 void BlockFileCache::fill_holes_with_empty_file_blocks(FileBlocks& file_blocks, const Key& key,
-                                                     const CacheContext& context,
-                                                     const FileBlock::Range& range,
-                                                     std::lock_guard<doris::Mutex>& cache_lock) {
+                                                       const CacheContext& context,
+                                                       const FileBlock::Range& range,
+                                                       std::lock_guard<doris::Mutex>& cache_lock) {
     /// There are segments [segment1, ..., segmentN]
     /// (non-overlapping, non-empty, ascending-ordered) which (maybe partially)
     /// intersect with given range.
@@ -629,7 +639,7 @@ void BlockFileCache::fill_holes_with_empty_file_blocks(FileBlocks& file_blocks, 
 }
 
 FileBlocksHolder BlockFileCache::get_or_set(const Key& key, size_t offset, size_t size,
-                                          const CacheContext& context) {
+                                            const CacheContext& context) {
     FileBlock::Range range(offset, offset + size - 1);
 
     std::lock_guard cache_lock(_mutex);
@@ -649,9 +659,9 @@ FileBlocksHolder BlockFileCache::get_or_set(const Key& key, size_t offset, size_
 }
 
 BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const CacheContext& context,
-                                                    size_t offset, size_t size,
-                                                    FileBlock::State state,
-                                                    std::lock_guard<doris::Mutex>& cache_lock) {
+                                                        size_t offset, size_t size,
+                                                        FileBlock::State state,
+                                                        std::lock_guard<doris::Mutex>& cache_lock) {
     /// Create a file segment cell and put it in `files` map by [key][offset].
     if (size == 0) {
         return nullptr; /// Empty files are not cached.
@@ -680,20 +690,19 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
             std::filesystem::create_directories(key_path, ec);
             if (ec) [[unlikely]] {
                 LOG(WARNING) << fmt::format("cannot create {}: {}", key_path,
-                                          std::strerror(ec.value()));
+                                            std::strerror(ec.value()));
                 state = FileBlock::State::SKIP_CACHE;
             }
         } else if (ec) [[unlikely]] {
             LOG(WARNING) << fmt::format("cannot exists {}: {}", key_path,
-                                      std::strerror(ec.value()));
+                                        std::strerror(ec.value()));
             state = FileBlock::State::SKIP_CACHE;
         }
     }
 
-    FileBlockCell cell(
-            std::make_shared<FileBlock>(offset, size, key, this, state,
-                                                       context.cache_type, context.expiration_time),
-            context.cache_type, cache_lock);
+    FileBlockCell cell(std::make_shared<FileBlock>(offset, size, key, this, state,
+                                                   context.cache_type, context.expiration_time),
+                       context.cache_type, cache_lock);
     if (context.cache_type != FileCacheType::TTL) {
         auto& queue = get_queue(context.cache_type);
         cell.queue_iterator = queue.add(key, offset, size, cache_lock);
@@ -847,7 +856,7 @@ bool BlockFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mut
 //     a. evict from query queue
 //     b. evict from other queue
 bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, size_t offset,
-                               size_t size, std::lock_guard<doris::Mutex>& cache_lock) {    
+                                 size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     if (!_lazy_open_done) {
         return try_reserve_for_lazy_load(size, cache_lock);
     }
@@ -1051,8 +1060,8 @@ void BlockFileCache::reset_range(const Key& key, size_t offset, size_t old_size,
 }
 
 bool BlockFileCache::try_reserve_from_other_queue(FileCacheType cur_cache_type, size_t size,
-                                                int64_t cur_time,
-                                                std::lock_guard<doris::Mutex>& cache_lock) {
+                                                  int64_t cur_time,
+                                                  std::lock_guard<doris::Mutex>& cache_lock) {
     auto other_cache_types = get_other_cache_type(cur_cache_type);
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
@@ -1115,8 +1124,8 @@ bool BlockFileCache::try_reserve_from_other_queue(FileCacheType cur_cache_type, 
 }
 
 bool BlockFileCache::try_reserve_for_lru(const Key& key, QueryFileCacheContextPtr query_context,
-                                       const CacheContext& context, size_t offset, size_t size,
-                                       std::lock_guard<doris::Mutex>& cache_lock) {
+                                         const CacheContext& context, size_t offset, size_t size,
+                                         std::lock_guard<doris::Mutex>& cache_lock) {
     int64_t cur_time = std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count();
@@ -1196,7 +1205,7 @@ bool BlockFileCache::try_reserve_for_lru(const Key& key, QueryFileCacheContextPt
 }
 
 void BlockFileCache::remove(FileBlockSPtr file_block, std::lock_guard<doris::Mutex>& cache_lock,
-                          std::lock_guard<doris::Mutex>& segment_lock) {
+                            std::lock_guard<doris::Mutex>& segment_lock) {
     auto key = file_block->key();
     auto offset = file_block->offset();
     auto type = file_block->cache_type();
@@ -1222,10 +1231,12 @@ void BlockFileCache::remove(FileBlockSPtr file_block, std::lock_guard<doris::Mut
     if (bool is_exist = std::filesystem::exists(cache_file_path, ec); is_exist && !ec) {
         std::filesystem::remove(cache_file_path, ec);
         if (ec) {
-            LOG(WARNING) << "filesystem error, failed to remove file, file=" << cache_file_path << " error=" << ec.message();
+            LOG(WARNING) << "filesystem error, failed to remove file, file=" << cache_file_path
+                         << " error=" << ec.message();
         }
     } else if (ec) {
-        LOG(WARNING) << "filesystem error, failed to exists file, file=" << cache_file_path << " error=" << ec.message();
+        LOG(WARNING) << "filesystem error, failed to exists file, file=" << cache_file_path
+                     << " error=" << ec.message();
     }
     if (offsets.empty()) {
         auto key_path = get_path_in_local_cache(key, expiration_time);
@@ -1244,7 +1255,7 @@ Status BlockFileCache::load_cache_info_into_memory() {
 
     // upgrade the cache
     std::error_code dec;
-    std::filesystem::directory_iterator upgrade_key_it (_cache_base_path, dec);
+    std::filesystem::directory_iterator upgrade_key_it(_cache_base_path, dec);
     if (dec) [[unlikely]] {
         LOG(WARNING) << dec.message();
         return Status::IOError(dec.message());
@@ -1265,16 +1276,18 @@ Status BlockFileCache::load_cache_info_into_memory() {
 
     std::vector<std::string> need_to_check_if_empty_dir;
     /// cache_base_path / key / offset
-    std::filesystem::directory_iterator key_it (_cache_base_path, dec);
+    std::filesystem::directory_iterator key_it(_cache_base_path, dec);
     if (dec) [[unlikely]] {
         LOG(ERROR) << dec.message();
         return Status::IOError(dec.message());
     }
     auto add_cell_batch_func = [&]() {
         std::lock_guard cache_lock(_mutex);
-        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args){
-            add_cell(args.key, args.ctx, args.offset, args.size, FileBlock::State::DOWNLOADED, cache_lock);
-        });
+        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(),
+                      [&](const BatchLoadArgs& args) {
+                          add_cell(args.key, args.ctx, args.offset, args.size,
+                                   FileBlock::State::DOWNLOADED, cache_lock);
+                      });
         batch_load_buffer.clear();
     };
     for (; key_it != std::filesystem::directory_iterator(); ++key_it) {
@@ -1287,9 +1300,10 @@ Status BlockFileCache::load_cache_info_into_memory() {
         expiration_time_str = key_with_suffix.substr(delim_pos + 1);
         key = Key(vectorized::unhex_uint<uint128_t>(key_str.c_str()));
         std::error_code ec;
-        std::filesystem::directory_iterator offset_it (key_it->path(), ec);
+        std::filesystem::directory_iterator offset_it(key_it->path(), ec);
         if (ec) [[unlikely]] {
-            LOG(WARNING) << "filesystem error, failed to remove file, file=" << key_it->path() << " error=" << ec.message();
+            LOG(WARNING) << "filesystem error, failed to remove file, file=" << key_it->path()
+                         << " error=" << ec.message();
             continue;
         }
         CacheContext context;
@@ -1339,7 +1353,8 @@ Status BlockFileCache::load_cache_info_into_memory() {
                 continue;
             }
             context.cache_type = cache_type;
-            batch_load_buffer.push_back(BatchLoadArgs{key, context, offset, size, key_it->path(), offset_it->path()});
+            batch_load_buffer.push_back(
+                    BatchLoadArgs {key, context, offset, size, key_it->path(), offset_it->path()});
 
             // add lock
             if (batch_load_buffer.size() >= scan_length) {
@@ -1359,8 +1374,8 @@ size_t BlockFileCache::get_used_cache_size(FileCacheType cache_type) const {
     return get_used_cache_size_unlocked(cache_type, cache_lock);
 }
 
-size_t BlockFileCache::get_used_cache_size_unlocked(FileCacheType cache_type,
-                                                  std::lock_guard<doris::Mutex>& cache_lock) const {
+size_t BlockFileCache::get_used_cache_size_unlocked(
+        FileCacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_total_cache_size(cache_lock);
 }
 
@@ -1380,13 +1395,13 @@ size_t BlockFileCache::get_file_blocks_num(FileCacheType cache_type) const {
     return get_file_blocks_num_unlocked(cache_type, cache_lock);
 }
 
-size_t BlockFileCache::get_file_blocks_num_unlocked(FileCacheType cache_type,
-                                                    std::lock_guard<doris::Mutex>& cache_lock) const {
+size_t BlockFileCache::get_file_blocks_num_unlocked(
+        FileCacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
     return get_queue(cache_type).get_elements_num(cache_lock);
 }
 
 BlockFileCache::FileBlockCell::FileBlockCell(FileBlockSPtr file_block, FileCacheType cache_type,
-                                           std::lock_guard<doris::Mutex>& cache_lock)
+                                             std::lock_guard<doris::Mutex>& cache_lock)
         : file_block(file_block), cache_type(cache_type) {
     /**
      * Cell can be created with either DOWNLOADED or EMPTY file segment's state.
@@ -1405,7 +1420,6 @@ BlockFileCache::FileBlockCell::FileBlockCell(FileBlockSPtr file_block, FileCache
                       << FileBlock::state_to_string(file_block->_download_state);
     }
 }
-
 
 BlockFileCache::LRUQueue::Iterator BlockFileCache::LRUQueue::add(
         const Key& key, size_t offset, size_t size,
@@ -1460,7 +1474,8 @@ std::string BlockFileCache::dump_structure(const Key& key) {
     return dump_structure_unlocked(key, cache_lock);
 }
 
-std::string BlockFileCache::dump_structure_unlocked(const Key& key, std::lock_guard<doris::Mutex>&) {
+std::string BlockFileCache::dump_structure_unlocked(const Key& key,
+                                                    std::lock_guard<doris::Mutex>&) {
     std::stringstream result;
     const auto& cells_by_offset = _files[key];
 
@@ -1525,18 +1540,21 @@ void BlockFileCache::check_disk_resource_limit(const std::string& path) {
     auto [capacity_percentage, inode_remain_percentage] = percent;
     DCHECK(capacity_percentage >= 0 && capacity_percentage <= 100);
     DCHECK(inode_remain_percentage >= 0 && inode_remain_percentage <= 100);
-    if (((100 - capacity_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent)
-        || (inode_remain_percentage < config::file_cache_enter_disk_resource_limit_mode_percent)) {
+    if (((100 - capacity_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent) ||
+        (inode_remain_percentage < config::file_cache_enter_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = true;
-    } else if (_disk_resource_limit_mode
-            && ((100 - capacity_percentage) > config::file_cache_exit_disk_resource_limit_mode_percent)
-            && (inode_remain_percentage > config::file_cache_exit_disk_resource_limit_mode_percent)) {
+    } else if (_disk_resource_limit_mode &&
+               ((100 - capacity_percentage) >
+                config::file_cache_exit_disk_resource_limit_mode_percent) &&
+               (inode_remain_percentage >
+                config::file_cache_exit_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = false;
     }
     if (_disk_resource_limit_mode) {
-        LOG_WARNING("file cache background thread").tag("remain space percent", 100 - capacity_percentage)
-                    .tag("remain inode percent", inode_remain_percentage)
-                    .tag("mode", "run in resource limit");
+        LOG_WARNING("file cache background thread")
+                .tag("remain space percent", 100 - capacity_percentage)
+                .tag("remain inode percent", inode_remain_percentage)
+                .tag("mode", "run in resource limit");
     }
 }
 
@@ -1578,7 +1596,8 @@ void BlockFileCache::run_background_operation() {
                 _normal_queue.get_elements_num(cache_lock));
         _cur_index_queue_cache_size_metrics->set_value(
                 _index_queue.get_total_cache_size(cache_lock));
-        _cur_index_queue_element_count_metrics->set_value(_index_queue.get_elements_num(cache_lock));
+        _cur_index_queue_element_count_metrics->set_value(
+                _index_queue.get_elements_num(cache_lock));
         _cur_disposable_queue_cache_size_metrics->set_value(
                 _disposable_queue.get_total_cache_size(cache_lock));
         _cur_disposable_queue_element_count_metrics->set_value(
@@ -1600,8 +1619,9 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
                                 get_path_in_local_cache(key, new_expiration_time), ec);
         if (ec) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
-                         << get_path_in_local_cache(key, iter->second) << " to file="
-                         << get_path_in_local_cache(key, new_expiration_time) << " error=" << ec.message();
+                         << get_path_in_local_cache(key, iter->second)
+                         << " to file=" << get_path_in_local_cache(key, new_expiration_time)
+                         << " error=" << ec.message();
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
@@ -1643,8 +1663,8 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
     }
 }
 
-std::vector<std::tuple<size_t, size_t, FileCacheType, int64_t>> BlockFileCache::get_hot_segments_meta(
-        const Key& key) const {
+std::vector<std::tuple<size_t, size_t, FileCacheType, int64_t>>
+BlockFileCache::get_hot_segments_meta(const Key& key) const {
     int64_t cur_time = std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count();
@@ -1707,7 +1727,8 @@ size_t BlockFileCache::file_reader_cache_size() {
     return s_file_name_to_reader.size();
 }
 
-bool BlockFileCache::try_reserve_for_lazy_load(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
+bool BlockFileCache::try_reserve_for_lazy_load(size_t size,
+                                               std::lock_guard<doris::Mutex>& cache_lock) {
     size_t removed_size = 0;
     auto remove_file_block_if = [&](FileBlockCell* cell) {
         if (FileBlockSPtr file_block = cell->file_block; file_block) {
@@ -1745,17 +1766,17 @@ bool BlockFileCache::try_reserve_for_lazy_load(size_t size, std::lock_guard<dori
             std::lock_guard segment_lock(file_block->_mutex);
 
             switch (file_block->_download_state) {
-                case FileBlock::State::DOWNLOADED: {
-                    /// Cell will actually be removed only if
-                    /// we managed to reserve enough space.
+            case FileBlock::State::DOWNLOADED: {
+                /// Cell will actually be removed only if
+                /// we managed to reserve enough space.
 
-                    to_evict.push_back(cell);
-                    break;
-                }
-                default: {
-                    trash.push_back(cell);
-                    break;
-                }
+                to_evict.push_back(cell);
+                break;
+            }
+            default: {
+                trash.push_back(cell);
+                break;
+            }
             }
             removed_size += cell_size;
         }

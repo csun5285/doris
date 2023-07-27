@@ -72,6 +72,7 @@ Status LikeSearchState::clone(LikeSearchState& cloned) {
         hs_database_t* database = nullptr;
         hs_scratch_t* scratch = nullptr;
         RETURN_IF_ERROR(FunctionLike::hs_prepare(nullptr, re_pattern.c_str(), &database, &scratch));
+
         cloned.hs_database.reset(database);
         cloned.hs_scratch.reset(scratch);
     } else { // fallback to re2
@@ -369,6 +370,7 @@ Status FunctionLikeBase::constant_regex_fn_predicate(LikeSearchState* state,
                                                      ColumnUInt8::Container& result,
                                                      const uint16_t* sel, size_t sz) {
     auto data_ptr = reinterpret_cast<const StringRef*>(val.get_data().data());
+
     if (state->hs_database) { // use hyperscan
         for (size_t i = 0; i < sz; i++) {
             auto ret = hs_scan(state->hs_database.get(), data_ptr[sel[i]].data,
@@ -434,10 +436,10 @@ Status FunctionLikeBase::regexp_fn_predicate(LikeSearchState* state,
 // hyperscan compile expression to database and allocate scratch space
 Status FunctionLikeBase::hs_prepare(FunctionContext* context, const char* expression,
                                     hs_database_t** database, hs_scratch_t** scratch) {
-    return Status::RuntimeError("hs_compile inject error:");
     hs_compile_error_t* compile_err;
-    auto res = hs_compile(expression, HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY, HS_MODE_BLOCK, nullptr,
-                          database, &compile_err);
+    auto res = hs_compile(expression, HS_FLAG_DOTALL | HS_FLAG_ALLOWEMPTY | HS_FLAG_UTF8,
+                          HS_MODE_BLOCK, nullptr, database, &compile_err);
+
     if (res != HS_SUCCESS) {
         *database = nullptr;
         if (context) {

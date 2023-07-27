@@ -20,9 +20,15 @@
 // **Note**: default db will be create if not exist
 defaultDb = "regression_test"
 
-jdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true"
+jdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
+targetJdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
 jdbcUser = "root"
 jdbcPassword = ""
+
+feSourceThriftAddress = "127.0.0.1:9020"
+feTargetThriftAddress = "127.0.0.1:9020"
+feSyncerUser = "root"
+feSyncerPassword = ""
 
 feHttpAddress = "172.30.32.17:8030"
 feHttpUser = "root"
@@ -52,10 +58,7 @@ testDirectories = ""
 // this groups will not be executed
 excludeGroups = ""
 // this suites will not be executed
-excludeSuites = "test_insert_nested_array,test_clean_label, \
-tpch_sf1_q8_nereids,test_alter_user,test_explain_tpch_sf_1_q4,test_explain_tpch_sf_1_q20, \
-test_explain_tpch_sf_1_q21,test_explain_tpch_sf_1_q13,test_explain_tpch_sf_1_q22,test_ctas, \
-test_ctl,redundant_conjuncts,test_dynamic_partition,test_array_show_create,test_disable_management_cluster"
+excludeSuites = "test_broker_load,test_spark_load,test_analyze_stats_p1,test_refresh_mtmv, test_disable_management_cluster"
 // this directories will not be executed
 excludeDirectories = "backup_restore,compaction, cold_heat_separation, dynamic_table, javaudf_p0, primary_key,\
 tpcds_sf1000_p2,primary_index,github_events_p2,nereids_syntax_p0,schema_change_p0, \
@@ -72,9 +75,21 @@ hdfsPasswd = ""
 brokerName = "broker_name"
 
 // broker load test config
-// enableBrokerLoad=true
+enableBrokerLoad=true
 
 // cacheDataPath = "/data/regression/"
+s3Endpoint = "cos.ap-hongkong.myqcloud.com"
+s3BucketName = "doris-build-hk-1308700295"
+s3Region = "ap-hongkong"
+
+// hive catalog test config
+// To enable jdbc test, you need first start hive container.
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableHiveTest=false
+hms_port=7141
+
+cacheDataPath = "/data/regression/"
+
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
 s3Region = "ap-hongkong"

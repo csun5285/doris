@@ -89,7 +89,8 @@ public class MasterInfo implements Writable {
         Text.writeString(out, json);
     }
 
-    public void readFields(DataInput in) throws IOException {
+    @Deprecated
+    private void readFields(DataInput in) throws IOException {
         host = Text.readString(in);
         httpPort = in.readInt();
         rpcPort = in.readInt();

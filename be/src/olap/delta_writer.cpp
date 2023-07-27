@@ -60,6 +60,7 @@
 #include "runtime/memory/mem_tracker.h"
 #include "service/backend_options.h"
 #include "util/brpc_client_cache.h"
+#include "util/mem_info.h"
 #include "util/ref_count_closure.h"
 #include "util/stopwatch.hpp"
 #include "util/time.h"
@@ -89,7 +90,6 @@ DeltaWriter::DeltaWriter(WriteRequest* req, StorageEngine* storage_engine, Runti
 
 void DeltaWriter::_init_profile(RuntimeProfile* profile) {
     _profile = profile->create_child(fmt::format("DeltaWriter {}", _req.tablet_id), true, true);
-    profile->add_child(_profile, false, nullptr);
     _lock_timer = ADD_TIMER(_profile, "LockTime");
     _sort_timer = ADD_TIMER(_profile, "MemTableSortTime");
     _agg_timer = ADD_TIMER(_profile, "MemTableAggTime");
@@ -221,10 +221,11 @@ Status DeltaWriter::init() {
 #else
     // check tablet version number
     if (!config::disable_auto_compaction &&
-        _tablet->exceed_version_limit(config::max_tablet_version_num - 100)) {
+        _tablet->exceed_version_limit(config::max_tablet_version_num - 100) &&
+        !MemInfo::is_exceed_soft_mem_limit(GB_EXCHANGE_BYTE)) {
         //trigger compaction
         StorageEngine::instance()->submit_compaction_task(
-                _tablet, CompactionType::CUMULATIVE_COMPACTION);
+                _tablet, CompactionType::CUMULATIVE_COMPACTION, true);
         if (_tablet->version_count() > config::max_tablet_version_num) {
             LOG(WARNING) << "failed to init delta writer. version count: "
                          << _tablet->version_count()
@@ -239,7 +240,7 @@ Status DeltaWriter::init() {
         if (!base_migration_rlock.owns_lock()) {
             return Status::Error<TRY_LOCK_FAILED>();
         }
-        std::lock_guard push_lock(_tablet->get_push_lock());
+        std::lock_guard<std::mutex> push_lock(_tablet->get_push_lock());
         RETURN_IF_ERROR(_storage_engine->txn_manager()->prepare_txn(_req.partition_id, _tablet,
                                                                     _req.txn_id, _req.load_id));
     }
@@ -264,8 +265,9 @@ Status DeltaWriter::init() {
     context.tablet = _tablet;
     context.disable_file_cache = _req.disable_file_cache;
     context.newest_write_timestamp = UnixSeconds();
-    context.mow_context =
-            std::make_shared<MowContext>(_cur_max_version, _rowset_ids, _delete_bitmap);
+    context.write_type = DataWriteType::TYPE_DIRECT;
+    context.mow_context = std::make_shared<MowContext>(_cur_max_version, _req.txn_id, _rowset_ids,
+                                                       _delete_bitmap);
     RETURN_IF_ERROR(_tablet->create_rowset_writer(context, &_rowset_writer));
 
     _schema.reset(new Schema(_tablet_schema));
@@ -295,7 +297,7 @@ Status DeltaWriter::write(const vectorized::Block* block, const std::vector<int>
         return Status::OK();
     }
     _lock_watch.start();
-    std::lock_guard l(_lock);
+    std::lock_guard<std::mutex> l(_lock);
     _lock_watch.stop();
     if (!_is_init && !_is_cancelled) {
         RETURN_IF_ERROR(init());
@@ -373,7 +375,7 @@ Status DeltaWriter::flush_memtable_and_wait(bool need_wait) {
 
 Status DeltaWriter::wait_flush() {
     {
-        std::lock_guard l(_lock);
+        std::lock_guard<std::mutex> l(_lock);
         if (!_is_init) {
             // return OK instead of Status::Error<ALREADY_CANCELLED>() for same reason
             // as described in flush_memtable_and_wait()
@@ -411,7 +413,8 @@ void DeltaWriter::_reset_mem_table() {
         _mem_table_insert_trackers.push_back(mem_table_insert_tracker);
         _mem_table_flush_trackers.push_back(mem_table_flush_tracker);
     }
-    auto mow_context = std::make_shared<MowContext>(_cur_max_version, _rowset_ids, _delete_bitmap);
+    auto mow_context = std::make_shared<MowContext>(_cur_max_version, _req.txn_id, _rowset_ids,
+                                                    _delete_bitmap);
     _mem_table.reset(new MemTable(_tablet, _schema.get(), _tablet_schema.get(), _req.slots,
                                   _req.tuple_desc, _rowset_writer.get(), mow_context,
                                   mem_table_insert_tracker, mem_table_flush_tracker));
@@ -434,7 +437,7 @@ void DeltaWriter::_reset_mem_table() {
 
 Status DeltaWriter::close() {
     _lock_watch.start();
-    std::lock_guard l(_lock);
+    std::lock_guard<std::mutex> l(_lock);
     _lock_watch.stop();
     if (!_is_init && !_is_cancelled) {
         // if this delta writer is not initialized, but close() is called.
@@ -494,9 +497,10 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
 
     _mem_table.reset();
 
-    if (_rowset_writer->num_rows() + _merged_rows != _total_received_rows) {
+    if (_rowset_writer->num_rows() + _memtable_stat.merged_rows != _total_received_rows) {
         LOG(WARNING) << "the rows number written doesn't match, rowset num rows written to file: "
-                     << _rowset_writer->num_rows() << ", merged_rows: " << _merged_rows
+                     << _rowset_writer->num_rows()
+                     << ", merged_rows: " << _memtable_stat.merged_rows
                      << ", total received rows: " << _total_received_rows;
         return Status::InternalError("rows number written by delta writer dosen't match");
     }
@@ -533,7 +537,7 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
 Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
                                const bool write_single_replica) {
     SCOPED_TIMER(_close_wait_timer);
-    std::lock_guard l(_lock);
+    std::lock_guard<std::mutex> l(_lock);
     DCHECK(_is_init)
             << "delta writer is supposed be to initialized before close_wait() being called";
 
@@ -567,8 +571,43 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
         LOG(WARNING) << "fail to build rowset";
         return Status::Error<MEM_ALLOC_FAILED>();
     }
+
+    if (_tablet->enable_unique_key_merge_on_write()) {
+        auto beta_rowset = reinterpret_cast<BetaRowset*>(_cur_rowset.get());
+        std::vector<segment_v2::SegmentSharedPtr> segments;
+        RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
+        // tablet is under alter process. The delete bitmap will be calculated after conversion.
+        if (_tablet->tablet_state() == TABLET_NOTREADY &&
+            SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
+            return Status::OK();
+        }
+        if (segments.size() > 1) {
+            // calculate delete bitmap between segments
+            RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
+                                                                         _delete_bitmap));
+        }
+
+        // commit_phase_update_delete_bitmap() may generate new segments, we need to create a new
+        // transient rowset writer to write the new segments, then merge it back the original
+        // rowset.
+        std::unique_ptr<RowsetWriter> rowset_writer;
+        _tablet->create_transient_rowset_writer(_cur_rowset, &rowset_writer);
+        RETURN_IF_ERROR(_tablet->commit_phase_update_delete_bitmap(
+                _cur_rowset, _rowset_ids, _delete_bitmap, segments, _req.txn_id,
+                rowset_writer.get()));
+        if (_cur_rowset->tablet_schema()->is_partial_update()) {
+            // build rowset writer and merge transient rowset
+            RETURN_IF_ERROR(rowset_writer->flush());
+            RowsetSharedPtr transient_rowset = rowset_writer->build();
+            _cur_rowset->merge_rowset_meta(transient_rowset->rowset_meta());
+
+            // erase segment cache cause we will add a segment to rowset
+            SegmentLoader::instance()->erase_segment(_cur_rowset->rowset_id());
+        }
+    }
     Status res = _storage_engine->txn_manager()->commit_txn(_req.partition_id, _tablet, _req.txn_id,
                                                             _req.load_id, _cur_rowset, false);
+
     if (!res && !res.is<PUSH_TRANSACTION_ALREADY_EXIST>()) {
         LOG(WARNING) << "Failed to commit txn: " << _req.txn_id
                      << " for rowset: " << _cur_rowset->rowset_id();
@@ -635,7 +674,7 @@ Status DeltaWriter::cancel() {
 }
 
 Status DeltaWriter::cancel_with_status(const Status& st) {
-    std::lock_guard l(_lock);
+    std::lock_guard<std::mutex> l(_lock);
     if (_is_cancelled) {
         return Status::OK();
     }
@@ -650,27 +689,6 @@ Status DeltaWriter::cancel_with_status(const Status& st) {
     _is_cancelled = true;
     _cancel_status = st;
     return Status::OK();
-}
-
-void DeltaWriter::save_mem_consumption_snapshot() {
-    std::lock_guard l(_lock);
-    _mem_consumption_snapshot = mem_consumption(MemType::ALL);
-    if (_mem_table == nullptr) {
-        _memtable_consumption_snapshot = 0;
-    } else {
-        _memtable_consumption_snapshot = _mem_table->memory_usage();
-    }
-}
-
-int64_t DeltaWriter::get_memtable_consumption_inflush() const {
-    if (!_is_init || _flush_token->get_stats().flush_running_count == 0) {
-        return 0;
-    }
-    return _mem_consumption_snapshot - _memtable_consumption_snapshot;
-}
-
-int64_t DeltaWriter::get_memtable_consumption_snapshot() const {
-    return _memtable_consumption_snapshot;
 }
 
 int64_t DeltaWriter::mem_consumption(MemType mem) {
@@ -691,6 +709,23 @@ int64_t DeltaWriter::mem_consumption(MemType mem) {
             for (auto mem_table_tracker : _mem_table_flush_trackers) {
                 mem_usage += mem_table_tracker->consumption();
             }
+        }
+    }
+    return mem_usage;
+}
+
+int64_t DeltaWriter::active_memtable_mem_consumption() {
+    if (_flush_token == nullptr) {
+        // This method may be called before this writer is initialized.
+        // So _flush_token may be null.
+        return 0;
+    }
+    int64_t mem_usage = 0;
+    {
+        std::lock_guard<SpinLock> l(_mem_table_tracker_lock);
+        if (_mem_table_insert_trackers.size() > 0) {
+            mem_usage += (*_mem_table_insert_trackers.rbegin())->consumption();
+            mem_usage += (*_mem_table_flush_trackers.rbegin())->consumption();
         }
     }
     return mem_usage;

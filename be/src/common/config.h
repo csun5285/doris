@@ -106,8 +106,7 @@ DECLARE_Int32(brpc_num_threads);
 // If no ip match this rule, will choose one randomly.
 DECLARE_String(priority_networks);
 
-// memory mode
-// performance or compact
+// performance moderate or or compact, only tcmalloc compile
 DECLARE_String(memory_mode);
 
 // process memory limit specified as number of bytes
@@ -166,8 +165,15 @@ DECLARE_mString(process_full_gc_size);
 // If false, cancel query when the memory used exceeds exec_mem_limit, same as before.
 DECLARE_mBool(enable_query_memory_overcommit);
 
+// gc will release cache, cancel task, and task will wait for gc to release memory,
+// default gc strategy is conservative, if you want to exclude the interference of gc, let it be true
+DECLARE_mBool(disable_memory_gc);
+
 // The maximum time a thread waits for a full GC. Currently only query will wait for full gc.
 DECLARE_mInt32(thread_wait_gc_max_milliseconds);
+
+// reach mem limit, don't serialize in batch
+DECLARE_mInt64(pre_serialize_keys_limit_bytes);
 
 // the port heartbeat service used
 DECLARE_Int32(heartbeat_service_port);
@@ -185,6 +191,8 @@ DECLARE_Int32(push_worker_count_high_priority);
 DECLARE_Int32(publish_version_worker_count);
 // the count of tablet thread to publish version
 DECLARE_Int32(tablet_publish_txn_max_thread);
+// the timeout of EnginPublishVersionTask
+DECLARE_Int32(publish_version_task_timeout_s);
 // the count of thread to clear transaction task
 DECLARE_Int32(clear_transaction_task_worker_count);
 // the count of thread to delete
@@ -233,8 +241,6 @@ DECLARE_String(sys_log_level);
 DECLARE_String(sys_log_roll_mode);
 // log roll num
 DECLARE_Int32(sys_log_roll_num);
-// set the roll num of warn log, "-1" means keep consistent with "sys_log_roll_num"
-DECLARE_Int32(sys_warn_log_roll_num);
 // verbose log
 DECLARE_Strings(sys_log_verbose_modules);
 // verbose log level
@@ -347,12 +353,14 @@ DECLARE_Bool(disable_storage_row_cache);
 // Cache for mow primary key storage page size, it's seperated from
 // storage_page_cache_limit
 DECLARE_String(pk_storage_page_cache_limit);
+// data page size for primary key index
+DECLARE_Int32(primary_key_data_page_size);
 
 DECLARE_Bool(enable_low_cardinality_optimize);
 DECLARE_Bool(enable_low_cardinality_cache_code);
 
 // be policy
-// In size_based policy, output rowset of cumulative compaction total disk size exceed this config size,
+// whether check compaction checksum
 DECLARE_mBool(enable_compaction_checksum);
 // whether disable automatic compaction task
 DECLARE_mBool(disable_auto_compaction);
@@ -368,8 +376,6 @@ DECLARE_mInt32(vertical_compaction_num_columns_per_group);
 DECLARE_Int32(vertical_compaction_max_row_source_memory_mb);
 // In vertical compaction, max dest segment file size
 DECLARE_mInt64(vertical_compaction_max_segment_size);
-// In vertical compaction, max dest segment file size
-DECLARE_mInt64(max_segment_size_in_vertical_compaction);
 
 // In ordered data compaction, min segment size for input rowset
 DECLARE_mInt32(ordered_data_compaction_min_segment_size);
@@ -388,14 +394,13 @@ DECLARE_mInt64(base_compaction_dup_key_max_file_size_mbytes);
 
 DECLARE_Bool(enable_skip_tablet_compaction);
 // output rowset of cumulative compaction total disk size exceed this config size,
+// this rowset will be given to base compaction, unit is m byte.
+DECLARE_mInt64(compaction_promotion_size_mbytes);
 
-// check the configuration of auto compaction in seconds when auto compaction disabled
 DECLARE_mInt32(check_auto_compaction_interval_seconds);
 DECLARE_mInt64(base_compaction_num_cumulative_deltas);
 DECLARE_mInt64(base_compaction_interval_seconds_since_last_operation);
 DECLARE_Bool(enable_dup_key_base_compaction_skip_big_file);
-// this rowset will be given to base compaction, unit is m byte.
-DECLARE_mInt64(compaction_promotion_size_mbytes);
 
 // output rowset of cumulative compaction total disk size exceed this config ratio of
 // base rowset's total disk size, this rowset will be given to base compaction. The value must be between
@@ -410,7 +415,7 @@ DECLARE_mInt64(compaction_promotion_min_size_mbytes);
 // this size, size_based policy may not do to cumulative compaction. The unit is m byte.
 DECLARE_mInt64(compaction_min_size_mbytes);
 
-// This config can be set to limit thread number in  smallcompaction thread pool.
+// cumulative compaction policy: min and max delta file's number
 DECLARE_mInt64(cumulative_compaction_min_deltas);
 DECLARE_mInt64(cumulative_compaction_max_deltas);
 
@@ -472,7 +477,7 @@ DECLARE_String(ssl_certificate_path);
 // Path of private key
 DECLARE_String(ssl_private_key_path);
 // Whether to check authorization
-DECLARE_Bool(enable_http_auth);
+DECLARE_Bool(enable_all_http_auth);
 // Number of webserver workers
 DECLARE_Int32(webserver_num_workers);
 // Period to update rate counters and sampling counters in ms.
@@ -506,6 +511,8 @@ DECLARE_mInt64(streaming_load_json_max_mb);
 // If the channel does not receive any data till this time,
 // the channel will be removed.
 DECLARE_mInt32(streaming_load_rpc_max_alive_time_sec);
+// the timeout of a rpc to open the tablet writer in remote BE.
+// short operation time, can set a short timeout
 DECLARE_Int32(tablet_writer_open_rpc_timeout_sec);
 // The configuration is used to enable lazy open feature, and the default value is false.
 // When there is mixed deployment in the upgraded version, it needs to be set to false.
@@ -547,25 +554,6 @@ DECLARE_Int32(min_buffer_size); // 1024, The minimum read buffer size (in bytes)
 // With 1024B through 8MB buffers, this is up to ~2GB of buffers.
 DECLARE_Int32(max_free_io_buffers);
 
-// Whether to disable the memory cache pool,
-// including MemPool, ChunkAllocator, DiskIO free buffer.
-DECLARE_Bool(disable_mem_pools);
-
-// The reserved bytes limit of Chunk Allocator, usually set as a percentage of mem_limit.
-// defaults to bytes if no unit is given, the number of bytes must be a multiple of 2.
-// must larger than 0. and if larger than physical memory size, it will be set to physical memory size.
-// increase this variable can improve performance,
-// but will acquire more free memory which can not be used by other modules.
-DECLARE_mString(chunk_reserved_bytes_limit);
-// 1024, The minimum chunk allocator size (in bytes)
-DECLARE_Int32(min_chunk_reserved_bytes);
-// Disable Chunk Allocator in Vectorized Allocator, this will reduce memory cache.
-// For high concurrent queries, using Chunk Allocator with vectorized Allocator can reduce the impact
-// of gperftools tcmalloc central lock.
-// Jemalloc or google tcmalloc have core cache, Chunk Allocator may no longer be needed after replacing
-// gperftools tcmalloc.
-DECLARE_mBool(disable_chunk_allocator_in_vec);
-
 // The probing algorithm of partitioned hash table.
 // Enable quadratic probing hash table
 DECLARE_Bool(enable_quadratic_probing);
@@ -597,6 +585,7 @@ DECLARE_Bool(madvise_huge_pages);
 // whether use mmap to allocate memory
 DECLARE_Bool(mmap_buffers);
 
+// Sleep time in milliseconds between memory maintenance iterations
 DECLARE_mInt32(memory_maintenance_sleep_time_ms);
 
 // After full gc, no longer full gc and minor gc during sleep.
@@ -613,9 +602,6 @@ DECLARE_Int32(memory_max_alignment);
 DECLARE_mInt64(write_buffer_size);
 // max buffer size used in memtable for the aggregated table, default 400MB
 DECLARE_mInt64(write_buffer_size_for_agg);
-
-// write buffer size in push task for sparkload, default 1GB
-DECLARE_mInt64(flush_size_for_sparkload);
 
 DECLARE_Int32(load_process_max_memory_limit_percent); // 50%
 
@@ -783,10 +769,6 @@ DECLARE_mInt32(mem_tracker_consume_min_size_bytes);
 // In most cases, it does not need to be modified.
 DECLARE_mDouble(tablet_version_graph_orphan_vertex_ratio);
 
-// if set runtime_filter_use_async_rpc true, publish runtime filter will be a async method
-// else we will call sync method
-DECLARE_mBool(runtime_filter_use_async_rpc);
-
 // max send batch parallelism for OlapTableSink
 // The value set by the user for send_batch_parallelism is not allowed to exceed max_send_batch_parallelism_per_job,
 // if exceed, the value of send_batch_parallelism would be max_send_batch_parallelism_per_job
@@ -835,6 +817,10 @@ DECLARE_String(kafka_broker_version_fallback);
 // If you meet the error describe in https://github.com/edenhill/librdkafka/issues/3608
 // Change this size to 0 to fix it temporarily.
 DECLARE_Int32(routine_load_consumer_pool_size);
+
+// Used in single-stream-multi-table load. When receive a batch of messages from kafka,
+// if the size of batch is more than this threshold, we will request plans for all related tables.
+DECLARE_Int32(multi_table_batch_plan_threshold);
 
 // When the timeout of a load task is less than this threshold,
 // Doris treats it as a high priority task.
@@ -965,8 +951,6 @@ DECLARE_mInt32(max_fragment_start_wait_time_seconds);
 // any tablet.
 DECLARE_String(be_node_role);
 
-DECLARE_Int32(multi_get_per_batch);
-
 // Hide webserver page for safety.
 // Hide the be config page for webserver.
 DECLARE_Bool(hide_webserver_config_page);
@@ -981,9 +965,6 @@ DECLARE_Int32(segcompaction_small_threshold);
 
 // enable java udf and jdbc scannode
 DECLARE_Bool(enable_java_support);
-
-// disable java udf
-DECLARE_Bool(disable_java_udf);
 
 // Set config randomly to check more issues in github workflow
 DECLARE_Bool(enable_fuzzy_mode);
@@ -1012,8 +993,6 @@ DECLARE_String(inverted_index_query_cache_limit);
 
 // inverted index
 DECLARE_mDouble(inverted_index_ram_buffer_size);
-// setMaxBufferedDocs for lucene
-DECLARE_mInt32(inverted_index_max_buffer_docs);
 DECLARE_Int32(query_bkd_inverted_index_limit_percent); // 5%
 // dict path for chinese analyzer
 DECLARE_String(inverted_index_dict_path);
@@ -1027,10 +1006,16 @@ DECLARE_Int32(num_broadcast_buffer);
 // semi-structure configs
 DECLARE_Bool(enable_parse_multi_dimession_array);
 
-// setMergeFactor for lucene
-DECLARE_mInt32(inverted_index_merge_factor);
-
-DECLARE_Bool(enable_index_compaction);
+// Currently, two compaction strategies are implemented, SIZE_BASED and TIME_SERIES.
+// In the case of time series compaction, the execution of compaction is adjusted
+// using parameters that have the prefix time_series_compaction.
+DECLARE_mString(compaction_policy);
+// the size of input files for each compaction
+DECLARE_mInt64(time_series_compaction_goal_size_mbytes);
+// the minimum number of input files for each compaction if time_series_compaction_goal_size_mbytes not meets
+DECLARE_mInt64(time_series_compaction_file_count_threshold);
+// if compaction has not been performed within 3600 seconds, a compaction will be triggered
+DECLARE_mInt64(time_series_compaction_time_threshold_seconds);
 
 // max depth of expression tree allowed.
 DECLARE_Int32(max_depth_of_expr_tree);
@@ -1038,8 +1023,18 @@ DECLARE_Int32(max_depth_of_expr_tree);
 // Report a tablet as bad when io errors occurs more than this value.
 DECLARE_mInt64(max_tablet_io_errors);
 
+// Report a tablet as bad when its path not found
+DECLARE_Int32(tablet_path_check_interval_seconds);
+DECLARE_mInt32(tablet_path_check_batch_size);
+
 // Page size of row column, default 4KB
 DECLARE_mInt64(row_column_page_size);
+// it must be larger than or equal to 5MB
+DECLARE_mInt32(s3_write_buffer_size);
+// the size of the whole s3 buffer pool, which indicates the s3 file writer
+// can at most buffer 50MB data. And the num of multi part upload task is
+// s3_write_buffer_whole_size / s3_write_buffer_size
+DECLARE_mInt32(s3_write_buffer_whole_size);
 //enable shrink memory
 DECLARE_Bool(enable_shrink_memory);
 // enable cache for high concurrent point query work load
@@ -1053,6 +1048,21 @@ DECLARE_Bool(enable_feature_binlog);
 DECLARE_Bool(enable_set_in_bitmap_value);
 
 DECLARE_mBool(enable_stack_trace);
+
+// max number of hdfs file handle in cache
+DECLARE_Int64(max_hdfs_file_handle_cache_num);
+// max number of meta info of external files, such as parquet footer
+DECLARE_Int64(max_external_file_meta_cache_num);
+
+// max_write_buffer_number for rocksdb
+DECLARE_Int32(rocksdb_max_write_buffer_number);
+
+// Allow invalid decimalv2 literal for compatible with old version. Recommend set it false strongly.
+DECLARE_mBool(allow_invalid_decimalv2_literal);
+// the max expiration time of kerberos ticket.
+// If a hdfs filesytem with kerberos authentication live longer
+// than this time, it will be expired.
+DECLARE_mInt64(kerberos_expiration_time_seconds);
 
 //==============================================================================
 // begin selectdb cloud conf
@@ -1076,8 +1086,6 @@ DECLARE_Int64(file_cache_max_file_segment_size); // 1MB
 DECLARE_Int64(file_cache_min_file_segment_size);
 DECLARE_Bool(clear_file_cache);
 DECLARE_Bool(enable_file_cache_query_limit);
-DECLARE_Int32(file_cache_enter_disk_resource_limit_mode_percent);
-DECLARE_Int32(file_cache_exit_disk_resource_limit_mode_percent);
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]

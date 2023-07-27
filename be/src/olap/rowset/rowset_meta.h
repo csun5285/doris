@@ -362,6 +362,8 @@ public:
         return true;
     }
 
+    auto& get_segments_key_bounds() { return _rowset_meta_pb.segments_key_bounds(); }
+
     void set_segments_key_bounds(const std::vector<KeyBoundsPB>& segments_key_bounds) {
         for (const KeyBoundsPB& key_bounds : segments_key_bounds) {
             KeyBoundsPB* new_key_bounds = _rowset_meta_pb.add_segments_key_bounds();

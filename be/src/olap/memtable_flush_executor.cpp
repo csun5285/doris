@@ -20,7 +20,6 @@
 #include <gen_cpp/olap_file.pb.h>
 #include <stddef.h>
 
-#include "common/status.h"
 #include <algorithm>
 #include <ostream>
 

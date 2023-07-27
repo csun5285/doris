@@ -33,7 +33,6 @@
 #include "runtime/thread_context.h"
 #include "util/doris_metrics.h"
 #include "util/time.h"
-#include "util/trace.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -53,18 +52,15 @@ Status CumulativeCompaction::prepare_compact() {
         LOG(INFO) << "The tablet is under cumulative compaction. tablet=" << _tablet->full_name();
         return Status::Error<TRY_LOCK_FAILED>();
     }
-    TRACE("got cumulative compaction lock");
 
     // 1. calculate cumulative point
     _tablet->calculate_cumulative_point();
-    TRACE("calculated cumulative point");
     VLOG_CRITICAL << "after calculate, current cumulative point is "
                   << _tablet->cumulative_layer_point() << ", tablet=" << _tablet->full_name();
 
     // 2. pick rowsets to compact
     RETURN_IF_ERROR(pick_rowsets_to_compact());
-    TRACE("rowsets picked");
-    TRACE_COUNTER_INCREMENT("input_rowsets_count", _input_rowsets.size());
+    COUNTER_UPDATE(_input_rowsets_counter, _input_rowsets.size());
     _tablet->set_clone_occurred(false);
 
     return Status::OK();
@@ -76,7 +72,6 @@ Status CumulativeCompaction::execute_compact_impl() {
         LOG(INFO) << "The tablet is under cumulative compaction. tablet=" << _tablet->full_name();
         return Status::Error<TRY_LOCK_FAILED>();
     }
-    TRACE("got cumulative compaction lock");
 
     // Clone task may happen after compaction task is submitted to thread pool, and rowsets picked
     // for compaction may change. In this case, current compaction task should not be executed.
@@ -90,7 +85,6 @@ Status CumulativeCompaction::execute_compact_impl() {
     // 3. do cumulative compaction, merge rowsets
     int64_t permits = get_compaction_permits();
     RETURN_IF_ERROR(do_compaction(permits));
-    TRACE("compaction finished");
 
     // 4. set state to success
     _state = CompactionState::SUCCESS;
@@ -104,7 +98,6 @@ Status CumulativeCompaction::execute_compact_impl() {
     // 6. add metric to cumulative compaction
     DorisMetrics::instance()->cumulative_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->cumulative_compaction_bytes_total->increment(_input_rowsets_size);
-    TRACE("save cumulative compaction metrics");
 
     return Status::OK();
 }

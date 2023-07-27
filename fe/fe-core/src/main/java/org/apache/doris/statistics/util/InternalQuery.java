@@ -19,8 +19,6 @@ package org.apache.doris.statistics.util;
 
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.QueryStmt;
-import org.apache.doris.analysis.SelectStmt;
-import org.apache.doris.analysis.ShowStmt;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
 import org.apache.doris.analysis.StatementBase;
@@ -74,17 +72,9 @@ public class InternalQuery {
     private StatementBase stmt;
     private final List<TResultBatch> resultBatches = Lists.newArrayList();
 
-    private boolean noAuth = false;
-
     public InternalQuery(String database, String sql) {
         this.database = database;
         this.sql = sql;
-    }
-
-    public InternalQuery(String database, String sql, boolean noAuth) {
-        this.database = database;
-        this.sql = sql;
-        this.noAuth = noAuth;
     }
 
     public void setTimeout(int timeout) {
@@ -118,12 +108,8 @@ public class InternalQuery {
         context = new ConnectContext();
         context.setEnv(Env.getCurrentEnv());
         context.setCluster(SystemInfoService.DEFAULT_CLUSTER);
-        if (noAuth) {
-            context.setNoAuth(noAuth);
-        } else {
-            context.setCurrentUserIdentity(UserIdentity.ROOT);
-            context.setQualifiedUser(UserIdentity.ROOT.getQualifiedUser());
-        }
+        context.setCurrentUserIdentity(UserIdentity.ROOT);
+        context.setQualifiedUser(UserIdentity.ROOT.getQualifiedUser());
 
         String fullDbName = ClusterNamespace
                 .getFullName(SystemInfoService.DEFAULT_CLUSTER, database);
@@ -140,7 +126,6 @@ public class InternalQuery {
         // If user does not set the timeout, then use max_cbo_statistics_task_timeout_sec
         timeout = timeout > 0 ? timeout : Config.max_cbo_statistics_task_timeout_sec;
         context.getSessionVariable().setQueryTimeoutS(timeout);
-        context.setCloudCluster();
     }
 
     private void parseSql() throws DdlException {
@@ -154,21 +139,6 @@ public class InternalQuery {
         } catch (Exception e) {
             LOG.warn("Failed to parse the statement: {}. {}", sql, e);
             throw new DdlException("Failed to parse the statement:" + sql);
-        }
-
-        if (noAuth) {
-            Analyzer analyzer = new Analyzer(context.getEnv(), context);
-            if (stmt instanceof ShowStmt) {
-                try {
-                    SelectStmt selectStmt = ((ShowStmt) stmt).toSelectStmt(analyzer);
-                    if (selectStmt != null) {
-                        stmt = selectStmt;
-                    }
-                } catch (Exception e) {
-                    throw new DdlException("For show stmts only that can be trasformed "
-                            + "to select stmt are supported:" + sql);
-                }
-            }
         }
 
         if (! (stmt instanceof QueryStmt)) {

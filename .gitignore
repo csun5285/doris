@@ -13,8 +13,8 @@ core.*
 .DS_Store
 .classpath
 nohup.out
-custom_env.sh
-custom_env_mac.sh
+/custom_env.sh
+/custom_env_mac.sh
 derby.log
 dependency-reduced-pom.xml
 yarn.lock
@@ -42,10 +42,15 @@ docs/.temp
 
 # output, thirdparty, extension
 output/
+output.bak/
 rpc_data/
 metastore_db/
 thirdparty/src*
 thirdparty/installed*
+<<<<<<< HEAD
+=======
+thirdparty/doris-thirdparty*.tar.xz
+>>>>>>> 2.0.0-rc01
 
 fe_plugins/output
 fe_plugins/**/.factorypath
@@ -59,10 +64,8 @@ regression-test/realdata/*
 regression-test/cacheData/*
 regression-test/conf/regression-conf-custom.groovy
 regression-test/framework/bin/*
+regression-test/framework/src/main/groovy/org/apache/doris/thrift
 regression-test/certificate.p12
-
-regression-test/cacheData/*
-regression-test/conf/regression-conf-custom.groovy
 
 samples/doris-demo/remote-udf-python-demo/*_pb2.py
 samples/doris-demo/remote-udf-python-demo/*_pb2_grpc.py
@@ -101,6 +104,12 @@ tools/**/tpc-h_v*.docx
 tools/**/tpc-h_v*.pdf
 tools/**/tpch-data/
 tools/single-node-cluster/fe*
+<<<<<<< HEAD
+=======
+tools/tpcds-tools/TPC-DS_Tools_*.zip
+tools/tpcds-tools/bin/DSGen-software*
+tools/tpcds-tools/bin/tpcds-data/
+>>>>>>> 2.0.0-rc01
 
 # be-ut
 data_test

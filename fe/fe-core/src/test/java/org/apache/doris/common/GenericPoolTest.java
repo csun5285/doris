@@ -252,6 +252,7 @@ public class GenericPoolTest {
             return new TWarmUpTabletsResponse();
         }
 
+
         @Override
         public TIngestBinlogResult ingestBinlog(TIngestBinlogRequest ingestBinlogRequest) throws TException {
             return null;

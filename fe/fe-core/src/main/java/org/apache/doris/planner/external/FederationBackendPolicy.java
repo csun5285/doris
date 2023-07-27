@@ -20,18 +20,25 @@ package org.apache.doris.planner.external;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.UserException;
+import org.apache.doris.common.util.ConsistentHash;
 import org.apache.doris.mysql.privilege.UserProperty;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.BeSelectionPolicy;
+import org.apache.doris.thrift.TFileRangeDesc;
+import org.apache.doris.thrift.TScanRangeLocations;
 
-import com.google.common.base.Strings;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.hash.Funnel;
+import com.google.common.hash.Hashing;
+import com.google.common.hash.PrimitiveSink;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -39,11 +46,16 @@ import java.util.Set;
 public class FederationBackendPolicy {
     private static final Logger LOG = LogManager.getLogger(FederationBackendPolicy.class);
     private final List<Backend> backends = Lists.newArrayList();
+    private ConsistentHash<TScanRangeLocations, Backend> consistentHash;
 
     private int nextBe = 0;
+    private boolean initialized = false;
 
     public void init() throws UserException {
-        init(Collections.emptyList());
+        if (!initialized) {
+            init(Collections.emptyList());
+            initialized = true;
+        }
     }
 
     public void init(List<String> preLocations) throws UserException {
@@ -75,31 +87,9 @@ public class FederationBackendPolicy {
         if (backends.isEmpty()) {
             throw new UserException("No available backends");
         }
-    }
-
-    public void cloudInit() throws UserException {
-        if (ConnectContext.get() == null) {
-            LOG.warn("connect context is null");
-            throw new UserException("connect context is null");
-        }
-
-        String cluster = ConnectContext.get().getCloudCluster();
-        if (Strings.isNullOrEmpty(cluster)) {
-            LOG.warn("failed to get available be, clusterName: {}", cluster);
-            throw new UserException("failed to get available be, clusterName: " + cluster);
-        }
-
-        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(cluster);
-        for (Backend be : clusterBes) {
-            if (be.isAlive()) {
-                backends.add(be);
-            }
-        }
-
-        if (backends.isEmpty()) {
-            throw new UserException("No available backends, cluster is: " + cluster);
-        }
-        Collections.shuffle(backends);
+        int virtualNumber = Math.max(Math.min(512 / backends.size(), 32), 2);
+        consistentHash = new ConsistentHash<>(Hashing.murmur3_128(), new ScanRangeHash(),
+                new BackendHash(), backends, virtualNumber);
     }
 
     public Backend getNextBe() {
@@ -108,11 +98,34 @@ public class FederationBackendPolicy {
         return selectedBackend;
     }
 
+    public Backend getNextConsistentBe(TScanRangeLocations scanRangeLocations) {
+        return consistentHash.getNode(scanRangeLocations);
+    }
+
     public int numBackends() {
         return backends.size();
     }
 
     public List<Backend> getBackends() {
         return backends;
+    }
+
+    private static class BackendHash implements Funnel<Backend> {
+        @Override
+        public void funnel(Backend backend, PrimitiveSink primitiveSink) {
+            primitiveSink.putLong(backend.getId());
+        }
+    }
+
+    private static class ScanRangeHash implements Funnel<TScanRangeLocations> {
+        @Override
+        public void funnel(TScanRangeLocations scanRange, PrimitiveSink primitiveSink) {
+            Preconditions.checkState(scanRange.scan_range.isSetExtScanRange());
+            for (TFileRangeDesc desc : scanRange.scan_range.ext_scan_range.file_scan_range.ranges) {
+                primitiveSink.putBytes(desc.path.getBytes(StandardCharsets.UTF_8));
+                primitiveSink.putLong(desc.start_offset);
+                primitiveSink.putLong(desc.size);
+            }
+        }
     }
 }

@@ -231,38 +231,41 @@ public class ConnectProcessor {
         LOG.debug("execute prepared statement {}", stmtId);
         PrepareStmtContext prepareCtx = ctx.getPreparedStmt(String.valueOf(stmtId));
         if (prepareCtx == null) {
-            LOG.warn("No such statement in context, stmtId:{}", stmtId);
+            LOG.debug("No such statement in context, stmtId:{}", stmtId);
             ctx.getState().setError(ErrorCode.ERR_UNKNOWN_COM_ERROR,
                     "msg: Not supported such prepared statement");
             return;
         }
+        ctx.setStartTime();
+        if (prepareCtx.stmt.getInnerStmt() instanceof QueryStmt) {
+            ctx.getState().setIsQuery(true);
+        }
+        prepareCtx.stmt.setIsPrepared();
         int paramCount = prepareCtx.stmt.getParmCount();
-        LOG.debug("execute prepared statement {}, paramCount {}", stmtId, paramCount);
         // null bitmap
+        byte[] nullbitmapData = new byte[(paramCount + 7) / 8];
+        packetBuf.get(nullbitmapData);
+        String stmtStr = "";
         try {
-            List<LiteralExpr> realValueExprs = new ArrayList<>();
-            if (paramCount > 0) {
-                byte[] nullbitmapData = new byte[(paramCount + 7) / 8];
-                packetBuf.get(nullbitmapData);
-                // new_params_bind_flag
-                if ((int) packetBuf.get() != 0) {
-                    // parse params's types
-                    for (int i = 0; i < paramCount; ++i) {
-                        int typeCode = packetBuf.getChar();
-                        LOG.debug("code {}", typeCode);
-                        prepareCtx.stmt.placeholders().get(i).setTypeCode(typeCode);
-                    }
-                }
-                // parse param data
+            // new_params_bind_flag
+            if ((int) packetBuf.get() != 0) {
+                // parse params's types
                 for (int i = 0; i < paramCount; ++i) {
-                    if (isNull(nullbitmapData, i)) {
-                        realValueExprs.add(new NullLiteral());
-                        continue;
-                    }
-                    LiteralExpr l = prepareCtx.stmt.placeholders().get(i).createLiteralFromType();
-                    l.setupParamFromBinary(packetBuf);
-                    realValueExprs.add(l);
+                    int typeCode = packetBuf.getChar();
+                    LOG.debug("code {}", typeCode);
+                    prepareCtx.stmt.placeholders().get(i).setTypeCode(typeCode);
                 }
+            }
+            List<LiteralExpr> realValueExprs = new ArrayList<>();
+            // parse param data
+            for (int i = 0; i < paramCount; ++i) {
+                if (isNull(nullbitmapData, i)) {
+                    realValueExprs.add(new NullLiteral());
+                    continue;
+                }
+                LiteralExpr l = prepareCtx.stmt.placeholders().get(i).createLiteralFromType();
+                l.setupParamFromBinary(packetBuf);
+                realValueExprs.add(l);
             }
             ExecuteStmt executeStmt = new ExecuteStmt(String.valueOf(stmtId), realValueExprs);
             // TODO set real origin statement
@@ -272,6 +275,7 @@ public class ConnectProcessor {
             executor = new StmtExecutor(ctx, executeStmt);
             ctx.setExecutor(executor);
             executor.execute();
+            stmtStr = executeStmt.toSql();
         } catch (Throwable e)  {
             // Catch all throwable.
             // If reach here, maybe palo bug.
@@ -279,9 +283,11 @@ public class ConnectProcessor {
             ctx.getState().setError(ErrorCode.ERR_UNKNOWN_ERROR,
                     e.getClass().getSimpleName() + ", msg: " + e.getMessage());
         }
+        auditAfterExec(stmtStr, prepareCtx.stmt.getInnerStmt(), null, false);
     }
 
-    private void auditAfterExec(String origStmt, StatementBase parsedStmt, Data.PQueryStatistics statistics) {
+    private void auditAfterExec(String origStmt, StatementBase parsedStmt,
+                    Data.PQueryStatistics statistics, boolean printFuzzyVariables) {
         origStmt = origStmt.replace("\n", " ");
         // slow query
         long endTime = System.currentTimeMillis();
@@ -303,9 +309,9 @@ public class ConnectProcessor {
                 .setStmtId(ctx.getStmtId())
                 .setQueryId(ctx.queryId() == null ? "NaN" : DebugUtil.printId(ctx.queryId()))
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
-                .setFuzzyVariables(ctx.getSessionVariable().printFuzzyVariables())
                 .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
-                            ? ctx.cloudCluster : "UNKNOWN");
+                            ? ctx.cloudCluster : "UNKNOWN")
+                .setFuzzyVariables(!printFuzzyVariables ? "" : ctx.getSessionVariable().printFuzzyVariables());
 
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
@@ -447,7 +453,7 @@ public class ConnectProcessor {
             } catch (Exception e) {
                 // TODO: We should catch all exception here until we support all query syntax.
                 nereidsParseException = e;
-                LOG.info("Nereids parse sql failed. Reason: {}. Statement: \"{}\".",
+                LOG.debug("Nereids parse sql failed. Reason: {}. Statement: \"{}\".",
                         e.getMessage(), originStmt);
             }
         }
@@ -507,7 +513,7 @@ public class ConnectProcessor {
                         finalizeCommand();
                     }
                 }
-                auditAfterExec(auditStmt, executor.getParsedStmt(), executor.getQueryStatisticsForAuditLog());
+                auditAfterExec(auditStmt, executor.getParsedStmt(), executor.getQueryStatisticsForAuditLog(), true);
                 // execute failed, skip remaining stmts
                 if (ctx.getState().getStateType() == MysqlStateType.ERR) {
                     break;
@@ -551,7 +557,7 @@ public class ConnectProcessor {
                 ctx.getState().setErrType(QueryState.ErrType.ANALYSIS_ERR);
             }
         }
-        auditAfterExec(origStmt, parsedStmt, statistics);
+        auditAfterExec(origStmt, parsedStmt, statistics, true);
     }
 
     // analyze the origin stmt and return multi-statements
@@ -632,6 +638,7 @@ public class ConnectProcessor {
             LOG.warn("Unknown command(" + code + ")");
             return;
         }
+        LOG.debug("handle command {}", command);
         ctx.setCommand(command);
         ctx.setStartTime();
 

@@ -1,4 +1,5 @@
 
+
 SELECT COUNT(*) FROM large_records_t3_dk;
 
 SELECT COUNT(*) from large_records_t3_dk WHERE b like '%samerowword%';

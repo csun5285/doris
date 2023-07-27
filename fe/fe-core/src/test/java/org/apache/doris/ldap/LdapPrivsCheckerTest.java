@@ -211,8 +211,8 @@ public class LdapPrivsCheckerTest {
     @Test
     public void testGetLdapAllResourcePrivs() {
         Map<ResourcePattern, PrivBitSet> allResource = LdapPrivsChecker.getLdapAllResourcePrivs(userIdent);
-        ResourcePattern resource1 = new ResourcePattern(RESOURCE1,  ResourceTypeEnum.GENERAL);
-        ResourcePattern resource2 = new ResourcePattern(RESOURCE1,  ResourceTypeEnum.GENERAL);
+        ResourcePattern resource1 = new ResourcePattern(RESOURCE1, ResourceTypeEnum.GENERAL);
+        ResourcePattern resource2 = new ResourcePattern(RESOURCE1, ResourceTypeEnum.GENERAL);
         Assert.assertEquals(PrivBitSet.of(Privilege.USAGE_PRIV).toString(), allResource.get(resource1).toString());
         Assert.assertEquals(PrivBitSet.of(Privilege.USAGE_PRIV).toString(), allResource.get(resource2).toString());
     }

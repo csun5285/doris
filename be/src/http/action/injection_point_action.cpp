@@ -37,7 +37,7 @@ void set_sleep(const std::string& point, HttpRequest* req) {
     if (!duration_str.empty()) {
         try {
             duration = std::stoi(duration_str);
-        } catch (const std::exception& e) {
+        } catch (const std::exception&) {
             HttpChannel::send_reply(req, HttpStatus::BAD_REQUEST,
                                     "invalid duration: " + duration_str);
             return;
@@ -56,7 +56,7 @@ void set_return(const std::string& point, HttpRequest* req) {
         try {
             auto pred = try_any_cast<bool*>(args.back());
             *pred = true;
-        } catch (const std::bad_any_cast& e) {
+        } catch (const std::bad_any_cast&) {
             LOG_FIRST_N(ERROR, 1) << "failed to process `return` callback\n" << get_stack_trace();
         }
     });
@@ -70,7 +70,7 @@ void set_return_ok(const std::string& point, HttpRequest* req) {
             auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
             pair->first = Status::OK();
             pair->second = true;
-        } catch (const std::bad_any_cast& e) {
+        } catch (const std::bad_any_cast&) {
             LOG_FIRST_N(ERROR, 1) << "failed to process `return_ok` callback\n"
                                   << get_stack_trace();
         }
@@ -85,7 +85,7 @@ void set_return_error(const std::string& point, HttpRequest* req) {
             auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
             pair->first = Status::InternalError("injected error");
             pair->second = true;
-        } catch (const std::bad_any_cast& e) {
+        } catch (const std::bad_any_cast&) {
             LOG_FIRST_N(ERROR, 1) << "failed to process `return_error` callback\n"
                                   << get_stack_trace();
         }

@@ -126,8 +126,12 @@ DEFINE_mString(process_full_gc_size, "20%");
 // If false, cancel query when the memory used exceeds exec_mem_limit, same as before.
 DEFINE_mBool(enable_query_memory_overcommit, "true");
 
+DEFINE_mBool(disable_memory_gc, "false");
+
 // The maximum time a thread waits for a full GC. Currently only query will wait for full gc.
 DEFINE_mInt32(thread_wait_gc_max_milliseconds, "1000");
+
+DEFINE_mInt64(pre_serialize_keys_limit_bytes, "16777216");
 
 // the port heartbeat service used
 DEFINE_Int32(heartbeat_service_port, "9050");
@@ -145,6 +149,10 @@ DEFINE_Int32(push_worker_count_high_priority, "3");
 DEFINE_Int32(publish_version_worker_count, "8");
 // the count of tablet thread to publish version
 DEFINE_Int32(tablet_publish_txn_max_thread, "32");
+// the timeout of EnginPublishVersionTask
+DEFINE_Int32(publish_version_task_timeout_s, "8");
+// the count of thread to calc delete bitmap
+DEFINE_Int32(calc_delete_bitmap_max_thread, "32");
 // the count of thread to clear transaction task
 DEFINE_Int32(clear_transaction_task_worker_count, "1");
 // the count of thread to delete
@@ -277,7 +285,7 @@ DEFINE_mInt32(default_num_rows_per_column_file_block, "1024");
 // pending data policy
 DEFINE_mInt32(pending_data_expire_time_sec, "1800");
 // inc_rowset snapshot rs sweep time interval
-DEFINE_mInt32(tablet_rowset_stale_sweep_time_sec, "120");
+DEFINE_mInt32(tablet_rowset_stale_sweep_time_sec, "300");
 // garbage sweep policy
 DEFINE_Int32(max_garbage_sweep_interval, "3600");
 DEFINE_Int32(min_garbage_sweep_interval, "180");
@@ -306,6 +314,8 @@ DEFINE_Bool(disable_storage_row_cache, "true");
 
 // Cache for mow primary key storage page size
 DEFINE_String(pk_storage_page_cache_limit, "10%");
+// data page size for primary key index
+DEFINE_Int32(primary_key_data_page_size, "32768");
 
 DEFINE_Bool(enable_low_cardinality_optimize, "true");
 DEFINE_Bool(enable_low_cardinality_cache_code, "true");
@@ -362,7 +372,7 @@ DEFINE_mDouble(compaction_promotion_ratio, "0.05");
 
 // the smallest size of rowset promotion. When the rowset is less than this config, this
 // rowset will be not given to base compaction. The unit is m byte.
-DEFINE_mInt64(compaction_promotion_min_size_mbytes, "64");
+DEFINE_mInt64(compaction_promotion_min_size_mbytes, "128");
 
 // The lower bound size to do cumulative compaction. When total disk size of candidate rowsets is less than
 // this size, size_based policy may not do to cumulative compaction. The unit is m byte.
@@ -435,7 +445,7 @@ DEFINE_String(ssl_certificate_path, "");
 // Path of private key
 DEFINE_String(ssl_private_key_path, "");
 // Whether to check authorization
-DEFINE_Bool(enable_http_auth, "false");
+DEFINE_Bool(enable_all_http_auth, "false");
 // Number of webserver workers
 DEFINE_Int32(webserver_num_workers, "48");
 // Period to update rate counters and sampling counters in ms.
@@ -601,7 +611,7 @@ DEFINE_mInt32(priority_queue_remaining_tasks_increased_frequency, "512");
 DEFINE_mBool(sync_tablet_meta, "false");
 
 // default thrift rpc timeout ms
-DEFINE_mInt32(thrift_rpc_timeout_ms, "10000");
+DEFINE_mInt32(thrift_rpc_timeout_ms, "20000");
 
 // txn commit rpc timeout
 DEFINE_mInt32(txn_commit_rpc_timeout_ms, "10000");
@@ -678,7 +688,7 @@ DEFINE_mBool(transfer_large_data_by_brpc, "false");
 
 // max number of txns for every txn_partition_map in txn manager
 // this is a self protection to avoid too many txns saving in manager
-DEFINE_mInt64(max_runnings_transactions_per_txn_map, "100");
+DEFINE_mInt64(max_runnings_transactions_per_txn_map, "2000");
 
 // tablet_map_lock shard size, the value is 2^n, n=0,1,2,3,4
 // this is a an enhancement for better performance to manage tablet
@@ -727,7 +737,7 @@ DEFINE_mInt32(zone_map_row_num_threshold, "20");
 //    Info = 4,
 //    Debug = 5,
 //    Trace = 6
-DEFINE_Int32(aws_log_level, "0");
+DEFINE_Int32(aws_log_level, "3");
 
 // the buffer size when read data from remote storage like s3
 DEFINE_mInt32(remote_storage_read_buffer_mb, "16");
@@ -799,6 +809,10 @@ DEFINE_String(kafka_broker_version_fallback, "0.10.0");
 // If you meet the error describe in https://github.com/edenhill/librdkafka/issues/3608
 // Change this size to 0 to fix it temporarily.
 DEFINE_Int32(routine_load_consumer_pool_size, "10");
+
+// Used in single-stream-multi-table load. When receive a batch of messages from kafka,
+// if the size of batch is more than this threshold, we will request plans for all related tables.
+DEFINE_Int32(multi_table_batch_plan_threshold, "200");
 
 // When the timeout of a load task is less than this threshold,
 // Doris treats it as a high priority task.
@@ -1002,13 +1016,31 @@ DEFINE_Bool(inverted_index_compaction_enable, "false");
 // use num_broadcast_buffer blocks as buffer to do broadcast
 DEFINE_Int32(num_broadcast_buffer, "32");
 // semi-structure configs
-DEFINE_Bool(enable_parse_multi_dimession_array, "true");
+DEFINE_Bool(enable_parse_multi_dimession_array, "false");
+
+// Currently, two compaction strategies are implemented, SIZE_BASED and TIME_SERIES.
+// In the case of time series compaction, the execution of compaction is adjusted
+// using parameters that have the prefix time_series_compaction.
+DEFINE_mString(compaction_policy, "size_based");
+DEFINE_Validator(compaction_policy, [](const std::string config) -> bool {
+    return config == "size_based" || config == "time_series";
+});
+// the size of input files for each compaction
+DEFINE_mInt64(time_series_compaction_goal_size_mbytes, "512");
+// the minimum number of input files for each compaction if time_series_compaction_goal_size_mbytes not meets
+DEFINE_mInt64(time_series_compaction_file_count_threshold, "2000");
+// if compaction has not been performed within 3600 seconds, a compaction will be triggered
+DEFINE_mInt64(time_series_compaction_time_threshold_seconds, "3600");
 
 // max depth of expression tree allowed.
 DEFINE_Int32(max_depth_of_expr_tree, "600");
 
 // Report a tablet as bad when io errors occurs more than this value.
 DEFINE_mInt64(max_tablet_io_errors, "-1");
+
+// Report a tablet as bad when its path not found
+DEFINE_Int32(tablet_path_check_interval_seconds, "-1");
+DEFINE_mInt32(tablet_path_check_batch_size, "1000");
 
 // Page size of row column, default 4KB
 DEFINE_mInt64(row_column_page_size, "4096");
@@ -1032,6 +1064,15 @@ DEFINE_Bool(enable_set_in_bitmap_value, "false");
 
 DEFINE_mBool(enable_stack_trace, "true");
 
+DEFINE_Int64(max_hdfs_file_handle_cache_num, "20000");
+DEFINE_Int64(max_external_file_meta_cache_num, "20000");
+
+// max_write_buffer_number for rocksdb
+DEFINE_Int32(rocksdb_max_write_buffer_number, "5");
+
+DEFINE_Bool(allow_invalid_decimalv2_literal, "false");
+DEFINE_mInt64(kerberos_expiration_time_seconds, "43200");
+
 //==============================================================================
 // begin selectdb cloud conf
 //==============================================================================
@@ -1045,7 +1086,6 @@ DEFINE_Bool(enable_file_cache, "false");
 // format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","total_size":21474836480,"query_limit":10737418240}]
 DEFINE_String(file_cache_path, "");
 // format: ["/mnt/disk3/selectdb_cloud/file_cache"]
-DEFINE_String(disposable_file_cache_path, "");
 DEFINE_Bool(clear_file_cache, "false");
 DEFINE_Bool(enable_file_cache_query_limit, "false");
 
@@ -1060,6 +1100,7 @@ DEFINE_Validator(file_cache_min_file_segment_size, [](const int64_t config) -> b
     return config >= 4096 && config <= 268435456 &&
            config <= config::file_cache_max_file_segment_size;
 });
+DEFINE_String(disposable_file_cache_path, "");
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]
@@ -1120,10 +1161,10 @@ DEFINE_Int32(calc_delete_bitmap_worker_count, "8");
 // the count of tablet thread to calc delete bitmap
 DEFINE_Int32(tablet_calc_delete_bitmap_max_thread, "32");
 
-DEFINE_mBool(enable_parallel_cumu_compaction, "false");
-
 // the maximum condition vatiable wait time for buffered reader
 DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");
+
+DEFINE_mBool(enable_parallel_cumu_compaction, "false");
 
 //==============================================================================
 // end selectdb cloud conf
@@ -1139,7 +1180,6 @@ DEFINE_String(test_s3_region, "region");
 DEFINE_String(test_s3_bucket, "bucket");
 DEFINE_String(test_s3_prefix, "prefix");
 #endif
-
 
 std::map<std::string, Register::Field>* Register::_s_field_map = nullptr;
 std::map<std::string, std::function<bool()>>* RegisterConfValidator::_s_field_validator = nullptr;

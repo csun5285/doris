@@ -68,4 +68,3 @@ public class IcebergRestExternalCatalog extends IcebergExternalCatalog {
         return conf;
     }
 }
-

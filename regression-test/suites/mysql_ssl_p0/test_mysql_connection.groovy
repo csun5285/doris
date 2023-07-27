@@ -42,7 +42,7 @@ suite("test_mysql_connection") { suite ->
     String cmdSsl12 = "mysql --ssl-mode=REQUIRED -uroot -h" + mysqlHost + " -P" + mysqlPort + " --tls-version=TLSv1.2 -e \"show variables\"";
     // client verifies server certificate
     String cmdv1 = "mysql --ssl-mode=VERIFY_CA --ssl-ca=" + context.config.sslCertificatePath + "/ca.pem -uroot -h" + mysqlHost + " -P" + mysqlPort + " --tls-version=TLSv1.2 -e \"show variables\"";
-
+    
     // two-way ssl auth (client and server both verify their respective certificates)
     String cmdv2 = "mysql --ssl-mode=VERIFY_CA --ssl-ca=" + context.config.sslCertificatePath + "/ca.pem \
                     --ssl-cert=" + context.config.sslCertificatePath + "/client-cert.pem \

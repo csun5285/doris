@@ -33,20 +33,18 @@ under the License.
 
     <!-- Suppress some rules except nereids -->
     <!-- Java doc -->
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="AtclauseOrder" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="JavadocMethod" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="JavadocParagraph" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="JavadocStyle" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="JavadocTagContinuationIndentation" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="InvalidJavadocPosition" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="MissingJavadocMethod" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="MissingJavadocType" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="NonEmptyAtclauseDescription" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="RequireEmptyLineBeforeBlockTagGroup" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="SummaryJavadoc" />
-    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="SingleLineJavadoc" />
-    <suppress files="com[\\/]selectdb[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="MissingJavadocMethod" />
-    <suppress files="com[\\/]selectdb[\\/](?!nereids)[^\\/]+[\\/]|PaloFe\.java" checks="MissingJavadocType" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="AtclauseOrder" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="JavadocMethod" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="JavadocParagraph" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="JavadocStyle" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="JavadocTagContinuationIndentation" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="InvalidJavadocPosition" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="MissingJavadocMethod" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="MissingJavadocType" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="NonEmptyAtclauseDescription" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="RequireEmptyLineBeforeBlockTagGroup" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="SummaryJavadoc" />
+    <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|com[\\/]selectdb[\\/]cloud[\\/]|DorisFE\.java" checks="SingleLineJavadoc" />
 
     <!-- other -->
     <suppress files="org[\\/]apache[\\/]doris[\\/](?!nereids)[^\\/]+[\\/]|DorisFE\.java" checks="DeclarationOrder" />
