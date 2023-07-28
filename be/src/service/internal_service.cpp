@@ -1615,8 +1615,14 @@ Status PInternalServiceImpl::_multi_get(const PMultiGetRequest& request,
                     segment->new_column_iterator(full_read_schema.column(index), &column_iterator));
             segment_v2::ColumnIteratorOptions opt;
             OlapReaderStatistics stats;
+            io::IOContext io_ctx;
+            io_ctx.file_cache_stats = &stats.file_cache_stats;
+            io_ctx.async_io_stats = &stats.async_io_stats;
+            io_ctx.reader_type = ReaderType::READER_QUERY;
+            io_ctx.file_cache_stats = &stats.file_cache_stats;
             opt.file_reader = segment->file_reader().get();
             opt.stats = &stats;
+            opt.io_ctx = &io_ctx;
             opt.use_page_cache = !config::disable_storage_page_cache;
             column_iterator->init(opt);
             std::vector<segment_v2::rowid_t> single_row_loc {
