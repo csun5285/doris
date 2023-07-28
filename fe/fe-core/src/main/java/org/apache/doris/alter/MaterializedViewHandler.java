@@ -70,6 +70,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.selectdb.cloud.catalog.CloudReplica;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -420,8 +421,13 @@ public class MaterializedViewHandler extends AlterHandler {
                     Preconditions.checkState(baseReplica.getState() == ReplicaState.NORMAL,
                             baseReplica.getState());
                     // replica's init state is ALTER, so that tablet report process will ignore its report
-                    Replica mvReplica = new Replica(mvReplicaId, backendId, ReplicaState.ALTER,
-                            Partition.PARTITION_INIT_VERSION, mvSchemaHash);
+                    Replica mvReplica = Config.isNotCloudMode()
+                            ? new Replica(mvReplicaId, backendId, ReplicaState.ALTER,
+                                    Partition.PARTITION_INIT_VERSION, mvSchemaHash)
+                            : new CloudReplica(mvReplicaId, null, ReplicaState.ALTER,
+                                    Partition.PARTITION_INIT_VERSION, mvSchemaHash,
+                                    dbId, tableId, partitionId, mvIndexId,
+                                    ((CloudReplica) baseReplica).getIdx());
                     newTablet.addReplica(mvReplica);
                     healthyReplicaNum++;
                 } // end for baseReplica
