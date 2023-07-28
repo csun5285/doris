@@ -65,6 +65,7 @@ static constexpr int BRPC_RETRY_TIMES = 3;
 class MetaServiceProxy {
 public:
     static Status get_client(std::shared_ptr<selectdb::MetaService_Stub>* stub) {
+        SYNC_POINT_RETURN_WITH_VALUE("MetaServiceProxy::get_client", Status::OK(), stub);
         return get_pooled_client(stub);
     }
 

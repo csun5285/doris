@@ -201,6 +201,7 @@ TEST(CloudCompactionTest, schedule) {
 
     auto sp = SyncPoint::get_instance();
     Defer defer {[sp] {
+        sp->clear_call_back("MetaServiceProxy::get_client");
         sp->clear_call_back("CloudMetaMgr::prepare_tablet_job");
         sp->clear_call_back("CloudCumulativeCompaction::execute_compact_impl");
         sp->load_dependency({}); // Clear dependency
@@ -208,10 +209,13 @@ TEST(CloudCompactionTest, schedule) {
     sp->enable_processing();
 
     // Create MockMetaService
-    auto meta_mgr = static_cast<cloud::CloudMetaMgr*>(cloud::meta_mgr());
-    auto _mock_service = std::make_unique<MockMetaService>();
-    auto mock_service = _mock_service.get();
-    meta_mgr->_stub = std::move(_mock_service);
+    auto mock_service = std::make_shared<MockMetaService>();
+    sp->set_call_back("MetaServiceProxy::get_client", [&mock_service](auto&& args) {
+        auto stub = try_any_cast<std::shared_ptr<selectdb::MetaService_Stub>*>(args[0]);
+        *stub = mock_service;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
 
     // Prepare tablet
     constexpr int tablet_id = 10011;
@@ -337,16 +341,20 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
 
     auto sp = SyncPoint::get_instance();
     Defer defer {[sp] {
+        sp->clear_call_back("MetaServiceProxy::get_client");
         sp->clear_call_back("CloudMetaMgr::prepare_tablet_job");
         sp->clear_call_back("CloudMetaMgr::commit_tablet_job");
     }};
     sp->enable_processing();
 
     // Create MockMetaService
-    auto meta_mgr = static_cast<cloud::CloudMetaMgr*>(cloud::meta_mgr());
-    auto _mock_service = std::make_unique<MockMetaService>();
-    auto mock_service = _mock_service.get();
-    meta_mgr->_stub = std::move(_mock_service);
+    auto mock_service = std::make_shared<MockMetaService>();
+    sp->set_call_back("MetaServiceProxy::get_client", [&mock_service](auto&& args) {
+        auto stub = try_any_cast<std::shared_ptr<selectdb::MetaService_Stub>*>(args[0]);
+        *stub = mock_service;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
 
     auto prepare_tablet = [&](int64_t tablet_id) {
         auto& tablet_rowsets = mock_service->tablet_rowsets_map[tablet_id];
@@ -532,6 +540,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
 
     auto sp = SyncPoint::get_instance();
     Defer defer {[sp] {
+        sp->clear_call_back("MetaServiceProxy::get_client");
         sp->clear_call_back("CloudMetaMgr::prepare_tablet_job");
         sp->clear_call_back("CloudMetaMgr::commit_tablet_job");
     }};
@@ -546,10 +555,13 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
     });
 
     // Create MockMetaService
-    auto meta_mgr = static_cast<cloud::CloudMetaMgr*>(cloud::meta_mgr());
-    auto _mock_service = std::make_unique<MockMetaService>();
-    auto mock_service = _mock_service.get();
-    meta_mgr->_stub = std::move(_mock_service);
+    auto mock_service = std::make_shared<MockMetaService>();
+    sp->set_call_back("MetaServiceProxy::get_client", [&mock_service](auto&& args) {
+        auto stub = try_any_cast<std::shared_ptr<selectdb::MetaService_Stub>*>(args[0]);
+        *stub = mock_service;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
 
     config::cumulative_compaction_min_deltas = 2;
     config::enable_parallel_cumu_compaction = true;
