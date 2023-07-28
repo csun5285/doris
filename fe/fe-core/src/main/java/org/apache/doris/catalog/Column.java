@@ -593,6 +593,7 @@ public class Column implements Writable, GsonPostProcessable {
                 return stringLength;
             case VARCHAR:
             case HLL:
+            case AGG_STATE:
                 return stringLength + 2; // sizeof(OLAP_VARCHAR_MAX_LENGTH)
             case STRING:
                 return stringLength + 4; // sizeof(OLAP_STRING_MAX_LENGTH)
@@ -608,6 +609,10 @@ public class Column implements Writable, GsonPostProcessable {
                 return 16;
             case DECIMALV2:
                 return 12; // use 12 bytes in olap engine.
+            case STRUCT:
+                return 65535;
+            case MAP:
+                return 65535;
             default:
                 LOG.warn("unknown field type. [type= << {} << ]", type);
                 throw new DdlException("unknown field type. type: " + type);
