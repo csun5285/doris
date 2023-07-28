@@ -118,6 +118,10 @@ public class StatisticsUtil {
 
     public static List<ResultRow> execStatisticQuery(String sql) {
         try (AutoCloseConnectContext r = StatisticsUtil.buildConnectContext()) {
+            if (Config.isCloudMode()) {
+                r.connectContext.setCloudCluster();
+            }
+
             StmtExecutor stmtExecutor = new StmtExecutor(r.connectContext, sql);
             r.connectContext.setExecutor(stmtExecutor);
             return stmtExecutor.executeInternalQuery();
@@ -392,14 +396,30 @@ public class StatisticsUtil {
         } catch (Throwable t) {
             return false;
         }
-        for (OlapTable table : statsTbls) {
-            for (Partition partition : table.getPartitions()) {
-                if (partition.getBaseIndex().getTablets().stream()
-                        .anyMatch(t -> t.getNormalReplicaBackendIds().isEmpty())) {
-                    return false;
+
+        if (Config.isCloudMode()) {
+            try (AutoCloseConnectContext r = buildConnectContext()) {
+                r.connectContext.setCloudCluster();
+                for (OlapTable table : statsTbls) {
+                    for (Partition partition : table.getPartitions()) {
+                        if (partition.getBaseIndex().getTablets().stream()
+                                .anyMatch(t -> t.getNormalReplicaBackendIds().isEmpty())) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        } else {
+            for (OlapTable table : statsTbls) {
+                for (Partition partition : table.getPartitions()) {
+                    if (partition.getBaseIndex().getTablets().stream()
+                            .anyMatch(t -> t.getNormalReplicaBackendIds().isEmpty())) {
+                        return false;
+                    }
                 }
             }
         }
+
         return true;
     }
 
