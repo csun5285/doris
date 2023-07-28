@@ -32,7 +32,11 @@
 export TP_SOURCE_DIR="${TP_DIR:-.}/src"
 
 # thirdparties will be installed to here
-export TP_INSTALL_DIR="${TP_DIR:-.}/installed"
+if [[ -z "${BRANCH}" ]]; then
+    export TP_INSTALL_DIR="${TP_DIR}/installed"
+else
+    export TP_INSTALL_DIR="${TP_DIR}/installed-${BRANCH}"
+fi
 
 # patches for all thirdparties
 export TP_PATCH_DIR="${TP_DIR:-.}/patches"

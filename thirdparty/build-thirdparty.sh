@@ -149,7 +149,7 @@ fi
 # Download thirdparties.
 "${TP_DIR}/download-thirdparty.sh"
 
-export LD_LIBRARY_PATH="${TP_DIR}/installed/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${TP_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
 
 # toolchain specific warning options and settings
 if [[ "${CC}" == *gcc ]]; then
@@ -180,14 +180,14 @@ elif [[ "${CC}" == *clang ]]; then
 fi
 
 # prepare installed prefix
-mkdir -p "${TP_DIR}/installed/lib64"
-pushd "${TP_DIR}/installed"/
+mkdir -p "${TP_INSTALL_DIR}/lib64"
+pushd "${TP_INSTALL_DIR}"/
 ln -sf lib64 lib
 popd
 
 # Configure the search paths for pkg-config and cmake
-export PKG_CONFIG_PATH="${TP_DIR}/installed/lib64/pkgconfig"
-export CMAKE_PREFIX_PATH="${TP_DIR}/installed"
+export PKG_CONFIG_PATH="${TP_INSTALL_DIR}/lib64/pkgconfig"
+export CMAKE_PREFIX_PATH="${TP_INSTALL_DIR}"
 
 echo "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH}"
 echo "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}"
@@ -761,15 +761,15 @@ build_mysql() {
     "${BUILD_SYSTEM}" -j "${PARALLEL}" mysqlclient
 
     # copy headers manually
-    rm -rf ../../../installed/include/mysql/
-    mkdir ../../../installed/include/mysql/ -p
-    cp -R ./include/* ../../../installed/include/mysql/
-    cp -R ../include/* ../../../installed/include/mysql/
-    cp ../libbinlogevents/export/binary_log_types.h ../../../installed/include/mysql/
+    rm -rf ${TP_INCLUDE_DIR}/mysql/
+    mkdir ${TP_INCLUDE_DIR}/mysql/ -p
+    cp -R ./include/* ${TP_INCLUDE_DIR}/mysql/
+    cp -R ../include/* ${TP_INCLUDE_DIR}/mysql/
+    cp ../libbinlogevents/export/binary_log_types.h ${TP_INCLUDE_DIR}/mysql/
     echo "mysql headers are installed."
 
     # copy libmysqlclient.a
-    cp libmysql/libmysqlclient.a ../../../installed/lib/
+    cp libmysql/libmysqlclient.a ${TP_LIB_DIR}
     echo "mysql client lib is installed."
     strip_lib libmysqlclient.a
 }
@@ -844,8 +844,8 @@ build_rocksdb() {
     ${warning_defaulted_function_deleted} ${warning_unused_but_set_variable} -Wno-pessimizing-move -Wno-range-loop-construct" \
         LDFLAGS="${ldflags}" \
         PORTABLE=1 make USE_RTTI=1 -j "${PARALLEL}" static_lib
-    cp librocksdb.a ../../installed/lib/librocksdb.a
-    cp -r include/rocksdb ../../installed/include/
+    cp librocksdb.a ${TP_LIB_DIR}/librocksdb.a
+    cp -r include/rocksdb ${TP_INCLUDE_DIR}/include/
     strip_lib librocksdb.a
 }
 
@@ -930,9 +930,9 @@ build_flatbuffers() {
 
     "${BUILD_SYSTEM}" -j "${PARALLEL}"
 
-    cp flatc ../../../installed/bin/flatc
-    cp -r ../include/flatbuffers ../../../installed/include/flatbuffers
-    cp libflatbuffers.a ../../../installed/lib/libflatbuffers.a
+    cp flatc ${TP_INSTALL_DIR}/bin/flatc
+    cp -r ../include/flatbuffers ${TP_INCLUDE_DIR}/flatbuffers
+    cp libflatbuffers.a ${TP_LIB_DIR}/libflatbuffers.a
 }
 
 # arrow
@@ -1611,9 +1611,6 @@ build_cos_sdk() {
     cmake .. -DTP_INSTALL_DIR=${TP_INSTALL_DIR} -DCMAKE_BUILD_TYPE=Release
     make -j "${PARALLEL}"
     cp ./lib/libcossdk.a "${TP_INSTALL_DIR}/lib64/"
-    rm -rf "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/*.a"
-    find ./hadoop-dist/target/hadoop-3.3.4/lib/native/ -type f ! -name '*.a' -exec cp {} "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/" \;
-    find ./hadoop-dist/target/hadoop-3.3.4/lib/native/ -type l -exec cp -P {} "${TP_INSTALL_DIR}/lib/hadoop_hdfs/native/" \;
 }
 
 if [[ "${#packages[@]}" -eq 0 ]]; then
