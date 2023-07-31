@@ -90,9 +90,6 @@ public:
 
     Status open(const PTabletWriterOpenRequest& request, PTabletWriterOpenResult* response);
 
-    // Open specific partition all writers
-    Status open_all_writers_for_partition(const OpenPartitionRequest& request);
-
     // no-op when this channel has been closed or cancelled
     Status add_batch(const PTabletWriterAddBlockRequest& request,
                      PTabletWriterAddBlockResult* response);
@@ -132,9 +129,6 @@ private:
     template <typename Request>
     Status _get_current_seq(int64_t& cur_seq, const Request& request);
 
-    template <typename TabletWriterAddRequest>
-    Status _open_all_writers_for_partition(const int64_t& tablet_id,
-                                           const TabletWriterAddRequest& request);
     // open all writer
     Status _open_all_writers(const PTabletWriterOpenRequest& request,
                              PTabletWriterOpenResult* response);
@@ -145,7 +139,6 @@ private:
                      google::protobuf::RepeatedPtrField<PTabletInfo>* tablet_vec,
                      google::protobuf::RepeatedPtrField<PTabletError>* tablet_error,
                      PSlaveTabletNodes slave_tablet_nodes, const bool write_single_replica);
-    void _build_partition_tablets_relation(const PTabletWriterOpenRequest& request);
 
     void _add_broken_tablet(int64_t tablet_id);
     bool _is_broken_tablet(int64_t tablet_id);
@@ -182,8 +175,6 @@ private:
     // status to return when operate on an already closed/cancelled channel
     // currently it's OK.
     Status _close_status;
-    std::map<int64, std::vector<int64>> _partition_tablets_map;
-    std::map<int64, int64> _tablet_partition_map;
 
     // tablet_id -> TabletChannel
     std::unordered_map<int64_t, DeltaWriter*> _tablet_writers;
