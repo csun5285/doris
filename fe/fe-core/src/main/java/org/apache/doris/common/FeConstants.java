@@ -93,4 +93,5 @@ public class FeConstants {
     public static final String INTERNAL_DB_NAME = "__internal_schema";
     public static String TEMP_MATERIZLIZE_DVIEW_PREFIX = "internal_tmp_materialized_view_";
     public static final String INTERNAL_FILE_CACHE_HOTSPOT_TABLE_NAME = "selectdb_cache_hotspot";
+    public static boolean disablePreHeat = false;
 }

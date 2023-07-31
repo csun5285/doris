@@ -18,6 +18,7 @@
 package org.apache.doris.statistics;
 
 import org.apache.doris.common.Config;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.ThreadPoolManager;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
@@ -169,7 +170,9 @@ public class StatisticsCache {
     }
 
     public void preHeat() {
-        threadPool.submit(this::doPreHeat);
+        if (!FeConstants.disablePreHeat) {
+            threadPool.submit(this::doPreHeat);
+        }
     }
 
     private void doPreHeat() {
