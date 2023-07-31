@@ -661,8 +661,11 @@ public class Column implements Writable, GsonPostProcessable {
         if (indexes != null) {
             for (Index index : indexes) {
                 if (index.getIndexType() == IndexDef.IndexType.BITMAP) {
-                    builder.setHasBitmapIndex(true);
-                    break;
+                    List<String> columns = index.getColumns();
+                    if (this.name.equalsIgnoreCase(columns.get(0))) {
+                        builder.setHasBitmapIndex(true);
+                        break;
+                    }
                 }
             }
         }
