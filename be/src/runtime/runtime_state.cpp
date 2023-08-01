@@ -34,6 +34,7 @@
 #include "common/object_pool.h"
 #include "common/status.h"
 #include "runtime/exec_env.h"
+#include "runtime/fragment_mgr.h"
 #include "runtime/load_path_mgr.h"
 #include "runtime/memory/mem_tracker_limiter.h"
 #include "runtime/memory/thread_mem_tracker_mgr.h"
@@ -400,6 +401,22 @@ Status RuntimeState::append_error_msg_to_file(std::function<std::string()> line,
     }
     return Status::OK();
 }
+
+const std::string RuntimeState::get_error_log_file_path() const {
+    if (_error_log_file_path.empty()) {
+        return "";
+    }
+#ifdef CLOUD_MODE
+    // expiration must be less than a week (in seconds) for presigned url
+    static const unsigned EXPIRATION_SECONDS = 7 * 24 * 60 * 60 - 1;
+    // We should return a public endpoint to user.
+    return std::dynamic_pointer_cast<io::S3FileSystem>(_error_fs)->generate_presigned_url(
+            _s3_error_log_file_path, EXPIRATION_SECONDS, true);
+#else
+    return to_load_error_http_path(_error_log_file_path);
+#endif
+}
+
 
 int64_t RuntimeState::get_load_mem_limit() {
     // TODO: the code is abandoned, it can be deleted after v1.3

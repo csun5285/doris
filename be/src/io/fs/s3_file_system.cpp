@@ -89,7 +89,7 @@ namespace io {
 #endif
 
 constexpr std::string_view OSS_PRIVATE_ENDPOINT_SUFFIX = "-internal.aliyuncs.com";
-
+constexpr int LEN_OF_OSS_PRIVATE_SUFFIX = 9; // length of "-internal"
 #ifndef CHECK_S3_PATH
 #define CHECK_S3_PATH(uri, path) \
     S3URI uri(path.string());    \
@@ -571,14 +571,13 @@ std::string S3FileSystem::error_msg(const std::string& key, const std::string& e
 // whether to return a public endpoint.
 std::string S3FileSystem::generate_presigned_url(const Path& path, int64_t expiration_secs,
                                                  bool is_public_endpoint) const {
-    std::string key;
-    // FIXME(plat1ko): What if not ok?
-    get_key(path, &key);
+    // FIXME(Xiaoccer): only support relative path
+    std::string key = fmt::format("{}/{}", _s3_conf.prefix, path.native());
     std::shared_ptr<Aws::S3::S3Client> client;
     if (is_public_endpoint && _s3_conf.endpoint.ends_with(OSS_PRIVATE_ENDPOINT_SUFFIX)) {
         S3Conf new_s3_conf = _s3_conf;
         new_s3_conf.endpoint.erase(new_s3_conf.endpoint.size() - OSS_PRIVATE_ENDPOINT_SUFFIX.size(),
-                                   9);
+                                   LEN_OF_OSS_PRIVATE_SUFFIX);
         client = S3ClientFactory::instance().create(new_s3_conf);
     } else {
         client = get_client();

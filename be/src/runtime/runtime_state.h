@@ -226,7 +226,7 @@ public:
 
     int64_t load_job_id() const { return _load_job_id; }
 
-    const std::string get_error_log_file_path() const { return _error_log_file_path; }
+    const std::string get_error_log_file_path() const;
 
     // append error msg and error line to file when loading data.
     // is_summary is true, means we are going to write the summary line
