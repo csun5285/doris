@@ -1620,7 +1620,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     singlePartitionDesc.getTabletType(), olapTable.getCompressionType(),
                     olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                     olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
-                    olapTable.getName(), olapTable.getTTLSeconds());
+                    olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
                 commitCloudPartition(olapTable.getId(), partitionIds);
             }
             // check again
@@ -2406,7 +2406,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionInfo.getReplicaAllocation(partitionId), versionInfo, bfColumns, bfFpp, tabletIdSet,
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
-                        isPersistent, isDynamicSchema, olapTable.getName(), olapTable.getTTLSeconds());
+                        isPersistent, isDynamicSchema, olapTable.getName(), olapTable.getTTLSeconds(),
+                        olapTable.storeRowColumn());
                     commitCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList());
                 }
                 olapTable.addPartition(partition);
@@ -2480,7 +2481,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                                 partitionInfo.getTabletType(entry.getValue()), compressionType,
                                 olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                                 storagePolicy, isPersistent, isDynamicSchema,  olapTable.getName(),
-                                olapTable.getTTLSeconds());
+                                olapTable.getTTLSeconds(), olapTable.storeRowColumn());
                         olapTable.addPartition(partition);
                         continue;
                     }
@@ -2929,7 +2930,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                             copiedTbl.getCompressionType(), copiedTbl.getDataSortInfo(),
                             copiedTbl.getEnableUniqueKeyMergeOnWrite(), olapTable.getStoragePolicy(),
                             copiedTbl.isPersistent(), olapTable.isDynamicSchema(), olapTable.getName(),
-                            olapTable.getTTLSeconds());
+                            olapTable.getTTLSeconds(), olapTable.storeRowColumn());
                     newPartitions.add(newPartition);
                     continue;
                 }
@@ -3284,7 +3285,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                                       boolean isPersistent, boolean isShadow,
                                                                       boolean isDynamicSchema, String tableName,
                                                                       long ttlSeconds,
-                                                                      boolean enableUniqueKeyMergeOnWrite)
+                                                                      boolean enableUniqueKeyMergeOnWrite,
+                                                                      boolean storeRowColumn)
             throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
@@ -3343,6 +3345,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         schemaBuilder.setDeleteSignIdx(deleteSign);
         schemaBuilder.setSequenceColIdx(sequenceCol);
         schemaBuilder.setIsDynamicSchema(isDynamicSchema);
+        schemaBuilder.setStoreRowColumn(storeRowColumn);
 
         if (dataSortInfo.getSortType() == TSortType.LEXICAL) {
             schemaBuilder.setSortType(OlapFile.SortType.LEXICAL);
@@ -3407,7 +3410,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                       TTabletType tabletType, TCompressionType compressionType,
                                                       DataSortInfo dataSortInfo, boolean enableUniqueKeyMergeOnWrite,
                                                       String storagePolicy, boolean isPersistent,
-                                                      boolean isDynamicSchema, String tableName, long ttlSeconds)
+                                                      boolean isDynamicSchema, String tableName, long ttlSeconds,
+                                                      boolean storeRowColumn)
             throws DdlException {
         // create base index first.
         Preconditions.checkArgument(baseIndexId != -1);
@@ -3461,7 +3465,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
                         storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
-                        enableUniqueKeyMergeOnWrite);
+                        enableUniqueKeyMergeOnWrite, storeRowColumn);
                 requestBuilder.addTabletMetas(builder);
             }
 
