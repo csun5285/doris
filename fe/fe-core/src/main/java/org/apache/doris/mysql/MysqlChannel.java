@@ -75,6 +75,8 @@ public class MysqlChannel {
 
     protected volatile MysqlSerializer serializer;
 
+    // mysql useServerPrepStmts
+    private boolean useServerPrepStmts;
     // mysql flag CLIENT_DEPRECATE_EOF
     private boolean clientDeprecatedEOF;
 
@@ -82,8 +84,16 @@ public class MysqlChannel {
         // For DummyMysqlChannel
     }
 
+    public void setUseServerPrepStmts() {
+        useServerPrepStmts = true;
+    }
+
     public void setClientDeprecatedEOF() {
         clientDeprecatedEOF = true;
+    }
+
+    public boolean useServerPrepStmts() {
+        return useServerPrepStmts;
     }
 
     public boolean clientDeprecatedEOF() {

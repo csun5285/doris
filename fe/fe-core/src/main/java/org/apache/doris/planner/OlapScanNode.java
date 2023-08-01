@@ -539,9 +539,9 @@ public class OlapScanNode extends ScanNode {
         super.init(analyzer);
 
         filterDeletedRows(analyzer);
-        // lazy evaluation, since stmt is a prepared statment
+        // point query could do lazy evaluation, since stmt is a prepared statment
         isFromPrepareStmt = analyzer.getPrepareStmt() != null;
-        if (!isFromPrepareStmt) {
+        if (!isFromPrepareStmt || !isPointQuery()) {
             computeColumnFilter();
             computePartitionInfo();
         }
@@ -602,7 +602,7 @@ public class OlapScanNode extends ScanNode {
         }
 
         // prepare stmt evaluate lazily in Coordinator execute
-        if (!isFromPrepareStmt) {
+        if (!isFromPrepareStmt || !isPointQuery()) {
             try {
                 createScanRangeLocations();
             } catch (AnalysisException e) {

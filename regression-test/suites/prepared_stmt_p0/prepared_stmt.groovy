@@ -95,7 +95,7 @@ suite("test_prepared_stmt") {
               )
           """
       
-      def insert_stmt = prepareStatement """ INSERT INTO ${tableName} VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) """
+      def insert_stmt = prepareStatement """ INSERT INTO ${tableName} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) """
       assertEquals(insert_stmt.class, com.mysql.cj.jdbc.ServerPreparedStatement);
       insert_prepared insert_stmt, 1231, 119291.11, "ddd", "laooq", null, "2020-01-01 12:36:38", null, "1022-01-01 11:30:38", "[2022-01-01 11:30:38, 2022-01-01 11:30:38, 2022-01-01 11:30:38]"
       insert_prepared insert_stmt, 1232, 12222.99121135, "xxx", "laooq", "2023-01-02", "2020-01-01 12:36:38", 522.762, "2022-01-01 11:30:38", "[2023-01-01 11:30:38, 2023-01-01 11:30:38]"
@@ -136,27 +136,27 @@ suite("test_prepared_stmt") {
       qe_select2 stmt_read2
       qe_select2 stmt_read2
 
-     //  sql "DROP TABLE IF EXISTS mytable1"
-     //  sql """
-     //    CREATE TABLE mytable1
-     //    (
-     //        siteid INT DEFAULT '10',
-     //        citycode SMALLINT,
-     //        username VARCHAR(32) DEFAULT '',
-     //        pv BIGINT SUM DEFAULT '0'
-     //    )
-     //    AGGREGATE KEY(siteid, citycode, username)
-     //    DISTRIBUTED BY HASH(siteid) BUCKETS 10
-     //    PROPERTIES("replication_num" = "1");
-     //    """
+    //  sql "DROP TABLE IF EXISTS mytable1"
+    //  sql """
+    //    CREATE TABLE mytable1
+    //    (
+    //        siteid INT DEFAULT '10',
+    //        citycode SMALLINT,
+    //        username VARCHAR(32) DEFAULT '',
+    //        pv BIGINT SUM DEFAULT '0'
+    //    )
+    //    AGGREGATE KEY(siteid, citycode, username)
+    //    DISTRIBUTED BY HASH(siteid) BUCKETS 10
+    //    PROPERTIES("replication_num" = "1");
+    //    """
     
-     // sql """insert into mytable1 values(1,1,'user1',10);"""
-     // sql """insert into mytable1 values(1,1,'user1',10);"""
-     // sql """insert into mytable1 values(1,1,'user1',10);"""
-     // stmt_read = prepareStatement "SELECT *, ? FROM (select *, ? from mytable1 where citycode = ?) AS `SpotfireCustomQuery1` WHERE 1 = 1"
-     // stmt_read.setInt(1, 12345)
-     // stmt_read.setInt(2, 1234)
-     // stmt_read.setInt(3, 1)
-     // qe_select3 stmt_read
+    // sql """insert into mytable1 values(1,1,'user1',10);"""
+    // sql """insert into mytable1 values(1,1,'user1',10);"""
+    // sql """insert into mytable1 values(1,1,'user1',10);"""
+    // stmt_read = prepareStatement "SELECT *, ? FROM (select *, ? from mytable1 where citycode = ?) AS `SpotfireCustomQuery1` WHERE 1 = 1"
+    // stmt_read.setInt(1, 12345)
+    // stmt_read.setInt(2, 1234)
+    // stmt_read.setInt(3, 1)
+    // qe_select3 stmt_read
     }
 }

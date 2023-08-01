@@ -324,14 +324,14 @@ public class Coordinator {
             }
         }
         PrepareStmt prepareStmt = analyzer == null ? null : analyzer.getPrepareStmt();
-        if (prepareStmt != null) {
+        if (prepareStmt != null && prepareStmt.getDescTable() != null) {
             // Used cached or better performance
             this.descTable = prepareStmt.getDescTable();
             if (pointExec != null) {
                 pointExec.setCacheID(prepareStmt.getID());
                 pointExec.setSerializedDescTable(prepareStmt.getSerializedDescTable());
                 pointExec.setSerializedOutputExpr(prepareStmt.getSerializedOutputExprs());
-                pointExec.setBinaryProtocol(prepareStmt.isBinaryProtocol());
+                pointExec.setBinaryProtocol(context.getMysqlChannel().useServerPrepStmts());
             }
         } else {
             this.descTable = planner.getDescTable().toThrift();
@@ -414,6 +414,8 @@ public class Coordinator {
         this.queryOptions.setQueryTimeout(context.getExecTimeout());
         this.queryOptions.setExecutionTimeout(context.getExecTimeout());
         this.queryOptions.setEnableScanNodeRunSerial(context.getSessionVariable().isEnableScanRunSerial());
+        this.queryOptions.setMysqlRowBinaryFormat(
+                    context.getMysqlChannel().useServerPrepStmts());
     }
 
     public long getJobId() {

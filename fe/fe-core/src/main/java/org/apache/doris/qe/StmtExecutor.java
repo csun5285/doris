@@ -890,19 +890,22 @@ public class StmtExecutor {
             }
             // parsedStmt may already by set when constructing this StmtExecutor();
             preparedStmtCtx.stmt.asignValues(execStmt.getArgs());
+            context.getMysqlChannel().setUseServerPrepStmts();
             parsedStmt = preparedStmtCtx.stmt.getInnerStmt();
             planner = preparedStmtCtx.planner;
             analyzer = preparedStmtCtx.analyzer;
             prepareStmt = preparedStmtCtx.stmt;
-            Preconditions.checkState(parsedStmt.isAnalyzed());
-            LOG.debug("already prepared stmt: {}", preparedStmtCtx.stmtString);
+            // Preconditions.checkState(parsedStmt.isAnalyzed());
+            LOG.debug("already prepared stmt: {}, {}", preparedStmtCtx.stmtString, parsedStmt.toSql());
             isExecuteStmt = true;
             if (!preparedStmtCtx.stmt.needReAnalyze()) {
                 // Return directly to bypass analyze and plan
                 return;
             }
+            LOG.debug("reanalyze statement: {}", parsedStmt.toSql());
             // continue analyze
             preparedStmtReanalyzed = true;
+            preparedStmtCtx.stmt.reset();
             preparedStmtCtx.stmt.analyze(analyzer);
         }
 
@@ -918,7 +921,8 @@ public class StmtExecutor {
         if (parsedStmt instanceof PrepareStmt || context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
             if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
                 prepareStmt = new PrepareStmt(parsedStmt,
-                        String.valueOf(context.getEnv().getNextStmtId()), true /*binary protocol*/);
+                        String.valueOf(context.getEnv().getNextStmtId()));
+                context.getMysqlChannel().setUseServerPrepStmts();
             } else {
                 prepareStmt = (PrepareStmt) parsedStmt;
             }
@@ -926,6 +930,10 @@ public class StmtExecutor {
             prepareStmt.analyze(analyzer);
             // Need analyze inner statement
             parsedStmt = prepareStmt.getInnerStmt();
+            if (prepareStmt.getPreparedType() == PrepareStmt.PreparedType.STATEMENT) {
+                // Skip analyze, do it lazy
+                return;
+            }
         }
 
         // Convert show statement to select statement here
@@ -1034,7 +1042,8 @@ public class StmtExecutor {
                 throw new AnalysisException("Unexpected exception: " + e.getMessage());
             }
         }
-        if (preparedStmtReanalyzed) {
+        if (preparedStmtReanalyzed
+                && preparedStmtCtx.stmt.getPreparedType() == PrepareStmt.PreparedType.FULL_PREPARED) {
             LOG.debug("update planner and analyzer after prepared statement reanalyzed");
             preparedStmtCtx.planner = planner;
             preparedStmtCtx.analyzer = analyzer;
@@ -1148,11 +1157,6 @@ public class StmtExecutor {
                     prepareStmt.analyze(analyzer);
                 }
 
-                if (prepareStmt != null) {
-                    // Re-analyze prepareStmt with a new analyzer
-                    prepareStmt.reset();
-                    prepareStmt.analyze(analyzer);
-                }
                 // query re-analyze
                 parsedStmt.reset();
                 parsedStmt.analyze(analyzer);
@@ -2042,16 +2046,16 @@ public class StmtExecutor {
 
     private void handlePrepareStmt() throws Exception {
         // register prepareStmt
-        LOG.debug("add prepared statement {}, isBinaryProtocol {}",
-                        prepareStmt.getName(), prepareStmt.isBinaryProtocol());
+        LOG.debug("add prepared statement: {}, statementId : {}, useServerPrepStmts: {}",
+                        prepareStmt.getInnerStmt().toSql(),
+                        prepareStmt.getName(), context.getMysqlChannel().useServerPrepStmts());
         context.addPreparedStmt(prepareStmt.getName(),
                 new PrepareStmtContext(prepareStmt,
                             context, planner, analyzer, prepareStmt.getName()));
-        if (prepareStmt.isBinaryProtocol()) {
+        if (context.getMysqlChannel().useServerPrepStmts()) {
             sendStmtPrepareOK();
         }
     }
-
 
     // Process use statement.
     private void handleUseStmt() throws AnalysisException {

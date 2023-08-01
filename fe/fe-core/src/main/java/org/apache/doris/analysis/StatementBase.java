@@ -103,16 +103,17 @@ public abstract class StatementBase implements ParseNode {
         this.explainOptions = options;
     }
 
-    public boolean isExplain() {
-        return this.explainOptions != null;
-    }
-
     public void setPlaceHolders(ArrayList<PlaceHolderExpr> placeholders) {
+        LOG.debug("setPlaceHolders {}", placeholders);
         this.placeholders = new ArrayList<PlaceHolderExpr>(placeholders);
     }
 
     public ArrayList<PlaceHolderExpr> getPlaceHolders() {
         return this.placeholders;
+    }
+
+    public boolean isExplain() {
+        return this.explainOptions != null;
     }
 
     public boolean isVerbose() {

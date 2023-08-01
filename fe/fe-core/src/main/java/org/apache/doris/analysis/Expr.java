@@ -1468,6 +1468,9 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
         if (this instanceof PlaceHolderExpr && this.type.isInvalid()) {
             return this;
         }
+        if (this instanceof PlaceHolderExpr && this.type.isUnsupported()) {
+            return this;
+        }
         // If the targetType is NULL_TYPE then ignore the cast because NULL_TYPE
         // is compatible with all types and no cast is necessary.
         if (targetType.isNull()) {
