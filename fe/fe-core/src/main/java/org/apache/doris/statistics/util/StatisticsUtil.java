@@ -180,7 +180,13 @@ public class StatisticsUtil {
         connectContext.setQueryId(queryId);
         connectContext.setStartTime();
         connectContext.setCluster(SystemInfoService.DEFAULT_CLUSTER);
-        return new AutoCloseConnectContext(connectContext);
+        if (Config.isCloudMode()) {
+            AutoCloseConnectContext ctx = new AutoCloseConnectContext(connectContext);
+            ctx.connectContext.setCloudCluster();
+            return ctx;
+        } else {
+            return new AutoCloseConnectContext(connectContext);
+        }
     }
 
     public static void analyze(StatementBase statementBase) throws UserException {
