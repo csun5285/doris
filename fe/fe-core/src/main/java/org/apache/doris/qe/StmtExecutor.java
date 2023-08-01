@@ -1049,7 +1049,7 @@ public class StmtExecutor {
             int analyzeTimes = 2;
             if (Config.isCloudMode()) {
                 // be core and be restarted, need retry more times
-                analyzeTimes = Config.cloud_meta_service_rpc_failed_retry_times;
+                analyzeTimes = 30;
             }
             for (int i = 1; i <= analyzeTimes; i++) {
                 MetaLockUtils.readLockTables(tables);
