@@ -265,11 +265,18 @@ fi
 if [[ "${HELP}" -eq 1 ]]; then
     usage
 fi
+
+if [[ -z "${DORIS_BRANCH}" ]]; then
+    export TP_INSTALL_DIR="${DORIS_THIRDPARTY}/installed"
+else
+    export TP_INSTALL_DIR="${DORIS_THIRDPARTY}/installed-${DORIS_BRANCH}"
+fi
+
 # build thirdparty libraries if necessary
-if [[ ! -f "${DORIS_THIRDPARTY}/installed/lib/libbacktrace.a" ]]; then
+if [[ ! -f "${TP_INSTALL_DIR}/lib/libbacktrace.a" ]]; then
     echo "Thirdparty libraries need to be build ..."
     # need remove all installed pkgs because some lib like lz4 will throw error if its lib alreay exists
-    rm -rf "${DORIS_THIRDPARTY}/installed"
+    rm -rf "${TP_INSTALL_DIR}"
 
     if [[ "${CLEAN}" -eq 0 ]]; then
         "${DORIS_THIRDPARTY}/build-thirdparty.sh" -j "${PARALLEL}"
@@ -646,7 +653,7 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     cp -r -p "${DORIS_HOME}/docs/build/help-resource.zip" "${DORIS_OUTPUT}/fe/lib"/
     cp -r -p "${DORIS_HOME}/webroot/static" "${DORIS_OUTPUT}/fe/webroot"/
 
-    cp -r -p "${DORIS_THIRDPARTY}/installed/webroot"/* "${DORIS_OUTPUT}/fe/webroot/static"/
+    cp -r -p "${TP_INSTALL_DIR}/webroot"/* "${DORIS_OUTPUT}/fe/webroot/static"/
     copy_common_files "${DORIS_OUTPUT}/fe/"
     mkdir -p "${DORIS_OUTPUT}/fe/log"
     mkdir -p "${DORIS_OUTPUT}/fe/doris-meta"
@@ -669,8 +676,8 @@ if [[ "${OUTPUT_BE_BINARY}" -eq 1 ]]; then
     cp -r -p "${DORIS_HOME}/be/output/conf"/* "${DORIS_OUTPUT}/be/conf"/
     cp -r -p "${DORIS_HOME}/be/output/dict" "${DORIS_OUTPUT}/be/"
 
-    if [[ -d "${DORIS_THIRDPARTY}/installed/lib/hadoop_hdfs/" ]]; then
-        cp -r -p "${DORIS_THIRDPARTY}/installed/lib/hadoop_hdfs/" "${DORIS_OUTPUT}/be/lib/"
+    if [[ -d "${TP_INSTALL_DIR}/lib/hadoop_hdfs/" ]]; then
+        cp -r -p "${TP_INSTALL_DIR}/lib/hadoop_hdfs/" "${DORIS_OUTPUT}/be/lib/"
     fi
 
     if [[ "${BUILD_BE_JAVA_EXTENSIONS_IN_CONF}" -eq 1 ]]; then
@@ -732,7 +739,7 @@ EOF
         fi
     done
 
-    cp -r -p "${DORIS_THIRDPARTY}/installed/webroot"/* "${DORIS_OUTPUT}/be/www"/
+    cp -r -p "${TP_INSTALL_DIR}/webroot"/* "${DORIS_OUTPUT}/be/www"/
     copy_common_files "${DORIS_OUTPUT}/be/"
     mkdir -p "${DORIS_OUTPUT}/be/log"
     mkdir -p "${DORIS_OUTPUT}/be/storage"

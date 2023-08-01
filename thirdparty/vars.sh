@@ -32,10 +32,10 @@
 export TP_SOURCE_DIR="${TP_DIR:-.}/src"
 
 # thirdparties will be installed to here
-if [[ -z "${BRANCH}" ]]; then
+if [[ -z "${DORIS_BRANCH}" ]]; then
     export TP_INSTALL_DIR="${TP_DIR}/installed"
 else
-    export TP_INSTALL_DIR="${TP_DIR}/installed-${BRANCH}"
+    export TP_INSTALL_DIR="${TP_DIR}/installed-${DORIS_BRANCH}"
 fi
 
 # patches for all thirdparties

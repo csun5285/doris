@@ -30,7 +30,11 @@ DORIS_THIRDPARTY="$(
     source "${DORIS_HOME}/env.sh" &>/dev/null
     echo "${DORIS_THIRDPARTY}"
 )"
-INSTALL_PATH="${DORIS_THIRDPARTY}/installed/bin"
+if [[ -z "${DORIS_BRANCH}" ]]; then
+    export INSTALL_PATH="${DORIS_THIRDPARTY}/installed/bin"
+else
+    export INSTALL_PATH="${DORIS_THIRDPARTY}/installed-${DORIS_BRANCH}/bin"
+fi
 
 SHELLCHECK=''
 SHFMT=''

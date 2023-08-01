@@ -149,7 +149,7 @@ fi
 # Download thirdparties.
 "${TP_DIR}/download-thirdparty.sh"
 
-export LD_LIBRARY_PATH="${TP_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${TP_LIB_DIR}:${LD_LIBRARY_PATH}"
 
 # toolchain specific warning options and settings
 if [[ "${CC}" == *gcc ]]; then
