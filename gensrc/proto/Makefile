@@ -19,7 +19,11 @@
 
 BUILD_DIR = ${CURDIR}/../build/
 
-PROTOC = ${DORIS_THIRDPARTY}/installed/bin/protoc
+ifeq ($(DORIS_BRANCH),)
+	PROTOC = ${DORIS_THIRDPARTY}/installed/bin/protoc
+else
+	PROTOC = ${DORIS_THIRDPARTY}/installed-${DORIS_BRANCH}/bin/protoc
+endif
 
 SOURCES = $(shell find ${CURDIR} -name "*.proto")
 OBJECTS = $(patsubst ${CURDIR}/%.proto, ${BUILD_DIR}/gen_cpp/%.pb.cc, ${SOURCES})
