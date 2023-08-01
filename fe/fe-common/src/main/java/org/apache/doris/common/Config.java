@@ -2062,12 +2062,6 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int meta_service_rpc_retry_times = 200;
 
-    @ConfField(mutable = true)
-    public static boolean meta_service_use_short_connection = false;
-
-    @ConfField(mutable = true)
-    public static boolean fuzzy_meta_service_use_short_connection = false;
-
     // 0 means no limit
     @ConfField(mutable = true)
     public static int cloud_max_copy_job_per_table = 10000;
@@ -2216,12 +2210,12 @@ public class Config extends ConfigBase {
     public static boolean cloud_use_strong_password = true;
 
     @ConfField(mutable = true)
-    public static boolean meta_service_connection_pooled = false;
+    public static boolean meta_service_connection_pooled = true;
 
     // A connection will expire after a random time during [base, 2*base), so that the FE
     // has a chance to connect to a new RS. Set zero to disable it.
     @ConfField(mutable = true)
-    public static int meta_service_connection_age_base_minutes = 0;
+    public static int meta_service_connection_age_base_minutes = 5;
 
     @ConfField(mutable = true)
     public static int meta_service_connection_pool_size = 20;
