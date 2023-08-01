@@ -31,6 +31,7 @@
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
+#include "common/logging.h"
 #include "common/status.h"
 #include "gutil/strings/substitute.h"
 #include "io/fs/s3_file_system.h"
@@ -578,7 +579,10 @@ void StorageEngine::_compaction_tasks_producer_callback() {
             /// thus cannot be collected by the garbage collector. (TabletManager::start_trash_sweep)
             for (const auto& tablet : tablets_compaction) {
                 Status st = submit_compaction_task(tablet, compaction_type);
-                if (!st.ok()) {
+                if (st.ok()) continue;
+                if ((!st.is<BE_NO_SUITABLE_VERSION>() &&
+                     !st.is<CUMULATIVE_NO_SUITABLE_VERSION>()) ||
+                    VLOG_DEBUG_IS_ON) {
                     LOG(WARNING) << "failed to submit compaction task for tablet: "
                                  << tablet->tablet_id() << ", err: " << st;
                 }
@@ -712,13 +716,6 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
         auto compaction = std::make_shared<CloudBaseCompaction>(tablet);
         auto st = compaction->prepare_compact();
         if (!st.ok()) {
-            if (!st.is<BE_NO_SUITABLE_VERSION>()) {
-                LOG(WARNING) << "failed to prepare base compaction, tablet_id="
-                             << tablet->tablet_id() << " err=" << st;
-            } else {
-                VLOG_DEBUG << "failed to prepare base compaction, tablet_id=" << tablet->tablet_id()
-                           << " err=" << st;
-            }
             long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
             tablet->set_last_base_compaction_failure_time(now);
             std::lock_guard lock(_compaction_mtx);
@@ -768,13 +765,8 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
     if (!st.ok()) {
         long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         if (st.is<CUMULATIVE_NO_SUITABLE_VERSION>()) {
-            VLOG_DEBUG << "failed to prepare cumu compaction, tablet_id=" << tablet->tablet_id()
-                       << " err=" << st;
             // Backoff strategy if no suitable version
             tablet->set_last_cumu_no_suitable_version_time(now);
-        } else {
-            LOG(WARNING) << "failed to prepare cumu compaction, tablet_id=" << tablet->tablet_id()
-                         << " err=" << st;
         }
         tablet->set_last_cumu_compaction_failure_time(now);
         std::lock_guard lock(_compaction_mtx);
