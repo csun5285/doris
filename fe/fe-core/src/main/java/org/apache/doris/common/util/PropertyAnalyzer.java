@@ -511,8 +511,13 @@ public class PropertyAnalyzer {
             return true;
         }
         if (Config.isCloudMode()) {
-            throw new AnalysisException(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE
-                    + " must be `true`");
+            if (Config.light_schema_change_force_to_true) {
+                LOG.info("light sc is forced to true in cloud mode, origin value {}", value);
+                return true;
+            } else {
+                throw new AnalysisException(PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE
+                        + " must be `true`");
+            }
         }
         if (value.equalsIgnoreCase("false")) {
             return false;

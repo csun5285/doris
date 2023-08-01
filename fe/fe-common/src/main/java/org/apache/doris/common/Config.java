@@ -2222,7 +2222,12 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_light_index_change = false;
+
+    // only used in regression test
+    @ConfField(mutable = true)
+    public static boolean light_schema_change_force_to_true = false;
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
+    //
 }
