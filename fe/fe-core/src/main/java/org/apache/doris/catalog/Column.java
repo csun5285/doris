@@ -673,6 +673,16 @@ public class Column implements Writable, GsonPostProcessable {
         if (this.type.isArrayType()) {
             Column child = this.getChildren().get(0);
             builder.addChildrenColumns(child.toPb(bfColumns, indexes));
+        } else if (this.type.isMapType()) {
+            Column k = this.getChildren().get(0);
+            builder.addChildrenColumns(k.toPb(bfColumns, indexes));
+            Column v = this.getChildren().get(1);
+            builder.addChildrenColumns(v.toPb(bfColumns, indexes));
+        } else if (this.type.isStructType()) {
+            List<Column> childrenColumns = this.getChildren();
+            for (Column c : childrenColumns) {
+                builder.addChildrenColumns(c.toPb(bfColumns, indexes));
+            }
         }
 
         OlapFile.ColumnPB col = builder.build();
