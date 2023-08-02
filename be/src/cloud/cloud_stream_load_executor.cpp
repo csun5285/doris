@@ -34,6 +34,10 @@ Status CloudStreamLoadExecutor::operate_txn_2pc(StreamLoadContext* ctx) {
 }
 
 Status CloudStreamLoadExecutor::commit_txn(StreamLoadContext* ctx) {
+    if (ctx->load_type == TLoadType::ROUTINE_LOAD) {
+        return StreamLoadExecutor::commit_txn(ctx);
+    }
+
     // forward to fe to excute commit transaction for MoW table
     if (!ctx->commit_infos.empty()) {
         int64_t tablet_id = ctx->commit_infos.at(0).tabletId;

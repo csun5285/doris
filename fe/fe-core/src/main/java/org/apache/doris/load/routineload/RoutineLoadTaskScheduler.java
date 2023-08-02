@@ -302,6 +302,7 @@ public class RoutineLoadTaskScheduler extends MasterDaemon {
                     .add("assigned_be_id", beId)
                     .build());
         }
+
         routineLoadTaskInfo.setBeId(beId);
         return true;
     }

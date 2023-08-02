@@ -350,5 +350,10 @@ under the License.
             <artifactId>sshj</artifactId>
             <version>0.32.0</version>
         </dependency>
+        <dependency>
+            <groupId> org.apache.kafka </groupId>
+              <artifactId> kafka-clients </artifactId>
+            <version> 2.7.0 </version>
+        </dependency>
     </dependencies>
 </project>

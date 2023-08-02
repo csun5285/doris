@@ -191,34 +191,14 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof CancelLoadStmt) {
             env.getLoadManager().cancelLoadJob((CancelLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getRoutineLoadManager().createRoutineLoadJob((CreateRoutineLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof PauseRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getRoutineLoadManager().pauseRoutineLoadJob((PauseRoutineLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof ResumeRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getRoutineLoadManager().resumeRoutineLoadJob((ResumeRoutineLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof StopRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getRoutineLoadManager().stopRoutineLoadJob((StopRoutineLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof AlterRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getRoutineLoadManager().alterRoutineLoadJob((AlterRoutineLoadStmt) ddlStmt);
         } else if (ddlStmt instanceof DeleteStmt) {
             env.getDeleteHandler().process((DeleteStmt) ddlStmt);

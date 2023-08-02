@@ -252,6 +252,8 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
 
     protected boolean isTypeRead = false;
 
+    private String cloudClusterId;
+
     public void setTypeRead(boolean isTypeRead) {
         this.isTypeRead = isTypeRead;
     }
@@ -849,7 +851,26 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
         Database db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
         Table table = db.getTableOrMetaException(tableId, Table.TableType.OLAP);
         table.readLock();
+
+        boolean needCleanCtx = false;
         try {
+            if (Config.isCloudMode()) {
+                String clusterName = Env.getCurrentSystemInfo().getClusterNameByClusterId(cloudClusterId);
+                if (Strings.isNullOrEmpty(clusterName)) {
+                    LOG.warn("cluster name is empty, cluster id is {}", cloudClusterId);
+                    throw new UserException("cluster name is empty, cluster id is {}", cloudClusterId);
+                }
+
+                if (ConnectContext.get() == null) {
+                    ConnectContext ctx = new ConnectContext();
+                    ctx.setThreadLocalInfo();
+                    ctx.setCloudCluster(clusterName);
+                    needCleanCtx = true;
+                } else {
+                    ConnectContext.get().setCloudCluster(clusterName);
+                }
+            }
+
             TExecPlanFragmentParams planParams = planner.plan(loadId);
             // add table indexes to transaction state
             TransactionState txnState = Env.getCurrentGlobalTransactionMgr().getTransactionState(db.getId(), txnId);
@@ -860,6 +881,9 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
 
             return planParams;
         } finally {
+            if (Config.isCloudMode() && needCleanCtx) {
+                ConnectContext.remove();
+            }
             table.readUnlock();
         }
     }
@@ -951,6 +975,7 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
     @Override
     public void afterCommitted(TransactionState txnState, boolean txnOperated) throws UserException {
         long taskBeId = -1L;
+        writeLock();
         try {
             if (txnOperated) {
                 // find task in job
@@ -1347,6 +1372,23 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
         this.origStmt = origStmt;
     }
 
+    public void setCloudCluster(String cloudClusterName) throws UserException {
+        if (Strings.isNullOrEmpty(cloudClusterName)) {
+            LOG.warn("cluster name is empty");
+            throw new UserException("cluster name is empty");
+        }
+
+        this.cloudClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cloudClusterName);
+        if (Strings.isNullOrEmpty(this.cloudClusterId)) {
+            LOG.warn("cluster id is empty, cluster name {}", cloudClusterName);
+            throw new UserException("cluster id is empty, cluster name: " + cloudClusterName);
+        }
+    }
+
+    public String getCloudClusterId() {
+        return cloudClusterId;
+    }
+
     // check the correctness of commit info
     protected abstract boolean checkCommitInfo(RLTaskTxnCommitAttachment rlTaskTxnCommitAttachment,
                                                TransactionState txnState,
@@ -1644,6 +1686,7 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
             out.writeBoolean(true);
             userIdentity.write(out);
         }
+        Text.writeString(out, cloudClusterId);
         Text.writeString(out, comment);
     }
 
@@ -1732,6 +1775,7 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
                 userIdentity = UserIdentity.UNKNOWN;
             }
         }
+        cloudClusterId = Text.readString(in);
         if (Env.getCurrentEnvJournalVersion() >= FeMetaVersion.VERSION_117) {
             comment = Text.readString(in);
         } else {

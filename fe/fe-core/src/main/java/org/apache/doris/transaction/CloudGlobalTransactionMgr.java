@@ -37,6 +37,7 @@ import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
+import org.apache.doris.load.routineload.RLTaskTxnCommitAttachment;
 import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
 import org.apache.doris.persist.BatchRemoveTransactionsOperationV2;
@@ -262,6 +263,10 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 LoadJobFinalOperation loadJobFinalOperation = (LoadJobFinalOperation) txnCommitAttachment;
                 builder.setCommitAttachment(TxnUtil
                         .loadJobFinalOperationToPb(loadJobFinalOperation));
+            } else if (txnCommitAttachment instanceof RLTaskTxnCommitAttachment) {
+                RLTaskTxnCommitAttachment rlTaskTxnCommitAttachment = (RLTaskTxnCommitAttachment) txnCommitAttachment;
+                builder.setCommitAttachment(TxnUtil
+                        .rlTaskTxnCommitAttachmentToPb(rlTaskTxnCommitAttachment));
             } else {
                 throw new UserException("Invalid txnCommitAttachment");
             }

@@ -52,6 +52,7 @@ import org.apache.doris.system.Backend;
 import org.apache.doris.system.BeSelectionPolicy;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -70,6 +71,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
+
 
 public class RoutineLoadManager implements Writable {
     private static final Logger LOG = LogManager.getLogger(RoutineLoadManager.class);
@@ -152,6 +154,12 @@ public class RoutineLoadManager implements Writable {
                 break;
             default:
                 throw new UserException("Unknown data source type: " + type);
+        }
+
+        if (!Strings.isNullOrEmpty(ConnectContext.get().getCloudCluster())) {
+            routineLoadJob.setCloudCluster(ConnectContext.get().getCloudCluster());
+        } else {
+            throw new UserException("cloud cluster is empty, please specify cloud cluster");
         }
 
         routineLoadJob.setOrigStmt(createRoutineLoadStmt.getOrigStmt());
@@ -427,7 +435,25 @@ public class RoutineLoadManager implements Writable {
     // return true if it is available. return false if otherwise.
     // throw exception if unrecoverable errors happen.
     public long getAvailableBeForTask(long jobId, long previousBeId, String clusterName) throws LoadException {
-        List<Long> availableBeIds = getAvailableBackendIds(jobId, clusterName);
+        List<Long> availableBeIds;
+        if (Config.isCloudMode()) {
+            RoutineLoadJob routineLoadJob = getJob(jobId);
+            String cloudClusterId = routineLoadJob.getCloudClusterId();
+            if (Strings.isNullOrEmpty(cloudClusterId)) {
+                LOG.warn("cluster id is empty");
+                throw new LoadException("cluster id is empty");
+            }
+            List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterId(cloudClusterId);
+
+            availableBeIds = new ArrayList<Long>();
+            for (Backend be : clusterBes) {
+                if (be.isAlive()) {
+                    availableBeIds.add(be.getId());
+                }
+            }
+        } else {
+            availableBeIds = getAvailableBackendIds(jobId, clusterName);
+        }
 
         // check if be has idle slot
         readLock();

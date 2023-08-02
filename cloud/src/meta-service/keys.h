@@ -152,6 +152,9 @@ using MetaDeleteBitmapUpdateLockInfo = BasicKeyInfo<23 , std::tuple<std::string,
 //                                                      0:instance_id  1:tablet_id
 using MetaPendingDeleteBitmapInfo = BasicKeyInfo<24 , std::tuple<std::string, int64_t>>;
 
+//                                                      0:instance_id 1:db_id  2:job_id
+using RLJobProgressKeyInfo = BasicKeyInfo<25, std::tuple<std::string, int64_t, int64_t>>;
+
 void instance_key(const InstanceKeyInfo& in, std::string* out);
 
 std::string txn_key_prefix(std::string_view instance_id);
@@ -209,6 +212,8 @@ void job_check_key(const JobRecycleKeyInfo& in, std::string* out);
 static inline std::string job_check_key(const JobRecycleKeyInfo& in) { std::string s; job_check_key(in, &s); return s; }
 void job_tablet_key(const JobTabletKeyInfo& in, std::string* out);
 static inline std::string job_tablet_key(const JobTabletKeyInfo& in) { std::string s; job_tablet_key(in, &s); return s; }
+void rl_job_progress_key_info(const RLJobProgressKeyInfo& in, std::string* out);
+static inline std::string rl_job_progress_key_info(const RLJobProgressKeyInfo& in) { std::string s; rl_job_progress_key_info(in, &s); return s; }
 
 std::string copy_key_prefix(std::string_view instance_id);
 void copy_job_key(const CopyJobKeyInfo& in, std::string* out);

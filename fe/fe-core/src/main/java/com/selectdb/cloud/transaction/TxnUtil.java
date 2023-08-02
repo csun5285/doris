@@ -1,6 +1,8 @@
 package com.selectdb.cloud.transaction;
 
 // import com.selectdb.cloud.proto.SelectdbCloud.LoadJobSourceTypePB;
+import com.selectdb.cloud.proto.SelectdbCloud.RLTaskTxnCommitAttachmentPB;
+import com.selectdb.cloud.proto.SelectdbCloud.RoutineLoadProgressPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnCommitAttachmentPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnCommitAttachmentPB.LoadJobFinalOperationPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnCommitAttachmentPB.LoadJobFinalOperationPB.EtlStatusPB;
@@ -9,11 +11,14 @@ import com.selectdb.cloud.proto.SelectdbCloud.TxnCommitAttachmentPB.LoadJobFinal
 import com.selectdb.cloud.proto.SelectdbCloud.TxnCoordinatorPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnSourceTypePB;
+import com.selectdb.cloud.proto.SelectdbCloud.UniqueIdPB;
 
 import org.apache.doris.load.EtlStatus;
 import org.apache.doris.load.FailMsg;
 import org.apache.doris.load.loadv2.JobState;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
+import org.apache.doris.load.routineload.KafkaProgress;
+import org.apache.doris.load.routineload.RLTaskTxnCommitAttachment;
 import org.apache.doris.thrift.TEtlState;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionState;
@@ -204,6 +209,47 @@ public class TxnUtil {
         return attachementBuilder.build();
     }
 
+    public static TxnCommitAttachmentPB rlTaskTxnCommitAttachmentToPb(RLTaskTxnCommitAttachment
+            rtTaskTxnCommitAttachment) {
+        LOG.info("rtTaskTxnCommitAttachment:{}", rtTaskTxnCommitAttachment);
+        TxnCommitAttachmentPB.Builder attachementBuilder = TxnCommitAttachmentPB.newBuilder();
+        attachementBuilder.setType(TxnCommitAttachmentPB.Type.RT_TASK_TXN_COMMIT_ATTACHMENT);
+
+        RLTaskTxnCommitAttachmentPB.Builder builder =
+                RLTaskTxnCommitAttachmentPB.newBuilder();
+
+        UniqueIdPB.Builder taskIdBuilder = UniqueIdPB.newBuilder();
+        taskIdBuilder.setHi(rtTaskTxnCommitAttachment.getTaskId().getHi());
+        taskIdBuilder.setLo(rtTaskTxnCommitAttachment.getTaskId().getLo());
+
+        RoutineLoadProgressPB.Builder progressBuilder = RoutineLoadProgressPB.newBuilder();
+        progressBuilder.putAllPartitionToOffset(((KafkaProgress) rtTaskTxnCommitAttachment.getProgress())
+                .getOffsetByPartition());
+
+        builder.setJobId(rtTaskTxnCommitAttachment.getJobId())
+                .setTaskId(taskIdBuilder)
+                .setFilteredRows(rtTaskTxnCommitAttachment.getFilteredRows())
+                .setLoadedRows(rtTaskTxnCommitAttachment.getLoadedRows())
+                .setProgress(progressBuilder)
+                .setUnselectedRows(rtTaskTxnCommitAttachment.getUnselectedRows())
+                .setReceivedBytes(rtTaskTxnCommitAttachment.getReceivedBytes())
+                .setTaskExecutionTimeMs(rtTaskTxnCommitAttachment.getTaskExecutionTimeMs());
+
+        if (rtTaskTxnCommitAttachment.getErrorLogUrl() != null) {
+            builder.setErrorLogUrl(rtTaskTxnCommitAttachment.getErrorLogUrl());
+        }
+
+        attachementBuilder.setRlTaskTxnCommitAttachment(builder.build());
+        return attachementBuilder.build();
+    }
+
+    public static RLTaskTxnCommitAttachment rtTaskTxnCommitAttachmentFromPb(
+            TxnCommitAttachmentPB txnCommitAttachmentPB) {
+        RLTaskTxnCommitAttachmentPB rlTaskTxnCommitAttachmentPB = txnCommitAttachmentPB.getRlTaskTxnCommitAttachment();
+        LOG.debug("RLTaskTxnCommitAttachmentPB={}", rlTaskTxnCommitAttachmentPB);
+        return new RLTaskTxnCommitAttachment(txnCommitAttachmentPB.getRlTaskTxnCommitAttachment());
+    }
+
     public static LoadJobFinalOperation loadJobFinalOperationFromPb(TxnCommitAttachmentPB txnCommitAttachmentPB) {
         LoadJobFinalOperationPB loadJobFinalOperationPB = txnCommitAttachmentPB.getLoadJobFinalOperation();
         LOG.debug("loadJobFinalOperationPB={}", loadJobFinalOperationPB);
@@ -259,8 +305,15 @@ public class TxnUtil {
 
         TxnCommitAttachment commitAttachment = null;
         if (txnInfo.hasCommitAttachment()) {
-            commitAttachment =
+            if (txnInfo.getCommitAttachment().getType() == TxnCommitAttachmentPB.Type.LODD_JOB_FINAL_OPERATION) {
+                commitAttachment =
                     TxnUtil.loadJobFinalOperationFromPb(txnInfo.getCommitAttachment());
+            }
+
+            if (txnInfo.getCommitAttachment().getType() == TxnCommitAttachmentPB.Type.RT_TASK_TXN_COMMIT_ATTACHMENT) {
+                commitAttachment =
+                    TxnUtil.rtTaskTxnCommitAttachmentFromPb(txnInfo.getCommitAttachment());
+            }
         }
 
         long prepareTime = txnInfo.hasPrepareTime() ? txnInfo.getPrepareTime() : -1;

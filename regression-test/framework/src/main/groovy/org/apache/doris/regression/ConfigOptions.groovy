@@ -86,6 +86,8 @@ class ConfigOptions {
     static Option stageIamAkOpt
     static Option stageIamSkOpt
     static Option stageIamUserIdOpt
+    static Option clusterDirOpt
+    static Option kafkaBrokerListOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")
@@ -510,6 +512,16 @@ class ConfigOptions {
                 .hasArg(false)
                 .desc("stage iam user id")
                 .build()
+        clusterDirOpt = Option.builder("clusterDir")
+                .required(false)
+                .hasArg(false)
+                .desc("cloud cluster deploy dir")
+                .build()
+        kafkaBrokerListOpt = Option.builder("kafkaBrokerList")
+                .required(false)
+                .hasArg(false)
+                .desc("kafka broker list")
+                .build()
 
         Options options = new Options()
                 .addOption(helpOption)
@@ -567,6 +579,9 @@ class ConfigOptions {
                 .addOption(stageIamAkOpt)
                 .addOption(stageIamSkOpt)
                 .addOption(stageIamUserIdOpt)
+                .addOption(clusterDirOpt)
+                .addOption(kafkaBrokerListOpt)
+
 
         CommandLine cmd = new DefaultParser().parse(options, args, true)
         if (cmd.hasOption(helpOption)) {

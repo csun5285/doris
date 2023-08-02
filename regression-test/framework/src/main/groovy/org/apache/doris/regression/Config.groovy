@@ -120,6 +120,9 @@ class Config {
     public String stageIamSk
     public String stageIamUserId
 
+    public String clusterDir
+    public String kafkaBrokerList
+
     Config() {}
 
     Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
@@ -132,7 +135,8 @@ class Config {
            String pluginPath, String sslCertificatePath, String multiClusterBes, String metaServiceToken, String multiClusterInstance,
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
-           String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId) {
+           String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId,
+           String clusterDir, kafkaBrokerList) {
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -180,6 +184,8 @@ class Config {
         this.stageIamAk = stageIamAk
         this.stageIamSk = stageIamSk
         this.stageIamUserId = stageIamUserId
+        this.clusterDir = clusterDir
+        this.kafkaBrokerList = kafkaBrokerList
     }
 
     static Config fromCommandLine(CommandLine cmd) {
@@ -338,6 +344,8 @@ class Config {
         config.stageIamUserId = cmd.getOptionValue(stageIamUserIdOpt, config.stageIamUserId)
         log.info("stageIamUserId is ${config.stageIamUserId}".toString())
 
+        config.kafkaBrokerList = cmd.getOptionValue(kafkaBrokerListOpt, config.kafkaBrokerList)
+
         config.recycleServiceHttpAddress = cmd.getOptionValue(recycleServiceHttpAddressOpt, config.recycleServiceHttpAddress)
         try {
             Inet4Address host = Inet4Address.getByName(config.recycleServiceHttpAddress.split(":")[0]) as Inet4Address
@@ -432,7 +440,9 @@ class Config {
             configToString(obj.stageIamArn),
             configToString(obj.stageIamAk),
             configToString(obj.stageIamSk),
-            configToString(obj.stageIamUserId)
+            configToString(obj.stageIamUserId),
+            configToString(obj.clusterDir),
+            configToString(obj.kafkaBrokerList)
         )
 
         def declareFileNames = config.getClass()

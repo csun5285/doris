@@ -47,10 +47,12 @@ namespace selectdb {
 [[maybe_unused]] static const char* STATS_KEY_INFIX_TABLET    = "tablet";
 
 [[maybe_unused]] static const char* JOB_KEY_INFIX_TABLET      = "tablet";
+[[maybe_unused]] static const char* JOB_KEY_INFIX_PROGRESS    = "progress";
 
 [[maybe_unused]] static const char* COPY_JOB_KEY_INFIX        = "job";
 [[maybe_unused]] static const char* COPY_FILE_KEY_INFIX       = "loading_file";
 [[maybe_unused]] static const char* STAGE_KEY_INFIX           = "stage";
+
 // clang-format on
 
 // clang-format off
@@ -98,7 +100,7 @@ static void encode_prefix(const T& t, std::string* key) {
         MetaDeleteBitmapInfo, MetaDeleteBitmapUpdateLockInfo, MetaPendingDeleteBitmapInfo, VersionKeyInfo,
         RecycleIndexKeyInfo, RecyclePartKeyInfo, RecycleRowsetKeyInfo, RecycleTxnKeyInfo, RecycleStageKeyInfo,
         StatsTabletKeyInfo,
-        JobTabletKeyInfo, JobRecycleKeyInfo,
+        JobTabletKeyInfo, JobRecycleKeyInfo, RLJobProgressKeyInfo,
         CopyJobKeyInfo, CopyFileKeyInfo>);
 
     key->push_back(CLOUD_USER_KEY_SPACE01);
@@ -130,7 +132,8 @@ static void encode_prefix(const T& t, std::string* key) {
     } else if constexpr (std::is_same_v<T, StatsTabletKeyInfo>) {
         encode_bytes(STATS_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, JobTabletKeyInfo>
-                      || std::is_same_v<T, JobRecycleKeyInfo>) {
+                      || std::is_same_v<T, JobRecycleKeyInfo>
+                      || std::is_same_v<T, RLJobProgressKeyInfo>) {
         encode_bytes(JOB_KEY_PREFIX, key);
     } else if constexpr (std::is_same_v<T, CopyJobKeyInfo>
                       || std::is_same_v<T, CopyFileKeyInfo>) {
@@ -364,6 +367,13 @@ void job_recycle_key(const JobRecycleKeyInfo& in, std::string* out) {
 void job_check_key(const JobRecycleKeyInfo& in, std::string* out) {
     encode_prefix(in, out);     // 0x01 "job" ${instance_id}
     encode_bytes("check", out); // "check"
+}
+
+void rl_job_progress_key_info(const RLJobProgressKeyInfo& in, std::string* out) {
+    encode_prefix(in, out);                  // 0x01 "job" ${instance_id}
+    encode_bytes(JOB_KEY_INFIX_TABLET, out); // "progress"
+    encode_int64(std::get<1>(in), out);      // db_id
+    encode_int64(std::get<2>(in), out);      // job_id
 }
 
 //==============================================================================

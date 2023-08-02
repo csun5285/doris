@@ -113,6 +113,7 @@ es_8_port=39200
 multiClusterBes = "127.0.0.1:9712:9711:be_1_id:9000,127.0.0.1:9732:9731:be_2_id:9000"
 metaServiceToken = "greedisgood9999"
 multiClusterInstance = "test_instance_id"
+kafkaBrokerList = "127.0.0.1:9092"
 cacheDataPath = "/tmp"
 
 //hive  catalog test config for bigdata

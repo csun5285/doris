@@ -324,22 +324,10 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowLoadWarningsStmt) {
             handleShowLoadWarnings();
         } else if (stmt instanceof ShowRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
             handleShowRoutineLoad();
         } else if (stmt instanceof ShowRoutineLoadTaskStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
             handleShowRoutineLoadTask();
         } else if (stmt instanceof ShowCreateRoutineLoadStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
             handleShowCreateRoutineLoad();
         } else if (stmt instanceof ShowCreateLoadStmt) {
             handleShowCreateLoad();

@@ -196,9 +196,26 @@ message TxnCoordinatorPB {
     optional string ip = 2;
 }
 
+message RoutineLoadProgressPB {
+    map<int32, int64> partition_to_offset = 1;
+}
+
+message RLTaskTxnCommitAttachmentPB {
+    optional int64 job_id = 1;
+    optional UniqueIdPB task_id = 2;
+    optional int64 filtered_rows = 3;
+    optional int64 loaded_rows = 4;
+    optional int64 unselected_rows = 5;
+    optional int64 received_bytes = 6;
+    optional int64 task_execution_time_ms = 7;
+    optional RoutineLoadProgressPB progress = 8;
+    optional string error_log_url = 9;
+}
+
 message TxnCommitAttachmentPB {
     enum Type {
         LODD_JOB_FINAL_OPERATION = 0;
+        RT_TASK_TXN_COMMIT_ATTACHMENT = 1;
     }
     message LoadJobFinalOperationPB {
         message EtlStatusPB {
@@ -250,8 +267,11 @@ message TxnCommitAttachmentPB {
         optional string copy_id = 8;
         optional string load_file_paths = 9;
     }
+
+
     optional Type type = 1;
     optional LoadJobFinalOperationPB load_job_final_operation = 2;
+    optional RLTaskTxnCommitAttachmentPB rl_task_txn_commit_attachment = 3;
 }
 
 // For storing label -> txn_ids
@@ -1035,6 +1055,7 @@ enum MetaServiceCode {
     JOB_EXPIRED = 5000;
     JOB_TABLET_BUSY = 5001;
     JOB_ALREADY_SUCCESS = 5002;
+    ROUTINE_LOAD_DATA_INCONSISTENT = 5003;
 
     // Rate limit
     MAX_QPS_LIMIT = 6001;
