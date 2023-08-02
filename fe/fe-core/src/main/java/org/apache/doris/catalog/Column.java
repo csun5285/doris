@@ -48,6 +48,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -631,7 +632,16 @@ public class Column implements Writable, GsonPostProcessable {
         builder.setType(this.getDataType().toThrift().name());
         builder.setIsKey(this.isKey);
         if (null != this.aggregationType) {
-            builder.setAggregation(this.aggregationType.toString());
+            if (type.isAggStateType()) {
+                AggStateType aggState = (AggStateType) type;
+                builder.setAggregation(aggState.getFunctionName());
+                builder.setResultIsNullable(aggState.getResultIsNullable());
+                for (Column column : children) {
+                    builder.addChildrenColumns(column.toPb(new HashSet<>(), new ArrayList<>()));
+                }
+            } else {
+                builder.setAggregation(this.aggregationType.toString());
+            }
         } else {
             builder.setAggregation("NONE");
         }
@@ -672,16 +682,16 @@ public class Column implements Writable, GsonPostProcessable {
 
         if (this.type.isArrayType()) {
             Column child = this.getChildren().get(0);
-            builder.addChildrenColumns(child.toPb(bfColumns, indexes));
+            builder.addChildrenColumns(child.toPb(new HashSet<>(), new ArrayList<>()));
         } else if (this.type.isMapType()) {
             Column k = this.getChildren().get(0);
-            builder.addChildrenColumns(k.toPb(bfColumns, indexes));
+            builder.addChildrenColumns(k.toPb(new HashSet<>(), new ArrayList<>()));
             Column v = this.getChildren().get(1);
-            builder.addChildrenColumns(v.toPb(bfColumns, indexes));
+            builder.addChildrenColumns(v.toPb(new HashSet<>(), new ArrayList<>()));
         } else if (this.type.isStructType()) {
             List<Column> childrenColumns = this.getChildren();
             for (Column c : childrenColumns) {
-                builder.addChildrenColumns(c.toPb(bfColumns, indexes));
+                builder.addChildrenColumns(c.toPb(new HashSet<>(), new ArrayList<>()));
             }
         }
 
