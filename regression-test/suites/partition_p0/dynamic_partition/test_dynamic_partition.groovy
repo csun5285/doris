@@ -88,25 +88,26 @@ suite("test_dynamic_partition") {
     assertEquals(Integer.valueOf(result.get(0).get(8)), 3)
     sql "drop table dy_par_bucket_set_by_distribution"
     sql "drop table if exists dy_par_bad"
-    test {
-        sql """
-        CREATE TABLE IF NOT EXISTS dy_par_bad ( k1 date NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
-        AGGREGATE KEY(k1,k2)
-        PARTITION BY RANGE(k1) ( )
-        DISTRIBUTED BY HASH(k1) BUCKETS 3
-        PROPERTIES (
-            "dynamic_partition.enable"="true",
-            "dynamic_partition.end"="3",
-            "dynamic_partition.buckets"="10",
-            "dynamic_partition.start"="-3",
-            "dynamic_partition.prefix"="p",
-            "dynamic_partition.time_unit"="DAY",
-            "dynamic_partition.create_history_partition"="true",
-            "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
-        """
-        // check exception message contains
-        exception "errCode = 2,"
-    }
+    // not support tag in cloud mode
+    // test {
+    //     sql """
+    //     CREATE TABLE IF NOT EXISTS dy_par_bad ( k1 date NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
+    //     AGGREGATE KEY(k1,k2)
+    //     PARTITION BY RANGE(k1) ( )
+    //     DISTRIBUTED BY HASH(k1) BUCKETS 3
+    //     PROPERTIES (
+    //         "dynamic_partition.enable"="true",
+    //         "dynamic_partition.end"="3",
+    //         "dynamic_partition.buckets"="10",
+    //         "dynamic_partition.start"="-3",
+    //         "dynamic_partition.prefix"="p",
+    //         "dynamic_partition.time_unit"="DAY",
+    //         "dynamic_partition.create_history_partition"="true",
+    //         "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
+    //     """
+    //     // check exception message contains
+    //     exception "errCode = 2,"
+    // }
     sql "drop table if exists dy_par_bad"
     sql """
         CREATE TABLE IF NOT EXISTS dy_par ( k1 datev2 NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
@@ -129,24 +130,25 @@ suite("test_dynamic_partition") {
     sql "drop table dy_par"
     //
     sql "drop table if exists dy_par_bad"
-    test {
-        sql """
-        CREATE TABLE IF NOT EXISTS dy_par_bad ( k1 datev2 NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
-        AGGREGATE KEY(k1,k2)
-        PARTITION BY RANGE(k1) ( )
-        DISTRIBUTED BY HASH(k1) BUCKETS 3
-        PROPERTIES (
-            "dynamic_partition.enable"="true",
-            "dynamic_partition.end"="3",
-            "dynamic_partition.buckets"="10",
-            "dynamic_partition.start"="-3",
-            "dynamic_partition.prefix"="p",
-            "dynamic_partition.time_unit"="DAY",
-            "dynamic_partition.create_history_partition"="true",
-            "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
-        """
-        // check exception message contains
-        exception "errCode = 2,"
-    }
+    // not support tag in cloud mode
+    // test {
+    //     sql """
+    //     CREATE TABLE IF NOT EXISTS dy_par_bad ( k1 datev2 NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
+    //     AGGREGATE KEY(k1,k2)
+    //     PARTITION BY RANGE(k1) ( )
+    //     DISTRIBUTED BY HASH(k1) BUCKETS 3
+    //     PROPERTIES (
+    //         "dynamic_partition.enable"="true",
+    //         "dynamic_partition.end"="3",
+    //         "dynamic_partition.buckets"="10",
+    //         "dynamic_partition.start"="-3",
+    //         "dynamic_partition.prefix"="p",
+    //         "dynamic_partition.time_unit"="DAY",
+    //         "dynamic_partition.create_history_partition"="true",
+    //         "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
+    //     """
+    //     // check exception message contains
+    //     exception "errCode = 2,"
+    // }
     sql "drop table if exists dy_par_bad"
 }
