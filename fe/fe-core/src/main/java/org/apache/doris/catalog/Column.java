@@ -628,7 +628,7 @@ public class Column implements Writable, GsonPostProcessable {
                 ? name.substring(SchemaChangeHandler.SHADOW_NAME_PREFIX.length()) : name);
 
         builder.setUniqueId(uniqueId);
-        builder.setType(this.getDataType().toString());
+        builder.setType(this.getDataType().toThrift().name());
         builder.setIsKey(this.isKey);
         if (null != this.aggregationType) {
             builder.setAggregation(this.aggregationType.toString());
