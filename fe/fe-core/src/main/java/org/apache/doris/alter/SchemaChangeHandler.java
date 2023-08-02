@@ -1902,6 +1902,7 @@ public class SchemaChangeHandler extends AlterHandler {
                 } else if (alterClause instanceof ModifyTablePropertiesClause) {
                     // modify table properties
                     // do nothing, properties are already in propertyMap
+                    lightSchemaChange = false;
                 } else if (alterClause instanceof CreateIndexClause) {
                     CreateIndexClause createIndexClause = (CreateIndexClause) alterClause;
                     IndexDef indexDef = createIndexClause.getIndexDef();
