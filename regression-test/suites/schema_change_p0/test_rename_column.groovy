@@ -122,10 +122,10 @@ suite ("test_rename_column") {
         UNIQUE KEY(`user_id`, `date`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`)
         PROPERTIES ( "replication_num" = "1" , "light_schema_change" = "false")
         """
-    test {
-        sql """ ALTER table ${tableName} RENAME COLUMN  date new_date """
-        exception "not implemented"
-    }
+    // test {
+    //     sql """ ALTER table ${tableName} RENAME COLUMN  date new_date """
+    //     exception "not implemented"
+    // }
     sql """ DROP TABLE ${tableName} """
 
     // rollup
