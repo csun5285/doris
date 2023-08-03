@@ -533,18 +533,15 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     stats->SerializeToString(&stats_val);
     txn->put(stats_key, stats_val);
     merge_tablet_stats(*stats, detached_stats);
-    if (stats->data_size() < 0 || stats->num_rowsets() < 0) [[unlikely]] {
+    if (stats->data_size() < 0 || stats->num_rowsets() < 1) [[unlikely]] {
         INSTANCE_LOG(ERROR) << "buggy data size, tablet_id=" << tablet_id
                             << " stats.data_size=" << stats->data_size()
                             << " compaction.size_output_rowsets="
                             << compaction.size_output_rowsets()
                             << " compaction.size_input_rowsets= "
                             << compaction.size_input_rowsets();
+        DCHECK(false) << "buggy data size";
     }
-    DCHECK(stats->data_size() >= 0 && stats->num_rowsets() > 0)
-            << "stats.data_size=" << stats->data_size()
-            << " compaction.size_output_rowsets=" << compaction.size_output_rowsets()
-            << " compaction.size_input_rowsets=" << compaction.size_input_rowsets();
 
     VLOG_DEBUG << "update tablet stats tablet_id=" << tablet_id << " key=" << hex(stats_key)
                << " stats=" << proto_to_json(*stats);
