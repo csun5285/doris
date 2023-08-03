@@ -3640,17 +3640,22 @@ public class Env {
 
             // keys
             String keySql = olapTable.getKeysType().toSql();
-            sb.append("\n").append(table.getType() == TableType.OLAP
-                    ? keySql
-                    : keySql.substring("DUPLICATE ".length()))
-                    .append("(");
-            List<String> keysColumnNames = Lists.newArrayList();
-            for (Column column : olapTable.getBaseSchema()) {
-                if (column.isKey()) {
-                    keysColumnNames.add("`" + column.getName() + "`");
+            if (olapTable.isDuplicateWithoutKey()) {
+                // after #18621, use can create a DUP_KEYS olap table without key columns
+                // and get a ddl schema without key type and key columns
+            } else {
+                sb.append("\n").append(table.getType() == TableType.OLAP
+                                ? keySql
+                                : keySql.substring("DUPLICATE ".length()))
+                        .append("(");
+                List<String> keysColumnNames = Lists.newArrayList();
+                for (Column column : olapTable.getBaseSchema()) {
+                    if (column.isKey()) {
+                        keysColumnNames.add("`" + column.getName() + "`");
+                    }
                 }
+                sb.append(Joiner.on(", ").join(keysColumnNames)).append(")");
             }
-            sb.append(Joiner.on(", ").join(keysColumnNames)).append(")");
 
             if (specificVersion != -1) {
                 // for copy tablet operation
@@ -3785,10 +3790,22 @@ public class Env {
                 sb.append(olapTable.getSequenceType().toString()).append("\"");
             }
 
+            // disable auto compaction
+            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_DISABLE_AUTO_COMPACTION).append("\" = \"");
+            sb.append(olapTable.disableAutoCompaction()).append("\"");
+
             // unique key table with merge on write
             if (olapTable.getKeysType() == KeysType.UNIQUE_KEYS && olapTable.getEnableUniqueKeyMergeOnWrite()) {
                 sb.append(",\n\"").append(PropertyAnalyzer.ENABLE_UNIQUE_KEY_MERGE_ON_WRITE).append("\" = \"");
                 sb.append(olapTable.getEnableUniqueKeyMergeOnWrite()).append("\"");
+            }
+            
+            // enable duplicate without keys by default
+            if (olapTable.isDuplicateWithoutKey()) {
+                sb.append(",\n\"")
+                        .append(PropertyAnalyzer.PROPERTIES_ENABLE_DUPLICATE_WITHOUT_KEYS_BY_DEFAULT)
+                        .append("\" = \"");
+                sb.append(olapTable.isDuplicateWithoutKey()).append("\"");
             }
 
             sb.append("\n)");
