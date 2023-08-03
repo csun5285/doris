@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <functional>
 
 namespace doris {
 namespace io {
