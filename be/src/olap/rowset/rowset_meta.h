@@ -431,9 +431,9 @@ public:
                        ? (_rowset_meta_pb.enable_segments_file_size()
                                   ? (_rowset_meta_pb.segments_file_size_size() != 0
                                              ? _rowset_meta_pb.segments_file_size(idx)
-                                             : 0)
-                                  : 0)
-                       : 0;
+                                             : -1)
+                                  : -1)
+                       : -1;
     }
 
 private:

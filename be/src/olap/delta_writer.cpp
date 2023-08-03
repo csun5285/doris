@@ -174,6 +174,13 @@ Status DeltaWriter::init(const std::vector<DeltaWriter*>& writers) {
 Status DeltaWriter::init() {
 #ifdef CLOUD_MODE
     RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(_req.tablet_id, &_tablet));
+    // get rowset ids snapshot
+    if (_tablet->enable_unique_key_merge_on_write()) {
+        RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(_tablet.get()));
+        std::lock_guard<std::shared_mutex> lck(_tablet->get_header_lock());
+        _cur_max_version = _tablet->max_version_unlocked().second;
+        _rowset_ids = _tablet->all_rs_id(_cur_max_version);
+    }
 #else
     TabletManager* tablet_mgr = _storage_engine->tablet_manager();
     _tablet = tablet_mgr->get_tablet(_req.tablet_id);
@@ -183,14 +190,6 @@ Status DeltaWriter::init() {
         return Status::Error<TABLE_NOT_FOUND>();
     }
 #endif
-
-    // get rowset ids snapshot
-    if (_tablet->enable_unique_key_merge_on_write()) {
-        RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(_tablet.get()));
-        std::lock_guard<std::shared_mutex> lck(_tablet->get_header_lock());
-        _cur_max_version = _tablet->max_version_unlocked().second;
-        _rowset_ids = _tablet->all_rs_id(_cur_max_version);
-    }
 
 #ifdef CLOUD_MODE
     auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
@@ -519,6 +518,8 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
             RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
                                                                          _delete_bitmap));
         }
+        RETURN_IF_ERROR(_tablet->commit_phase_update_delete_bitmap(
+                _cur_rowset, _rowset_ids, _delete_bitmap, segments, _req.txn_id, nullptr));
         _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
                 _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
     }

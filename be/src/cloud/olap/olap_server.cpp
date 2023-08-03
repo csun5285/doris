@@ -201,10 +201,16 @@ Status StorageEngine::cloud_start_bg_threads() {
             &_compaction_tasks_producer_thread));
     LOG(INFO) << "compaction tasks producer thread started";
 
-    // add tablet calculate delete bitmap thread pool
+    // add calculate tablet delete bitmap task thread pool
     ThreadPoolBuilder("TabletCalDeleteBitmapThreadPool")
-            .set_min_threads(config::tablet_calc_delete_bitmap_max_thread)
-            .set_max_threads(config::tablet_calc_delete_bitmap_max_thread)
+            .set_min_threads(1)
+            .set_max_threads(config::calc_tablet_delete_bitmap_task_max_thread)
+            .build(&_calc_tablet_delete_bitmap_task_thread_pool);
+
+    // add calculate segment delete bitmap thread pool
+    ThreadPoolBuilder("TabletCalDeleteBitmapThreadPool")
+            .set_min_threads(1)
+            .set_max_threads(config::calc_delete_bitmap_max_thread)
             .build(&_calc_delete_bitmap_thread_pool);
 
     LOG(INFO) << "all storage engine's background threads for cloud are started.";

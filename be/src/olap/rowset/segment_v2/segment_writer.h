@@ -133,6 +133,7 @@ public:
     void set_mow_context(std::shared_ptr<MowContext> mow_context);
     Status fill_missing_columns(vectorized::MutableColumns& mutable_full_columns,
                                 const std::vector<bool>& use_default_flag, bool has_default);
+    io::FileWriter* get_file_writer() { return _file_writer; }
 
 private:
     DISALLOW_COPY_AND_ASSIGN(SegmentWriter);

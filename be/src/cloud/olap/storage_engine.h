@@ -230,6 +230,10 @@ public:
         return _calc_delete_bitmap_thread_pool;
     }
 
+    std::unique_ptr<ThreadPool>& calc_tablet_delete_bitmap_task_thread_pool() {
+        return _calc_tablet_delete_bitmap_task_thread_pool;
+    }
+
 private:
     // Instance should be inited from `static open()`
     // MUST NOT be called in other circumstances.
@@ -393,6 +397,8 @@ private:
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;
 
     std::unique_ptr<ThreadPool> _calc_delete_bitmap_thread_pool;
+
+    std::unique_ptr<ThreadPool> _calc_tablet_delete_bitmap_task_thread_pool;
 
     mutable std::mutex _compaction_mtx;
     // tablet_id -> submitted base compaction, guarded by `_compaction_mtx`

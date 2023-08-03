@@ -1153,10 +1153,10 @@ DEFINE_mInt32(meta_service_brpc_timeout_ms, "10000");
 
 // the max sleep time when meeting high pressure load task
 DEFINE_mInt64(max_load_pressure_wait_time_ms, "3000");
-// the count of thread to calc delete bitmap worker
+// the count of thread to calc delete bitmap worker, only used for cloud
 DEFINE_Int32(calc_delete_bitmap_worker_count, "8");
-// the count of tablet thread to calc delete bitmap
-DEFINE_Int32(tablet_calc_delete_bitmap_max_thread, "32");
+// the count of thread to calc tablet delete bitmap task, only used for cloud
+DEFINE_Int32(calc_tablet_delete_bitmap_task_max_thread, "32");
 
 // the maximum condition vatiable wait time for buffered reader
 DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");

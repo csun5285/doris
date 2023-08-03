@@ -524,8 +524,12 @@ Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, i
         DCHECK_EQ(writer->get_segment_id(), segment_id);
         DCHECK_EQ(writer.get(), raw_writer);
     }
+    auto file_writer = writer->get_file_writer();
     RETURN_IF_ERROR(_flush_segment_writer(&writer, flush_size));
     if (ctx != nullptr && ctx->generate_delete_bitmap) {
+        // mow table need to read the segment when memtable flush,
+        // so we do close file_writer here.
+        file_writer->close();
         RETURN_IF_ERROR(ctx->generate_delete_bitmap(segment_id));
     }
     RETURN_IF_ERROR(_segcompaction_if_necessary());
