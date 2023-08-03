@@ -221,13 +221,13 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
         TabletSharedPtr tablet;
         auto download_callback = [&, tablet_id = meta.tablet_id()](Status) {
             std::lock_guard lock(_inflight_mtx);
-            auto it = _inflight_tablets.find(meta.tablet_id());
+            auto it = _inflight_tablets.find(tablet_id);
             if (it == _inflight_tablets.end()) {
-                LOG(WARNING) << "inflight ref cnt not exist, tablet id " << meta.tablet_id();
+                LOG(WARNING) << "inflight ref cnt not exist, tablet id " << tablet_id;
             } else {
                 it->second--;
                 if (it->second < 0) {
-                    LOG(WARNING) << "reference count is less than 0, tablet id " << meta.tablet_id()
+                    LOG(WARNING) << "reference count is less than 0, tablet id " << tablet_id
                                  << " ref cnt " << it->second;
                 }
                 if (it->second <= 0) {
