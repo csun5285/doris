@@ -239,8 +239,7 @@ void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Transacti
     ret = txn->get(key, &val);
     if (ret != 0) {
         code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("failed to get tablet_idx, ret={} tablet_id={} ", ret,
-                          tablet_idx.tablet_id());
+        msg = fmt::format("failed to get tablet_idx, ret={} tablet_id={} ", ret, tablet_id);
         return;
     }
     if (!tablet_idx.ParseFromString(val)) [[unlikely]] {

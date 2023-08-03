@@ -731,7 +731,11 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
 
 Status Tablet::cloud_sync_meta() {
     TabletMetaSharedPtr tablet_meta;
-    RETURN_IF_ERROR(cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta));
+    auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
+    if (st.is<NOT_FOUND>()) {
+        cloud::tablet_mgr()->erase_tablet(tablet_id());
+        return st;
+    }
     if (tablet_meta->tablet_state() != TABLET_RUNNING) { // impossible
         return Status::InternalError("invalid tablet state. tablet_id={}", tablet_id());
     }
@@ -795,7 +799,11 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data
             if (tablet_state() == TABLET_RUNNING) break;
         }
         TabletMetaSharedPtr tablet_meta;
-        RETURN_IF_ERROR(cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta));
+        auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
+        if (st.is<NOT_FOUND>()) {
+            cloud::tablet_mgr()->erase_tablet(tablet_id());
+            return st;
+        }
         if (tablet_meta->tablet_state() != TABLET_RUNNING) [[unlikely]] { // impossible
             return Status::InternalError("invalid tablet state. tablet_id={}", tablet_id());
         }
@@ -809,7 +817,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data
             _tablet_meta->clear_stale_rowset();
             _max_version = -1;
         }
-        auto st = cloud::meta_mgr()->sync_tablet_rowsets(this);
+        st = cloud::meta_mgr()->sync_tablet_rowsets(this);
         if (st.is<NOT_FOUND>()) {
             cloud::tablet_mgr()->erase_tablet(tablet_id());
         }

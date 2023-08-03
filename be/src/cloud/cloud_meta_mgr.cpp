@@ -196,6 +196,9 @@ TRY_AGAIN:
         }
         return Status::RpcError("failed to get tablet meta: {}", cntl.ErrorText());
     }
+    if (resp.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
+        return Status::NotFound("failed to get tablet meta: {}", resp.status().msg());
+    }
     if (resp.status().code() != selectdb::MetaServiceCode::OK) {
         return Status::InternalError("failed to get tablet meta: {}", resp.status().msg());
     }

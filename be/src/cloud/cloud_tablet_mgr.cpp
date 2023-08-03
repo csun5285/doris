@@ -11,6 +11,7 @@
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
+#include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_downloader.h"
 #include "io/fs/s3_file_system.h"
@@ -283,15 +284,16 @@ void CloudTabletMgr::sync_tablets() {
             if (tablet->last_sync_time() > last_sync_time_bound) {
                 continue;
             }
+            ++num_sync;
             auto st = tablet->cloud_sync_meta();
             if (!st) {
                 LOG_WARNING("failed to sync tablet meta {}", tablet->tablet_id()).error(st);
+                if (st.is<ErrorCode::NOT_FOUND>()) continue;
             }
             st = tablet->cloud_sync_rowsets(-1);
             if (!st) {
                 LOG_WARNING("failed to sync tablet rowsets {}", tablet->tablet_id()).error(st);
             }
-            ++num_sync;
         }
     }
     LOG_INFO("finish sync tablets").tag("num_sync", num_sync);

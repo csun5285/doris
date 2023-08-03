@@ -1762,7 +1762,7 @@ public class Config extends ConfigBase {
      * NOTE: The storage policy is still under developement.
      */
     @ConfField(mutable = false, masterOnly = true)
-    public static boolean enable_storage_policy = true;
+    public static boolean enable_storage_policy = false;
 
     /**
      * This config is mainly used in the k8s cluster environment.
