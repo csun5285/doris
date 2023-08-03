@@ -237,7 +237,13 @@ Status CloudBaseCompaction::modify_rowsets(const Merger::Statistics* merger_stat
     }
 
     selectdb::FinishTabletJobResponse resp;
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_tablet_job(job, &resp));
+    auto st = cloud::meta_mgr()->commit_tablet_job(job, &resp);
+    if (!st.ok()) {
+        if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
+            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+        }
+        return st;
+    }
     auto& stats = resp.stats();
     LOG(INFO) << "tablet stats=" << stats.ShortDebugString();
 

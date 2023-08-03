@@ -75,6 +75,9 @@ extern void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Tr
                            const std::string& instance_id, int64_t tablet_id,
                            TabletIndexPB& tablet_idx);
 
+extern bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t index_id,
+                              int64_t partition_id);
+
 void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss, int& ret,
                           std::unique_ptr<Transaction>& txn, const StartTabletJobRequest* request,
                           StartTabletJobResponse* response, std::string& instance_id,
@@ -356,6 +359,13 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
         !tablet_idx.has_partition_id()) {
         get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
         if (code != MetaServiceCode::OK) return;
+    }
+    // Check if tablet has been dropped
+    if (is_dropped_tablet(txn.get(), instance_id, tablet_idx.index_id(),
+                          tablet_idx.partition_id())) {
+        code = MetaServiceCode::TABLET_NOT_FOUND;
+        msg = fmt::format("tablet {} has been dropped", tablet_id);
+        return;
     }
 
     ObjectPool obj_pool; // To save KVs that txn may use asynchronously
@@ -1135,6 +1145,13 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
         !tablet_idx.has_partition_id()) {
         get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
         if (code != MetaServiceCode::OK) return;
+    }
+    // Check if tablet has been dropped
+    if (is_dropped_tablet(txn.get(), instance_id, tablet_idx.index_id(),
+                          tablet_idx.partition_id())) {
+        code = MetaServiceCode::TABLET_NOT_FOUND;
+        msg = fmt::format("tablet {} has been dropped", tablet_id);
+        return;
     }
 
     // TODO(gaivn): remove duplicated code with start_tablet_job()

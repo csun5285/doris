@@ -222,7 +222,13 @@ Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merge
     }
 
     selectdb::FinishTabletJobResponse resp;
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_tablet_job(job, &resp));
+    auto st = cloud::meta_mgr()->commit_tablet_job(job, &resp);
+    if (!st.ok()) {
+        if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
+            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+        }
+        return st;
+    }
     auto& stats = resp.stats();
     LOG(INFO) << "tablet stats=" << stats.ShortDebugString();
     {
@@ -368,6 +374,9 @@ void CloudCumulativeCompaction::update_cumulative_point() {
     selectdb::FinishTabletJobResponse finish_resp;
     st = cloud::meta_mgr()->commit_tablet_job(job, &finish_resp);
     if (!st.ok()) {
+        if (finish_resp.status().code() == selectdb::TABLET_NOT_FOUND) {
+            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+        }
         LOG_WARNING("failed to update cumulative point to meta srv")
                 .tag("job_id", _uuid)
                 .tag("tablet_id", _tablet->tablet_id())

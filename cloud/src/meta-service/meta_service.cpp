@@ -143,6 +143,18 @@ std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
     return instance_id;
 }
 
+// Return `true` if tablet has been dropped
+bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t index_id,
+                       int64_t partition_id) {
+    auto key = recycle_index_key({instance_id, index_id});
+    std::string val;
+    int ret = txn->get(key, &val);
+    if (ret == 0) return true; // Ignore kv error
+    key = recycle_partition_key({instance_id, partition_id});
+    ret = txn->get(key, &val);
+    return ret == 0; // Ignore kv error
+}
+
 template <class Request>
 void begin_rpc(std::string_view func_name, brpc::Controller* ctrl, const Request* req) {
     if constexpr (std::is_same_v<Request, CreateRowsetRequest>) {
@@ -2784,6 +2796,11 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
     if (!idx.has_table_id() || !idx.has_index_id() || !idx.has_partition_id()) {
         get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, idx);
         if (code != MetaServiceCode::OK) return;
+    }
+    if (is_dropped_tablet(txn.get(), instance_id, idx.index_id(), idx.partition_id())) {
+        code = MetaServiceCode::TABLET_NOT_FOUND;
+        msg = fmt::format("tablet {} has been dropped", tablet_id);
+        return;
     }
 
     TabletStatsPB tablet_stat;
