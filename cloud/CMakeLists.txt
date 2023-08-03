@@ -529,6 +529,7 @@ else()
 endif()
 
 if (NOT EXISTS "${THIRDPARTY_SRC}/${FDB_LIB}")
+    file(MAKE_DIRECTORY ${THIRDPARTY_SRC})
     execute_process(COMMAND "curl" "${FDB_LIB_URL}"
                             "-o" "${THIRDPARTY_SRC}/${FDB_LIB}" "-k"
                     RESULTS_VARIABLE DOWNLOAD_RET)
