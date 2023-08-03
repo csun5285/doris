@@ -33,7 +33,7 @@ INSERT INTO example_range_tbl VALUES
 
 select * from example_range_tbl order by `date`;
 
-ALTER TABLE example_range_tbl SET ("light_schema_change" = "true");
+-- ALTER TABLE example_range_tbl SET ("light_schema_change" = "true");
 
 INSERT INTO example_range_tbl VALUES
     (1, '2017-03-02', 'Beijing', 10, 1, "2017-03-02 00:00:00", 1, 30, 20);

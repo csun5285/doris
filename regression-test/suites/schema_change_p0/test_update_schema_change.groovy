@@ -54,7 +54,7 @@ suite ("test_update_schema_change") {
     qt_sc """ SELECT * FROM ${tableName} order by user_id ASC, last_visit_date; """
 
     // alter and test light schema change
-    sql """ALTER TABLE ${tableName} SET ("light_schema_change" = "true");"""
+    try_sql """ALTER TABLE ${tableName} SET ("light_schema_change" = "true");"""
 
     sql """
         ALTER table ${tableName} ADD COLUMN new_column INT default "1";

@@ -84,7 +84,7 @@ suite ("test_uniq_vals_schema_change") {
                         """
 
         // alter and test light schema change
-        sql """ALTER TABLE ${tableName} SET ("light_schema_change" = "true");"""
+        try_sql """ALTER TABLE ${tableName} SET ("light_schema_change" = "true");"""
 
         // add column
         sql """

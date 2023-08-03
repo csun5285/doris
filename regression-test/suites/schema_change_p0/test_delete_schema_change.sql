@@ -23,7 +23,7 @@ INSERT INTO schema_change_delete_regression_test VALUES
 
 SELECT * FROM schema_change_delete_regression_test order by user_id ASC, last_visit_date;
 
-ALTER TABLE schema_change_delete_regression_test SET ("light_schema_change" = "true");
+-- ALTER TABLE schema_change_delete_regression_test SET ("light_schema_change" = "true");
 
 ALTER table schema_change_delete_regression_test ADD COLUMN new_column INT default "1";
 

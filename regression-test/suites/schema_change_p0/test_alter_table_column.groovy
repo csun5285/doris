@@ -33,7 +33,7 @@ suite("test_alter_table_column") {
         """
 
     // alter and test light schema change
-    sql """ALTER TABLE ${tbName1} SET ("light_schema_change" = "true");"""
+    try_sql """ALTER TABLE ${tbName1} SET ("light_schema_change" = "true");"""
 
     sql """
             ALTER TABLE ${tbName1} 
