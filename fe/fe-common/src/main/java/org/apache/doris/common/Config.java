@@ -2226,6 +2226,11 @@ public class Config extends ConfigBase {
     // only used in regression test
     @ConfField(mutable = true)
     public static boolean light_schema_change_force_to_true = false;
+
+    @ConfField(mutable = true, masterOnly = true)
+    // Add a flag to force disable two phase read
+    // TODO enable this if cloud is ready
+    public static boolean enable_two_phase_read_opt = false;
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

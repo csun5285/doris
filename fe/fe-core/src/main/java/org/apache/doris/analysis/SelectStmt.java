@@ -35,6 +35,7 @@ import org.apache.doris.catalog.View;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.ColumnAliasGenerator;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.Pair;
@@ -713,7 +714,7 @@ public class SelectStmt extends QueryStmt {
     // 3. final matrialize all data
     public boolean checkEnableTwoPhaseRead(Analyzer analyzer) {
         // only vectorized mode and session opt variable enabled
-        if (ConnectContext.get() == null
+        if (!Config.enable_two_phase_read_opt || ConnectContext.get() == null
                 || ConnectContext.get().getSessionVariable() == null
                 || !ConnectContext.get().getSessionVariable().enableTwoPhaseReadOpt) {
             return false;

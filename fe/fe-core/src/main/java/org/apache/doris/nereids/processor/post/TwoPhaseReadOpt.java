@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.processor.post;
 
+import org.apache.doris.common.Config;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.properties.OrderKey;
 import org.apache.doris.nereids.trees.expressions.Alias;
@@ -152,6 +153,9 @@ public class TwoPhaseReadOpt extends PlanPostProcessor {
     }
 
     private long getTopNOptLimitThreshold() {
+        if (!Config.enable_two_phase_read_opt) {
+            return -1;
+        }
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
             if (!ConnectContext.get().getSessionVariable().enableTwoPhaseReadOpt) {
                 return -1;
