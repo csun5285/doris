@@ -1143,11 +1143,6 @@ public class InternalCatalog implements CatalogIf<Database> {
      * 11. add this table to ColocateGroup if necessary
      */
     public void createTable(CreateTableStmt stmt) throws UserException {
-        if (Config.isCloudMode()) {
-            createCloudTable(stmt);
-            return;
-        }
-
         String engineName = stmt.getEngineName();
         String dbName = stmt.getDbName();
         String tableName = stmt.getTableName();
@@ -1161,7 +1156,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
 
         // only internal table should check quota and cluster capacity
-        if (!stmt.isExternal()) {
+        if (!Config.isCloudMode() && !stmt.isExternal()) {
             // check cluster capacity
             Env.getCurrentSystemInfo().checkAvailableCapacity();
             // check db quota
