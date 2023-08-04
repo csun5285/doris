@@ -177,16 +177,23 @@ Status NewOlapScanner::init() {
         }
 
 #ifdef CLOUD_MODE
-        {
+        // FIXME(plat1ko): Holy shit! Do `_init_tablet_reader_params` realy need hold tablet rlock?
+        //  And why not pass `tablet` in NewOlapScanner ctor?
+        if (_tablet_reader_params.rs_readers.empty()) {
+            RETURN_IF_ERROR(_tablet->cloud_sync_rowsets(_version, true));
             std::shared_lock rdlock(_tablet->get_header_lock());
-            if (_tablet_reader_params.rs_readers.empty()) {
-                RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers({0, _version},
-                                                                  &_tablet_reader_params.rs_readers));
-            }
+            RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers({0, _version},
+                                                              &_tablet_reader_params.rs_readers));
             // Initialize tablet_reader_params
             RETURN_IF_ERROR(_init_tablet_reader_params(_key_ranges, parent->_olap_filters,
                                                        parent->_filter_predicates,
                                                        parent->_push_down_functions));
+        } else {
+            std::shared_lock rdlock(_tablet->get_header_lock());
+            // Initialize tablet_reader_params
+            RETURN_IF_ERROR(_init_tablet_reader_params(_key_ranges, parent->_olap_filters,
+                                                       parent->_filter_predicates,
+                                                       parent->_push_down_functions)); 
         }
 #else
         {
