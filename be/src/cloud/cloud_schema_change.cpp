@@ -113,6 +113,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     sc_params.ref_rowset_readers = rs_readers;
     sc_params.delete_handler = &delete_handler;
     sc_params.base_tablet_schema = base_tablet_schema;
+    sc_params.be_exec_version = request.be_exec_version;
     DCHECK(request.__isset.alter_tablet_type);
     switch (request.alter_tablet_type) {
     case TAlterTabletType::SCHEMA_CHANGE:
