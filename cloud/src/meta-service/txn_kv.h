@@ -329,8 +329,7 @@ private:
 class Transaction : public selectdb::Transaction {
 public:
     friend class Database;
-    Transaction(std::shared_ptr<Database> db, FDBTransactionOption opt)
-            : db_(std::move(db)), opt_(opt) {}
+    Transaction(std::shared_ptr<Database> db) : db_(std::move(db)) {}
 
     ~Transaction() override {
         if (txn_) fdb_transaction_destroy(txn_);
@@ -413,7 +412,6 @@ private:
     bool commited_ = false;
     bool aborted_ = false;
     FDBTransaction* txn_ = nullptr;
-    FDBTransactionOption opt_;
     std::vector<std::unique_ptr<std::string>> kv_pool_;
 };
 
