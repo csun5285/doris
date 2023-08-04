@@ -131,8 +131,8 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     // In normal circumstances, 4 threads are required to concurrently execute a buffered reader,
     // and up to 32 buffered reader requirements can be handled with 128 threads
     ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
-            .set_min_threads(16)
-            .set_max_threads(64)
+            .set_min_threads(1024)
+            .set_max_threads(1024)
             .build(&_buffered_reader_prefetch_thread_pool);
 
     // min num equal to fragment pool's min num

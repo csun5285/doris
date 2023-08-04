@@ -126,13 +126,13 @@ void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     // We don't need high accuracy here, so we use time(nullptr)
     // since it's the fastest way to get current time(second)
     auto current_time_second = time(nullptr);
-    current_time.tv_sec = current_time_second;
+    current_time.tv_sec = current_time_second + 300;
     current_time.tv_nsec = 0;
     // bthread::countdown_event::timed_wait() should use absolute time
-    do {
+    while (0 != _countdown_event.timed_wait(current_time)) {
         current_time.tv_sec += 300;
         LOG(WARNING) << msg;
-    } while (0 != _countdown_event.timed_wait(current_time));
+    }
 }
 
 Status S3FileWriter::_open() {
@@ -197,7 +197,10 @@ Status S3FileWriter::close() {
         if (_upload_id.empty()) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
             DCHECK(buf != nullptr);
-            buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
+            buf->set_upload_to_remote([this](UploadFileBuffer& b) {
+                LOG(INFO) << "use put object operation for key " << _key << " bucket " << _bucket;
+                _put_object(b);
+            });
         }
         _countdown_event.add_count();
         _pending_buf->submit();
@@ -327,6 +330,7 @@ FileBlocksHolderPtr S3FileWriter::_allocate_file_segments(size_t offset) {
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed);
+    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);
     Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
@@ -388,7 +392,10 @@ Status S3FileWriter::finalize() {
         if (1 == _cur_part_num) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
             DCHECK(buf != nullptr);
-            buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
+            buf->set_upload_to_remote([this](UploadFileBuffer& b) {
+                LOG(INFO) << "use put object operation for key " << _key << " bucket " << _bucket;
+                _put_object(b);
+            });
         }
         _countdown_event.add_count();
         _pending_buf->submit();
