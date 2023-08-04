@@ -35,7 +35,6 @@ CONF_Bool(use_mem_kv, "false");
 CONF_Int32(meta_server_register_interval_ms, "20000");
 CONF_Int32(meta_server_lease_ms, "60000");
 
-CONF_Int64(fdb_txn_timeout_ms, "10000");
 CONF_Int64(brpc_max_body_size, "3147483648");
 CONF_Int64(brpc_socket_max_unwritten_bytes, "1073741824");
 
