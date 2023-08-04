@@ -131,6 +131,7 @@ void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     // bthread::countdown_event::timed_wait() should use absolute time
     do {
         current_time.tv_sec += 300;
+        LOG(WARNING) << msg;
     } while (0 != _countdown_event.timed_wait(current_time));
 }
 
@@ -306,7 +307,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_ptr<CompletedPart> completed_part = std::make_unique<CompletedPart>();
 
     completed_part->SetPartNumber(part_num);
-    auto etag = upload_part_outcome.GetResult().GetETag();
+    const auto& etag = upload_part_outcome.GetResult().GetETag();
     // DCHECK(etag.empty());
     completed_part->SetETag(etag);
 
@@ -328,6 +329,8 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed);
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);
+    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
+    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
     request.SetBody(buf.get_stream());
     request.SetContentLength(buf.get_size());
     auto response = _client->PutObject(request);
