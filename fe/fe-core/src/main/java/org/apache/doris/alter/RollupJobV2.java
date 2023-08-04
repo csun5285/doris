@@ -376,7 +376,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 Env.getCurrentInternalCatalog().createCloudTabletMetaBuilder(tableId, rollupIndexId,
                                 partitionId, rollupTablet, tabletType, rollupSchemaHash,
                                 rollupKeysType, rollupShortKeyColumnCount, tbl.getCopiedBfColumns(),
-                                tbl.getBfFpp(), tbl.getCopiedIndexes(), rollupSchema,
+                                tbl.getBfFpp(), null, rollupSchema,
                                 tbl.getDataSortInfo(), tbl.getCompressionType(), tbl.getStoragePolicy(),
                                 tbl.isInMemory(), tbl.isPersistent(), true, tbl.isDynamicSchema(),
                                 tbl.getName(), tbl.getTTLSeconds(),
