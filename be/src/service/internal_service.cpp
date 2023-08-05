@@ -1599,7 +1599,7 @@ Status PInternalServiceImpl::_multi_get(const PMultiGetRequest& request,
             io_ctx.file_cache_stats = &stats.file_cache_stats;
             opt.file_reader = segment->file_reader().get();
             opt.stats = &stats;
-            opt.io_ctx = io_ctx;
+            opt.io_ctx = &io_ctx;
             opt.use_page_cache = !config::disable_storage_page_cache;
             column_iterator->init(opt);
             std::vector<segment_v2::rowid_t> single_row_loc {

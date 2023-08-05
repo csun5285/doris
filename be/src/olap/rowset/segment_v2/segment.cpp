@@ -269,7 +269,7 @@ Status Segment::load_index() {
             io::IOContext io_ctx;
             io_ctx.read_segment_index = true;
             io_ctx.disable_file_cache = _disable_file_cache;
-            opts.io_ctx = io_ctx;
+            opts.io_ctx = &io_ctx;
             Slice body;
             PageFooterPB footer;
             RETURN_IF_ERROR(

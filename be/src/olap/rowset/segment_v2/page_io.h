@@ -73,7 +73,7 @@ struct PageReadOptions {
     // index_page should not be pre-decoded
     bool pre_decode = true;
 
-    io::IOContext io_ctx;
+    io::IOContext* io_ctx = nullptr; // Ref
 
     void sanity_check() const {
         CHECK_NOTNULL(file_reader);
