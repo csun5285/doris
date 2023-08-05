@@ -124,7 +124,7 @@ Status IndexedColumnReader::read_page(const PagePointer& pp, PageHandle* handle,
     opts.pre_decode = pre_decode;
     io::IOContext io_ctx;
     io_ctx.read_segment_index = true;
-    opts.io_ctx = &io_ctx;
+    opts.io_ctx = io_ctx;
 
     auto st = PageIO::read_and_decompress_page(opts, handle, body, footer);
     g_index_reader_compressed_bytes << pp.size;

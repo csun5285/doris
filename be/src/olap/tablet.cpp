@@ -2972,6 +2972,7 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;
+    opt.io_ctx.reader_type = ReaderType::READER_QUERY;
     column_iterator->init(opt);
     // get and parse tuple row
     vectorized::MutableColumnPtr column_ptr = vectorized::ColumnString::create();
@@ -3028,6 +3029,7 @@ Status Tablet::fetch_value_by_rowids(RowsetSharedPtr input_rowset, uint32_t segi
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;
+    opt.io_ctx.reader_type = ReaderType::READER_QUERY;
     column_iterator->init(opt);
     RETURN_IF_ERROR(column_iterator->read_by_rowids(rowids.data(), rowids.size(), dst));
     return Status::OK();
@@ -3072,14 +3074,12 @@ Status Tablet::lookup_row_data(const Slice& encoded_key, const RowLocation& row_
     RETURN_IF_ERROR(segment->new_column_iterator(tablet_schema->column(BeConsts::ROW_STORE_COL),
                                                  &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
-    io::IOContext io_ctx;
-    io_ctx.file_cache_stats = &stats.file_cache_stats;
-    io_ctx.async_io_stats = &stats.async_io_stats;
-    io_ctx.reader_type = ReaderType::READER_QUERY;
-    io_ctx.file_cache_stats = &stats.file_cache_stats;
+    opt.io_ctx.file_cache_stats = &stats.file_cache_stats;
+    opt.io_ctx.async_io_stats = &stats.async_io_stats;
+    opt.io_ctx.reader_type = ReaderType::READER_QUERY;
+    opt.io_ctx.file_cache_stats = &stats.file_cache_stats;
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
-    opt.io_ctx = &io_ctx;
     opt.use_page_cache = !config::disable_storage_page_cache;
     column_iterator->init(opt);
     // get and parse tuple row

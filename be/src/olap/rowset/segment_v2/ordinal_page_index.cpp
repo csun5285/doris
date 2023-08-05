@@ -88,7 +88,7 @@ Status OrdinalIndexReader::load(bool use_page_cache, bool kept_in_memory) {
     opts.type = INDEX_PAGE;
     io::IOContext io_ctx;
     io_ctx.read_segment_index = true;
-    opts.io_ctx = &io_ctx;
+    opts.io_ctx = io_ctx;
 
     // read index page
     PageHandle page_handle;

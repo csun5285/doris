@@ -90,7 +90,7 @@ struct ColumnIteratorOptions {
     // page types are divided into DATA_PAGE & INDEX_PAGE
     // INDEX_PAGE including index_page, dict_page and short_key_page
     PageTypePB type;
-    io::IOContext* io_ctx = nullptr; // Ref
+    io::IOContext io_ctx;
     bool is_predicate_column = false;
 
     void sanity_check() const {
