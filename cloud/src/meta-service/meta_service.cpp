@@ -1968,10 +1968,9 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
         return;
     }
 
+    std::string rs_key, rs_val;
     if (has_first_rowset) {
         // Put first rowset if needed
-        std::string rs_key;
-        std::string rs_val;
         auto first_rowset = tablet_meta.mutable_rs_metas(0);
         if (config::write_schema_kv) { // detach schema from rowset meta
             first_rowset->set_index_id(index_id);
