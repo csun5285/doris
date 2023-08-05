@@ -2969,6 +2969,9 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
                                                  &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
+    io::IOContext io_ctx;
+    io_ctx.reader_type = ReaderType::READER_QUERY;
+    opt.io_ctx = &io_ctx;
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;
@@ -3025,6 +3028,9 @@ Status Tablet::fetch_value_by_rowids(RowsetSharedPtr input_rowset, uint32_t segi
             segment->new_column_iterator(tablet_schema->column(column_name), &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
+    io::IOContext io_ctx;
+    io_ctx.reader_type = ReaderType::READER_QUERY;
+    opt.io_ctx = &io_ctx;
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;
