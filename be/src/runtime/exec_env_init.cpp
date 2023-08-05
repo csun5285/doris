@@ -169,7 +169,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _internal_client_cache = new BrpcClientCache<PBackendService_Stub>();
     _function_client_cache = new BrpcClientCache<PFunctionService_Stub>();
 #ifdef CLOUD_MODE
-    _stream_load_executor = cloud::CloudStreamLoadExecutor::create_shared(this);
+    _stream_load_executor = std::make_shared<cloud::CloudStreamLoadExecutor>(this);
 #else
     _stream_load_executor = StreamLoadExecutor::create_shared(this);
 #endif
