@@ -1762,13 +1762,22 @@ public class FrontendServiceImpl implements FrontendService.Iface {
     }
 
     private TExecPlanFragmentParams streamLoadPutImpl(TStreamLoadPutRequest request) throws UserException {
-        ConnectContext ctx = new ConnectContext();
-        ctx.setThreadLocalInfo();
-        ctx.setQualifiedUser(request.getUser());
-        ctx.setCurrentUserIdentity(UserIdentity.createAnalyzedUserIdentWithIp(request.getUser(), "%"));
-        ctx.setCloudCluster();
-        LOG.debug("streamLoadPutImpl set context: cluster {}, setCurrentUserIdentity {}",
-                ctx.getCloudCluster(), ctx.getCurrentUserIdentity());
+        if (Config.isCloudMode()) {
+            ConnectContext ctx = new ConnectContext();
+            ctx.setThreadLocalInfo();
+            ctx.setQualifiedUser(request.getUser());
+            ctx.setCurrentUserIdentity(UserIdentity.createAnalyzedUserIdentWithIp(request.getUser(), "%"));
+            LOG.info("stream load use cloud cluster {}", request.getCloudCluster());
+            if (Strings.isNullOrEmpty(request.getCloudCluster())) {
+                ctx.setCloudCluster();
+            } else {
+                Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
+            }
+
+            LOG.debug("streamLoadPutImpl set context: cluster {}, setCurrentUserIdentity {}",
+                    ctx.getCloudCluster(), ctx.getCurrentUserIdentity());
+        }
+
         String cluster = request.getCluster();
         if (Strings.isNullOrEmpty(cluster)) {
             cluster = SystemInfoService.DEFAULT_CLUSTER;

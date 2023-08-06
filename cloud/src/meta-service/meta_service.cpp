@@ -3782,6 +3782,7 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             LOG(WARNING) << msg;
             return;
         }
+
         r.set_op(AlterClusterRequest::ADD_CLUSTER);
         AlterClusterResponse res;
         alter_cluster(cntl, &r, &res, nullptr);
@@ -3898,6 +3899,26 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
         }
 
         r.set_op(AlterClusterRequest::RENAME_CLUSTER);
+        AlterClusterResponse res;
+        alter_cluster(cntl, &r, &res, nullptr);
+        ret = res.status().code();
+        msg = res.status().msg();
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "update_cluster_endpoint") {
+        AlterClusterRequest r;
+        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
+        if (!st.ok()) {
+            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
+            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            response_body = msg;
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        r.set_op(AlterClusterRequest::UPDATE_CLUSTER_ENDPOINT);
         AlterClusterResponse res;
         alter_cluster(cntl, &r, &res, nullptr);
         ret = res.status().code();
@@ -5132,6 +5153,28 @@ void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
                         return msg;
                     }
                     c.set_cluster_name(cluster.cluster.cluster_name());
+                    return msg;
+                });
+    } break;
+    case AlterClusterRequest::UPDATE_CLUSTER_ENDPOINT: {
+        msg = resource_mgr_->update_cluster(
+                instance_id, cluster,
+                [&](const ::selectdb::ClusterPB& i) {
+                    return i.cluster_id() == cluster.cluster.cluster_id();
+                },
+                [&](::selectdb::ClusterPB& c, std::set<std::string>& cluster_names) {
+                    std::string msg = "";
+                    if (!cluster.cluster.has_private_endpoint()
+                            || cluster.cluster.private_endpoint().empty()) {
+                        code = MetaServiceCode::CLUSTER_ENDPOINT_MISSING;
+                        ss << "missing private endpoint";
+                        msg = ss.str();
+                        return msg;
+                    }
+
+                    c.set_public_endpoint(cluster.cluster.public_endpoint());
+                    c.set_private_endpoint(cluster.cluster.private_endpoint());
+
                     return msg;
                 });
     } break;

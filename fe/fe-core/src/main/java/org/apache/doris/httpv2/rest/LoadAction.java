@@ -19,9 +19,11 @@ package org.apache.doris.httpv2.rest;
 
 import org.apache.doris.catalog.Env;
 import org.apache.doris.cluster.ClusterNamespace;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.LoadException;
+import org.apache.doris.common.Pair;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
 import org.apache.doris.httpv2.entity.RestBaseResult;
 import org.apache.doris.mysql.privilege.PrivPredicate;
@@ -34,6 +36,7 @@ import org.apache.doris.thrift.TNetworkAddress;
 
 import com.google.common.base.Strings;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import org.apache.commons.validator.routines.InetAddressValidator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.http.ResponseEntity;
@@ -43,7 +46,9 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -117,6 +122,7 @@ public class LoadAction extends RestBaseController {
         try {
             String dbName = db;
             String tableName = table;
+
             // A 'Load' request must have 100-continue header
             if (request.getHeader(HttpHeaderNames.EXPECT.toString()) == null) {
                 return new RestBaseResult("There is no 100-continue header");
@@ -164,7 +170,18 @@ public class LoadAction extends RestBaseController {
                     return new RestBaseResult(e.getMessage());
                 }
             } else {
-                redirectAddr = selectRedirectBackend(clusterName);
+                if (Config.isCloudMode()) {
+                    String cloudClusterName = getCloudClusterName(request);
+                    if (Strings.isNullOrEmpty(cloudClusterName)) {
+                        LOG.warn("cluster name is empty in stream load");
+                        return new RestBaseResult("No cloud cluster name selected.");
+                    }
+                    String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
+                    LOG.info("host header {}", reqHostStr);
+                    redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
+                } else {
+                    redirectAddr = selectRedirectBackend(clusterName);
+                }
             }
 
             LOG.info("redirect load action to destination={}, stream: {}, db: {}, tbl: {}, label: {}",
@@ -199,7 +216,20 @@ public class LoadAction extends RestBaseController {
                 return new RestBaseResult("No transaction operation(\'commit\' or \'abort\') selected.");
             }
 
-            TNetworkAddress redirectAddr = selectRedirectBackend(clusterName);
+            TNetworkAddress redirectAddr;
+            if (Config.isCloudMode()) {
+                String cloudClusterName = getCloudClusterName(request);
+                if (Strings.isNullOrEmpty(cloudClusterName)) {
+                    LOG.warn("cluster name is empty in stream load");
+                    return new RestBaseResult("No cloud cluster name selected.");
+                }
+                String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
+                LOG.info("host header {}", reqHostStr);
+                redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
+            } else {
+                redirectAddr = selectRedirectBackend(clusterName);
+            }
+
             LOG.info("redirect stream load 2PC action to destination={}, db: {}, txn: {}, operation: {}",
                     redirectAddr.toString(), dbName, request.getHeader(TXN_ID_KEY), txnOperation);
 
@@ -209,6 +239,26 @@ public class LoadAction extends RestBaseController {
         } catch (Exception e) {
             return new RestBaseResult(e.getMessage());
         }
+    }
+
+    private String getCloudClusterName(HttpServletRequest request) {
+        String cloudClusterName = request.getHeader(CLOUD_CLUSTER);
+        if (!Strings.isNullOrEmpty(cloudClusterName)) {
+            return cloudClusterName;
+        }
+
+        cloudClusterName = ConnectContext.get().getCloudCluster();
+        if (!Strings.isNullOrEmpty(cloudClusterName)) {
+            return cloudClusterName;
+        }
+
+        ConnectContext.get().setCloudCluster();
+        cloudClusterName = ConnectContext.get().getCloudCluster();
+        if (!Strings.isNullOrEmpty(cloudClusterName)) {
+            return cloudClusterName;
+        }
+
+        return "";
     }
 
     private TNetworkAddress selectRedirectBackend(String clusterName) throws LoadException {
@@ -223,5 +273,100 @@ public class LoadAction extends RestBaseController {
             throw new LoadException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + ", policy: " + policy);
         }
         return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
+    }
+
+    private Pair<String, Integer> splitHostAndPort(String hostPort) throws AnalysisException {
+        hostPort = hostPort.replaceAll("\\s+", "");
+        if (hostPort.isEmpty()) {
+            LOG.info("empty endpoint");
+            throw new AnalysisException("empty endpoint: " + hostPort);
+        }
+
+        String[] pair = hostPort.split(":");
+        if (pair.length != 2) {
+            LOG.info("Invalid endpoint: {}", hostPort);
+            throw new AnalysisException("Invalid endpoint: " + hostPort);
+        }
+
+        int port = Integer.parseInt(pair[1]);
+        if (port <= 0 || port >= 65536) {
+            LOG.info("Invalid endpoint port: {}", pair[1]);
+            throw new AnalysisException("Invalid endpoint port: " + pair[1]);
+        }
+
+        return Pair.of(pair[0], port);
+    }
+
+    private TNetworkAddress selectCloudRedirectBackend(String clusterName, String reqHostStr) throws LoadException {
+        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(clusterName);
+
+        List<Backend> backends = new ArrayList<Backend>();
+        for (Backend be : clusterBes) {
+            if (be.isAlive()) {
+                backends.add(be);
+            }
+        }
+
+        if (backends.isEmpty()) {
+            LOG.warn("No available backend for stream load redirect, cluster name {}", clusterName);
+            throw new LoadException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + ", cluster: " + clusterName);
+        }
+
+        Random rand = new Random();
+        int randomIndex = rand.nextInt(backends.size());
+        Backend backend = backends.get(randomIndex);
+
+        Pair<String, Integer> publicHostPort = null;
+        Pair<String, Integer> privateHostPort = null;
+        try {
+            if (!Strings.isNullOrEmpty(backend.getCloudPublicEndpoint())) {
+                publicHostPort = splitHostAndPort(backend.getCloudPublicEndpoint());
+            }
+        } catch (AnalysisException e) {
+            throw new LoadException(e.getMessage());
+        }
+
+        try {
+            if (!Strings.isNullOrEmpty(backend.getCloudPrivateEndpoint())) {
+                privateHostPort = splitHostAndPort(backend.getCloudPrivateEndpoint());
+            }
+        } catch (AnalysisException e) {
+            throw new LoadException(e.getMessage());
+        }
+
+        reqHostStr = reqHostStr.replaceAll("\\s+", "");
+        if (reqHostStr.isEmpty()) {
+            LOG.info("Invalid header host: {}", reqHostStr);
+            throw new LoadException("Invalid header host: " + reqHostStr);
+        }
+
+        String reqHost = "";
+        String[] pair = reqHostStr.split(":");
+        if (pair.length == 1) {
+            reqHost = pair[0];
+        } else if (pair.length == 2) {
+            reqHost = pair[0];
+        } else {
+            LOG.info("Invalid header host: {}", reqHostStr);
+            throw new LoadException("Invalid header host: " + reqHost);
+        }
+
+        if (InetAddressValidator.getInstance().isValid(reqHost)) {
+            if (publicHostPort != null && reqHost == publicHostPort.first) {
+                return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
+            } else if (privateHostPort != null) {
+                return new TNetworkAddress(reqHost, privateHostPort.second);
+            } else {
+                return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
+            }
+        } else {
+            if (publicHostPort != null && reqHost.toLowerCase().contains("public")) {
+                return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
+            } else if (privateHostPort != null) {
+                return new TNetworkAddress(privateHostPort.first, privateHostPort.second);
+            } else {
+                return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
+            }
+        }
     }
 }

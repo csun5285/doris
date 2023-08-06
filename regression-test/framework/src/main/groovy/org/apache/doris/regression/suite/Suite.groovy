@@ -808,7 +808,7 @@ class Suite implements GroovyInterceptable {
         def js = jsonOutput.toJson(map)
         log.info("decommission node req: ${js} ".toString())
 
-        def add_cluster_api = { request_body, check_func ->
+        def d_cluster_api = { request_body, check_func ->
             httpTest {
                 endpoint context.config.metaServiceHttpAddress
                 uri "/MetaService/http/decommission_node?token=${token}"
@@ -817,7 +817,7 @@ class Suite implements GroovyInterceptable {
             }
         }
 
-        add_cluster_api.call(js) {
+        d_cluster_api.call(js) {
             respCode, body ->
                 log.info("decommission node resp: ${body} ${respCode}".toString())
                 def json = parseJson(body)

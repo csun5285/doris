@@ -53,6 +53,7 @@ suite("test_cloud_stream_load_2pc", "p0") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
+        isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -80,6 +81,7 @@ suite("test_cloud_stream_load_2pc", "p0") {
 
         file 'all_types.csv'
         twoPhaseCommit true
+        isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {

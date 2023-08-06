@@ -40,7 +40,7 @@ import org.junit.Assert
 
 @Slf4j
 class StreamLoadAction implements SuiteAction {
-    public final InetSocketAddress address
+    public InetSocketAddress address
     public final String user
     public final String password
     String db
@@ -54,9 +54,11 @@ class StreamLoadAction implements SuiteAction {
     Map<String, String> headers
     SuiteContext context
     boolean twoPhaseCommit = false;
+    boolean isCloud = false;
 
     StreamLoadAction(SuiteContext context) {
         this.address = context.config.feHttpInetSocketAddress
+
         this.user = context.config.feHttpUser
         this.password = context.config.feHttpPassword
 
@@ -132,6 +134,14 @@ class StreamLoadAction implements SuiteAction {
         this.twoPhaseCommit = twoPhaseCommit.call();
     }
 
+    void isCloud(boolean isCloud) {
+        this.isCloud = isCloud
+    }
+
+    void isCloud(Closure<Boolean> isCloud) {
+        this.isCloud = isCloud.call();
+    }
+
     void check(@ClosureParams(value = FromString, options = ["String,Throwable,Long,Long"]) Closure check) {
         this.check = check
     }
@@ -146,6 +156,9 @@ class StreamLoadAction implements SuiteAction {
         Throwable ex = null
         long startTime = System.currentTimeMillis()
         try {
+            if (isCloud) {
+                this.address = context.config.feCloudHttpInetSocketAddress
+            }
 
             def uri = "http://${address.hostString}:${address.port}/api/${db}/${table}/_stream_load"
             if (twoPhaseCommit) {
