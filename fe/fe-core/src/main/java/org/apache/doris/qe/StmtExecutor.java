@@ -824,17 +824,12 @@ public class StmtExecutor {
 
     private void analyzeVariablesInStmt(StatementBase statement) throws DdlException {
         SessionVariable sessionVariable = context.getSessionVariable();
-        if (parsedStmt != null && (parsedStmt instanceof SelectStmt || parsedStmt instanceof CopyStmt
-                || parsedStmt instanceof InsertStmt)) {
+        if (statement != null && (statement instanceof SelectStmt || statement instanceof CopyStmt)) {
             Map<String, String> optHints;
-            if (parsedStmt instanceof SelectStmt) {
-                optHints = ((SelectStmt) parsedStmt).getSelectList().getOptHints();
-            } else if (parsedStmt instanceof InsertStmt) {
-                // TODO(meiyi), 为了编译过把optHints先置为null
-                optHints = null;
-                // optHints = ((InsertStmt) parsedStmt).getInsertHints();
+            if (statement instanceof SelectStmt) {
+                optHints = ((SelectStmt) statement).getSelectList().getOptHints();
             } else {
-                optHints = ((CopyStmt) parsedStmt).getOptHints();
+                optHints = ((CopyStmt) statement).getOptHints();
             }
             if (optHints != null) {
                 sessionVariable.setIsSingleSetVar(true);
