@@ -54,6 +54,7 @@
 #include "util/defer_op.h"
 #include "util/doris_metrics.h"
 #include "util/runtime_profile.h"
+#include "util/s3_util.h"
 
 namespace Aws {
 namespace S3 {
@@ -144,6 +145,7 @@ Status S3FileWriter::_open() {
     }
 
     auto outcome = _client->CreateMultipartUpload(create_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     if (outcome.IsSuccess()) {
         _upload_id = outcome.GetResult().GetUploadId();
@@ -173,6 +175,7 @@ Status S3FileWriter::abort() {
     AbortMultipartUploadRequest request;
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
     auto outcome = _client->AbortMultipartUpload(request);
+    s3_bvar::s3_multi_part_upload_total << 1;
     if (outcome.IsSuccess() ||
         outcome.GetError().GetErrorType() == Aws::S3::S3Errors::NO_SUCH_UPLOAD ||
         outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
@@ -293,6 +296,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     upload_request.SetContentLength(buf.get_size());
 
     auto upload_part_callable = _client->UploadPartCallable(upload_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     UploadPartOutcome upload_part_outcome = upload_part_callable.get();
     if (!upload_part_outcome.IsSuccess()) {
@@ -338,6 +342,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetBody(buf.get_stream());
     request.SetContentLength(buf.get_size());
     auto response = _client->PutObject(request);
+    s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::InternalError("Error: [{}:{}, responseCode:{}]",
                                     response.GetError().GetExceptionName(),
@@ -372,6 +377,7 @@ Status S3FileWriter::_complete() {
     complete_request.WithMultipartUpload(completed_upload);
 
     auto compute_outcome = _client->CompleteMultipartUpload(complete_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
         auto s = Status::IOError("failed to create multi part upload (bucket={}, key={}): {}",

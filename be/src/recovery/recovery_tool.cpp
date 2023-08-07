@@ -25,6 +25,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
+#include "util/s3_util.h"
 
 DEFINE_string(mode, "warehouse",
               "recovery mode: 'warehouse' or 's3', \
@@ -260,6 +261,7 @@ int recovery_data(const S3Conf& s3_conf, const std::string& recovery_file, int l
         bool is_truncated = false;
         do {
             auto list_response = s3_client.ListObjectVersions(list_request);
+            doris::s3_bvar::s3_list_object_versions_total << 1;
             if (!list_response.IsSuccess()) {
                 std::cerr << "list object versions failed, err: "
                           << list_response.GetError().GetMessage() << std::endl;
@@ -323,6 +325,7 @@ int recovery_data(const S3Conf& s3_conf, const std::string& recovery_file, int l
     copy_request.SetCopySource(bucket + "/" + recovery_file_key + "?versionId=" + version_id);
 
     auto copy_object_outcome = s3_client.CopyObject(copy_request);
+    doris::s3_bvar::s3_copy_object_total << 1;
     if (copy_object_outcome.IsSuccess()) {
         std::cout << "Successfully recovery object" << std::endl;
     } else {

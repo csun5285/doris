@@ -41,7 +41,23 @@ class S3Client;
 } // namespace S3
 } // namespace Aws
 
+namespace bvar {
+    template<typename T>
+    class Adder;
+}
 namespace doris {
+
+namespace s3_bvar {
+    extern bvar::Adder<uint64_t> s3_get_total;
+    extern bvar::Adder<uint64_t> s3_put_total;
+    extern bvar::Adder<uint64_t> s3_delete_total;
+    extern bvar::Adder<uint64_t> s3_head_total;
+    extern bvar::Adder<uint64_t> s3_multi_part_upload_total;
+    extern bvar::Adder<uint64_t> s3_list_total;
+    extern bvar::Adder<uint64_t> s3_list_object_versions_total;
+    extern bvar::Adder<uint64_t> s3_get_bucket_version_total;
+    extern bvar::Adder<uint64_t> s3_copy_object_total;
+}
 
 class S3URI;
 
