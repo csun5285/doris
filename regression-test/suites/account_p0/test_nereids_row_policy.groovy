@@ -21,6 +21,13 @@ suite("test_nereids_row_policy") {
     def user='row_policy_user'
     def tokens = context.config.jdbcUrl.split('/')
     def url=tokens[0] + "//" + tokens[2] + "/" + dbName + "?"
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO ${user}""";
+    }
 
     def assertQueryResult = { size ->
         def result1 = connect(user=user, password='123abc!@#', url=url) {
@@ -78,7 +85,13 @@ suite("test_nereids_row_policy") {
     sql "DROP USER IF EXISTS ${user}"
     sql "CREATE USER ${user} IDENTIFIED BY '123abc!@#'"
     sql "GRANT SELECT_PRIV ON internal.${dbName}.${tableName} TO ${user}"
-
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO ${user}""";
+    }
 
     // no policy
     assertQueryResult 3

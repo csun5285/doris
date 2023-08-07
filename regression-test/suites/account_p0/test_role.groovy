@@ -29,6 +29,13 @@ suite("test_role", "account") {
     sql """CREATE ROLE ${role}"""
     sql """GRANT SELECT_PRIV ON ${context.config.defaultDb} TO ROLE '${role}'"""
     sql """GRANT SELECT_PRIV ON ${dbName} TO ROLE '${role}'"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO ${user}""";
+    }
     sql """CREATE USER '${user}' IDENTIFIED BY '${pwd}' DEFAULT ROLE '${role}'"""
     def result1 = connect(user=user, password="${pwd}", url=context.config.jdbcUrl) {
         sql "show databases like '${dbName}'"

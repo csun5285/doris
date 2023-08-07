@@ -495,6 +495,14 @@ public class Role implements Writable, GsonPostProcessable {
         return resourcePrivTable;
     }
 
+    public ResourcePrivTable getCloudClusterPrivTable() {
+        return cloudClusterPrivTable;
+    }
+
+    public ResourcePrivTable getCloudStagePrivTable() {
+        return cloudStagePrivTable;
+    }
+
     public WorkloadGroupPrivTable getWorkloadGroupPrivTable() {
         return workloadGroupPrivTable;
     }
