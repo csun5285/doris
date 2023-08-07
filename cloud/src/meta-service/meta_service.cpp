@@ -2796,11 +2796,7 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
         get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, idx);
         if (code != MetaServiceCode::OK) return;
     }
-    if (is_dropped_tablet(txn.get(), instance_id, idx.index_id(), idx.partition_id())) {
-        code = MetaServiceCode::TABLET_NOT_FOUND;
-        msg = fmt::format("tablet {} has been dropped", tablet_id);
-        return;
-    }
+    // TODO(plat1ko): Judge if tablet has been dropped (in dropped index/partition)
 
     TabletStatsPB tablet_stat;
     internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, idx, tablet_stat, true);
