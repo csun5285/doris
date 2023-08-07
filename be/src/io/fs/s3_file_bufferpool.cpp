@@ -174,6 +174,12 @@ void UploadFileBuffer::read_from_cache() {
  * submit the on_download() task to executor
  */
 void DownloadFileBuffer::submit() {
+    // Currently download file buffer is only served for cache prefetching
+    // so we just skip executing the download task when file cache is not enabled
+    if (!config::enable_file_cache) [[unlikely]] {
+        LOG(INFO) << "Skip download file task because file cache is not enabled";
+        return;
+    }
     ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
                 // to extend buf's lifetime
