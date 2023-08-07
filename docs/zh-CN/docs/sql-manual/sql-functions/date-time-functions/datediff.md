@@ -28,11 +28,7 @@ under the License.
 ### description
 #### Syntax
 
-<<<<<<< HEAD
-`DATETIME DATEDIFF(DATETIME expr1, DATETIME expr2)`
-=======
 `INT DATEDIFF(DATETIME expr1, DATETIME expr2)`
->>>>>>> 2.0.0-rc01
 
 
 计算expr1 - expr2，结果精确到天。

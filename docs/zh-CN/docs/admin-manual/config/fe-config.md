@@ -165,13 +165,13 @@ ALTER TABLE 请求的最大超时时间。设置的足够长以适应表的数�
 
 是否为 Master FE 节点独有的配置项：`true`
 
-### `analyze_task_timeout_in_minutes`
+### `analyze_task_timeout_in_hours`
 
 待补充
 
 类型：`int`
 
-默认值：`120`
+默认值：`12`
 
 是否可动态修改：`false`
 
@@ -219,7 +219,7 @@ FE 审计日志文件的存放路径，用于存放 fe.audit.log。
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/log`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/log`
 
 是否可动态修改：`false`
 
@@ -300,6 +300,18 @@ FE 审计日志文件的最大数量。超过这个数量后，最老的日志�
 是否可动态修改：`true`
 
 是否为 Master FE 节点独有的配置项：`true`
+
+### `backend_proxy_num`
+
+BackendServiceProxy数量, 用于池化GRPC channel
+
+类型：`int`
+
+默认值：`48`
+
+是否可动态修改：`false`
+
+是否为 Master FE 节点独有的配置项：`false`
 
 ### `backend_rpc_timeout_ms`
 
@@ -415,7 +427,7 @@ BDBJE 操作的锁超时时间，单位为秒。如果 FE 的 WARN 日志中出�
 
 类型：`int`
 
-默认值：`1`
+默认值：`5`
 
 是否可动态修改：`false`
 
@@ -889,18 +901,6 @@ Broker load 的默认超时时间，单位是秒。
 
 是否为 Master FE 节点独有的配置项：`false`
 
-### `collect_external_table_stats_by_sql`
-
-待补充
-
-类型：`boolean`
-
-默认值：`true`
-
-是否可动态修改：`true`
-
-是否为 Master FE 节点独有的配置项：`false`
-
 ### `colocate_group_relocate_delay_second`
 
 待补充
@@ -955,7 +955,7 @@ Broker load 的默认超时时间，单位是秒。
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/conf`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/conf`
 
 是否可动态修改：`false`
 
@@ -1719,6 +1719,18 @@ BDBJE 的日志滚动大小。当日志条目数超过这个值后，会触发�
 
 是否为 Master FE 节点独有的配置项：`false`
 
+### `enable_light_index_change`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`true`
+
 ### `enable_local_replica_selection`
 
 待补充
@@ -1742,18 +1754,6 @@ BDBJE 的日志滚动大小。当日志条目数超过这个值后，会触发�
 是否可动态修改：`true`
 
 是否为 Master FE 节点独有的配置项：`false`
-
-### `enable_map_type`
-
-待补充
-
-类型：`boolean`
-
-默认值：`false`
-
-是否可动态修改：`true`
-
-是否为 Master FE 节点独有的配置项：`true`
 
 ### `enable_metric_calculator`
 
@@ -1929,21 +1929,9 @@ BDBJE 的日志滚动大小。当日志条目数超过这个值后，会触发�
 
 类型：`boolean`
 
-默认值：`true`
-
-是否可动态修改：`false`
-
-是否为 Master FE 节点独有的配置项：`true`
-
-### `enable_struct_type`
-
-待补充
-
-类型：`boolean`
-
 默认值：`false`
 
-是否可动态修改：`true`
+是否可动态修改：`false`
 
 是否为 Master FE 节点独有的配置项：`true`
 
@@ -1982,6 +1970,18 @@ BDBJE 的日志滚动大小。当日志条目数超过这个值后，会触发�
 是否可动态修改：`false`
 
 是否为 Master FE 节点独有的配置项：`false`
+
+### `enable_two_phase_read_opt`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`true`
 
 ### `experimental_enable_workload_group`
 
@@ -2115,17 +2115,17 @@ FE 从 BE 获取 Stream Load 作业信息的间隔。
 
 是否为 Master FE 节点独有的配置项：`true`
 
-### `fuzzy_meta_service_use_short_connection`
+### `force_olap_table_replication_num`
 
-待补充
+用于强制设定内表的副本数，如果改参数大于零，则用户在建表时指定的副本数将被忽略，而使用本参数设置的值。同时，建表语句中指定的副本标签等参数会被忽略。该参数不影响包括创建分区、修改表属性的操作。该参数建议仅用于测试环境
 
-类型：`boolean`
+类型：`int`
 
-默认值：`false`
+默认值：`0`
 
 是否可动态修改：`true`
 
-是否为 Master FE 节点独有的配置项：`false`
+是否为 Master FE 节点独有的配置项：`true`
 
 ### `fuzzy_test_type`
 
@@ -2397,7 +2397,7 @@ JDBC 驱动的存放路径。在创建 JDBC Catalog 时，如果指定的驱动�
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/jdbc_drivers`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/jdbc_drivers`
 
 是否可动态修改：`false`
 
@@ -2417,11 +2417,11 @@ Jetty 的 acceptor 线程数。Jetty的线程架构模型很简单，分为三�
 
 ### `jetty_server_max_http_header_size`
 
-Jetty 的最大 HTTP header 大小，单位是字节，默认值是 10KB。
+Jetty 的最大 HTTP header 大小，单位是字节，默认值是 1MB。
 
 类型：`int`
 
-默认值：`10240`
+默认值：`1048576`
 
 是否可动态修改：`false`
 
@@ -2529,7 +2529,7 @@ FE https 服务的 key store 路径
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/conf/ssl/doris_ssl_certificate.keystore`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/conf/ssl/doris_ssl_certificate.keystore`
 
 是否可动态修改：`false`
 
@@ -2570,6 +2570,18 @@ FE https 服务的 key store 类型
 是否可动态修改：`true`
 
 是否为 Master FE 节点独有的配置项：`true`
+
+### `light_schema_change_force_to_true`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`false`
 
 ### `load_checker_interval_ms`
 
@@ -2759,7 +2771,7 @@ Agent任务线程池的线程数
 
 类型：`long`
 
-默认值：`3221225472`
+默认值：`536870912000`
 
 是否可动态修改：`true`
 
@@ -2945,18 +2957,6 @@ Hive表到分区名列表缓存的最大数量。
 
 是否为 Master FE 节点独有的配置项：`false`
 
-### `max_instance_num`
-
-待补充
-
-类型：`int`
-
-默认值：`128`
-
-是否可动态修改：`true`
-
-是否为 Master FE 节点独有的配置项：`false`
-
 ### `max_load_timeout_second`
 
 Load 的最大超时时间，单位是秒。
@@ -3050,6 +3050,18 @@ MySQL 服务的最大任务线程数
 默认值：`1`
 
 是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`false`
+
+### `max_remote_file_system_cache_num`
+
+远程文件系统缓存的最大数量
+
+类型：`long`
+
+默认值：`100`
+
+是否可动态修改：`false`
 
 是否为 Master FE 节点独有的配置项：`false`
 
@@ -3287,7 +3299,7 @@ Sync job 的最大并发数。
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/doris-meta`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/doris-meta`
 
 是否可动态修改：`false`
 
@@ -3311,7 +3323,7 @@ Sync job 的最大并发数。
 
 类型：`int`
 
-默认值：`0`
+默认值：`5`
 
 是否可动态修改：`true`
 
@@ -3335,7 +3347,7 @@ Sync job 的最大并发数。
 
 类型：`boolean`
 
-默认值：`false`
+默认值：`true`
 
 是否可动态修改：`true`
 
@@ -3360,18 +3372,6 @@ Sync job 的最大并发数。
 类型：`int`
 
 默认值：`200`
-
-是否可动态修改：`true`
-
-是否为 Master FE 节点独有的配置项：`false`
-
-### `meta_service_use_short_connection`
-
-待补充
-
-类型：`boolean`
-
-默认值：`false`
 
 是否可动态修改：`true`
 
@@ -3599,7 +3599,7 @@ MySQL 服务的 IO 线程数
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/ca_certificate.p12`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/mysql_ssl_default_certificate/ca_certificate.p12`
 
 是否可动态修改：`false`
 
@@ -3623,7 +3623,7 @@ MySQL 服务的 IO 线程数
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/server_certificate.p12`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/mysql_ssl_default_certificate/server_certificate.p12`
 
 是否可动态修改：`false`
 
@@ -3695,7 +3695,7 @@ MySQL 服务的 IO 线程数
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/plugins`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/plugins`
 
 是否可动态修改：`false`
 
@@ -3712,6 +3712,18 @@ MySQL 服务的 IO 线程数
 是否可动态修改：`true`
 
 是否为 Master FE 节点独有的配置项：`true`
+
+### `point_query_timeout_ms`
+
+主键高并发点查短路径超时时间。
+
+类型：`int`
+
+默认值：`10000`
+
+是否可动态修改：`false`
+
+是否为 Master FE 节点独有的配置项：`false`
 
 ### `pre_heating_time_limit_sec`
 
@@ -3993,17 +4005,41 @@ FE thrift server 的端口号
 
 是否为 Master FE 节点独有的配置项：`false`
 
+### `schedule_batch_size`
+
+待补充
+
+类型：`int`
+
+默认值：`50`
+
+是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`true`
+
+### `schedule_decommission_slot_num_per_path`
+
+待补充
+
+类型：`int`
+
+默认值：`8`
+
+是否可动态修改：`true`
+
+是否为 Master FE 节点独有的配置项：`true`
+
 ### `schedule_slot_num_per_path`
 
 待补充
 
 类型：`int`
 
-默认值：`2`
+默认值：`4`
 
-是否可动态修改：`false`
+是否可动态修改：`true`
 
-是否为 Master FE 节点独有的配置项：`false`
+是否为 Master FE 节点独有的配置项：`true`
 
 ### `scheduler_mtmv_job_expired`
 
@@ -4071,7 +4107,7 @@ FE thrift server 的端口号
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/small_files`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/small_files`
 
 是否可动态修改：`false`
 
@@ -4083,7 +4119,7 @@ Spark DPP 程序的版本
 
 类型：`String`
 
-默认值：`1.0.0`
+默认值：`1.2-SNAPSHOT`
 
 是否可动态修改：`false`
 
@@ -4095,7 +4131,7 @@ Spark Load 所使用的 Spark 程序目录
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/lib/spark2x`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/spark2x`
 
 是否可动态修改：`true`
 
@@ -4107,7 +4143,7 @@ Spark launcher 日志路径
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/log/spark_launcher_log`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/log/spark_launcher_log`
 
 是否可动态修改：`false`
 
@@ -4173,18 +4209,6 @@ Spark load 所使用的依赖项目录
 
 是否为 Master FE 节点独有的配置项：`false`
 
-### `statistic_internal_table_replica_num`
-
-待补充
-
-类型：`int`
-
-默认值：`1`
-
-是否可动态修改：`false`
-
-是否为 Master FE 节点独有的配置项：`false`
-
 ### `statistics_simultaneously_running_task_num`
 
 待补充
@@ -4192,6 +4216,30 @@ Spark load 所使用的依赖项目录
 类型：`int`
 
 默认值：`10`
+
+是否可动态修改：`false`
+
+是否为 Master FE 节点独有的配置项：`false`
+
+### `statistics_sql_mem_limit_in_bytes`
+
+待补充
+
+类型：`long`
+
+默认值：`2147483648`
+
+是否可动态修改：`false`
+
+是否为 Master FE 节点独有的配置项：`false`
+
+### `statistics_sql_parallel_exec_instance_num`
+
+待补充
+
+类型：`int`
+
+默认值：`1`
 
 是否可动态修改：`false`
 
@@ -4347,7 +4395,7 @@ FE 日志文件的存放路径，用于存放 fe.log。
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/log`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/log`
 
 是否可动态修改：`false`
 
@@ -4557,7 +4605,7 @@ thrift server 的最大 worker 线程数
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/temp_dir`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/temp_dir`
 
 是否可动态修改：`false`
 
@@ -4725,7 +4773,7 @@ Yarn client 的路径
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/lib/yarn-client/hadoop/bin/yarn`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/yarn-client/hadoop/bin/yarn`
 
 是否可动态修改：`false`
 
@@ -4737,7 +4785,7 @@ Yarn 配置文件的路径
 
 类型：`String`
 
-默认值：`/mnt/disk1/dengxin/selectdb-core/lib/yarn-config`
+默认值：`/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/yarn-config`
 
 是否可动态修改：`false`
 

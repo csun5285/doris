@@ -119,7 +119,7 @@ TRY_AGAIN:
                 LOG_WARNING("failed to prepare cumu compaction")
                         .tag("job_id", _uuid)
                         .tag("msg", resp.status().msg());
-                return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
+                return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
             }
         }
         return st;
@@ -311,7 +311,7 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
                 });
     }
     if (candidate_rowsets.empty()) {
-        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
     }
     std::sort(candidate_rowsets.begin(), candidate_rowsets.end(), Rowset::comparator);
     DCHECK(check_version_continuity(candidate_rowsets).ok());
@@ -324,12 +324,12 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
             &_last_delete_version, &compaction_score);
 
     if (_input_rowsets.empty()) {
-        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
     } else if (_input_rowsets.size() == 1 &&
                !_input_rowsets.front()->rowset_meta()->is_segments_overlapping()) {
         VLOG_DEBUG << "there is only one rowset and not overlapping. tablet_id="
                    << _tablet->tablet_id() << ", version=" << _input_rowsets.front()->version();
-        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>();
+        return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
     }
     return Status::OK();
 }

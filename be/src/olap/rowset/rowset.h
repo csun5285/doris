@@ -76,7 +76,8 @@ public:
             break;
 
         default:
-            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>(
+                    "RowsetStateMachine meet invalid state");
         }
         return Status::OK();
     }
@@ -92,7 +93,8 @@ public:
             break;
 
         default:
-            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>(
+                    "RowsetStateMachine meet invalid state");
         }
         return Status::OK();
     }
@@ -104,7 +106,8 @@ public:
             break;
 
         default:
-            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>();
+            return Status::Error<ErrorCode::ROWSET_INVALID_STATE_TRANSITION>(
+                    "RowsetStateMachine meet invalid state");
         }
         return Status::OK();
     }

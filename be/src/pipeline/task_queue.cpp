@@ -35,9 +35,6 @@ PipelineTask* SubTaskQueue::try_take(bool is_steal) {
         return nullptr;
     }
     auto task = _queue.front();
-    if (!task->can_steal() && is_steal) {
-        return nullptr;
-    }
     _queue.pop();
     return task;
 }
@@ -46,7 +43,7 @@ PipelineTask* SubTaskQueue::try_take(bool is_steal) {
 
 PriorityTaskQueue::PriorityTaskQueue() : _closed(false) {
     double factor = 1;
-    for (int i = 0; i < SUB_QUEUE_LEVEL; ++i) {
+    for (int i = SUB_QUEUE_LEVEL - 1; i >= 0; i--) {
         _sub_queues[i].set_level_factor(factor);
         factor *= LEVEL_QUEUE_TIME_FACTOR;
     }

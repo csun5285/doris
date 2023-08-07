@@ -43,8 +43,6 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.Table;
 import com.google.common.collect.TreeMultimap;
-import org.apache.commons.lang3.tuple.ImmutableTriple;
-import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -97,7 +95,6 @@ public class TabletInvertedIndex {
     private Table<Long, Long, Replica> backingReplicaMetaTable = HashBasedTable.create();
 
     private volatile ImmutableSet<Long> partitionIdInMemorySet = ImmutableSet.of();
-    private volatile ImmutableSet<Long> partitionIdPersistentSet = ImmutableSet.of();
 
     private ForkJoinPool taskPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
 
@@ -130,8 +127,6 @@ public class TabletInvertedIndex {
                              ListMultimap<Long, Long> transactionsToClear,
                              ListMultimap<Long, Long> tabletRecoveryMap,
                              List<TTabletMetaInfo> tabletToUpdate,
-                             List<Triple<Long, Integer, Boolean>> tabletToInMemory,
-                             List<Triple<Long, Integer, Boolean>> tabletToPersistent,
                              List<CooldownConf> cooldownConfToPush,
                              List<CooldownConf> cooldownConfToUpdate) {
         List<Pair<TabletMeta, TTabletInfo>> cooldownTablets = new ArrayList<>();
@@ -165,13 +160,6 @@ public class TabletInvertedIndex {
                                 if (tabletMetaInfo == null) {
                                     tabletMetaInfo = new TTabletMetaInfo();
                                     tabletMetaInfo.setIsInMemory(!backendTabletInfo.isIsInMemory());
-                                }
-                            }
-                            if (partitionIdPersistentSet.contains(
-                                    backendTabletInfo.getPartitionId()) != backendTabletInfo.isIsPersistent()) {
-                                synchronized (tabletToPersistent) {
-                                    tabletToPersistent.add(new ImmutableTriple<>(tabletId,
-                                            backendTabletInfo.getSchemaHash(), !backendTabletInfo.isIsPersistent()));
                                 }
                             }
                             // 1. (intersection)
@@ -572,13 +560,12 @@ public class TabletInvertedIndex {
         }
         long stamp = writeLock();
         try {
-            long backendId = Config.isNotCloudMode() ? replica.getBackendId() : -1L;
             Preconditions.checkState(tabletMetaMap.containsKey(tabletId));
-            replicaMetaTable.put(tabletId, backendId, replica);
+            replicaMetaTable.put(tabletId, replica.getBackendId(), replica);
             replicaToTabletMap.put(replica.getId(), tabletId);
-            backingReplicaMetaTable.put(backendId, tabletId, replica);
+            backingReplicaMetaTable.put(replica.getBackendId(), tabletId, replica);
             LOG.debug("add replica {} of tablet {} in backend {}",
-                    replica.getId(), tabletId, backendId);
+                    replica.getId(), tabletId, replica.getBackendId());
         } finally {
             writeUnlock(stamp);
         }
@@ -712,10 +699,6 @@ public class TabletInvertedIndex {
 
     public void setPartitionIdInMemorySet(ImmutableSet<Long> partitionIdInMemorySet) {
         this.partitionIdInMemorySet = partitionIdInMemorySet;
-    }
-
-    public void setPartitionIdPersistentSet(ImmutableSet<Long> partitionIdPersistentSet) {
-        this.partitionIdPersistentSet = partitionIdPersistentSet;
     }
 
     public Map<Long, Long> getReplicaToTabletMap() {

@@ -313,9 +313,12 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                                     tbl.disableAutoCompaction(),
                                     tbl.enableSingleReplicaCompaction(),
                                     tbl.skipWriteIndexOnLoad(),
+                                    tbl.getCompactionPolicy(),
+                                    tbl.getTimeSeriesCompactionGoalSizeMbytes(),
+                                    tbl.getTimeSeriesCompactionFileCountThreshold(),
+                                    tbl.getTimeSeriesCompactionTimeThresholdSeconds(),
                                     tbl.storeRowColumn(),
                                     tbl.isDynamicSchema(),
-                                    tbl.isPersistent(),
                                     binlogConfig);
 
                             createReplicaTask.setBaseTablet(partitionIndexTabletMap.get(partitionId, shadowIdxId)

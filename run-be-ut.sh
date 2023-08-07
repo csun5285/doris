@@ -187,6 +187,14 @@ if [[ -z "${USE_DWARF}" ]]; then
     USE_DWARF='OFF'
 fi
 
+if [[ -z "${USE_UNWIND}" ]]; then
+    if [[ "$(uname -s)" != 'Darwin' ]]; then
+        USE_UNWIND='ON'
+    else
+        USE_UNWIND='OFF'
+    fi
+fi
+
 MAKE_PROGRAM="$(command -v "${BUILD_SYSTEM}")"
 echo "-- Make program: ${MAKE_PROGRAM}"
 echo "-- Use ccache: ${CMAKE_USE_CCACHE}"
@@ -206,6 +214,7 @@ cd "${CMAKE_BUILD_DIR}"
     -DENABLE_INJECTION_POINT=OFF \
     -DWITH_MYSQL=OFF \
     -DUSE_DWARF="${USE_DWARF}" \
+    -DUSE_UNWIND="${USE_UNWIND}" \
     -DUSE_MEM_TRACKER="${USE_MEM_TRACKER}" \
     -DUSE_JEMALLOC=OFF \
     -DEXTRA_CXX_FLAGS="${EXTRA_CXX_FLAGS}" \
@@ -351,7 +360,7 @@ java_version="$(
 CUR_DATE=$(date +%Y%m%d-%H%M%S)
 LOG_PATH="-DlogPath=${DORIS_TEST_BINARY_DIR}/log/jni.log"
 COMMON_OPTS="-Dsun.java.command=DorisBETEST -XX:-CriticalJNINatives"
-JDBC_OPTS="-DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDEL_TIME=300000"
+JDBC_OPTS="-DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDLE_TIME=300000"
 
 if [[ "${java_version}" -gt 8 ]]; then
     if [[ -z ${JAVA_OPTS} ]]; then

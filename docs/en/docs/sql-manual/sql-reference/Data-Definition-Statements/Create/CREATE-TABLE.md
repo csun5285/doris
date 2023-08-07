@@ -50,118 +50,6 @@ distribution_desc
 
 #### column_definition_list
 
-<<<<<<< HEAD
-    Column definition list:
-
-    `column_definition[, column_definition]`
-
-    * `column_definition`
-
-        Column definition:
-
-        `column_name column_type [KEY] [aggr_type] [NULL] [default_value] [column_comment]`
-
-        * `column_type`
-
-            Column type, the following types are supported:
-
-            ```
-            TINYINT (1 byte)
-                Range: -2^7 + 1 ~ 2^7-1
-            SMALLINT (2 bytes)
-                Range: -2^15 + 1 ~ 2^15-1
-            INT (4 bytes)
-                Range: -2^31 + 1 ~ 2^31-1
-            BIGINT (8 bytes)
-                Range: -2^63 + 1 ~ 2^63-1
-            LARGEINT (16 bytes)
-                Range: -2^127 + 1 ~ 2^127-1
-            FLOAT (4 bytes)
-                Support scientific notation
-            DOUBLE (12 bytes)
-                Support scientific notation
-            DECIMAL[(precision, scale)] (16 bytes)
-                The decimal type with guaranteed precision. The default is DECIMAL(10, 0)
-                precision: 1 ~ 27
-                scale: 0 ~ 9
-                Where the integer part is 1 ~ 18
-                Does not support scientific notation
-            DATE (3 bytes)
-                Range: 0000-01-01 ~ 9999-12-31
-            DATETIME (8 bytes)
-                Range: 0000-01-01 00:00:00 ~ 9999-12-31 23:59:59
-            CHAR[(length)]
-                Fixed-length character string. Length range: 1 ~ 255. Default is 1
-            VARCHAR[(length)]
-                Variable length character string. Length range: 1 ~ 65533. Default is 1
-            HLL (1~16385 bytes)
-                HyperLogLog column type, do not need to specify the length and default value. The length is controlled within the system according to the degree of data aggregation.
-                Must be used with HLL_UNION aggregation type.
-            BITMAP
-                The bitmap column type does not need to specify the length and default value. Represents a collection of integers, and the maximum number of elements supported is 2^64-1.
-                Must be used with BITMAP_UNION aggregation type.
-            ```
-
-        * `aggr_type`
-
-            Aggregation type, the following aggregation types are supported:
-
-            ```
-            SUM: Sum. Applicable numeric types.
-            MIN: Find the minimum value. Suitable for numeric types.
-            MAX: Find the maximum value. Suitable for numeric types.
-            REPLACE: Replace. For rows with the same dimension column, the index column will be imported in the order of import, and the last imported will replace the first imported.
-            REPLACE_IF_NOT_NULL: non-null value replacement. The difference with REPLACE is that there is no replacement for null values. It should be noted here that the default value should be NULL, not an empty string. If it is an empty string, you should replace it with an empty string.
-            HLL_UNION: The aggregation method of HLL type columns, aggregated by HyperLogLog algorithm.
-            BITMAP_UNION: The aggregation mode of BIMTAP type columns, which performs the union aggregation of bitmaps.
-            ```
-
-        * `default_value`
-
-            Default value of the column. If the load data does not specify a value for this column, the system will assign a default value to this column.
-            
-            The syntax is: `default default_value`。
-            
-            Currently, the default value supports two forms:
-
-            1. The user specifies a fixed value, such as:
-
-            ```SQL
-            	k1 INT DEFAULT '1',
-                k2 CHAR(10) DEFAULT 'aaaa'
-            ```
-            2. Keywords are provided by the system. Currently, the following keywords are supported: 
-            
-            ```SQL
-                // This keyword is used only for DATETIME type. If the value is missing, the system assigns the current timestamp.
-                dt DATETIME DEFAULT CURRENT_TIMESTAMP
-            ```
-
-        Example:
-
-            ```
-            k1 TINYINT,
-            k2 DECIMAL(10,2) DEFAULT "10.5",
-            k4 BIGINT NULL DEFAULT "1000" COMMENT "This is column k4",
-            v1 VARCHAR(10) REPLACE NOT NULL,
-            v2 BITMAP BITMAP_UNION,
-            v3 HLL HLL_UNION,
-            v4 INT SUM NOT NULL DEFAULT "1" COMMENT "This is column v4"
-            ```
-
-#### index_definition_list
-
-    Index list definition:
-
-    `index_definition[, index_definition]`
-
-    * `index_definition`
-
-        Index definition:
-
-        ```sql
-        INDEX index_name (col_name) [USING BITMAP] COMMENT'xxxxxx'
-=======
 Column definition list:
 
 `column_definition[, column_definition]`
@@ -211,7 +99,6 @@ Column definition list:
         BITMAP
             The bitmap column type does not need to specify the length and default value. Represents a collection of integers, and the maximum number of elements supported is 2^64-1.
             Must be used with BITMAP_UNION aggregation type.
->>>>>>> 2.0.0-rc01
         ```
 
     * `aggr_type`
@@ -228,11 +115,7 @@ Column definition list:
         BITMAP_UNION: The aggregation mode of BIMTAP type columns, which performs the union aggregation of bitmaps.
         ```
 
-<<<<<<< HEAD
-#### engine_type
-=======
     * `default_value`
->>>>>>> 2.0.0-rc01
 
         Default value of the column. If the load data does not specify a value for this column, the system will assign a default value to this column.
         
@@ -265,11 +148,7 @@ Column definition list:
         v4 INT SUM NOT NULL DEFAULT "1" COMMENT "This is column v4"
         ```
 
-<<<<<<< HEAD
-#### keys_type
-=======
 #### index_definition_list
->>>>>>> 2.0.0-rc01
 
 Index list definition:
 
@@ -283,10 +162,6 @@ Index list definition:
     INDEX index_name (col_name) [USING BITMAP] COMMENT'xxxxxx'
     ```
 
-    <version since="2.0">
-    NOTE: when set table property `"enable_duplicate_without_keys_by_default" = "true"`, will create a duplicate model without sorting columns and prefix indexes by default.
-    </version>
-
     Example:
 
     ```sql
@@ -295,11 +170,7 @@ Index list definition:
     ...
     ```
 
-<<<<<<< HEAD
-#### table_comment
-=======
 #### engine_type
->>>>>>> 2.0.0-rc01
 
 Table engine type. All types in this document are OLAP. For other external table engine types, see [CREATE EXTERNAL TABLE](./CREATE-EXTERNAL-TABLE.md) document. Example:
 
@@ -378,16 +249,6 @@ Partition information supports three writing methods:
 </version>
 
 
-<<<<<<< HEAD
-    4. MULTI RANGE：Multi build integer RANGE partitions,Define the left closed and right open interval of the zone, and step size。
-
-        ```
-        PARTITION BY RANGE(int_col)
-        (
-            FROM (1) TO (100) INTERVAL 10
-        )
-        ```
-=======
 4. MULTI RANGE：Multi build integer RANGE partitions,Define the left closed and right open interval of the zone, and step size。
 
     ```
@@ -396,26 +257,11 @@ Partition information supports three writing methods:
         FROM (1) TO (100) INTERVAL 10
     )
     ```
->>>>>>> 2.0.0-rc01
     
 #### distribution_desc
 
 Define the data bucketing method.
 
-<<<<<<< HEAD
-    1) Hash
-       Syntax:
-       `DISTRIBUTED BY HASH (k1[,k2 ...]) [BUCKETS num|auto]`
-       Explain:
-       Hash bucketing using the specified key column.
-    2) Random
-       Syntax:
-       `DISTRIBUTED BY RANDOM [BUCKETS num|auto]`
-       Explain:
-       Use random numbers for bucketing.
-
-#### rollup_list
-=======
 1. Hash
    Syntax:
    `DISTRIBUTED BY HASH (k1[,k2 ...]) [BUCKETS num|auto]`
@@ -427,7 +273,6 @@ Define the data bucketing method.
    `DISTRIBUTED BY RANDOM [BUCKETS num|auto]`
    Explain:
    Use random numbers for bucketing.
->>>>>>> 2.0.0-rc01
 
 #### rollup_list
 
@@ -441,16 +286,12 @@ Multiple materialized views (ROLLUP) can be created at the same time as the tabl
 
     Example:
 
-<<<<<<< HEAD
-#### properties
-=======
     ```
     ROLLUP (
         r1 (k1, k3, v1, v2),
         r2 (k1, v1)
     )
     ```
->>>>>>> 2.0.0-rc01
 
 #### properties
 
@@ -467,6 +308,16 @@ Set table properties. The following attributes are currently supported:
 * `replication_allocation`
 
     Set the copy distribution according to Tag. This attribute can completely cover the function of the `replication_num` attribute.
+
+* `is_being_synced`  
+
+    Used to identify whether this table is copied by CCR and is being synchronized by syncer. The default is `false`.  
+
+    If set to `true`:  
+    `colocate_with`, `storage_policy` properties will be erased  
+    `dynamic partition`, `auto bucket` features will be disabled, that is, they will be displayed as enabled in `show create table`, but will not actually take effect. When `is_being_synced` is set to `false`, these features will resume working.  
+
+    This property is for CCR peripheral modules only and should not be manually set during CCR synchronization.  
 
 * `storage_medium/storage_cooldown_time`
 
@@ -491,15 +342,11 @@ Set table properties. The following attributes are currently supported:
 
    `"bloom_filter_columns" = "k1, k2, k3"`
 
-<<<<<<< HEAD
-        Deprecated.
-=======
 * `in_memory`
 
    Deprecated.
 
 * `function_column.sequence_col`
->>>>>>> 2.0.0-rc01
 
    When using the UNIQUE KEY model, you can specify a sequence column. When the KEY columns are the same, REPLACE will be performed according to the sequence column (the larger value replaces the smaller value, otherwise it cannot be replaced)
 
@@ -523,17 +370,7 @@ Set table properties. The following attributes are currently supported:
 
 * `light_schema_change`
 
-<<<<<<< HEAD
-        Whether to use the Light Schema Change optimization.
-        
-        If set to true, the addition and deletion of value columns can be done more quickly and synchronously.
-    
-        `"light_schema_change"="true"`
-
-        This feature is enabled by default after v1.2.1.
-=======
    Whether to use the Light Schema Change optimization.
->>>>>>> 2.0.0-rc01
     
    If set to true, the addition and deletion of value columns can be done more quickly and synchronously.
 
@@ -541,46 +378,6 @@ Set table properties. The following attributes are currently supported:
 
    This feature is enabled by default after v2.0.0.
 
-<<<<<<< HEAD
-        `"disable_auto_compaction" = "false"`
-
-    * `enable_single_replica_compaction`
-
-        Whether to enable single replica compaction for this table.
-
-        If this property is set to 'true', all replicas of the tablet will only have one replica performing compaction, while the others fetch rowsets from that replica.
-
-        `"enable_single_replica_compaction" = "false"`
-
-    * `enable_duplicate_without_keys_by_default`
-
-        When `true`, if Unique, Aggregate, or Duplicate is not specified when creating a table, a Duplicate model table without sorting columns and prefix indexes will be created by default.
-
-        `"enable_duplicate_without_keys_by_default" = "false"`
-
-    * `skip_write_index_on_load`
-
-        Whether to enable skip inverted index on load for this table.
-
-        If this property is set to 'true', skip writting index (only inverted index now) on first time load and delay writting 
-        index to compaction. It can reduce CPU and IO resource usage for high throughput load.
-
-        `"skip_write_index_on_load" = "false"`
-    
-    * Dynamic partition related
-    
-        The relevant parameters of dynamic partition are as follows:
-    
-        * `dynamic_partition.enable`: Used to specify whether the dynamic partition function at the table level is enabled. The default is true.
-        * `dynamic_partition.time_unit:` is used to specify the time unit for dynamically adding partitions, which can be selected as DAY (day), WEEK (week), MONTH (month), YEAR (year), HOUR (hour).
-        * `dynamic_partition.start`: Used to specify how many partitions to delete forward. The value must be less than 0. The default is Integer.MIN_VALUE.
-        * `dynamic_partition.end`: Used to specify the number of partitions created in advance. The value must be greater than 0.
-        * `dynamic_partition.prefix`: Used to specify the partition name prefix to be created. For example, if the partition name prefix is ​​p, the partition name will be automatically created as p20200108.
-        * `dynamic_partition.buckets`: Used to specify the number of partition buckets that are automatically created.
-        * `dynamic_partition.create_history_partition`: Whether to create a history partition.
-        * `dynamic_partition.history_partition_num`: Specify the number of historical partitions to be created.
-        * `dynamic_partition.reserved_history_periods`: Used to specify the range of reserved history periods.
-=======
 * `disable_auto_compaction`
 
    Whether to disable automatic compaction for this table.
@@ -612,6 +409,37 @@ Set table properties. The following attributes are currently supported:
 
    `"skip_write_index_on_load" = "false"`
 
+* `compaction_policy`
+
+    Configure the compaction strategy in the compression phase. Only support configuring the compaction policy as "time_series" or "size_based".
+
+    time_series: When the disk size of a rowset accumulates to a certain threshold, version merging takes place. The merged rowset is directly promoted to the base compaction stage. This approach effectively reduces the write amplification rate of compaction, especially in scenarios with continuous imports in a time series context.
+
+    In the case of time series compaction, the execution of compaction is adjusted using parameters that have the prefix time_series_compaction.
+
+    `"compaction_policy" = ""`
+
+* `time_series_compaction_goal_size_mbytes`
+
+    Time series compaction policy will utilize this parameter to adjust the size of input files for each compaction. The output file size will be approximately equal to the input file size.
+
+    `"time_series_compaction_goal_size_mbytes" = "1024"`
+
+* `time_series_compaction_file_count_threshold`
+
+    Time series compaction policy will utilize this parameter to adjust the minimum number of input files for each compaction.
+
+    If the number of files in a tablet exceeds the configured threshold, it will trigger a compaction process.
+
+    `"time_series_compaction_file_count_threshold" = "2000"`
+
+* `time_series_compaction_time_threshold_seconds`
+
+     When time series compaction policy is applied, a significant duration passes without a compaction being executed, a compaction will be triggered.
+
+    `"time_series_compaction_time_threshold_seconds" = "3600"`
+
+
 * Dynamic partition related
 
    The relevant parameters of dynamic partition are as follows:
@@ -625,7 +453,6 @@ Set table properties. The following attributes are currently supported:
 * `dynamic_partition.create_history_partition`: Whether to create a history partition.
 * `dynamic_partition.history_partition_num`: Specify the number of historical partitions to be created.
 * `dynamic_partition.reserved_history_periods`: Used to specify the range of reserved history periods.
->>>>>>> 2.0.0-rc01
     
 ### Example
 
@@ -913,13 +740,8 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
         PROPERTIES(
             "replication_num" = "1"
         );
-<<<<<<< HEAD
-```
-```
-=======
     ```
     ```sql
->>>>>>> 2.0.0-rc01
         CREATE TABLE create_table_multi_partion_integer
         (
             k1 BIGINT,
@@ -931,11 +753,7 @@ NOTE: Need to create the s3 resource and storage policy before the table can be 
         PROPERTIES(
             "replication_num" = "1"
         );
-<<<<<<< HEAD
-```
-=======
     ```
->>>>>>> 2.0.0-rc01
 
 NOTE: Multi Partition can be mixed with conventional manual creation of partitions. When using, you need to limit the partition column to only one, The default maximum number of partitions created in multi partition is 4096, This parameter can be adjusted in fe configuration `max_multi_partition_num`.
 
@@ -945,11 +763,7 @@ NOTE: Multi Partition can be mixed with conventional manual creation of partitio
 
 14. Add a duplicate without sorting column table
 
-<<<<<<< HEAD
-```sql
-=======
     ```sql
->>>>>>> 2.0.0-rc01
     CREATE TABLE example_db.table_hash
     (
         k1 DATE,
@@ -969,11 +783,7 @@ NOTE: Multi Partition can be mixed with conventional manual creation of partitio
         "replication_num" = "1",
         "enable_duplicate_without_keys_by_default" = "true"
     );
-<<<<<<< HEAD
-```
-=======
     ```
->>>>>>> 2.0.0-rc01
 
 </version>
 

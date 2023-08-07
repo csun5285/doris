@@ -126,21 +126,6 @@ Parameter Description:
     CREATE GLOBAL ALIAS FUNCTION id_masking(INT) WITH PARAMETER(id) AS CONCAT(LEFT(id, 3), '****', RIGHT(id, 4));
     ```
 
-6. Create a global custom scalar function
-
-   ```sql
-   CREATE GLOBAL FUNCTION my_add(INT, INT) RETURNS INT PROPERTIES (
-   "symbol" = "_ZN9doris_udf6AddUdfEPNS_15FunctionContextERKNS_6IntValES4_",
-   "object_file" = "http://host:port/libmyadd.so"
-   );
-   ````
-
-7. Create a global custom alias function
-
-   ```sql
-   CREATE GLOBAL ALIAS FUNCTION id_masking(INT) WITH PARAMETER(id) AS CONCAT(LEFT(id, 3), '****', RIGHT(id, 4));
-   ```` 
-
 ### Keywords
 
     CREATE, FUNCTION

@@ -238,6 +238,8 @@ public:
     size_t next_column_unique_id() const { return _next_column_unique_id; }
     bool has_bf_fpp() const { return _has_bf_fpp; }
     double bloom_filter_fpp() const { return _bf_fpp; }
+    bool is_in_memory() const { return _is_in_memory; }
+    void set_is_in_memory(bool is_in_memory) { _is_in_memory = is_in_memory; }
     void set_disable_auto_compaction(bool disable_auto_compaction) {
         _disable_auto_compaction = disable_auto_compaction;
     }
@@ -316,9 +318,11 @@ public:
     bool is_partial_update() const { return _is_partial_update; }
     size_t partial_input_column_size() const { return _partial_update_input_columns.size(); }
     bool is_column_missing(size_t cid) const;
-    bool allow_key_not_exist_in_partial_update() const {
-        return _allow_key_not_exist_in_partial_update;
+    bool can_insert_new_rows_in_partial_update() const {
+        return _can_insert_new_rows_in_partial_update;
     }
+    void set_is_strict_mode(bool is_strict_mode) { _is_strict_mode = is_strict_mode; }
+    bool is_strict_mode() const { return _is_strict_mode; }
     std::vector<uint32_t> get_missing_cids() { return _missing_cids; }
     std::vector<uint32_t> get_update_cids() { return _update_cids; }
 
@@ -361,8 +365,10 @@ private:
     std::set<std::string> _partial_update_input_columns;
     std::vector<uint32_t> _missing_cids;
     std::vector<uint32_t> _update_cids;
-    // if key not exist in old rowset, use default value or null
-    bool _allow_key_not_exist_in_partial_update = true;
+    // if key not exist in old rowset, use default value or null value for the unmentioned cols
+    // to generate a new row, only available in non-strict mode
+    bool _can_insert_new_rows_in_partial_update = true;
+    bool _is_strict_mode = false;
 };
 
 bool operator==(const TabletSchema& a, const TabletSchema& b);

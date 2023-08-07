@@ -29,11 +29,7 @@ under the License.
 ### Description
 #### Syntax
 
-<<<<<<< HEAD
-`DATETIME DATEDIFF (DATETIME expr1, DATETIME expr2)`
-=======
 `INT DATEDIFF (DATETIME expr1, DATETIME expr2)`
->>>>>>> 2.0.0-rc01
 
 
 Calculate expr1 - expr2, the result is accurate to the unit of a day.

@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 #include <gen_cpp/Status_types.h> // for TStatus
+#include <gen_cpp/types.pb.h>
 #include <glog/logging.h>
 #include <stdint.h>
 
@@ -59,6 +60,7 @@ TStatusError(ABORTED);
 TStatusError(DATA_QUALITY_ERROR);
 TStatusError(LABEL_ALREADY_EXISTS);
 TStatusError(NOT_AUTHORIZED);
+TStatusError(HTTP_ERROR);
 #undef TStatusError
 // BE internal errors
 E(OS_ERROR, -100);
@@ -231,6 +233,8 @@ E(CUMULATIVE_INVALID_NEED_MERGED_VERSIONS, -2004);
 E(CUMULATIVE_ERROR_DELETE_ACTION, -2005);
 E(CUMULATIVE_MISS_VERSION, -2006);
 E(CUMULATIVE_CLONE_OCCURRED, -2007);
+E(FULL_NO_SUITABLE_VERSION, -2008);
+E(FULL_MISS_VERSION, -2009);
 E(META_INVALID_ARGUMENT, -3000);
 E(META_OPEN_DB_ERROR, -3001);
 E(META_KEY_NOT_FOUND, -3002);
@@ -278,8 +282,7 @@ E(INVERTED_INDEX_BUILD_WAITTING, -6008);
 
 // clang-format off
 // whether to capture stacktrace
-template <int code>
-constexpr bool capture_stacktrace() {
+inline bool capture_stacktrace(int code) {
     return code != ErrorCode::OK
         && code != ErrorCode::END_OF_FILE
         && code != ErrorCode::MEM_LIMIT_EXCEEDED
@@ -291,6 +294,7 @@ constexpr bool capture_stacktrace() {
         && code != ErrorCode::PUSH_TRANSACTION_ALREADY_EXIST
         && code != ErrorCode::BE_NO_SUITABLE_VERSION
         && code != ErrorCode::CUMULATIVE_NO_SUITABLE_VERSION
+        && code != ErrorCode::FULL_NO_SUITABLE_VERSION
         && code != ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS
         && code != ErrorCode::ROWSET_RENAME_FILE_FAILED
         && code != ErrorCode::SEGCOMPACTION_INIT_READER
@@ -336,43 +340,22 @@ public:
     // move assign
     Status& operator=(Status&& rhs) noexcept = default;
 
-    // "Copy" c'tor from TStatus.
-    Status(const TStatus& status);
+    Status static create(const TStatus& status) {
+        return Error<true>(status.status_code,
+                           status.error_msgs.empty() ? "" : status.error_msgs[0]);
+    }
 
-    Status(const PStatus& pstatus);
+    Status static create(const PStatus& pstatus) {
+        return Error<true>(pstatus.status_code(),
+                           pstatus.error_msgs_size() == 0 ? "" : pstatus.error_msgs(0));
+    }
 
     template <int code, bool stacktrace = true, typename... Args>
     Status static Error(std::string_view msg, Args&&... args) {
-        Status status;
-        status._code = code;
-        status._err_msg = std::make_unique<ErrMsg>();
-        if constexpr (sizeof...(args) == 0) {
-            status._err_msg->_msg = msg;
-        } else {
-            status._err_msg->_msg = fmt::format(msg, std::forward<Args>(args)...);
-        }
-#ifdef ENABLE_STACKTRACE
-        if constexpr (stacktrace && capture_stacktrace<code>()) {
-            status._err_msg->_stack = get_stack_trace();
-        }
-#endif
-        return status;
+        return Error<stacktrace>(code, msg, std::forward<Args>(args)...);
     }
 
-    template <int code, bool stacktrace = true>
-    Status static Error() {
-        Status status;
-        status._code = code;
-#ifdef ENABLE_STACKTRACE
-        if constexpr (stacktrace && capture_stacktrace<code>()) {
-            status._err_msg = std::make_unique<ErrMsg>();
-            status._err_msg->_stack = get_stack_trace();
-        }
-#endif
-        return status;
-    }
-
-    template <typename... Args>
+    template <bool stacktrace = true, typename... Args>
     Status static Error(int code, std::string_view msg, Args&&... args) {
         Status status;
         status._code = code;
@@ -382,12 +365,12 @@ public:
         } else {
             status._err_msg->_msg = fmt::format(msg, std::forward<Args>(args)...);
         }
-        return status;
-    }
-
-    Status static Error(int code) {
-        Status status;
-        status._code = code;
+#ifdef ENABLE_STACKTRACE
+        if (stacktrace && capture_stacktrace(code)) {
+            status._err_msg->_stack = get_stack_trace();
+            LOG(WARNING) << "meet error status: " << status; // may print too many stacks.
+        }
+#endif
         return status;
     }
 
@@ -423,6 +406,7 @@ public:
     ERROR_CTOR(Aborted, ABORTED)
     ERROR_CTOR(DataQualityError, DATA_QUALITY_ERROR)
     ERROR_CTOR(NotAuthorized, NOT_AUTHORIZED)
+    ERROR_CTOR(HttpError, HTTP_ERROR)
 #undef ERROR_CTOR
 
     template <int code>
@@ -597,8 +581,3 @@ using Result = expected<T, Status>;
     } while (false)
 
 } // namespace doris
-#ifdef WARN_UNUSED_RESULT
-#undef WARN_UNUSED_RESULT
-#endif
-
-#define WARN_UNUSED_RESULT __attribute__((warn_unused_result))

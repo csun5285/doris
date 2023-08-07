@@ -57,6 +57,7 @@ import org.apache.doris.common.ThriftServerEventProcessor;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.Version;
 import org.apache.doris.common.annotation.LogException;
+import org.apache.doris.common.util.Util;
 import org.apache.doris.cooldown.CooldownDelete;
 import org.apache.doris.datasource.CatalogIf;
 import org.apache.doris.datasource.ExternalCatalog;
@@ -64,13 +65,17 @@ import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.master.MasterImpl;
 import org.apache.doris.mysql.privilege.AccessControllerManager;
 import org.apache.doris.mysql.privilege.PrivPredicate;
+import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.planner.StreamLoadPlanner;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ConnectProcessor;
 import org.apache.doris.qe.DdlExecutor;
+import org.apache.doris.qe.MasterCatalogExecutor;
 import org.apache.doris.qe.QeProcessorImpl;
 import org.apache.doris.qe.QueryState;
 import org.apache.doris.qe.VariableMgr;
+import org.apache.doris.statistics.ColumnStatistic;
+import org.apache.doris.statistics.StatisticsCacheKey;
 import org.apache.doris.statistics.query.QueryStats;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.Frontend;
@@ -164,6 +169,7 @@ import org.apache.doris.thrift.TTableIndexQueryStats;
 import org.apache.doris.thrift.TTableQueryStats;
 import org.apache.doris.thrift.TTableStatus;
 import org.apache.doris.thrift.TUpdateExportTaskStatusRequest;
+import org.apache.doris.thrift.TUpdateFollowerStatsCacheRequest;
 import org.apache.doris.thrift.TWaitingTxnStatusRequest;
 import org.apache.doris.thrift.TWaitingTxnStatusResult;
 import org.apache.doris.transaction.DatabaseTransactionMgr;
@@ -903,6 +909,8 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (params.isSyncJournalOnly()) {
             final TMasterOpResult result = new TMasterOpResult();
             result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
+            // just make the protocol happy
+            result.setPacket("".getBytes());
             return result;
         }
 
@@ -1735,16 +1743,23 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             return result;
         }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
-        List<TExecPlanFragmentParams> planFragmentParamsList = new ArrayList<>(tableNames.size());
+        List planFragmentParamsList = new ArrayList<>(tableNames.size());
         List<Long> tableIds = olapTables.stream().map(OlapTable::getId).collect(Collectors.toList());
         // todo: if is multi table, we need consider the lock time and the timeout
+        boolean enablePipelineLoad = Config.enable_pipeline_load;
         try {
             multiTableFragmentInstanceIdIndexMap.putIfAbsent(request.getTxnId(), 1);
             for (OlapTable table : olapTables) {
                 int index = multiTableFragmentInstanceIdIndexMap.get(request.getTxnId());
-                TExecPlanFragmentParams planFragmentParams = generatePlanFragmentParams(request, db, fullDbName,
-                        table, timeoutMs, index);
-                planFragmentParamsList.add(planFragmentParams);
+                if (enablePipelineLoad) {
+                    planFragmentParamsList.add(generatePipelineStreamLoadPut(request, db, fullDbName, table, timeoutMs,
+                            index));
+                } else {
+                    TExecPlanFragmentParams planFragmentParams = generatePlanFragmentParams(request, db, fullDbName,
+                            table, timeoutMs, index);
+
+                    planFragmentParamsList.add(planFragmentParams);
+                }
                 multiTableFragmentInstanceIdIndexMap.put(request.getTxnId(), ++index);
             }
             ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).getDatabaseTransactionMgr(db.getId())
@@ -1755,6 +1770,10 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             LOG.warn("catch unknown result.", e);
             status.setStatusCode(TStatusCode.INTERNAL_ERROR);
             status.addToErrorMsgs(e.getClass().getSimpleName() + ": " + Strings.nullToEmpty(e.getMessage()));
+            return result;
+        }
+        if (enablePipelineLoad) {
+            result.setPipelineParams(planFragmentParamsList);
             return result;
         }
         result.setParams(planFragmentParamsList);
@@ -1792,7 +1811,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
     private TExecPlanFragmentParams generatePlanFragmentParams(TStreamLoadPutRequest request, Database db,
                                                                String fullDbName, OlapTable table,
                                                                long timeoutMs) throws UserException {
-        return generatePlanFragmentParams(request, db, fullDbName, table, timeoutMs, 0);
+        return generatePlanFragmentParams(request, db, fullDbName, table, timeoutMs, 1);
     }
 
     private TExecPlanFragmentParams generatePlanFragmentParams(TStreamLoadPutRequest request, Database db,
@@ -1826,7 +1845,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (Strings.isNullOrEmpty(cluster)) {
             cluster = SystemInfoService.DEFAULT_CLUSTER;
         }
-
         Env env = Env.getCurrentEnv();
         String fullDbName = ClusterNamespace.getFullName(cluster, request.getDb());
         Database db = env.getInternalCatalog().getDbNullable(fullDbName);
@@ -1839,21 +1857,37 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
         Table table = db.getTableOrMetaException(request.getTbl(), TableType.OLAP);
+        return this.generatePipelineStreamLoadPut(request, db, fullDbName, (OlapTable) table, timeoutMs, 1);
+    }
+
+    private TPipelineFragmentParams generatePipelineStreamLoadPut(TStreamLoadPutRequest request, Database db,
+                                                                  String fullDbName, OlapTable table,
+                                                                  long timeoutMs,
+                                                               int multiTableFragmentInstanceIdIndex)
+            throws UserException {
+        if (db == null) {
+            String dbName = fullDbName;
+            if (Strings.isNullOrEmpty(request.getCluster())) {
+                dbName = request.getDb();
+            }
+            throw new UserException("unknown database, database=" + dbName);
+        }
         if (!table.tryReadLock(timeoutMs, TimeUnit.MILLISECONDS)) {
             throw new UserException(
                     "get table read lock timeout, database=" + fullDbName + ",table=" + table.getName());
         }
         try {
             StreamLoadTask streamLoadTask = StreamLoadTask.fromTStreamLoadPutRequest(request);
-            StreamLoadPlanner planner = new StreamLoadPlanner(db, (OlapTable) table, streamLoadTask);
-            TPipelineFragmentParams plan = planner.planForPipeline(streamLoadTask.getId());
+            StreamLoadPlanner planner = new StreamLoadPlanner(db, table, streamLoadTask);
+            TPipelineFragmentParams plan = planner.planForPipeline(streamLoadTask.getId(),
+                    multiTableFragmentInstanceIdIndex);
             // add table indexes to transaction state
             TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
                     .getTransactionState(db.getId(), request.getTxnId());
             if (txnState == null) {
                 throw new UserException("txn does not exist: " + request.getTxnId());
             }
-            txnState.addTableIndexes((OlapTable) table);
+            txnState.addTableIndexes(table);
             return plan;
         } finally {
             table.readUnlock();
@@ -1961,10 +1995,15 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!(catalog instanceof ExternalCatalog)) {
             throw new TException("Only support forward ExternalCatalog init operation.");
         }
-        ((ExternalCatalog) catalog).makeSureInitialized();
         TInitExternalCtlMetaResult result = new TInitExternalCtlMetaResult();
-        result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
-        result.setStatus("OK");
+        try {
+            ((ExternalCatalog) catalog).makeSureInitialized();
+            result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
+            result.setStatus(MasterCatalogExecutor.STATUS_OK);
+        } catch (Throwable t) {
+            LOG.warn("init catalog failed. catalog: {}", catalog.getName(), t);
+            result.setStatus(Util.getRootCauseStack(t));
+        }
         return result;
     }
 
@@ -1980,10 +2019,16 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!(db instanceof ExternalDatabase)) {
             throw new TException("Only support forward ExternalDatabase init operation.");
         }
-        ((ExternalDatabase) db).makeSureInitialized();
+
         TInitExternalCtlMetaResult result = new TInitExternalCtlMetaResult();
-        result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
-        result.setStatus("OK");
+        try {
+            ((ExternalDatabase) db).makeSureInitialized();
+            result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
+            result.setStatus(MasterCatalogExecutor.STATUS_OK);
+        } catch (Throwable t) {
+            LOG.warn("init database failed. catalog.database: {}", catalog.getName(), db.getFullName(), t);
+            result.setStatus(Util.getRootCauseStack(t));
+        }
         return result;
     }
 
@@ -2529,7 +2574,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         Map<String, String> properties = request.getProperties();
         RestoreStmt restoreStmt = new RestoreStmt(label, repoName, null, properties, request.getMeta(),
                 request.getJobInfo());
-        restoreStmt.disableDynamicPartition();
+        restoreStmt.setIsBeingSynced();
         LOG.trace("restore snapshot info, restoreStmt: {}", restoreStmt);
         try {
             ConnectContext ctx = ConnectContext.get();
@@ -2674,5 +2719,13 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
 
         return result;
+    }
+
+    @Override
+    public TStatus updateStatsCache(TUpdateFollowerStatsCacheRequest request) throws TException {
+        StatisticsCacheKey key = GsonUtils.GSON.fromJson(request.key, StatisticsCacheKey.class);
+        ColumnStatistic columnStatistic = GsonUtils.GSON.fromJson(request.colStats, ColumnStatistic.class);
+        Env.getCurrentEnv().getStatisticsCache().putCache(key, columnStatistic);
+        return new TStatus(TStatusCode.OK);
     }
 }

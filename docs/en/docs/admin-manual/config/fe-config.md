@@ -166,13 +166,13 @@ Mutable: `true`
 
 Master only: `true`
 
-### `analyze_task_timeout_in_minutes`
+### `analyze_task_timeout_in_hours`
 
 TODO
 
 Type: `int`
 
-Default: `120`
+Default: `12`
 
 Mutable: `false`
 
@@ -220,7 +220,7 @@ The path of the FE audit log file, used to store fe.audit.log
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/log`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/log`
 
 Mutable: `false`
 
@@ -301,6 +301,18 @@ Default: `5`
 Mutable: `true`
 
 Master only: `true`
+
+### `backend_proxy_num`
+
+BackendServiceProxy pool size for pooling GRPC channels.
+
+Type: `int`
+
+Default: `48`
+
+Mutable: `false`
+
+Master only: `false`
 
 ### `backend_rpc_timeout_ms`
 
@@ -416,7 +428,7 @@ The lock timeout of bdbje operation, in seconds. If there are many LockTimeoutEx
 
 Type: `int`
 
-Default: `1`
+Default: `5`
 
 Mutable: `false`
 
@@ -890,18 +902,6 @@ Mutable: `false`
 
 Master only: `false`
 
-### `collect_external_table_stats_by_sql`
-
-TODO
-
-Type: `boolean`
-
-Default: `true`
-
-Mutable: `true`
-
-Master only: `false`
-
 ### `colocate_group_relocate_delay_second`
 
 TODO
@@ -956,7 +956,7 @@ The path of the user-defined configuration file, used to store fe_custom.conf. T
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/conf`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/conf`
 
 Mutable: `false`
 
@@ -1720,6 +1720,18 @@ Mutable: `false`
 
 Master only: `false`
 
+### `enable_light_index_change`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `true`
+
+Master only: `true`
+
 ### `enable_local_replica_selection`
 
 TODO
@@ -1743,18 +1755,6 @@ Default: `false`
 Mutable: `true`
 
 Master only: `false`
-
-### `enable_map_type`
-
-TODO
-
-Type: `boolean`
-
-Default: `false`
-
-Mutable: `true`
-
-Master only: `true`
 
 ### `enable_metric_calculator`
 
@@ -1930,21 +1930,9 @@ TODO
 
 Type: `boolean`
 
-Default: `true`
-
-Mutable: `false`
-
-Master only: `true`
-
-### `enable_struct_type`
-
-TODO
-
-Type: `boolean`
-
 Default: `false`
 
-Mutable: `true`
+Mutable: `false`
 
 Master only: `true`
 
@@ -1983,6 +1971,18 @@ Default: `false`
 Mutable: `false`
 
 Master only: `false`
+
+### `enable_two_phase_read_opt`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `true`
+
+Master only: `true`
 
 ### `experimental_enable_workload_group`
 
@@ -2116,17 +2116,17 @@ Mutable: `true`
 
 Master only: `true`
 
-### `fuzzy_meta_service_use_short_connection`
+### `force_olap_table_replication_num`
 
-TODO
+Used to force the number of replicas of the internal table. If the config is greater than zero, the number of replicas specified by the user when creating the table will be ignored, and the value set by this parameter will be used. At the same time, the replica tags and other parameters specified in the create table statement will be ignored. This config does not effect the operations including creating partitions and modifying table properties. This config is recommended to be used only in the test environment
 
-Type: `boolean`
+Type: `int`
 
-Default: `false`
+Default: `0`
 
 Mutable: `true`
 
-Master only: `false`
+Master only: `true`
 
 ### `fuzzy_test_type`
 
@@ -2398,7 +2398,7 @@ The path to save jdbc drivers. When creating JDBC Catalog,if the specified drive
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/jdbc_drivers`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/jdbc_drivers`
 
 Mutable: `false`
 
@@ -2418,11 +2418,11 @@ Master only: `false`
 
 ### `jetty_server_max_http_header_size`
 
-The maximum HTTP header size of Jetty, in bytes, the default value is 10KB.
+The maximum HTTP header size of Jetty, in bytes, the default value is 1MB.
 
 Type: `int`
 
-Default: `10240`
+Default: `1048576`
 
 Mutable: `false`
 
@@ -2530,7 +2530,7 @@ The key store path of FE https service
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/conf/ssl/doris_ssl_certificate.keystore`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/conf/ssl/doris_ssl_certificate.keystore`
 
 Mutable: `false`
 
@@ -2571,6 +2571,18 @@ Default: `259200`
 Mutable: `true`
 
 Master only: `true`
+
+### `light_schema_change_force_to_true`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `true`
+
+Master only: `false`
 
 ### `load_checker_interval_ms`
 
@@ -2760,7 +2772,7 @@ TODO
 
 Type: `long`
 
-Default: `3221225472`
+Default: `536870912000`
 
 Mutable: `true`
 
@@ -2946,18 +2958,6 @@ Mutable: `false`
 
 Master only: `false`
 
-### `max_instance_num`
-
-TODO
-
-Type: `int`
-
-Default: `128`
-
-Mutable: `true`
-
-Master only: `false`
-
 ### `max_load_timeout_second`
 
 Maximal timeout for load job, in seconds.
@@ -3051,6 +3051,18 @@ Type: `int`
 Default: `1`
 
 Mutable: `true`
+
+Master only: `false`
+
+### `max_remote_file_system_cache_num`
+
+Max cache number of remote file system.
+
+Type: `long`
+
+Default: `100`
+
+Mutable: `false`
 
 Master only: `false`
 
@@ -3288,7 +3300,7 @@ The directory to save Doris meta data
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/doris-meta`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/doris-meta`
 
 Mutable: `false`
 
@@ -3312,7 +3324,7 @@ TODO
 
 Type: `int`
 
-Default: `0`
+Default: `5`
 
 Mutable: `true`
 
@@ -3336,7 +3348,7 @@ TODO
 
 Type: `boolean`
 
-Default: `false`
+Default: `true`
 
 Mutable: `true`
 
@@ -3361,18 +3373,6 @@ TODO
 Type: `int`
 
 Default: `200`
-
-Mutable: `true`
-
-Master only: `false`
-
-### `meta_service_use_short_connection`
-
-TODO
-
-Type: `boolean`
-
-Default: `false`
 
 Mutable: `true`
 
@@ -3600,7 +3600,7 @@ TODO
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/ca_certificate.p12`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/mysql_ssl_default_certificate/ca_certificate.p12`
 
 Mutable: `false`
 
@@ -3624,7 +3624,7 @@ TODO
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/mysql_ssl_default_certificate/server_certificate.p12`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/mysql_ssl_default_certificate/server_certificate.p12`
 
 Mutable: `false`
 
@@ -3696,7 +3696,7 @@ The installation directory of the plugin
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/plugins`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/plugins`
 
 Mutable: `false`
 
@@ -3713,6 +3713,18 @@ Default: `true`
 Mutable: `true`
 
 Master only: `true`
+
+### `point_query_timeout_ms`
+
+The timeout of RPC for high concurrenty short circuit query
+
+Type: `int`
+
+Default: `10000`
+
+Mutable: `false`
+
+Master only: `false`
 
 ### `pre_heating_time_limit_sec`
 
@@ -3994,17 +4006,41 @@ Mutable: `false`
 
 Master only: `false`
 
+### `schedule_batch_size`
+
+TODO
+
+Type: `int`
+
+Default: `50`
+
+Mutable: `true`
+
+Master only: `true`
+
+### `schedule_decommission_slot_num_per_path`
+
+TODO
+
+Type: `int`
+
+Default: `8`
+
+Mutable: `true`
+
+Master only: `true`
+
 ### `schedule_slot_num_per_path`
 
 TODO
 
 Type: `int`
 
-Default: `2`
+Default: `4`
 
-Mutable: `false`
+Mutable: `true`
 
-Master only: `false`
+Master only: `true`
 
 ### `scheduler_mtmv_job_expired`
 
@@ -4072,7 +4108,7 @@ TODO
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/small_files`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/small_files`
 
 Mutable: `false`
 
@@ -4084,7 +4120,7 @@ Default spark dpp version
 
 Type: `String`
 
-Default: `1.0.0`
+Default: `1.2-SNAPSHOT`
 
 Mutable: `false`
 
@@ -4096,7 +4132,7 @@ Spark dir for Spark Load
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/lib/spark2x`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/spark2x`
 
 Mutable: `true`
 
@@ -4108,7 +4144,7 @@ Spark launcher log dir
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/log/spark_launcher_log`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/log/spark_launcher_log`
 
 Mutable: `false`
 
@@ -4174,18 +4210,6 @@ Mutable: `false`
 
 Master only: `false`
 
-### `statistic_internal_table_replica_num`
-
-TODO
-
-Type: `int`
-
-Default: `1`
-
-Mutable: `false`
-
-Master only: `false`
-
 ### `statistics_simultaneously_running_task_num`
 
 TODO
@@ -4193,6 +4217,30 @@ TODO
 Type: `int`
 
 Default: `10`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `statistics_sql_mem_limit_in_bytes`
+
+TODO
+
+Type: `long`
+
+Default: `2147483648`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `statistics_sql_parallel_exec_instance_num`
+
+TODO
+
+Type: `int`
+
+Default: `1`
 
 Mutable: `false`
 
@@ -4348,7 +4396,7 @@ The path of the FE log file, used to store fe.log
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/log`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/log`
 
 Mutable: `false`
 
@@ -4558,7 +4606,7 @@ The directory to save Doris temp data
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/temp_dir`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/temp_dir`
 
 Mutable: `false`
 
@@ -4726,7 +4774,7 @@ Yarn client path
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/lib/yarn-client/hadoop/bin/yarn`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/yarn-client/hadoop/bin/yarn`
 
 Mutable: `false`
 
@@ -4738,7 +4786,7 @@ Yarn config path
 
 Type: `String`
 
-Default: `/mnt/disk1/dengxin/selectdb-core/lib/yarn-config`
+Default: `/mnt/disk1/gavinchou/workspace/selectdb-dev/lib/yarn-config`
 
 Mutable: `false`
 

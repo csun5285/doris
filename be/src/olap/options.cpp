@@ -72,10 +72,9 @@ Status parse_root_path(const string& root_path, StorePath* path) {
 
     // parse root path name
     StripWhiteSpace(&tmp_vec[0]);
-    tmp_vec[0].erase(tmp_vec[0].find_last_not_of("/") + 1);
+    tmp_vec[0].erase(tmp_vec[0].find_last_not_of('/') + 1);
     if (tmp_vec[0].empty() || tmp_vec[0][0] != '/') {
-        LOG(WARNING) << "invalid store path. path=" << tmp_vec[0];
-        return Status::Error<INVALID_ARGUMENT>();
+        return Status::Error<INVALID_ARGUMENT>("invalid store path. path={}", tmp_vec[0]);
     }
 
     string canonicalized_path;
@@ -116,8 +115,8 @@ Status parse_root_path(const string& root_path, StorePath* path) {
             // path, so it can override medium_str
             medium_str = to_upper(value);
         } else {
-            LOG(WARNING) << "invalid property of store path, " << tmp_vec[i];
-            return Status::Error<INVALID_ARGUMENT>();
+            return Status::Error<INVALID_ARGUMENT>("invalid property of store path, {}",
+                                                   tmp_vec[i]);
         }
     }
 
@@ -126,7 +125,8 @@ Status parse_root_path(const string& root_path, StorePath* path) {
         if (!valid_signed_number<int64_t>(capacity_str) ||
             strtol(capacity_str.c_str(), nullptr, 10) < 0) {
             LOG(WARNING) << "invalid capacity of store path, capacity=" << capacity_str;
-            return Status::Error<INVALID_ARGUMENT>();
+            return Status::Error<INVALID_ARGUMENT>("invalid capacity of store path, capacity={}",
+                                                   capacity_str);
         }
         path->capacity_bytes = strtol(capacity_str.c_str(), nullptr, 10) * GB_EXCHANGE_BYTE;
     }
@@ -140,8 +140,7 @@ Status parse_root_path(const string& root_path, StorePath* path) {
         } else if (medium_str == REMOTE_CACHE_UC) {
             path->storage_medium = TStorageMedium::REMOTE_CACHE;
         } else {
-            LOG(WARNING) << "invalid storage medium. medium=" << medium_str;
-            return Status::Error<INVALID_ARGUMENT>();
+            return Status::Error<INVALID_ARGUMENT>("invalid storage medium. medium={}", medium_str);
         }
     }
 
@@ -160,8 +159,8 @@ Status parse_conf_store_paths(const string& config_path, std::vector<StorePath>*
         }
     }
     if (paths->empty() || (path_vec.size() != paths->size() && !config::ignore_broken_disk)) {
-        LOG(WARNING) << "fail to parse storage_root_path config. value=[" << config_path << "]";
-        return Status::Error<INVALID_ARGUMENT>();
+        return Status::Error<INVALID_ARGUMENT>("fail to parse storage_root_path config. value={}",
+                                               config_path);
     }
     return Status::OK();
 }
@@ -224,7 +223,7 @@ Status parse_conf_rm_paths(const std::string& config_path, std::vector<std::stri
         if (config.IsString()) {
             path.push_back(config.GetString());
         } else {
-            return Status::Error<INVALID_ARGUMENT>();
+            return Status::Error<INVALID_ARGUMENT>("invalid file cache paths");
         }
     }
     return Status::OK();

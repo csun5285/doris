@@ -37,6 +37,7 @@
 #include "gen_cpp/MasterService_types.h"
 #include "gutil/ref_counted.h"
 #include "io/fs/file_system.h"
+#include "olap/calc_delete_bitmap_executor.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/olap_meta.h"
@@ -160,6 +161,9 @@ public:
     DeleteBitmapTxnManager* delete_bitmap_txn_manager() { return _delete_bitmap_txn_manager.get(); }
 
     MemTableFlushExecutor* memtable_flush_executor() { return _memtable_flush_executor.get(); }
+    CalcDeleteBitmapExecutor* calc_delete_bitmap_executor() {
+        return _calc_delete_bitmap_executor.get();
+    }
 
     cloud::MetaMgr* meta_mgr() { return _meta_mgr.get(); }
     cloud::CloudTabletMgr* tablet_mgr() { return _tablet_mgr.get(); }
@@ -381,6 +385,7 @@ private:
     std::unique_ptr<RowsetIdGenerator> _rowset_id_generator;
 
     std::unique_ptr<MemTableFlushExecutor> _memtable_flush_executor;
+    std::unique_ptr<CalcDeleteBitmapExecutor> _calc_delete_bitmap_executor;
 
     // Used to control the migration from segment_v1 to segment_v2, can be deleted in futrue.
     // Type of new loaded data

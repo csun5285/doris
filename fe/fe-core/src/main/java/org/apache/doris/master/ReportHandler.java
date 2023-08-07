@@ -83,7 +83,6 @@ import org.apache.doris.thrift.TStorageType;
 import org.apache.doris.thrift.TTablet;
 import org.apache.doris.thrift.TTabletInfo;
 import org.apache.doris.thrift.TTabletMetaInfo;
-import org.apache.doris.thrift.TTabletMetaType;
 import org.apache.doris.thrift.TTaskType;
 
 import com.google.common.base.Preconditions;
@@ -94,7 +93,6 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Queues;
 import com.google.common.collect.Sets;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
@@ -434,10 +432,6 @@ public class ReportHandler extends Daemon {
         List<CooldownConf> cooldownConfToPush = new LinkedList<>();
         List<CooldownConf> cooldownConfToUpdate = new LinkedList<>();
 
-        List<Triple<Long, Integer, Boolean>> tabletToInMemory = Lists.newArrayList();
-
-        List<Triple<Long, Integer, Boolean>> tabletToPersistent = Lists.newArrayList();
-
         // 1. do the diff. find out (intersection) / (be - meta) / (meta - be)
         Env.getCurrentInvertedIndex().tabletReport(backendId, backendTablets, storageMediumMap,
                 tabletSyncMap,
@@ -448,8 +442,6 @@ public class ReportHandler extends Daemon {
                 transactionsToClear,
                 tabletRecoveryMap,
                 tabletToUpdate,
-                tabletToInMemory,
-                tabletToPersistent,
                 cooldownConfToPush,
                 cooldownConfToUpdate);
 
@@ -494,30 +486,12 @@ public class ReportHandler extends Daemon {
             handleUpdateTabletMeta(backendId, tabletToUpdate);
         }
 
-        // 10. send set tablet in memory to be
-        if (!tabletToInMemory.isEmpty()) {
-            handleSetTabletInMemory(backendId, tabletToInMemory);
-        }
-
         // handle cooldown conf
         if (!cooldownConfToPush.isEmpty()) {
             handlePushCooldownConf(backendId, cooldownConfToPush);
         }
         if (!cooldownConfToUpdate.isEmpty()) {
             Env.getCurrentEnv().getCooldownConfHandler().addCooldownConfToUpdate(cooldownConfToUpdate);
-        }
-
-        // handle cooldown conf
-        if (!cooldownConfToPush.isEmpty()) {
-            handlePushCooldownConf(backendId, cooldownConfToPush);
-        }
-        if (!cooldownConfToUpdate.isEmpty()) {
-            Env.getCurrentEnv().getCooldownConfHandler().addCooldownConfToUpdate(cooldownConfToUpdate);
-        }
-
-        // 10. send set tablet persistent to be
-        if (!tabletToPersistent.isEmpty()) {
-            handleSetTabletPersistent(backendId, tabletToPersistent);
         }
 
         final SystemInfoService currentSystemInfo = Env.getCurrentSystemInfo();
@@ -834,10 +808,13 @@ public class ReportHandler extends Daemon {
                                             olapTable.getCompressionType(),
                                             olapTable.getEnableUniqueKeyMergeOnWrite(), olapTable.getStoragePolicy(),
                                             olapTable.disableAutoCompaction(),
-                                            olapTable.isPersistent(),
                                             olapTable.enableSingleReplicaCompaction(),
-                                            olapTable.skipWriteIndexOnLoad(),
-                                            olapTable.storeRowColumn(), olapTable.isDynamicSchema(), binlogConfig);
+                                            olapTable.skipWriteIndexOnLoad(), olapTable.getCompactionPolicy(),
+                                            olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                                            olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                                            olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                                            olapTable.storeRowColumn(), olapTable.isDynamicSchema(),
+                                            binlogConfig);
 
                                     createReplicaTask.setIsRecoverTask(true);
                                     createReplicaBatchTask.addTask(createReplicaTask);
@@ -1104,23 +1081,6 @@ public class ReportHandler extends Daemon {
                     tabletToUpdate.subList(start, Math.min(start + updateBatchSize, tabletToUpdate.size())));
             batchTask.addTask(task);
         }
-    }
-
-    private static void handleSetTabletInMemory(long backendId, List<Triple<Long, Integer, Boolean>> tabletToInMemory) {
-        AgentBatchTask batchTask = new AgentBatchTask();
-        UpdateTabletMetaInfoTask task = new UpdateTabletMetaInfoTask(backendId, tabletToInMemory,
-                TTabletMetaType.INMEMORY);
-        batchTask.addTask(task);
-        AgentTaskExecutor.submit(batchTask);
-    }
-
-
-    private static void handleSetTabletPersistent(long backendId,
-            List<Triple<Long, Integer, Boolean>> tabletToPersistent) {
-        AgentBatchTask batchTask = new AgentBatchTask();
-        UpdateTabletMetaInfoTask task = new UpdateTabletMetaInfoTask(backendId, tabletToPersistent,
-                                                                     TTabletMetaType.PERSISTENT);
-        batchTask.addTask(task);
         AgentTaskExecutor.submit(batchTask);
     }
 

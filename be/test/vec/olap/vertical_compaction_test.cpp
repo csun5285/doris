@@ -78,6 +78,7 @@ static StorageEngine* k_engine = nullptr;
 class VerticalCompactionTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        config::vertical_compaction_max_row_source_memory_mb = 1;
         char buffer[MAX_PATH_LEN];
         EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
         absolute_dir = std::string(buffer) + kTestDir;
@@ -87,11 +88,15 @@ protected:
                             ->create_directory(absolute_dir + "/tablet_path")
                             .ok());
 
+        _data_dir = new DataDir(absolute_dir, 100000000);
+        _data_dir->init();
+
         doris::EngineOptions options;
         k_engine = new StorageEngine(options);
         StorageEngine::_s_instance = k_engine;
     }
     void TearDown() override {
+        SAFE_DELETE(_data_dir);
         EXPECT_TRUE(io::global_local_filesystem()->delete_directory(absolute_dir).ok());
         if (k_engine != nullptr) {
             k_engine->stop();
@@ -337,8 +342,14 @@ protected:
                                UniqueId(1, 2), TTabletType::TABLET_TYPE_DISK,
                                TCompressionType::LZ4F, 0, enable_unique_key_merge_on_write));
 
-        TabletSharedPtr tablet(new Tablet(tablet_meta, nullptr));
+        TabletSharedPtr tablet(new Tablet(tablet_meta, _data_dir));
         tablet->init();
+        bool exists = false;
+        auto res = io::global_local_filesystem()->exists(tablet->tablet_path(), &exists);
+        EXPECT_TRUE(res.ok() && !exists);
+        res = io::global_local_filesystem()->create_directory(tablet->tablet_path());
+        EXPECT_TRUE(res.ok());
+
         if (has_delete_handler) {
             // delete data with key < 1000
             std::vector<TCondition> conditions;
@@ -395,6 +406,7 @@ protected:
 private:
     const std::string kTestDir = "/ut_dir/vertical_compaction_test";
     string absolute_dir;
+    DataDir* _data_dir = nullptr;
 };
 
 TEST_F(VerticalCompactionTest, TestRowSourcesBuffer) {
@@ -457,7 +469,7 @@ TEST_F(VerticalCompactionTest, TestRowSourcesBuffer) {
 TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -534,7 +546,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(), num_input_rowset * num_segments * rows_per_segment);
     std::vector<uint32_t> segment_num_rows;
@@ -564,7 +576,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -641,7 +653,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(), num_input_rowset * num_segments * rows_per_segment);
     std::vector<uint32_t> segment_num_rows;
@@ -672,7 +684,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -723,7 +735,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
     RowIdConversion rowid_conversion;
     stats.rowid_conversion = &rowid_conversion;
     s = Merger::vertical_merge_rowsets(tablet, ReaderType::READER_BASE_COMPACTION, tablet_schema,
-                                       input_rs_readers, output_rs_writer.get(), 100, &stats);
+                                       input_rs_readers, output_rs_writer.get(), 10000, &stats);
     EXPECT_TRUE(s.ok());
     RowsetSharedPtr out_rowset = output_rs_writer->build();
 
@@ -749,7 +761,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(), num_segments * rows_per_segment);
     std::vector<uint32_t> segment_num_rows;
@@ -772,7 +784,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -849,7 +861,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(),
               num_input_rowset * num_segments * rows_per_segment - num_input_rowset * 100);
@@ -866,7 +878,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
 TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -943,7 +955,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(),
               num_input_rowset * num_segments * rows_per_segment - num_input_rowset * 100);
@@ -960,7 +972,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
 TEST_F(VerticalCompactionTest, TestAggKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -1037,7 +1049,7 @@ TEST_F(VerticalCompactionTest, TestAggKeyVerticalMerge) {
             output_data.emplace_back(columns[0].column->get_int(i), columns[1].column->get_int(i));
         }
     } while (s == Status::OK());
-    EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+    EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
     EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
     EXPECT_EQ(output_data.size(), num_segments * rows_per_segment);
     std::vector<uint32_t> segment_num_rows;

@@ -138,8 +138,6 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
     // Runtime filters assigned to this node.
     protected List<RuntimeFilter> runtimeFilters = new ArrayList<>();
 
-    private boolean cardinalityIsDone = false;
-
     protected List<SlotId> outputSlotIds;
 
     protected StatisticalType statisticalType = StatisticalType.DEFAULT;
@@ -432,7 +430,7 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         return targetConjuncts.get(0);
     }
 
-    protected List<Expr> splitAndCompoundPredicateToConjuncts(Expr vconjunct) {
+    public static List<Expr> splitAndCompoundPredicateToConjuncts(Expr vconjunct) {
         List<Expr> conjuncts = Lists.newArrayList();
         if (vconjunct instanceof CompoundPredicate) {
             CompoundPredicate andCompound = (CompoundPredicate) vconjunct;
@@ -957,6 +955,25 @@ public abstract class PlanNode extends TreeNode<PlanNode> implements PlanStats {
         // don't round cardinality down to zero for safety.
         if (cardinality == 0 && preConjunctCardinality > 0) {
             cardinality = 1;
+        }
+    }
+
+    /**
+     * find planNode recursively based on the planNodeId
+     */
+    public static PlanNode findPlanNodeFromPlanNodeId(PlanNode root, PlanNodeId id) {
+        if (root == null || root.getId() == null || id == null) {
+            return null;
+        } else if (root.getId().equals(id)) {
+            return root;
+        } else {
+            for (PlanNode child : root.getChildren()) {
+                PlanNode retNode = findPlanNodeFromPlanNodeId(child, id);
+                if (retNode != null) {
+                    return retNode;
+                }
+            }
+            return null;
         }
     }
 

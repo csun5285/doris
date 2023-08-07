@@ -79,10 +79,16 @@ public final class MetricRepo {
 
     public static LongCounterMetric COUNTER_QUERY_TABLE;
     public static LongCounterMetric COUNTER_QUERY_OLAP_TABLE;
+    public static AutoMappedMetric<LongCounterMetric> USER_COUNTER_QUERY_ALL;
+    public static AutoMappedMetric<LongCounterMetric> USER_COUNTER_QUERY_ERR;
     public static Histogram HISTO_QUERY_LATENCY;
+
     public static Histogram HISTO_HTTP_COPY_INTO_UPLOAD_LATENCY;
     public static Histogram HISTO_HTTP_COPY_INTO_QUERY_LATENCY;
+
     public static AutoMappedMetric<Histogram> DB_HISTO_QUERY_LATENCY;
+    public static AutoMappedMetric<Histogram> USER_HISTO_QUERY_LATENCY;
+
     public static AutoMappedMetric<GaugeMetricImpl<Long>> USER_GAUGE_QUERY_INSTANCE_NUM;
     public static AutoMappedMetric<LongCounterMetric> USER_COUNTER_QUERY_INSTANCE_BEGIN;
     public static AutoMappedMetric<LongCounterMetric> BE_COUNTER_QUERY_RPC_ALL;
@@ -423,8 +429,23 @@ public final class MetricRepo {
         COUNTER_QUERY_OLAP_TABLE = new LongCounterMetric("query_olap_table", MetricUnit.REQUESTS,
                 "total query from olap table");
         DORIS_METRIC_REGISTER.addMetrics(COUNTER_QUERY_OLAP_TABLE);
+        USER_COUNTER_QUERY_ALL = new AutoMappedMetric<>(name -> {
+            LongCounterMetric userCountQueryAll  = new LongCounterMetric("query_total", MetricUnit.REQUESTS,
+                    "total query for single user");
+            userCountQueryAll.addLabel(new MetricLabel("user", name));
+            DORIS_METRIC_REGISTER.addMetrics(userCountQueryAll);
+            return userCountQueryAll;
+        });
+        USER_COUNTER_QUERY_ERR = new AutoMappedMetric<>(name -> {
+            LongCounterMetric userCountQueryErr  = new LongCounterMetric("query_err", MetricUnit.REQUESTS,
+                    "total error query for single user");
+            userCountQueryErr.addLabel(new MetricLabel("user", name));
+            DORIS_METRIC_REGISTER.addMetrics(userCountQueryErr);
+            return userCountQueryErr;
+        });
         HISTO_QUERY_LATENCY = METRIC_REGISTER.histogram(
                 MetricRegistry.name("query", "latency", "ms"));
+
         HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST = new LongCounterMetric("http_copy_into_upload_request_total",
                 MetricUnit.REQUESTS, "http copy into upload total request");
         DORIS_METRIC_REGISTER.addMetrics(HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST);
@@ -441,8 +462,13 @@ public final class MetricRepo {
             MetricRegistry.name("http_copy_into_upload", "latency", "ms"));
         HISTO_HTTP_COPY_INTO_QUERY_LATENCY = METRIC_REGISTER.histogram(
             MetricRegistry.name("http_copy_into_query", "latency", "ms"));
+
         DB_HISTO_QUERY_LATENCY = new AutoMappedMetric<>(name -> {
             String metricName = MetricRegistry.name("query", "latency", "ms", "db=" + name);
+            return METRIC_REGISTER.histogram(metricName);
+        });
+        USER_HISTO_QUERY_LATENCY = new AutoMappedMetric<>(name -> {
+            String metricName = MetricRegistry.name("query", "latency", "ms", "user=" + name);
             return METRIC_REGISTER.histogram(metricName);
         });
         USER_COUNTER_QUERY_INSTANCE_BEGIN = addLabeledMetrics("user", () ->
@@ -799,8 +825,7 @@ public final class MetricRepo {
         JvmStats jvmStats = jvmService.stats();
         visitor.visitJvm(sb, jvmStats);
 
-        visitor.setMetricNumber(
-                DORIS_METRIC_REGISTER.getMetrics().size() + DORIS_METRIC_REGISTER.getSystemMetrics().size());
+        visitor.setMetricNumber(DORIS_METRIC_REGISTER.getAllMetricSize());
         // doris metrics
         for (Metric metric : DORIS_METRIC_REGISTER.getMetrics()) {
             visitor.visit(sb, MetricVisitor.FE_PREFIX, metric);

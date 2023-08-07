@@ -36,7 +36,6 @@ under the License.
         <awssdk.version>2.17.257</awssdk.version>
         <huaweiobs.version>3.1.1-hw-45</huaweiobs.version>
         <tencentcos.version>3.3.5</tencentcos.version>
-        <aliyunoss.version>3.2.2</aliyunoss.version>
     </properties>
     <profiles>
         <profile>
@@ -414,7 +413,6 @@ under the License.
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-aliyun</artifactId>
-            <version>${aliyunoss.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
@@ -576,6 +574,18 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-format</artifactId>
+            <version>${paimon.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
+            <version>${paimon.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-oss</artifactId>
             <version>${paimon.version}</version>
         </dependency>
 
@@ -861,7 +871,7 @@ under the License.
                     <reuseForks>false</reuseForks>
                     <useFile>false</useFile>
                     <argLine>
-                        -javaagent:${settings.localRepository}/org/jmockit/jmockit/${jmockit.version}/jmockit-${jmockit.version}.jar
+                        -Xmx512m -javaagent:${settings.localRepository}/org/jmockit/jmockit/${jmockit.version}/jmockit-${jmockit.version}.jar
                     </argLine>
                 </configuration>
             </plugin>

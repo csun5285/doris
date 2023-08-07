@@ -67,7 +67,10 @@ Status TabletMeta::create(const TCreateTabletReq& request, const TabletUid& tabl
             request.__isset.enable_unique_key_merge_on_write
                     ? request.enable_unique_key_merge_on_write
                     : false,
-            std::move(binlog_config));
+            std::move(binlog_config), request.compaction_policy,
+            request.time_series_compaction_goal_size_mbytes,
+            request.time_series_compaction_file_count_threshold,
+            request.time_series_compaction_time_threshold_seconds);
     return Status::OK();
 }
 
@@ -84,7 +87,10 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
                        TCompressionType::type compression_type, bool is_in_memory,
                        bool is_persistent, int64_t storage_policy_id,
                        bool enable_unique_key_merge_on_write,
-                       std::optional<TBinlogConfig> binlog_config)
+                       std::optional<TBinlogConfig> binlog_config, std::string compaction_policy,
+                       int64_t time_series_compaction_goal_size_mbytes,
+                       int64_t time_series_compaction_file_count_threshold,
+                       int64_t time_series_compaction_time_threshold_seconds)
         : _tablet_uid(0, 0),
           _schema(new TabletSchema),
           _delete_bitmap(new DeleteBitmap(tablet_id)) {
@@ -107,6 +113,13 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
     tablet_meta_pb.set_is_in_memory(is_in_memory);
     tablet_meta_pb.set_is_persistent(is_persistent);
     tablet_meta_pb.set_storage_policy_id(storage_policy_id);
+    tablet_meta_pb.set_compaction_policy(compaction_policy);
+    tablet_meta_pb.set_time_series_compaction_goal_size_mbytes(
+            time_series_compaction_goal_size_mbytes);
+    tablet_meta_pb.set_time_series_compaction_file_count_threshold(
+            time_series_compaction_file_count_threshold);
+    tablet_meta_pb.set_time_series_compaction_time_threshold_seconds(
+            time_series_compaction_time_threshold_seconds);
     TabletSchemaPB* schema = tablet_meta_pb.mutable_schema();
     schema->set_num_short_key_columns(tablet_schema.short_key_column_count);
     schema->set_num_rows_per_row_block(config::default_num_rows_per_column_file_block);
@@ -279,7 +292,6 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
     if (tablet_schema.__isset.skip_write_index_on_load) {
         schema->set_skip_write_index_on_load(tablet_schema.skip_write_index_on_load);
     }
-
     if (binlog_config.has_value()) {
         BinlogConfig tmp_binlog_config;
         tmp_binlog_config = binlog_config.value();
@@ -379,8 +391,8 @@ Status TabletMeta::create_from_file(const string& file_path) {
     try {
         tablet_meta_pb.CopyFrom(file_header.message());
     } catch (...) {
-        LOG(WARNING) << "fail to copy protocol buffer object. file='" << file_path;
-        return Status::Error<PARSE_PROTOBUF_ERROR>();
+        return Status::Error<PARSE_PROTOBUF_ERROR>("fail to copy protocol buffer object. file={}",
+                                                   file_path);
     }
 
     init_from_pb(tablet_meta_pb);
@@ -421,7 +433,8 @@ Status TabletMeta::save(const string& file_path, const TabletMetaPB& tablet_meta
         file_header.mutable_message()->CopyFrom(tablet_meta_pb);
     } catch (...) {
         LOG(WARNING) << "fail to copy protocol buffer object. file='" << file_path;
-        return Status::Error<ErrorCode::INTERNAL_ERROR>();
+        return Status::Error<ErrorCode::INTERNAL_ERROR>(
+                "fail to copy protocol buffer object. file={}", file_path);
     }
     RETURN_IF_ERROR(file_header.prepare());
     RETURN_IF_ERROR(file_header.serialize());
@@ -463,8 +476,7 @@ Status TabletMeta::deserialize(const string& meta_binary) {
     TabletMetaPB tablet_meta_pb;
     bool parsed = tablet_meta_pb.ParseFromString(meta_binary);
     if (!parsed) {
-        LOG(WARNING) << "parse tablet meta failed";
-        return Status::Error<INIT_FAILED>();
+        return Status::Error<INIT_FAILED>("parse tablet meta failed");
     }
     init_from_pb(tablet_meta_pb);
     return Status::OK();
@@ -529,6 +541,10 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     // init _schema
     _schema = TabletSchemaCache::instance()->insert(_index_id, tablet_meta_pb.schema());
 
+    if (tablet_meta_pb.has_enable_unique_key_merge_on_write()) {
+        _enable_unique_key_merge_on_write = tablet_meta_pb.enable_unique_key_merge_on_write();
+    }
+
 #ifndef CLOUD_MODE
     // init _rs_metas
     for (auto& it : tablet_meta_pb.rs_metas()) {
@@ -537,10 +553,15 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
         _rs_metas.push_back(std::move(rs_meta));
     }
 
-    for (auto& it : tablet_meta_pb.stale_rs_metas()) {
-        RowsetMetaSharedPtr rs_meta(new RowsetMeta());
-        rs_meta->init_from_pb(it);
-        _stale_rs_metas.push_back(std::move(rs_meta));
+    // For mow table, delete bitmap of stale rowsets has not been persisted.
+    // When be restart, query should not read the stale rowset, otherwise duplicate keys
+    // will be read out. Therefore, we don't add them to _stale_rs_meta for mow table.
+    if (!_enable_unique_key_merge_on_write) {
+        for (auto& it : tablet_meta_pb.stale_rs_metas()) {
+            RowsetMetaSharedPtr rs_meta(new RowsetMeta());
+            rs_meta->init_from_pb(it);
+            _stale_rs_metas.push_back(std::move(rs_meta));
+        }
     }
 #endif
 
@@ -555,10 +576,6 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     _storage_policy_id = tablet_meta_pb.storage_policy_id();
     if (tablet_meta_pb.has_cooldown_meta_id()) {
         _cooldown_meta_id = tablet_meta_pb.cooldown_meta_id();
-    }
-
-    if (tablet_meta_pb.has_enable_unique_key_merge_on_write()) {
-        _enable_unique_key_merge_on_write = tablet_meta_pb.enable_unique_key_merge_on_write();
     }
 
     if (tablet_meta_pb.has_delete_bitmap()) {
@@ -581,6 +598,13 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     if (tablet_meta_pb.has_binlog_config()) {
         _binlog_config = tablet_meta_pb.binlog_config();
     }
+    _compaction_policy = tablet_meta_pb.compaction_policy();
+    _time_series_compaction_goal_size_mbytes =
+            tablet_meta_pb.time_series_compaction_goal_size_mbytes();
+    _time_series_compaction_file_count_threshold =
+            tablet_meta_pb.time_series_compaction_file_count_threshold();
+    _time_series_compaction_time_threshold_seconds =
+            tablet_meta_pb.time_series_compaction_time_threshold_seconds();
 }
 
 void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
@@ -662,6 +686,13 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
         }
     }
     _binlog_config.to_pb(tablet_meta_pb->mutable_binlog_config());
+    tablet_meta_pb->set_compaction_policy(compaction_policy());
+    tablet_meta_pb->set_time_series_compaction_goal_size_mbytes(
+            time_series_compaction_goal_size_mbytes());
+    tablet_meta_pb->set_time_series_compaction_file_count_threshold(
+            time_series_compaction_file_count_threshold());
+    tablet_meta_pb->set_time_series_compaction_time_threshold_seconds(
+            time_series_compaction_time_threshold_seconds());
 }
 
 void TabletMeta::cloud_add_rs_metas(const std::vector<RowsetSharedPtr>& to_add) {
@@ -728,9 +759,9 @@ Status TabletMeta::add_rs_meta(const RowsetMetaSharedPtr& rs_meta) {
     for (auto& rs : _rs_metas) {
         if (rs->version() == rs_meta->version()) {
             if (rs->rowset_id() != rs_meta->rowset_id()) {
-                LOG(WARNING) << "version already exist. rowset_id=" << rs->rowset_id()
-                             << " version=" << rs->version() << ", tablet=" << full_name();
-                return Status::Error<PUSH_VERSION_ALREADY_EXIST>();
+                return Status::Error<PUSH_VERSION_ALREADY_EXIST>(
+                        "version already exist. rowset_id={}, version={}, tablet={}",
+                        rs->rowset_id().to_string(), rs->version().to_string(), full_name());
             } else {
                 // rowsetid,version is equal, it is a duplicate req, skip it
                 return Status::OK();
@@ -917,6 +948,15 @@ bool operator==(const TabletMeta& a, const TabletMeta& b) {
     if (a._is_in_memory != b._is_in_memory) return false;
     if (a._is_persistent != b._is_persistent) return false;
     if (a._storage_policy_id != b._storage_policy_id) return false;
+    if (a._compaction_policy != b._compaction_policy) return false;
+    if (a._time_series_compaction_goal_size_mbytes != b._time_series_compaction_goal_size_mbytes)
+        return false;
+    if (a._time_series_compaction_file_count_threshold !=
+        b._time_series_compaction_file_count_threshold)
+        return false;
+    if (a._time_series_compaction_time_threshold_seconds !=
+        b._time_series_compaction_time_threshold_seconds)
+        return false;
     return true;
 }
 
@@ -1003,6 +1043,11 @@ bool DeleteBitmap::contains_agg(const BitmapKey& bmk, uint32_t row_id) const {
     return get_agg(bmk)->contains(row_id);
 }
 
+bool DeleteBitmap::empty() const {
+    std::shared_lock l(lock);
+    return delete_bitmap.empty();
+}
+
 bool DeleteBitmap::contains_agg_without_cache(const BitmapKey& bmk, uint32_t row_id) const {
     std::shared_lock l(lock);
     DeleteBitmap::BitmapKey start {std::get<0>(bmk), std::get<1>(bmk), 0};
@@ -1045,7 +1090,7 @@ void DeleteBitmap::subset(const BitmapKey& start, const BitmapKey& end,
     roaring::Roaring roaring;
     DCHECK(start < end);
     std::shared_lock l(lock);
-    for (auto it = delete_bitmap.upper_bound(start); it != delete_bitmap.end(); ++it) {
+    for (auto it = delete_bitmap.lower_bound(start); it != delete_bitmap.end(); ++it) {
         auto& [k, bm] = *it;
         if (k >= end) {
             break;

@@ -24,6 +24,7 @@ import org.apache.doris.nereids.properties.RequireProperties;
 import org.apache.doris.nereids.properties.RequirePropertiesSupplier;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateParam;
 import org.apache.doris.nereids.trees.plans.AggMode;
 import org.apache.doris.nereids.trees.plans.AggPhase;
@@ -87,7 +88,7 @@ public class PhysicalHashAggregate<CHILD_TYPE extends Plan> extends PhysicalUnar
             Optional<List<Expression>> partitionExpressions, AggregateParam aggregateParam, boolean maybeUsingStream,
             Optional<GroupExpression> groupExpression, LogicalProperties logicalProperties,
             RequireProperties requireProperties, CHILD_TYPE child) {
-        super(PlanType.PHYSICAL_AGGREGATE, groupExpression, logicalProperties, child);
+        super(PlanType.PHYSICAL_HASH_AGGREGATE, groupExpression, logicalProperties, child);
         this.groupByExpressions = ImmutableList.copyOf(
                 Objects.requireNonNull(groupByExpressions, "groupByExpressions cannot be null"));
         this.outputExpressions = ImmutableList.copyOf(
@@ -113,7 +114,7 @@ public class PhysicalHashAggregate<CHILD_TYPE extends Plan> extends PhysicalUnar
             Optional<GroupExpression> groupExpression, LogicalProperties logicalProperties,
             RequireProperties requireProperties, PhysicalProperties physicalProperties,
             Statistics statistics, CHILD_TYPE child) {
-        super(PlanType.PHYSICAL_AGGREGATE, groupExpression, logicalProperties, physicalProperties, statistics,
+        super(PlanType.PHYSICAL_HASH_AGGREGATE, groupExpression, logicalProperties, physicalProperties, statistics,
                 child);
         this.groupByExpressions = ImmutableList.copyOf(
                 Objects.requireNonNull(groupByExpressions, "groupByExpressions cannot be null"));
@@ -282,5 +283,20 @@ public class PhysicalHashAggregate<CHILD_TYPE extends Plan> extends PhysicalUnar
         StringBuilder builder = new StringBuilder("hashAgg[");
         builder.append(getAggPhase()).append("]");
         return builder.toString();
+    }
+
+    @Override
+    public List<Slot> computeOutput() {
+        return outputExpressions.stream()
+                .map(NamedExpression::toSlot)
+                .collect(ImmutableList.toImmutableList());
+    }
+
+    @Override
+    public PhysicalHashAggregate<CHILD_TYPE> resetLogicalProperties() {
+        return new PhysicalHashAggregate<>(groupByExpressions, outputExpressions, partitionExpressions,
+                aggregateParam, maybeUsingStream, groupExpression, null,
+                requireProperties, physicalProperties, statistics,
+                child());
     }
 }

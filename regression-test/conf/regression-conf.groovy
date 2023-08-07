@@ -20,41 +20,26 @@
 // **Note**: default db will be create if not exist
 defaultDb = "regression_test"
 
-// add useLocalSessionState so that the jdbc will not send
-// init cmd like: select @@session.tx_read_only
-// at each time we connect.
-// add allowLoadLocalInfile so that the jdbc can execute mysql load data from client.
-jdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
-targetJdbcUrl = "jdbc:mysql://127.0.0.1:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
+jdbcUrl = "jdbc:mysql://127.0.0.1:8902/?"
 jdbcUser = "root"
 jdbcPassword = ""
 
-feSourceThriftAddress = "127.0.0.1:9020"
-feTargetThriftAddress = "127.0.0.1:9020"
-feSyncerUser = "root"
-feSyncerPassword = ""
-
-feHttpAddress = "127.0.0.1:8030"
+feHttpAddress = "127.0.0.1:8900"
 feHttpUser = "root"
 feHttpPassword = ""
 
-feCloudHttpAddress = "127.0.0.1:8035"
-feCloudHttpUser = "root"
-feCloudHttpPassword = ""
-
-// for cloud mode
-instanceId = "clickbench"
-cloudUniqueId = "cloud_unique_id_xxx"
+beHttpAddress = "127.0.0.1"
+instanceId = "gavin-debug"
+cloudUniqueId = ""
 metaServiceHttpAddress = "127.0.0.1:5000"
-recycleServiceHttpAddress = "127.0.0.1:5001"
+recycleServiceHttpAddress = "127.0.0.1:5100"
+feCloudHttpAddress = "127.0.0.1:8904"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
-suitePath = "${DORIS_HOME}/regression-test/suites"
-dataPath = "${DORIS_HOME}/regression-test/data"
-pluginPath = "${DORIS_HOME}/regression-test/plugins"
-realDataPath = "${DORIS_HOME}/regression-test/realdata"
-sslCertificatePath = "${DORIS_HOME}/regression-test/ssl_default_certificate"
+suitePath = "/mnt/disk1/gavinchou/debug/regression/regression-test/suites"
+dataPath = "/mnt/disk1/gavinchou/debug/regression/regression-test/data"
+sf1DataPath = "/mnt/disk1/gavinchou/debug/regression/data"
 
 // will test <group>/<suite>.groovy
 // empty group will test all group
@@ -66,10 +51,20 @@ testDirectories = ""
 
 // this groups will not be executed
 excludeGroups = ""
+
 // this suites will not be executed
-excludeSuites = "test_broker_load"
+excludeSuites = "test_clean_label, \
+test_alter_user,test_explain_tpch_sf_1_q4,test_explain_tpch_sf_1_q20, \
+test_explain_tpch_sf_1_q21,test_explain_tpch_sf_1_q13,test_explain_tpch_sf_1_q22, \
+test_ctl,redundant_conjuncts,test_disable_management_cluster"
 // this directories will not be executed
-excludeDirectories = "segcompaction_p1, cloud/abnormal"
+excludeDirectories = "backup_restore,compaction, cold_heat_separation, javaudf_p0, \
+tpcds_sf1000_p2,primary_index,github_events_p2,,schema_change_p0, \
+schema_change, cloud/smoke, cloud/multi_cluster, load_p0/broker_load, \
+tpch_sf1_p1/tpch_sf1/explain"
+
+excludeSuites = ""
+excludeDirectories = ""
 
 customConf1 = "test_custom_conf_value"
 
@@ -80,96 +75,23 @@ hdfsUser = "doris-test"
 hdfsPasswd = ""
 brokerName = "broker_name"
 
-// broker load test config
-enableBrokerLoad=true
-ak=""
-sk=""
-
-// jdbc connector test config
-// To enable jdbc test, you need first start mysql/pg container.
-// See `docker/thirdparties/start-thirdparties-docker.sh`
-enableJdbcTest=false
-mysql_57_port=3316
-pg_14_port=5442
-oracle_11_port=1521
-sqlserver_2022_port=1433
-clickhouse_22_port=8123
-
-// hive catalog test config
-// To enable hive test, you need first start hive container.
-// See `docker/thirdparties/start-thirdparties-docker.sh`
-enableHiveTest=false
-hms_port=9183
-hdfs_port=8120
-
-// elasticsearch catalog test config
-// See `docker/thirdparties/start-thirdparties-docker.sh`
-enableEsTest=false
-es_6_port=19200
-es_7_port=29200
-es_8_port=39200
-
-// be1_ip:be1_heartbeat_port:be1_http_port:be1_unique_id:be1_brpc_port,be2_ip:be2_heartbeat_port:be2_http_port:be2_unique_id:be2_brpc_port
-multiClusterBes = "127.0.0.1:9712:9711:be_1_id:9000,127.0.0.1:9732:9731:be_2_id:9000"
-metaServiceToken = "greedisgood9999"
-multiClusterInstance = "test_instance_id"
-kafkaBrokerList = "127.0.0.1:9092"
-cacheDataPath = "/tmp"
-
-//hive  catalog test config for bigdata
-enableExternalHiveTest = false
-extHiveHmsHost = "***.**.**.**"
-extHiveHmsPort = 7004
-extHdfsPort = 4007
-extHiveHmsUser = "****"
-extHiveHmsPassword= "***********"
-
-//mysql jdbc connector test config for bigdata
-enableExternalMysqlTest = false
-extMysqlHost = "***.**.**.**"
-extMysqlPort = 3306
-extMysqlUser = "****"
-extMysqlPassword = "***********"
-
-//postgresql jdbc connector test config for bigdata
-enableExternalPgTest = false
-extPgHost = "***.**.**.*"
-extPgPort = 5432
-extPgUser = "****"
-extPgPassword = "***********"
-
-// elasticsearch external test config for bigdata
-enableExternalEsTest = false
-extEsHost = "***********"
-extEsPort = 9200
-extEsUser = "*******"
-extEsPassword = "***********"
+// s3Endpoint = "cos.ap-beijing.myqcloud.com"
+// s3BucketName = "doris-build-1308700295"
+// ak = "AKIDAE2aqpY0B7oFPIvHMBj01lFSO3RYOxFH"
+// sk = "nJYWDepkQqzrWv3uWsxlJ0ScV7SXLs88"
 
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
+ak = "AKIDPhmeKo46sPhkZ9USWQEqGTSDsW5Xr6IL"
+sk = "xmT2Uoz0vgGkbKr6A4mGWcWCiBVcYJSV"
 s3Region = "ap-hongkong"
+s3Provider = "COS"
 
-// stage iam test
-stageIamEndpoint = ""
-stageIamRegion = ""
-stageIamBucket = ""
-
-// used for oss and obs, which does not support external id. Create role (or agency) and use for all instances.
-stageIamRole = ""
-stageIamArn = ""
-
-// used for cos and s3, which support external id.
-// this is policy arn for s3
-stageIamPolicy = "smoke_test_policy"
-stageIamAk = ""
-stageIamSk = ""
-
-// used for cos, which sdk does not return arn, so construct arn by user id.
-stageIamUserId = ""
-// If the failure suite num exceeds this config
-// all following suite will be skipped to fast quit the run.
-// <=0 means no limit.
-max_failure_num=0
-
-// used for exporting test
-s3ExportBucketName = ""
+// enableJdbcTest：开启 jdbc 外表测试，需要启动 MySQL 和 Postgresql 的 container。
+// mysql_57_port 和 pg_14_port 分别对应 MySQL 和 Postgresql 的对外端口，默认为 3316 和 5442。
+// enableHiveTest：开启 hive 外表测试，需要启动 hive 的 container。
+// hms_port 对应 hive metastore 的对外端口，默认为 9183。
+enableEsTest=true
+es_6_port=19200
+es_7_port=29200
+es_8_port=39200

@@ -52,91 +52,9 @@ distribution_desc
 
 列定义列表：
 
-<<<<<<< HEAD
-        列定义：
-    
-        `column_name column_type [KEY] [aggr_type] [NULL] [default_value] [column_comment]`
-
-        * `column_type`
-
-            列类型，支持以下类型：
-
-            ```
-            TINYINT（1字节）
-                范围：-2^7 + 1 ~ 2^7 - 1
-            SMALLINT（2字节）
-                范围：-2^15 + 1 ~ 2^15 - 1
-            INT（4字节）
-                范围：-2^31 + 1 ~ 2^31 - 1
-            BIGINT（8字节）
-                范围：-2^63 + 1 ~ 2^63 - 1
-            LARGEINT（16字节）
-                范围：-2^127 + 1 ~ 2^127 - 1
-            FLOAT（4字节）
-                支持科学计数法
-            DOUBLE（12字节）
-                支持科学计数法
-            DECIMAL[(precision, scale)] (16字节)
-                保证精度的小数类型。默认是 DECIMAL(9, 0)
-                precision: 1 ~ 27
-                scale: 0 ~ 9
-                其中整数部分为 1 ~ 18
-                不支持科学计数法
-            DATE（3字节）
-                范围：0000-01-01 ~ 9999-12-31
-            DATETIME（8字节）
-                范围：0000-01-01 00:00:00 ~ 9999-12-31 23:59:59
-            CHAR[(length)]
-                定长字符串。长度范围：1 ~ 255。默认为1
-            VARCHAR[(length)]
-                变长字符串。长度范围：1 ~ 65533。默认为1
-            HLL (1~16385个字节)
-                HyperLogLog 列类型，不需要指定长度和默认值。长度根据数据的聚合程度系统内控制。
-                必须配合 HLL_UNION 聚合类型使用。
-            BITMAP
-                bitmap 列类型，不需要指定长度和默认值。表示整型的集合，元素最大支持到2^64 - 1。
-                必须配合 BITMAP_UNION 聚合类型使用。
-            ```
-
-        * `aggr_type`
-
-            聚合类型，支持以下聚合类型：
-
-            ```
-            SUM：求和。适用数值类型。
-            MIN：求最小值。适合数值类型。
-            MAX：求最大值。适合数值类型。
-            REPLACE：替换。对于维度列相同的行，指标列会按照导入的先后顺序，后倒入的替换先导入的。
-            REPLACE_IF_NOT_NULL：非空值替换。和 REPLACE 的区别在于对于null值，不做替换。这里要注意的是字段默认值要给NULL，而不能是空字符串，如果是空字符串，会给你替换成空字符串。
-            HLL_UNION：HLL 类型的列的聚合方式，通过 HyperLogLog 算法聚合。
-            BITMAP_UNION：BIMTAP 类型的列的聚合方式，进行位图的并集聚合。
-            ```
-            
-        * `default_value`
-
-            列默认值，当导入数据未指定该列的值时，系统将赋予该列default_value。
-            
-            语法为`default default_value`。
-            
-            当前default_value支持两种形式：
-
-            1. 用户指定固定值，如：
-
-            ```SQL
-            	k1 INT DEFAULT '1',
-                k2 CHAR(10) DEFAULT 'aaaa'
-            ```
-            2. 系统提供的关键字，目前支持以下关键字：
-            
-            ```SQL
-                // 只用于DATETIME类型，导入数据缺失该值时系统将赋予当前时间
-                dt DATETIME DEFAULT CURRENT_TIMESTAMP
-            ```
-=======
 `column_definition[, column_definition]`
 * `column_definition`
     列定义：
->>>>>>> 2.0.0-rc01
 
     `column_name column_type [KEY] [aggr_type] [NULL] [default_value] [column_comment]`
     * `column_type`
@@ -273,24 +191,11 @@ UNIQUE KEY(k1, k2)
     
 #### table_comment
 
-<<<<<<< HEAD
-    <version since="2.0">
-    注：当表属性`enable_duplicate_without_keys_by_default = true`时, 默认创建没有排序列的DUPLICATE表。
-    </version>
-
-    示例：
-=======
 表注释。示例：
->>>>>>> 2.0.0-rc01
     
     ```
     COMMENT "This is my first DORIS table"
     ```
-<<<<<<< HEAD
-    
-#### table_comment
-=======
->>>>>>> 2.0.0-rc01
 
 #### partition_info
 
@@ -306,11 +211,7 @@ UNIQUE KEY(k1, k2)
     )
     ```
 
-<<<<<<< HEAD
-#### partition_info
-=======
 2. FIXED RANGE：定义分区的左闭右开区间。
->>>>>>> 2.0.0-rc01
 
     ```
     PARTITION BY RANGE(col1[, col2, ...])
@@ -332,26 +233,6 @@ UNIQUE KEY(k1, k2)
     )
     ```
 
-<<<<<<< HEAD
-        ```
-        PARTITION BY RANGE(col)
-        (
-           FROM ("2000-11-14") TO ("2021-11-14") INTERVAL 1 YEAR,
-           FROM ("2021-11-14") TO ("2022-11-14") INTERVAL 1 MONTH,
-           FROM ("2022-11-14") TO ("2023-01-03") INTERVAL 1 WEEK,
-           FROM ("2023-01-03") TO ("2023-01-14") INTERVAL 1 DAY
-        )
-        ```
-
-    4. MULTI RANGE：批量创建数字类型的RANGE分区，定义分区的左闭右开区间，设定步长。
-
-        ```
-        PARTITION BY RANGE(int_col)
-        (
-            FROM (1) TO (100) INTERVAL 10
-        )
-        ```
-=======
 4. MULTI RANGE：批量创建数字类型的RANGE分区，定义分区的左闭右开区间，设定步长。
 
     ```
@@ -360,27 +241,10 @@ UNIQUE KEY(k1, k2)
         FROM (1) TO (100) INTERVAL 10
     )
     ```
->>>>>>> 2.0.0-rc01
 
 
 #### distribution_desc
 
-<<<<<<< HEAD
-    定义数据分桶方式。
-
-    1) Hash 分桶
-       语法：
-          `DISTRIBUTED BY HASH (k1[,k2 ...]) [BUCKETS num|auto]`
-       说明：
-          使用指定的 key 列进行哈希分桶。
-    2) Random 分桶
-       语法：
-          `DISTRIBUTED BY RANDOM [BUCKETS num|auto]`
-       说明：
-          使用随机数进行分桶。 
-
-#### rollup_list
-=======
 定义数据分桶方式。
 
 1. Hash 分桶
@@ -429,6 +293,16 @@ UNIQUE KEY(k1, k2)
 
     根据 Tag 设置副本分布情况。该属性可以完全覆盖 `replication_num` 属性的功能。
 
+* `is_being_synced`  
+
+    用于标识此表是否是被CCR复制而来并且正在被syncer同步，默认为 `false`。  
+
+    如果设置为 `true`：  
+    `colocate_with`，`storage_policy`属性将被擦除  
+    `dynamic partition`，`auto bucket`功能将会失效，即在`show create table`中显示开启状态，但不会实际生效。当`is_being_synced`被设置为 `false` 时，这些功能将会恢复生效。  
+
+    这个属性仅供CCR外围模块使用，在CCR同步的过程中不要手动设置。
+
 * `storage_medium/storage_cooldown_time`
 
     数据存储介质。`storage_medium` 用于声明表数据的初始存储介质，而 `storage_cooldown_time` 用于设定到期时间。示例：
@@ -441,7 +315,6 @@ UNIQUE KEY(k1, k2)
     这个示例表示数据存放在 SSD 中，并且在 2020-11-20 00:00:00 到期后，会自动迁移到 HDD 存储上。
 
 * `colocate_with`
->>>>>>> 2.0.0-rc01
 
     当需要使用 Colocation Join 功能时，使用这个参数设置 Colocation Group。
 
@@ -455,11 +328,7 @@ UNIQUE KEY(k1, k2)
 
 * `in_memory` 
 
-<<<<<<< HEAD
-#### properties
-=======
     已弃用。只支持设置为'false'。
->>>>>>> 2.0.0-rc01
 
 * `compression`
 
@@ -495,15 +364,11 @@ UNIQUE KEY(k1, k2)
 
 * `disable_auto_compaction`
 
-<<<<<<< HEAD
-        已弃用。只支持设置为'false'。
-=======
     是否对这个表禁用自动compaction。
 
     如果这个属性设置成 `true`, 后台的自动compaction进程会跳过这个表的所有tablet。
 
     `"disable_auto_compaction" = "false"`
->>>>>>> 2.0.0-rc01
 
 * `enable_single_replica_compaction`
 
@@ -526,63 +391,42 @@ UNIQUE KEY(k1, k2)
     如果这个属性设置成 `true`, 数据导入的时候不写索引（目前仅对倒排索引生效），而是在compaction的时候延迟写索引。这样可以避免首次写入和compaction
     重复写索引的CPU和IO资源消耗，提升高吞吐导入的性能。
 
-<<<<<<< HEAD
-        如果设置成 `true`, 对于值列的加减操作，可以更快地，同步地完成。
-    
-        `"light_schema_change" = 'true'`
-
-        该功能在 1.2.1 及之后版本默认开启。
-    
-    * `disable_auto_compaction`
-=======
     `"skip_write_index_on_load" = "false"`
->>>>>>> 2.0.0-rc01
+
+* `compaction_policy`
+
+    配置这个表的 compaction 的合并策略，仅支持配置为 time_series 或者 size_based
+
+    time_series: 当 rowset 的磁盘体积积攒到一定大小时进行版本合并。合并后的 rowset 直接晋升到 base compaction 阶段。在时序场景持续导入的情况下有效降低 compact 的写入放大率
+
+    此策略将使用 time_series_compaction 为前缀的参数调整 compaction 的执行
+
+    `"compaction_policy" = ""`
+
+* `time_series_compaction_goal_size_mbytes`
+
+    compaction 的合并策略为 time_series 时，将使用此参数来调整每次 compaction 输入的文件的大小，输出的文件大小和输入相当
+
+    `"time_series_compaction_goal_size_mbytes" = "1024"`
+
+* `time_series_compaction_file_count_threshold`
+
+    compaction 的合并策略为 time_series 时，将使用此参数来调整每次 compaction 输入的文件数量的最小值
+
+    一个 tablet 中，文件数超过该配置，就会触发 compaction
+
+    `"time_series_compaction_file_count_threshold" = "2000"`
+
+* `time_series_compaction_time_threshold_seconds`
+
+    compaction 的合并策略为 time_series 时，将使用此参数来调整 compaction 的最长时间间隔，即长时间未执行过 compaction 时，就会触发一次 compaction，单位为秒
+
+    `"time_series_compaction_time_threshold_seconds" = "3600"`
 
 * 动态分区相关
 
     动态分区相关参数如下：
 
-<<<<<<< HEAD
-        `"disable_auto_compaction" = "false"`
-    
-    * `enable_single_replica_compaction`
-
-        是否对这个表开启单副本 compaction。
-
-        如果这个属性设置成 `true`, 这个表的 tablet 的所有副本只有一个 do compaction，其他的从该副本拉取 rowset
-
-        `"enable_single_replica_compaction" = "false"`
-
-    * `enable_duplicate_without_keys_by_default`
-
-        当配置为`true`时，如果创建表的时候没有指定Unique、Aggregate或Duplicate时，会默认创建一个没有排序列和前缀索引的Duplicate模型的表。
-
-        `"enable_duplicate_without_keys_by_default" = "false"`
-
-    * `skip_write_index_on_load`
-
-        是否对这个表开启数据导入时不写索引.
-
-        如果这个属性设置成 `true`, 数据导入的时候不写索引（目前仅对倒排索引生效），而是在compaction的时候延迟写索引。这样可以避免首次写入和compaction
-        重复写索引的CPU和IO资源消耗，提升高吞吐导入的性能。
-
-        `"skip_write_index_on_load" = "false"`
-
-    * 动态分区相关
-    
-        动态分区相关参数如下：
-    
-        * `dynamic_partition.enable`: 用于指定表级别的动态分区功能是否开启。默认为 true。
-        * `dynamic_partition.time_unit:` 用于指定动态添加分区的时间单位，可选择为DAY（天），WEEK(周)，MONTH（月），YEAR（年），HOUR（时）。
-        * `dynamic_partition.start`: 用于指定向前删除多少个分区。值必须小于0。默认为 Integer.MIN_VALUE。
-        * `dynamic_partition.end`: 用于指定提前创建的分区数量。值必须大于0。
-        * `dynamic_partition.prefix`: 用于指定创建的分区名前缀，例如分区名前缀为p，则自动创建分区名为p20200108。
-        * `dynamic_partition.buckets`: 用于指定自动创建的分区分桶数量。
-        * `dynamic_partition.create_history_partition`: 是否创建历史分区。
-        * `dynamic_partition.history_partition_num`: 指定创建历史分区的数量。
-        * `dynamic_partition.reserved_history_periods`: 用于指定保留的历史分区的时间段。
-
-=======
     * `dynamic_partition.enable`: 用于指定表级别的动态分区功能是否开启。默认为 true。
     * `dynamic_partition.time_unit:` 用于指定动态添加分区的时间单位，可选择为DAY（天），WEEK(周)，MONTH（月），YEAR（年），HOUR（时）。
     * `dynamic_partition.start`: 用于指定向前删除多少个分区。值必须小于0。默认为 Integer.MIN_VALUE。
@@ -593,7 +437,6 @@ UNIQUE KEY(k1, k2)
     * `dynamic_partition.history_partition_num`: 指定创建历史分区的数量。
     * `dynamic_partition.reserved_history_periods`: 用于指定保留的历史分区的时间段。
 
->>>>>>> 2.0.0-rc01
 ### Example
 
 1. 创建一个明细模型的表
@@ -880,13 +723,8 @@ UNIQUE KEY(k1, k2)
         PROPERTIES(
             "replication_num" = "1"
         );
-<<<<<<< HEAD
-```
-```
-=======
     ```
     ```sql
->>>>>>> 2.0.0-rc01
         CREATE TABLE create_table_multi_partion_integer
         (
             k1 BIGINT,
@@ -898,11 +736,7 @@ UNIQUE KEY(k1, k2)
         PROPERTIES(
             "replication_num" = "1"
         );
-<<<<<<< HEAD
-```
-=======
     ```
->>>>>>> 2.0.0-rc01
 
 注：批量创建分区可以和常规手动创建分区混用，使用时需要限制分区列只能有一个，批量创建分区实际创建默认最大数量为4096，这个参数可以在fe配置项 `max_multi_partition_num` 调整
 
@@ -912,11 +746,7 @@ UNIQUE KEY(k1, k2)
 
 14. 批量无排序列Duplicate表
 
-<<<<<<< HEAD
-```sql
-=======
     ```sql
->>>>>>> 2.0.0-rc01
     CREATE TABLE example_db.table_hash
     (
         k1 DATE,
@@ -936,11 +766,7 @@ UNIQUE KEY(k1, k2)
         "replication_num" = "1",
         "enable_duplicate_without_keys_by_default" = "true"
     );
-<<<<<<< HEAD
-```
-=======
     ```
->>>>>>> 2.0.0-rc01
 
 </version>
 

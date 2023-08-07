@@ -54,7 +54,8 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     if (!schema_change_lock.owns_lock()) {
         LOG(WARNING) << "Failed to obtain schema change lock. base_tablet="
                      << request.base_tablet_id;
-        return Status::Error<TRY_LOCK_FAILED>();
+        return Status::Error<TRY_LOCK_FAILED>("Failed to obtain schema change lock. base_tablet={}",
+                                              request.base_tablet_id);
     }
 
     // MUST sync rowsets before capturing rowset readers and building DeleteHandler
@@ -62,11 +63,11 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
    // ATTN: Only convert rowsets of version larger than 1, MUST let the new tablet cache have rowset [0-1]
     _output_cumulative_point = base_tablet->cumulative_layer_point();
 
-    std::vector<RowsetReaderSharedPtr> rs_readers;
+    std::vector<RowSetSplits> rs_splits;
     int64_t base_max_version = base_tablet->local_max_version();
     if (request.alter_version > 1) {
         // [0-1] is a placeholder rowset, no need to convert
-        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_max_version}, &rs_readers));
+        RETURN_IF_ERROR(base_tablet->cloud_capture_rs_readers({2, base_max_version}, &rs_splits));
     }
     // FIXME(cyx): Should trigger compaction on base_tablet if there are too many rowsets to convert.
 
@@ -77,8 +78,8 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     // delete handlers to filter out deleted rows
     DeleteHandler delete_handler;
     std::vector<RowsetMetaSharedPtr> delete_predicates;
-    for (auto& rs_reader : rs_readers) {
-        auto& rs_meta = rs_reader->rowset()->rowset_meta();
+    for (auto& split : rs_splits) {
+        auto& rs_meta = split.rs_reader->rowset()->rowset_meta();
         if (rs_meta->has_delete_predicate()) {
             base_tablet_schema->merge_dropped_columns(rs_meta->tablet_schema());
             delete_predicates.push_back(rs_meta);
@@ -101,8 +102,8 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     reader_context.is_unique = base_tablet->keys_type() == UNIQUE_KEYS;
     reader_context.batch_size = ALTER_TABLE_BATCH_SIZE;
 
-    for (auto& rs_reader : rs_readers) {
-        RETURN_IF_ERROR(rs_reader->init(&reader_context));
+    for (auto& split : rs_splits) {
+        RETURN_IF_ERROR(split.rs_reader->init(&reader_context));
     }
 
     SchemaChangeParams sc_params;
@@ -110,7 +111,10 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     DescriptorTbl::create(&sc_params.pool, request.desc_tbl, &sc_params.desc_tbl);
     sc_params.base_tablet = base_tablet;
     sc_params.new_tablet = new_tablet;
-    sc_params.ref_rowset_readers = rs_readers;
+    sc_params.ref_rowset_readers.reserve(rs_splits.size());
+    for (RowSetSplits& split : rs_splits) {
+        sc_params.ref_rowset_readers.emplace_back(std::move(split.rs_reader));
+    }
     sc_params.delete_handler = &delete_handler;
     sc_params.base_tablet_schema = base_tablet_schema;
     sc_params.be_exec_version = request.be_exec_version;

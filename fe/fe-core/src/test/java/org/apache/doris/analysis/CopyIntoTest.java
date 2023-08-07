@@ -62,7 +62,7 @@ public class CopyIntoTest extends TestWithFeService {
 
     @Override
     protected void beforeCreatingConnectContext() throws Exception {
-        FeConstants.disableInternalSchemaDb = true;
+        FeConstants.enableInternalSchemaDb = false;
         FeConstants.runningCopyIntoTest = true;
         FeConstants.disablePreHeat = true;
     }

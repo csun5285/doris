@@ -470,6 +470,9 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
     if (!http_req->header(HTTP_TIMEZONE).empty()) {
         request.__set_timezone(http_req->header(HTTP_TIMEZONE));
     }
+    if (!http_req->header(HTTP_TIME_ZONE).empty()) {
+        request.__set_timezone(http_req->header(HTTP_TIME_ZONE));
+    }
     if (!http_req->header(HTTP_EXEC_MEM_LIMIT).empty()) {
         try {
             request.__set_execMemLimit(std::stoll(http_req->header(HTTP_EXEC_MEM_LIMIT)));
@@ -617,7 +620,7 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
 #else
     ctx->put_result = k_stream_load_put_result;
 #endif
-    Status plan_status(ctx->put_result.status);
+    Status plan_status(Status::create(ctx->put_result.status));
     if (!plan_status.ok()) {
         LOG(WARNING) << "plan streaming load failed. errmsg=" << plan_status << ctx->brief();
         return plan_status;

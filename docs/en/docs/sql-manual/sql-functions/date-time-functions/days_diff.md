@@ -30,11 +30,7 @@ under the License.
 
 `INT days_diff(DATETIME enddate, DATETIME startdate)`
 
-<<<<<<< HEAD
-The difference between the start time and the end time is a few days, the date judgment is accurate to seconds and rounded down to an integer. This is different from date_diff function, which only provides accuracy up to days."
-=======
 The number of days between end date and start date, the date judgment is accurate to seconds and rounded down to the nearest integer. Different from the date_diff function, the datediff function judges the date with precision to the day."
->>>>>>> 2.0.0-rc01
 
 ### example
 

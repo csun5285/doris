@@ -264,7 +264,7 @@ Status StreamLoadExecutor::begin_txn(StreamLoadContext* ctx) {
 #else
         result = k_stream_load_begin_result;
 #endif
-        status = Status(result.status);
+        status = Status::create(result.status);
     }
     g_stream_load_begin_txn_latency << duration_ns / 1000;
     if (!status.ok()) {
@@ -307,7 +307,7 @@ Status StreamLoadExecutor::pre_commit_txn(StreamLoadContext* ctx) {
     // Return if this transaction is precommitted successful; otherwise, we need try
     // to
     // rollback this transaction
-    Status status(result.status);
+    Status status(Status::create(result.status));
     if (!status.ok()) {
         LOG(WARNING) << "precommit transaction failed, errmsg=" << status << ctx->brief();
         if (status.is<PUBLISH_TIMEOUT>()) {
@@ -342,7 +342,7 @@ Status StreamLoadExecutor::operate_txn_2pc(StreamLoadContext* ctx) {
                 config::txn_commit_rpc_timeout_ms));
     }
     g_stream_load_commit_txn_latency << duration_ns / 1000;
-    Status status(result.status);
+    Status status(Status::create(result.status));
     if (!status.ok()) {
         LOG(WARNING) << "2PC commit transaction failed, errmsg=" << status;
         return status;
@@ -398,7 +398,7 @@ Status StreamLoadExecutor::commit_txn(StreamLoadContext* ctx) {
     // Return if this transaction is committed successful; otherwise, we need try
     // to
     // rollback this transaction
-    Status status(result.status);
+    Status status(Status::create(result.status));
     if (!status.ok()) {
         LOG(WARNING) << "commit transaction failed, errmsg=" << status << ", " << ctx->brief();
         if (status.is<PUBLISH_TIMEOUT>()) {

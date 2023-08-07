@@ -172,11 +172,7 @@ sh bin/run.sh --create-olap-table --insert-data --drop-external-table
 sh bin/run.sh -o -i -d
 ```
 
-<<<<<<< HEAD
-执行成功后会生成 files目录，该目录包含`tables`（表名称） 和 `tables.sql` （doris odbc建表语句）
-=======
 此选项只当 `--type` 为 `ODBC` 时有效。
->>>>>>> 2.0.0-rc01
 
 ### 创建 Doris OLAP 表并且自动同步表结构变化
 使用方式如下：
@@ -205,10 +201,6 @@ sh bin/run.sh --databases db1
 sh bin/run.sh --databases db1,db2,db3
 ```
 
-<<<<<<< HEAD
-执行成功后会生成 user_files目录，该目录包含 `tables.sql` （doris odbc建表语句）
-=======
 通过这个选项，程序会自动获取mysql指定数据库下的全部表，并生成mysql_tables, doris_tables和doris_external_tables的配置。
 
 **请注意，该选项需要配合其他选项一起使用。**
->>>>>>> 2.0.0-rc01

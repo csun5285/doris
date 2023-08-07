@@ -21,17 +21,17 @@ import org.apache.doris.catalog.BinlogConfig;
 import org.apache.doris.common.MarkedCountDownLatch;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Status;
+import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TTabletMetaInfo;
-import org.apache.doris.thrift.TTabletMetaType;
 import org.apache.doris.thrift.TTaskType;
 import org.apache.doris.thrift.TUpdateTabletMetaInfoReq;
 
-import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
@@ -46,14 +46,10 @@ public class UpdateTabletMetaInfoTask extends AgentTask {
     private int inMemory = -1; // < 0 means not to update inMemory property, > 0 means true, == 0 means false
     private long storagePolicyId = -1; // < 0 means not to update storage policy, == 0 means to reset storage policy
     private BinlogConfig binlogConfig = null; // null means not to update binlog config
+    private String compactionPolicy = null; // null means not to update compaction policy
+    private Map<String, Long> timeSeriesCompactionConfig = null; // null means not to update compaction policy config
     // For ReportHandler
     private List<TTabletMetaInfo> tabletMetaInfos;
-    private TTabletMetaType metaType;
-
-    // <tablet id, tablet schema hash, tablet in memory>
-    private List<Triple<Long, Integer, Boolean>> tabletToInMemory;
-    // <tablet id, tablet schema hash, tablet persistent>
-    private List<Triple<Long, Integer, Boolean>> tabletToPersistent;
 
     public UpdateTabletMetaInfoTask(long backendId, Set<Pair<Long, Integer>> tableIdWithSchemaHash) {
         super(null, backendId, TTaskType.UPDATE_TABLET_META_INFO,
@@ -81,24 +77,19 @@ public class UpdateTabletMetaInfoTask extends AgentTask {
     }
 
     public UpdateTabletMetaInfoTask(long backendId,
-                                    List<Triple<Long, Integer, Boolean>> tabletMap,
-                                    TTabletMetaType metaType) {
-        super(null, backendId, TTaskType.UPDATE_TABLET_META_INFO,
-                -1L, -1L, -1L, -1L, -1L, tabletMap.hashCode());
-        this.metaType = metaType;
-        switch (metaType) {
-            case INMEMORY: {
-                this.tabletToInMemory = tabletMap;
-                break;
-            }
-            case PERSISTENT: {
-                this.tabletToPersistent = tabletMap;
-                break;
-            }
-            default: {
-                break;
-            }
-        }
+                                    Set<Pair<Long, Integer>> tableIdWithSchemaHash,
+                                    int inMemory, long storagePolicyId,
+                                    BinlogConfig binlogConfig,
+                                    MarkedCountDownLatch<Long, Set<Pair<Long, Integer>>> latch,
+                                    String compactionPolicy,
+                                    Map<String, Long> timeSeriesCompactionConfig) {
+        this(backendId, tableIdWithSchemaHash);
+        this.storagePolicyId = storagePolicyId;
+        this.inMemory = inMemory;
+        this.binlogConfig = binlogConfig;
+        this.latch = latch;
+        this.compactionPolicy = compactionPolicy;
+        this.timeSeriesCompactionConfig = timeSeriesCompactionConfig;
     }
 
     public void countDownLatch(long backendId, Set<Pair<Long, Integer>> tablets) {
@@ -138,6 +129,26 @@ public class UpdateTabletMetaInfoTask extends AgentTask {
                 }
                 if (binlogConfig != null) {
                     metaInfo.setBinlogConfig(binlogConfig.toThrift());
+                }
+                if (compactionPolicy != null) {
+                    metaInfo.setCompactionPolicy(compactionPolicy);
+                }
+                if (timeSeriesCompactionConfig != null && !timeSeriesCompactionConfig.isEmpty()) {
+                    if (timeSeriesCompactionConfig
+                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)) {
+                        metaInfo.setTimeSeriesCompactionGoalSizeMbytes(timeSeriesCompactionConfig
+                                    .get(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES));
+                    }
+                    if (timeSeriesCompactionConfig
+                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)) {
+                        metaInfo.setTimeSeriesCompactionFileCountThreshold(timeSeriesCompactionConfig
+                                        .get(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD));
+                    }
+                    if (timeSeriesCompactionConfig
+                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)) {
+                        metaInfo.setTimeSeriesCompactionTimeThresholdSeconds(timeSeriesCompactionConfig
+                                    .get(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS));
+                    }
                 }
                 updateTabletMetaInfoReq.addToTabletMetaInfos(metaInfo);
             }

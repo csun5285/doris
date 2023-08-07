@@ -143,6 +143,10 @@ struct TCreateTabletReq {
     21: optional bool is_persistent = false
     22: optional i64 storage_policy_id
     23: optional TBinlogConfig binlog_config
+    24: optional string compaction_policy = "size_based"
+    25: optional i64 time_series_compaction_goal_size_mbytes = 1024
+    26: optional i64 time_series_compaction_file_count_threshold = 2000
+    27: optional i64 time_series_compaction_time_threshold_seconds = 3600
 }
 
 struct TDropTabletReq {
@@ -413,12 +417,16 @@ struct TTabletMetaInfo {
     // 4: optional TTabletMetaType Deprecated_meta_type
     5: optional bool is_in_memory
 
+    // 6: optional string Deprecated_storage_policy
     6: optional string storage_policy;
     7: optional bool is_persistent
-    // 6: optional string Deprecated_storage_policy
     8: optional i64 storage_policy_id
     9: optional Types.TReplicaId replica_id
     10: optional TBinlogConfig binlog_config
+    11: optional string compaction_policy
+    12: optional i64 time_series_compaction_goal_size_mbytes
+    13: optional i64 time_series_compaction_file_count_threshold
+    14: optional i64 time_series_compaction_time_threshold_seconds
 }
 
 struct TUpdateTabletMetaInfoReq {

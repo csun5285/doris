@@ -303,18 +303,6 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
-### `default_order_by_limit`
-
-待补充
-
-类型：`long`
-
-默认值：`-1`
-
-只读变量：`false`
-
-仅全局变量：`false`
-
 ### `default_password_lifetime`
 
 待补充
@@ -639,6 +627,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `enable_inverted_index_query`
+
+是否启用inverted index query。
+
+类型：`boolean`
+
+默认值：`true`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `enable_local_exchange`
 
 待补充
@@ -897,7 +897,7 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 类型：`boolean`
 
-默认值：`true`
+默认值：`false`
 
 只读变量：`false`
 
@@ -1107,6 +1107,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `have_query_cache`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`true`
+
+仅全局变量：`false`
+
 ### `ignore_column_with_complex_type`
 
 待补充
@@ -1263,6 +1275,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `max_instance_num`
+
+待补充
+
+类型：`int`
+
+默认值：`64`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `max_pushdown_conditions_per_column`
 
 待补充
@@ -1390,6 +1414,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 类型：`int`
 
 默认值：`0`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
+### `parallel_sync_analyze_task_num`
+
+待补充
+
+类型：`int`
+
+默认值：`2`
 
 只读变量：`false`
 
@@ -1551,6 +1587,18 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 仅全局变量：`false`
 
+### `round_precise_decimalv2_value`
+
+待补充
+
+类型：`boolean`
+
+默认值：`false`
+
+只读变量：`false`
+
+仅全局变量：`false`
+
 ### `scan_queue_mem_limit`
 
 待补充
@@ -1690,18 +1738,6 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 类型：`int`
 
 默认值：`0`
-
-只读变量：`false`
-
-仅全局变量：`false`
-
-### `sql_select_limit`
-
-待补充
-
-类型：`long`
-
-默认值：`9223372036854775807`
 
 只读变量：`false`
 
@@ -1893,7 +1929,7 @@ SELECT /*+ SET_VAR(query_timeout = 1, enable_partition_cache=true) */ sleep(3);
 
 类型：`String`
 
-默认值：`SelectDB Core version: 2.0.0`
+默认值：`SelectDB Core version: selectdb-2.0.0-dev`
 
 只读变量：`true`
 
