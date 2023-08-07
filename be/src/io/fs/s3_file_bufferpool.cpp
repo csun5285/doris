@@ -174,7 +174,7 @@ void UploadFileBuffer::read_from_cache() {
  * submit the on_download() task to executor
  */
 void DownloadFileBuffer::submit() {
-    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+    ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
                 // to extend buf's lifetime
                 // (void)buf;
@@ -193,7 +193,7 @@ void UploadFileBuffer::submit() {
     if (_holder && _cur_file_segment != _holder->file_segments.end()) {
         (*_cur_file_segment)->finalize_write();   
     }
-    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+    ExecEnv::GetInstance()->s3_file_writer_upload_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
                 // to extend buf's lifetime
                 // (void)buf;

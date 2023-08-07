@@ -131,9 +131,19 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     // In normal circumstances, 4 threads are required to concurrently execute a buffered reader,
     // and up to 32 buffered reader requirements can be handled with 128 threads
     ThreadPoolBuilder("BufferedReaderPrefetchThreadPool")
-            .set_min_threads(1024)
-            .set_max_threads(1024)
+            .set_min_threads(16)
+            .set_max_threads(64)
             .build(&_buffered_reader_prefetch_thread_pool);
+    
+    ThreadPoolBuilder("S3FileWriterUploadThreadPool")
+            .set_min_threads(16)
+            .set_max_threads(64)
+            .build(&_s3_file_writer_upload_thread_pool);
+    
+    ThreadPoolBuilder("S3DownloaderDownloadThreadPool")
+            .set_min_threads(16)
+            .set_max_threads(64)
+            .build(&_s3_downloader_download_thread_pool);
 
     // min num equal to fragment pool's min num
     // max num is useless because it will start as many as requested in the past

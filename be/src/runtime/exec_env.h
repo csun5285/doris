@@ -126,6 +126,12 @@ public:
     ThreadPool* buffered_reader_prefetch_thread_pool() {
         return _buffered_reader_prefetch_thread_pool.get();
     }
+    ThreadPool* s3_file_writer_upload_thread_pool() {
+        return _s3_file_writer_upload_thread_pool.get();
+    }
+    ThreadPool* s3_downloader_download_thread_pool() {
+        return _s3_downloader_download_thread_pool.get();
+    }
     ThreadPool* send_report_thread_pool() { return _send_report_thread_pool.get(); }
     ThreadPool* join_node_thread_pool() { return _join_node_thread_pool.get(); }
     ThreadPool* sync_load_for_tablets_thread_pool() {
@@ -225,6 +231,10 @@ private:
     std::unique_ptr<ThreadPool> _download_cache_thread_pool;
     // Threadpool used to prefetch remote file for buffered reader
     std::unique_ptr<ThreadPool> _buffered_reader_prefetch_thread_pool;
+    // Threadpool used to do s3 upload operation for s3 file writer
+    std::unique_ptr<ThreadPool> _s3_file_writer_upload_thread_pool;
+    // Threadpool used to do s3 get operation for s3 downloader
+    std::unique_ptr<ThreadPool> _s3_downloader_download_thread_pool;
     std::unique_ptr<ThreadPool> _sync_load_for_tablets_thread_pool;
     // Threadpool used to write data to file cache async
     std::unique_ptr<ThreadPool> _async_write_file_cache_thread_pool;

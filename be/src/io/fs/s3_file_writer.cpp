@@ -200,10 +200,7 @@ Status S3FileWriter::close() {
         if (_upload_id.empty()) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
             DCHECK(buf != nullptr);
-            buf->set_upload_to_remote([this](UploadFileBuffer& b) {
-                LOG(INFO) << "use put object operation for key " << _key << " bucket " << _bucket;
-                _put_object(b);
-            });
+            buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
         _pending_buf->submit();
@@ -398,10 +395,7 @@ Status S3FileWriter::finalize() {
         if (1 == _cur_part_num) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
             DCHECK(buf != nullptr);
-            buf->set_upload_to_remote([this](UploadFileBuffer& b) {
-                LOG(INFO) << "use put object operation for key " << _key << " bucket " << _bucket;
-                _put_object(b);
-            });
+            buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
         _pending_buf->submit();
