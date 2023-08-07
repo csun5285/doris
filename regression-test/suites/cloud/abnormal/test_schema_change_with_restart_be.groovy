@@ -24,9 +24,7 @@ suite("test_schema_change_with_restart_be") {
         )
         DUPLICATE KEY(C_CUSTKEY, C_NAME)
         DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 32
-        PROPERTIES (
-            "replication_num" = "1"
-        );
+        ;
     """
 
     sql """

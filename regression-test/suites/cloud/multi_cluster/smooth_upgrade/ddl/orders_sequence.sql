@@ -13,6 +13,5 @@ UNIQUE KEY(`o_orderkey`, `o_orderdate`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`o_orderkey`) BUCKETS 96
 PROPERTIES (
-    "function_column.sequence_type" = 'bigint',
-    "replication_num" = "3"
+    "function_column.sequence_type" = 'bigint'
 )

@@ -40,7 +40,7 @@ suite("test_bitmap_index") {
                k14 DATETIMEV2(3),
                k15 DATETIMEV2(6)
             )
-            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(k1) BUCKETS 5;
         """
 
     sql """
@@ -119,7 +119,7 @@ suite("test_bitmap_index") {
                 v1 INT SUM
             )
             AGGREGATE KEY(k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11,k12,k13,k14,k15)
-            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(k1) BUCKETS 5;
         """
 
     sql """
@@ -201,7 +201,7 @@ suite("test_bitmap_index") {
                v1  INT
             )
             UNIQUE KEY(k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11)
-            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(k1) BUCKETS 5;
         """
 
     sql """

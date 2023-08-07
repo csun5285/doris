@@ -20,7 +20,6 @@ UNIQUE KEY(`l_shipdate`, `l_orderkey`,`l_linenumber`,`l_partkey`,`l_suppkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`l_orderkey`) BUCKETS 96
 PROPERTIES (
-    "function_column.sequence_type" = 'DATE',
-    "replication_num" = "3"
+    "function_column.sequence_type" = 'DATE'
 )
 

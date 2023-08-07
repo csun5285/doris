@@ -82,7 +82,7 @@ suite ("test_uniq_rollup_schema_change") {
                 `min_dwell_time` INT DEFAULT "99999" COMMENT "用户最小停留时间")
             UNIQUE KEY(`user_id`, `date`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`)
             BUCKETS 1
-            PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true" );
+            ;
         """
 
     //add rollup

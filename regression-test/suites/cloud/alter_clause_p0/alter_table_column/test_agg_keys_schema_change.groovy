@@ -77,7 +77,7 @@ suite ("test_agg_keys_schema_change") {
                     `bitmap_col` Bitmap BITMAP_UNION NOT NULL COMMENT "bitmap列")
                 AGGREGATE KEY(`user_id`, `date`, `city`, `age`, `sex`) DISTRIBUTED BY HASH(`user_id`)
                 BUCKETS 1
-                PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true" );
+                ;
             """
 
         sql """ INSERT INTO schema_change_agg_keys_regression_test VALUES

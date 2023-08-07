@@ -12,6 +12,4 @@ CREATE TABLE IF NOT EXISTS orders  (
 UNIQUE KEY(`o_orderkey`, `o_orderdate`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`o_orderkey`) BUCKETS 96
-PROPERTIES (
-    "replication_num" = "3"
-)
+

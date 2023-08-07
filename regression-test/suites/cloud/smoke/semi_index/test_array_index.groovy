@@ -28,7 +28,7 @@ suite("smoke_test_array_index", "smoke"){
     def indexTblName = "array_test"
 
     sql "DROP TABLE IF EXISTS ${indexTblName}"
-    // create 1 replica table
+
     sql """
 	CREATE TABLE IF NOT EXISTS ${indexTblName}(
 		`id`int(11)NULL,

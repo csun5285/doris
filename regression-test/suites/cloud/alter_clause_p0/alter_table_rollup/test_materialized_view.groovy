@@ -31,7 +31,7 @@ suite("test_materialized_view") {
                 sale_date date, 
                 sale_amt bigint
             ) 
-            DISTRIBUTED BY HASH(record_id) properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(record_id) ;
         """
     sql "DROP TABLE IF EXISTS ${tbName2}"
     sql """
@@ -42,7 +42,7 @@ suite("test_materialized_view") {
                 sale_date date, 
                 sale_amt bigint
             ) 
-            DISTRIBUTED BY HASH(record_id) properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(record_id);
         """
     sql "CREATE materialized VIEW amt_sum AS SELECT store_id, sum(sale_amt) FROM ${tbName1} GROUP BY store_id;"
     int max_try_secs = 60

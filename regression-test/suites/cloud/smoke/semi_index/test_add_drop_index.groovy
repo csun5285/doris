@@ -38,7 +38,7 @@ suite("smoke_add_drop_index_with_data", "smoke"){
     def indexTbName1 = "test_add_drop_inverted_index2"
 
     sql "DROP TABLE IF EXISTS ${indexTbName1}"
-    // create 1 replica table
+
     sql """
             CREATE TABLE IF NOT EXISTS ${indexTbName1} (
                 `id` int(11) NULL,

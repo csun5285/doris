@@ -38,10 +38,6 @@ suite("test_array_string_insert", "load") {
             ) ENGINE=OLAP
             DUPLICATE KEY(`k1`)
             DISTRIBUTED BY HASH(`k1`) BUCKETS 1
-            PROPERTIES (
-            "replication_allocation" = "tag.location.default: 1",
-            "storage_format" = "V2"
-            )
             """
         
         // DDL/DML return 1 row and 3 column, the only value is update row count

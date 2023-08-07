@@ -19,7 +19,5 @@ CREATE TABLE IF NOT EXISTS lineitem (
 UNIQUE KEY(`l_shipdate`, `l_orderkey`,`l_linenumber`,`l_partkey`,`l_suppkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`l_orderkey`) BUCKETS 96
-PROPERTIES (
-    "replication_num" = "3"
-)
+
 

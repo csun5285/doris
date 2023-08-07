@@ -11,6 +11,5 @@ UNIQUE KEY(`s_suppkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`s_suppkey`) BUCKETS 12
 PROPERTIES (
-    "function_column.sequence_type" = 'int',
-    "replication_num" = "3"
+    "function_column.sequence_type" = 'int'
 )

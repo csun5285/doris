@@ -40,7 +40,7 @@ suite("test_alter_table_property") {
         )
         DISTRIBUTED BY HASH(`user_id`)
         BUCKETS 1
-        PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true" );
+        ;
         """
 
     sql """ INSERT INTO ${tableName} VALUES

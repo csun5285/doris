@@ -28,7 +28,7 @@ suite("test_alter_table_column_with_delete") {
                 value1 INT
             )
             UNIQUE KEY (k1)
-            DISTRIBUTED BY HASH(k1) BUCKETS 1 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(k1) BUCKETS 1;
         """
 
     sql "insert into ${tbName1} values(1,1);"

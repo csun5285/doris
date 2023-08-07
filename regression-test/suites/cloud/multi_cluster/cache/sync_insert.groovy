@@ -95,11 +95,6 @@ CREATE TABLE IF NOT EXISTS `${table1}` (
 DUPLICATE KEY(`siteid`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
-PROPERTIES (
-"replication_allocation" = "tag.location.default: 1",
-"in_memory" = "false",
-"storage_format" = "V2"
-)
 """
     sleep(10000)
     sql """insert into ${table1} values

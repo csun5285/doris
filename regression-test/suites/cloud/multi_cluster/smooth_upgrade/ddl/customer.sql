@@ -11,7 +11,5 @@ CREATE TABLE IF NOT EXISTS customer (
 UNIQUE KEY(`c_custkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`c_custkey`) BUCKETS 24
-PROPERTIES (
-    "replication_num" = "3"
-)
+
 

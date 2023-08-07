@@ -86,7 +86,7 @@ suite("test_rollup_with_drop_cluster") {
                 uv BIGINT(20) SUM NOT NULL DEFAULT '0'
             )
             AGGREGATE KEY (siteid,citycode,username)
-            DISTRIBUTED BY HASH(siteid) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(siteid) BUCKETS 5 ;
         """
     sql "insert into ${tbName1} values(1, 1, 'test1', 100,100);"
     sql "insert into ${tbName1} values(2, 1, 'test1', 100,100);"

@@ -26,9 +26,7 @@ suite("test_alter_bitmap_load") {
         `a` decimal(12, 6) NOT NULL
         ) ENGINE = OLAP
         DUPLICATE KEY(`a`)
-        DISTRIBUTED BY HASH(`a`) BUCKETS 1
-        PROPERTIES (
-            "replication_allocation" = "tag.location.default: 1");
+        DISTRIBUTED BY HASH(`a`) BUCKETS 1;
         """
     sql """
     create index bitmap_index_multi_page on ${tbName}(a) using bitmap;

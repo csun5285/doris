@@ -57,8 +57,7 @@ suite("test_cloud_dynamic_partition") {
             "dynamic_partition.start"="-3", 
             "dynamic_partition.prefix"="p", 
             "dynamic_partition.time_unit"="DAY", 
-            "dynamic_partition.create_history_partition"="true",
-            "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
+            "dynamic_partition.create_history_partition"="true")
         """
         // check exception message contains
         exception "errCode = 2,"
@@ -98,8 +97,7 @@ suite("test_cloud_dynamic_partition") {
             "dynamic_partition.start"="-3",
             "dynamic_partition.prefix"="p",
             "dynamic_partition.time_unit"="DAY",
-            "dynamic_partition.create_history_partition"="true",
-            "dynamic_partition.replication_allocation" = "tag.location.not_exist_tag: 1")
+            "dynamic_partition.create_history_partition"="true")
         """
         // check exception message contains
         exception "errCode = 2,"

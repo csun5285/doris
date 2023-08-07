@@ -71,7 +71,7 @@ suite("test_inverted_index_compcation"){
             )
             DUPLICATE KEY(`name`)
             DISTRIBUTED BY HASH(`name`) BUCKETS 1
-            properties("replication_num" = "1");
+            ;
     """
 
     for (int i = 0; i < 5; i++) {

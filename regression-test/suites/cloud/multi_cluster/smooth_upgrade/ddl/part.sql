@@ -12,7 +12,5 @@ CREATE TABLE IF NOT EXISTS part (
 UNIQUE KEY(`p_partkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`p_partkey`) BUCKETS 24
-PROPERTIES (
-    "replication_num" = "3"
-)
+
 

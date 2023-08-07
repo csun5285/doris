@@ -20,10 +20,7 @@ PARTITION BY RANGE(`date`)
     PARTITION `p201703` VALUES LESS THAN ("2017-04-01")
 )
 DISTRIBUTED BY HASH(`user_id`) BUCKETS 1
-PROPERTIES
-(
-    "replication_num" = "1", "light_schema_change" = "true"
-);
+;
 
 INSERT INTO example_range_tbl VALUES
     (1, '2017-01-02', 'Beijing', 10, 1, "2017-01-02 00:00:00", 1, 30, 20);

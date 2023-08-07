@@ -89,9 +89,7 @@ suite("stream_load_2pc") {
       `k13` datetime NULL
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
-    PROPERTIES (
-    "replication_allocation" = "tag.location.default: 1"
-    );
+    ;
     """
 
     sql """ set enable_profile = true """
@@ -196,9 +194,7 @@ suite("stream_load_2pc") {
       `k13` datetime NULL
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
-    PROPERTIES (
-    "replication_allocation" = "tag.location.default: 1"
-    );
+    ;
     """
 
     sql """ set enable_profile = true """
@@ -313,9 +309,7 @@ suite("stream_load_2pc") {
       `k13` datetime NULL
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
-    PROPERTIES (
-    "replication_allocation" = "tag.location.default: 1"
-    );
+    ;
     """
 
     sql """ set enable_profile = true """

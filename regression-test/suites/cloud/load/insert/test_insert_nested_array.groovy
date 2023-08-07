@@ -33,7 +33,6 @@ suite("test_insert_nested_array", "load") {
                 `key` INT,
                 value ARRAY<ARRAY<INT>>
             ) DUPLICATE KEY (`key`) DISTRIBUTED BY HASH (`key`) BUCKETS 1
-            PROPERTIES ('replication_num' = '1')
         """
 
         sql "INSERT INTO ${tableName} VALUES (1, [])"
@@ -71,7 +70,6 @@ suite("test_insert_nested_array", "load") {
                 `key` INT,
                 value ARRAY<ARRAY<ARRAY<INT>>>
             ) DUPLICATE KEY (`key`) DISTRIBUTED BY HASH (`key`) BUCKETS 1
-            PROPERTIES ('replication_num' = '1')
         """
 
         sql "INSERT INTO ${tableName} VALUES (1, [])"
