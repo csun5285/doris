@@ -227,6 +227,9 @@ set_target_properties(aws-c-s3 PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/li
 add_library(aws-s2n STATIC IMPORTED)
 set_target_properties(aws-s2n PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libs2n.a)
 
+add_library(aws-c-sdkutils STATIC IMPORTED)
+set_target_properties(aws-c-sdkutils PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libaws-c-sdkutils.a)
+
 set(AWS_LIBS
     aws-sdk-s3
     aws-sdk-core
@@ -243,6 +246,7 @@ set(AWS_LIBS
     aws-c-compression
     aws-c-http
     aws-c-mqtt
+    aws-c-sdkutils
     aws-sdk-s3-crt)
 
 add_library(fmt STATIC IMPORTED)

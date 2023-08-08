@@ -48,7 +48,8 @@ int S3Accessor::init() {
     aws_config.region = conf_.region;
     s3_client_ = std::make_shared<Aws::S3::S3Client>(
             std::move(aws_cred), std::move(aws_config),
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never);
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            true /* useVirtualAddressing */);
     return 0;
 }
 
