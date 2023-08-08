@@ -80,7 +80,7 @@ suite("test_mysql_load", "p0") {
             COLUMNS TERMINATED BY '\t'
             (k1, k2, v2, v10, v11)
             PROPERTIES ("strict_mode"="true");
-        """
+        """, false
         exception "too many filtered rows"
     }
 

@@ -46,7 +46,7 @@ suite("test_mysql_load_big_file", "p0") {
             INFILE '${mysql_load_skip_lines}'
             INTO TABLE ${tableName}
             COLUMNS TERMINATED BY ',';
-        """
+        """, false
         check { result, exception, startTime, endTime ->
             if (exception != null) {
                 // skip publish timeout

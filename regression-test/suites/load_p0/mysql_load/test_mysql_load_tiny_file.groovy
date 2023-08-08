@@ -44,7 +44,7 @@ suite("test_mysql_load_tiny_file", "p0") {
                 INFILE '${test_mysql_load_tiny_file}'
                 INTO TABLE ${tableName}
                 COLUMNS TERMINATED BY '\\t';
-            """
+            """, false
             check { result, exception, startTime, endTime ->
                 if (exception != null) {
                     // skip publish timeout
