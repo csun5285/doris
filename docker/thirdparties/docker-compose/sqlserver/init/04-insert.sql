@@ -49,8 +49,6 @@ insert into dbo.test_binary values (2, 1, 0x4D616B6520446F72697320477265617421, 
 insert into dbo.test_binary values (3, -1, 0x4D616B6520446F72697320477265617421, 0x4D616B6520446F72697320477265617421);
 
 
-<<<<<<< HEAD
-=======
 INSERT INTO dbo.DateAndTime
 VALUES (
     '2023-06-25', -- DATE
@@ -60,5 +58,4 @@ VALUES (
     '2023-06-25T14:30:45.1234567', -- DATETIME2
     '2023-06-25 14:30:45.1234567 -07:00' -- DATETIMEOFFSET
 );
->>>>>>> 2.0.0-rc01
 
