@@ -1119,6 +1119,24 @@ public class Auth implements Writable {
         } finally {
             readUnlock();
         }
+        if (Config.isCloudMode()) {
+            List<List<String>> userAuthInfosTmp = Lists.newArrayList();
+            for (List<String> userAuthInfo : userAuthInfos) {
+                if (userAuthInfo == null) {
+                    continue;
+                }
+                List<String> userAuthInfoTmp = Lists.newArrayList();
+                for (String s : userAuthInfo) {
+                    if (s == null) {
+                        userAuthInfoTmp.add(s);
+                        continue;
+                    }
+                    userAuthInfoTmp.add(s.replaceAll("default_cluster:", ""));
+                }
+                userAuthInfosTmp.add(userAuthInfoTmp);
+            }
+            userAuthInfos = userAuthInfosTmp;
+        }
         return userAuthInfos;
     }
 
