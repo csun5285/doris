@@ -1,3 +1,4 @@
+package pipeline.external.conf
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -20,8 +21,8 @@
 // **Note**: default db will be create if not exist
 defaultDb = "regression_test"
 
-jdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
-targetJdbcUrl = "jdbc:mysql://172.30.32.17:9030/?useLocalSessionState=true&allowLoadLocalInfile=true"
+jdbcUrl = "jdbc:mysql://172.19.0.2:9131/?useLocalSessionState=true&allowLoadLocalInfile=true"
+targetJdbcUrl = "jdbc:mysql://172.19.0.2:9131/?useLocalSessionState=true&allowLoadLocalInfile=true"
 jdbcUser = "root"
 jdbcPassword = ""
 
@@ -30,22 +31,18 @@ feTargetThriftAddress = "127.0.0.1:9020"
 feSyncerUser = "root"
 feSyncerPassword = ""
 
-feHttpAddress = "172.30.32.17:8030"
+feHttpAddress = "172.19.0.2:8131"
 feHttpUser = "root"
 feHttpPassword = ""
-
-beHttpAddress = "172.30.32.17:8040"
-instanceId = "selectdb-cloud"
-cloudUniqueId = "selectdb-cloud_fe"
-metaServiceHttpAddress = "172.30.32.17:5000"
-recycleServiceHttpAddress = "172.30.32.17:6000"
-feCloudHttpAddress = "172.30.32.17:18030"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
 suitePath = "${DORIS_HOME}/regression-test/suites"
 dataPath = "${DORIS_HOME}/regression-test/data"
-sf1DataPath = "/data"
+pluginPath = "${DORIS_HOME}/regression-test/plugins"
+realDataPath = "${DORIS_HOME}/regression-test/realdata"
+// sf1DataPath can be url like "https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com" or local path like "/data"
+//sf1DataPath = "https://doris-community-test-1308700295.cos.ap-hongkong.myqcloud.com"
 
 // will test <group>/<suite>.groovy
 // empty group will test all group
@@ -58,12 +55,9 @@ testDirectories = ""
 // this groups will not be executed
 excludeGroups = ""
 // this suites will not be executed
-excludeSuites = "test_broker_load,test_spark_load,test_analyze_stats_p1,test_refresh_mtmv, test_disable_management_cluster"
+excludeSuites = "test_cast_string_to_array,test_broker_load,test_spark_load,test_analyze_stats_p1,test_refresh_mtmv"
 // this directories will not be executed
-excludeDirectories = "backup_restore,compaction, cold_heat_separation, dynamic_table, javaudf_p0, primary_key,\
-tpcds_sf1000_p2,primary_index,github_events_p2,nereids_syntax_p0,schema_change_p0, \
-tpch_sf1_p1/tpch_sf1/nereids,schema_change, cloud/smoke, cloud/recycler, cloud/multi_cluster, cloud/compaction, cloud/cache, load_p0/broker_load, \
-tpch_sf1_p1/tpch_sf1/explain,cloud/abnormal"
+excludeDirectories = ""
 
 customConf1 = "test_custom_conf_value"
 
@@ -77,16 +71,26 @@ brokerName = "broker_name"
 // broker load test config
 enableBrokerLoad=true
 
-// cacheDataPath = "/data/regression/"
-s3Endpoint = "cos.ap-hongkong.myqcloud.com"
-s3BucketName = "doris-build-hk-1308700295"
-s3Region = "ap-hongkong"
+// jdbc connector test config
+// To enable jdbc test, you need first start mysql/pg container.
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableJdbcTest=true
+mysql_57_port=3316
+pg_14_port=7121
+oracle_11_port=1521
+sqlserver_2022_port=1433
+clickhouse_22_port=8123
 
 // hive catalog test config
 // To enable jdbc test, you need first start hive container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`
-enableHiveTest=false
+enableHiveTest=true
 hms_port=7141
+
+enableEsTest=true
+es_6_port=19200
+es_7_port=29200
+es_8_port=39200
 
 cacheDataPath = "/data/regression/"
 
