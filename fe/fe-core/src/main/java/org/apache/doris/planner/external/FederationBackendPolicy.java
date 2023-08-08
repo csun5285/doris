@@ -30,6 +30,7 @@ import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TScanRangeLocations;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.hash.Funnel;
@@ -59,6 +60,11 @@ public class FederationBackendPolicy {
     }
 
     public void init(List<String> preLocations) throws UserException {
+        if (Config.isCloudMode()) {
+            cloudInit();
+            return;
+        }
+
         Set<Tag> tags = Sets.newHashSet();
         if (ConnectContext.get() != null && ConnectContext.get().getCurrentUserIdentity() != null) {
             String qualifiedUser = ConnectContext.get().getCurrentUserIdentity().getQualifiedUser();
@@ -87,6 +93,34 @@ public class FederationBackendPolicy {
         if (backends.isEmpty()) {
             throw new UserException("No available backends");
         }
+        int virtualNumber = Math.max(Math.min(512 / backends.size(), 32), 2);
+        consistentHash = new ConsistentHash<>(Hashing.murmur3_128(), new ScanRangeHash(),
+                new BackendHash(), backends, virtualNumber);
+    }
+
+    public void cloudInit() throws UserException {
+        if (ConnectContext.get() == null) {
+            LOG.warn("connect context is null");
+            throw new UserException("connect context is null");
+        }
+
+        String cluster = ConnectContext.get().getCloudCluster();
+        if (Strings.isNullOrEmpty(cluster)) {
+            LOG.warn("failed to get available be, clusterName: {}", cluster);
+            throw new UserException("failed to get available be, clusterName: " + cluster);
+        }
+
+        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(cluster);
+        for (Backend be : clusterBes) {
+            if (be.isAlive()) {
+                backends.add(be);
+            }
+        }
+
+        if (backends.isEmpty()) {
+            throw new UserException("No available backends, cluster is: " + cluster);
+        }
+
         int virtualNumber = Math.max(Math.min(512 / backends.size(), 32), 2);
         consistentHash = new ConsistentHash<>(Hashing.murmur3_128(), new ScanRangeHash(),
                 new BackendHash(), backends, virtualNumber);

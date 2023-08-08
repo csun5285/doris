@@ -1771,7 +1771,13 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             if (Strings.isNullOrEmpty(request.getCloudCluster())) {
                 ctx.setCloudCluster();
             } else {
-                Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
+                if (Strings.isNullOrEmpty(request.getUser())) {
+                    // mysql load
+                    ctx.setCloudCluster(request.getCloudCluster());
+                } else {
+                    // stream load
+                    Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
+                }
             }
 
             LOG.debug("streamLoadPutImpl set context: cluster {}, setCurrentUserIdentity {}",

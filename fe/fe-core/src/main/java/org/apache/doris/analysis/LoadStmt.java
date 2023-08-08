@@ -123,6 +123,7 @@ public class LoadStmt extends DdlStmt {
     public static final String KEY_TRIM_DOUBLE_QUOTES = "trim_double_quotes";
 
     public static final String KEY_COMMENT = "comment";
+    public static final String KEY_CLOUD_CLUSTER = "cloud_cluster";
 
     private final LabelName label;
     private final List<DataDescription> dataDescriptions;
