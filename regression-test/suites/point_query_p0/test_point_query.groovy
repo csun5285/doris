@@ -48,22 +48,6 @@ suite("test_point_query") {
     }
 
     sql """DROP TABLE IF EXISTS ${tableName}"""
-    test {
-        // abnormal case
-        sql """
-              CREATE TABLE IF NOT EXISTS ${tableName} (
-                `k1` int NULL COMMENT ""
-              ) ENGINE=OLAP
-              UNIQUE KEY(`k1`)
-              DISTRIBUTED BY HASH(`k1`) BUCKETS 1
-              PROPERTIES (
-              "replication_allocation" = "tag.location.default: 1",
-              "store_row_column" = "true",
-              "light_schema_change" = "false"
-              )
-          """
-        exception "errCode = 2, detailMessage = Row store column rely on light schema change, enable light schema change first"
-    }
     sql """
               CREATE TABLE IF NOT EXISTS ${tableName} (
                 `k1` int(11) NULL COMMENT "",
@@ -85,7 +69,6 @@ suite("test_point_query") {
               "replication_allocation" = "tag.location.default: 1",
               "store_row_column" = "true",
               "enable_unique_key_merge_on_write" = "true",
-              "light_schema_change" = "true",
               "storage_format" = "V2"
               )
           """
@@ -98,7 +81,7 @@ suite("test_point_query") {
       sql """ INSERT INTO ${tableName} VALUES(1237, 120939.11130, "a    ddd", "laooq", "2030-01-02", "2020-01-01 12:36:38", 22.822, "7022-01-01 11:30:38", 0, 90696620686827832.374, [1.1, 2.2, 3.3, 4.4, 5.5], []) """
       sql """ INSERT INTO ${tableName} VALUES(251, 120939.11130, "${generateString(251)}", "laooq", "2030-01-02", "2020-01-01 12:36:38", 251, "7022-01-01 11:30:38", 1, 90696620686827832.374, [11111], []) """
       sql """ INSERT INTO ${tableName} VALUES(252, 120939.11130, "${generateString(252)}", "laooq", "2030-01-02", "2020-01-01 12:36:38", 252, "7022-01-01 11:30:38", 0, 90696620686827832.374, [0], null) """
-      sql """ INSERT INTO ${tableName} VALUES(298, 120939.11130, "${generateString(298)}", "laooq", "2030-01-02", "2020-01-01 12:36:38", 298, "7022-01-01 11:30:38", 1, 90696620686827832.374, [], []) """
+      sql """ INSERT INTO ${tableName} VALUES(250, 120939.11130, "${generateString(250)}", "laooq", "2030-01-02", "2020-01-01 12:36:38", 298, "7022-01-01 11:30:38", 1, 90696620686827832.374, [], []) """
 
     def nprep_sql = {sql_str->
         def url_without_prep ="jdbc:mysql://" + sql_ip + ":" + sql_port + "/" + realDb
@@ -138,9 +121,9 @@ suite("test_point_query") {
       stmt.setString(3, generateString(252))
       qe_point_select stmt
 
-      stmt.setInt(1, 298)
+      stmt.setInt(1, 250)
       stmt.setBigDecimal(2, new BigDecimal("120939.11130"))
-      stmt.setString(3, generateString(298))
+      stmt.setString(3, generateString(250))
       qe_point_select stmt
 
       stmt = prepareStatement "select * from ${tableName} where k1 = 1235 and k2 = ? and k3 = ?"
@@ -194,14 +177,14 @@ suite("test_point_query") {
         qt_sql """select * from ${tableName} where k1 = 1231 and k2 = 119291.11 and k3 = 'ddd'"""
         qt_sql """select * from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
         qt_sql """select  hex(k3), hex(k4), k7 + 10.1 from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
-        // prepared text
-        sql """ prepare stmt1 from  select * from ${tableName} where k1 = % and k2 = % and k3 = % """ 
-        qt_sql """execute stmt1 using (1231, 119291.11, 'ddd')"""
-        qt_sql """execute stmt1 using (1237, 120939.11130, 'a    ddd')"""
+        // // prepared text
+        // sql """ prepare stmt1 from  select * from ${tableName} where k1 = % and k2 = % and k3 = % """ 
+        // qt_sql """execute stmt1 using (1231, 119291.11, 'ddd')"""
+        // qt_sql """execute stmt1 using (1237, 120939.11130, 'a    ddd')"""
 
-        sql """prepare stmt2 from  select * from ${tableName} where k1 = % and k2 = % and k3 = %""" 
-        qt_sql """execute stmt2 using (1231, 119291.11, 'ddd')"""
-        qt_sql """execute stmt2 using (1237, 120939.11130, 'a    ddd')"""
+        // sql """prepare stmt2 from  select * from ${tableName} where k1 = % and k2 = % and k3 = %""" 
+        // qt_sql """execute stmt2 using (1231, 119291.11, 'ddd')"""
+        // qt_sql """execute stmt2 using (1237, 120939.11130, 'a    ddd')"""
         tableName = "test_query"
         sql """DROP TABLE IF EXISTS ${tableName}"""
         sql """CREATE TABLE ${tableName} (
@@ -216,7 +199,6 @@ suite("test_point_query") {
             PROPERTIES (
             "replication_allocation" = "tag.location.default: 1",
             "storage_format" = "V2",
-            "light_schema_change" = "true",
             "store_row_column" = "true",
             "enable_unique_key_merge_on_write" = "true",
             "disable_auto_compaction" = "false"

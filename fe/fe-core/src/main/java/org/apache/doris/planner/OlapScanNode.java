@@ -28,6 +28,7 @@ import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.InPredicate;
 import org.apache.doris.analysis.IntLiteral;
 import org.apache.doris.analysis.PartitionNames;
+import org.apache.doris.analysis.PrepareStmt;
 import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
@@ -188,7 +189,7 @@ public class OlapScanNode extends ScanNode {
     // TScanRangeLocations.
     public ArrayListMultimap<Integer, TScanRangeLocations> bucketSeq2locations = ArrayListMultimap.create();
 
-    boolean isFromPrepareStmt = false;
+    PrepareStmt preparedStatment = null;
     // For point query
     private Map<SlotRef, Expr> pointQueryEqualPredicats;
     private DescriptorTable descTable;
@@ -540,8 +541,8 @@ public class OlapScanNode extends ScanNode {
 
         filterDeletedRows(analyzer);
         // point query could do lazy evaluation, since stmt is a prepared statment
-        isFromPrepareStmt = analyzer.getPrepareStmt() != null;
-        if (!isFromPrepareStmt || !isPointQuery()) {
+        preparedStatment = analyzer.getPrepareStmt();
+        if (preparedStatment == null || !preparedStatment.isPointQueryShortCircuit()) {
             computeColumnFilter();
             computePartitionInfo();
         }
@@ -602,7 +603,7 @@ public class OlapScanNode extends ScanNode {
         }
 
         // prepare stmt evaluate lazily in Coordinator execute
-        if (!isFromPrepareStmt || !isPointQuery()) {
+        if (preparedStatment == null || !preparedStatment.isPointQueryShortCircuit()) {
             try {
                 createScanRangeLocations();
             } catch (AnalysisException e) {
@@ -998,10 +999,6 @@ public class OlapScanNode extends ScanNode {
         } else if (!sampleTabletIds.isEmpty()) {
             // TODO add limit
         }
-    }
-
-    public boolean isFromPrepareStmt() {
-        return this.isFromPrepareStmt;
     }
 
     public void setPointQueryEqualPredicates(Map<SlotRef, Expr> predicates) {
