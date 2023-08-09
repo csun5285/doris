@@ -1,28 +1,27 @@
 
 // clang-format off
 #include "meta_service.h"
-#include <brpc/details/profiler_linker.h>
-#include <brpc/options.pb.h>
-#include "meta-service/doris_txn.h"
-#include "meta-service/keys.h"
-#include "meta-service/meta_service_tablet_stats.h"
+
+#include "common/bvars.h"
 #include "common/config.h"
 #include "common/encryption_util.h"
 #include "common/logging.h"
-#include "common/util.h"
-#include "common/bvars.h"
 #include "common/stopwatch.h"
 #include "common/sync_point.h"
+#include "common/util.h"
+#include "meta-service/doris_txn.h"
+#include "meta-service/keys.h"
+#include "meta-service/meta_service_tablet_stats.h"
+#include "meta-service/txn_kv.h"
+#include "rate-limiter/rate_limiter.h"
 
 #include "brpc/channel.h"
 #include "brpc/closure_guard.h"
 #include "brpc/controller.h"
 #include "bthread/bthread.h"
 #include "google/protobuf/util/json_util.h"
-#include "meta-service/txn_kv.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/schema.h"
-#include "rate-limiter/rate_limiter.h"
 
 #include <chrono>
 #include <cstddef>
@@ -54,6 +53,9 @@ static void* run_bthread_work(void* arg) {
     delete f;
     return nullptr;
 }
+
+extern void process_http_encode_key(std::string& response_body, int& status_code,
+        brpc::URI& uri, std::string& msg, bool& keep_raw_body);
 
 MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
                                  std::shared_ptr<ResourceManager> resource_mgr,
@@ -3550,8 +3552,8 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             });
 
     // Prepare input request info
-    auto unresolved_path = cntl->http_request().unresolved_path();
-    auto uri = cntl->http_request().uri();
+    auto& unresolved_path = cntl->http_request().unresolved_path();
+    auto& uri = cntl->http_request().uri();
     std::stringstream ss;
     ss << "\nuri_path=" << uri.path();
     ss << "\nunresolved_path=" << unresolved_path;
@@ -4068,8 +4070,11 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
         return;
     }
 
+    if (unresolved_path == "encode_key") {
+        return process_http_encode_key(response_body, status_code, uri, msg, keep_raw_body);
+    }
+
     // TODO:
-    // * unresolved_path == "encode_key"
     // * unresolved_path == "set_token"
     // * etc.
 }

@@ -18,6 +18,7 @@ add_library(MetaService
     keys.cpp
     doris_txn.cpp
     mem_txn_kv.cpp
+    http_encode_key.cpp
 )
 
 # vim: et tw=120 ts=4 sw=4 cc=80:
