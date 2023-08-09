@@ -22,9 +22,9 @@
 #include <memory>
 
 #include "beta_rowset.h"
+#include "io/fs/file_system.h"
 #include "io/fs/file_writer.h" // IWYU pragma: keep
 #include "olap/rowset/beta_rowset_writer.h"
-#include "olap/rowset/vertical_beta_rowset_writer.h"
 #include "olap/rowset/rowset_writer.h"
 #include "olap/rowset/rowset_writer_context.h"
 #include "olap/rowset/vertical_beta_rowset_writer.h"
@@ -48,7 +48,9 @@ Status RowsetFactory::create_rowset(const TabletSchemaSPtr& schema, const std::s
 Status RowsetFactory::create_rowset_writer(const RowsetWriterContext& context, bool is_vertical,
                                            std::unique_ptr<RowsetWriter>* output) {
 #ifdef CLOUD_MODE
-    DCHECK_GT(context.txn_expiration, 0);
+    // Local rowset does not require txn expiration
+    DCHECK(context.fs == nullptr || context.fs->type() == io::FileSystemType::LOCAL ||
+           context.txn_expiration > 0);
 #endif
     if (context.rowset_type == ALPHA_ROWSET) {
         return Status::Error<ROWSET_INVALID>();
