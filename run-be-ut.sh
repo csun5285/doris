@@ -398,11 +398,7 @@ export DORIS_HOME="${DORIS_TEST_BINARY_DIR}/"
 export JAVA_OPTS="-Xmx1024m -DlogPath=${DORIS_HOME}/log/jni.log -Xloggc:${DORIS_HOME}/log/be.gc.log.${CUR_DATE} -Dsun.java.command=DorisBE -XX:-CriticalJNINatives -DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDEL_TIME=300000"
 
 # find all executable test files
-if [ "${CLOUD_MODE}" == "ON" ]; then
-    test=${DORIS_TEST_BINARY_DIR}/cloud_be_test
-else
-    test=${DORIS_TEST_BINARY_DIR}/doris_be_test
-fi
+test=${DORIS_TEST_BINARY_DIR}/doris_be_test
 
 profraw=${DORIS_TEST_BINARY_DIR}/doris_be_test.profraw
 profdata=${DORIS_TEST_BINARY_DIR}/doris_be_test.profdata
@@ -417,7 +413,7 @@ if [[ -f "${test}" ]]; then
             -instr-profile=${profdata} \
             -object=${test}
     else
-        "${test}" --gtest_output="xml:${GTEST_OUTPUT_DIR}/${file_name}.xml"  --gtest_print_time=true "${FILTER}"
+        "${test}" --gtest_output="xml:${GTEST_OUTPUT_DIR}/${file_name}.xml" --gtest_print_time=true "${FILTER}"
     fi
     echo "=== Finished. Gtest output: ${GTEST_OUTPUT_DIR}"
 else

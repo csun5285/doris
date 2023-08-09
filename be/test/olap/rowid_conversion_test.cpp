@@ -253,7 +253,13 @@ protected:
         rsm->set_delete_predicate(del_pred);
         rsm->set_tablet_schema(tablet->tablet_schema());
         RowsetSharedPtr rowset = std::make_shared<BetaRowset>(tablet->tablet_schema(), "", rsm);
+#ifdef CLOUD_MODE
+        std::vector<RowsetSharedPtr> to_add;
+        to_add.push_back(rowset);
+        tablet->cloud_add_rowsets(to_add, false, false);
+#else
         tablet->add_rowset(rowset);
+#endif
     }
 
     TabletSharedPtr create_tablet(const TabletSchema& tablet_schema,

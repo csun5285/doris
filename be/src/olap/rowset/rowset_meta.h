@@ -61,8 +61,10 @@ public:
     }
 
     virtual bool init_from_pb(const RowsetMetaPB& rowset_meta_pb) {
+#ifndef BE_TEST
         // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
         DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
+#endif // BE_TEST
         if (rowset_meta_pb.has_tablet_schema()) {
             _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
                                                             rowset_meta_pb.tablet_schema());
@@ -442,8 +444,10 @@ private:
         if (!rowset_meta_pb.ParseFromString(value)) {
             return false;
         }
+#ifndef BE_TEST
         // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
         DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
+#endif // BE_TEST
         if (rowset_meta_pb.has_tablet_schema()) {
             _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
                                                             rowset_meta_pb.tablet_schema());
