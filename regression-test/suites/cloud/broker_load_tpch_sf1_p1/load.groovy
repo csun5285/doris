@@ -37,7 +37,7 @@ suite("load") {
 
     Configuration configuration = new Configuration();
     configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
-    FileSystem hdfs = FileSystem.get(new URI("hdfs://127.0.0.1:9200"), configuration);
+    FileSystem hdfs = FileSystem.get(new URI(getHdfsFs()), configuration);
 
     for (String table in tables) {
         if (table == "orders" || table == "lineitem" || table == "partsupp" ) {
