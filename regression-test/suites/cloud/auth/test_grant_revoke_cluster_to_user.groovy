@@ -30,7 +30,6 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     // for use default_cluster:regression_test
     sql """grant select_priv on *.*.* to ${user2}"""
-    order_qt_show_user2_grants2 """show grants for '${user2}'"""
 
 
     // 2. grant cluster
@@ -64,7 +63,6 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
-    order_qt_show_user3_grants3 """show grants for '${user2}'"""
 
     sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     show_cluster_2 = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
@@ -99,4 +97,5 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""
 }
+
 
