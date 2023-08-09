@@ -205,7 +205,8 @@ public class FileGroupInfo {
             long leftBytes = fileStatus.size - curFileOffset;
             long tmpBytes = curInstanceBytes + leftBytes;
             // header_type
-            TFileFormatType formatType = formatType(context.fileGroup.getFileFormat(), fileStatus.path);
+            TFileFormatType formatType = LoadScanProvider.formatType(context.fileGroup.getFileFormat(),
+                    context.fileGroup.getCompressType(), fileStatus.path);
             context.params.setFormatType(formatType);
             List<String> columnsFromPath = BrokerUtil.parseColumnsFromPath(fileStatus.path,
                     context.fileGroup.getColumnNamesFromPath());
