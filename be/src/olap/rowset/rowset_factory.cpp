@@ -47,6 +47,9 @@ Status RowsetFactory::create_rowset(const TabletSchemaSPtr& schema, const std::s
 
 Status RowsetFactory::create_rowset_writer(const RowsetWriterContext& context, bool is_vertical,
                                            std::unique_ptr<RowsetWriter>* output) {
+#ifdef CLOUD_MODE
+    DCHECK_GT(context.txn_expiration, 0);
+#endif
     if (context.rowset_type == ALPHA_ROWSET) {
         return Status::Error<ROWSET_INVALID>();
     }

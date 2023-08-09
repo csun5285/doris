@@ -2468,7 +2468,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
     prepare_rowset.mutable_rowset_meta()->CopyFrom(rowset_meta);
     prepare_rowset.set_type(RecycleRowsetPB::PREPARE);
     prepare_rowset.SerializeToString(&prepare_val);
-
+    DCHECK_GT(prepare_rowset.expiration(), 0);
     txn->put(prepare_key, prepare_val);
     LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "prepare_rowset_key "
               << hex(prepare_key) << " associated commit_rowset_key " << hex(commit_key)
@@ -2611,6 +2611,7 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     std::string prepare_key;
     RecycleRowsetKeyInfo prepare_key_info {instance_id, tablet_id, rowset_id};
     recycle_rowset_key(prepare_key_info, &prepare_key);
+    DCHECK_GT(rowset_meta.txn_expiration(), 0);
     if (!rowset_meta.SerializeToString(&commit_val)) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
         msg = "failed to serialize rowset meta";

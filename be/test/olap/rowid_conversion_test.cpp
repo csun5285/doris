@@ -152,6 +152,7 @@ protected:
         rowset_writer_context->version = Version(inc_id, inc_id);
         rowset_writer_context->segments_overlap = overlap;
         rowset_writer_context->max_rows_per_segment = max_rows_per_segment;
+        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
         inc_id++;
     }
 
