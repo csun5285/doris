@@ -41,6 +41,7 @@
 #include "vec/common/hash_table/hash_map.h"
 #include "vec/common/string_ref.h"
 #include "vec/core/types.h"
+#include "exec/decompressor.h"
 #include "vec/exec/format/generic_reader.h"
 #include "vec/json/json_parser.h"
 #include "vec/json/simd_json_parser.h"
@@ -95,6 +96,7 @@ public:
                              std::vector<TypeDescriptor>* col_types) override;
 
 private:
+    Status _create_decompressor();
     Status _get_range_params();
     void _init_system_properties();
     void _init_file_description();
@@ -197,6 +199,7 @@ private:
     std::shared_ptr<io::FileSystem> _file_system;
     io::FileReaderSPtr _file_reader;
     std::unique_ptr<LineReader> _line_reader;
+    std::unique_ptr<Decompressor> _decompressor;
     bool _reader_eof;
 
     // When we fetch range doesn't start from 0 will always skip the first line
@@ -230,6 +233,8 @@ private:
     std::unordered_map<std::string, int> _name_map;
 
     bool* _scanner_eof;
+    TFileFormatType::type _file_format_type;
+    TFileCompressType::type _file_compress_type;
 
     size_t _current_offset;
 
