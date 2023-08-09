@@ -730,10 +730,16 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
 }
 
 Status Tablet::cloud_sync_meta() {
+    if (!config::enable_file_cache) {
+        return Status::OK();
+    }
+
     TabletMetaSharedPtr tablet_meta;
     auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
-    if (st.is<NOT_FOUND>()) {
-        cloud::tablet_mgr()->erase_tablet(tablet_id());
+    if (!st.ok()) {
+        if (st.is<NOT_FOUND>()) {
+            cloud::tablet_mgr()->erase_tablet(tablet_id());
+        }
         return st;
     }
     if (tablet_meta->tablet_state() != TABLET_RUNNING) { // impossible
@@ -742,10 +748,6 @@ Status Tablet::cloud_sync_meta() {
     auto table_name = tablet_meta->table_name();
     if (_tablet_meta->table_name() != table_name) {
         _tablet_meta->set_table_name(table_name);
-    }
-
-    if (!config::enable_file_cache) {
-        return Status::OK();
     }
 
     auto new_ttl_seconds = tablet_meta->ttl_seconds();
@@ -783,6 +785,7 @@ Status Tablet::cloud_sync_meta() {
 }
 
 // There are only two tablet_states RUNNING and NOT_READY in cloud mode
+// This function will erase the tablet from `CloudTabletMgr` when it can't find this tablet in MS.
 Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data_async) {
     do {
         // Sync tablet if not running.
@@ -800,8 +803,10 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data
         }
         TabletMetaSharedPtr tablet_meta;
         auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
-        if (st.is<NOT_FOUND>()) {
-            cloud::tablet_mgr()->erase_tablet(tablet_id());
+        if (!st.ok()) {
+            if (st.is<NOT_FOUND>()) {
+                cloud::tablet_mgr()->erase_tablet(tablet_id());
+            }
             return st;
         }
         if (tablet_meta->tablet_state() != TABLET_RUNNING) [[unlikely]] { // impossible
