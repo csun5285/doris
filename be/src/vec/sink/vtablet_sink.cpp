@@ -324,6 +324,7 @@ void VNodeChannel::open() {
     request.set_is_vectorized(true);
     request.set_backend_id(_node_id);
     request.set_enable_profile(_state->enable_profile());
+    request.set_txn_expiration(_parent->_txn_expiration);
 
     _open_closure = new RefCountClosure<PTabletWriterOpenResult>();
     _open_closure->ref();
@@ -977,6 +978,11 @@ Status VOlapTableSink::init(const TDataSink& t_sink) {
             return Status::InternalError("single replica load is disabled on BE.");
         }
     }
+
+#ifdef CLOUD_MODE
+    DCHECK_GT(table_sink.txn_timeout_s, 0);
+#endif
+    _txn_expiration = ::time(nullptr) + table_sink.txn_timeout_s;
 
     if (table_sink.__isset.load_channel_timeout_s) {
         _load_channel_timeout_s = table_sink.load_channel_timeout_s;

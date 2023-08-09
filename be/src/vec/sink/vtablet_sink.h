@@ -633,6 +633,8 @@ private:
 
     // the timeout of load channels opened by this tablet sink. in second
     int64_t _load_channel_timeout_s = 0;
+    // CLOUD_MODE load txn absolute exipration time
+    int64_t _txn_expiration = 0;
 
     int32_t _send_batch_parallelism = 1;
     // Save the status of try_close() and close() method
