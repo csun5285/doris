@@ -533,19 +533,6 @@ Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
         return Status::InternalError("fail to build rowset");
     }
 
-    if (_tablet->enable_unique_key_merge_on_write()) {
-        auto beta_rowset = reinterpret_cast<BetaRowset*>(_cur_rowset.get());
-        std::vector<segment_v2::SegmentSharedPtr> segments;
-        RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
-        if (segments.size() > 1) {
-            // calculate delete bitmap between segments
-            RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
-                                                                         _delete_bitmap));
-        }
-        RETURN_IF_ERROR(_tablet->commit_phase_update_delete_bitmap(
-                _cur_rowset, _rowset_ids, _delete_bitmap, segments, _req.txn_id, nullptr));
-    }
-
     _delta_written_success = true;
 
     const FlushStatistic& stat = _flush_token->get_stats();
@@ -555,6 +542,13 @@ Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
         *rowset = _cur_rowset;
     }
     return Status::OK();
+}
+
+void DeltaWriter::cloud_set_txn_related_delete_bitmap() {
+    if (_tablet->enable_unique_key_merge_on_write()) {
+        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
+                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
+    }
 }
 
 Status DeltaWriter::build_rowset() {
@@ -662,14 +656,9 @@ Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
         return res;
     }
     if (_tablet->enable_unique_key_merge_on_write()) {
-#ifdef CLOUD_MODE
-        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
-                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
-#else
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
             _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
             _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids);
-#endif
     }
 
     _delta_written_success = true;

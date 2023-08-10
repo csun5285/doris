@@ -207,12 +207,6 @@ Status StorageEngine::cloud_start_bg_threads() {
             .set_max_threads(config::calc_tablet_delete_bitmap_task_max_thread)
             .build(&_calc_tablet_delete_bitmap_task_thread_pool);
 
-    // add calculate segment delete bitmap thread pool
-    ThreadPoolBuilder("TabletCalDeleteBitmapThreadPool")
-            .set_min_threads(1)
-            .set_max_threads(config::calc_delete_bitmap_max_thread)
-            .build(&_calc_delete_bitmap_thread_pool);
-
     LOG(INFO) << "all storage engine's background threads for cloud are started.";
     return Status::OK();
 }

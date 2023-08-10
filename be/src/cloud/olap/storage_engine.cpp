@@ -141,6 +141,7 @@ StorageEngine::StorageEngine(const EngineOptions& options)
                   new DeleteBitmapTxnManager(config::delete_bitmap_agg_cache_capacity)),
           _rowset_id_generator(new UniqueRowsetIdGenerator(options.backend_uid)),
           _memtable_flush_executor(nullptr),
+          _calc_delete_bitmap_executor(nullptr),
           _default_rowset_type(BETA_ROWSET),
           _heartbeat_flags(nullptr),
           _cumulative_compaction_policy(
@@ -229,6 +230,9 @@ Status StorageEngine::_open() {
 
     _memtable_flush_executor.reset(new MemTableFlushExecutor());
     _memtable_flush_executor->init(dirs);
+
+    _calc_delete_bitmap_executor.reset(new CalcDeleteBitmapExecutor());
+    _calc_delete_bitmap_executor->init();
 
     _parse_default_rowset_type();
 

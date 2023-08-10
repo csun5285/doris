@@ -229,6 +229,35 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
     }
     int64_t commit_latency =
             duration_cast<milliseconds>(steady_clock::now() - commit_start).count();
+
+    // 4. calculate delete bitmap for Unique Key MoW tables
+    for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
+        auto st = (*it)->submit_calc_delete_bitmap_task();
+        if (!st.ok()) {
+            _add_error_tablet(tablet_errors, (*it)->tablet_id(), st);
+            it = need_wait_writers.erase(it);
+            continue;
+        }
+        it++;
+    }
+
+    // 5. wait for delete bitmap calculation complete if necessary
+    for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
+        Status st = (*it)->wait_calc_delete_bitmap();
+        if (!st.ok()) {
+            _add_error_tablet(tablet_errors, (*it)->tablet_id(), st);
+            it = need_wait_writers.erase(it);
+            continue;
+        }
+        it++;
+    }
+     
+    // 6. set txn related delete bitmap if necessary
+    for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
+        (*it)->cloud_set_txn_related_delete_bitmap();
+        it++;
+    }
+
     tablet_vec->Reserve(need_wait_writers.size());
     for (auto writer : need_wait_writers) {
         PTabletInfo* tablet_info = tablet_vec->Add();

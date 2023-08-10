@@ -3391,8 +3391,12 @@ Status Tablet::calc_delete_bitmap(RowsetSharedPtr rowset,
     }
 
     OlapStopWatch watch;
-    doris::TabletSharedPtr tablet_ptr =
-            StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
+    doris::TabletSharedPtr tablet_ptr;
+#ifdef CLOUD_MODE
+    cloud::tablet_mgr()->get_tablet(tablet_id(), &tablet_ptr);
+#else
+    tablet_ptr = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
+#endif
     if (tablet_ptr == nullptr) {
         return Status::InternalError("Can't find tablet id: {}, maybe already dropped.",
                                      tablet_id());
