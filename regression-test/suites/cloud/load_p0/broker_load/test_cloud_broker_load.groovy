@@ -27,7 +27,7 @@ import java.io.OutputStreamWriter
 suite("test_cloud_broker_load", "p0") {
     Configuration configuration = new Configuration();
     configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
-    FileSystem hdfs = FileSystem.get(new URI("hdfs://127.0.0.1:9200"), configuration);
+    FileSystem hdfs = FileSystem.get(new URI(getHdfsFs()), configuration);
     hdfs.copyFromLocalFile(new Path("regression-test/data/cloud/load_p0/broker_load/all_types.csv"), new Path("/broker/all_types.csv"));
 
     // test common case
