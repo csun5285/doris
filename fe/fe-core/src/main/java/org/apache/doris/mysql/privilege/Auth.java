@@ -1221,7 +1221,6 @@ public class Auth implements Writable {
         for (PrivEntry entry : getUserCloudClusterPrivTable(userIdent).entries) {
             ResourcePrivEntry rEntry = (ResourcePrivEntry) entry;
             PrivBitSet savedPrivs = rEntry.getPrivSet().copy();
-            savedPrivs.or(LdapPrivsChecker.getResourcePrivFromLdap(userIdent, rEntry.getOrigResource()));
             cloudClusterPrivs.add(rEntry.getOrigResource() + ": " + savedPrivs.toString());
         }
 
@@ -1236,7 +1235,6 @@ public class Auth implements Writable {
         for (PrivEntry entry : getUserCloudStagePrivTable(userIdent).entries) {
             ResourcePrivEntry rEntry = (ResourcePrivEntry) entry;
             PrivBitSet savedPrivs = rEntry.getPrivSet().copy();
-            savedPrivs.or(LdapPrivsChecker.getResourcePrivFromLdap(userIdent, rEntry.getOrigResource()));
             cloudStagePrivs.add(rEntry.getOrigResource() + ": " + savedPrivs.toString());
         }
 
@@ -1315,9 +1313,6 @@ public class Auth implements Writable {
         for (String roleName : roles) {
             table.merge(roleManager.getRole(roleName).getCloudClusterPrivTable());
         }
-        if (isLdapAuthEnabled() && ldapManager.doesUserExist(userIdentity.getQualifiedUser())) {
-            table.merge(ldapManager.getUserRole(userIdentity.getQualifiedUser()).getCloudClusterPrivTable());
-        }
         return table;
     }
 
@@ -1326,9 +1321,6 @@ public class Auth implements Writable {
         Set<String> roles = userRoleManager.getRolesByUser(userIdentity);
         for (String roleName : roles) {
             table.merge(roleManager.getRole(roleName).getCloudStagePrivTable());
-        }
-        if (isLdapAuthEnabled() && ldapManager.doesUserExist(userIdentity.getQualifiedUser())) {
-            table.merge(ldapManager.getUserRole(userIdentity.getQualifiedUser()).getCloudStagePrivTable());
         }
         return table;
     }
