@@ -54,6 +54,7 @@
 #include "olap/schema_change.h"
 #include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
+#include "olap/tablet_meta.h"
 #include "olap/txn_manager.h"
 #include "runtime/exec_env.h"
 #include "runtime/load_channel_mgr.h"
@@ -128,6 +129,11 @@ DeltaWriter::~DeltaWriter() {
             _tablet->flush_finish_count->increment(stat.flush_finish_count);
         }
     }
+
+    if (_calc_delete_bitmap_token != nullptr) {
+        _calc_delete_bitmap_token->cancel();
+    }
+
 #ifndef CLOUD_MODE
     if (_tablet != nullptr) {
         _tablet->data_dir()->remove_pending_ids(ROWSET_ID_PREFIX +
@@ -185,9 +191,8 @@ Status DeltaWriter::init() {
     TabletManager* tablet_mgr = _storage_engine->tablet_manager();
     _tablet = tablet_mgr->get_tablet(_req.tablet_id);
     if (_tablet == nullptr) {
-        LOG(WARNING) << "fail to find tablet. tablet_id=" << _req.tablet_id
-                     << ", schema_hash=" << _req.schema_hash;
-        return Status::Error<TABLE_NOT_FOUND>();
+        return Status::Error<TABLE_NOT_FOUND>("fail to find tablet. tablet_id={}, schema_hash={}",
+                                              _req.tablet_id, _req.schema_hash);
     }
 #endif
 
@@ -214,10 +219,31 @@ Status DeltaWriter::init() {
             LOG_WARNING("tablet exceeds max version num limit")
                     .tag("limit", config::max_tablet_version_num)
                     .tag("tablet_id", _tablet->tablet_id());
-            return Status::Error<TOO_MANY_VERSION>();
+            return Status::Error<TOO_MANY_VERSION>("too many versions, versions={} tablet={}",
+                    config::max_tablet_version_num, _tablet->tablet_id());
         }
     }
+
 #else
+    // get rowset ids snapshot
+    if (_tablet->enable_unique_key_merge_on_write()) {
+        std::lock_guard<std::shared_mutex> lck(_tablet->get_header_lock());
+        _cur_max_version = _tablet->max_version_unlocked().second;
+        // tablet is under alter process. The delete bitmap will be calculated after conversion.
+        if (_tablet->tablet_state() == TABLET_NOTREADY &&
+            SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
+            // Disable 'partial_update' when the tablet is undergoing a 'schema changing process'
+            if (_req.table_schema_param->is_partial_update()) {
+                return Status::InternalError(
+                        "Unable to do 'partial_update' when "
+                        "the tablet is undergoing a 'schema changing process'");
+            }
+            _rowset_ids.clear();
+        } else {
+            _rowset_ids = _tablet->all_rs_id(_cur_max_version);
+        }
+    }
+
     // check tablet version number
     if (!config::disable_auto_compaction &&
         _tablet->exceed_version_limit(config::max_tablet_version_num - 100) &&
@@ -226,18 +252,16 @@ Status DeltaWriter::init() {
         StorageEngine::instance()->submit_compaction_task(
                 _tablet, CompactionType::CUMULATIVE_COMPACTION, true);
         if (_tablet->version_count() > config::max_tablet_version_num) {
-            LOG(WARNING) << "failed to init delta writer. version count: "
-                         << _tablet->version_count()
-                         << ", exceed limit: " << config::max_tablet_version_num
-                         << ". tablet: " << _tablet->full_name();
-            return Status::Error<TOO_MANY_VERSION>();
+            return Status::Error<TOO_MANY_VERSION>(
+                    "failed to init delta writer. version count: {}, exceed limit: {}, tablet: {}",
+                    _tablet->version_count(), config::max_tablet_version_num, _tablet->full_name());
         }
     }
 
     {
         std::shared_lock base_migration_rlock(_tablet->get_migration_lock(), std::try_to_lock);
         if (!base_migration_rlock.owns_lock()) {
-            return Status::Error<TRY_LOCK_FAILED>();
+            return Status::Error<TRY_LOCK_FAILED>("get lock failed");
         }
         std::lock_guard<std::mutex> push_lock(_tablet->get_push_lock());
         RETURN_IF_ERROR(_storage_engine->txn_manager()->prepare_txn(_req.partition_id, _tablet,
@@ -281,6 +305,7 @@ Status DeltaWriter::init() {
     bool should_serial = false;
     RETURN_IF_ERROR(_storage_engine->memtable_flush_executor()->create_flush_token(
             &_flush_token, _rowset_writer->type(), should_serial, _req.is_high_priority));
+    _calc_delete_bitmap_token = _storage_engine->calc_delete_bitmap_executor()->create_token();
 
     _is_init = true;
     return Status::OK();
@@ -307,9 +332,9 @@ Status DeltaWriter::write(const vectorized::Block* block, const std::vector<int>
     }
 
     if (_is_closed) {
-        LOG(WARNING) << "write block after closed tablet_id=" << _req.tablet_id
-                     << " load_id=" << _req.load_id << " txn_id=" << _req.txn_id;
-        return Status::Error<ALREADY_CLOSED>();
+        return Status::Error<ALREADY_CLOSED>(
+                "write block after closed tablet_id={}, load_id={}-{}, txn_id={}", _req.tablet_id,
+                _req.load_id.hi(), _req.load_id.lo(), _req.txn_id);
     }
 
     if (is_append) {
@@ -478,8 +503,7 @@ void DeltaWriter::update_tablet_stats() {
     _tablet->fetch_add_approximate_cumu_data_size(_cur_rowset->data_disk_size());
 }
 
-#ifdef CLOUD_MODE
-Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
+Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
     std::lock_guard l(_lock);
     DCHECK(_is_init)
             << "delta writer is supposed be to initialized before close_wait() being called";
@@ -520,8 +544,6 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
         }
         RETURN_IF_ERROR(_tablet->commit_phase_update_delete_bitmap(
                 _cur_rowset, _rowset_ids, _delete_bitmap, segments, _req.txn_id, nullptr));
-        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
-                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
     }
 
     _delta_written_success = true;
@@ -534,13 +556,11 @@ Status DeltaWriter::close_wait(RowsetSharedPtr* rowset) {
     }
     return Status::OK();
 }
-#else
-Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
-                               const bool write_single_replica) {
-    SCOPED_TIMER(_close_wait_timer);
+
+Status DeltaWriter::build_rowset() {
     std::lock_guard<std::mutex> l(_lock);
     DCHECK(_is_init)
-            << "delta writer is supposed be to initialized before close_wait() being called";
+            << "delta writer is supposed be to initialized before build_rowset() being called";
 
     if (_is_cancelled) {
         return _cancel_status;
@@ -569,43 +589,70 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
     // use rowset meta manager to save meta
     _cur_rowset = _rowset_writer->build();
     if (_cur_rowset == nullptr) {
-        LOG(WARNING) << "fail to build rowset";
-        return Status::Error<MEM_ALLOC_FAILED>();
+        return Status::Error<MEM_ALLOC_FAILED>("fail to build rowset");
+    }
+    return Status::OK();
+}
+
+Status DeltaWriter::submit_calc_delete_bitmap_task() {
+    if (!_tablet->enable_unique_key_merge_on_write()) {
+        return Status::OK();
     }
 
-    if (_tablet->enable_unique_key_merge_on_write()) {
-        auto beta_rowset = reinterpret_cast<BetaRowset*>(_cur_rowset.get());
-        std::vector<segment_v2::SegmentSharedPtr> segments;
-        RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
-        // tablet is under alter process. The delete bitmap will be calculated after conversion.
-        if (_tablet->tablet_state() == TABLET_NOTREADY &&
-            SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
-            return Status::OK();
-        }
-        if (segments.size() > 1) {
-            // calculate delete bitmap between segments
-            RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
-                                                                         _delete_bitmap));
-        }
-
-        // commit_phase_update_delete_bitmap() may generate new segments, we need to create a new
-        // transient rowset writer to write the new segments, then merge it back the original
-        // rowset.
-        std::unique_ptr<RowsetWriter> rowset_writer;
-        _tablet->create_transient_rowset_writer(_cur_rowset, &rowset_writer);
-        RETURN_IF_ERROR(_tablet->commit_phase_update_delete_bitmap(
-                _cur_rowset, _rowset_ids, _delete_bitmap, segments, _req.txn_id,
-                rowset_writer.get()));
-        if (_cur_rowset->tablet_schema()->is_partial_update()) {
-            // build rowset writer and merge transient rowset
-            RETURN_IF_ERROR(rowset_writer->flush());
-            RowsetSharedPtr transient_rowset = rowset_writer->build();
-            _cur_rowset->merge_rowset_meta(transient_rowset->rowset_meta());
-
-            // erase segment cache cause we will add a segment to rowset
-            SegmentLoader::instance()->erase_segment(_cur_rowset->rowset_id());
-        }
+    std::lock_guard<std::mutex> l(_lock);
+    // tablet is under alter process. The delete bitmap will be calculated after conversion.
+    if (_tablet->tablet_state() == TABLET_NOTREADY &&
+        SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
+        LOG(INFO) << "tablet is under alter process, delete bitmap will be calculated later, "
+                     "tablet_id: "
+                  << _tablet->tablet_id() << " txn_id: " << _req.txn_id;
+        return Status::OK();
     }
+    auto beta_rowset = reinterpret_cast<BetaRowset*>(_cur_rowset.get());
+    std::vector<segment_v2::SegmentSharedPtr> segments;
+    RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
+    // tablet is under alter process. The delete bitmap will be calculated after conversion.
+    if (_tablet->tablet_state() == TABLET_NOTREADY &&
+        SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
+        return Status::OK();
+    }
+    if (segments.size() > 1) {
+        // calculate delete bitmap between segments
+        RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
+                                                                     _delete_bitmap));
+    }
+
+    // For partial update, we need to fill in the entire row of data, during the calculation
+    // of the delete bitmap. This operation is resource-intensive, and we need to minimize
+    // the number of times it occurs. Therefore, we skip this operation here.
+    if (_cur_rowset->tablet_schema()->is_partial_update()) {
+        return Status::OK();
+    }
+
+    LOG(INFO) << "submit calc delete bitmap task to executor, tablet_id: " << _tablet->tablet_id()
+              << ", txn_id: " << _req.txn_id;
+    return _tablet->commit_phase_update_delete_bitmap(_cur_rowset, _rowset_ids, _delete_bitmap,
+                                                      segments, _req.txn_id,
+                                                      _calc_delete_bitmap_token.get(), nullptr);
+}
+
+Status DeltaWriter::wait_calc_delete_bitmap() {
+    if (!_tablet->enable_unique_key_merge_on_write() ||
+        _cur_rowset->tablet_schema()->is_partial_update()) {
+        return Status::OK();
+    }
+    std::lock_guard<std::mutex> l(_lock);
+    RETURN_IF_ERROR(_calc_delete_bitmap_token->wait());
+    RETURN_IF_ERROR(_calc_delete_bitmap_token->get_delete_bitmap(_delete_bitmap));
+    LOG(INFO) << "Got result of calc delete bitmap task from executor, tablet_id: "
+              << _tablet->tablet_id() << ", txn_id: " << _req.txn_id;
+    return Status::OK();
+}
+
+Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
+                               const bool write_single_replica) {
+    std::lock_guard<std::mutex> l(_lock);
+    SCOPED_TIMER(_close_wait_timer);
     Status res = _storage_engine->txn_manager()->commit_txn(_req.partition_id, _tablet, _req.txn_id,
                                                             _req.load_id, _cur_rowset, false);
 
@@ -615,23 +662,14 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
         return res;
     }
     if (_tablet->enable_unique_key_merge_on_write()) {
-        auto beta_rowset = reinterpret_cast<BetaRowset*>(_cur_rowset.get());
-        std::vector<segment_v2::SegmentSharedPtr> segments;
-        RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
-        // tablet is under alter process. The delete bitmap will be calculated after conversion.
-        if (_tablet->tablet_state() == TABLET_NOTREADY &&
-            SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id())) {
-            return Status::OK();
-        }
-        if (segments.size() > 1) {
-            // calculate delete bitmap between segments
-            RETURN_IF_ERROR(_tablet->calc_delete_bitmap_between_segments(_cur_rowset, segments,
-                                                                         _delete_bitmap));
-        }
+#ifdef CLOUD_MODE
+        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
+                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
+#else
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
-                _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
-                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids, _cur_rowset
-                dynamic_cast<BetaRowsetWriter*>(_rowset_writer.get())->get_num_mow_keys());
+            _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
+            _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids);
+#endif
     }
 
     _delta_written_success = true;
@@ -652,7 +690,6 @@ Status DeltaWriter::close_wait(const PSlaveTabletNodes& slave_tablet_nodes,
     COUNTER_UPDATE(_lock_timer, _lock_watch.elapsed_time() / 1000);
     return Status::OK();
 }
-#endif // !CLOUD_MODE
 
 bool DeltaWriter::check_slave_replicas_done(
         google::protobuf::Map<int64_t, PSuccessSlaveTabletNodeIds>* success_slave_tablet_node_ids) {
@@ -686,6 +723,9 @@ Status DeltaWriter::cancel_with_status(const Status& st) {
     if (_flush_token != nullptr) {
         // cancel and wait all memtables in flush queue to be finished
         _flush_token->cancel();
+    }
+    if (_calc_delete_bitmap_token != nullptr) {
+        _calc_delete_bitmap_token->cancel();
     }
     _is_cancelled = true;
     _cancel_status = st;
@@ -772,6 +812,7 @@ void DeltaWriter::_build_current_tablet_schema(int64_t index_id,
     // set partial update columns info
     _tablet_schema->set_partial_update_info(table_schema_param->is_partial_update(),
                                             table_schema_param->partial_update_input_columns());
+    _tablet_schema->set_is_strict_mode(table_schema_param->is_strict_mode());
 }
 
 void DeltaWriter::_request_slave_tablet_pull_rowset(PNodeInfo node_info) {
@@ -876,6 +917,10 @@ void DeltaWriter::finish_slave_tablet_pull_rowset(int64_t node_id, bool is_succe
                       << "], tablet_id=" << _tablet->tablet_id() << ", node_id=" << node_id;
     }
     _unfinished_slave_node.erase(node_id);
+}
+
+int64_t DeltaWriter::num_rows_filtered() const {
+    return _rowset_writer == nullptr ? 0 : _rowset_writer->num_rows_filtered();
 }
 
 } // namespace doris

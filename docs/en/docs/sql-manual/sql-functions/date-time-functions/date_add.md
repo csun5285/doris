@@ -28,11 +28,7 @@ under the License.
 ### Description
 #### Syntax
 
-<<<<<<< HEAD
-`INT DATE_ADD(DATETIME date, INTERVAL expr type)`
-=======
 `DATETIME DATE_ADD(DATETIME date, INTERVAL expr type)`
->>>>>>> 2.0.0-rc01
 
 
 Adds a specified time interval to the date.

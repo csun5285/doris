@@ -226,8 +226,10 @@ struct TQueryOptions {
 
   75: optional bool enable_insert_strict = false;
 
+  76: optional bool enable_inverted_index_query = true;
+
   // to control if the content would be written into file cache
-  76: optional bool disable_file_cache = false
+  1000: optional bool disable_file_cache = false
 }
 
 // A scan range plus the parameters needed to execute that scan.
@@ -423,6 +425,9 @@ struct TExecPlanFragmentParams {
   22: optional list<Types.TUniqueId> instances_sharing_hash_table;
 
   23: optional string table_name;
+
+  // scan node id -> scan range params, only for external file scan
+  24: optional map<Types.TPlanNodeId, PlanNodes.TFileScanRangeParams> file_scan_params
 }
 
 struct TExecPlanFragmentParamsList {
@@ -647,6 +652,9 @@ struct TPipelineFragmentParams {
   24: list<TPipelineInstanceParams> local_params
   26: optional list<TPipelineWorkloadGroup> workload_groups
   27: optional TTxnParams txn_conf
+  28: optional string table_name
+  // scan node id -> scan range params, only for external file scan
+  29: optional map<Types.TPlanNodeId, PlanNodes.TFileScanRangeParams> file_scan_params
 }
 
 struct TPipelineFragmentParamsList {

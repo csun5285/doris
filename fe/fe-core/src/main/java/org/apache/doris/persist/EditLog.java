@@ -334,7 +334,8 @@ public class EditLog {
                     BatchDropInfo batchDropInfo = (BatchDropInfo) journal.getData();
                     for (long indexId : batchDropInfo.getIndexIdSet()) {
                         env.getMaterializedViewHandler().replayDropRollup(
-                                new DropInfo(batchDropInfo.getDbId(), batchDropInfo.getTableId(), indexId, false, 0),
+                                new DropInfo(batchDropInfo.getDbId(), batchDropInfo.getTableId(),
+                                        batchDropInfo.getTableName(), indexId, false, 0),
                                 env);
                     }
                     break;
@@ -886,7 +887,7 @@ public class EditLog {
                 }
                 case OperationType.OP_ALTER_CATALOG_PROPS: {
                     CatalogLog log = (CatalogLog) journal.getData();
-                    env.getCatalogMgr().replayAlterCatalogProps(log);
+                    env.getCatalogMgr().replayAlterCatalogProps(log, null, true);
                     break;
                 }
                 case OperationType.OP_REFRESH_CATALOG: {

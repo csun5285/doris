@@ -249,6 +249,7 @@ struct TEsScanRange {
 struct TFileTextScanRangeParams {
     1: optional string column_separator;
     2: optional string line_delimiter;
+    3: optional string array_delimiter;
 }
 
 struct TFileScanSlotInfo {
@@ -296,15 +297,12 @@ struct TIcebergFileDesc {
 }
 
 struct TPaimonFileDesc {
-    1: optional binary paimon_split
-    2: optional string paimon_column_ids
-    3: optional string paimon_column_types
-    4: optional string paimon_column_names
-    5: optional string hive_metastore_uris
-    6: optional string warehouse
-    7: optional string db_name
-    8: optional string table_name
-    9: optional string length_byte
+    1: optional string paimon_split
+    2: optional string paimon_column_names
+    3: optional string db_name
+    4: optional string table_name
+    5: optional string paimon_predicate
+    6: optional map<string, string> paimon_options
 }
 
 
@@ -340,8 +338,10 @@ struct TTableFormatFileDesc {
 }
 
 struct TFileScanRangeParams {
+    // deprecated, move to TFileScanRange
     1: optional Types.TFileType file_type;
     2: optional TFileFormatType format_type;
+    // deprecated, move to TFileScanRange
     3: optional TFileCompressType compress_type;
     // If this is for load job, src point to the source table and dest point to the doris table.
     // If this is for query, only dest_tuple_id is set, including both file slot and partition slot.
@@ -400,6 +400,8 @@ struct TFileRangeDesc {
     8: optional TTableFormatFileDesc table_format_params
     // Use modification time to determine whether the file is changed
     9: optional i64 modification_time
+    10: optional Types.TFileType file_type;
+    11: optional TFileCompressType compress_type;
 }
 
 // TFileScanRange represents a set of descriptions of a file and the rules for reading and converting it.
@@ -407,6 +409,10 @@ struct TFileRangeDesc {
 //  list<TFileRangeDesc>: file location and range
 struct TFileScanRange {
     1: optional list<TFileRangeDesc> ranges
+    // If file_scan_params in TExecPlanFragmentParams is set in TExecPlanFragmentParams
+    // will use that field, otherwise, use this field.
+    // file_scan_params in TExecPlanFragmentParams will always be set in query request,
+    // and TFileScanRangeParams here is used for some other request such as fetch table schema for tvf. 
     2: optional TFileScanRangeParams params
 }
 
@@ -506,6 +512,7 @@ struct TBrokerScanNode {
 
 struct TFileScanNode {
     1: optional Types.TTupleId tuple_id
+    2: optional string table_name
 }
 
 struct TEsScanNode {
@@ -789,7 +796,7 @@ struct TAggregationNode {
   6: optional bool use_streaming_preaggregation
   7: optional list<TSortInfo> agg_sort_infos
   8: optional bool is_first_phase
-  9: optional bool use_fixed_length_serialization_opt
+  // 9: optional bool use_fixed_length_serialization_opt
 }
 
 struct TRepeatNode {

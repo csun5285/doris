@@ -102,13 +102,14 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
     DCHECK(check_version_continuity(_input_rowsets).ok());
     _filter_input_rowset();
     if (_input_rowsets.size() <= 1) {
-        return Status::Error<BE_NO_SUITABLE_VERSION>();
+        return Status::Error<BE_NO_SUITABLE_VERSION>("insuffient compation input rowset, #rowsets={}",
+                                                     _input_rowsets.size());
     }
 
     if (_input_rowsets.size() == 2 && _input_rowsets[0]->end_version() == 1) {
         // the tablet is with rowset: [0-1], [2-y]
         // and [0-1] has no data. in this situation, no need to do base compaction.
-        return Status::Error<BE_NO_SUITABLE_VERSION>();
+        return Status::Error<BE_NO_SUITABLE_VERSION>("no suitable versions for compaction");
     }
 
     // 1. cumulative rowset must reach base_compaction_min_rowset_num threshold
@@ -161,7 +162,7 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
                 << ", num_cumulative_rowsets=" << _input_rowsets.size() - 1
                 << ", cumulative_base_ratio=" << cumulative_base_ratio
                 << ", interval_since_last_base_compaction=" << interval_since_last_base_compaction;
-    return Status::Error<BE_NO_SUITABLE_VERSION>();
+    return Status::Error<BE_NO_SUITABLE_VERSION>("no suitable versions for compaction");
 }
 
 Status CloudBaseCompaction::execute_compact_impl() {

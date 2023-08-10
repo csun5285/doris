@@ -606,7 +606,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
                 res->mutable_status()->set_code(selectdb::JOB_TABLET_BUSY);
                 res->add_version_in_compaction(2);
                 res->add_version_in_compaction(10);
-                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>();
+                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>("");
             }
             pair->second = true;
         });
@@ -634,7 +634,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
                 res->add_version_in_compaction(10);
                 res->add_version_in_compaction(11);
                 res->add_version_in_compaction(12);
-                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>();
+                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>("");
             }
             pair->second = true;
         });
@@ -707,7 +707,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
                 res->mutable_status()->set_code(selectdb::JOB_TABLET_BUSY);
                 res->add_version_in_compaction(2);
                 res->add_version_in_compaction(10);
-                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>();
+                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>("");
             }
             pair->second = true;
         });
@@ -745,7 +745,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
                 res->add_version_in_compaction(12);
                 res->add_version_in_compaction(15);
                 res->add_version_in_compaction(16);
-                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>();
+                pair->first = Status::Error<ErrorCode::INTERNAL_ERROR>("");
             }
             pair->second = true;
         });

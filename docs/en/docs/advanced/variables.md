@@ -304,18 +304,6 @@ Read Only: `false`
 
 Global only: `false`
 
-### `default_order_by_limit`
-
-TODO
-
-Type: `long`
-
-Default: `-1`
-
-Read Only: `false`
-
-Global only: `false`
-
 ### `default_password_lifetime`
 
 TODO
@@ -640,6 +628,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `enable_inverted_index_query`
+
+Set wether to use inverted index query.
+
+Type: `boolean`
+
+Default: `true`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `enable_local_exchange`
 
 TODO
@@ -898,7 +898,7 @@ TODO
 
 Type: `boolean`
 
-Default: `true`
+Default: `false`
 
 Read Only: `false`
 
@@ -1108,6 +1108,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `have_query_cache`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Read Only: `true`
+
+Global only: `false`
+
 ### `ignore_column_with_complex_type`
 
 TODO
@@ -1264,6 +1276,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `max_instance_num`
+
+TODO
+
+Type: `int`
+
+Default: `64`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `max_pushdown_conditions_per_column`
 
 TODO
@@ -1391,6 +1415,18 @@ TODO
 Type: `int`
 
 Default: `0`
+
+Read Only: `false`
+
+Global only: `false`
+
+### `parallel_sync_analyze_task_num`
+
+TODO
+
+Type: `int`
+
+Default: `2`
 
 Read Only: `false`
 
@@ -1552,6 +1588,18 @@ Read Only: `false`
 
 Global only: `false`
 
+### `round_precise_decimalv2_value`
+
+TODO
+
+Type: `boolean`
+
+Default: `false`
+
+Read Only: `false`
+
+Global only: `false`
+
 ### `scan_queue_mem_limit`
 
 TODO
@@ -1691,18 +1739,6 @@ TODO
 Type: `int`
 
 Default: `0`
-
-Read Only: `false`
-
-Global only: `false`
-
-### `sql_select_limit`
-
-TODO
-
-Type: `long`
-
-Default: `9223372036854775807`
 
 Read Only: `false`
 
@@ -1894,7 +1930,7 @@ TODO
 
 Type: `String`
 
-Default: `SelectDB Core version: 2.0.0`
+Default: `SelectDB Core version: selectdb-2.0.0-dev`
 
 Read Only: `true`
 

@@ -11,6 +11,7 @@ static const char* MAX_CACHE_BYTES = "max_cache_bytes";
 static const char* MAX_UPLOAD_BYTES = "max_upload_bytes";
 
 Status TmpFileMgr::create_tmp_file_mgrs() {
+    if (_s_instance != nullptr) return Status::OK();
     if (config::tmp_file_dirs.empty()) {
         return Status::InvalidArgument("The config tmp_file_dirs is empty");
     }

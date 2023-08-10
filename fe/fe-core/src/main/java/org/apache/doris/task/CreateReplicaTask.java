@@ -74,7 +74,6 @@ public class CreateReplicaTask extends AgentTask {
 
     private boolean isInMemory;
 
-    private boolean isPersistent;
     private boolean isDynamicSchema;
 
     private TTabletType tabletType;
@@ -106,6 +105,14 @@ public class CreateReplicaTask extends AgentTask {
 
     private boolean skipWriteIndexOnLoad;
 
+    private String compactionPolicy;
+
+    private long timeSeriesCompactionGoalSizeMbytes;
+
+    private long timeSeriesCompactionFileCountThreshold;
+
+    private long timeSeriesCompactionTimeThresholdSeconds;
+
     private boolean storeRowColumn;
 
     private BinlogConfig binlogConfig;
@@ -124,9 +131,13 @@ public class CreateReplicaTask extends AgentTask {
                              String storagePolicy, boolean disableAutoCompaction,
                              boolean enableSingleReplicaCompaction,
                              boolean skipWriteIndexOnLoad,
+                             String compactionPolicy,
+                             long timeSeriesCompactionGoalSizeMbytes,
+                             long timeSeriesCompactionFileCountThreshold,
+                             long timeSeriesCompactionTimeThresholdSeconds,
                              boolean storeRowColumn,
                              boolean isDynamicSchema,
-                             boolean isPersistent, BinlogConfig binlogConfig) {
+                             BinlogConfig binlogConfig) {
         super(null, backendId, TTaskType.CREATE, dbId, tableId, partitionId, indexId, tabletId);
 
         this.replicaId = replicaId;
@@ -161,9 +172,12 @@ public class CreateReplicaTask extends AgentTask {
             }
         }
         this.disableAutoCompaction = disableAutoCompaction;
-        this.isPersistent = isPersistent;
         this.enableSingleReplicaCompaction = enableSingleReplicaCompaction;
         this.skipWriteIndexOnLoad = skipWriteIndexOnLoad;
+        this.compactionPolicy = compactionPolicy;
+        this.timeSeriesCompactionGoalSizeMbytes = timeSeriesCompactionGoalSizeMbytes;
+        this.timeSeriesCompactionFileCountThreshold = timeSeriesCompactionFileCountThreshold;
+        this.timeSeriesCompactionTimeThresholdSeconds = timeSeriesCompactionTimeThresholdSeconds;
         this.storeRowColumn = storeRowColumn;
         this.binlogConfig = binlogConfig;
     }
@@ -268,9 +282,9 @@ public class CreateReplicaTask extends AgentTask {
         if (bfColumns != null) {
             tSchema.setBloomFilterFpp(bfFpp);
         }
+        tSchema.setIsInMemory(isInMemory);
         tSchema.setDisableAutoCompaction(disableAutoCompaction);
         tSchema.setEnableSingleReplicaCompaction(enableSingleReplicaCompaction);
-        tSchema.setSkipWriteIndexOnLoad(skipWriteIndexOnLoad);
         tSchema.setSkipWriteIndexOnLoad(skipWriteIndexOnLoad);
         tSchema.setStoreRowColumn(storeRowColumn);
         tSchema.setIsDynamicSchema(isDynamicSchema);
@@ -301,8 +315,10 @@ public class CreateReplicaTask extends AgentTask {
         createTabletReq.setTabletType(tabletType);
         createTabletReq.setCompressionType(compressionType);
         createTabletReq.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
-        createTabletReq.setIsInMemory(isInMemory);
-        createTabletReq.setIsPersistent(isPersistent);
+        createTabletReq.setCompactionPolicy(compactionPolicy);
+        createTabletReq.setTimeSeriesCompactionGoalSizeMbytes(timeSeriesCompactionGoalSizeMbytes);
+        createTabletReq.setTimeSeriesCompactionFileCountThreshold(timeSeriesCompactionFileCountThreshold);
+        createTabletReq.setTimeSeriesCompactionTimeThresholdSeconds(timeSeriesCompactionTimeThresholdSeconds);
 
         if (binlogConfig != null) {
             createTabletReq.setBinlogConfig(binlogConfig.toThrift());

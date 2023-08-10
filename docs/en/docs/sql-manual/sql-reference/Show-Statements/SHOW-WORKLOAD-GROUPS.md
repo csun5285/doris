@@ -34,11 +34,7 @@ SHOW workload GROUPS
 
 ### Description
 
-<<<<<<< HEAD
-This statement is used to display all workload groups.
-=======
 This statement is used to display the resource groups for which the current user has usage_priv privileges.
->>>>>>> 2.0.0-rc01
 
 grammar:
 

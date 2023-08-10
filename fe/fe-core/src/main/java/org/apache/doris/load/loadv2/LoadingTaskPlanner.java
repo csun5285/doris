@@ -181,9 +181,9 @@ public class LoadingTaskPlanner {
         List<Long> partitionIds = getAllPartitionIds();
         OlapTableSink olapTableSink = new OlapTableSink(table, destTupleDesc, partitionIds,
                 Config.enable_single_replica_load);
-        int timeout = timeoutS == 0 ? ConnectContext.get().getExecTimeout() : (int) timeoutS;
-        olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, timeout);
-        olapTableSink.complete();
+        long txnTimeout = timeoutS == 0 ? ConnectContext.get().getExecTimeout() : timeoutS;
+        olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, strictMode, txnTimeout);
+        olapTableSink.complete(analyzer);
 
         // 3. Plan fragment
         PlanFragment sinkFragment = new PlanFragment(new PlanFragmentId(0), scanNode, DataPartition.RANDOM);

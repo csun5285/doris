@@ -159,7 +159,7 @@ void TaskWorkerPool::start() {
     case TaskWorkerType::ALTER_TABLE:
         break;
     case TaskWorkerType::ALTER_INVERTED_INDEX:
-        _worker_count = config::alter_inverted_index_worker_count;
+        _worker_count = config::alter_index_worker_count;
         _cb = std::bind<void>(&TaskWorkerPool::_alter_inverted_index_worker_thread_callback, this);
         break;
     case TaskWorkerType::CLONE:
@@ -429,6 +429,57 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
             bool need_to_save = false;
             if (tablet_meta_info.__isset.storage_policy_id) {
                 tablet->tablet_meta()->set_storage_policy_id(tablet_meta_info.storage_policy_id);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.is_in_memory) {
+                tablet->tablet_meta()->mutable_tablet_schema()->set_is_in_memory(
+                        tablet_meta_info.is_in_memory);
+                std::shared_lock rlock(tablet->get_header_lock());
+                for (auto& rowset_meta : tablet->tablet_meta()->all_mutable_rs_metas()) {
+                    rowset_meta->tablet_schema()->set_is_in_memory(tablet_meta_info.is_in_memory);
+                }
+                tablet->tablet_schema_unlocked()->set_is_in_memory(tablet_meta_info.is_in_memory);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.compaction_policy) {
+                if (tablet_meta_info.compaction_policy != "size_based" &&
+                    tablet_meta_info.compaction_policy != "time_series") {
+                    status = Status::InvalidArgument(
+                            "invalid compaction policy, only support for size_based or "
+                            "time_series");
+                    continue;
+                }
+                tablet->tablet_meta()->set_compaction_policy(tablet_meta_info.compaction_policy);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.time_series_compaction_goal_size_mbytes) {
+                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                    status = Status::InvalidArgument(
+                            "only time series compaction policy support time series config");
+                    continue;
+                }
+                tablet->tablet_meta()->set_time_series_compaction_goal_size_mbytes(
+                        tablet_meta_info.time_series_compaction_goal_size_mbytes);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.time_series_compaction_file_count_threshold) {
+                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                    status = Status::InvalidArgument(
+                            "only time series compaction policy support time series config");
+                    continue;
+                }
+                tablet->tablet_meta()->set_time_series_compaction_file_count_threshold(
+                        tablet_meta_info.time_series_compaction_file_count_threshold);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.time_series_compaction_time_threshold_seconds) {
+                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                    status = Status::InvalidArgument(
+                            "only time series compaction policy support time series config");
+                    continue;
+                }
+                tablet->tablet_meta()->set_time_series_compaction_time_threshold_seconds(
+                        tablet_meta_info.time_series_compaction_time_threshold_seconds);
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.replica_id) {
@@ -1334,7 +1385,7 @@ void CreateTableTaskPool::_create_tablet_worker_thread_callback() {
         Status status = _env->storage_engine()->create_tablet(create_tablet_req);
         if (!status.ok()) {
             DorisMetrics::instance()->create_tablet_requests_failed->increment(1);
-            LOG_WARNING("failed to create tablet")
+            LOG_WARNING("failed to create tablet, reason={}", status.to_string())
                     .tag("signature", agent_task_req.signature)
                     .tag("tablet_id", create_tablet_req.tablet_id)
                     .error(status);

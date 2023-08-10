@@ -107,10 +107,10 @@ TEST(CloudTabletTest, add_rowsets) {
         tablet.capture_consistent_versions({2, 4}, &versions);
         ASSERT_EQ(versions, (Versions {{2, 2}, {3, 3}, {4, 4}}));
 
-        std::vector<RowsetReaderSharedPtr> rs_readers;
-        ASSERT_EQ(tablet.capture_rs_readers(versions, &rs_readers), Status::OK());
+        std::vector<RowSetSplits> rs_splits;
+        ASSERT_EQ(tablet.cloud_capture_rs_readers({2, 4}, &rs_splits), Status::OK());
         for (size_t i = 0; i < versions.size(); ++i) {
-            ASSERT_EQ(rs_readers[i]->rowset()->rowset_id(), rowsets[i]->rowset_id());
+            ASSERT_EQ(rs_splits[i].rs_reader->rowset()->rowset_id(), rowsets[i]->rowset_id());
         }
     }
     {

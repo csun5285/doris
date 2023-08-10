@@ -17,12 +17,20 @@
 
 package org.apache.doris.statistics;
 
+import org.apache.doris.catalog.Env;
+import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.ThreadPoolManager;
+import org.apache.doris.ha.FrontendNodeType;
+import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
 import org.apache.doris.statistics.util.StatisticsUtil;
+import org.apache.doris.system.Frontend;
+import org.apache.doris.thrift.FrontendService;
+import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TUpdateFollowerStatsCacheRequest;
 
 import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -57,7 +65,6 @@ public class StatisticsCache {
     private final AsyncLoadingCache<StatisticsCacheKey, Optional<ColumnStatistic>> columnStatisticsCache =
             Caffeine.newBuilder()
                     .maximumSize(Config.stats_cache_size)
-                    .expireAfterAccess(Duration.ofHours(StatisticConstants.STATISTICS_CACHE_VALID_DURATION_IN_HOURS))
                     .refreshAfterWrite(Duration.ofHours(StatisticConstants.STATISTICS_CACHE_REFRESH_INTERVAL))
                     .executor(threadPool)
                     .buildAsync(columnStatisticsCacheLoader);
@@ -65,7 +72,6 @@ public class StatisticsCache {
     private final AsyncLoadingCache<StatisticsCacheKey, Optional<Histogram>> histogramCache =
             Caffeine.newBuilder()
                     .maximumSize(Config.stats_cache_size)
-                    .expireAfterAccess(Duration.ofHours(StatisticConstants.STATISTICS_CACHE_VALID_DURATION_IN_HOURS))
                     .refreshAfterWrite(Duration.ofHours(StatisticConstants.STATISTICS_CACHE_REFRESH_INTERVAL))
                     .executor(threadPool)
                     .buildAsync(histogramCacheLoader);
@@ -73,7 +79,7 @@ public class StatisticsCache {
     private final AsyncLoadingCache<StatisticsCacheKey, Optional<TableStatistic>> tableStatisticsCache =
             Caffeine.newBuilder()
                     .maximumSize(Config.stats_cache_size)
-                    .expireAfterWrite(Duration.ofHours(StatisticConstants.ROW_COUNT_CACHE_VALID_DURATION_IN_HOURS))
+                    .refreshAfterWrite(Duration.ofHours(StatisticConstants.STATISTICS_CACHE_REFRESH_INTERVAL))
                     .executor(threadPool)
                     .buildAsync(tableStatisticsCacheLoader);
 
@@ -98,7 +104,7 @@ public class StatisticsCache {
     }
 
     public Optional<ColumnStatistic> getColumnStatistics(long catalogId, long dbId,
-                                                         long tblId, long idxId, String colName) {
+            long tblId, long idxId, String colName) {
         ConnectContext ctx = ConnectContext.get();
         if (ctx != null && ctx.getSessionVariable().internalSession) {
             return Optional.empty();
@@ -162,7 +168,11 @@ public class StatisticsCache {
     }
 
     public void refreshColStatsSync(long tblId, long idxId, String colName) {
-        columnStatisticsCache.synchronous().refresh(new StatisticsCacheKey(tblId, idxId, colName));
+        columnStatisticsCache.synchronous().refresh(new StatisticsCacheKey(-1, -1, tblId, idxId, colName));
+    }
+
+    public void refreshColStatsSync(long catalogId, long dbId, long tblId, long idxId, String colName) {
+        columnStatisticsCache.synchronous().refresh(new StatisticsCacheKey(catalogId, dbId, tblId, idxId, colName));
     }
 
     public void refreshHistogramSync(long tblId, long idxId, String colName) {
@@ -206,42 +216,78 @@ public class StatisticsCache {
         }
         for (ResultRow r : recentStatsUpdatedCols) {
             try {
-                String tblId = r.getColumnValue("tbl_id");
-                String idxId = r.getColumnValue("idx_id");
+                long tblId = Long.parseLong(r.getColumnValue("tbl_id"));
+                long idxId = Long.parseLong(r.getColumnValue("idx_id"));
                 String colId = r.getColumnValue("col_id");
                 final StatisticsCacheKey k =
-                        new StatisticsCacheKey(Long.parseLong(tblId), Long.parseLong(idxId), colId);
+                        new StatisticsCacheKey(tblId, idxId, colId);
                 final ColumnStatistic c = ColumnStatistic.fromResultRow(r);
-                CompletableFuture<Optional<ColumnStatistic>> f = new CompletableFuture<Optional<ColumnStatistic>>() {
-
-                    @Override
-                    public Optional<ColumnStatistic> get() throws InterruptedException, ExecutionException {
-                        return Optional.of(c);
-                    }
-
-                    @Override
-                    public boolean isDone() {
-                        return true;
-                    }
-
-                    @Override
-                    public boolean complete(Optional<ColumnStatistic> value) {
-                        return true;
-                    }
-
-                    @Override
-                    public Optional<ColumnStatistic> join() {
-                        return Optional.of(c);
-                    }
-                };
-                if (c.isUnKnown) {
-                    continue;
-                }
-                columnStatisticsCache.put(k, f);
+                c.loadPartitionStats(tblId, idxId, colId);
+                putCache(k, c);
             } catch (Throwable t) {
                 LOG.warn("Error when preheating stats cache", t);
             }
         }
+    }
+
+    public void syncLoadColStats(long tableId, long idxId, String colName) {
+        List<ResultRow> columnResults = StatisticsRepository.loadColStats(tableId, idxId, colName);
+        for (ResultRow r : columnResults) {
+            final StatisticsCacheKey k =
+                    new StatisticsCacheKey(tableId, idxId, colName);
+            final ColumnStatistic c = ColumnStatistic.fromResultRow(r);
+            if (c == ColumnStatistic.UNKNOWN) {
+                continue;
+            }
+            putCache(k, c);
+            TUpdateFollowerStatsCacheRequest updateFollowerStatsCacheRequest = new TUpdateFollowerStatsCacheRequest();
+            updateFollowerStatsCacheRequest.key = GsonUtils.GSON.toJson(k);
+            updateFollowerStatsCacheRequest.colStats = GsonUtils.GSON.toJson(c);
+            for (Frontend frontend : Env.getCurrentEnv().getFrontends(FrontendNodeType.FOLLOWER)) {
+                TNetworkAddress address = new TNetworkAddress(frontend.getHost(),
+                        frontend.getRpcPort());
+                FrontendService.Client client = null;
+                try {
+                    client = ClientPool.frontendPool.borrowObject(address);
+                    client.updateStatsCache(updateFollowerStatsCacheRequest);
+                } catch (Throwable t) {
+                    LOG.warn("Failed to sync stats to follower: {}", address, t);
+                } finally {
+                    if (client != null) {
+                        ClientPool.frontendPool.returnObject(address, client);
+                    }
+                }
+            }
+        }
+    }
+
+    public void putCache(StatisticsCacheKey k, ColumnStatistic c) {
+        CompletableFuture<Optional<ColumnStatistic>> f = new CompletableFuture<Optional<ColumnStatistic>>() {
+
+            @Override
+            public Optional<ColumnStatistic> get() throws InterruptedException, ExecutionException {
+                return Optional.of(c);
+            }
+
+            @Override
+            public boolean isDone() {
+                return true;
+            }
+
+            @Override
+            public boolean complete(Optional<ColumnStatistic> value) {
+                return true;
+            }
+
+            @Override
+            public Optional<ColumnStatistic> join() {
+                return Optional.of(c);
+            }
+        };
+        if (c.isUnKnown) {
+            return;
+        }
+        columnStatisticsCache.put(k, f);
     }
 
 }

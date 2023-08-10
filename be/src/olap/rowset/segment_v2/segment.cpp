@@ -225,7 +225,7 @@ Status Segment::_parse_footer() {
     }
     if (_footer.num_rows() == 0) {
         // this is a pad segment
-        return Status::Error<EMPTY_SEGMENT>();
+        return Status::Error<EMPTY_SEGMENT>("empty segment");
     }
     return Status::OK();
 }

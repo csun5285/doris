@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 
+#include "cloud/io/tmp_file_mgr.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/sync_point.h"
@@ -41,6 +42,7 @@ using namespace doris;
 int main(int argc, char** argv) {
     doris::ExecEnv::GetInstance()->init_mem_tracker();
     doris::thread_context()->thread_mem_tracker_mgr->init();
+    doris::CacheManager::create_global_instance();
     doris::TabletSchemaCache::create_global_schema_cache();
     doris::StoragePageCache::create_global_cache(1 << 30, 10, 0);
     doris::SegmentLoader::create_global_instance(1000);
@@ -55,6 +57,8 @@ int main(int argc, char** argv) {
     doris::DiskInfo::init();
     doris::MemInfo::init();
     doris::BackendOptions::init();
+    config::tmp_file_dirs = R"([{"path":")" + std::string(getenv("DORIS_HOME")) + "/tmp" + R"(","max_upload_bytes":1073741824}])";
+    doris::io::TmpFileMgr::create_tmp_file_mgrs();
     auto sp = SyncPoint::get_instance();
     sp->set_call_back("TabletSchemaCache::insert1", [](auto&& args) {
         auto pair = try_any_cast<std::pair<TabletSchemaSPtr, bool>*>(args.back());

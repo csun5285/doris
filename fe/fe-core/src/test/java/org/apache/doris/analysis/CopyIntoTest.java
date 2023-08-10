@@ -24,9 +24,11 @@ import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.Pair;
 import org.apache.doris.qe.SessionVariable;
+import org.apache.doris.system.Backend;
 import org.apache.doris.utframe.TestWithFeService;
 import org.apache.doris.utframe.UtFrameUtils;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB.Provider;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
@@ -62,7 +64,7 @@ public class CopyIntoTest extends TestWithFeService {
 
     @Override
     protected void beforeCreatingConnectContext() throws Exception {
-        FeConstants.disableInternalSchemaDb = true;
+        FeConstants.enableInternalSchemaDb = false;
         FeConstants.runningCopyIntoTest = true;
         FeConstants.disablePreHeat = true;
     }
@@ -224,6 +226,7 @@ public class CopyIntoTest extends TestWithFeService {
     public void testCopyWithCloudCluster() throws Exception {
         List<StagePB> stages = Lists.newArrayList(internalStagePB);
         List<String> clusters = Lists.newArrayList("cluster0");
+        ImmutableMap<Long, Backend> idToBackendRef = ImmutableMap.of();
         new Expectations(Env.getCurrentInternalCatalog(), Env.getCurrentSystemInfo()) {
             {
                 Env.getCurrentSystemInfo().getCloudClusterNames();
@@ -233,6 +236,10 @@ public class CopyIntoTest extends TestWithFeService {
                 Env.getCurrentInternalCatalog().getStage(StageType.INTERNAL, anyString, null, null);
                 minTimes = 0;
                 result = stages;
+
+                Env.getCurrentSystemInfo().getAllBackendsMap();
+                minTimes = 0;
+                result = idToBackendRef;
             }
         };
 

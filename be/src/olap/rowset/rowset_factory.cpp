@@ -36,13 +36,13 @@ Status RowsetFactory::create_rowset(const TabletSchemaSPtr& schema, const std::s
                                     const RowsetMetaSharedPtr& rowset_meta,
                                     RowsetSharedPtr* rowset) {
     if (rowset_meta->rowset_type() == ALPHA_ROWSET) {
-        return Status::Error<ROWSET_INVALID>();
+        return Status::Error<ROWSET_INVALID>("invalid rowset_type");
     }
     if (rowset_meta->rowset_type() == BETA_ROWSET) {
         rowset->reset(new BetaRowset(schema, tablet_path, rowset_meta));
         return (*rowset)->init();
     }
-    return Status::Error<ROWSET_TYPE_NOT_FOUND>(); // should never happen
+    return Status::Error<ROWSET_TYPE_NOT_FOUND>("invalid rowset_type"); // should never happen
 }
 
 Status RowsetFactory::create_rowset_writer(const RowsetWriterContext& context, bool is_vertical,
@@ -53,7 +53,7 @@ Status RowsetFactory::create_rowset_writer(const RowsetWriterContext& context, b
            context.txn_expiration > 0);
 #endif
     if (context.rowset_type == ALPHA_ROWSET) {
-        return Status::Error<ROWSET_INVALID>();
+        return Status::Error<ROWSET_INVALID>("invalid rowset_type");
     }
     if (context.rowset_type == BETA_ROWSET) {
         if (is_vertical) {
@@ -63,7 +63,7 @@ Status RowsetFactory::create_rowset_writer(const RowsetWriterContext& context, b
         output->reset(new BetaRowsetWriter);
         return (*output)->init(context);
     }
-    return Status::Error<ROWSET_TYPE_NOT_FOUND>();
+    return Status::Error<ROWSET_TYPE_NOT_FOUND>("invalid rowset_type");
 }
 
 } // namespace doris

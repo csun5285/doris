@@ -1,10 +1,6 @@
 ---
 {
-<<<<<<< HEAD:docs/en/docs/sql-manual/sql-functions/string-functions/uuid.md
-    "title": "uuid",
-=======
     "title": "to_base64",
->>>>>>> 1.2.0-rc04-origin:docs/en/docs/sql-manual/sql-functions/string-functions/to_base64.md
     "language": "en"
 }
 ---
@@ -28,16 +24,6 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-<<<<<<< HEAD:docs/en/docs/sql-manual/sql-functions/string-functions/uuid.md
-## uuid
-### description
-#### Syntax
-
-`VARCHAR uuid()`
-
-return a random uuid string
-
-=======
 ## to_base64
 ### description
 #### Syntax
@@ -46,20 +32,10 @@ return a random uuid string
 
 
 Returns the result of Base64 encoding the input string
->>>>>>> 1.2.0-rc04-origin:docs/en/docs/sql-manual/sql-functions/string-functions/to_base64.md
 
 ### example
 
 ```
-<<<<<<< HEAD:docs/en/docs/sql-manual/sql-functions/string-functions/uuid.md
-mysql> select uuid();
-+--------------------------------------+
-| uuid()                               |
-+--------------------------------------+
-| 29077778-fc5e-4603-8368-6b5f8fd55c24 |
-+--------------------------------------+
-
-=======
 mysql> select to_base64('1');
 +----------------+
 | to_base64('1') |
@@ -73,11 +49,6 @@ mysql> select to_base64('234');
 +------------------+
 | MjM0             |
 +------------------+
->>>>>>> 1.2.0-rc04-origin:docs/en/docs/sql-manual/sql-functions/string-functions/to_base64.md
 ```
 ### keywords
-<<<<<<< HEAD:docs/en/docs/sql-manual/sql-functions/string-functions/uuid.md
-    UUID
-=======
     to_base64
->>>>>>> 1.2.0-rc04-origin:docs/en/docs/sql-manual/sql-functions/string-functions/to_base64.md

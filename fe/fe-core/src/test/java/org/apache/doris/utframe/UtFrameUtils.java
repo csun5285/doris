@@ -212,7 +212,7 @@ public class UtFrameUtils {
 
     public static void createDorisCluster(String runningDir, int backendNum) throws EnvVarNotSetException, IOException,
             FeStartException, NotInitException, DdlException, InterruptedException {
-        FeConstants.disableInternalSchemaDb = true;
+        FeConstants.enableInternalSchemaDb = false;
         int port = createMetaServer(MockedMetaServerFactory.METASERVER_DEFAULT_IP);
         int feRpcPort = startFEServer(runningDir, port);
         List<Backend> bes = Lists.newArrayList();
@@ -249,7 +249,7 @@ public class UtFrameUtils {
         // set runningUnitTest to true, so that for ut,
         // the agent task will be sent to "127.0.0.1" to make cluster running well.
         FeConstants.runningUnitTest = true;
-        FeConstants.disableInternalSchemaDb = true;
+        FeConstants.enableInternalSchemaDb = false;
         int feRpcPort = startFEServer(runningDir, port);
         for (int i = 0; i < backendNum; i++) {
             String host = "127.0.0." + (i + 1);

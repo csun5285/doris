@@ -36,6 +36,11 @@
 #include "http/http_request.h"
 #include "http/http_status.h"
 #include "olap/olap_common.h"
+#include "olap/base_compaction.h"
+#include "olap/cumulative_compaction.h"
+#include "olap/cumulative_compaction_policy.h"
+#include "olap/cumulative_compaction_time_series_policy.h"
+#include "olap/full_compaction.h"
 #include "olap/olap_define.h"
 #include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
@@ -93,7 +98,8 @@ Status CompactionAction::_handle_run_compaction(HttpRequest* req, std::string* j
     // check compaction_type equals 'base' or 'cumulative'
     auto& compaction_type = req->param(PARAM_COMPACTION_TYPE);
     if (compaction_type != PARAM_COMPACTION_BASE &&
-        compaction_type != PARAM_COMPACTION_CUMULATIVE) {
+        compaction_type != PARAM_COMPACTION_CUMULATIVE &&
+        compaction_type != PARAM_COMPACTION_FULL) {
         return Status::NotSupported("The compaction type '{}' is not supported", compaction_type);
     }
 

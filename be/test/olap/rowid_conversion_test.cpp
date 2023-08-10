@@ -254,7 +254,13 @@ protected:
         rsm->set_delete_predicate(del_pred);
         rsm->set_tablet_schema(tablet->tablet_schema());
         RowsetSharedPtr rowset = std::make_shared<BetaRowset>(tablet->tablet_schema(), "", rsm);
+#ifdef CLOUD_MODE
+        std::vector<RowsetSharedPtr> to_add;
+        to_add.push_back(rowset);
+        tablet->cloud_add_rowsets(to_add, false, false);
+#else
         tablet->add_rowset(rowset);
+#endif
     }
 
     TabletSharedPtr create_tablet(const TabletSchema& tablet_schema,
@@ -392,7 +398,7 @@ protected:
                                          columns[1].column->get_int(i));
             }
         } while (s == Status::OK());
-        EXPECT_EQ(Status::Error<END_OF_FILE>(), s);
+        EXPECT_EQ(Status::Error<END_OF_FILE>(""), s);
         EXPECT_EQ(out_rowset->rowset_meta()->num_rows(), output_data.size());
         std::vector<uint32_t> segment_num_rows;
         EXPECT_TRUE(output_rs_reader->get_segment_num_rows(&segment_num_rows).ok());

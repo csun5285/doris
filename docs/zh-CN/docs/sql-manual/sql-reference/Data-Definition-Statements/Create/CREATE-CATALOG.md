@@ -118,11 +118,7 @@ CREATE CATALOG [IF NOT EXISTS] catalog_name
 		"user"="doris",
 		"password"="123456",
 		"jdbc_url" = "jdbc:oracle:thin:@127.0.0.1:1521:helowin",
-<<<<<<< HEAD
-		"driver_url" = "file:///path/to/ojdbc6.jar",
-=======
 		"driver_url" = "file:///path/to/ojdbc8.jar",
->>>>>>> 2.0.0-rc01
 		"driver_class" = "oracle.jdbc.driver.OracleDriver"
 	);	
 	```

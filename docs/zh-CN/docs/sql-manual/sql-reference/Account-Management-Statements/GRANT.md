@@ -87,11 +87,8 @@ resource_name 支持以下两种形式：
     2. resource 权限应用于指定资源
     
     这里指定的资源可以是不存在的资源。另外，这里的资源请跟外部表区分开，有使用外部表的情况请都使用catalog作为替代。
-<<<<<<< HEAD
-=======
 
 workload_group_name 可指定workload group 名，支持 `%`和`_`匹配符，`%`可匹配任意字符串，`_`匹配任意单个字符。
->>>>>>> 2.0.0-rc01
 
 user_identity：
 
@@ -140,17 +137,10 @@ role_list 是需要赋予的角色列表，以逗号分隔，指定的角色必�
     ```
    
 <version since="2.0.0"></version>
-<<<<<<< HEAD
-
-=======
->>>>>>> 2.0.0-rc01
 7. 将指定角色授予某用户
 
     ```sql
     GRANT 'role1','role2' TO 'jack'@'%';
-<<<<<<< HEAD
-    ```
-=======
     ````
 
 
@@ -173,7 +163,6 @@ role_list 是需要赋予的角色列表，以逗号分隔，指定的角色必�
     ```sql
     GRANT USAGE_PRIV ON WORKLOAD GROUP 'g1' TO ROLE 'my_role';
     ````
->>>>>>> 2.0.0-rc01
 
 ### Keywords
 

@@ -41,6 +41,7 @@
 #include "common/status.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/fs/file_system.h"
+#include "gutil/integral_types.h"
 #include "util/runtime_profile.h"
 #include "util/telemetry/telemetry.h"
 
@@ -68,8 +69,8 @@ public:
                  ExecEnv* exec_env);
 
     RuntimeState(const TPipelineInstanceParams& pipeline_params, const TUniqueId& query_id,
-                 const TQueryOptions& query_options, const TQueryGlobals& query_globals,
-                 ExecEnv* exec_env);
+                 int32 fragment_id, const TQueryOptions& query_options,
+                 const TQueryGlobals& query_globals, ExecEnv* exec_env);
 
     // RuntimeState for executing expr in fe-support.
     RuntimeState(const TQueryGlobals& query_globals);
@@ -117,6 +118,8 @@ public:
     const std::string& user() const { return _user; }
     const TUniqueId& query_id() const { return _query_id; }
     const TUniqueId& fragment_instance_id() const { return _fragment_instance_id; }
+    // should only be called in pipeline engine
+    int32_t fragment_id() const { return _fragment_id; }
     ExecEnv* exec_env() { return _exec_env; }
     std::shared_ptr<MemTrackerLimiter> query_mem_tracker() const;
 
@@ -168,7 +171,7 @@ public:
         _is_cancelled.store(v);
         // Create a error status, so that we could print error stack, and
         // we could know which path call cancel.
-        LOG(INFO) << "task is cancelled, st = " << Status::Error<ErrorCode::CANCELLED>();
+        LOG(INFO) << "task is cancelled, st = " << Status::Error<ErrorCode::CANCELLED>("");
     }
 
     void set_backend_id(int64_t backend_id) { _backend_id = backend_id; }
@@ -245,6 +248,10 @@ public:
 
     int64_t num_rows_load_unselected() { return _num_rows_load_unselected.load(); }
 
+    int64_t num_rows_filtered_in_strict_mode_partial_update() {
+        return _num_rows_filtered_in_strict_mode_partial_update;
+    }
+
     int64_t num_rows_load_success() {
         return num_rows_load_total() - num_rows_load_filtered() - num_rows_load_unselected();
     }
@@ -267,6 +274,10 @@ public:
 
     void update_num_rows_load_unselected(int64_t num_rows) {
         _num_rows_load_unselected.fetch_add(num_rows);
+    }
+
+    void update_num_rows_filtered_in_strict_mode_partial_update(int64_t num_rows) {
+        _num_rows_filtered_in_strict_mode_partial_update += num_rows;
     }
 
     void set_per_fragment_instance_idx(int idx) { _per_fragment_instance_idx = idx; }
@@ -468,6 +479,8 @@ private:
 
     TUniqueId _query_id;
     std::vector<io::BlockFileCache::QueryFileCacheContextHolderPtr> _query_contexts;
+    // fragment id for each TPipelineFragmentParams
+    int32_t _fragment_id;
     TUniqueId _fragment_instance_id;
     TQueryOptions _query_options;
     ExecEnv* _exec_env = nullptr;
@@ -495,6 +508,7 @@ private:
     std::atomic<int64_t> _num_rows_load_total;      // total rows read from source
     std::atomic<int64_t> _num_rows_load_filtered;   // unqualified rows
     std::atomic<int64_t> _num_rows_load_unselected; // rows filtered by predicates
+    std::atomic<int64_t> _num_rows_filtered_in_strict_mode_partial_update;
     std::atomic<int64_t> _num_print_error_rows;
 
     std::atomic<int64_t> _num_bytes_load_total; // total bytes read from source

@@ -156,10 +156,12 @@ public class RoutineLoadManager implements Writable {
                 throw new UserException("Unknown data source type: " + type);
         }
 
-        if (!Strings.isNullOrEmpty(ConnectContext.get().getCloudCluster())) {
-            routineLoadJob.setCloudCluster(ConnectContext.get().getCloudCluster());
-        } else {
-            throw new UserException("cloud cluster is empty, please specify cloud cluster");
+        if (Config.isCloudMode()) {
+            if (!Strings.isNullOrEmpty(ConnectContext.get().getCloudCluster())) {
+                routineLoadJob.setCloudCluster(ConnectContext.get().getCloudCluster());
+            } else {
+                throw new UserException("cloud cluster is empty, please specify cloud cluster");
+            }
         }
 
         routineLoadJob.setOrigStmt(createRoutineLoadStmt.getOrigStmt());

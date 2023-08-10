@@ -21,14 +21,20 @@ import org.apache.doris.analysis.LiteralExpr;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.common.DdlException;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
 import org.apache.doris.statistics.util.StatisticsUtil;
 
+import com.google.common.base.Preconditions;
+import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.JSONObject;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class ColumnStatistic {
@@ -69,12 +75,19 @@ public class ColumnStatistic {
         UNSUPPORTED_TYPE.add(Type.LAMBDA_FUNCTION);
     }
 
+    @SerializedName("count")
     public final double count;
+    @SerializedName("ndv")
     public final double ndv;
+    @SerializedName("numNulls")
     public final double numNulls;
+    @SerializedName("dataSize")
     public final double dataSize;
+    @SerializedName("avgSizeByte")
     public final double avgSizeByte;
+    @SerializedName("minValue")
     public final double minValue;
+    @SerializedName("maxValue")
     public final double maxValue;
     public final boolean isUnKnown;
     /*
@@ -102,12 +115,18 @@ public class ColumnStatistic {
     public final LiteralExpr minExpr;
     public final LiteralExpr maxExpr;
 
+    @SerializedName("histogram")
     // assign value when do stats estimation.
     public final Histogram histogram;
 
+    public final Map<Long, ColumnStatistic> partitionIdToColStats = new HashMap<>();
+
+    public final String updatedTime;
+
     public ColumnStatistic(double count, double ndv, ColumnStatistic original, double avgSizeByte,
             double numNulls, double dataSize, double minValue, double maxValue,
-            double selectivity, LiteralExpr minExpr, LiteralExpr maxExpr, boolean isUnKnown, Histogram histogram) {
+            double selectivity, LiteralExpr minExpr, LiteralExpr maxExpr, boolean isUnKnown, Histogram histogram,
+            String updatedTime) {
         this.count = count;
         this.ndv = ndv;
         this.original = original;
@@ -121,6 +140,28 @@ public class ColumnStatistic {
         this.maxExpr = maxExpr;
         this.isUnKnown = isUnKnown;
         this.histogram = histogram;
+        this.updatedTime = updatedTime;
+    }
+
+    public static ColumnStatistic fromResultRow(List<ResultRow> resultRows) {
+        Map<Long, ColumnStatistic> partitionIdToColStats = new HashMap<>();
+        ColumnStatistic columnStatistic = null;
+        try {
+            for (ResultRow resultRow : resultRows) {
+                String partId = resultRow.getColumnValue("part_id");
+                if (partId == null) {
+                    columnStatistic = fromResultRow(resultRow);
+                } else {
+                    partitionIdToColStats.put(Long.parseLong(partId), fromResultRow(resultRow));
+                }
+            }
+        } catch (Throwable t) {
+            LOG.warn("Failed to deserialize column stats", t);
+            return ColumnStatistic.UNKNOWN;
+        }
+        Preconditions.checkState(columnStatistic != null, "Column stats is null");
+        columnStatistic.partitionIdToColStats.putAll(partitionIdToColStats);
+        return columnStatistic;
     }
 
     // TODO: use thrift
@@ -138,7 +179,8 @@ public class ColumnStatistic {
             columnStatisticBuilder.setNumNulls(Double.parseDouble(nullCount));
             columnStatisticBuilder.setDataSize(Double
                     .parseDouble(resultRow.getColumnValueWithDefault("data_size_in_bytes", "0")));
-            columnStatisticBuilder.setAvgSizeByte(columnStatisticBuilder.getDataSize()
+            columnStatisticBuilder.setAvgSizeByte(columnStatisticBuilder.getCount() == 0
+                    ? 0 : columnStatisticBuilder.getDataSize()
                     / columnStatisticBuilder.getCount());
             long catalogId = Long.parseLong(resultRow.getColumnValue("catalog_id"));
             long idxId = Long.parseLong(resultRow.getColumnValue("idx_id"));
@@ -170,6 +212,7 @@ public class ColumnStatistic {
             Histogram histogram = Env.getCurrentEnv().getStatisticsCache().getHistogram(tblId, idxId, colName)
                     .orElse(null);
             columnStatisticBuilder.setHistogram(histogram);
+            columnStatisticBuilder.setUpdatedTime(resultRow.getColumnValue("update_time"));
             return columnStatisticBuilder.build();
         } catch (Exception e) {
             LOG.warn("Failed to deserialize column statistics, column not exists", e);
@@ -276,8 +319,8 @@ public class ColumnStatistic {
 
     @Override
     public String toString() {
-        return isUnKnown ? "unKnown" : String.format("ndv=%.4f, min=%f, max=%f, sel=%f, count=%.4f",
-                ndv, minValue, maxValue, selectivity, count);
+        return isUnKnown ? "unknown" : String.format("ndv=%.4f, min=%f(%s), max=%f(%s), count=%.4f",
+                ndv, minValue, minExpr, maxValue, maxExpr, count);
     }
 
     public JSONObject toJson() {
@@ -358,7 +401,8 @@ public class ColumnStatistic {
             null,
             null,
             stat.getBoolean("IsUnKnown"),
-            Histogram.deserializeFromJson(stat.getString("Histogram"))
+            Histogram.deserializeFromJson(stat.getString("Histogram")),
+            stat.getString("lastUpdatedTine")
         );
     }
 
@@ -384,5 +428,14 @@ public class ColumnStatistic {
 
     public boolean isUnKnown() {
         return isUnKnown;
+    }
+
+    public void loadPartitionStats(long tableId, long idxId, String colName) throws DdlException {
+        List<ResultRow> resultRows = StatisticsRepository.loadPartStats(tableId, idxId, colName);
+        for (ResultRow resultRow : resultRows) {
+            String partId = resultRow.getColumnValue("part_id");
+            ColumnStatistic columnStatistic = ColumnStatistic.fromResultRow(resultRow);
+            partitionIdToColStats.put(Long.parseLong(partId), columnStatistic);
+        }
     }
 }

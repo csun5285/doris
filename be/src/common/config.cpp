@@ -60,7 +60,7 @@ DEFINE_Int32(brpc_port, "8060");
 
 // the number of bthreads for brpc, the default value is set to -1,
 // which means the number of bthreads is #cpu-cores
-DEFINE_Int32(brpc_num_threads, "-1");
+DEFINE_Int32(brpc_num_threads, "256");
 
 // Declare a selection strategy for those servers have many ips.
 // Note that there should at most one ip match this list.
@@ -159,8 +159,8 @@ DEFINE_Int32(clear_transaction_task_worker_count, "1");
 DEFINE_Int32(delete_worker_count, "3");
 // the count of thread to alter table
 DEFINE_Int32(alter_tablet_worker_count, "3");
-// the count of thread to alter inverted index
-DEFINE_Int32(alter_inverted_index_worker_count, "3");
+// the count of thread to alter index
+DEFINE_Int32(alter_index_worker_count, "3");
 // the count of thread to clone
 DEFINE_Int32(clone_worker_count, "3");
 // the count of thread to clone
@@ -229,13 +229,12 @@ DEFINE_mInt64(doris_blocking_priority_queue_wait_timeout_ms, "500");
 // number of scanner thread pool size for olap table
 // and the min thread num of remote scanner thread pool
 DEFINE_Int32(doris_scanner_thread_pool_thread_num, "48");
-// max number of remote scanner thread pool size
-DEFINE_Int32(doris_max_remote_scanner_thread_pool_thread_num, "512");
+DEFINE_Int32(doris_max_remote_scanner_thread_pool_thread_num, "-1");
 // number of olap scanner thread pool queue size
 DEFINE_Int32(doris_scanner_thread_pool_queue_size, "102400");
 // default thrift client connect timeout(in seconds)
 DEFINE_mInt32(thrift_connect_timeout_seconds, "3");
-DEFINE_mInt32(fetch_rpc_timeout_seconds, "20");
+DEFINE_mInt32(fetch_rpc_timeout_seconds, "30");
 // default thrift client retry interval (in milliseconds)
 DEFINE_mInt64(thrift_client_retry_interval_ms, "1000");
 // max row count number for single scan range, used in segmentv1
@@ -267,7 +266,7 @@ DEFINE_mInt64(memory_limitation_per_thread_for_schema_change_bytes, "2147483648"
 DEFINE_mInt64(memory_limitation_per_thread_for_storage_migration_bytes, "100000000");
 
 // the clean interval of file descriptor cache and segment cache
-DEFINE_mInt32(cache_clean_interval, "60");
+DEFINE_mInt32(cache_clean_interval, "10");
 // the clean interval of tablet lookup cache
 DEFINE_mInt32(tablet_lookup_cache_clean_interval, "30");
 DEFINE_mInt32(disk_stat_monitor_interval, "5");
@@ -303,19 +302,25 @@ DEFINE_String(row_cache_mem_limit, "20%");
 DEFINE_String(storage_page_cache_limit, "20%");
 // Shard size for page cache, the value must be power of two.
 // It's recommended to set it to a value close to the number of BE cores in order to reduce lock contentions.
-DEFINE_Int32(storage_page_cache_shard_size, "16");
+DEFINE_Int32(storage_page_cache_shard_size, "256");
 // Percentage for index page cache
 // all storage page cache will be divided into data_page_cache and index_page_cache
 DEFINE_Int32(index_page_cache_percentage, "10");
 // whether to disable page cache feature in storage
-DEFINE_Bool(disable_storage_page_cache, "false");
+DEFINE_Bool(disable_storage_page_cache, "true");
 // whether to disable row cache feature in storage
 DEFINE_Bool(disable_storage_row_cache, "true");
+// whether to disable pk page cache feature in storage
+DEFINE_Bool(disable_pk_storage_page_cache, "false");
 
 // Cache for mow primary key storage page size
 DEFINE_String(pk_storage_page_cache_limit, "10%");
 // data page size for primary key index
 DEFINE_Int32(primary_key_data_page_size, "32768");
+
+DEFINE_mInt32(data_page_cache_stale_sweep_time_sec, "300");
+DEFINE_mInt32(index_page_cache_stale_sweep_time_sec, "600");
+DEFINE_mInt32(pk_index_page_cache_stale_sweep_time_sec, "600");
 
 DEFINE_Bool(enable_low_cardinality_optimize, "true");
 DEFINE_Bool(enable_low_cardinality_cache_code, "true");
@@ -380,10 +385,7 @@ DEFINE_mInt64(compaction_min_size_mbytes, "64");
 
 // cumulative compaction policy: min and max delta file's number
 DEFINE_mInt64(cumulative_compaction_min_deltas, "5");
-DEFINE_mInt64(cumulative_compaction_max_deltas, "100");
-
-// This config can be set to limit thread number in  segcompaction thread pool.
-DEFINE_mInt32(seg_compaction_max_threads, "10");
+DEFINE_mInt64(cumulative_compaction_max_deltas, "1000");
 
 // This config can be set to limit thread number in  multiget thread pool.
 DEFINE_mInt32(multi_get_max_threads, "10");
@@ -399,9 +401,9 @@ DEFINE_mInt32(update_replica_infos_interval_seconds, "60");
 
 // Compaction task number per disk.
 // Must be greater than 2, because Base compaction and Cumulative compaction have at least one thread each.
-DEFINE_mInt32(compaction_task_num_per_disk, "2");
+DEFINE_mInt32(compaction_task_num_per_disk, "4");
 // compaction thread num for fast disk(typically .SSD), must be greater than 2.
-DEFINE_mInt32(compaction_task_num_per_fast_disk, "4");
+DEFINE_mInt32(compaction_task_num_per_fast_disk, "8");
 DEFINE_Validator(compaction_task_num_per_disk,
                  [](const int config) -> bool { return config >= 2; });
 DEFINE_Validator(compaction_task_num_per_fast_disk,
@@ -460,14 +462,10 @@ DEFINE_Int64(load_data_reserve_hours, "4");
 // log error log will be removed after this time
 DEFINE_mInt64(load_error_log_reserve_hours, "48");
 
-// be brpc interface is classified into two categories: light and heavy
-// each category has diffrent thread number
-// threads to handle heavy api interface, such as transmit_data/transmit_block etc
-DEFINE_Int32(brpc_heavy_work_pool_threads, "192");
-// threads to handle light api interface, such as exec_plan_fragment_prepare/exec_plan_fragment_start
-DEFINE_Int32(brpc_light_work_pool_threads, "32");
-DEFINE_Int32(brpc_heavy_work_pool_max_queue_size, "10240");
-DEFINE_Int32(brpc_light_work_pool_max_queue_size, "10240");
+DEFINE_Int32(brpc_heavy_work_pool_threads, "-1");
+DEFINE_Int32(brpc_light_work_pool_threads, "-1");
+DEFINE_Int32(brpc_heavy_work_pool_max_queue_size, "-1");
+DEFINE_Int32(brpc_light_work_pool_max_queue_size, "-1");
 
 // The maximum amount of data that can be processed by a stream load
 DEFINE_mInt64(streaming_load_max_mb, "10240");
@@ -484,6 +482,7 @@ DEFINE_mInt32(streaming_load_rpc_max_alive_time_sec, "1200");
 DEFINE_Int32(tablet_writer_open_rpc_timeout_sec, "60");
 // You can ignore brpc error '[E1011]The server is overcrowded' when writing data.
 DEFINE_mBool(tablet_writer_ignore_eovercrowded, "true");
+DEFINE_mBool(exchange_sink_ignore_eovercrowded, "true");
 DEFINE_mInt32(slave_replica_writer_rpc_timeout_sec, "60");
 // Whether to enable stream load record function, the default is false.
 // False: disable stream load record
@@ -501,8 +500,8 @@ DEFINE_mInt32(olap_table_sink_send_interval_ms, "1");
 
 // Fragment thread pool
 DEFINE_Int32(fragment_pool_thread_num_min, "64");
-DEFINE_Int32(fragment_pool_thread_num_max, "512");
-DEFINE_Int32(fragment_pool_queue_size, "2048");
+DEFINE_Int32(fragment_pool_thread_num_max, "2048");
+DEFINE_Int32(fragment_pool_queue_size, "4096");
 
 // Control the number of disks on the machine.  If 0, this comes from the system settings.
 DEFINE_Int32(num_disks, "0");
@@ -608,10 +607,10 @@ DEFINE_mInt32(priority_queue_remaining_tasks_increased_frequency, "512");
 DEFINE_mBool(sync_tablet_meta, "false");
 
 // default thrift rpc timeout ms
-DEFINE_mInt32(thrift_rpc_timeout_ms, "20000");
+DEFINE_mInt32(thrift_rpc_timeout_ms, "60000");
 
 // txn commit rpc timeout
-DEFINE_mInt32(txn_commit_rpc_timeout_ms, "10000");
+DEFINE_mInt32(txn_commit_rpc_timeout_ms, "60000");
 
 // If set to true, metric calculator will run
 DEFINE_Bool(enable_metric_calculator, "true");
@@ -675,8 +674,7 @@ DEFINE_String(default_rowset_type, "BETA");
 
 // Maximum size of a single message body in all protocols
 DEFINE_Int64(brpc_max_body_size, "3147483648");
-// Max unwritten bytes in each socket, if the limit is reached, Socket.Write fails with EOVERCROWDED
-DEFINE_Int64(brpc_socket_max_unwritten_bytes, "1073741824");
+DEFINE_Int64(brpc_socket_max_unwritten_bytes, "-1");
 // TODO(zxy): expect to be true in v1.3
 // Whether to embed the ProtoBuf Request serialized string together with Tuple/Block data into
 // Controller Attachment and send it through http brpc when the length of the Tuple/Block data
@@ -689,11 +687,11 @@ DEFINE_mInt64(max_runnings_transactions_per_txn_map, "2000");
 
 // tablet_map_lock shard size, the value is 2^n, n=0,1,2,3,4
 // this is a an enhancement for better performance to manage tablet
-DEFINE_Int32(tablet_map_shard_size, "4");
+DEFINE_Int32(tablet_map_shard_size, "256");
 
 // txn_map_lock shard size, the value is 2^n, n=0,1,2,3,4
 // this is a an enhancement for better performance to manage txn
-DEFINE_Int32(txn_map_shard_size, "128");
+DEFINE_Int32(txn_map_shard_size, "1024");
 
 // txn_lock shard size, the value is 2^n, n=0,1,2,3,4
 // this is a an enhancement for better performance to commit and publish txn
@@ -782,7 +780,7 @@ DEFINE_Int64(download_cache_buffer_size, "10485760");
 // so if there are too many segment in a rowset, the compaction process
 // will run out of memory.
 // When doing compaction, each segment may take at least 1MB buffer.
-DEFINE_mInt32(max_segment_num_per_rowset, "200");
+DEFINE_mInt32(max_segment_num_per_rowset, "1000");
 DEFINE_mInt32(segment_compression_threshold_kb, "256");
 
 // The connection timeout when connecting to external table such as odbc table.
@@ -969,6 +967,9 @@ DEFINE_Int32(segcompaction_threshold_segment_num, "10");
 // The segment whose row number above the threshold will be compacted during segcompaction
 DEFINE_Int32(segcompaction_small_threshold, "1048576");
 
+// This config can be set to limit thread number in  segcompaction thread pool.
+DEFINE_mInt32(segcompaction_max_threads, "10");
+
 // enable java udf and jdbc scannode
 DEFINE_Bool(enable_java_support, "true");
 
@@ -989,7 +990,7 @@ DEFINE_Bool(enable_index_apply_preds_except_leafnode_of_andnode, "true");
 // cache entry stay time after lookup, default 1h
 DEFINE_mInt32(index_cache_entry_stay_time_after_lookup_s, "3600");
 // cache entry that have not been visited for a certain period of time can be cleaned up by GC thread
-DEFINE_mInt32(index_cache_entry_no_visit_gc_time_s, "3600");
+DEFINE_mInt32(inverted_index_cache_stale_sweep_time_sec, "600");
 // inverted index searcher cache size
 DEFINE_String(inverted_index_searcher_cache_limit, "10%");
 // set `true` to enable insert searcher into cache when write inverted index data
@@ -1014,20 +1015,6 @@ DEFINE_Bool(inverted_index_compaction_enable, "false");
 DEFINE_Int32(num_broadcast_buffer, "32");
 // semi-structure configs
 DEFINE_Bool(enable_parse_multi_dimession_array, "false");
-
-// Currently, two compaction strategies are implemented, SIZE_BASED and TIME_SERIES.
-// In the case of time series compaction, the execution of compaction is adjusted
-// using parameters that have the prefix time_series_compaction.
-DEFINE_mString(compaction_policy, "size_based");
-DEFINE_Validator(compaction_policy, [](const std::string config) -> bool {
-    return config == "size_based" || config == "time_series";
-});
-// the size of input files for each compaction
-DEFINE_mInt64(time_series_compaction_goal_size_mbytes, "512");
-// the minimum number of input files for each compaction if time_series_compaction_goal_size_mbytes not meets
-DEFINE_mInt64(time_series_compaction_file_count_threshold, "2000");
-// if compaction has not been performed within 3600 seconds, a compaction will be triggered
-DEFINE_mInt64(time_series_compaction_time_threshold_seconds, "3600");
 
 // max depth of expression tree allowed.
 DEFINE_Int32(max_depth_of_expr_tree, "600");
@@ -1166,6 +1153,26 @@ DEFINE_mBool(enable_parallel_cumu_compaction, "false");
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================
+
+DEFINE_mString(get_stack_trace_tool, "libunwind");
+
+// the ratio of _prefetch_size/_batch_size in AutoIncIDBuffer
+DEFINE_mInt64(auto_inc_prefetch_size_ratio, "10");
+
+// the ratio of _low_level_water_level_mark/_batch_size in AutoIncIDBuffer
+DEFINE_mInt64(auto_inc_low_water_level_mark_size_ratio, "3");
+
+// number of threads that fetch auto-inc ranges from FE
+DEFINE_mInt64(auto_inc_fetch_thread_num, "3");
+// default 4GB
+DEFINE_mInt64(lookup_connection_cache_bytes_limit, "4294967296");
+
+// level of compression when using LZ4_HC, whose defalut value is LZ4HC_CLEVEL_DEFAULT
+DEFINE_mInt64(LZ4_HC_compression_level, "9");
+
+// enable window_funnel_function with different modes
+DEFINE_mBool(enable_window_funnel_function_v2, "false");
+
 
 #ifdef BE_TEST
 // test s3

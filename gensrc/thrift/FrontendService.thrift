@@ -621,6 +621,7 @@ struct TStreamLoadMultiTablePutResult {
     1: required Status.TStatus status
     // valid when status is OK
     2: optional list<PaloInternalService.TExecPlanFragmentParams> params
+    3: optional list<PaloInternalService.TPipelineFragmentParams> pipeline_params
 }
 
 struct TKafkaRLTaskProgress {
@@ -963,8 +964,9 @@ enum TBinlogType {
   CREATE_TABLE = 2,
   DROP_PARTITION = 3,
   DROP_TABLE = 4,
-  ALTER_JOB = 5, 
+  ALTER_JOB = 5,
   MODIFY_TABLE_ADD_OR_DROP_COLUMNS = 6,
+  DUMMY = 7,
 }
 
 struct TBinlog {
@@ -974,6 +976,8 @@ struct TBinlog {
     4: optional i64 db_id
     5: optional list<i64> table_ids
     6: optional string data
+    7: optional i64 belong  // belong == -1 if type is not DUMMY
+    8: optional i64 table_ref // only use for gc
 }
 
 struct TGetBinlogResult {
@@ -1058,6 +1062,11 @@ struct TGetBinlogLagResult {
     2: optional i64 lag
 }
 
+struct TUpdateFollowerStatsCacheRequest {
+    1: optional string key;
+    2: optional string colStats;
+}
+
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1122,4 +1131,6 @@ service FrontendService {
     TGetMasterTokenResult getMasterToken(1: TGetMasterTokenRequest request)
 
     TGetBinlogLagResult getBinlogLag(1: TGetBinlogLagRequest request)
+
+    Status.TStatus updateStatsCache(1: TUpdateFollowerStatsCacheRequest request)
 }

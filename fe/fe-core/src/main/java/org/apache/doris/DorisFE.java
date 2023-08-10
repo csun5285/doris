@@ -203,6 +203,9 @@ public class DorisFE {
                 Thread.sleep(2000);
             }
         } catch (Throwable e) {
+            // Some exception may thrown before LOG is inited.
+            // So need to print to stdout
+            e.printStackTrace();
             LOG.warn("", e);
         }
     }

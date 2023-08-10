@@ -37,6 +37,7 @@
 
 #include "common/status.h"
 #include "gutil/ref_counted.h"
+#include "olap/calc_delete_bitmap_executor.h"
 #include "olap/compaction_permit_limiter.h"
 #include "olap/olap_common.h"
 #include "olap/options.h"
@@ -143,6 +144,9 @@ public:
     TabletManager* tablet_manager() { return _tablet_manager.get(); }
     TxnManager* txn_manager() { return _txn_manager.get(); }
     MemTableFlushExecutor* memtable_flush_executor() { return _memtable_flush_executor.get(); }
+    CalcDeleteBitmapExecutor* calc_delete_bitmap_executor() {
+        return _calc_delete_bitmap_executor.get();
+    }
 
     bool check_rowset_id_in_unused_rowsets(const RowsetId& rowset_id);
 
@@ -210,9 +214,6 @@ public:
     std::unique_ptr<ThreadPool>& tablet_publish_txn_thread_pool() {
         return _tablet_publish_txn_thread_pool;
     }
-    std::unique_ptr<ThreadPool>& calc_delete_bitmap_thread_pool() {
-        return _calc_delete_bitmap_thread_pool;
-    }
     bool stopped() { return _stopped; }
     ThreadPool* get_bg_multiget_threadpool() { return _bg_multi_get_thread_pool.get(); }
 
@@ -223,6 +224,12 @@ public:
     void add_async_publish_task(int64_t partition_id, int64_t tablet_id, int64_t publish_version,
                                 int64_t transaction_id, bool is_recover);
     int64_t get_pending_publish_min_version(int64_t tablet_id);
+
+    void add_quering_rowset(RowsetSharedPtr rs);
+
+    RowsetSharedPtr get_quering_rowset(RowsetId rs_id);
+
+    void evict_querying_rowset(RowsetId rs_id);
 
 private:
     // Instance should be inited from `static open()`
@@ -246,6 +253,10 @@ private:
     void _clean_unused_txns();
 
     void _clean_unused_rowset_metas();
+
+    void _clean_unused_delete_bitmap();
+
+    void _clean_unused_pending_publish_info();
 
     Status _do_sweep(const std::string& scan_root, const time_t& local_tm_now,
                      const int32_t expire);
@@ -276,8 +287,6 @@ private:
     void _parse_default_rowset_type();
 
     void _start_clean_cache();
-
-    void _start_clean_lookup_cache();
 
     // Disk status monitoring. Monitoring unused_flag Road King's new corresponding root_path unused flag,
     // When the unused mark is detected, the corresponding table information is deleted from the memory, and the disk data does not move.
@@ -370,6 +379,10 @@ private:
     // map<rowset_id(str), RowsetSharedPtr>, if we use RowsetId as the key, we need custom hash func
     std::unordered_map<std::string, RowsetSharedPtr> _unused_rowsets;
 
+    // Hold reference of quering rowsets
+    std::mutex _quering_rowsets_mutex;
+    std::unordered_map<RowsetId, RowsetSharedPtr, HashOfRowsetId> _querying_rowsets;
+
     // Count the memory consumption of segment compaction tasks.
     std::shared_ptr<MemTracker> _segcompaction_mem_tracker;
     // This mem tracker is only for tracking memory use by segment meta data such as footer or index page.
@@ -409,6 +422,7 @@ private:
     std::unique_ptr<RowsetIdGenerator> _rowset_id_generator;
 
     std::unique_ptr<MemTableFlushExecutor> _memtable_flush_executor;
+    std::unique_ptr<CalcDeleteBitmapExecutor> _calc_delete_bitmap_executor;
 
     // Used to control the migration from segment_v1 to segment_v2, can be deleted in futrue.
     // Type of new loaded data
@@ -423,7 +437,6 @@ private:
     std::unique_ptr<ThreadPool> _cold_data_compaction_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
-    std::unique_ptr<ThreadPool> _calc_delete_bitmap_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;
     std::unique_ptr<ThreadPool> _bg_multi_get_thread_pool;
@@ -447,7 +460,9 @@ private:
 
     std::shared_ptr<StreamLoadRecorder> _stream_load_recorder;
 
-    std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
+    // we use unordered_map to store all cumulative compaction policy sharded ptr
+    std::unordered_map<std::string_view, std::shared_ptr<CumulativeCompactionPolicy>>
+            _cumulative_compaction_policies;
 
     scoped_refptr<Thread> _cooldown_tasks_producer_thread;
     scoped_refptr<Thread> _remove_unused_remote_files_thread;

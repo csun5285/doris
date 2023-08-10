@@ -172,7 +172,7 @@ Status FileBlock::read_at(Slice buffer, size_t read_offset) {
     Status st = Status::OK();
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
-        std::lock_guard<doris::Mutex> lock(_mutex);
+        std::lock_guard lock(_mutex);
         if (!(reader = _cache_reader.lock())) {
             auto download_path = get_path_in_local_cache();
             RETURN_IF_ERROR(global_local_filesystem()->open_file(download_path, &reader));

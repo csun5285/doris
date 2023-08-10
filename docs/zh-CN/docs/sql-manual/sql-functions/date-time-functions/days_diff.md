@@ -31,11 +31,7 @@ under the License.
 `INT days_diff(DATETIME enddate, DATETIME startdate)`
 
 开始时间到结束时间相差几天，对日期的判断精确到秒，并向下取整数。
-<<<<<<< HEAD
-区别于date_diff，datediff函数对日期的判断精确到天。
-=======
 区别于datediff，datediff函数对日期的判断精确到天。
->>>>>>> 2.0.0-rc01
 ### example
 
 ```

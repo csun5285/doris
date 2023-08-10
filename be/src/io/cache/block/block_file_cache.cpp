@@ -1713,6 +1713,7 @@ std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
 }
 
 void BlockFileCache::remove_file_reader(const AccessKeyAndOffset& key) {
+    std::lock_guard lock(s_file_reader_cache_mtx);
     if (auto iter = s_file_name_to_reader.find(key); iter != s_file_name_to_reader.end()) {
         s_file_reader_cache.erase(iter->second);
         s_file_name_to_reader.erase(key);
@@ -1720,10 +1721,12 @@ void BlockFileCache::remove_file_reader(const AccessKeyAndOffset& key) {
 }
 
 bool BlockFileCache::contains_file_reader(const AccessKeyAndOffset& key) {
+    std::lock_guard lock(s_file_reader_cache_mtx);
     return s_file_name_to_reader.find(key) != s_file_name_to_reader.end();
 }
 
 size_t BlockFileCache::file_reader_cache_size() {
+    std::lock_guard lock(s_file_reader_cache_mtx);
     return s_file_name_to_reader.size();
 }
 

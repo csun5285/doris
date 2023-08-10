@@ -68,7 +68,8 @@ Status EngineCalcDeleteBitmapTask::finish() {
                 LOG(WARNING) << "can't get tablet when calculate delete bitmap. tablet_id="
                              << tablet_id;
                 _error_tablet_ids->push_back(tablet_id);
-                res = Status::Error<ErrorCode::PUSH_TABLE_NOT_EXIST>();
+                res = Status::Error<ErrorCode::PUSH_TABLE_NOT_EXIST>(
+                        "can't get tablet when calculate delete bitmap. tablet_id={}", tablet_id);
                 break;
             }
 
@@ -77,7 +78,7 @@ Status EngineCalcDeleteBitmapTask::finish() {
             if (version != max_version + 1) {
                 if (tablet->tablet_state() != TABLET_NOTREADY || max_version != 1) {
                     _error_tablet_ids->push_back(tablet_id);
-                    res = Status::Error<ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS>();
+                    res = Status::Error<ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS>("version not continuous");
                     LOG(WARNING) << "version not continuous, current max version=" << max_version
                                  << ", request_version=" << version
                                  << " tablet_id=" << tablet->tablet_id();

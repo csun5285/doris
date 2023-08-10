@@ -87,11 +87,8 @@ resource_name supports the following two forms:
     2. The resource permission applies to the specified resource
     
     The resource specified here can be a non-existing resource. In addition, please distinguish the resources here from external tables, and use catalog as an alternative if you use external tables.
-<<<<<<< HEAD
-=======
 
 workload_group_name specifies the workload group name and supports `%` and `_` match characters, `%` can match any string and `_` matches any single character.
->>>>>>> 2.0.0-rc01
 
 user_identity:
 
@@ -145,9 +142,6 @@ role_list is the list of roles to be assigned, separated by commas,the specified
 
     ```sql
     GRANT 'role1','role2' TO 'jack'@'%';
-<<<<<<< HEAD
-    ```
-=======
     ````
 
 <version since="dev"></version>
@@ -169,7 +163,6 @@ role_list is the list of roles to be assigned, separated by commas,the specified
     ```sql
     GRANT USAGE_PRIV ON WORKLOAD GROUP 'g1' TO ROLE 'my_role'.
     ````
->>>>>>> 2.0.0-rc01
 
 ### Keywords
 
