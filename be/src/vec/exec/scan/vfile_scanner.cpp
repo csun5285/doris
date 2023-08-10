@@ -708,7 +708,6 @@ Status VFileScanner::_get_next_reader() {
         case TFileFormatType::FORMAT_JSON_LZO:
         case TFileFormatType::FORMAT_JSON_LZOP:
         case TFileFormatType::FORMAT_JSON_DEFLATE: {
-        case TFileFormatType::FORMAT_JSON: {
             _cur_reader = NewJsonReader::create_unique(_state, _profile, &_counter, *_params, range,
                                                        _file_slot_descs, &_scanner_eof,
                                                        _io_ctx.get(), _is_dynamic_schema);
