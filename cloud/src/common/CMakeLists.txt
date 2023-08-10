@@ -11,6 +11,7 @@ set(COMMON_FILES
     logging.cpp
     bvars.cpp
     encryption_util.cpp
+    metric.cpp
 )
 
 if (USE_JEMALLOC)

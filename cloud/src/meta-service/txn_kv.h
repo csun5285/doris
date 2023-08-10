@@ -233,7 +233,7 @@ private:
 class Database {
 public:
     Database(std::shared_ptr<Network> net, const std::string& cluster_file, FDBDatabaseOption opt)
-            : network_(std::move(net)), cluster_file_path_(cluster_file), opt_(std::move(opt)) {}
+            : network_(std::move(net)), cluster_file_path_(cluster_file), opt_(opt) {}
 
     /**
      *

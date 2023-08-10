@@ -306,8 +306,7 @@ static void load_watcher(std::shared_ptr<LoadContext> ctx) {
     while (saved_total_finished < ctx->num_instances) {
         bthread_usleep(FLAGS_report_intervals * SECONDS);
 
-        auto status = selectdb::get_fdb_status(ctx->txn_kv);
-        selectdb::export_fdb_status_details(status);
+        selectdb::FdbMetricExporter::export_fdb_metrics(ctx->txn_kv.get());
 
         // save the progress
         uint64_t min_finished_instance_id =
