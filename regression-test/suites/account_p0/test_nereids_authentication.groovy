@@ -43,6 +43,13 @@ suite("test_nereids_authentication", "query") {
     try_sql "DROP USER ${user}"
     sql "CREATE USER ${user} IDENTIFIED BY 'Doris_123456'"
     sql "GRANT SELECT_PRIV ON internal.${dbName}.${tableName1} TO ${user}"
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO ${user}""";
+    }
 
     def tokens = context.config.jdbcUrl.split('/')
     def url=tokens[0] + "//" + tokens[2] + "/" + dbName + "?"

@@ -19,6 +19,7 @@
 #include "io/fs/s3_file_system.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/tablet.h"
+#include "util/s3_util.h"
 #include "util/wait_group.h"
 
 namespace doris::io {
@@ -33,6 +34,7 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
     auto outcome = client->GetObject(request);
+    s3_bvar::s3_get_total << 1;
 
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", key_name,

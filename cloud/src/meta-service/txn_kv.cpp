@@ -42,7 +42,7 @@ int FdbTxnKv::init() {
 }
 
 int FdbTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
-    auto t = new fdb::Transaction(database_, FDBTransactionOption {});
+    auto t = new fdb::Transaction(database_);
     txn->reset(t);
     int ret = t->init();
     if (ret != 0) {
@@ -146,6 +146,25 @@ int Transaction::init() {
                      << " fdb_database_create_transaction error:" << fdb_get_error(err);
         return -1;
     }
+
+    // FDB txn callback only guaranteed *at most once*, because the future might be set to `Never`
+    // by unexpected. In order to achieve *exactly once* semantic, a timeout must be set to force
+    // fdb cancel future and invoke callback eventually.
+    //
+    // See:
+    // - https://apple.github.io/foundationdb/api-c.html#fdb_future_set_callback.
+    // - https://forums.foundationdb.org/t/does-fdb-future-set-callback-guarantee-exactly-once-execution/1498/2
+    static_assert(sizeof(config::fdb_txn_timeout_ms) == sizeof(int64_t));
+    err = fdb_transaction_set_option(txn_, FDBTransactionOption::FDB_TR_OPTION_TIMEOUT,
+                                     (const uint8_t*)&config::fdb_txn_timeout_ms,
+                                     sizeof(config::fdb_txn_timeout_ms));
+    if (err) {
+        LOG_WARNING("fdb_transaction_set_option error: ")
+                .tag("code", err)
+                .tag("msg", fdb_get_error(err));
+        return -1;
+    }
+
     return 0;
 }
 

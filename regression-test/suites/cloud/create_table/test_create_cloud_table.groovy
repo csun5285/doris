@@ -36,8 +36,6 @@ suite("test_create_cloud_table") {
         CREATE TABLE table_2 ( k1 date NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL ) 
         AGGREGATE KEY(k1,k2) 
         DISTRIBUTED BY HASH(k1) BUCKETS 3 
-        PROPERTIES (
-            "replication_allocation" = "tag.location.not_exist_tag: 1")
         """
         // check exception message contains
         exception "errCode = 2,"
@@ -58,8 +56,6 @@ suite("test_create_cloud_table") {
         PARTITION p1997 VALUES [("19970101"), ("19980101")),
         PARTITION p1998 VALUES [("19980101"), ("19990101")))
         DISTRIBUTED BY HASH(k1) BUCKETS 3 
-        PROPERTIES (
-            "replication_allocation" = "tag.location.not_exist_tag: 1")
         """
         // check exception message contains
         exception "errCode = 2,"
@@ -86,9 +82,7 @@ suite("test_create_cloud_table") {
         AGGREGATE KEY(k1,k2) 
         DISTRIBUTED BY HASH(k1) BUCKETS 3 
         PROPERTIES (
-            "compression"="zstd",
-            "replication_allocation" = "tag.location.not_exist_tag: 1",
-            "replication_num" = "3")
+            "compression"="zstd")
         """
     }
 
@@ -111,8 +105,6 @@ suite("test_create_cloud_table") {
         PARTITION p1997 VALUES [("19970101"), ("19980101")),
         PARTITION p1998 VALUES [("19980101"), ("19990101")))
         DISTRIBUTED BY HASH(k1) BUCKETS 3 
-        PROPERTIES (
-            "replication_allocation" = "tag.location.not_exist_tag: 1")
         """
         // check exception message contains
     }

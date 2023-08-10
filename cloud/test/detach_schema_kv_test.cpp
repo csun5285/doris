@@ -275,6 +275,7 @@ static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id,
         rowset.set_end_version(version);
     }
     rowset.mutable_tablet_schema()->set_schema_version(schema_version);
+    rowset.set_txn_expiration(::time(nullptr)); // Required by DCHECK
     return rowset;
 }
 

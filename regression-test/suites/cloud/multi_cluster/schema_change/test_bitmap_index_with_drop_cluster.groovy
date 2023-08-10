@@ -96,7 +96,7 @@ suite("test_bitmap_index_with_drop_cluster") {
                k14 DATETIMEV2(3),
                k15 DATETIMEV2(6)
             )
-            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(k1) BUCKETS 5 ;
         """
     
     sql "insert into ${tbName1} values(1,1,1,1,'1','1','2022-05-31','2022-05-31 10:00:00',1,1.0,1,'2022-05-31','2022-05-31 10:00:00.111111','2022-05-31 10:00:00.111111','2022-05-31 10:00:00.111111');"

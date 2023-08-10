@@ -17,14 +17,13 @@
 
 #include "s3_file_bufferpool.h"
 
-#include "io/cache/block/block_file_segment.h"
-#include "io/fs/s3_common.h"
 #include "common/config.h"
 #include "common/logging.h"
+#include "io/cache/block/block_file_segment.h"
+#include "io/fs/s3_common.h"
 #include "runtime/exec_env.h"
 #include "util/defer_op.h"
 #include "util/slice.h"
-
 
 namespace doris {
 namespace io {
@@ -83,7 +82,7 @@ void UploadFileBuffer::set_index_offset(size_t offset) {
  * 0. when there is memory preserved, directly write data to buf
  * 1. write to file cache otherwise, then we'll wait for free buffer and to rob it
  */
-void UploadFileBuffer::append_data(const Slice& data) {
+Status UploadFileBuffer::append_data(const Slice& data) {
     Defer defer {[&] { _size += data.get_size(); }};
     while (true) {
         // if buf is not empty, it means there is memory preserved for this buf
@@ -123,9 +122,15 @@ void UploadFileBuffer::append_data(const Slice& data) {
                 size_t segment_remain_size = range.right - _append_offset + 1;
                 size_t append_size = std::min(data_remain_size, segment_remain_size);
                 Slice append_data(data.get_data() + pos, append_size);
-                (*_cur_file_segment)->append(append_data);
+                // When there is no available free memory buffer, the data will be written to the cache first
+                // and then uploaded to S3 when there is an available free memory buffer.
+                // However, if an error occurs during the write process to the local cache,
+                // continuing to upload the dirty data from the cache to S3 will result in erroneous data(Bad segment).
+                // Considering that local disk write failures are rare, a simple approach is chosen here,
+                // which is to treat the import as a failure directly when a local write failure occurs
+                RETURN_IF_ERROR((*_cur_file_segment)->append(append_data));
                 if (segment_remain_size == append_size) {
-                    (*_cur_file_segment)->finalize_write(); // DOWNLOADED
+                    RETURN_IF_ERROR((*_cur_file_segment)->finalize_write());
                     if (++_cur_file_segment != _holder->file_segments.end()) {
                         (*_cur_file_segment)->get_or_set_downloader();
                     }
@@ -141,6 +146,7 @@ void UploadFileBuffer::append_data(const Slice& data) {
             swap_buffer(tmp);
         }
     }
+    return Status::OK();
 }
 
 /**
@@ -159,7 +165,10 @@ void UploadFileBuffer::read_from_cache() {
         if (pos == _size) {
             break;
         }
-        segment->finalize_write();
+        if (auto s = segment->finalize_write(); !s.ok()) [[unlikely]] {
+            set_val(std::move(s));
+            return;
+        }
         size_t segment_size = segment->range().size();
         Slice s(_buffer.get_data() + pos, segment_size);
         segment->read_at(s, 0);
@@ -174,7 +183,13 @@ void UploadFileBuffer::read_from_cache() {
  * submit the on_download() task to executor
  */
 void DownloadFileBuffer::submit() {
-    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+    // Currently download file buffer is only served for cache prefetching
+    // so we just skip executing the download task when file cache is not enabled
+    if (!config::enable_file_cache) [[unlikely]] {
+        LOG(INFO) << "Skip download file task because file cache is not enabled";
+        return;
+    }
+    ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
                 // to extend buf's lifetime
                 // (void)buf;
@@ -190,10 +205,14 @@ void UploadFileBuffer::submit() {
     if (!_buffer.empty()) [[likely]] {
         _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);
     }
+    // If the data is written into file cache
     if (_holder && _cur_file_segment != _holder->file_segments.end()) {
-        (*_cur_file_segment)->finalize_write();   
+        if (auto s = (*_cur_file_segment)->finalize_write(); !s.ok()) [[unlikely]] {
+            set_val(std::move(s));
+            return;
+        }
     }
-    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+    ExecEnv::GetInstance()->s3_file_writer_upload_thread_pool()->submit_func(
             [buf = this->shared_from_this(), this]() {
                 // to extend buf's lifetime
                 // (void)buf;
@@ -204,6 +223,7 @@ void UploadFileBuffer::submit() {
 /**
  * write the content of the memory buffer to local file cache
  */
+// TODO(AlexYue): this function could be processed asynchronously
 void UploadFileBuffer::upload_to_local_file_cache() {
     if (!config::enable_file_cache || _alloc_holder == nullptr) {
         return;

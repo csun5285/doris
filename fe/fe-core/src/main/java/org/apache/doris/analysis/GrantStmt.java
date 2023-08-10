@@ -78,6 +78,9 @@ public class GrantStmt extends DdlStmt {
         this.tblPattern = tblPattern;
         this.resourcePattern = resourcePattern;
         this.workloadGroupPattern = workloadGroupPattern;
+        if (this.resourcePattern != null) {
+            this.resourcePattern.setResourceType(type);
+        }
         PrivBitSet privs = PrivBitSet.of();
         for (AccessPrivilege accessPrivilege : privileges) {
             if (!accessPrivilege.isResource() || type == ResourceTypeEnum.GENERAL) {

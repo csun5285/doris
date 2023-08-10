@@ -26,9 +26,7 @@ suite("test_alter_bitmap_load") {
         `a` decimal(12, 6) NOT NULL
         ) ENGINE = OLAP
         DUPLICATE KEY(`a`)
-        DISTRIBUTED BY HASH(`a`) BUCKETS 1
-        PROPERTIES (
-            "replication_allocation" = "tag.location.default: 1");
+        DISTRIBUTED BY HASH(`a`) BUCKETS 1;
         """
     sql """
     create index bitmap_index_multi_page on ${tbName}(a) using bitmap;
@@ -38,7 +36,7 @@ suite("test_alter_bitmap_load") {
         table "${tbName}"
         set 'column_separator', '|'
         set 'columns', 'a,temp'
-        file """${context.sf1DataPath}/regression/bitmap_index_test.csv"""
+        file """${getS3Url()}/regression/bitmap_index_test.csv"""
         time 10000 // limit inflight 10s
 
         // if declared a check callback, the default check condition will ignore.

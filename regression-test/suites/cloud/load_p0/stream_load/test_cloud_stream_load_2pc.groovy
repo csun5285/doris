@@ -37,10 +37,7 @@ suite("test_cloud_stream_load_2pc", "p0") {
       `k12` date NULL,
       `k13` datetime NULL
     ) ENGINE=OLAP
-    DISTRIBUTED BY HASH(`k1`) BUCKETS 3
-    PROPERTIES (
-    "replication_allocation" = "tag.location.default: 1"
-    );
+    DISTRIBUTED BY HASH(`k1`) BUCKETS 3;
     """
 
     long txnId = -1;
@@ -53,6 +50,7 @@ suite("test_cloud_stream_load_2pc", "p0") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
+        isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -80,6 +78,7 @@ suite("test_cloud_stream_load_2pc", "p0") {
 
         file 'all_types.csv'
         twoPhaseCommit true
+        isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {

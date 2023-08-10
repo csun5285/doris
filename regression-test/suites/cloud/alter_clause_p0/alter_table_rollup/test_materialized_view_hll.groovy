@@ -30,7 +30,7 @@ suite("test_materialized_view_hll") {
                 sale_date date, 
                 sale_amt bigint
             ) 
-            DISTRIBUTED BY HASH(record_id) properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(record_id);
         """
 
     sql "CREATE materialized VIEW amt_count AS SELECT store_id, hll_union(hll_hash(sale_amt)) FROM ${tbName1} GROUP BY store_id;"

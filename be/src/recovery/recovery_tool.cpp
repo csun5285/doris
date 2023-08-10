@@ -199,7 +199,7 @@ int recovery_data(const S3Conf& s3_conf, const std::string& recovery_file, int l
     aws_config.region = s3_conf.region;
     aws_config.verifySSL = false;
     Aws::S3::S3Client s3_client(aws_cred, aws_config,
-                                Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never);
+                                Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, true);
     std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&aws_options](int*) {
         Aws::ShutdownAPI(aws_options);
     });

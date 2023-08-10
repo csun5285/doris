@@ -8,7 +8,5 @@ CREATE TABLE IF NOT EXISTS partsupp (
 UNIQUE KEY(`ps_partkey`,`ps_suppkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`ps_partkey`) BUCKETS 24
-PROPERTIES (
-    "replication_num" = "3"
-)
+
 

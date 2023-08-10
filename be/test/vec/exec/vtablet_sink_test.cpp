@@ -419,6 +419,7 @@ public:
         ASSERT_TRUE(st.ok());
 
         // init
+        t_data_sink.olap_table_sink.txn_timeout_s = 10086;
         st = sink.init(t_data_sink);
         ASSERT_TRUE(st.ok());
         // prepare
@@ -560,6 +561,7 @@ TEST_F(VOlapTableSinkTest, convert) {
 
     // set output tuple_id
     t_data_sink.olap_table_sink.tuple_id = 1;
+    t_data_sink.olap_table_sink.txn_timeout_s = 10086;
     // init
     st = sink.init(t_data_sink);
     ASSERT_TRUE(st.ok());
@@ -687,6 +689,7 @@ TEST_F(VOlapTableSinkTest, add_block_failed) {
 
     // set output tuple_id
     t_data_sink.olap_table_sink.tuple_id = 1;
+    t_data_sink.olap_table_sink.txn_timeout_s = 10086;
     // init
     st = sink.init(t_data_sink);
     ASSERT_TRUE(st.ok());
@@ -779,6 +782,7 @@ TEST_F(VOlapTableSinkTest, decimal) {
     VOlapTableSink sink(&obj_pool, row_desc, {}, &st);
     ASSERT_TRUE(st.ok());
 
+    t_data_sink.olap_table_sink.txn_timeout_s = 10086;
     // init
     st = sink.init(t_data_sink);
     ASSERT_TRUE(st.ok());

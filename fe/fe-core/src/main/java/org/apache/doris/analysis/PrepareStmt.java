@@ -61,6 +61,7 @@ public class PrepareStmt extends StatementBase {
     private OlapTable tbl;
     private ConnectContext context;
     private PreparedType preparedType = PreparedType.STATEMENT;
+    boolean isPointQueryShortCircuit = false;
 
     private TDescriptorTable descTable;
     // Serialized mysql Field, this could avoid serialize mysql field each time sendFields.
@@ -136,6 +137,10 @@ public class PrepareStmt extends StatementBase {
         return serializedOutputExpr;
     }
 
+    public boolean isPointQueryShortCircuit() {
+        return isPointQueryShortCircuit;
+    }
+
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
         // TODO support more Statement
@@ -155,6 +160,7 @@ public class PrepareStmt extends StatementBase {
                     tbl = (OlapTable) selectStmt.getTableRefs().get(0).getTable();
                     schemaVersion = tbl.getBaseSchemaVersion();
                     preparedType = PreparedType.FULL_PREPARED;
+                    isPointQueryShortCircuit = true;
                     LOG.debug("using FULL_PREPARED prepared");
                     return;
                 }

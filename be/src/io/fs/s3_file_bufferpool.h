@@ -84,7 +84,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     *
     * @param S the content to be appended
     */
-    virtual void append_data(const Slice& s) = 0;
+    virtual Status append_data(const Slice& s) = 0;
     /**
     * call the reclaim callback when task is done 
     */
@@ -143,7 +143,7 @@ struct DownloadFileBuffer final : public FileBuffer {
     * do the download work, it would write the content into local memory buffer
     */
     void on_download();
-    void append_data(const Slice& s) override {}
+    Status append_data(const Slice& s) override { return Status::OK(); }
 
     std::function<Status(Slice&)> _download;
     std::function<void(FileBlocksHolderPtr, Slice)> _write_to_local_file_cache;
@@ -165,7 +165,7 @@ struct UploadFileBuffer final : public FileBuffer {
     * @param offset the index offset
     */
     void set_index_offset(size_t offset);
-    void append_data(const Slice& s) override;
+    Status append_data(const Slice& s) override;
     /**
     * read the content from local file cache
     * because previously lack of  memory buffer

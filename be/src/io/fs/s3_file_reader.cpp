@@ -36,6 +36,9 @@
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
+#include "util/s3_util.h"
+#include "util/trace.h"
+
 
 namespace doris {
 namespace io {
@@ -97,6 +100,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
     }
     s3_file_reader_counter << 1;
     auto outcome = client->GetObject(request);
+    s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", _path.native(),
                                outcome.GetError().GetMessage());

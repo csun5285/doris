@@ -1143,6 +1143,7 @@ int InstanceRecycler::recycle_rowsets() {
             return -1;
         }
         int64_t current_time = ::time(nullptr);
+        // RecycleRowsetPB created by merged rowset has no expiration time, and will be recycled when exceed retention time
         int64_t expiration = rowset.expiration() > 0 ? rowset.expiration() : rowset.creation_time();
         if (current_time < expiration + config::retention_seconds) {
             // not expired
@@ -1287,6 +1288,9 @@ int InstanceRecycler::recycle_tmp_rowsets() {
             return -1;
         }
         int64_t current_time = ::time(nullptr);
+        // ATTN: `txn_expiration` should > 0, however we use `creation_time` + a large `retention_time` (> 1 day in production environment)
+        //  when `txn_expiration` <= 0 in some unexpected situation (usually when there are bugs). This is usually safe, coz loading
+        //  duration or timeout always < `retention_time` in practice.
         int64_t expiration =
                 rowset.txn_expiration() > 0 ? rowset.txn_expiration() : rowset.creation_time();
         if (current_time < expiration + config::retention_seconds) {

@@ -200,6 +200,7 @@ Status S3FileSystem::delete_file_impl(const Path& file) {
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
     auto outcome = client->DeleteObject(request);
+    s3_bvar::s3_delete_total << 1;
     if (outcome.IsSuccess() ||
         outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
         return Status::OK();
@@ -223,6 +224,7 @@ Status S3FileSystem::delete_directory_impl(const Path& dir) {
     bool is_trucated = false;
     do {
         auto outcome = client->ListObjectsV2(request);
+        s3_bvar::s3_list_total << 1;
         if (!outcome.IsSuccess()) {
             return Status::IOError("failed to list objects when delete dir {}: {}", dir.native(),
                                    error_msg(prefix, outcome));
@@ -238,6 +240,7 @@ Status S3FileSystem::delete_directory_impl(const Path& dir) {
             del.WithObjects(std::move(objects)).SetQuiet(true);
             delete_request.SetDelete(std::move(del));
             auto delete_outcome = client->DeleteObjects(delete_request);
+            s3_bvar::s3_delete_total << 1;
             if (!delete_outcome.IsSuccess()) {
                 return Status::IOError("failed to delete dir {}: {}", dir.native(),
                                        error_msg(prefix, delete_outcome));
@@ -282,6 +285,7 @@ Status S3FileSystem::batch_delete_impl(const std::vector<Path>& remote_files) {
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
         auto delete_outcome = client->DeleteObjects(delete_request);
+        s3_bvar::s3_delete_total << 1;
         if (UNLIKELY(!delete_outcome.IsSuccess())) {
             return Status::IOError(
                     "failed to delete objects: {}",
@@ -307,6 +311,7 @@ Status S3FileSystem::exists_impl(const Path& path, bool* res) const {
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
     auto outcome = client->HeadObject(request);
+    s3_bvar::s3_head_total << 1;
     if (outcome.IsSuccess()) {
         *res = true;
     } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
@@ -327,6 +332,7 @@ Status S3FileSystem::file_size_impl(const Path& file, int64_t* file_size) const 
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
     auto outcome = client->HeadObject(request);
+    s3_bvar::s3_head_total << 1;
     if (outcome.IsSuccess()) {
         *file_size = outcome.GetResult().GetContentLength();
     } else {
@@ -353,6 +359,7 @@ Status S3FileSystem::list_impl(const Path& dir, bool only_file, std::vector<File
     bool is_trucated = false;
     do {
         auto outcome = client->ListObjectsV2(request);
+        s3_bvar::s3_list_total << 1;
         if (!outcome.IsSuccess()) {
             return Status::IOError("failed to list {}: {}", dir.native(),
                                    error_msg(prefix, outcome));
@@ -461,6 +468,7 @@ Status S3FileSystem::direct_upload_impl(const Path& remote_file, const std::stri
                                remote_file.native());
     }
     Aws::S3::Model::PutObjectOutcome response = _client->PutObject(request);
+    s3_bvar::s3_put_total << 1;
     if (response.IsSuccess()) {
         return Status::OK();
     } else {
@@ -481,6 +489,7 @@ Status S3FileSystem::download_impl(const Path& remote_file, const Path& local_fi
     Aws::S3::Model::GetObjectRequest request;
     request.WithBucket(_s3_conf.bucket).WithKey(key);
     Aws::S3::Model::GetObjectOutcome response = _client->GetObject(request);
+    s3_bvar::s3_get_total << 1;
     if (response.IsSuccess()) {
         Aws::OFStream local_file_s;
         local_file_s.open(local_file, std::ios::out | std::ios::binary);
@@ -504,6 +513,7 @@ Status S3FileSystem::direct_download_impl(const Path& remote, std::string* conte
     GET_KEY(key, remote);
     request.WithBucket(_s3_conf.bucket).WithKey(key);
     Aws::S3::Model::GetObjectOutcome response = _client->GetObject(request);
+    s3_bvar::s3_get_total << 1;
     if (response.IsSuccess()) {
         std::stringstream ss;
         ss << response.GetResult().GetBody().rdbuf();
@@ -524,6 +534,7 @@ Status S3FileSystem::copy(const Path& src, const Path& dst) {
             .WithKey(dst_key)
             .WithBucket(_s3_conf.bucket);
     Aws::S3::Model::CopyObjectOutcome response = _client->CopyObject(request);
+    s3_bvar::s3_copy_object_total << 1;
     if (response.IsSuccess()) {
         return Status::OK();
     } else {
@@ -610,6 +621,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     Aws::S3::Model::GetBucketVersioningRequest request;
     request.SetBucket(bucket);
     auto outcome = s3_client->GetBucketVersioning(request);
+    s3_bvar::s3_get_bucket_version_total << 1;
 
     if (outcome.IsSuccess()) {
         auto versioning_configuration = outcome.GetResult().GetStatus();
@@ -639,6 +651,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     *input_data << check_value;
     upload_request.SetBody(input_data);
     auto upload_response = s3_client->PutObject(upload_request);
+    s3_bvar::s3_put_total << 1;
     if (!upload_response.IsSuccess()) {
         return Status::InternalError("Versioning Err: Error uploading check object : " +
                                      upload_response.GetError().GetMessage() + log_with_s3_info());
@@ -650,6 +663,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     Aws::S3::Model::DeleteObjectRequest delete_request;
     delete_request.WithBucket(bucket).WithKey(check_key);
     auto delete_response = s3_client->DeleteObject(delete_request);
+    s3_bvar::s3_delete_total << 1;
     if (!delete_response.IsSuccess()) {
         return Status::InternalError("Versioning Err: Error deleting check object : " +
                                      delete_response.GetError().GetMessage() + log_with_s3_info());
@@ -662,6 +676,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     // get last two version
     list_request.WithBucket(bucket).WithPrefix(check_key).WithMaxKeys(2);
     auto list_response = s3_client->ListObjectVersions(list_request);
+    s3_bvar::s3_list_object_versions_total << 1;
     if (!list_response.IsSuccess()) {
         return Status::InternalError("Versioning Err: Error listing object versions: " +
                                      list_response.GetError().GetMessage() + log_with_s3_info());
@@ -688,6 +703,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     Aws::S3::Model::GetObjectRequest get_request;
     get_request.WithBucket(bucket).WithKey(check_key).WithVersionId(check_version_id);
     auto get_response = s3_client->GetObject(get_request);
+    s3_bvar::s3_get_total << 1;
     if (!get_response.IsSuccess()) {
         return Status::InternalError("Versioning Err: Error getting check object with version: " +
                                      get_response.GetError().GetMessage() + log_with_s3_info());
@@ -710,6 +726,7 @@ Status S3FileSystem::check_bucket_versioning() const {
     *reupload_input_data << check_value;
     reupload_request.SetBody(reupload_input_data);
     auto reupload_response = s3_client->PutObject(reupload_request);
+    s3_bvar::s3_put_total << 1;
     if (!reupload_response.IsSuccess()) {
         return Status::InternalError("Versioning Err: Error re-uploading check object: " +
                                      reupload_response.GetError().GetMessage() +

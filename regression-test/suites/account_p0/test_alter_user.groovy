@@ -36,6 +36,13 @@ suite("test_alter_user", "account") {
 
     sql """alter user test_auth_user2 password_history 0"""
     sql """set password for 'test_auth_user2' = password('12345')"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO test_auth_user2""";
+    }
     
     def result1 = connect(user = 'test_auth_user2', password = '12345', url = context.config.jdbcUrl) {
         sql 'select 1'
@@ -56,6 +63,13 @@ suite("test_alter_user", "account") {
     // 3. test FAILED_LOGIN_ATTEMPTS and PASSWORD_LOCK_TIME
     sql """create user test_auth_user3 identified by '12345' FAILED_LOGIN_ATTEMPTS 2 PASSWORD_LOCK_TIME 1 DAY"""
     sql """grant all on *.* to test_auth_user3"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO test_auth_user3""";
+    }
          
     // login success in multi times
     result1 = connect(user = 'test_auth_user3', password = '12345', url = context.config.jdbcUrl) {
@@ -122,6 +136,8 @@ suite("test_alter_user", "account") {
         sql 'select 1'
     }
 
+    // cloud mode doesn't run validate_password_policy
+    if (context.config.metaServiceHttpAddress.isEmpty()) {
     // 4. test password validation
     sql """set global validate_password_policy=STRONG"""
     test {
@@ -138,10 +154,18 @@ suite("test_alter_user", "account") {
         sql 'select 1'
     }
     sql """set global validate_password_policy=NONE"""
+    }
 
     // 5. text expire
     sql """create user test_auth_user4 identified by '12345' PASSWORD_EXPIRE INTERVAL 5 SECOND"""
     sql """grant all on *.* to test_auth_user4"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO test_auth_user4""";
+    }
     result1 = connect(user = 'test_auth_user4', password = '12345', url = context.config.jdbcUrl) {
         sql 'select 1'
     }
@@ -157,6 +181,13 @@ suite("test_alter_user", "account") {
     sql """drop user test_auth_user4"""
     sql """create user test_auth_user4 identified by '12345'"""
     sql """grant all on *.* to test_auth_user4"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO test_auth_user4""";
+    }
     result1 = connect(user = 'test_auth_user4', password = '12345', url = context.config.jdbcUrl) {
         sql 'select 1'
     }

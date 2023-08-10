@@ -94,6 +94,8 @@ message ClusterPB {
     optional string desc = 4;
     repeated NodeInfoPB nodes = 5;
     repeated string mysql_user_name = 6;
+    optional string public_endpoint = 7;
+    optional string private_endpoint = 8;
 }
 
 message NodeInfoPB {
@@ -806,6 +808,7 @@ message AlterClusterRequest {
         UPDATE_CLUSTER_MYSQL_USER_NAME = 6; // just for update cluster's mysql_user_name
         DECOMMISSION_NODE = 7;
         NOTIFY_DECOMMISSIONED = 8;
+        UPDATE_CLUSTER_ENDPOINT = 9;
     }
     optional string instance_id = 1;
     optional string cloud_unique_id = 2; // For auth
@@ -1044,6 +1047,7 @@ enum MetaServiceCode {
 
     CLUSTER_NOT_FOUND = 3001;
     ALREADY_EXISTED = 3002;
+    CLUSTER_ENDPOINT_MISSING = 3003;
 
     // Stage
     STAGE_NOT_FOUND = 4001;

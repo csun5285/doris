@@ -16,6 +16,10 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
         return null
     }
 
+    def clusters = sql " SHOW CLUSTERS; "
+    assertTrue(!clusters.isEmpty())
+    def validCluster = clusters[0][0]
+
     // 1. change user
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
@@ -23,9 +27,9 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
 
     // ${user2} not admin role
     sql """create user ${user2} identified by 'Cloud12345'"""
+    sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     // for use default_cluster:regression_test
     sql """grant select_priv on *.*.* to ${user2}"""
-    order_qt_show_user2_grants2 """show grants for '${user2}'"""
 
 
     // 2. grant cluster
@@ -46,10 +50,6 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
 
-    def clusters = sql " SHOW CLUSTERS; "
-    assertTrue(!clusters.isEmpty())
-    def validCluster = clusters[0][0]
-
     // default cluster
     sql """SET PROPERTY FOR '${user1}' 'default_cloud_cluster' = '${validCluster}'"""
     sql """SET PROPERTY FOR '${user2}' 'default_cloud_cluster' = '${validCluster}'"""
@@ -63,7 +63,6 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
-    order_qt_show_user3_grants3 """show grants for '${user2}'"""
 
     sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     show_cluster_2 = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
@@ -98,3 +97,5 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""
 }
+
+

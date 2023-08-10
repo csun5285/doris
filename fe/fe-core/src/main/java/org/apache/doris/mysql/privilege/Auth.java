@@ -1115,6 +1115,24 @@ public class Auth implements Writable {
         } finally {
             readUnlock();
         }
+        if (Config.isCloudMode()) {
+            List<List<String>> userAuthInfosTmp = Lists.newArrayList();
+            for (List<String> userAuthInfo : userAuthInfos) {
+                if (userAuthInfo == null) {
+                    continue;
+                }
+                List<String> userAuthInfoTmp = Lists.newArrayList();
+                for (String s : userAuthInfo) {
+                    if (s == null) {
+                        userAuthInfoTmp.add(s);
+                        continue;
+                    }
+                    userAuthInfoTmp.add(s.replaceAll("default_cluster:", ""));
+                }
+                userAuthInfosTmp.add(userAuthInfoTmp);
+            }
+            userAuthInfos = userAuthInfosTmp;
+        }
         return userAuthInfos;
     }
 
@@ -1198,6 +1216,36 @@ public class Auth implements Writable {
             userAuthInfo.add(Joiner.on("; ").join(resourcePrivs));
         }
 
+        // cloudCluster
+        List<String> cloudClusterPrivs = Lists.newArrayList();
+        for (PrivEntry entry : getUserCloudClusterPrivTable(userIdent).entries) {
+            ResourcePrivEntry rEntry = (ResourcePrivEntry) entry;
+            PrivBitSet savedPrivs = rEntry.getPrivSet().copy();
+            savedPrivs.or(LdapPrivsChecker.getResourcePrivFromLdap(userIdent, rEntry.getOrigResource()));
+            cloudClusterPrivs.add(rEntry.getOrigResource() + ": " + savedPrivs.toString());
+        }
+
+        if (cloudClusterPrivs.isEmpty()) {
+            userAuthInfo.add(FeConstants.null_string);
+        } else {
+            userAuthInfo.add(Joiner.on("; ").join(cloudClusterPrivs));
+        }
+
+        // cloudStage
+        List<String> cloudStagePrivs = Lists.newArrayList();
+        for (PrivEntry entry : getUserCloudStagePrivTable(userIdent).entries) {
+            ResourcePrivEntry rEntry = (ResourcePrivEntry) entry;
+            PrivBitSet savedPrivs = rEntry.getPrivSet().copy();
+            savedPrivs.or(LdapPrivsChecker.getResourcePrivFromLdap(userIdent, rEntry.getOrigResource()));
+            cloudStagePrivs.add(rEntry.getOrigResource() + ": " + savedPrivs.toString());
+        }
+
+        if (cloudStagePrivs.isEmpty()) {
+            userAuthInfo.add(FeConstants.null_string);
+        } else {
+            userAuthInfo.add(Joiner.on("; ").join(cloudStagePrivs));
+        }
+
         // workload group
         List<String> workloadGroupPrivs = Lists.newArrayList();
         for (PrivEntry entry : getUserWorkloadGroupPrivTable(userIdent).entries) {
@@ -1256,6 +1304,31 @@ public class Auth implements Writable {
         Set<Role> roles = getRolesByUserWithLdap(userIdentity);
         for (Role role : roles) {
             table.merge(role.getResourcePrivTable());
+        }
+        return table;
+    }
+
+
+    private ResourcePrivTable getUserCloudClusterPrivTable(UserIdentity userIdentity) {
+        ResourcePrivTable table = new ResourcePrivTable();
+        Set<String> roles = userRoleManager.getRolesByUser(userIdentity);
+        for (String roleName : roles) {
+            table.merge(roleManager.getRole(roleName).getCloudClusterPrivTable());
+        }
+        if (isLdapAuthEnabled() && ldapManager.doesUserExist(userIdentity.getQualifiedUser())) {
+            table.merge(ldapManager.getUserRole(userIdentity.getQualifiedUser()).getCloudClusterPrivTable());
+        }
+        return table;
+    }
+
+    private ResourcePrivTable getUserCloudStagePrivTable(UserIdentity userIdentity) {
+        ResourcePrivTable table = new ResourcePrivTable();
+        Set<String> roles = userRoleManager.getRolesByUser(userIdentity);
+        for (String roleName : roles) {
+            table.merge(roleManager.getRole(roleName).getCloudStagePrivTable());
+        }
+        if (isLdapAuthEnabled() && ldapManager.doesUserExist(userIdentity.getQualifiedUser())) {
+            table.merge(ldapManager.getUserRole(userIdentity.getQualifiedUser()).getCloudStagePrivTable());
         }
         return table;
     }

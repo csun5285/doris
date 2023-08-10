@@ -25,9 +25,7 @@ suite("test_recycler_with_drop_column") {
         )
         DUPLICATE KEY(C_CUSTKEY, C_NAME)
         DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 32
-        PROPERTIES (
-            "replication_num" = "1"
-        );
+        ;
     """
 
     sql """

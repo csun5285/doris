@@ -137,6 +137,16 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_min_threads(16)
             .set_max_threads(64)
             .build(&_buffered_reader_prefetch_thread_pool);
+    
+    ThreadPoolBuilder("S3FileWriterUploadThreadPool")
+            .set_min_threads(16)
+            .set_max_threads(64)
+            .build(&_s3_file_writer_upload_thread_pool);
+    
+    ThreadPoolBuilder("S3DownloaderDownloadThreadPool")
+            .set_min_threads(16)
+            .set_max_threads(64)
+            .build(&_s3_downloader_download_thread_pool);
 
     // min num equal to fragment pool's min num
     // max num is useless because it will start as many as requested in the past
@@ -172,7 +182,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _internal_client_cache = new BrpcClientCache<PBackendService_Stub>();
     _function_client_cache = new BrpcClientCache<PFunctionService_Stub>();
 #ifdef CLOUD_MODE
-    _stream_load_executor = cloud::CloudStreamLoadExecutor::create_shared(this);
+    _stream_load_executor = std::make_shared<cloud::CloudStreamLoadExecutor>(this);
 #else
     _stream_load_executor = StreamLoadExecutor::create_shared(this);
 #endif

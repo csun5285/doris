@@ -21,7 +21,7 @@ suite("test_index") {
     CREATE TABLE IF NOT EXISTS t1 (
         col1 int not null,
         col2 char(10)
-    )DISTRIBUTED BY HASH(col1) BUCKETS 5 properties("replication_num" = "1");
+    )DISTRIBUTED BY HASH(col1) BUCKETS 5;
     """
     def tables = sql "show tables"
     def tb = tables[0][0]

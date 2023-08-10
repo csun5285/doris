@@ -465,6 +465,9 @@ void TabletsChannel::get_active_memtable_mem_consumption(
 
 Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request,
                                          PTabletWriterOpenResult* response) {
+#ifdef CLOUD_MODE
+    DCHECK_GT(request.txn_expiration(), 0);
+#endif
     std::vector<SlotDescriptor*>* index_slots = nullptr;
     int32_t schema_hash = 0;
     for (auto& index : _schema->indexes()) {
@@ -503,6 +506,7 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
         wrequest.slots = index_slots;
         wrequest.is_high_priority = _is_high_priority;
         wrequest.table_schema_param = _schema;
+        wrequest.txn_expiration = request.txn_expiration(); // Required by CLOUD
 
         DeltaWriter* writer = nullptr;
         auto st = DeltaWriter::open(&wrequest, &writer, _profile, _load_id);

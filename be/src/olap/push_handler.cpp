@@ -99,6 +99,9 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     context.rowset_state = PREPARED;
     context.segments_overlap = OVERLAP_UNKNOWN;
     context.tablet_schema = tablet_schema;
+    // ATTN: `request.timeout` is always 0 in current version, so we MUST ensure that the retention time of the
+    //  recycler is much longer than the duration of the push task
+    context.txn_expiration = ::time(nullptr) + request.timeout;
     RETURN_IF_ERROR(tablet->create_rowset_writer(context, &rowset_writer));
     auto rowset = rowset_writer->build();
     if (!rowset) {

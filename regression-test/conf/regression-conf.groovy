@@ -87,6 +87,7 @@ sk = "xmT2Uoz0vgGkbKr6A4mGWcWCiBVcYJSV"
 s3Region = "ap-hongkong"
 s3Provider = "COS"
 
+
 // enableJdbcTest：开启 jdbc 外表测试，需要启动 MySQL 和 Postgresql 的 container。
 // mysql_57_port 和 pg_14_port 分别对应 MySQL 和 Postgresql 的对外端口，默认为 3316 和 5442。
 // enableHiveTest：开启 hive 外表测试，需要启动 hive 的 container。
@@ -95,3 +96,30 @@ enableEsTest=true
 es_6_port=19200
 es_7_port=29200
 es_8_port=39200
+
+// stage iam test
+stageIamEndpoint = ""
+stageIamRegion = ""
+stageIamBucket = ""
+
+// used for oss and obs, which does not support external id. Create role (or agency) and use for all instances.
+stageIamRole = ""
+stageIamArn = ""
+
+// used for cos and s3, which support external id.
+// this is policy arn for s3
+stageIamPolicy = "smoke_test_policy"
+stageIamAk = ""
+stageIamSk = ""
+
+// used for cos, which sdk does not return arn, so construct arn by user id.
+stageIamUserId = ""
+// If the failure suite num exceeds this config
+// all following suite will be skipped to fast quit the run.
+// <=0 means no limit.
+max_failure_num=0
+
+// used for exporting test
+s3ExportBucketName = ""
+
+externalEnvIp="127.0.0.1"

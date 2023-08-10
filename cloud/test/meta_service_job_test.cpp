@@ -74,6 +74,7 @@ static doris::RowsetMetaPB create_rowset(int64_t tablet_id, int64_t start_versio
     rowset.set_num_rows(num_rows);
     rowset.set_data_disk_size(num_rows * 100);
     rowset.mutable_tablet_schema()->set_schema_version(0);
+    rowset.set_txn_expiration(::time(nullptr)); // Required by DCHECK
     return rowset;
 }
 

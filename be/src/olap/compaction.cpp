@@ -503,6 +503,7 @@ Status Compaction::construct_output_rowset_writer(RowsetWriterContext& ctx, bool
     ctx.ttl_seconds = _tablet->ttl_seconds();
     ctx.txn_id = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                  std::numeric_limits<int64_t>::max(); // MUST be positive
+    ctx.txn_expiration = _expiration;
 #endif
     ctx.version = _output_version;
     ctx.rowset_state = VISIBLE;

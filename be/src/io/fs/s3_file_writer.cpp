@@ -54,6 +54,7 @@
 #include "util/defer_op.h"
 #include "util/doris_metrics.h"
 #include "util/runtime_profile.h"
+#include "util/s3_util.h"
 
 namespace Aws {
 namespace S3 {
@@ -126,12 +127,13 @@ void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     // We don't need high accuracy here, so we use time(nullptr)
     // since it's the fastest way to get current time(second)
     auto current_time_second = time(nullptr);
-    current_time.tv_sec = current_time_second;
+    current_time.tv_sec = current_time_second + 300;
     current_time.tv_nsec = 0;
     // bthread::countdown_event::timed_wait() should use absolute time
-    do {
+    while (0 != _countdown_event.timed_wait(current_time)) {
         current_time.tv_sec += 300;
-    } while (0 != _countdown_event.timed_wait(current_time));
+        LOG(WARNING) << msg;
+    }
 }
 
 Status S3FileWriter::_open() {
@@ -143,6 +145,7 @@ Status S3FileWriter::_open() {
     }
 
     auto outcome = _client->CreateMultipartUpload(create_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     if (outcome.IsSuccess()) {
         _upload_id = outcome.GetResult().GetUploadId();
@@ -172,6 +175,7 @@ Status S3FileWriter::abort() {
     AbortMultipartUploadRequest request;
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
     auto outcome = _client->AbortMultipartUpload(request);
+    s3_bvar::s3_multi_part_upload_total << 1;
     if (outcome.IsSuccess() ||
         outcome.GetError().GetErrorType() == Aws::S3::S3Errors::NO_SUCH_UPLOAD ||
         outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
@@ -251,7 +255,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
-            _pending_buf->append_data(Slice {data[i].get_data() + pos, data_size_to_append});
+            RETURN_IF_ERROR(_pending_buf->append_data(Slice {data[i].get_data() + pos, data_size_to_append}));
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB
@@ -289,6 +293,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     upload_request.SetContentLength(buf.get_size());
 
     auto upload_part_callable = _client->UploadPartCallable(upload_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     UploadPartOutcome upload_part_outcome = upload_part_callable.get();
     if (!upload_part_outcome.IsSuccess()) {
@@ -306,7 +311,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_ptr<CompletedPart> completed_part = std::make_unique<CompletedPart>();
 
     completed_part->SetPartNumber(part_num);
-    auto etag = upload_part_outcome.GetResult().GetETag();
+    const auto& etag = upload_part_outcome.GetResult().GetETag();
     // DCHECK(etag.empty());
     completed_part->SetETag(etag);
 
@@ -326,11 +331,15 @@ FileBlocksHolderPtr S3FileWriter::_allocate_file_segments(size_t offset) {
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed);
+    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);
+    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
+    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
     request.SetBody(buf.get_stream());
     request.SetContentLength(buf.get_size());
     auto response = _client->PutObject(request);
+    s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::InternalError("Error: [{}:{}, responseCode:{}]",
                                     response.GetError().GetExceptionName(),
@@ -365,6 +374,7 @@ Status S3FileWriter::_complete() {
     complete_request.WithMultipartUpload(completed_upload);
 
     auto compute_outcome = _client->CompleteMultipartUpload(complete_request);
+    s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
         auto s = Status::IOError("failed to create multi part upload (bucket={}, key={}): {}",

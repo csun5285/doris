@@ -93,6 +93,7 @@ NewJsonReader::NewJsonReader(RuntimeState* state, RuntimeProfile* profile, Scann
           _file_system(nullptr),
           _file_reader(nullptr),
           _line_reader(nullptr),
+          _decompressor(nullptr),
           _reader_eof(false),
           _skip_first_line(false),
           _next_row(0),
@@ -101,6 +102,8 @@ NewJsonReader::NewJsonReader(RuntimeState* state, RuntimeProfile* profile, Scann
           _parse_allocator(_parse_buffer, sizeof(_parse_buffer)),
           _origin_json_doc(&_value_allocator, sizeof(_parse_buffer), &_parse_allocator),
           _scanner_eof(scanner_eof),
+          _file_format_type(params.format_type),
+          _file_compress_type(params.compress_type),
           _current_offset(0),
           _io_ctx(io_ctx),
           _is_dynamic_schema(is_dynamic_schema) {
@@ -122,6 +125,7 @@ NewJsonReader::NewJsonReader(RuntimeProfile* profile, const TFileScanRangeParams
           _range(range),
           _file_slot_descs(file_slot_descs),
           _line_reader(nullptr),
+          _decompressor(nullptr),
           _reader_eof(false),
           _skip_first_line(false),
           _next_row(0),
@@ -129,6 +133,8 @@ NewJsonReader::NewJsonReader(RuntimeProfile* profile, const TFileScanRangeParams
           _value_allocator(_value_buffer, sizeof(_value_buffer)),
           _parse_allocator(_parse_buffer, sizeof(_parse_buffer)),
           _origin_json_doc(&_value_allocator, sizeof(_parse_buffer), &_parse_allocator),
+          _file_format_type(params.format_type),
+          _file_compress_type(params.compress_type),
           _io_ctx(io_ctx) {
     _init_system_properties();
     _init_file_description();
@@ -405,9 +411,67 @@ Status NewJsonReader::_open_line_reader() {
     } else {
         _skip_first_line = false;
     }
-    _line_reader = NewPlainTextLineReader::create_unique(_profile, _file_reader, nullptr, size,
-                                                         _line_delimiter, _line_delimiter_length,
-                                                         _current_offset);
+    // create decompressor.
+    // _decompressor may be nullptr if this is not a compressed file
+    RETURN_IF_ERROR(_create_decompressor());
+    _line_reader = NewPlainTextLineReader::create_unique(_profile, _file_reader, _decompressor.get(),
+                                           size, _line_delimiter, _line_delimiter_length, _current_offset);
+    return Status::OK();
+}
+
+Status NewJsonReader::_create_decompressor() {
+    CompressType compress_type;
+    if (_file_compress_type != TFileCompressType::UNKNOWN) {
+        switch (_file_compress_type) {
+        case TFileCompressType::PLAIN:
+            compress_type = CompressType::UNCOMPRESSED;
+            break;
+        case TFileCompressType::GZ:
+            compress_type = CompressType::GZIP;
+            break;
+        case TFileCompressType::LZO:
+            compress_type = CompressType::LZOP;
+            break;
+        case TFileCompressType::BZ2:
+            compress_type = CompressType::BZIP2;
+            break;
+        case TFileCompressType::LZ4FRAME:
+            compress_type = CompressType::LZ4FRAME;
+            break;
+        case TFileCompressType::DEFLATE:
+            compress_type = CompressType::DEFLATE;
+            break;
+        default:
+            return Status::InternalError("unknown compress type: {}", _file_compress_type);
+        }
+    } else {
+        switch (_file_format_type) {
+        case TFileFormatType::FORMAT_JSON:
+            compress_type = CompressType::UNCOMPRESSED;
+            break;
+        case TFileFormatType::FORMAT_JSON_GZ:
+            compress_type = CompressType::GZIP;
+            break;
+        case TFileFormatType::FORMAT_JSON_BZ2:
+            compress_type = CompressType::BZIP2;
+            break;
+        case TFileFormatType::FORMAT_JSON_LZ4FRAME:
+            compress_type = CompressType::LZ4FRAME;
+            break;
+        case TFileFormatType::FORMAT_JSON_LZO:
+        case TFileFormatType::FORMAT_JSON_LZOP:
+            compress_type = CompressType::LZOP;
+            break;
+        case TFileFormatType::FORMAT_JSON_DEFLATE:
+            compress_type = CompressType::DEFLATE;
+            break;
+        default:
+            return Status::InternalError("unknown format type: {}", _file_format_type);
+        }
+    }
+    Decompressor* decompressor;
+    RETURN_IF_ERROR(Decompressor::create_decompressor(compress_type, &decompressor));
+    _decompressor.reset(decompressor);
     return Status::OK();
 }
 

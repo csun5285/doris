@@ -40,7 +40,7 @@ suite("test_alter_table_property") {
         )
         DISTRIBUTED BY HASH(`user_id`)
         BUCKETS 1
-        PROPERTIES ( "replication_num" = "1", "light_schema_change" = "true" );
+        ;
         """
 
     sql """ INSERT INTO ${tableName} VALUES
@@ -58,7 +58,12 @@ suite("test_alter_table_property") {
 
 
     //modify in_memory property
-    sql """ALTER TABLE ${tableName} set ("in_memory" = "true");"""
+    // https://github.com/apache/doris/pull/18731
+    test {
+        sql """ALTER TABLE ${tableName} set ("in_memory" = "true");"""
+        exception "Not support set 'in_memory'='true' now!"
+    }
+
 
     sql """ INSERT INTO ${tableName} VALUES
             (4, '2017-03-01', 'Beijing', 10, 1, 1, 31, 21, hll_hash(2), to_bitmap(2))
@@ -67,7 +72,6 @@ suite("test_alter_table_property") {
     qt_order """ select * from ${tableName} order by user_id"""
     qt_order """ select * from ${tableName} order by date"""
     qt_order """select count(*) from ${tableName}"""
-
 
     //modify bucket num
     sql """ALTER TABLE ${tableName} MODIFY DISTRIBUTION DISTRIBUTED BY HASH(user_id) BUCKETS 2;"""

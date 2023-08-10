@@ -16,7 +16,7 @@ suite("test_dynamic_table") {
         )
         DUPLICATE KEY(`qid`)
         DISTRIBUTED BY RANDOM BUCKETS 5 
-        properties("replication_num" = "1");
+        ;
         """
 
         sql """ DROP TABLE IF EXISTS ${tableName2}; """
@@ -27,7 +27,7 @@ suite("test_dynamic_table") {
         )
         DUPLICATE KEY(`id`)
         DISTRIBUTED BY HASH(`id`) BUCKETS 10
-        properties("replication_num" = "1");
+        ;
         """
 
         sql """

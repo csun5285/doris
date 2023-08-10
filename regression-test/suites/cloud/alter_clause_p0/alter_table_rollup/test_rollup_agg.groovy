@@ -35,7 +35,7 @@ suite("test_rollup_agg") {
                 uv BIGINT(20) SUM NOT NULL DEFAULT '0'
             )
             AGGREGATE KEY (siteid,citycode,username)
-            DISTRIBUTED BY HASH(siteid) BUCKETS 5 properties("replication_num" = "1");
+            DISTRIBUTED BY HASH(siteid) BUCKETS 5 ;
         """
     sql """ALTER TABLE ${tbName} ADD ROLLUP rollup_city(citycode, pv);"""
     int max_try_secs = 60

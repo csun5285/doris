@@ -446,6 +446,7 @@ public class NativeInsertStmt extends InsertStmt {
         // Analyze columns mentioned in the statement.
         Set<String> mentionedColumns = Sets.newTreeSet(String.CASE_INSENSITIVE_ORDER);
         List<String> realTargetColumnNames;
+        targetColumns.clear();
         if (targetColumnNames == null) {
             // the mentioned columns are columns which are visible to user, so here we use
             // getBaseSchema(), not getFullSchema()

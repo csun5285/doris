@@ -77,8 +77,12 @@ public class CloudClusterChecker extends MasterDaemon {
                     Map<String, String> newTagMap = Tag.DEFAULT_BACKEND_TAG.toMap();
                     String clusterName = remoteClusterIdToPB.get(addId).getClusterName();
                     String clusterId = remoteClusterIdToPB.get(addId).getClusterId();
+                    String publicEndpoint = remoteClusterIdToPB.get(addId).getPublicEndpoint();
+                    String privateEndpoint = remoteClusterIdToPB.get(addId).getPrivateEndpoint();
                     newTagMap.put(Tag.CLOUD_CLUSTER_NAME, clusterName);
                     newTagMap.put(Tag.CLOUD_CLUSTER_ID, clusterId);
+                    newTagMap.put(Tag.CLOUD_CLUSTER_PUBLIC_ENDPOINT, publicEndpoint);
+                    newTagMap.put(Tag.CLOUD_CLUSTER_PRIVATE_ENDPOINT, privateEndpoint);
                     MetricRepo.registerClusterMetrics(clusterName, clusterId);
                     //toAdd.forEach(i -> i.setTagMap(newTagMap));
                     List<Backend> toAdd = new ArrayList<>();
@@ -203,11 +207,14 @@ public class CloudClusterChecker extends MasterDaemon {
             Map<String, String> newTagMap = Tag.DEFAULT_BACKEND_TAG.toMap();
             newTagMap.put(Tag.CLOUD_CLUSTER_NAME, remoteClusterIdToPB.get(cid).getClusterName());
             newTagMap.put(Tag.CLOUD_CLUSTER_ID, remoteClusterIdToPB.get(cid).getClusterId());
+            newTagMap.put(Tag.CLOUD_CLUSTER_PUBLIC_ENDPOINT, remoteClusterIdToPB.get(cid).getPublicEndpoint());
+            newTagMap.put(Tag.CLOUD_CLUSTER_PRIVATE_ENDPOINT, remoteClusterIdToPB.get(cid).getPrivateEndpoint());
 
             diffNodes(toAdd, toDel, () -> {
                 Map<String, Backend> currentMap = new HashMap<>();
                 for (Backend be : currentBes) {
-                    String endpoint = be.getHost() + ":" + be.getHeartbeatPort();
+                    String endpoint = be.getHost() + ":" + be.getHeartbeatPort()
+                            + be.getCloudPublicEndpoint() + be.getCloudPrivateEndpoint();
                     currentMap.put(endpoint, be);
                 }
                 return currentMap;
@@ -219,7 +226,9 @@ public class CloudClusterChecker extends MasterDaemon {
                         LOG.warn("cant get valid add from ms {}", node);
                         continue;
                     }
-                    String endpoint = host + ":" + node.getHeartbeatPort();
+                    String endpoint = host + ":" + node.getHeartbeatPort()
+                            + remoteClusterIdToPB.get(cid).getPublicEndpoint()
+                            + remoteClusterIdToPB.get(cid).getPrivateEndpoint();
                     Backend b = new Backend(Env.getCurrentEnv().getNextId(), host, node.getHeartbeatPort());
                     if (node.hasIsSmoothUpgrade()) {
                         b.setSmoothUpgradeDst(node.getIsSmoothUpgrade());

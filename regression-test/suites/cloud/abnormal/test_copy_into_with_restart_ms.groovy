@@ -25,9 +25,7 @@ suite("test_copy_into_with_restart_ms") {
         )
         DUPLICATE KEY(C_CUSTKEY, C_NAME)
         DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 32
-        PROPERTIES (
-            "replication_num" = "1"
-        );
+        ;
     """
 
     sql """drop stage if exists ${externalStageName}"""

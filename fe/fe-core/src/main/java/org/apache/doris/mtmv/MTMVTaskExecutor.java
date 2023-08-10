@@ -106,6 +106,9 @@ public class MTMVTaskExecutor implements Comparable<MTMVTaskExecutor> {
         UUID taskId = UUID.fromString(task.getTaskId());
         TUniqueId queryId = new TUniqueId(taskId.getMostSignificantBits(), taskId.getLeastSignificantBits());
         ctx.setQueryId(queryId);
+        if (Config.isCloudMode()) {
+            ctx.setCloudCluster();
+        }
 
         taskContext.setCtx(ctx);
         taskContext.setTask(task);

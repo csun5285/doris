@@ -1968,10 +1968,9 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
         return;
     }
 
+    std::string rs_key, rs_val;
     if (has_first_rowset) {
         // Put first rowset if needed
-        std::string rs_key;
-        std::string rs_val;
         auto first_rowset = tablet_meta.mutable_rs_metas(0);
         if (config::write_schema_kv) { // detach schema from rowset meta
             first_rowset->set_index_id(index_id);
@@ -2469,7 +2468,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
     prepare_rowset.mutable_rowset_meta()->CopyFrom(rowset_meta);
     prepare_rowset.set_type(RecycleRowsetPB::PREPARE);
     prepare_rowset.SerializeToString(&prepare_val);
-
+    DCHECK_GT(prepare_rowset.expiration(), 0);
     txn->put(prepare_key, prepare_val);
     LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "prepare_rowset_key "
               << hex(prepare_key) << " associated commit_rowset_key " << hex(commit_key)
@@ -2612,6 +2611,7 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     std::string prepare_key;
     RecycleRowsetKeyInfo prepare_key_info {instance_id, tablet_id, rowset_id};
     recycle_rowset_key(prepare_key_info, &prepare_key);
+    DCHECK_GT(rowset_meta.txn_expiration(), 0);
     if (!rowset_meta.SerializeToString(&commit_val)) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
         msg = "failed to serialize rowset meta";
@@ -2797,11 +2797,7 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
         get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, idx);
         if (code != MetaServiceCode::OK) return;
     }
-    if (is_dropped_tablet(txn.get(), instance_id, idx.index_id(), idx.partition_id())) {
-        code = MetaServiceCode::TABLET_NOT_FOUND;
-        msg = fmt::format("tablet {} has been dropped", tablet_id);
-        return;
-    }
+    // TODO(plat1ko): Judge if tablet has been dropped (in dropped index/partition)
 
     TabletStatsPB tablet_stat;
     internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, idx, tablet_stat, true);
@@ -3783,6 +3779,7 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             LOG(WARNING) << msg;
             return;
         }
+
         r.set_op(AlterClusterRequest::ADD_CLUSTER);
         AlterClusterResponse res;
         alter_cluster(cntl, &r, &res, nullptr);
@@ -3899,6 +3896,26 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
         }
 
         r.set_op(AlterClusterRequest::RENAME_CLUSTER);
+        AlterClusterResponse res;
+        alter_cluster(cntl, &r, &res, nullptr);
+        ret = res.status().code();
+        msg = res.status().msg();
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "update_cluster_endpoint") {
+        AlterClusterRequest r;
+        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
+        if (!st.ok()) {
+            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
+            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            response_body = msg;
+            LOG(WARNING) << msg;
+            return;
+        }
+
+        r.set_op(AlterClusterRequest::UPDATE_CLUSTER_ENDPOINT);
         AlterClusterResponse res;
         alter_cluster(cntl, &r, &res, nullptr);
         ret = res.status().code();
@@ -5133,6 +5150,28 @@ void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
                         return msg;
                     }
                     c.set_cluster_name(cluster.cluster.cluster_name());
+                    return msg;
+                });
+    } break;
+    case AlterClusterRequest::UPDATE_CLUSTER_ENDPOINT: {
+        msg = resource_mgr_->update_cluster(
+                instance_id, cluster,
+                [&](const ::selectdb::ClusterPB& i) {
+                    return i.cluster_id() == cluster.cluster.cluster_id();
+                },
+                [&](::selectdb::ClusterPB& c, std::set<std::string>& cluster_names) {
+                    std::string msg = "";
+                    if (!cluster.cluster.has_private_endpoint()
+                            || cluster.cluster.private_endpoint().empty()) {
+                        code = MetaServiceCode::CLUSTER_ENDPOINT_MISSING;
+                        ss << "missing private endpoint";
+                        msg = ss.str();
+                        return msg;
+                    }
+
+                    c.set_public_endpoint(cluster.cluster.public_endpoint());
+                    c.set_private_endpoint(cluster.cluster.private_endpoint());
+
                     return msg;
                 });
     } break;

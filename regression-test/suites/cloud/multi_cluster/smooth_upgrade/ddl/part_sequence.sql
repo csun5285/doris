@@ -13,7 +13,6 @@ UNIQUE KEY(`p_partkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`p_partkey`) BUCKETS 24
 PROPERTIES (
-    "function_column.sequence_type" = 'int',
-    "replication_num" = "3"
+    "function_column.sequence_type" = 'int'
 )
 

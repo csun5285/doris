@@ -34,6 +34,7 @@ suite("test_unique_mow_table_debug_data") {
             distributed by hash(a) buckets 16
             properties(
                 "replication_allocation" = "tag.location.default:1",
+                "enable_unique_key_merge_on_write" = "true",
                 "disable_auto_compaction" = "true"
             );
         """

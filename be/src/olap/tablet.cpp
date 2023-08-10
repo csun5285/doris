@@ -735,10 +735,16 @@ Status Tablet::cloud_capture_rs_readers(const Version& version_range,
 }
 
 Status Tablet::cloud_sync_meta() {
+    if (!config::enable_file_cache) {
+        return Status::OK();
+    }
+
     TabletMetaSharedPtr tablet_meta;
     auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
-    if (st.is<NOT_FOUND>()) {
-        cloud::tablet_mgr()->erase_tablet(tablet_id());
+    if (!st.ok()) {
+        if (st.is<NOT_FOUND>()) {
+            cloud::tablet_mgr()->erase_tablet(tablet_id());
+        }
         return st;
     }
     if (tablet_meta->tablet_state() != TABLET_RUNNING) { // impossible
@@ -747,10 +753,6 @@ Status Tablet::cloud_sync_meta() {
     auto table_name = tablet_meta->table_name();
     if (_tablet_meta->table_name() != table_name) {
         _tablet_meta->set_table_name(table_name);
-    }
-
-    if (!config::enable_file_cache) {
-        return Status::OK();
     }
 
     auto new_ttl_seconds = tablet_meta->ttl_seconds();
@@ -788,6 +790,7 @@ Status Tablet::cloud_sync_meta() {
 }
 
 // There are only two tablet_states RUNNING and NOT_READY in cloud mode
+// This function will erase the tablet from `CloudTabletMgr` when it can't find this tablet in MS.
 Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data_async) {
     do {
         // Sync tablet if not running.
@@ -805,8 +808,10 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data
         }
         TabletMetaSharedPtr tablet_meta;
         auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
-        if (st.is<NOT_FOUND>()) {
-            cloud::tablet_mgr()->erase_tablet(tablet_id());
+        if (!st.ok()) {
+            if (st.is<NOT_FOUND>()) {
+                cloud::tablet_mgr()->erase_tablet(tablet_id());
+            }
             return st;
         }
         if (tablet_meta->tablet_state() != TABLET_RUNNING) [[unlikely]] { // impossible
@@ -2994,6 +2999,9 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
                                                  &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
+    io::IOContext io_ctx;
+    io_ctx.reader_type = ReaderType::READER_QUERY;
+    opt.io_ctx = &io_ctx;
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;
@@ -3048,6 +3056,9 @@ Status Tablet::fetch_value_by_rowids(RowsetSharedPtr input_rowset, uint32_t segi
     RETURN_IF_ERROR(segment->new_column_iterator(tablet_column, &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
+    io::IOContext io_ctx;
+    io_ctx.reader_type = ReaderType::READER_QUERY;
+    opt.io_ctx = &io_ctx;
     opt.file_reader = segment->file_reader().get();
     opt.stats = &stats;
     opt.use_page_cache = !config::disable_storage_page_cache;

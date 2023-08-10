@@ -397,7 +397,6 @@ export LSAN_OPTIONS=suppressions=${DORIS_TEST_BINARY_DIR}/asan_suppr.conf
 export DORIS_HOME="${DORIS_TEST_BINARY_DIR}/"
 export JAVA_OPTS="-Xmx1024m -DlogPath=${DORIS_HOME}/log/jni.log -Xloggc:${DORIS_HOME}/log/be.gc.log.${CUR_DATE} -Dsun.java.command=DorisBE -XX:-CriticalJNINatives -DJDBC_MIN_POOL=1 -DJDBC_MAX_POOL=100 -DJDBC_MAX_IDEL_TIME=300000"
 
-# find all executable test files
 test=${DORIS_TEST_BINARY_DIR}/doris_be_test
 
 profraw=${DORIS_TEST_BINARY_DIR}/doris_be_test.profraw

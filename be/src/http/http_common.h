@@ -61,4 +61,6 @@ static const std::string HTTP_TWO_PHASE_COMMIT = "two_phase_commit";
 static const std::string HTTP_TXN_ID_KEY = "txn_id";
 static const std::string HTTP_TXN_OPERATION_KEY = "txn_operation";
 
+static const std::string HTTP_CLOUD_CLUSTER = "cloud_cluster";
+
 } // namespace doris

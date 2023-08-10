@@ -6,7 +6,5 @@ CREATE TABLE IF NOT EXISTS region (
 UNIQUE KEY(`r_regionkey`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`r_regionkey`) BUCKETS 1
-PROPERTIES (
-    "replication_num" = "3"
-)
+
 
