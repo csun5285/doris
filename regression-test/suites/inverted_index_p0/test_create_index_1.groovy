@@ -138,11 +138,13 @@ suite("test_create_index_1", "inverted_index"){
     sql "drop index age_idx_1 on ${indexTbName1}"
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     sql "drop index age_idx_2 on ${indexTbName1}"
+    wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
     assertEquals(show_result.size(), 0)
 
     // case 2: alter add index
     sql "create index age_idx on ${indexTbName1}(age) using inverted"
+    wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
     assertEquals(show_result[0][2], "age_idx")

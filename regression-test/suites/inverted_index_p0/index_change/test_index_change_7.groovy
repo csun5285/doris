@@ -22,6 +22,20 @@ suite("test_index_change_7") {
     def delta_time = 1000
     def alter_res = "null"
     def useTime = 0
+    def wait_for_latest_op_on_table_finish = { table_name, OpTimeout ->
+        for(int t = delta_time; t <= OpTimeout; t += delta_time){
+            alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
+            alter_res = alter_res.toString()
+            if(alter_res.contains("FINISHED")) {
+                sleep(3000) // wait change table state to normal
+                logger.info(table_name + " latest alter job finished, detail: " + alter_res)
+                break
+            }
+            useTime = t
+            sleep(delta_time)
+        }
+        assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
+    }
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
@@ -84,11 +98,15 @@ suite("test_index_change_7") {
 
     // drop inverted index c_array_idx, int_array_idx
     sql """ DROP INDEX c_array_idx ON ${tableName} """
+    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ DROP INDEX int_array_idx ON ${tableName} """
+    wait_for_latest_op_on_table_finish(tableName, timeout)
 
     // create inverted index
     sql """ CREATE INDEX c_array_idx ON ${tableName}(`c_array`) USING INVERTED PROPERTIES("parser"="english") """
+    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ CREATE INDEX int_array_idx ON ${tableName}(`int_array`) USING INVERTED """
+    wait_for_latest_op_on_table_finish(tableName, timeout)
 
     // build inverted index
     sql """ BUILD INDEX c_array_idx ON ${tableName} """
