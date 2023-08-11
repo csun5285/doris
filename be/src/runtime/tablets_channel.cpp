@@ -263,6 +263,8 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
         PTabletInfo* tablet_info = tablet_vec->Add();
         tablet_info->set_tablet_id(writer->tablet_id());
         tablet_info->set_schema_hash(writer->schema_hash());
+        tablet_info->set_received_rows(writer->total_received_rows());
+        tablet_info->set_num_rows_filtered(writer->num_rows_filtered());
         // These stats may be larger than the actual value if the txn is aborted
         writer->update_tablet_stats();
     }
