@@ -56,7 +56,6 @@ import java.util.Map;
 import java.util.Optional;
 
 public class LoadScanProvider {
-
     private FileGroupInfo fileGroupInfo;
     private TupleDescriptor destTupleDesc;
 
@@ -123,6 +122,7 @@ public class LoadScanProvider {
         fileAttributes.setHeaderType(getHeaderType(fileGroup.getFileFormat()));
         fileAttributes.setTrimDoubleQuotes(fileGroup.getTrimDoubleQuotes());
         fileAttributes.setSkipLines(fileGroup.getSkipLines());
+        fileAttributes.setIgnoreCsvRedundantCol(fileGroup.getIgnoreCsvRedundantCol());
     }
 
     private String getHeaderType(String formatType) {

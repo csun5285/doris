@@ -13,7 +13,7 @@ suite("test_external_stage") {
         result = sql "show copy where id='${result[0][0]}'"
         logger.info("show copy result: " + result)
         assertTrue(result.size == 1)
-        assertTrue(result[0][19].split("s3://").length == (1 + expectFileNum), "expect load " + expectFileNum + " file")
+        assertTrue(result[0][21].split("s3://").length == (1 + expectFileNum), "expect load " + expectFileNum + " file")
     }
 
     try {

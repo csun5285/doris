@@ -151,6 +151,7 @@ public class CopyStmt extends DdlStmt {
                 copyFromParam.getColumnMappingList(), copyFromParam.getFileFilterExpr(), null, MergeType.APPEND, null,
                 null, dataDescProperties);
         dataDescription.setCompressType(StageUtil.parseCompressType(copyIntoProperties.getCompression()));
+        dataDescription.setIgnoreCsvRedundantCol(true);
         // analyze data description
         if (checkAuth) {
             dataDescription.analyze(db);

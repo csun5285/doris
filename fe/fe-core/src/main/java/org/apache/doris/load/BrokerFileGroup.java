@@ -107,6 +107,7 @@ public class BrokerFileGroup implements Writable {
     private boolean numAsString = false;
     private boolean trimDoubleQuotes = false;
     private int skipLines;
+    private boolean ignoreCsvRedundantCol = false;
 
     // for unit test and edit log persistence
     private BrokerFileGroup() {
@@ -158,6 +159,8 @@ public class BrokerFileGroup implements Writable {
         this.mergeType = dataDescription.getMergeType();
         this.sequenceCol = dataDescription.getSequenceCol();
         this.filePaths = dataDescription.getFilePaths();
+        // for cloud copy into
+        this.ignoreCsvRedundantCol = dataDescription.getIgnoreCsvRedundantCol();
     }
 
     // NOTE: DBLock will be held
@@ -426,6 +429,10 @@ public class BrokerFileGroup implements Writable {
 
     public int getSkipLines() {
         return skipLines;
+    }
+
+    public boolean getIgnoreCsvRedundantCol() {
+        return ignoreCsvRedundantCol;
     }
 
     @Override

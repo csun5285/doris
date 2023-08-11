@@ -153,6 +153,7 @@ public class DataDescription implements InsertStmt.DataDesc {
     private boolean trimDoubleQuotes = false;
     private boolean isMysqlLoad = false;
     private int skipLines = 0;
+    private boolean ignoreCsvRedundantCol = false;
 
     private boolean isAnalyzed = false;
 
@@ -1133,6 +1134,14 @@ public class DataDescription implements InsertStmt.DataDesc {
         }
 
         LOG.debug("after fill column info. columns: {}, parsed column exprs: {}", fileFieldNames, parsedColumnExprList);
+    }
+
+    public boolean getIgnoreCsvRedundantCol() {
+        return ignoreCsvRedundantCol;
+    }
+
+    public void setIgnoreCsvRedundantCol(boolean ignoreCsvRedundantCol) {
+        this.ignoreCsvRedundantCol = ignoreCsvRedundantCol;
     }
 
     public String toSql() {
