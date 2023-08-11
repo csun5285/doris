@@ -74,7 +74,7 @@ suite("test_delete") {
     sql """ DROP TABLE IF EXISTS ${tableName} """
 
     sql """ DROP TABLE IF EXISTS tb_test1 """
-    sql """  CREATE TABLE `tb_test1` (
+    sql """  CREATE TABLE IF NOT EXISTS `tb_test1` (
   	    `dt` date NULL,
   	    `code` int(11) NULL
 	) ENGINE=OLAP
@@ -121,7 +121,7 @@ suite("test_delete") {
 
     sql """ DROP TABLE IF EXISTS delete_test_tb """
     sql """
-        CREATE TABLE `delete_test_tb` (
+        CREATE TABLE IF NOT EXISTS `delete_test_tb` (
           `k1` varchar(30)  NULL,
           `v1` varchar(30) NULL
         )
@@ -180,7 +180,7 @@ suite("test_delete") {
 
     sql """ DROP TABLE IF EXISTS delete_test_tb2 """
     sql """
-        CREATE TABLE `delete_test_tb2` (
+        CREATE TABLE IF NOT EXISTS `delete_test_tb2` (
           `k1` int  NULL,
           `k2` decimal(9, 2) NULL,
           `v1` double NULL
@@ -220,9 +220,9 @@ suite("test_delete") {
     qt_check_numeric4 """ select k1, k2, v1 from delete_test_tb2 order by k1, k2; """;
     
     sql '''
-        CREATE TABLE test1 (
-            x varchar NOT NULL,
-            id varchar NOT NULL
+        CREATE TABLE IF NOT EXISTS test1 (
+            x varchar(10) NOT NULL,
+            id varchar(10) NOT NULL
         )
         ENGINE=OLAP
         UNIQUE KEY(`x`)COMMENT "OLAP"

@@ -10,6 +10,7 @@
 #include <variant>
 
 #include "cloud/utils.h"
+#include "common/config.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
@@ -157,6 +158,10 @@ void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_na
 }
 
 void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
+    if (!config::enable_file_cache) [[unlikely]] {
+        LOG(INFO) << "Skip submit download file task because file cache is not enabled";
+        return;
+    }
     if (task.task_message.index() == 0) {
         std::lock_guard lock(_inflight_mtx);
         for (auto& meta : std::get<0>(task.task_message)) {
