@@ -22,14 +22,25 @@ import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.common.Config;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeMetaVersion;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.jmockit.Deencapsulation;
 import org.apache.doris.datasource.InternalCatalog;
+import org.apache.doris.ha.FrontendNodeType;
+import org.apache.doris.load.EtlJobType;
 import org.apache.doris.meta.MetaContext;
+import org.apache.doris.metric.GaugeMetric;
+import org.apache.doris.metric.Metric;
+import org.apache.doris.metric.MetricLabel;
+import org.apache.doris.metric.MetricRepo;
 
+import com.google.common.collect.Maps;
 import mockit.Expectations;
 import mockit.Injectable;
 import mockit.Mocked;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -40,16 +51,20 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.util.List;
 import java.util.Map;
 
 public class LoadManagerTest {
+    private static final Logger LOG = LogManager.getLogger(LoadManagerTest.class);
     private LoadManager loadManager;
     private final String fieldName = "idToLoadJob";
     private UserIdentity userInfo = UserIdentity.createAnalyzedUserIdentWithIp("root", "localhost");
+    private long fakeId = 0;
 
     @Before
     public void setUp() throws Exception {
-
+        FeConstants.runningUnitTest = true;
+        MetricRepo.init();
     }
 
     @After
@@ -150,5 +165,75 @@ public class LoadManagerTest {
         LoadManager loadManager = new LoadManager(new LoadJobScheduler());
         loadManager.readFields(dis);
         return loadManager;
+    }
+
+    public Map<Long, LoadJob> createFakeLoadJob(EtlJobType fakeJobType, JobState fakeJobState, long fakeJobNum) {
+        Map<Long, LoadJob> idToLoadJob = Maps.newHashMap();
+        for (int i = 0; i < fakeJobNum; i++) {
+            switch (fakeJobType) {
+                case BROKER: {
+                    LoadJob loadJob = new BrokerLoadJob();
+                    Deencapsulation.setField(loadJob, "state", fakeJobState);
+                    Deencapsulation.setField(loadJob, "id", fakeId++);
+                    idToLoadJob.put(loadJob.getId(), loadJob);
+                }
+                    break;
+                case INSERT: {
+                    LoadJob loadJob = new InsertLoadJob();
+                    Deencapsulation.setField(loadJob, "state", fakeJobState);
+                    Deencapsulation.setField(loadJob, "id", fakeId++);
+                    idToLoadJob.put(loadJob.getId(), loadJob);
+                }
+                    break;
+                default:
+                    break;
+            }
+        }
+        return idToLoadJob;
+    }
+
+    @Test
+    public void testGetLoadJobNumMetrics() {
+        loadManager = new LoadManager(null);
+        Map<Long, LoadJob> idToLoadJob = Maps.newConcurrentMap();
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.BROKER, JobState.PENDING, 1235));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.BROKER, JobState.LOADING, 1123));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.BROKER, JobState.FINISHED, 1131));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.BROKER, JobState.CANCELLED, 1132));
+
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.INSERT, JobState.PENDING, 9876));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.INSERT, JobState.LOADING, 2431));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.INSERT, JobState.FINISHED, 4321));
+        idToLoadJob.putAll(createFakeLoadJob(EtlJobType.INSERT, JobState.CANCELLED, 932));
+        Deencapsulation.setField(loadManager, "idToLoadJob", idToLoadJob);
+        Map<Pair<EtlJobType, JobState>, Long> loadJobNum = loadManager.getLoadJobNum();
+
+        LOG.info("loadJobNum:{}", loadJobNum);
+
+        Assert.assertEquals(new Long(1132L), loadJobNum.get(Pair.of(EtlJobType.BROKER, JobState.CANCELLED)));
+        Assert.assertEquals(new Long(932L), loadJobNum.get(Pair.of(EtlJobType.INSERT, JobState.CANCELLED)));
+        Assert.assertEquals(new Long(4321L), loadJobNum.get(Pair.of(EtlJobType.INSERT, JobState.FINISHED)));
+
+        Deencapsulation.setField(Env.getCurrentEnv(), "loadManager", loadManager);
+        Deencapsulation.setField(Env.getCurrentEnv(), "feType", FrontendNodeType.MASTER);
+        Deencapsulation.invoke(MetricRepo.class, "updateLoadJobMetrics");
+
+        List<Metric> metrics = MetricRepo.getMetricsByName("job");
+        boolean found = false;
+        for (Metric metric : metrics) {
+            if (!metric.getDescription().equals("job statistics")) {
+                continue;
+            }
+
+            GaugeMetric<Long> gm = (GaugeMetric<Long>) metric;
+            List<MetricLabel> labels = gm.getLabels();
+            if (labels.get(0).getValue().equals("load")
+                    && labels.get(1).getValue().equals(EtlJobType.BROKER.name())
+                    && labels.get(2).getValue().equals(JobState.CANCELLED.name())) {
+                found = true;
+                Assert.assertEquals(Long.valueOf(1132L), (Long) gm.getValue());
+            }
+        }
+        Assert.assertTrue(found);
     }
 }

@@ -22,6 +22,7 @@ import org.apache.doris.alter.AlterJobV2.JobType;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.common.Config;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.ThreadPoolManager;
 import org.apache.doris.load.EtlJobType;
 import org.apache.doris.load.loadv2.JobState;
@@ -40,6 +41,7 @@ import org.apache.doris.transaction.TransactionStatus;
 
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.MetricRegistry;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -185,6 +187,8 @@ public final class MetricRepo {
             "metric-timer-pool", true);
     private static MetricCalculator metricCalculator = new MetricCalculator();
 
+    private static Map<Pair<EtlJobType, JobState>, Long> loadJobNum = Maps.newHashMap();
+
     public static void registerClusterMetrics(String clusterName, String clusterId) {
         CLOUD_CLUSTER_COUNTER_REQUEST_ALL.computeIfAbsent(clusterName, key -> {
             LongCounterMetric counterRequestAll = new LongCounterMetric("request_total", MetricUnit.REQUESTS,
@@ -258,7 +262,6 @@ public final class MetricRepo {
         }
 
         // load jobs
-        LoadManager loadManger = Env.getCurrentEnv().getLoadManager();
         for (EtlJobType jobType : EtlJobType.values()) {
             if (jobType == EtlJobType.UNKNOWN) {
                 continue;
@@ -270,7 +273,7 @@ public final class MetricRepo {
                         if (!Env.getCurrentEnv().isMaster()) {
                             return 0L;
                         }
-                        return loadManger.getLoadJobNum(state, jobType);
+                        return MetricRepo.getLoadJobNum(jobType, state);
                     }
                 };
                 gauge.addLabel(new MetricLabel("job", "load")).addLabel(new MetricLabel("type", jobType.name()))
@@ -819,6 +822,9 @@ public final class MetricRepo {
         // update the metrics first
         updateMetrics();
 
+        // update load job metrics
+        updateLoadJobMetrics();
+
         StringBuilder sb = new StringBuilder();
         // jvm
         JvmService jvmService = new JvmService();
@@ -863,5 +869,14 @@ public final class MetricRepo {
 
     public static synchronized List<Metric> getMetricsByName(String name) {
         return DORIS_METRIC_REGISTER.getMetricsByName(name);
+    }
+
+    private static void updateLoadJobMetrics() {
+        LoadManager loadManager = Env.getCurrentEnv().getLoadManager();
+        MetricRepo.loadJobNum = loadManager.getLoadJobNum();
+    }
+
+    private static long getLoadJobNum(EtlJobType jobType, JobState jobState) {
+        return MetricRepo.loadJobNum.getOrDefault(Pair.of(jobType, jobState), 0L);
     }
 }
