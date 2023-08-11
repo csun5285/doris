@@ -33,7 +33,7 @@ build_version_minor=0
 build_version_patch=0
 build_version_rc_version="dev"
 
-build_version="${build_version_prefix}-${build_version_major}.${build_version_minor}.${build_version_patch}-${build_version_rc_version}"
+build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
 
 unset LANG
 unset LC_CTYPE
