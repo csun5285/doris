@@ -18,107 +18,29 @@ ex_tb0
 ex_tb1
 
 -- !select --
-doris_test
+show_test_do_not_modify
 
 -- !select --
-all_types
-auto_default_t
-dt
-dt_null
 ex_tb0
 ex_tb1
-ex_tb10
-ex_tb11
-ex_tb12
-ex_tb13
-ex_tb14
-ex_tb15
-ex_tb16
-ex_tb17
-ex_tb18
-ex_tb19
 ex_tb2
-ex_tb20
-ex_tb3
-ex_tb4
-ex_tb5
-ex_tb6
-ex_tb7
-ex_tb8
-ex_tb9
-mysql_view
-test1
-test_insert
-test_insert2
 
 -- !select --
 ex_tb0
 
 -- !select --
-all_types
-auto_default_t
-dt
-dt_null
 ex_tb0
 ex_tb1
-ex_tb10
-ex_tb11
-ex_tb12
-ex_tb13
-ex_tb14
-ex_tb15
-ex_tb16
-ex_tb17
-ex_tb18
-ex_tb19
 ex_tb2
-ex_tb20
-ex_tb3
-ex_tb4
-ex_tb5
-ex_tb6
-ex_tb7
-ex_tb8
-ex_tb9
-mysql_view
-test1
-test_insert
-test_insert2
 
 -- !select --
 ex_tb0
 ex_tb1
 
 -- !select --
-all_types
-auto_default_t
-dt
-dt_null
 ex_tb0
 ex_tb1
-ex_tb10
-ex_tb11
-ex_tb12
-ex_tb13
-ex_tb14
-ex_tb15
-ex_tb16
-ex_tb17
-ex_tb18
-ex_tb19
 ex_tb2
-ex_tb20
-ex_tb3
-ex_tb4
-ex_tb5
-ex_tb6
-ex_tb7
-ex_tb8
-ex_tb9
-mysql_view
-test1
-test_insert
-test_insert2
 
 -- !select --
 doris_test
@@ -135,33 +57,6 @@ ex_tb0
 ex_tb1
 
 -- !select --
-all_types
-auto_default_t
-dt
-dt_null
 ex_tb0
 ex_tb1
-ex_tb10
-ex_tb11
-ex_tb12
-ex_tb13
-ex_tb14
-ex_tb15
-ex_tb16
-ex_tb17
-ex_tb18
-ex_tb19
 ex_tb2
-ex_tb20
-ex_tb3
-ex_tb4
-ex_tb5
-ex_tb6
-ex_tb7
-ex_tb8
-ex_tb9
-mysql_view
-test1
-test_insert
-test_insert2
-

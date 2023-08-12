@@ -58,6 +58,8 @@ suite("test_es_query", "p0,external,es,external_docker,external_docker_es") {
         );
         """
 
+        sql """drop table if exists test_v1;"""
+
         // test external table for datetime
         sql """
             CREATE TABLE `test_v1` (
@@ -99,6 +101,7 @@ suite("test_es_query", "p0,external,es,external_docker,external_docker_es") {
         order_qt_sql52 """select * from test_v1 where esquery(test2, '{"match":{"test2":"text#1"}}')"""
         order_qt_sql53 """select test4,test5,test6,test7,test8 from test_v1 order by test8"""
 
+       sql """drop table if exists test_v2;"""
        sql """
             CREATE TABLE `test_v2` (
                 `c_datetime` array<datev2> NULL,

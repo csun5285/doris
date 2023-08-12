@@ -32,7 +32,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
 
         // test old create-catalog syntax for compatibility
         sql """
-            create catalog es6
+            create catalog if not exists es6
             properties (
                 "type"="es",
                 "elasticsearch.hosts"="${externalEnvIp}:$es_6_port",
