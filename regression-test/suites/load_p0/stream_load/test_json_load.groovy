@@ -166,8 +166,8 @@ suite("test_json_load", "p0") {
                             INTO TABLE ${testTablex} 
                             FORMAT as "${format}"
                             PRECEDING FILTER id > 1 and id < 10)
-                        with BROKER "${brokerName}"
-                        ("username"="${hdfsUser}", "password"="${hdfsPasswd}");
+                        with HDFS
+                        ("hadoop.username"="${hdfsUser}", "hadoop.password"="${hdfsPasswd}", "fs.defaultFS"="${hdfsFs}");
                         """
         
         assertTrue(result1.size() == 1)
@@ -183,8 +183,8 @@ suite("test_json_load", "p0") {
                             FORMAT as "${format}"
                             PRECEDING FILTER id < 10
                             where id > 1 and id < 5)
-                        with BROKER "${brokerName}"
-                        ("username"="${hdfsUser}", "password"="${hdfsPasswd}");
+                        with HDFS
+                        ("fs.defaultFS"="${hdfsFs}, "hadoop.username"="${hdfsUser}", "hadoop.password"="${hdfsPasswd}");
                         """
         
         assertTrue(result1.size() == 1)
@@ -621,7 +621,7 @@ suite("test_json_load", "p0") {
         brokerName =getBrokerName()
         hdfsUser = getHdfsUser()
         hdfsPasswd = getHdfsPasswd()
-        def hdfs_file_path = uploadToHdfs "stream_load/simple_object_json.json"
+        def hdfs_file_path = uploadToHdfs "simple_object_json.json"
         def format = "json" 
 
         // case18: import json use pre-filter exprs

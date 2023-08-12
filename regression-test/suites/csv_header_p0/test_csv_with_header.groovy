@@ -53,8 +53,8 @@ suite("test_csv_with_header") {
                 DATA INFILE("${hdfsFilePath}") 
                 INTO TABLE ${testTable1} COLUMNS TERMINATED BY "," 
                 FORMAT as "${format1}" )
-                with BROKER "${brokerName}" 
-                ("username"="${hdfsUser}", "password"="${hdfsPasswd}")
+                with HDFS
+                ("hadoop.username"="${hdfsUser}", "hadoop.password"="${hdfsPasswd}", "fs.defaultFS"="${hdfsFs}")
         """
     }
 
@@ -144,7 +144,7 @@ suite("test_csv_with_header") {
             sql """ EXPORT TABLE ${exportTable} 
                 TO "${hdfsPath}" 
                 PROPERTIES ("label" = "${exportLable}", "column_separator"=",","format"="${exportFormat}") 
-                WITH BROKER "${exportBrokerName}" ("username"="${exportUserName}", "password"="${exportPasswd}")
+                WITH HDFS ("hadoop.username"="${exportUserName}", "hadoop.password"="${exportPasswd}", "fs.defaultFS"="${hdfsFs}")
             """
         }
 

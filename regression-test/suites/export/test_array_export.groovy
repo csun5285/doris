@@ -105,9 +105,10 @@ suite("test_array_export", "export") {
                     "column_separator"=",",
                     "format"="${exportFormat}"
                 )
-                WITH BROKER "${BrokerName}" (
-                    "username"="${HdfsUserName}",
-                    "password"="${HdfsPasswd}"
+                WITH HDFS (
+                    "fs.defaultFS"="${hdfsFs}",
+                    "hadoop.username"="${hdfsUser}",
+                    "hadoop.password"="${hdfsPasswd}"
                 )
             """
     }

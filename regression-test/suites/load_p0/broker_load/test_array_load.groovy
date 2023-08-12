@@ -137,9 +137,10 @@ suite("test_array_load", "load_p0") {
                             DATA INFILE("${hdfsFilePath}")
                             INTO TABLE ${testTablex}
                             FORMAT as "${format}")
-                        with BROKER "${brokerName}" (
-                        "username"="${hdfsUser}",
-                        "password"="${hdfsPasswd}")
+                        with HDFS (
+                        "fs.defaultFS"="${hdfsFs}",
+                        "hadoop.username"="${hdfsUser}",
+                        "hadoop.password"="${hdfsPasswd}")
                         PROPERTIES  (
                         "timeout"="1200",
                         "max_filter_ratio"="0.1");
@@ -157,9 +158,10 @@ suite("test_array_load", "load_p0") {
                             INTO TABLE ${testTablex}
                             COLUMNS TERMINATED BY "/"
                             FORMAT as "${format}")
-                        with BROKER "${brokerName}" (
-                        "username"="${hdfsUser}",
-                        "password"="${hdfsPasswd}")
+                        with HDFS (
+                        "fs.defaultFS"="${hdfsFs}",
+                        "hadoop.username"="${hdfsUser}",
+                        "hadoop.password"="${hdfsPasswd}")
                         PROPERTIES  (
                         "timeout"="1200",
                         "max_filter_ratio"="0.1");
@@ -249,12 +251,12 @@ suite("test_array_load", "load_p0") {
         brokerName =getBrokerName()
         hdfsUser = getHdfsUser()
         hdfsPasswd = getHdfsPasswd()
-        def hdfs_json_file_path = uploadToHdfs "broker_load/simple_object_array.json"
-        def hdfs_csv_file_path = uploadToHdfs "broker_load/simple_array.csv"
-        def hdfs_orc_file_path = uploadToHdfs "broker_load/simple_array.orc"
+        def hdfs_json_file_path = uploadToHdfs "simple_object_array.json"
+        def hdfs_csv_file_path = uploadToHdfs "simple_array.csv"
+        def hdfs_orc_file_path = uploadToHdfs "simple_array.orc"
         // orc file with native array(list) type
-        def hdfs_orc_file_path2 = uploadToHdfs "broker_load/simple_array_list_type.orc"
-        def hdfs_parquet_file_path = uploadToHdfs "broker_load/simple_array.parquet"
+        def hdfs_orc_file_path2 = uploadToHdfs "simple_array_list_type.orc"
+        def hdfs_parquet_file_path = uploadToHdfs "simple_array.parquet"
  
         // case5: import array data by hdfs and enable vectorized engine
         try {

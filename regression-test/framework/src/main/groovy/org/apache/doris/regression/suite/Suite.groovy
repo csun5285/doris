@@ -345,16 +345,8 @@ class Suite implements GroovyInterceptable {
     }
 
     String uploadToHdfs(String localFile) {
-        String[] group_arr;
-        group_arr = group.split(',');
-        String dataDir
-        if (group_arr.size() == 2) {
-            dataDir = context.config.dataPath + "/" + group_arr[0] + "/"
-        } else {
-            dataDir = context.config.dataPath + "/" + group + "/"
-        }
-
-        localFile = dataDir + localFile
+        String dataDir = context.dataPath
+        localFile = dataDir + "/" + localFile
         String hdfsFs = context.config.otherConfigs.get("hdfsFs")
         String hdfsUser = context.config.otherConfigs.get("hdfsUser")
         Hdfs hdfs = new Hdfs(hdfsFs, hdfsUser, dataDir)
