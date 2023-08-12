@@ -369,7 +369,7 @@ Status Segment::lookup_row_key(const Slice& key, bool with_seq_col, RowLocation*
     RETURN_IF_ERROR(load_pk_index_and_bf());
     bool has_seq_col = _tablet_schema->has_sequence_col();
     size_t seq_col_length = 0;
-    if (has_seq_col && with_seq_col) {
+    if (has_seq_col) {
         seq_col_length = _tablet_schema->column(_tablet_schema->sequence_col_idx()).length() + 1;
     }
 
