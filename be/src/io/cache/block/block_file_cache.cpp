@@ -861,6 +861,12 @@ bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, si
         return try_reserve_for_lazy_load(size, cache_lock);
     }
 
+    // use this strategy in scenarios where there is insufficient disk capacity or insufficient number of inodes remaining
+    // directly eliminate 5 times the size of the space
+    if (_disk_resource_limit_mode) {
+        size = 5 * size;
+    }
+
     if (context.cache_type == FileCacheType::TTL) {
         return try_reserve_for_ttl(size, cache_lock);
     }
