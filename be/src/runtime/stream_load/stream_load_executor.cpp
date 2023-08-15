@@ -97,8 +97,7 @@ Status StreamLoadExecutor::execute_plan_fragment(std::shared_ptr<StreamLoadConte
                         }
                         if (ctx->number_filtered_rows > 0 &&
                             !state->get_error_log_file_path().empty()) {
-                            ctx->error_url =
-                                    to_load_error_http_path(state->get_error_log_file_path());
+                            ctx->error_url = state->get_error_log_file_path();
                         }
 
                         if (status->ok()) {
@@ -170,8 +169,7 @@ Status StreamLoadExecutor::execute_plan_fragment(std::shared_ptr<StreamLoadConte
                         }
                         if (ctx->number_filtered_rows > 0 &&
                             !state->get_error_log_file_path().empty()) {
-                            ctx->error_url =
-                                    to_load_error_http_path(state->get_error_log_file_path());
+                            ctx->error_url = state->get_error_log_file_path();
                         }
 
                         if (status->ok()) {
