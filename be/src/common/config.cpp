@@ -1084,7 +1084,6 @@ DEFINE_Validator(file_cache_min_file_segment_size, [](const int64_t config) -> b
     return config >= 4096 && config <= 268435456 &&
            config <= config::file_cache_max_file_segment_size;
 });
-DEFINE_String(disposable_file_cache_path, "");
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]

@@ -52,6 +52,8 @@ public:
 
     size_t get_total_cache_size() const { return _total_cache_size; }
 
+    size_t get_cache_instance_size() const { return _caches.size(); }
+
     BlockFileCachePtr get_by_path(const Key& key);
     BlockFileCachePtr get_by_path(const std::string& cache_base_path);
     std::vector<BlockFileCache::QueryFileCacheContextHolderPtr> get_query_context_holders(
