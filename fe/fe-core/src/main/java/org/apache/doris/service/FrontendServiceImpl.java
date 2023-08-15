@@ -1785,7 +1785,8 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             ConnectContext ctx = new ConnectContext();
             ctx.setThreadLocalInfo();
             ctx.setQualifiedUser(request.getUser());
-            ctx.setCurrentUserIdentity(UserIdentity.createAnalyzedUserIdentWithIp(request.getUser(), "%"));
+            String fullUserName = ClusterNamespace.getFullName(SystemInfoService.DEFAULT_CLUSTER, request.getUser());
+            ctx.setCurrentUserIdentity(UserIdentity.createAnalyzedUserIdentWithIp(fullUserName, "%"));
             LOG.info("stream load use cloud cluster {}", request.getCloudCluster());
             if (Strings.isNullOrEmpty(request.getCloudCluster())) {
                 ctx.setCloudCluster();
