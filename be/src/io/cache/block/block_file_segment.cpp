@@ -206,12 +206,12 @@ bool FileBlock::change_cache_type(FileCacheType new_type) {
 }
 
 Status FileBlock::change_cache_type_self(FileCacheType new_type) {
+    std::lock_guard cache_lock(_cache->_mutex);
     std::unique_lock segment_lock(_mutex);
     Status st = Status::OK();
     if (_cache_type == FileCacheType::TTL || new_type == _cache_type) {
         return st;
     }
-    std::lock_guard cache_lock(_cache->_mutex);
     _cache_type = new_type;
     _cache->change_cache_type(_file_key, _segment_range.left, new_type, cache_lock);
     return st;
@@ -225,13 +225,13 @@ FileBlock::~FileBlock() {
 }
 
 Status FileBlock::finalize_write(bool need_to_get_file_size) {
-    int64_t downloaded_size = 0;
     if (need_to_get_file_size) {
+        int64_t downloaded_size = 0;
         std::string file_path = get_path_in_local_cache(true);
         RETURN_IF_ERROR(global_local_filesystem()->file_size(file_path, &downloaded_size));
+        std::lock_guard segment_lock(_mutex);
+        _downloaded_size = downloaded_size;
     }
-    std::lock_guard segment_lock(_mutex);
-    _downloaded_size = need_to_get_file_size ? downloaded_size : _downloaded_size;
     if (_downloaded_size != 0 && _downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
@@ -240,6 +240,7 @@ Status FileBlock::finalize_write(bool need_to_get_file_size) {
         DCHECK(new_size < old_size);
         _cache->reset_range(_file_key, _segment_range.left, old_size, new_size, cache_lock);
     }
+    std::lock_guard segment_lock(_mutex);
     RETURN_IF_ERROR(set_downloaded(segment_lock));
     _cv.notify_all();
     return Status::OK();
