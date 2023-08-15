@@ -767,8 +767,13 @@ int64_t DeltaWriter::partition_id() const {
 
 void DeltaWriter::set_tablet_load_rowset_num_info(
         google::protobuf::RepeatedPtrField<PTabletLoadRowsetInfo>* tablet_infos) {
-    if (auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0) + +_mem_table_num.load();
-        UNLIKELY(version_cnt > (config::max_tablet_version_num / 2))) {
+    // If the dleta writer is not inited nor the load task is cancelled before it's inited,
+    // the tablet shared ptr would be nullptr
+    if (nullptr == _tablet) [[unlikely]] {
+        return;
+    }
+    if (auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
+        version_cnt > (config::max_tablet_version_num / 2)) [[unlikely]] {
         auto load_info = tablet_infos->Add();
         load_info->set_current_rowset_nums(_tablet->fetch_add_approximate_num_rowsets(0));
         load_info->set_max_config_rowset_nums(config::max_tablet_version_num);
