@@ -6,7 +6,7 @@ suite("test_csv") {
     def token = "greedisgood9999"
     def instanceId = context.config.instanceId
     def cloudUniqueId = context.config.cloudUniqueId
-    def tableName = "customer_internal_stage"
+    def tableName = "customer_internal_stage_csv"
     def tableName2 = "customer_internal_stage2"
 
     def uploadFile = { remoteFilePath, localFilePath ->
