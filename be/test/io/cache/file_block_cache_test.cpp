@@ -45,6 +45,7 @@
 #include "olap/options.h"
 #include "common/sync_point.h"
 #include "util/slice.h"
+#include "common/sync_point.h"
 
 namespace doris::io {
 
@@ -1562,6 +1563,61 @@ TEST(BlockFileCache, run_in_resource_limit_mode) {
         }
         fs::create_directories(cache_base_path);
         test_file_cache(io::FileCacheType::NORMAL);
+    }
+}
+
+TEST(BlockFileCache, fix_tmp_file) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] {
+        sp->clear_call_back("CloudFileCache::TmpFile");
+    }};
+    sp->enable_processing();
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context, other_context;
+    context.cache_type = other_context.cache_type = io::FileCacheType::NORMAL;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    std::atomic_bool flag1  {false}, flag2 {false};
+    sp->set_call_back("CloudFileCache::TmpFile1", [&](auto&&) {
+        while (!flag1) {}
+    });
+    sp->set_call_back("CloudFileCache::TmpFile2", [&](auto&&) {
+        flag2 = true;
+    });
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    auto holder = cache.get_or_set(key, 100, 1, context); /// Add range [9, 9]
+    auto segments = fromHolder(holder);
+    ASSERT_EQ(segments.size(), 1);
+    assert_range(1, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::EMPTY);
+    ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+    assert_range(2, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::DOWNLOADING);
+    auto key_str = key.to_string();
+    auto subdir = fs::path(cache_base_path) /
+                  (key_str + "_" + std::to_string(segments[0]->expiration_time()));
+    ASSERT_TRUE(fs::exists(subdir));
+    size_t size = segments[0]->range().size();
+    std::string data(size, '0');
+    Slice result(data.data(), size);
+    ASSERT_TRUE(segments[0]->append(result));
+    flag1 = true;
+    while (!flag2) {}
+    ASSERT_TRUE(segments[0]->finalize_write());
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
     }
 }
 

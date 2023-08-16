@@ -465,9 +465,7 @@ private:
         size_t size;
         std::string key_path;
         std::string offset_path;
-        explicit BatchLoadArgs(const Key& key, CacheContext ctx, uint64_t offset,
-                      size_t size, const std::string& key_path, const std::string& offset_path) : key(key), ctx(ctx),
-                      offset(offset), size(size), key_path(key_path), offset_path(offset_path) {}
+        bool is_tmp;
     };
 
     bool _close {false};

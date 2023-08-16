@@ -34,6 +34,7 @@
 #include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
+#include "common/sync_point.h"
 
 namespace fs = std::filesystem;
 
@@ -348,6 +349,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
             auto delim_pos1 = offset_with_suffix.find('_');
             FileCacheType cache_type = FileCacheType::NORMAL;
             bool parsed = true;
+            bool is_tmp = false;
             try {
                 if (delim_pos1 == std::string::npos) {
                     // same as type "normal"
@@ -355,14 +357,8 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 } else {
                     offset = stoull(offset_with_suffix.substr(0, delim_pos1));
                     std::string suffix = offset_with_suffix.substr(delim_pos1 + 1);
-                    if (suffix == "persistent" || suffix == "tmp") [[unlikely]] {
-                        std::error_code ec;
-                        std::filesystem::remove(check_it->path(), ec);
-                        if (ec) [[unlikely]] {
-                            LOG(WARNING) << "filesystem error, failed to remove file, file="
-                                         << check_it->path() << " error=" << ec.message();
-                        }
-                        continue;
+                    if (suffix == "tmp") [[unlikely]] {
+                        is_tmp = true;
                     } else {
                         cache_type = string_to_cache_type(suffix);
                     }
@@ -371,7 +367,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 parsed = false;
             }
 
-            if (!parsed) [[unlikely]] {
+            if (!parsed && !is_tmp) [[unlikely]] {
                 LOG(WARNING) << "parse offset err, path=" << offset_with_suffix;
                 continue;
             }
@@ -386,8 +382,21 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 }
                 continue;
             }
-            context_original.cache_type = cache_type;
-            add_cell(key, context_original, offset, size, FileBlock::State::DOWNLOADED, cache_lock);
+            if (_files.count(key) == 0 || _files[key].count(offset) == 0) {
+                // if the file is tmp, it means it is the old file and it should be removed
+                if (is_tmp) {
+                    std::error_code ec;
+                    std::filesystem::remove(check_it->path(), ec);
+                    if (ec) {
+                        LOG(WARNING) << fmt::format("cannot remove {}: {}",
+                                                    check_it->path().native(), ec.message());
+                    }
+                } else {
+                    context_original.cache_type = cache_type;
+                    add_cell(key, context_original, offset, size, FileBlock::State::DOWNLOADED,
+                             cache_lock);
+                }
+            }
         }
 
         it = _files.find(key);
@@ -667,18 +676,10 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
         return nullptr; /// Empty files are not cached.
     }
 
-    // in async load mode, a cell may be added twice.
-    if (_lazy_open_done) {
-        DCHECK_EQ(_files[key].count(offset), 0)
-                << "Cache already exists for key: " << key.to_string() << ", offset: " << offset
-                << ", size: " << size
-                << ".\nCurrent cache structure: " << dump_structure_unlocked(key, cache_lock);
-    }
-
-    if (!_lazy_open_done && _files[key].count(offset) != 0) {
-        // in async load mode, if a cell added, just return
-        return &_files[key].at(offset);
-    }
+    DCHECK_EQ(_files[key].count(offset), 0)
+            << "Cache already exists for key: " << key.to_string() << ", offset: " << offset
+            << ", size: " << size
+            << ".\nCurrent cache structure: " << dump_structure_unlocked(key, cache_lock);
 
     auto& offsets = _files[key];
     DCHECK((context.expiration_time == 0 && context.cache_type != FileCacheType::TTL) ||
@@ -1289,13 +1290,25 @@ Status BlockFileCache::load_cache_info_into_memory() {
     }
     auto add_cell_batch_func = [&]() {
         std::lock_guard cache_lock(_mutex);
-        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(),
-                      [&](const BatchLoadArgs& args) {
-                          add_cell(args.key, args.ctx, args.offset, args.size,
-                                   FileBlock::State::DOWNLOADED, cache_lock);
-                      });
+        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args) {
+            // in async load mode, a cell may be added twice.
+            if (_files.count(args.key) == 0 || _files[args.key].count(args.offset) == 0) {
+                // if the file is tmp, it means it is the old file and it should be removed
+                if (args.is_tmp) {
+                    std::error_code ec;
+                    std::filesystem::remove(args.offset_path, ec);
+                    if (ec) {
+                        LOG(WARNING) << fmt::format("cannot remove {}: {}", args.offset_path, ec.message());
+                    }
+                } else {
+                    add_cell(args.key, args.ctx, args.offset, args.size,
+                            FileBlock::State::DOWNLOADED, cache_lock);
+                }
+            }
+        });
         batch_load_buffer.clear();
     };
+    TEST_SYNC_POINT_CALLBACK("CloudFileCache::TmpFile1");
     for (; key_it != std::filesystem::directory_iterator(); ++key_it) {
         auto key_with_suffix = key_it->path().filename().native();
         auto delim_pos = key_with_suffix.find('_');
@@ -1320,6 +1333,7 @@ Status BlockFileCache::load_cache_info_into_memory() {
             auto delim_pos1 = offset_with_suffix.find('_');
             FileCacheType cache_type = FileCacheType::NORMAL;
             bool parsed = true;
+            bool is_tmp = false;
             try {
                 if (delim_pos1 == std::string::npos) {
                     // same as type "normal"
@@ -1329,13 +1343,8 @@ Status BlockFileCache::load_cache_info_into_memory() {
                     std::string suffix = offset_with_suffix.substr(delim_pos1 + 1);
                     // not need persistent anymore
                     // if suffix is equals to "tmp", it should be removed too.
-                    if (suffix == "persistent" || suffix == "tmp") [[unlikely]] {
-                        std::error_code ec;
-                        std::filesystem::remove(offset_it->path(), ec);
-                        if (ec) {
-                            return Status::IOError(ec.message());
-                        }
-                        continue;
+                    if (suffix == "tmp") [[unlikely]] {
+                        is_tmp = true;
                     } else {
                         cache_type = string_to_cache_type(suffix);
                     }
@@ -1350,7 +1359,7 @@ Status BlockFileCache::load_cache_info_into_memory() {
             }
 
             size = offset_it->file_size();
-            if (size == 0) {
+            if (size == 0 && !is_tmp) {
                 std::error_code ec;
                 std::filesystem::remove(offset_it->path(), ec);
                 if (ec) {
@@ -1359,8 +1368,15 @@ Status BlockFileCache::load_cache_info_into_memory() {
                 continue;
             }
             context.cache_type = cache_type;
-            batch_load_buffer.push_back(
-                    BatchLoadArgs {key, context, offset, size, key_it->path(), offset_it->path()});
+            BatchLoadArgs args;
+            args.ctx = context;
+            args.key = key;
+            args.key_path = key_it->path();
+            args.offset_path = offset_it->path();
+            args.size = size;
+            args.offset = offset;
+            args.is_tmp = is_tmp;
+            batch_load_buffer.push_back(std::move(args));
 
             // add lock
             if (batch_load_buffer.size() >= scan_length) {
@@ -1372,6 +1388,7 @@ Status BlockFileCache::load_cache_info_into_memory() {
     if (batch_load_buffer.size() != 0) {
         add_cell_batch_func();
     }
+    TEST_SYNC_POINT_CALLBACK("CloudFileCache::TmpFile2");
     return Status::OK();
 }
 
