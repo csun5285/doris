@@ -2224,6 +2224,9 @@ public class Config extends ConfigBase {
     // Add a flag to force disable two phase read
     // TODO enable this if cloud is ready
     public static boolean enable_two_phase_read_opt = false;
+
+    @ConfField(mutable = true)
+    public static int get_tablet_stat_batch_size = 1000;
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

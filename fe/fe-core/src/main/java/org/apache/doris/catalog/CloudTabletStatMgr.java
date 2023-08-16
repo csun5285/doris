@@ -56,6 +56,9 @@ public class CloudTabletStatMgr extends MasterDaemon {
         List<SelectdbCloud.GetTabletStatsRequest> reqList =
                 new ArrayList<SelectdbCloud.GetTabletStatsRequest>();
 
+        SelectdbCloud.GetTabletStatsRequest.Builder builder =
+                SelectdbCloud.GetTabletStatsRequest.newBuilder();
+
         List<Long> dbIds = Env.getCurrentInternalCatalog().getDbIds();
         for (Long dbId : dbIds) {
             Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
@@ -73,30 +76,34 @@ public class CloudTabletStatMgr extends MasterDaemon {
                 try {
                     OlapTable tbl = (OlapTable) table;
                     for (Partition partition : tbl.getAllPartitions()) {
-                        SelectdbCloud.GetTabletStatsRequest.Builder builder =
-                                SelectdbCloud.GetTabletStatsRequest.newBuilder();
                         for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
                             for (Long tabletId : index.getTabletIdsInOrder()) {
                                 Tablet tablet = index.getTablet(tabletId);
-
-                                SelectdbCloud.TabletIndexPB.Builder indexBuilder =
+                                SelectdbCloud.TabletIndexPB.Builder tabletBuilder =
                                         SelectdbCloud.TabletIndexPB.newBuilder();
-                                indexBuilder.setDbId(dbId);
-                                indexBuilder.setTableId(table.getId());
-                                indexBuilder.setIndexId(index.getId());
-                                indexBuilder.setPartitionId(partition.getId());
-                                indexBuilder.setTabletId(tablet.getId());
-                                builder.addTabletIdx(indexBuilder);
+                                tabletBuilder.setDbId(dbId);
+                                tabletBuilder.setTableId(table.getId());
+                                tabletBuilder.setIndexId(index.getId());
+                                tabletBuilder.setPartitionId(partition.getId());
+                                tabletBuilder.setTabletId(tablet.getId());
+                                builder.addTabletIdx(tabletBuilder);
+
+                                if (builder.getTabletIdxCount() >= Config.get_tablet_stat_batch_size) {
+                                    reqList.add(builder.build());
+                                    builder = SelectdbCloud.GetTabletStatsRequest.newBuilder();
+                                }
                             }
                         }
-                        SelectdbCloud.GetTabletStatsRequest getTabletReq = builder.build();
-                        reqList.add(getTabletReq);
                     } // partitions
                 } finally {
                     table.readUnlock();
                 }
             } // tables
         } // end for dbs
+
+        if (builder.getTabletIdxCount() > 0) {
+            reqList.add(builder.build());
+        }
 
         for (SelectdbCloud.GetTabletStatsRequest req : reqList) {
             SelectdbCloud.GetTabletStatsResponse resp;
