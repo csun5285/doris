@@ -80,7 +80,7 @@ public:
 
     // remove all kv and data in this instance, ONLY be called when instance has been deleted
     // returns 0 for success otherwise error
-    int recycle_instance();
+    int recycle_deleted_instance();
 
     // scan and recycle expired indexes
     // returns 0 for success otherwise error

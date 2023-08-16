@@ -70,6 +70,9 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
                     .tag("prefix", prefix)
                     .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
                     .tag("error", outcome.GetError().GetMessage());
+            if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::FORBIDDEN) {
+                return 1;
+            }
             return -1;
         }
         const auto& result = outcome.GetResult();
@@ -95,6 +98,10 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
                         .tag("prefix", prefix)
                         .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
                         .tag("error", outcome.GetError().GetMessage());
+                if (delete_outcome.GetError().GetResponseCode() ==
+                    Aws::Http::HttpResponseCode::FORBIDDEN) {
+                    return 1;
+                }
                 return -2;
             }
             if (!delete_outcome.GetResult().GetErrors().empty()) {

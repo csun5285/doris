@@ -385,7 +385,7 @@ int InstanceRecycler::init() {
 int InstanceRecycler::do_recycle() {
     TEST_SYNC_POINT("InstanceRecycler.do_recycle");
     if (instance_info_.status() == InstanceInfoPB::DELETED) {
-        return recycle_instance();
+        return recycle_deleted_instance();
     } else if (instance_info_.status() == InstanceInfoPB::NORMAL) {
         int ret = recycle_indexes();
         if (recycle_partitions() != 0) ret = -1;
@@ -399,13 +399,13 @@ int InstanceRecycler::do_recycle() {
         if (recycle_versions() != 0) ret = -1;
         return ret;
     } else {
-        LOG(WARNING) << "unknown instance status: " << instance_info_.status()
+        LOG(WARNING) << "invalid instance status: " << instance_info_.status()
                      << " instance_id=" << instance_id_;
         return -1;
     }
 }
 
-int InstanceRecycler::recycle_instance() {
+int InstanceRecycler::recycle_deleted_instance() {
     LOG_INFO("begin to recycle deleted instance").tag("instance_id", instance_id_);
 
     int ret = 0;
@@ -459,16 +459,19 @@ int InstanceRecycler::recycle_instance() {
     for (auto& [_, accessor] : accessor_map_) {
         if (stopped()) return ret;
         LOG(INFO) << "begin to delete all objects in " << accessor->path();
-        if (accessor->delete_objects_by_prefix("") == 0) {
+        int del_ret = accessor->delete_objects_by_prefix("");
+        if (del_ret == 0) {
             LOG(INFO) << "successfully delete all objects in " << accessor->path();
-        } else { // no need to log, because S3Accessor has logged this error
+        } else if (del_ret != 1) { // no need to log, because S3Accessor has logged this error
+            // If `del_ret == 1`, it can be considered that the object data has been recycled by cloud platform,
+            // so the recycling has been successful.
             ret = -1;
         }
     }
-    // FIXME(meiyi): Delete objects in stages
 
     if (ret == 0) {
         // remove instance kv
+        // ATTN: MUST ensure that cloud platform won't regenerate the same instance id
         ret = txn_kv_->create_txn(&txn);
         if (ret != 0) {
             LOG(WARNING) << "failed to create txn";

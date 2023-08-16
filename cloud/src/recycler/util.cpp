@@ -44,7 +44,6 @@ int get_all_instances(TxnKv* txn_kv, std::vector<InstanceInfoPB>& res) {
                 LOG(WARNING) << "malformed instance info, key=" << hex(k);
                 return -1;
             }
-
             res.push_back(std::move(instance_info));
         }
         key0.push_back('\x00'); // Update to next smallest key for iteration

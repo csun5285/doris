@@ -78,7 +78,7 @@ public:
     // returns 0 for success otherwise error
     int init() override;
 
-    // returns 0 for success otherwise error
+    // returns 0 for success, returns 1 for http FORBIDDEN error, negative for other errors
     int delete_objects_by_prefix(const std::string& relative_path) override;
 
     // returns 0 for success otherwise error

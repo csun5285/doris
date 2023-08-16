@@ -9,7 +9,7 @@ namespace selectdb {
 class TxnKv;
 
 /**
- *
+ * Get all instances, include DELETED instance
  * @return 0 for success, otherwise error
  */
 int get_all_instances(TxnKv* txn_kv, std::vector<InstanceInfoPB>& res);
