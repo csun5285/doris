@@ -37,9 +37,9 @@ enum class BufferType { DOWNLOAD, UPLOAD };
 
 struct OperationState {
     OperationState(std::function<void(Status)> sync_after_complete_task,
-                   std::function<bool()> is_done)
+                   std::function<bool()> cancelled)
             : _sync_after_complete_task(std::move(sync_after_complete_task)),
-              _is_done(std::move(is_done)) {}
+              _cancelled(std::move(cancelled)) {}
     /**
     * set the val of this operation state which indicates it failed or succeeded
     *
@@ -61,13 +61,13 @@ struct OperationState {
     *
     * @return is the execution task is done
     */
-    bool is_done() const {
-        DCHECK(nullptr != _is_done);
-        return _is_done();
+    [[nodiscard]] bool cancelled() const {
+        DCHECK(nullptr != _cancelled);
+        return _cancelled();
     }
 
     std::function<void(Status)> _sync_after_complete_task;
-    std::function<bool()> _is_done;
+    std::function<bool()> _cancelled;
     bool _value_set = false;
 };
 
@@ -118,7 +118,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     *
     * @return is the execution task is done
     */
-    bool is_done() const { return _state.is_done(); }
+    bool cancelled() const { return _state.cancelled(); }
 
     std::function<FileBlocksHolderPtr()> _alloc_holder;
     Slice _buffer;
@@ -174,8 +174,9 @@ struct UploadFileBuffer final : public FileBuffer {
     /**
     * write the content inside memory buffer into 
     * local file cache
+    * @param cancelled if the whole task failed or not
     */
-    void upload_to_local_file_cache();
+    void upload_to_local_file_cache(bool cancelled);
     /**
     * do the upload work
     * 1. read from cache if the data is written to cache first
@@ -189,10 +190,19 @@ struct UploadFileBuffer final : public FileBuffer {
             read_from_cache();
         }
         _upload_to_remote(*this);
-        // this control flow means the buf and the stream shares one memory
-        // so we can directly use buf here
-        upload_to_local_file_cache();
+        // If we call cancelled() after `_state.set_val()`, there are chances
+        // that the outer resource is already destructed which would results in
+        // accessing invalid memory address. i.e. If this buffer is the last one
+        // then `_state.set_val()` would release the S3FileWriter waiting on uploadings
+        // to be done, then after the final notifying the instance of S3FileWriter might
+        // stop waiting and reclaimed by the system.
+        bool has_cancelled = cancelled();
         _state.set_val();
+        // this control flow means the buf and the stream shares one memory
+        // so we can directly use buf here, and the cache loading workload
+        // should not block the whole task, so we would do this after notifying
+        // the whold procedure
+        upload_to_local_file_cache(has_cancelled);
         on_finish();
     }
     /**
@@ -259,13 +269,15 @@ struct FileBufferBuilder {
     *
     * @param cb 
     */
-    FileBufferBuilder& set_is_done(std::function<bool()> cb) {
-        _is_done = std::move(cb);
+    FileBufferBuilder& set_cancelled(std::function<bool()> cb) {
+        _cancelled = std::move(cb);
         return *this;
     }
     /**
     * set the callback which allocate file cache segment holder
-    *
+    * **Notice**: Because the load file cache workload coule be done
+    * asynchronously so you must make sure all the dependencies of this
+    * cb could last until this cb is invoked
     * @param cb 
     */
     FileBufferBuilder& set_allocate_file_segments_holder(std::function<FileBlocksHolderPtr()> cb);
@@ -311,7 +323,7 @@ struct FileBufferBuilder {
     std::function<void(UploadFileBuffer& buf)> _upload_cb = nullptr;
     std::function<void(Status)> _sync_after_complete_task = nullptr;
     std::function<FileBlocksHolderPtr()> _alloc_holder_cb = nullptr;
-    std::function<bool()> _is_done = nullptr;
+    std::function<bool()> _cancelled = nullptr;
     std::function<void(FileBlocksHolderPtr, Slice)> _write_to_local_file_cache;
     std::function<Status(Slice&)> _download;
     std::function<void(Slice, size_t)> _write_to_use_buffer;

@@ -116,7 +116,7 @@ struct DownloadTaskExecutor {
                     .set_download_callback(std::move(download))
                     .set_sync_after_complete_task(sync_task)
                     .set_write_to_local_file_cache(std::move(append_file_cache))
-                    .set_is_done([this]() { return _failed.load(); });
+                    .set_cancelled([this]() { return _failed.load(); });
             if (!s.empty()) {
                 auto write_to_use_buffer = [s, cur_task_off](Slice content, size_t /*off*/) {
                     std::memcpy((void*)(s.get_data() + cur_task_off), content.get_data(),

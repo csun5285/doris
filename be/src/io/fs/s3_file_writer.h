@@ -26,6 +26,7 @@
 #include <string>
 
 #include "common/status.h"
+#include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
@@ -75,13 +76,12 @@ private:
     Status _open();
     Status _close();
 
-private:
     void _wait_until_finish(std::string_view task_name);
     Status _complete();
     Status _create_multi_upload_request();
     void _put_object(UploadFileBuffer& buf);
     void _upload_one_part(int64_t part_num, UploadFileBuffer& buf);
-    FileBlocksHolderPtr _allocate_file_segments(size_t offset);
+    FileBlocksHolderPtr _allocate_file_segments(CacheContext ctx, Key cache_key, size_t offset);
 
     std::string _bucket;
     std::string _key;

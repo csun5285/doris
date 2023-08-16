@@ -223,15 +223,14 @@ void UploadFileBuffer::submit() {
 /**
  * write the content of the memory buffer to local file cache
  */
-// TODO(AlexYue): this function could be processed asynchronously
-void UploadFileBuffer::upload_to_local_file_cache() {
+void UploadFileBuffer::upload_to_local_file_cache(bool cancelled) {
     if (!config::enable_file_cache || _alloc_holder == nullptr) {
         return;
     }
     if (_holder) {
         return;
     }
-    if (_state.is_done()) {
+    if (cancelled) {
         return;
     }
     // the data is already written to S3 in this situation
@@ -284,7 +283,7 @@ FileBufferBuilder& FileBufferBuilder::set_allocate_file_segments_holder(
 }
 
 std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
-    OperationState state(_sync_after_complete_task, _is_done);
+    OperationState state(_sync_after_complete_task, _cancelled);
     if (_type == BufferType::UPLOAD) {
         return std::make_shared<UploadFileBuffer>(std::move(_upload_cb), std::move(state), _offset,
                                                   std::move(_alloc_holder_cb), _index_offset);

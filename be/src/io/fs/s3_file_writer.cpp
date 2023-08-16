@@ -239,11 +239,21 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                             }
                             _countdown_event.signal();
                         })
-                        .set_is_done([this]() { return _failed.load(); });
+                        .set_cancelled([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
+                    // We would load the data into file cache asynchronously which indicates
+                    // that this instance of S3FileWriter might have been destructed when we
+                    // try to do writing into file cache, so we make the lambda capture the variable
+                    // we need by value to extend their lifetime
                     builder.set_allocate_file_segments_holder(
-                            [this, offset = _bytes_appended]() -> FileBlocksHolderPtr {
-                                return _allocate_file_segments(offset);
+                            [this, k = _cache_key, offset = _bytes_appended, t = _expiration_time,
+                             cold = _is_cold_data]() -> FileBlocksHolderPtr {
+                                CacheContext ctx;
+                                ctx.cache_type =
+                                        t == 0 ? FileCacheType::NORMAL : FileCacheType::TTL;
+                                ctx.expiration_time = t;
+                                ctx.is_cold_data = cold;
+                                return _allocate_file_segments(std::move(ctx), k, offset);
                             });
                 }
                 _pending_buf = builder.build();
@@ -255,7 +265,8 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
-            RETURN_IF_ERROR(_pending_buf->append_data(Slice {data[i].get_data() + pos, data_size_to_append}));
+            RETURN_IF_ERROR(_pending_buf->append_data(
+                    Slice {data[i].get_data() + pos, data_size_to_append}));
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB
@@ -276,7 +287,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 }
 
 void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
-    if (buf.is_done()) {
+    if (buf.cancelled()) {
         return;
     }
     UploadPartRequest upload_request;
@@ -320,12 +331,9 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     _bytes_written += buf.get_size();
 }
 
-FileBlocksHolderPtr S3FileWriter::_allocate_file_segments(size_t offset) {
-    CacheContext ctx;
-    ctx.cache_type = _expiration_time == 0 ? FileCacheType::NORMAL : FileCacheType::TTL;
-    ctx.expiration_time = _expiration_time;
-    ctx.is_cold_data = _is_cold_data;
-    auto holder = _cache->get_or_set(_cache_key, offset, config::s3_write_buffer_size, ctx);
+FileBlocksHolderPtr S3FileWriter::_allocate_file_segments(CacheContext ctx, Key cache_key,
+                                                          size_t offset) {
+    auto holder = _cache->get_or_set(cache_key, offset, config::s3_write_buffer_size, ctx);
     return std::make_unique<FileBlocksHolder>(std::move(holder));
 }
 
