@@ -254,6 +254,7 @@ public class ReportHandler extends Daemon {
         protected void exec() {
             if (tasks != null) {
                 ReportHandler.taskReport(beId, tasks);
+                ReportHandler.cpuReport(beId, cpuCores, pipelineExecutorSize);
             }
             if (disks != null) {
                 ReportHandler.diskReport(beId, disks);

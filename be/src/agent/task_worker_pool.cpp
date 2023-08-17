@@ -608,6 +608,10 @@ void TaskWorkerPool::_report_task_worker_thread_callback() {
             request.__set_tasks(_s_task_signatures);
             request.__set_backend(BackendOptions::get_local_backend());
         }
+        request.__set_num_cores(CpuInfo::num_cores());
+        request.__set_pipeline_executor_size(config::pipeline_executor_size > 0
+                                                     ? config::pipeline_executor_size
+                                                     : CpuInfo::num_cores());
         _handle_report(request, ReportType::TASK);
     }
     StorageEngine::instance()->deregister_report_listener(this);
