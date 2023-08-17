@@ -223,14 +223,14 @@ void UploadFileBuffer::submit() {
 /**
  * write the content of the memory buffer to local file cache
  */
-void UploadFileBuffer::upload_to_local_file_cache(bool cancelled) {
+void UploadFileBuffer::upload_to_local_file_cache() {
     if (!config::enable_file_cache || _alloc_holder == nullptr) {
         return;
     }
     if (_holder) {
         return;
     }
-    if (cancelled) {
+    if (cancelled()) {
         return;
     }
     // the data is already written to S3 in this situation

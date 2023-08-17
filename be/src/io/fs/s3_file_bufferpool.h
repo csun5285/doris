@@ -174,9 +174,8 @@ struct UploadFileBuffer final : public FileBuffer {
     /**
     * write the content inside memory buffer into 
     * local file cache
-    * @param cancelled if the whole task failed or not
     */
-    void upload_to_local_file_cache(bool cancelled);
+    void upload_to_local_file_cache();
     /**
     * do the upload work
     * 1. read from cache if the data is written to cache first
@@ -190,19 +189,10 @@ struct UploadFileBuffer final : public FileBuffer {
             read_from_cache();
         }
         _upload_to_remote(*this);
-        // If we call cancelled() after `_state.set_val()`, there are chances
-        // that the outer resource is already destructed which would results in
-        // accessing invalid memory address. i.e. If this buffer is the last one
-        // then `_state.set_val()` would release the S3FileWriter waiting on uploadings
-        // to be done, then after the final notifying the instance of S3FileWriter might
-        // stop waiting and reclaimed by the system.
-        bool has_cancelled = cancelled();
-        _state.set_val();
         // this control flow means the buf and the stream shares one memory
-        // so we can directly use buf here, and the cache loading workload
-        // should not block the whole task, so we would do this after notifying
-        // the whold procedure
-        upload_to_local_file_cache(has_cancelled);
+        // so we can directly use buf here
+        upload_to_local_file_cache();
+        _state.set_val();
         on_finish();
     }
     /**
