@@ -135,8 +135,11 @@ void TabletCalcDeleteBitmapTask::handle() {
         return;
     }
 
-    status = _tablet->cloud_update_delete_bitmap(_transaction_id, rowset, delete_bitmap, rowset_ids,
-                                                 _version);
+    rowset->make_visible(Version(_version, _version));
+    std::unique_ptr<RowsetWriter> rowset_writer;
+    _tablet->create_transient_rowset_writer(rowset, &rowset_writer);
+    status = _tablet->update_delete_bitmap(rowset, rowset_ids, delete_bitmap, _transaction_id,
+                                           rowset_writer.get());
     if (status != Status::OK()) {
         LOG(WARNING) << "failed to calculate delete bitmap. rowset_id=" << rowset->rowset_id()
                      << ", tablet_id=" << _tablet->tablet_id() << ", txn_id=" << _transaction_id
