@@ -15,7 +15,7 @@
 
 namespace selectdb {
 
-extern std::string convert_ms_code_to_http_code(const MetaServiceCode& ret, int& status_code);
+extern std::tuple<int, std::string_view> convert_ms_code_to_http_code(MetaServiceCode ret);
 
 RecyclerServiceImpl::RecyclerServiceImpl(std::shared_ptr<TxnKv> txn_kv, Recycler* recycler,
                                          Checker* checker)
@@ -228,7 +228,7 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
     std::string request_body;
     std::unique_ptr<int, std::function<void(int*)>> defer_status(
             (int*)0x01, [&code, &msg, &status_code, &response_body, &cntl, &req](int*) {
-                convert_ms_code_to_http_code(code, status_code);
+                status_code = std::get<0>(convert_ms_code_to_http_code(code));
                 LOG(INFO) << (code == MetaServiceCode::OK ? "succ to " : "failed to ") << "http"
                           << " " << cntl->remote_side() << " request=\n"
                           << req << "\n ret=" << code << " msg=" << msg;

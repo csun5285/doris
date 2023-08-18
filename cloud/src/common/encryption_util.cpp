@@ -502,7 +502,7 @@ int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
         TEST_SYNC_POINT_CALLBACK("decrypt_ak_sk:get_encryption_key", &key);
     }
     if (ret != 0) {
-        LOG(WARNING) << "failed to get encryptionn key version_id: " << encryption_info.key_id();
+        LOG(WARNING) << "failed to get encryption key version_id: " << encryption_info.key_id();
         return -1;
     }
     ret = decrypt_ak_sk({cipher_ak, cipher_sk}, encryption_info.encryption_method(), key,

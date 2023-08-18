@@ -54,9 +54,6 @@ static void* run_bthread_work(void* arg) {
     return nullptr;
 }
 
-extern void process_http_encode_key(std::string& response_body, int& status_code,
-        brpc::URI& uri, std::string& msg, bool& keep_raw_body);
-
 MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
                                  std::shared_ptr<ResourceManager> resource_mgr,
                                  std::shared_ptr<RateLimiter> rate_limiter) {
@@ -66,7 +63,7 @@ MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
     rate_limiter_->init(this);
 }
 
-MetaServiceImpl::~MetaServiceImpl() {}
+MetaServiceImpl::~MetaServiceImpl() = default;
 
 std::string static trim(std::string& str) {
     const std::string drop = "/ \t";
@@ -3297,73 +3294,6 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
     msg = ss.str();
 }
 
-std::string convert_ms_code_to_http_code(const MetaServiceCode& ret, int& status_code) {
-    switch (ret) {
-    case OK:
-        return "OK";
-        break;
-    case INVALID_ARGUMENT:
-    case PROTOBUF_PARSE_ERR:
-        status_code = 400;
-        return "INVALID_ARGUMENT";
-        break;
-    case KV_TXN_CREATE_ERR:
-    case KV_TXN_GET_ERR:
-    case KV_TXN_COMMIT_ERR:
-    case PROTOBUF_SERIALIZE_ERR:
-    case TXN_GEN_ID_ERR:
-    case TXN_DUPLICATED_REQ:
-    case TXN_LABEL_ALREADY_USED:
-    case TXN_INVALID_STATUS:
-    case TXN_LABEL_NOT_FOUND:
-    case TXN_ID_NOT_FOUND:
-    case TXN_ALREADY_ABORTED:
-    case TXN_ALREADY_VISIBLE:
-    case TXN_ALREADY_PRECOMMITED:
-    case VERSION_NOT_FOUND:
-    case UNDEFINED_ERR:
-        status_code = 500;
-        return "INTERANAL_ERROR";
-        break;
-    case CLUSTER_NOT_FOUND:
-        status_code = 404;
-        return "NOT_FOUND";
-        break;
-    case ALREADY_EXISTED:
-        status_code = 409;
-        return "ALREADY_EXISTED";
-        break;
-    default:
-        status_code = 500;
-        return "INTERANAL_ERROR";
-        break;
-    }
-}
-
-void static format_to_json_resp(std::string& response_body, const MetaServiceCode& ret,
-                                const std::string& c_ret, const std::string& msg) {
-    rapidjson::Document d;
-    d.Parse(response_body.c_str());
-    rapidjson::StringBuffer sb;
-    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(sb);
-    writer.StartObject();
-    writer.Key("code");
-    writer.String(d.HasParseError() ? c_ret.c_str() : "OK");
-    writer.Key("msg");
-    writer.String(ret == MetaServiceCode::OK ? "" : msg.c_str());
-    writer.EndObject();
-    if (!d.HasParseError()) {
-        // json string, add result obj into it.
-        rapidjson::Document d2;
-        d2.Parse(sb.GetString());
-        d2.AddMember("result", d, d2.GetAllocator());
-        sb.Clear();
-        writer.Reset(sb);
-        d2.Accept(writer);
-    }
-    response_body = sb.GetString();
-}
-
 static int encrypt_ak_sk_helper(const std::string plain_ak, const std::string plain_sk,
                                 EncryptionInfoPB* encryption_info, AkSkPair* cipher_ak_sk_pair,
                                 MetaServiceCode& code, std::string& msg) {
@@ -3406,9 +3336,9 @@ static int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cip
     return ret;
 }
 
-static int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_id,
-                                 MetaServiceCode& code, std::string& msg,
-                                 std::shared_ptr<Transaction>& txn) {
+int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_id,
+                          MetaServiceCode& code, std::string& msg,
+                          std::shared_ptr<Transaction>& txn) {
     for (auto& obj_info : *instance.mutable_obj_info()) {
         if (obj_info.has_encryption_info()) {
             AkSkPair plain_ak_sk_pair;
@@ -3473,610 +3403,6 @@ static int decrypt_instance_info(InstanceInfoPB& instance, const std::string& in
         }
     }
     return 0;
-}
-
-std::pair<MetaServiceCode, std::string> get_instance_info(
-        const std::shared_ptr<ResourceManager>& resource, const std::shared_ptr<TxnKv>& txn_kv,
-        std::string instance_id, const std::string& cloud_unique_id) {
-    std::pair<MetaServiceCode, std::string> ec {MetaServiceCode::OK, ""};
-    [[maybe_unused]] auto& [code, msg] = ec;
-    std::stringstream ss;
-    if (instance_id.empty()) {
-        if (cloud_unique_id.empty()) {
-            code = MetaServiceCode::INVALID_ARGUMENT;
-            msg = "empty instance_id and cloud_unique_id";
-            LOG(WARNING) << msg;
-            return ec;
-        }
-
-        // get instance_id by cloud_unique_id
-        instance_id = get_instance_id(resource, cloud_unique_id);
-        if (instance_id.empty()) {
-            code = MetaServiceCode::INVALID_ARGUMENT;
-            ss << "cannot find instance_id with cloud_unique_id="
-               << (cloud_unique_id.empty() ? "(empty)" : cloud_unique_id);
-            msg = ss.str();
-            return ec;
-        }
-    }
-    InstanceInfoPB instance;
-    std::unique_ptr<Transaction> txn0;
-    int ret_txn = txn_kv->create_txn(&txn0);
-    if (ret_txn != 0) {
-        msg = "failed to create txn";
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
-        LOG(WARNING) << msg << " ret=" << ret_txn;
-        return ec;
-    }
-    std::shared_ptr<Transaction> txn(txn0.release());
-    auto [c0, m0] = resource->get_instance(txn, instance_id, &instance);
-    if (c0 != 0) {
-        msg = "failed to get instance, info " + m0;
-        LOG(WARNING) << msg;
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        return ec;
-    }
-    // maybe do not decrypt ak/sk?
-    if (decrypt_instance_info(instance, instance_id, code, msg, txn)) {
-        return ec;
-    }
-    msg = proto_to_json(instance);
-    return ec;
-}
-
-void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
-                           const ::selectdb::MetaServiceHttpRequest* request,
-                           ::selectdb::MetaServiceHttpResponse* response,
-                           ::google::protobuf::Closure* done) {
-    auto cntl = static_cast<brpc::Controller*>(controller);
-    LOG(INFO) << "rpc from " << cntl->remote_side() << " request: " << request->ShortDebugString();
-    brpc::ClosureGuard closure_guard(done);
-    MetaServiceCode ret = MetaServiceCode::OK;
-    int status_code = 200;
-    std::string msg = "OK";
-    std::string req;
-    std::string response_body;
-    std::string request_body;
-    bool keep_raw_body = false;
-    std::unique_ptr<int, std::function<void(int*)>> defer_status(
-            (int*)0x01,
-            [&ret, &msg, &status_code, &response_body, &cntl, &req, &keep_raw_body](int*) {
-                std::string c_ret = convert_ms_code_to_http_code(ret, status_code);
-                LOG(INFO) << (ret == 0 ? "succ to " : "failed to ") << __PRETTY_FUNCTION__ << " "
-                          << cntl->remote_side() << " request=\n"
-                          << req << "\n ret=" << ret << " msg=" << msg;
-                cntl->http_response().set_status_code(status_code);
-                if (!keep_raw_body) format_to_json_resp(response_body, ret, c_ret, msg);
-                cntl->response_attachment().append(response_body);
-                cntl->response_attachment().append("\n");
-            });
-
-    // Prepare input request info
-    auto& unresolved_path = cntl->http_request().unresolved_path();
-    auto& uri = cntl->http_request().uri();
-    std::stringstream ss;
-    ss << "\nuri_path=" << uri.path();
-    ss << "\nunresolved_path=" << unresolved_path;
-    ss << "\nmethod=" << brpc::HttpMethod2Str(cntl->http_request().method());
-    ss << "\nquery strings:";
-    for (auto it = uri.QueryBegin(); it != uri.QueryEnd(); ++it) {
-        ss << "\n" << it->first << "=" << it->second;
-    }
-    ss << "\nheaders:";
-    for (auto it = cntl->http_request().HeaderBegin(); it != cntl->http_request().HeaderEnd();
-         ++it) {
-        ss << "\n" << it->first << ":" << it->second;
-    }
-    req = ss.str();
-    ss.clear();
-    ss.str("");
-    request_body = cntl->request_attachment().to_string(); // Just copy
-
-    // Auth
-    auto token = uri.GetQuery("token");
-    if (token == nullptr || *token != config::http_token) {
-        msg = "incorrect token, token=" + (token == nullptr ? std::string("(not given)") : *token);
-        ret = MetaServiceCode::INVALID_ARGUMENT;
-        keep_raw_body = true;
-        response_body = "incorrect token";
-        status_code = 403;
-        return;
-    }
-
-    // Process http request
-    // just for debug and regression test
-    if (unresolved_path == "get_obj_store_info") {
-        GetObjStoreInfoRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to GetObjStoreInfoRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        GetObjStoreInfoResponse res;
-        get_obj_store_info(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-    if (unresolved_path == "update_ak_sk") {
-        UpdateAkSkRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to UpdateAkSkRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        UpdateAkSkResponse res;
-        update_ak_sk(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-    }
-    if (unresolved_path == "add_obj_info") {
-        AlterObjStoreInfoRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to SetObjStoreInfoRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterObjStoreInfoRequest::ADD_OBJ_INFO);
-        AlterObjStoreInfoResponse res;
-        alter_obj_store_info(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-    if (unresolved_path == "legacy_update_ak_sk") {
-        AlterObjStoreInfoRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to SetObjStoreInfoRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterObjStoreInfoRequest::LEGACY_UPDATE_AK_SK);
-        AlterObjStoreInfoResponse res;
-        alter_obj_store_info(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-    if (unresolved_path == "decode_key") { // TODO: implement this in a separate src file
-        if (uri.GetQuery("key") == nullptr || uri.GetQuery("key")->empty()) {
-            msg = "no key to decode";
-            response_body = msg;
-            status_code = 400;
-            return;
-        }
-        bool unicode = true;
-        if (uri.GetQuery("unicode") != nullptr && *uri.GetQuery("unicode") == "false") {
-            unicode = false;
-        }
-        std::string_view key = *uri.GetQuery("key");
-        response_body = prettify_key(key, unicode);
-        if (key.empty()) {
-            msg = "failed to decode key, key=" + std::string(key);
-            response_body = "failed to decode key, it may be malformed";
-            status_code = 400;
-            return;
-        }
-        keep_raw_body = true;
-        return;
-    }
-
-    if (unresolved_path == "create_instance") {
-        CreateInstanceRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to CreateInstanceRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        CreateInstanceResponse res;
-        create_instance(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "rename_instance") {
-        AlterInstanceRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterInstanceRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterInstanceRequest::RENAME);
-        AlterInstanceResponse res;
-        alter_instance(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "enable_instance_sse") {
-        AlterInstanceRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterInstanceRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterInstanceRequest::ENABLE_SSE);
-        AlterInstanceResponse res;
-        alter_instance(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "disable_instance_sse") {
-        AlterInstanceRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterInstanceRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterInstanceRequest::DISABLE_SSE);
-        AlterInstanceResponse res;
-        alter_instance(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "drop_instance") {
-        AlterInstanceRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterInstanceRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterInstanceRequest::DROP);
-        AlterInstanceResponse res;
-        alter_instance(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "add_cluster") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        r.set_op(AlterClusterRequest::ADD_CLUSTER);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "add_node") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterClusterRequest::ADD_NODE);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "drop_node") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterClusterRequest::DROP_NODE);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "decommission_node") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterClusterRequest::DECOMMISSION_NODE);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    // This is useful for debuggin
-    if (unresolved_path == "get_cluster") {
-        GetClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to GetClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        GetClusterResponse res;
-        get_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "drop_cluster") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_op(AlterClusterRequest::DROP_CLUSTER);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "rename_cluster") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        r.set_op(AlterClusterRequest::RENAME_CLUSTER);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "update_cluster_endpoint") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        r.set_op(AlterClusterRequest::UPDATE_CLUSTER_ENDPOINT);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "update_cluster_mysql_user_name") {
-        AlterClusterRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AlterClusterRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        r.set_op(AlterClusterRequest::UPDATE_CLUSTER_MYSQL_USER_NAME);
-        AlterClusterResponse res;
-        alter_cluster(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "get_tablet_stats") {
-        GetTabletStatsRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse GetTabletStatsRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        GetTabletStatsResponse res;
-        get_tablet_stats(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = res.DebugString();
-        keep_raw_body = true;
-        return;
-    }
-
-    if (unresolved_path == "get_stage") {
-        GetStageRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse GetStageRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        GetStageResponse res;
-        get_stage(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "abort_txn") {
-        AbortTxnRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse AbortTxnRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-
-        AbortTxnResponse res;
-        abort_txn(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "abort_tablet_job") {
-        FinishTabletJobRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to parse FinishTabletJobRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        r.set_action(FinishTabletJobRequest::ABORT);
-
-        FinishTabletJobResponse res;
-        finish_tablet_job(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "get_instance") {
-        const std::string instance_id =
-                uri.GetQuery("instance_id") == nullptr ? "" : *uri.GetQuery("instance_id");
-        const std::string cloud_unique_id =
-                uri.GetQuery("cloud_unique_id") == nullptr ? "" : *uri.GetQuery("cloud_unique_id");
-        auto [c0, m0] = get_instance_info(resource_mgr_, txn_kv_, instance_id, cloud_unique_id);
-        ret = c0;
-        response_body = m0;
-        return;
-    }
-
-    if (unresolved_path == "alter_ram_user") {
-        AlterRamUserRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterRamUser, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        AlterRamUserResponse res;
-        alter_ram_user(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "alter_iam") {
-        AlterIamRequest r;
-        auto st = google::protobuf::util::JsonStringToMessage(request_body, &r);
-        if (!st.ok()) {
-            msg = "failed to AlterIamRequest, error: " + st.message().ToString();
-            ret = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            response_body = msg;
-            LOG(WARNING) << msg;
-            return;
-        }
-        AlterIamResponse res;
-        alter_iam(cntl, &r, &res, nullptr);
-        ret = res.status().code();
-        msg = res.status().msg();
-        response_body = msg;
-        return;
-    }
-
-    if (unresolved_path == "encode_key") {
-        return process_http_encode_key(response_body, status_code, uri, msg, keep_raw_body);
-    }
-
-    // TODO:
-    // * unresolved_path == "set_token"
-    // * etc.
 }
 
 // TODO: move to separate file
@@ -4145,8 +3471,6 @@ void MetaServiceImpl::get_obj_store_info(google::protobuf::RpcController* contro
         }
     }
     response->mutable_obj_info()->CopyFrom(instance.obj_info());
-    msg = proto_to_json(*response);
-    return;
 }
 
 void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* controller,
@@ -5295,7 +4619,6 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
 
     if (get_all_cluster_info) {
         response->mutable_cluster()->CopyFrom(instance.clusters());
-        msg = proto_to_json(*response);
         LOG_EVERY_N(INFO, 100) << "get all cluster info, " << msg;
     } else {
         for (int i = 0; i < instance.clusters_size(); ++i) {
@@ -5309,7 +4632,6 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
                 mysql_users.count(mysql_user_name)) {
                 // just one cluster
                 response->add_cluster()->CopyFrom(c);
-                msg = proto_to_json(response->cluster().at(0));
                 LOG_EVERY_N(INFO, 100) << "found a cluster, instance_id=" << instance.instance_id()
                                        << " cluster=" << msg;
             }
@@ -5321,9 +4643,7 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
         msg = ss.str();
         std::replace(msg.begin(), msg.end(), '\n', ' ');
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
-        return;
     }
-
 } // get_cluster
 
 void MetaServiceImpl::create_stage(::google::protobuf::RpcController* controller,
@@ -5653,7 +4973,6 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
                 stage_pb.mutable_obj_info()->set_prefix(s.obj_info().prefix());
                 stage_pb.set_stage_id(s.stage_id());
                 stage_pb.set_type(s.type());
-                msg = proto_to_json(stage_pb);
                 response->add_stage()->CopyFrom(stage_pb);
                 return;
             }
@@ -6999,6 +6318,40 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcControl
         msg = ss.str();
         return;
     }
+}
+
+std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
+        std::string_view instance_id, std::string_view cloud_unique_id, InstanceInfoPB* instance) {
+    if (instance_id.empty()) {
+        if (cloud_unique_id.empty()) {
+            return {MetaServiceCode::INVALID_ARGUMENT, "empty instance_id and cloud_unique_id"};
+        }
+        // get instance_id by cloud_unique_id
+        instance_id = get_instance_id(resource_mgr_, std::string(cloud_unique_id));
+        if (instance_id.empty()) {
+            std::string msg =
+                    fmt::format("cannot find instance_id with cloud_unique_id={}", cloud_unique_id);
+            return {MetaServiceCode::INVALID_ARGUMENT, std::move(msg)};
+        }
+    }
+
+    std::unique_ptr<Transaction> txn0;
+    int ret_txn = txn_kv_->create_txn(&txn0);
+    if (ret_txn != 0) {
+        return {MetaServiceCode::KV_TXN_CREATE_ERR, "failed to create txn"};
+    }
+
+    std::shared_ptr<Transaction> txn(txn0.release());
+    auto [c0, m0] = resource_mgr_->get_instance(txn, std::string(instance_id), instance);
+    if (c0 != 0) {
+        return {MetaServiceCode::KV_TXN_GET_ERR, "failed to get instance, info=" + m0};
+    }
+
+    // maybe do not decrypt ak/sk?
+    MetaServiceCode code = MetaServiceCode::OK;
+    std::string msg;
+    decrypt_instance_info(*instance, std::string(instance_id), code, msg, txn);
+    return {code, std::move(msg)};
 }
 
 #undef RPC_PREPROCESS

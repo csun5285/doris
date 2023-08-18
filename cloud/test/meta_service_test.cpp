@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 
 namespace selectdb {
 
-std::unique_ptr<MetaServiceImpl> get_meta_service() {
+std::unique_ptr<MetaServiceImpl> get_meta_service(bool mock_resource_mgr) {
     int ret = 0;
     // MemKv
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
@@ -68,10 +68,15 @@ std::unique_ptr<MetaServiceImpl> get_meta_service() {
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
     txn->commit();
 
-    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rs = mock_resource_mgr ? std::make_shared<MockResourceManager>(txn_kv)
+                                : std::make_shared<ResourceManager>(txn_kv);
     auto rl = std::make_shared<RateLimiter>();
     auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
     return meta_service;
+}
+
+std::unique_ptr<MetaServiceImpl> get_meta_service() {
+    return get_meta_service(true);
 }
 
 static std::string next_rowset_id() {

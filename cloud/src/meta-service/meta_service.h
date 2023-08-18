@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "gen_cpp/selectdb_cloud.pb.h"
@@ -9,6 +8,7 @@
 namespace selectdb {
 
 class Transaction;
+
 class MetaServiceImpl : public selectdb::MetaService {
 public:
     MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv, std::shared_ptr<ResourceManager> resource_mgr,
@@ -243,15 +243,15 @@ public:
                                        ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
                                        ::google::protobuf::Closure* done) override;
 
-private:
-    std::pair<MetaServiceCode, std::string> create_instance(
-            const ::selectdb::AlterInstanceRequest* request);
+    std::pair<MetaServiceCode, std::string> get_instance_info(std::string_view instance_id,
+                                                              std::string_view cloud_unique_id,
+                                                              InstanceInfoPB* instance);
 
+private:
     std::pair<MetaServiceCode, std::string> alter_instance(
             const ::selectdb::AlterInstanceRequest* request,
             std::function<std::pair<MetaServiceCode, std::string>(InstanceInfoPB*)> action);
 
-private:
     std::shared_ptr<TxnKv> txn_kv_;
     std::shared_ptr<ResourceManager> resource_mgr_;
     std::shared_ptr<RateLimiter> rate_limiter_;

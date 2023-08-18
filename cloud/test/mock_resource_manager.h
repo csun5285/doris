@@ -5,9 +5,9 @@
 
 using namespace selectdb;
 
-std::string mock_instance = "test_instance";
-std::string mock_cluster_name = "test_cluster";
-std::string mock_cluster_id = "test_cluster_id";
+static std::string mock_instance = "test_instance";
+static std::string mock_cluster_name = "test_cluster";
+static std::string mock_cluster_id = "test_cluster_id";
 
 class MockResourceManager : public ResourceManager {
 public:

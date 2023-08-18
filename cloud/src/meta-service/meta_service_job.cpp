@@ -1154,7 +1154,7 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
         return;
     }
 
-    // TODO(gaivn): remove duplicated code with start_tablet_job()
+    // TODO(gavin): remove duplicated code with start_tablet_job()
     // Begin to process finish tablet job
     std::string job_key = job_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
                                           tablet_idx.partition_id(), tablet_id});

@@ -551,11 +551,11 @@ std::pair<int, std::string> ResourceManager::get_instance(std::shared_ptr<Transa
     }
 
     ret = txn->get(key, &val);
-    LOG(INFO) << "get instnace_key=" << hex(key);
+    LOG(INFO) << "get instance_key=" << hex(key);
 
     if (ret != 0) {
         code = -2;
-        ss << "failed to get intancece, instance_id=" << instance_id << " ret=" << ret;
+        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
         msg = ss.str();
         return ec;
     }

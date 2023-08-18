@@ -102,7 +102,7 @@ public:
 
     /**
      *
-     *@return 0 for success otehrwise error
+     *@return 0 for success otherwise error
      */
     virtual int commit() = 0;
 
@@ -111,7 +111,7 @@ public:
      * Note that it does not make any sense we call this function before
      * any `Transaction::get()` is called.
      *
-     *@return positive number for success otehrwise error
+     *@return positive number for success otherwise error
      */
     virtual int64_t get_read_version() = 0;
 
@@ -120,7 +120,7 @@ public:
      * Note that it does not make any sense we call this function before
      * a successful call to `Transaction::commit()`.
      *
-     *@return positive number for success otehrwise error
+     *@return positive number for success otherwise error
      */
     virtual int64_t get_committed_version() = 0;
 
@@ -213,8 +213,8 @@ public:
     int init();
 
     /**
-     * Notify the newwork thread to stop, this is an async. call, check 
-     * Network::working to ensure the network exited finaly.
+     * Notify the newwork thread to stop, this is an async. call, check
+     * Network::working to ensure the network exited finally.
      *
      * FIXME: may be we can implement it as a sync. function.
      */
@@ -398,7 +398,7 @@ public:
 
     /**
      *
-     *@return 0 for success, -1 for conflict, -2 for otehrwise error
+     *@return 0 for success, -1 for conflict, -2 for otherwise error
      */
     int commit() override;
 
