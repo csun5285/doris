@@ -386,6 +386,8 @@ public class SessionVariable implements Serializable, Writable {
     public static final String ENABLE_MEMTABLE_ON_SINK_NODE =
             "enable_memtable_on_sink_node";
 
+    public static final String DESCRIBE_EXTEND_VARIANT_COLUMN = "describe_extend_variant_column";
+
     public static final List<String> DEBUG_VARIABLES = ImmutableList.of(
             SKIP_DELETE_PREDICATE,
             SKIP_DELETE_BITMAP,
@@ -722,6 +724,13 @@ public class SessionVariable implements Serializable, Writable {
 
     public int getBeNumberForTest() {
         return beNumberForTest;
+    }
+
+    @VariableMgr.VarAttr(name = DESCRIBE_EXTEND_VARIANT_COLUMN, needForward = true)
+    public boolean enableDescribeExtendVariantColumn = false;
+
+    public int getBeNumber() {
+        return beNumber;
     }
 
     public void setBeNumberForTest(int beNumberForTest) {
@@ -2523,6 +2532,22 @@ public class SessionVariable implements Serializable, Writable {
             return true;
         }
         return connectContext.getSessionVariable().enableAggState;
+    }
+
+    public boolean getEnableDescribeExtendVariantColumn() {
+        return enableDescribeExtendVariantColumn;
+    }
+
+    public void setEnableDescribeExtendVariantColumn(boolean enableDescribeExtendVariantColumn) {
+        this.enableDescribeExtendVariantColumn = enableDescribeExtendVariantColumn;
+    }
+
+    public static boolean enableDescribeExtendVariantColumn() {
+        ConnectContext connectContext = ConnectContext.get();
+        if (connectContext == null) {
+            return false;
+        }
+        return connectContext.getSessionVariable().enableDescribeExtendVariantColumn;
     }
 }
 

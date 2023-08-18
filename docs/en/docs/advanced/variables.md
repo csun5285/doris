@@ -682,6 +682,9 @@ Translated with www.DeepL.com/Translator (free version)
   Whether to add the final keyword when using the JDBC Catalog function to query ClickHouse,default is false.
   
   It is used for the ReplacingMergeTree table engine of ClickHouse to deduplicate queries.
+* `describe_extend_variant_column`
+
+  Controls whether to extend variant column in desc table_name. The default value is false.
 
 * `enable_memtable_on_sink_node`
 
