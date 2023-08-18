@@ -341,9 +341,8 @@ void VNodeChannel::open() {
     request.release_schema();
 }
 
-void refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
-                                    ::doris::PTabletLoadRowsetInfo>& tablet_load_infos,
-                            std::atomic<int64_t>& load_pressure_wait_time) {
+void VNodeChannel::_refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
+                                    ::doris::PTabletLoadRowsetInfo>& tablet_load_infos) {
     int64_t max_rowset_num_gap = 0;
     // if any one tablet is under high load pressure, we would make the whole procedure
     // sleep to prevent the corresponding BE return -235
@@ -369,7 +368,7 @@ void refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
     // 1800ms for compaction to be done toe reduce the high pressure
     auto max_time = config::max_load_pressure_wait_time_ms;
     if (UNLIKELY(max_rowset_num_gap > 0)) {
-        load_pressure_wait_time.store(std::min(max_rowset_num_gap + 1000, max_time));
+        _load_pressure_wait_time.store(std::min(max_rowset_num_gap + 1000, max_time));
     }
 }
 
@@ -395,6 +394,12 @@ Status VNodeChannel::open_wait() {
                 berror(error_code), error_text, channel_info());
     }
     Status status(Status::create(_open_closure->result.status()));
+    if (status.ok()) {
+        // in case the sending process is too fast that the _load_pressure_wait_time
+        // would not take effect. i.e: if all the data is already sent to receiver
+        // then there would be no try send batch anymore
+        _refresh_load_wait_time(_open_closure->result.tablet_load_rowset_num_infos());
+    }
     if (_open_closure->unref()) {
         delete _open_closure;
     }
@@ -439,7 +444,7 @@ Status VNodeChannel::open_wait() {
             // and notice that _index_channel may already be destroyed.
             return;
         }
-        refresh_load_wait_time(result.tablet_load_rowset_num_infos(), _load_pressure_wait_time);
+        _refresh_load_wait_time(result.tablet_load_rowset_num_infos());
         SCOPED_ATTACH_TASK(_state);
         Status status(Status::create(result.status()));
         if (status.ok()) {
@@ -646,9 +651,11 @@ int VNodeChannel::try_send_and_fetch_status(RuntimeState* state,
     }
 
     auto load_pressure_wait_time = _load_pressure_wait_time.load();
+    // This function is invoked inside one bthread
+    // so we shouldn't use any pthread's blocking sleep function
     if (UNLIKELY(load_pressure_wait_time > 0)) {
         VLOG_DEBUG << "try to sleep due to high load pressure for " << load_pressure_wait_time;
-        std::this_thread::sleep_for(std::chrono::milliseconds(load_pressure_wait_time));
+        bthread_usleep(load_pressure_wait_time);
         _load_pressure_block_ns.fetch_add(load_pressure_wait_time);
         _load_pressure_wait_time = 0;
     }
@@ -1040,6 +1047,7 @@ Status VOlapTableSink::prepare(RuntimeState* state) {
     _filtered_rows_counter = ADD_COUNTER(_profile, "RowsFiltered", TUnit::UNIT);
     _send_data_timer = ADD_TIMER(_profile, "SendDataTime");
     _wait_mem_limit_timer = ADD_CHILD_TIMER(_profile, "WaitMemLimitTime", "SendDataTime");
+    _wait_load_pressure_timer = ADD_CHILD_TIMER(_profile, "WaitLoadPressureTime", "SendDataTime");
     _row_distribution_timer = ADD_CHILD_TIMER(_profile, "RowDistributionTime", "SendDataTime");
     _filter_timer = ADD_CHILD_TIMER(_profile, "FilterTime", "SendDataTime");
     _where_clause_timer = ADD_CHILD_TIMER(_profile, "WhereClauseTime", "SendDataTime");
@@ -1528,7 +1536,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
         int64_t serialize_batch_ns = 0, queue_push_lock_ns = 0, actual_consume_ns = 0,
                 total_add_batch_exec_time_ns = 0, max_add_batch_exec_time_ns = 0,
                 total_wait_exec_time_ns = 0, max_wait_exec_time_ns = 0, total_add_batch_num = 0,
-                num_node_channels = 0;
+                num_node_channels = 0, load_pressure_time_ns = 0;
         VNodeChannelStat channel_stat;
         {
             for (const auto& index_channel : _channels) {
@@ -1542,7 +1550,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                          &serialize_batch_ns, &channel_stat, &queue_push_lock_ns,
                          &actual_consume_ns, &total_add_batch_exec_time_ns, &add_batch_exec_time,
                          &total_wait_exec_time_ns, &wait_exec_time,
-                         &total_add_batch_num](const std::shared_ptr<VNodeChannel>& ch) {
+                         &total_add_batch_num, &load_pressure_time_ns](const std::shared_ptr<VNodeChannel>& ch) {
                             if (!status.ok() || ch->is_closed()) {
                                 return;
                             }
@@ -1557,7 +1565,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                                             &channel_stat, &queue_push_lock_ns, &actual_consume_ns,
                                             &total_add_batch_exec_time_ns, &add_batch_exec_time,
                                             &total_wait_exec_time_ns, &wait_exec_time,
-                                            &total_add_batch_num);
+                                            &total_add_batch_num, &load_pressure_time_ns);
                         });
                 num_node_channels += index_channel->num_node_channels();
                 if (add_batch_exec_time > max_add_batch_exec_time_ns) {
@@ -1574,6 +1582,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
             LOG(INFO) << "total mem_exceeded_block_ns=" << channel_stat.mem_exceeded_block_ns
                       << ", total queue_push_lock_ns=" << queue_push_lock_ns
                       << ", total actual_consume_ns=" << actual_consume_ns
+                      << ", total load_pressure_wait_ns=" << load_pressure_time_ns
                       << ", load id=" << print_id(_load_id);
 
             COUNTER_SET(_input_rows_counter, _number_input_rows);
@@ -1582,6 +1591,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                         _number_filtered_rows +
                                 state->num_rows_filtered_in_strict_mode_partial_update());
             COUNTER_SET(_send_data_timer, _send_data_ns);
+            COUNTER_SET(_wait_load_pressure_timer, load_pressure_time_ns);
             COUNTER_SET(_row_distribution_timer, (int64_t)_row_distribution_watch.elapsed_time());
             COUNTER_SET(_filter_timer, _filter_ns);
             COUNTER_SET(_append_node_channel_timer, channel_stat.append_node_channel_ns);

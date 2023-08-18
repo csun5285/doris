@@ -270,7 +270,7 @@ public:
                      int64_t* queue_push_lock_ns, int64_t* actual_consume_ns,
                      int64_t* total_add_batch_exec_time_ns, int64_t* add_batch_exec_time_ns,
                      int64_t* total_wait_exec_time_ns, int64_t* wait_exec_time_ns,
-                     int64_t* total_add_batch_num) const {
+                     int64_t* total_add_batch_num, int64_t* load_pressure_time_ns) const {
         (*add_batch_counter_map)[_node_id] += _add_batch_counter;
         (*add_batch_counter_map)[_node_id].close_wait_time_ms = _close_time_ms;
         *serialize_batch_ns += _serialize_batch_ns;
@@ -282,6 +282,7 @@ public:
         *wait_exec_time_ns = (_add_batch_counter.add_batch_wait_execution_time_us * 1000);
         *total_wait_exec_time_ns += *wait_exec_time_ns;
         *total_add_batch_num += _add_batch_counter.add_batch_num;
+        *load_pressure_time_ns += _load_pressure_block_ns;
     }
 
     int64_t node_id() const { return _node_id; }
@@ -300,6 +301,8 @@ public:
 protected:
     void _close_check();
     void _cancel_with_msg(const std::string& msg);
+    void _refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
+                                    ::doris::PTabletLoadRowsetInfo>& tablet_load_infos);
 
     VOlapTableSink* _parent = nullptr;
     IndexChannel* _index_channel = nullptr;
@@ -627,6 +630,7 @@ private:
     RuntimeProfile::Counter* _max_wait_exec_timer = nullptr;
     RuntimeProfile::Counter* _add_batch_number = nullptr;
     RuntimeProfile::Counter* _num_node_channels = nullptr;
+    RuntimeProfile::Counter* _wait_load_pressure_timer = nullptr;
 
     // load mem limit is for remote load channel
     int64_t _load_mem_limit = -1;

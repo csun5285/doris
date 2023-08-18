@@ -28,9 +28,10 @@
 #include <string>
 #include <utility>
 
-#include "cloud/utils.h"
 #include "cloud/meta_mgr.h"
+#include "cloud/utils.h"
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "cloud/olap/storage_engine.h"
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
 #include "common/logging.h"
@@ -52,7 +53,6 @@
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/schema.h"
 #include "olap/schema_change.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
 #include "olap/txn_manager.h"
@@ -220,7 +220,8 @@ Status DeltaWriter::init() {
                     .tag("limit", config::max_tablet_version_num)
                     .tag("tablet_id", _tablet->tablet_id());
             return Status::Error<TOO_MANY_VERSION>("too many versions, versions={} tablet={}",
-                    config::max_tablet_version_num, _tablet->tablet_id());
+                                                   config::max_tablet_version_num,
+                                                   _tablet->tablet_id());
         }
     }
 
@@ -657,8 +658,8 @@ Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
     }
     if (_tablet->enable_unique_key_merge_on_write()) {
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
-            _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
-            _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids);
+                _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
+                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids);
     }
 
     _delta_written_success = true;
