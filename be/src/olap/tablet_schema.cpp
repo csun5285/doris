@@ -653,6 +653,7 @@ void TabletSchema::append_column(TabletColumn column, ColumnType col_type) {
             vectorized::PathInData path(col_name);
             column.set_path_info(path);
         }
+        _field_path_to_index[column.path_info()] = _num_columns;
     }
     if (UNLIKELY(column.name() == DELETE_SIGN)) {
         _delete_sign_idx = _num_columns;
@@ -666,6 +667,7 @@ void TabletSchema::append_column(TabletColumn column, ColumnType col_type) {
     if (col_type == ColumnType::NORMAL) {
         _field_name_to_index[column.name()] = _num_columns;
     } else if (col_type == ColumnType::VARIANT) {
+        _field_name_to_index[column.name()] = _num_columns;
         _field_path_to_index[column.path_info()] = _num_columns;
     }
     _field_id_to_index[column.unique_id()] = _num_columns;

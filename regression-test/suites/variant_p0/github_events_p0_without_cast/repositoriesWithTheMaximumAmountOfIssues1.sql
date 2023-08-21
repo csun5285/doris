@@ -1,0 +1,1 @@
+SELECT v:repo.name, count() AS c, count(distinct v:actor.login) AS u FROM github_events WHERE v:type = 'IssuesEvent' AND v:payload.action = 'opened' GROUP BY v:repo.name ORDER BY c DESC, v:repo.name LIMIT 50

@@ -472,6 +472,8 @@ public class Env {
 
     private HiveTransactionMgr hiveTransactionMgr;
 
+    private RemoteTableSchemaMgr remoteTableSchemaMgr;
+
     public List<Frontend> getFrontends(FrontendNodeType nodeType) {
         if (nodeType == null) {
             // get all
@@ -688,6 +690,7 @@ public class Env {
         this.hiveTransactionMgr = new HiveTransactionMgr();
         this.binlogManager = new BinlogManager();
         this.binlogGcer = new BinlogGcer();
+        this.remoteTableSchemaMgr = new RemoteTableSchemaMgr(10000);
     }
 
     public static void destroyCheckpoint() {
@@ -1533,6 +1536,8 @@ public class Env {
         domainResolver.start();
         // fe disk updater
         feDiskUpdater.start();
+        remoteTableSchemaMgr.start();
+
     }
 
     private void transferToNonMaster(FrontendNodeType newType) {
@@ -5473,5 +5478,9 @@ public class Env {
 
     public void replayAutoIncrementIdUpdateLog(AutoIncrementIdUpdateLog log) throws Exception {
         getInternalCatalog().replayAutoIncrementIdUpdateLog(log);
+    }
+
+    public RemoteTableSchemaMgr getRemoteTableSchemaMgr() {
+        return remoteTableSchemaMgr;
     }
 }

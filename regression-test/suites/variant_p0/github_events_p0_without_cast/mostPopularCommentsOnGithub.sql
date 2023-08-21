@@ -1,0 +1,1 @@
+SELECT v:payload.comment.body, count() FROM github_events WHERE v:payload.comment.body != "" AND length(v:payload.comment.body) < 100 GROUP BY v:payload.comment.body  ORDER BY count(), 1 DESC LIMIT 50

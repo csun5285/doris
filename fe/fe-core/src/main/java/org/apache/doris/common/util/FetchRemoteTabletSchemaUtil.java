@@ -170,6 +170,7 @@ public class FetchRemoteTabletSchemaUtil {
 
     private Column initColumnFromPB(ColumnPB column) throws AnalysisException {
         try {
+            int uniqueId = column.getUniqueId();
             AggregateType aggType = getAggTypeFromAggName(column.getAggregation());
             Type type = getTypeFromTypeName(column.getType());
             String columnName = column.getName();
@@ -210,8 +211,8 @@ public class FetchRemoteTabletSchemaUtil {
                     type = new StructType(childTypes);
                 }
             } while (false);
-            return new Column(columnName, type, isKey, aggType, isNullable,
-                                                    defaultValue, "remote schema");
+            return new Column(columnName, type, isKey, aggType, isNullable, defaultValue,
+                                                "remote schema", true, null, uniqueId, null);
         } catch (Exception e) {
             throw new AnalysisException("default value to string failed");
         }
