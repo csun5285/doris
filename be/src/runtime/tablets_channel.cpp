@@ -29,8 +29,8 @@
 #include <initializer_list>
 #include <set>
 #include <thread>
-#include <utility>
 #include <unordered_set>
+#include <utility>
 
 #include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
@@ -251,7 +251,7 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
         }
         it++;
     }
-     
+
     // 6. set txn related delete bitmap if necessary
     for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
         (*it)->cloud_set_txn_related_delete_bitmap();
@@ -670,28 +670,25 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
                                  std::function<Status(DeltaWriter * writer)> write_func) {
         google::protobuf::RepeatedPtrField<PTabletError>* tablet_errors =
                 response->mutable_tablet_errors();
-        {
-            std::lock_guard<SpinLock> l(_tablet_writers_lock);
-            auto tablet_writer_it = _tablet_writers.find(tablet_id);
-            if (tablet_writer_it == _tablet_writers.end()) {
-                return Status::InternalError("unknown tablet to append data, tablet={}", tablet_id);
-            }
-            Status st = write_func(tablet_writer_it->second);
-            if (!st.ok()) {
-                auto err_msg =
-                        fmt::format("tablet writer write failed, tablet_id={}, txn_id={}, err={}",
-                                    tablet_id, _txn_id, st.to_string());
-                LOG(WARNING) << err_msg;
-                PTabletError* error = tablet_errors->Add();
-                error->set_tablet_id(tablet_id);
-                error->set_msg(err_msg);
-                tablet_writer_it->second->cancel_with_status(st);
-                _add_broken_tablet(tablet_id);
-                // continue write to other tablet.
-                // the error will return back to sender.
-            }
-            tablet_writer_it->second->set_tablet_load_rowset_num_info(tablet_load_infos);
+        auto tablet_writer_it = _tablet_writers.find(tablet_id);
+        if (tablet_writer_it == _tablet_writers.end()) {
+            return Status::InternalError("unknown tablet to append data, tablet={}", tablet_id);
         }
+        Status st = write_func(tablet_writer_it->second);
+        if (!st.ok()) {
+            auto err_msg =
+                    fmt::format("tablet writer write failed, tablet_id={}, txn_id={}, err={}",
+                                tablet_id, _txn_id, st.to_string());
+            LOG(WARNING) << err_msg;
+            PTabletError* error = tablet_errors->Add();
+            error->set_tablet_id(tablet_id);
+            error->set_msg(err_msg);
+            tablet_writer_it->second->cancel_with_status(st);
+            _add_broken_tablet(tablet_id);
+            // continue write to other tablet.
+            // the error will return back to sender.
+        }
+        tablet_writer_it->second->set_tablet_load_rowset_num_info(tablet_load_infos);
         return Status::OK();
     };
 

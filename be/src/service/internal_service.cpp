@@ -282,10 +282,6 @@ void PInternalServiceImpl::tablet_writer_open(google::protobuf::RpcController* c
         st.to_protobuf(response->mutable_status());
     });
     if (!ret) {
-        LOG(WARNING) << "fail to offer request to the work pool";
-        brpc::ClosureGuard closure_guard(done);
-        response->mutable_status()->set_status_code(TStatusCode::CANCELLED);
-        response->mutable_status()->add_error_msgs("fail to offer request to the work pool");
         offer_failed(response, done, _light_work_pool);
     }
 }
