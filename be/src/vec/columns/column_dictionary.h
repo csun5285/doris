@@ -21,6 +21,7 @@
 
 #include <algorithm>
 
+#include "util/slice.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_string.h"
 #include "vec/columns/predicate_column.h"

@@ -35,6 +35,7 @@ private:
 public:
     const char* get_family_name() const override { return "Nothing"; }
     MutableColumnPtr clone_dummy(size_t s_) const override { return ColumnNothing::create(s_); }
+    void clear() override { s = 0; }
 
     bool can_be_inside_nullable() const override { return true; }
 

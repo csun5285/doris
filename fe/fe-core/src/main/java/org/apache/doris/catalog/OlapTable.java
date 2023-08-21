@@ -2332,7 +2332,7 @@ public class OlapTable extends Table {
         }
     }
 
-    public List<Tablet> getAllTablets() throws AnalysisException {
+    public List<Tablet> getAllTablets() {
         List<Tablet> tablets = Lists.newArrayList();
         for (Partition partition : getPartitions()) {
             for (Tablet tablet : partition.getBaseIndex().getTablets()) {

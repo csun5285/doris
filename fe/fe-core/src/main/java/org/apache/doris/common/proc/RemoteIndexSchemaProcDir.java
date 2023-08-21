@@ -18,6 +18,7 @@
 package org.apache.doris.common.proc;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.TableIf;
@@ -55,10 +56,13 @@ public class RemoteIndexSchemaProcDir implements ProcDirInterface {
         this.bfColumns = bfColumns;
     }
 
+    public List<Column> getSchema() {
+        return this.schema;
+    }
+
     @Override
     public ProcResult fetchResult() throws AnalysisException {
         Preconditions.checkNotNull(table);
-        Preconditions.checkNotNull(schema);
         List<Tablet> tablets = null;
         table.readLock();
         try {
@@ -72,6 +76,7 @@ public class RemoteIndexSchemaProcDir implements ProcDirInterface {
             throw new AnalysisException("fetch remote tablet schema failed");
         }
         this.schema = remoteSchema;
+        Env.getCurrentEnv().getRemoteTableSchemaMgr().updateOneTableSchmea(table.getId(), remoteSchema);
         return IndexSchemaProcNode.createResult(this.schema, this.bfColumns);
     }
 

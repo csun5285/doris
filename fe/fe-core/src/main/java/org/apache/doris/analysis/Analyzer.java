@@ -1008,10 +1008,17 @@ public class Analyzer {
 
         LOG.debug("register column ref table {}, colName {}, col {}", tblName, colName, col.toSql());
         if (col.getType().isVariantType() || (subColNames != null && !subColNames.isEmpty())) {
-            if (!col.getType().isVariantType()) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_ILLEGAL_COLUMN_REFERENCE_ERROR,
-                        Joiner.on(".").join(tblName.getTbl(), colName));
-            }
+            // select t.repo_name
+            // from (
+            //     select repo:name as repo_name from table
+            // ) t 
+            // where t.repo_name = 'opened';
+            // repo is variant column, repo:name will be found in remote schema cache
+            // repo:name type will be changed to string
+            // if (!col.getType().isVariantType()) {
+            //     ErrorReport.reportAnalysisException(ErrorCode.ERR_ILLEGAL_COLUMN_REFERENCE_ERROR,
+            //             Joiner.on(".").join(tblName.getTbl(), colName));
+            // }
             if (subColNames == null) {
                 // Root
                 subColNames = new ArrayList<String>();
@@ -1033,12 +1040,37 @@ public class Analyzer {
                 return result;
             }
             result = globalState.descTbl.addSlotDescriptor(d);
+            StringBuilder builder = new StringBuilder();
+            builder.append(col.getName());
+            for (String name : subColNames) {
+                builder.append(".");
+                builder.append(name);
+            }
+            String variantColName = builder.toString();
+            List<Column> extendCols = Env.getCurrentEnv().getRemoteTableSchemaMgr()
+                                                            .getTableSchema(d.getTable().getId());
+            if (extendCols != null && !extendCols.isEmpty()) {
+                for (Column column : extendCols) {
+                    if (column.getName().equals(variantColName)) {
+                        col = column;
+                        break;
+                    }
+                }
+            }
             LOG.debug("register slot descriptor {}", result);
             result.setSubColLables(subColNames);
             result.setColumn(col);
             result.setIsMaterialized(true);
             result.setIsNullable(col.isAllowNull());
             subColumnSlotRefMap.get(key).put(subColNames, result);
+            // select t.repo_name
+            // from (
+            //     select repo:name as repo_name from table
+            // ) t 
+            // where t.repo_name = 'opened';
+            // repo is variant column, repo:name will be found in remote schema cache
+            // we should add repo_name to slotRefMap
+            slotRefMap.put(key, result);
             return result;
         }
 
