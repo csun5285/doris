@@ -483,11 +483,11 @@ Status NewOlapScanner::_init_variant_columns() {
         if (!slot->need_materialize()) {
             continue;
         }
-        if (slot->type().is_variant_type()) {
+        if (!slot->column_paths().empty()) {
             // Such columns are not exist in frontend schema info, so we need to
             // add them into tablet_schema for later column indexing.
             TabletColumn subcol;
-            subcol.set_type(FieldType::OLAP_FIELD_TYPE_VARIANT);
+            subcol.set_type(_get_field_type(slot->type().type));
             subcol.set_name(slot->col_name());
             subcol.set_is_nullable(true);
             subcol.set_unique_id(slot->col_unique_id());
@@ -496,11 +496,6 @@ Status NewOlapScanner::_init_variant_columns() {
             if (_tablet_schema->field_index(path) < 0) {
                 _tablet_schema->append_column(subcol, TabletSchema::ColumnType::VARIANT);
             }
-        } else if (!slot->column_paths().empty()) {
-            // Extracted materialized columns update it's path info
-            PathInData path = _build_path(slot);
-            int index = _tablet_schema->field_index(slot->col_unique_id());
-            _tablet_schema->mutable_columns()[index].set_path_info(path);
         }
     }
     return Status::OK();
@@ -517,7 +512,7 @@ Status NewOlapScanner::_init_return_columns() {
 
         // variant column using path to index a column
         int32_t index = 0;
-        if (slot->type().is_variant_type()) {
+        if (!slot->column_paths().empty()) {
             index = _tablet_schema->field_index(_build_path(slot));
         } else {
             index = slot->col_unique_id() >= 0 ? _tablet_schema->field_index(slot->col_unique_id())
@@ -709,6 +704,81 @@ void NewOlapScanner::_update_counters_before_close() {
     _tablet->query_scan_bytes->increment(_compressed_bytes_read);
     _tablet->query_scan_rows->increment(_raw_rows_read);
     _tablet->query_scan_count->increment(1);
+}
+
+FieldType NewOlapScanner::_get_field_type(PrimitiveType primitiveType) {
+    switch (primitiveType) {
+    case PrimitiveType::INVALID_TYPE:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN;
+    case PrimitiveType::TYPE_NULL:
+        return FieldType::OLAP_FIELD_TYPE_NONE;
+    case PrimitiveType::TYPE_BOOLEAN:
+        return FieldType::OLAP_FIELD_TYPE_BOOL;
+    case PrimitiveType::TYPE_TINYINT:
+        return FieldType::OLAP_FIELD_TYPE_TINYINT;
+    case PrimitiveType::TYPE_SMALLINT:
+        return FieldType::OLAP_FIELD_TYPE_SMALLINT;
+    case PrimitiveType::TYPE_INT:
+        return FieldType::OLAP_FIELD_TYPE_INT;
+    case PrimitiveType::TYPE_BIGINT:
+        return FieldType::OLAP_FIELD_TYPE_BIGINT;
+    case PrimitiveType::TYPE_LARGEINT:
+        return FieldType::OLAP_FIELD_TYPE_LARGEINT;
+    case PrimitiveType::TYPE_FLOAT:
+        return FieldType::OLAP_FIELD_TYPE_FLOAT;
+    case PrimitiveType::TYPE_DOUBLE:
+        return FieldType::OLAP_FIELD_TYPE_DOUBLE;
+    case PrimitiveType::TYPE_VARCHAR:
+        return FieldType::OLAP_FIELD_TYPE_VARCHAR;
+    case PrimitiveType::TYPE_DATE:
+        return FieldType::OLAP_FIELD_TYPE_DATE;
+    case PrimitiveType::TYPE_DATETIME:
+        return FieldType::OLAP_FIELD_TYPE_DATETIME;
+    case PrimitiveType::TYPE_BINARY:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN; // Not implemented
+    case PrimitiveType::TYPE_CHAR:
+        return FieldType::OLAP_FIELD_TYPE_CHAR;
+    case PrimitiveType::TYPE_STRUCT:
+        return FieldType::OLAP_FIELD_TYPE_STRUCT;
+    case PrimitiveType::TYPE_ARRAY:
+        return FieldType::OLAP_FIELD_TYPE_ARRAY;
+    case PrimitiveType::TYPE_MAP:
+        return FieldType::OLAP_FIELD_TYPE_MAP;
+    case PrimitiveType::TYPE_HLL:
+        return FieldType::OLAP_FIELD_TYPE_HLL;
+    case PrimitiveType::TYPE_DECIMALV2:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN; // Not implemented
+    case PrimitiveType::TYPE_TIME:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN;
+    case PrimitiveType::TYPE_OBJECT:
+        return FieldType::OLAP_FIELD_TYPE_OBJECT;
+    case PrimitiveType::TYPE_STRING:
+        return FieldType::OLAP_FIELD_TYPE_STRING;
+    case PrimitiveType::TYPE_QUANTILE_STATE:
+        return FieldType::OLAP_FIELD_TYPE_QUANTILE_STATE;
+    case PrimitiveType::TYPE_DATEV2:
+        return FieldType::OLAP_FIELD_TYPE_DATEV2;
+    case PrimitiveType::TYPE_DATETIMEV2:
+        return FieldType::OLAP_FIELD_TYPE_DATETIMEV2;
+    case PrimitiveType::TYPE_TIMEV2:
+        return FieldType::OLAP_FIELD_TYPE_TIMEV2;
+    case PrimitiveType::TYPE_DECIMAL32:
+        return FieldType::OLAP_FIELD_TYPE_DECIMAL32;
+    case PrimitiveType::TYPE_DECIMAL64:
+        return FieldType::OLAP_FIELD_TYPE_DECIMAL64;
+    case PrimitiveType::TYPE_DECIMAL128I:
+        return FieldType::OLAP_FIELD_TYPE_DECIMAL128I;
+    case PrimitiveType::TYPE_JSONB:
+        return FieldType::OLAP_FIELD_TYPE_JSONB;
+    case PrimitiveType::TYPE_VARIANT:
+        return FieldType::OLAP_FIELD_TYPE_VARIANT;
+    case PrimitiveType::TYPE_LAMBDA_FUNCTION:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN; // Not implemented
+    case PrimitiveType::TYPE_AGG_STATE:
+        return FieldType::OLAP_FIELD_TYPE_AGG_STATE;
+    default:
+        return FieldType::OLAP_FIELD_TYPE_UNKNOWN;
+    }
 }
 
 } // namespace doris::vectorized

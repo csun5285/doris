@@ -1,0 +1,1 @@
+-- SELECT v:repo.name, v:created_at, count() AS stars FROM github_events WHERE v:type = 'WatchEvent' GROUP BY v:repo.name, v:created_at ORDER BY count() DESC LIMIT 50

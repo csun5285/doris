@@ -1006,6 +1006,23 @@ public class Analyzer {
                 return result;
             }
             result = globalState.descTbl.addSlotDescriptor(d);
+            StringBuilder builder = new StringBuilder();
+            builder.append(col.getName());
+            for (String name : subColNames) {
+                builder.append(".");
+                builder.append(name);
+            }
+            String variantColName = builder.toString();
+            List<Column> extendCols = Env.getCurrentEnv().getRemoteTableSchemaMgr()
+                                                            .getTableSchema(d.getTable().getId());
+            if (extendCols != null && !extendCols.isEmpty()) {
+                for (Column column : extendCols) {
+                    if (column.getName().equals(variantColName)) {
+                        col = column;
+                        break;
+                    }
+                }
+            }
             LOG.debug("register slot descriptor {}", result);
             result.setSubColLables(subColNames);
             result.setColumn(col);
