@@ -1610,6 +1610,8 @@ void SegmentIterator::_output_non_pred_columns(vectorized::Block* block) {
             block->replace_by_position(loc, std::move(_current_return_columns[cid]));
         }
     }
+    // variant column need to be finalized
+    block->finalize();
 }
 
 Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32_t& nrows_read,
@@ -1796,8 +1798,9 @@ Status SegmentIterator::_convert_to_expected_type(const std::vector<ColumnId>& c
         if (_current_return_columns[i] == nullptr || _converted_column_ids[i]) {
             continue;
         }
-        if (!_segment->is_same_file_col_type_with_expected(
-                    i, *_schema, _opts.io_ctx.reader_type != ReaderType::READER_QUERY)) {
+        bool is_same = _segment->is_same_file_col_type_with_expected(
+                    i, *_schema, _opts.io_ctx.reader_type != ReaderType::READER_QUERY);
+        if (!is_same) {
             const Field* field_type = _schema->column(i);
             vectorized::DataTypePtr expected_type = Schema::get_data_type_ptr(*field_type);
             vectorized::DataTypePtr file_column_type = _segment->get_data_type_of(
@@ -1811,22 +1814,23 @@ Status SegmentIterator::_convert_to_expected_type(const std::vector<ColumnId>& c
             }
             RETURN_IF_ERROR(vectorized::schema_util::cast_column({original, file_column_type, ""},
                                                                  expected_type, &expected));
-            // wrap predicate column
-            if (_is_pred_column[i]) {
-                vectorized::MutableColumnPtr new_pred_column =
-                        Schema::get_predicate_column_ptr(*field_type, _opts.io_ctx.reader_type);
-                new_pred_column->insert_range_from(*expected, 0, expected->size());
-                _current_return_columns[i] = std::move(new_pred_column);
-                // TODO set datetime type
-            } else {
-                _current_return_columns[i] = expected->assume_mutable();
-            }
-            _converted_column_ids[i] = 1;
+            
+            _current_return_columns[i] = expected->assume_mutable();
+            
             VLOG_DEBUG << fmt::format("Convert {} fom file column type {} to {}, num_rows {}",
                                       field_type->path().get_path(), file_column_type->get_name(),
                                       expected_type->get_name(),
                                       _current_return_columns[i]->size());
         }
+        // wrap predicate column
+        if (_is_pred_column[i] && !is_same) {
+            vectorized::MutableColumnPtr new_pred_column =
+                    Schema::get_predicate_column_ptr(*_schema->column(i), _opts.io_ctx.reader_type);
+            new_pred_column->insert_range_from(*_current_return_columns[i], 0, _current_return_columns[i]->size());
+            _current_return_columns[i] = std::move(new_pred_column);
+            // TODO set datetime type
+        }
+        _converted_column_ids[i] = 1;
     }
     return Status::OK();
 }

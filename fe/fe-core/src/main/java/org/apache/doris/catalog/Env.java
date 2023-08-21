@@ -501,6 +501,8 @@ public class Env {
         return res;
     }
 
+    private RemoteTableSchemaMgr remoteTableSchemaMgr;
+
     public List<Frontend> getFrontends(FrontendNodeType nodeType) {
         if (nodeType == null) {
             // get all
@@ -721,6 +723,7 @@ public class Env {
         this.binlogGcer = new BinlogGcer();
         this.columnIdFlusher = new ColumnIdFlushDaemon();
         this.queryCancelWorker = new QueryCancelWorker(systemInfo);
+        this.remoteTableSchemaMgr = new RemoteTableSchemaMgr(Config.remote_tablet_schema_fetch_intervals);
     }
 
     public static void destroyCheckpoint() {
@@ -1581,6 +1584,8 @@ public class Env {
         domainResolver.start();
         // fe disk updater
         feDiskUpdater.start();
+        remoteTableSchemaMgr.start();
+
     }
 
     private void transferToNonMaster(FrontendNodeType newType) {
@@ -5638,5 +5643,9 @@ public class Env {
 
     public StatisticsAutoCollector getStatisticsAutoCollector() {
         return statisticsAutoCollector;
+    }
+
+    public RemoteTableSchemaMgr getRemoteTableSchemaMgr() {
+        return remoteTableSchemaMgr;
     }
 }

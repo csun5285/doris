@@ -1,0 +1,1 @@
+SELECT v:payload.action, count() FROM github_events WHERE v:type = 'WatchEvent' GROUP BY v:payload.action 
