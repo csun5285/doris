@@ -53,12 +53,13 @@ class NewOlapScanner : public VScanner {
     ENABLE_FACTORY_CREATOR(NewOlapScanner);
 
 public:
-    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
-                   RuntimeProfile* profile);
+    NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
+                   NewOlapScanNode* parent, int64_t limit, bool aggregation,
+                   const std::vector<OlapScanRange*>& key_ranges, RuntimeProfile* profile);
 
-    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
+    NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
+                   NewOlapScanNode* parent, int64_t limit, bool aggregation,
+                   const std::vector<OlapScanRange*>& key_ranges,
                    const std::vector<RowSetSplits>& rs_splits, RuntimeProfile* profile);
 
     Status init() override;
@@ -94,7 +95,6 @@ private:
     TabletSchemaSPtr _tablet_schema;
     TabletSharedPtr _tablet;
     int64_t _version;
-    const TPaloScanRange& _scan_range;
     std::vector<OlapScanRange*> _key_ranges;
 
     TabletReader::ReaderParams _tablet_reader_params;

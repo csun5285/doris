@@ -65,27 +65,27 @@
 
 namespace doris::vectorized {
 
-NewOlapScanner::NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit,
-                               bool aggregation, const TPaloScanRange& scan_range,
+NewOlapScanner::NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
+                               NewOlapScanNode* parent, int64_t limit, bool aggregation,
                                const std::vector<OlapScanRange*>& key_ranges,
                                RuntimeProfile* profile)
         : VScanner(state, static_cast<VScanNode*>(parent), limit, profile),
           _aggregation(aggregation),
-          _version(-1),
-          _scan_range(scan_range),
+          _tablet(std::move(tablet)),
+          _version(version),
           _key_ranges(key_ranges) {
     _tablet_schema = std::make_shared<TabletSchema>();
     _is_init = false;
 }
 
-NewOlapScanner::NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit,
-                               bool aggregation, const TPaloScanRange& scan_range,
+NewOlapScanner::NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
+                               NewOlapScanNode* parent, int64_t limit, bool aggregation,
                                const std::vector<OlapScanRange*>& key_ranges,
                                const std::vector<RowSetSplits>& rs_splits, RuntimeProfile* profile)
         : VScanner(state, static_cast<VScanNode*>(parent), limit, profile),
           _aggregation(aggregation),
-          _version(-1),
-          _scan_range(scan_range),
+          _tablet(std::move(tablet)),
+          _version(version),
           _key_ranges(key_ranges) {
     _tablet_reader_params.rs_splits = rs_splits;
     _tablet_schema = std::make_shared<TabletSchema>();
@@ -138,28 +138,16 @@ Status NewOlapScanner::init() {
     // it will be very slow when reading data in segment iterator
     _tablet_reader->set_batch_size(_state->batch_size());
 
-    // Get olap table
-    TTabletId tablet_id = _scan_range.tablet_id;
-    _version = strtoul(_scan_range.version.c_str(), nullptr, 10);
     TabletSchemaSPtr cached_schema;
     std::string schema_key;
     {
-#ifdef CLOUD_MODE
-        // FIXME(plat1ko): use synced tablet in OlapScanNode
-        RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(tablet_id, &_tablet));
-#else
-        auto [tablet, status] =
-                StorageEngine::instance()->tablet_manager()->get_tablet_and_status(tablet_id, true);
-        RETURN_IF_ERROR(status);
-        _tablet = std::move(tablet);
-#endif
         TOlapScanNode& olap_scan_node = ((NewOlapScanNode*)_parent)->_olap_scan_node;
         if (olap_scan_node.__isset.schema_version && olap_scan_node.__isset.columns_desc &&
             !olap_scan_node.columns_desc.empty() &&
             olap_scan_node.columns_desc[0].col_unique_id >= 0) {
-            schema_key = SchemaCache::get_schema_key(tablet_id, olap_scan_node.columns_desc,
-                                                     olap_scan_node.schema_version,
-                                                     SchemaCache::Type::TABLET_SCHEMA);
+            schema_key = SchemaCache::get_schema_key(
+                    _tablet->tablet_id(), olap_scan_node.columns_desc,
+                    olap_scan_node.schema_version, SchemaCache::Type::TABLET_SCHEMA);
             cached_schema = SchemaCache::instance()->get_schema<TabletSchemaSPtr>(schema_key);
         }
         if (cached_schema) {
@@ -185,51 +173,19 @@ Status NewOlapScanner::init() {
             }
         }
 
-#ifdef CLOUD_MODE
-        // FIXME(plat1ko): Holy shit! Do `_init_tablet_reader_params` realy need hold tablet rlock?
-        //  And why not pass `tablet` in NewOlapScanner ctor?
-        if (_tablet_reader_params.rs_splits.empty()) {
-            RETURN_IF_ERROR(_tablet->cloud_sync_rowsets(_version, true));
-            std::shared_lock rdlock(_tablet->get_header_lock());
-            RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers({0, _version},
-                                                              &_tablet_reader_params.rs_splits));
-            // Initialize tablet_reader_params
-            RETURN_IF_ERROR(_init_tablet_reader_params(_key_ranges, parent->_olap_filters,
-                                                       parent->_filter_predicates,
-                                                       parent->_push_down_functions));
-        } else {
-            std::shared_lock rdlock(_tablet->get_header_lock());
-            // Initialize tablet_reader_params
-            RETURN_IF_ERROR(_init_tablet_reader_params(_key_ranges, parent->_olap_filters,
-                                                       parent->_filter_predicates,
-                                                       parent->_push_down_functions)); 
-        }
-#else
         {
             std::shared_lock rdlock(_tablet->get_header_lock());
             if (_tablet_reader_params.rs_splits.empty()) {
-                const RowsetSharedPtr rowset = _tablet->rowset_with_max_version();
-                if (rowset == nullptr) {
-                    std::stringstream ss;
-                    ss << "fail to get latest version of tablet: " << tablet_id;
-                    LOG(WARNING) << ss.str();
-                    return Status::InternalError(ss.str());
-                }
-
+#ifdef CLOUD_MODE
+                RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers(
+                        {0, _version}, &_tablet_reader_params.rs_splits));
+#else
                 // acquire tablet rowset readers at the beginning of the scan node
                 // to prevent this case: when there are lots of olap scanners to run for example 10000
                 // the rowsets maybe compacted when the last olap scanner starts
-                Version rd_version(0, _version);
-                Status acquire_reader_st =
-                        _tablet->capture_rs_readers(rd_version, &_tablet_reader_params.rs_splits);
-                if (!acquire_reader_st.ok()) {
-                    LOG(WARNING) << "fail to init reader.res=" << acquire_reader_st;
-                    std::stringstream ss;
-                    ss << "failed to initialize storage reader. tablet=" << _tablet->full_name()
-                       << ", res=" << acquire_reader_st
-                       << ", backend=" << BackendOptions::get_localhost();
-                    return Status::InternalError(ss.str());
-                }
+                RETURN_IF_ERROR(_tablet->capture_rs_readers({0, _version},
+                                                            &_tablet_reader_params.rs_splits));
+#endif
             }
 
             // Initialize tablet_reader_params
@@ -237,7 +193,6 @@ Status NewOlapScanner::init() {
                                                        parent->_filter_predicates,
                                                        parent->_push_down_functions));
         }
-#endif
     }
 
     // add read columns in profile
