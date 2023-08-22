@@ -2,6 +2,7 @@
 
 #include <aws/transfer/TransferHandle.h>
 #include <aws/transfer/TransferManager.h>
+#include <bthread/countdown_event.h>
 #include <bvar/bvar.h>
 #include <fmt/core.h>
 #include <gen_cpp/internal_service.pb.h>
@@ -21,7 +22,6 @@
 #include "olap/rowset/beta_rowset.h"
 #include "olap/tablet.h"
 #include "util/s3_util.h"
-#include "util/wait_group.h"
 
 namespace doris::io {
 using Aws::S3::Model::GetObjectRequest;
@@ -74,26 +74,31 @@ struct DownloadTaskExecutor {
     void execute(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name, size_t offset,
                  size_t size, std::string bucket,
                  std::function<FileBlocksHolderPtr(size_t, size_t)> alloc_holder,
-                 std::function<void(Status)> download_callback, Slice s) {
+                 std::function<void(Status)> download_callback, Slice user_slice) {
+        if (!user_slice.empty()) {
+            DCHECK(user_slice.get_size() >= size)
+                    << "request size " << size << " is larger than preserved size "
+                    << user_slice.get_size();
+        }
         size_t one_single_task_size = config::s3_write_buffer_size;
         size_t task_num = (size + one_single_task_size - 1) / one_single_task_size;
-        auto sync_task = [this, task_num, download_callback](Status s) {
-            Defer defer {[&] { wg.done(); }};
-            if (!s.ok()) [[unlikely]] {
+        auto sync_task = [this, task_num, download_callback](Status st) {
+            Defer defer {[&] { _countdown_event.signal(); }};
+            if (!st.ok()) [[unlikely]] {
                 _failed = true;
                 if (download_callback) {
-                    download_callback(s);
+                    download_callback(st);
                 }
                 return;
             }
             _succ++;
             if (_succ == task_num) {
                 if (download_callback) {
-                    download_callback(s);
+                    download_callback(st);
                 }
             }
         };
-        wg.add(task_num);
+        _countdown_event.add_count(task_num);
         for (size_t i = 0; i < task_num; i++) {
             size_t cur_task_off = offset + i * one_single_task_size;
             FileBufferBuilder builder;
@@ -117,9 +122,10 @@ struct DownloadTaskExecutor {
                     .set_sync_after_complete_task(sync_task)
                     .set_write_to_local_file_cache(std::move(append_file_cache))
                     .set_cancelled([this]() { return _failed.load(); });
-            if (!s.empty()) {
-                auto write_to_use_buffer = [s, cur_task_off](Slice content, size_t /*off*/) {
-                    std::memcpy((void*)(s.get_data() + cur_task_off), content.get_data(),
+            if (!user_slice.empty()) {
+                auto write_to_use_buffer = [user_slice, cur_task_off](Slice content,
+                                                                      size_t /*off*/) {
+                    std::memcpy((void*)(user_slice.get_data() + cur_task_off), content.get_data(),
                                 content.get_size());
                 };
                 builder.set_write_to_use_buffer(std::move(write_to_use_buffer));
@@ -127,7 +133,15 @@ struct DownloadTaskExecutor {
             auto buffer = builder.build();
             buffer->submit();
         }
-        while (!wg.wait()) {
+        timespec current_time;
+        // We don't need high accuracy here, so we use time(nullptr)
+        // since it's the fastest way to get current time(second)
+        auto current_time_second = time(nullptr);
+        current_time.tv_sec = current_time_second + 300;
+        current_time.tv_nsec = 0;
+        // bthread::countdown_event::timed_wait() should use absolute time
+        while (0 != _countdown_event.timed_wait(current_time)) {
+            current_time.tv_sec += 300;
             LOG_WARNING("Downloading {} {} {} {} is too long", bucket, key_name, offset, size);
         }
     }
@@ -135,7 +149,8 @@ struct DownloadTaskExecutor {
 private:
     std::atomic_bool _failed {false};
     std::atomic_uint64_t _succ {0};
-    WaitGroup wg;
+    // **Attention** call add_count() before submitting buf to async thread pool
+    bthread::CountdownEvent _countdown_event {0};
 };
 extern void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name,
                           size_t offset, size_t size, std::string bucket,
