@@ -24,6 +24,7 @@ import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.TimeUtils;
@@ -36,10 +37,19 @@ import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB.Provider;
+import com.selectdb.cloud.storage.RemoteBase;
+import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -73,6 +83,8 @@ import java.util.Map.Entry;
 //          WITH RESOURCE name
 //          (key3=value3, ...)
 public class LoadStmt extends DdlStmt {
+    private static final Logger LOG = LogManager.getLogger(LoadStmt.class);
+
     public static final String TIMEOUT_PROPERTY = "timeout";
     public static final String MAX_FILTER_RATIO_PROPERTY = "max_filter_ratio";
     public static final String EXEC_MEM_LIMIT = "exec_mem_limit";
@@ -91,6 +103,23 @@ public class LoadStmt extends DdlStmt {
     public static final String BOS_ENDPOINT = "bos_endpoint";
     public static final String BOS_ACCESSKEY = "bos_accesskey";
     public static final String BOS_SECRET_ACCESSKEY = "bos_secret_accesskey";
+
+    // for S3 load check
+    public static final String AWS_ENDPOINT = "AWS_ENDPOINT";
+    public static final String AWS_ACCESS_KEY = "AWS_ACCESS_KEY";
+    public static final String AWS_SECRET_KEY = "AWS_SECRET_KEY";
+    public static final String AWS_REGION = "AWS_REGION";
+    public static final String AWS_PROVIDER = "AWS_PROVIDER";
+    public static final List<String> PROVIDERS;
+
+    static {
+        PROVIDERS = new ArrayList<>();
+        PROVIDERS.add("cos");
+        PROVIDERS.add("oss");
+        PROVIDERS.add("s3");
+        PROVIDERS.add("obs");
+        PROVIDERS.add("bos");
+    }
 
     // mini load params
     public static final String KEY_IN_PARAM_COLUMNS = "columns";
@@ -463,6 +492,51 @@ public class LoadStmt extends DdlStmt {
             }
         } else if (brokerDesc != null) {
             etlJobType = EtlJobType.BROKER;
+            Map<String, String> brokerDescProperties = brokerDesc.getProperties();
+            if (brokerDescProperties.containsKey(AWS_ENDPOINT) && brokerDescProperties.containsKey(AWS_ACCESS_KEY)
+                    && brokerDescProperties.containsKey(AWS_SECRET_KEY)
+                    && brokerDescProperties.containsKey(AWS_REGION)) {
+                RemoteBase remote = null;
+                ObjectInfo objectInfo = null;
+                try {
+                    String endPoint = brokerDescProperties.get(AWS_ENDPOINT);
+                    tryConnect(endPoint);
+                    String provider = "";
+                    provider = getProviderFromEndpoint(endPoint);
+                    if (provider.equals("")) {
+                        throw new Exception("the provider in endpoint is invalid");
+                    }
+                    for (DataDescription dataDescription : dataDescriptions) {
+                        for (String filePath : dataDescription.getFilePaths()) {
+                            String bucket = getBucketFromFilePath(filePath);
+                            objectInfo = new ObjectInfo(Provider.valueOf(provider.toUpperCase()),
+                                    brokerDescProperties.get(AWS_ACCESS_KEY), brokerDescProperties.get(AWS_SECRET_KEY),
+                                    bucket, brokerDescProperties.get(AWS_ENDPOINT),
+                                    brokerDescProperties.get(AWS_REGION), "");
+                            remote = RemoteBase.newInstance(objectInfo);
+                            // RemoteBase#headObject does not throw exception if key does not exist.
+                            remote.headObject("1");
+                            remote.listObjects(null);
+                            remote.close();
+                        }
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed check object info={}", objectInfo, e);
+                    String message = e.getMessage();
+                    if (message != null) {
+                        int index = message.indexOf("Error message=");
+                        if (index != -1) {
+                            message = message.substring(index);
+                        }
+                    }
+                    throw new UserException(InternalErrorCode.GET_REMOTE_DATA_ERROR,
+                            "Incorrect object storage info, " + message);
+                } finally {
+                    if (remote != null) {
+                        remote.close();
+                    }
+                }
+            }
         } else if (isMysqlLoad) {
             etlJobType = EtlJobType.LOCAL_FILE;
         } else {
@@ -478,6 +552,46 @@ public class LoadStmt extends DdlStmt {
         }
 
         user = ConnectContext.get().getQualifiedUser();
+    }
+
+    private void tryConnect(String endpoint) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL("http://" + endpoint);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(10000);
+            connection.connect();
+        } catch (SocketTimeoutException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.warn("Failed to connect endpoint=" + endpoint, e);
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.disconnect();
+                } catch (Exception e) {
+                    LOG.warn("Failed to disconnect connection, endpoint={}", endpoint, e);
+                }
+            }
+        }
+    }
+
+    private String getProviderFromEndpoint(String endpoint) {
+        for (String provider : PROVIDERS) {
+            if (endpoint.toLowerCase().contains(provider.toLowerCase())) {
+                return provider;
+            }
+        }
+        return "";
+    }
+
+    private String getBucketFromFilePath(String filePath) throws Exception {
+        String[] parts = filePath.split("\\/\\/");
+        if (parts.length < 2) {
+            throw new Exception("filePath is not valid");
+        }
+        String buckt = parts[1].split("\\/")[0];
+        return buckt;
     }
 
     public String getComment() {
