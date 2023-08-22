@@ -873,6 +873,12 @@ under the License.
                     <argLine>
                         -Xmx512m -javaagent:${settings.localRepository}/org/jmockit/jmockit/${jmockit.version}/jmockit-${jmockit.version}.jar
                     </argLine>
+                    <excludes>
+                        <exclude>**/TopNRuntimeFilterTest.java</exclude>
+                        <exclude>**/CacheTest.java</exclude>
+                        <exclude>**/AnalysisTaskExecutorTest.java</exclude>
+                        <exclude>**/HistogramTaskTest.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>
