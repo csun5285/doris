@@ -415,6 +415,18 @@ TEST(MetaServiceHttpTest, InstanceTest) {
         ASSERT_EQ(instance.status(), InstanceInfoPB::NORMAL);
     }
 
+    // case: get instance by cloud_unique_id
+    {
+        auto [status_code, resp] = ctx.query_with_result<InstanceInfoPB>(
+                "get_instance_info", "cloud_unique_id=1:test_instance:1");
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
+        ASSERT_TRUE(resp.result.has_value());
+        InstanceInfoPB instance = resp.result.value();
+        ASSERT_EQ(instance.instance_id(), "test_instance");
+        ASSERT_EQ(instance.status(), InstanceInfoPB::NORMAL);
+    }
+
     // case: normal drop instance
     {
         AlterInstanceRequest req;

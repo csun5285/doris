@@ -281,7 +281,8 @@ static HttpResponse process_get_instance_info(MetaServiceImpl* service, brpc::Co
     std::string_view cloud_unique_id = http_query(uri, "cloud_unique_id");
 
     InstanceInfoPB instance;
-    auto [code, msg] = service->get_instance_info(instance_id, cloud_unique_id, &instance);
+    auto [code, msg] = service->get_instance_info(std::string(instance_id),
+                                                  std::string(cloud_unique_id), &instance);
     return http_json_reply_message(code, msg, instance);
 }
 

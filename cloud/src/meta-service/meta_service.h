@@ -243,8 +243,8 @@ public:
                                        ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
                                        ::google::protobuf::Closure* done) override;
 
-    std::pair<MetaServiceCode, std::string> get_instance_info(std::string_view instance_id,
-                                                              std::string_view cloud_unique_id,
+    std::pair<MetaServiceCode, std::string> get_instance_info(const std::string& instance_id,
+                                                              const std::string& cloud_unique_id,
                                                               InstanceInfoPB* instance);
 
 private:

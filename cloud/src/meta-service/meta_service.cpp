@@ -6321,13 +6321,15 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcControl
 }
 
 std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
-        std::string_view instance_id, std::string_view cloud_unique_id, InstanceInfoPB* instance) {
+        const std::string& instance_id, const std::string& cloud_unique_id,
+        InstanceInfoPB* instance) {
+    std::string cloned_instance_id = instance_id;
     if (instance_id.empty()) {
         if (cloud_unique_id.empty()) {
             return {MetaServiceCode::INVALID_ARGUMENT, "empty instance_id and cloud_unique_id"};
         }
         // get instance_id by cloud_unique_id
-        instance_id = get_instance_id(resource_mgr_, std::string(cloud_unique_id));
+        cloned_instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
         if (instance_id.empty()) {
             std::string msg =
                     fmt::format("cannot find instance_id with cloud_unique_id={}", cloud_unique_id);
@@ -6342,7 +6344,7 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
     }
 
     std::shared_ptr<Transaction> txn(txn0.release());
-    auto [c0, m0] = resource_mgr_->get_instance(txn, std::string(instance_id), instance);
+    auto [c0, m0] = resource_mgr_->get_instance(txn, cloned_instance_id, instance);
     if (c0 != 0) {
         return {MetaServiceCode::KV_TXN_GET_ERR, "failed to get instance, info=" + m0};
     }
@@ -6350,7 +6352,7 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
     // maybe do not decrypt ak/sk?
     MetaServiceCode code = MetaServiceCode::OK;
     std::string msg;
-    decrypt_instance_info(*instance, std::string(instance_id), code, msg, txn);
+    decrypt_instance_info(*instance, cloned_instance_id, code, msg, txn);
     return {code, std::move(msg)};
 }
 
