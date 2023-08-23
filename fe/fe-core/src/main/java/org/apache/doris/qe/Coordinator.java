@@ -23,6 +23,8 @@ import org.apache.doris.analysis.PrepareStmt;
 import org.apache.doris.analysis.StorageBackend;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
+import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Reference;
@@ -2067,6 +2069,10 @@ public class Coordinator {
             return;
         }
 
+        if (Config.isCloudMode() && Config.enable_cloud_snapshot_version) {
+            createScanRangeForOlapScanNode();
+        }
+
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
         Map<TNetworkAddress, Long> replicaNumPerHost = getReplicaNumPerHostForOlapTable();
         Collections.shuffle(scanNodes);
@@ -2307,6 +2313,28 @@ public class Coordinator {
             scanRangeNum = scanRangeNum + 1;
         }
         // TODO: more ranges?
+    }
+
+    // In cloud mode, meta read lock is not enough to keep a snapshot of partition versions.
+    // So the OlapScanNode only computes after all scan nodes are collected.
+    private void createScanRangeForOlapScanNode() throws UserException {
+        Map<Long, Long> visibleVersionMap = new HashMap<>();
+        for (ScanNode node : scanNodes) {
+            if (!(node instanceof OlapScanNode)) {
+                continue;
+            }
+            OlapScanNode scanNode = (OlapScanNode) node;
+            OlapTable table = scanNode.getOlapTable();
+            for (Long partitionId : scanNode.getSelectedPartitionIds()) {
+                if (visibleVersionMap.containsKey(partitionId)) {
+                    continue;
+                }
+                Partition partition = table.getPartition(partitionId);
+                Long version = partition.getVisibleVersion();
+                visibleVersionMap.put(partitionId, version);
+            }
+            scanNode.createScanRangeLocations(visibleVersionMap);
+        }
     }
 
     // update job progress from BE

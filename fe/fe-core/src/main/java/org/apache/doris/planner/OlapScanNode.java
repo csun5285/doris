@@ -706,9 +706,8 @@ public class OlapScanNode extends ScanNode {
         }
     }
 
-    private void addScanRangeLocations(Partition partition,
-            List<Tablet> tablets) throws UserException {
-        long visibleVersion = partition.getVisibleVersion();
+    private void addScanRangeLocations(Long partitionId, Long visibleVersion,
+                                       List<Tablet> tablets) throws UserException {
         String visibleVersionStr = String.valueOf(visibleVersion);
 
         Set<Tag> allowedTags = Sets.newHashSet();
@@ -728,7 +727,7 @@ public class OlapScanNode extends ScanNode {
                 }
                 if (tabletVersion != visibleVersion) {
                     LOG.warn("tablet {} version {} is not equal to partition {} version {}",
-                            tabletId, tabletVersion, partition.getId(), visibleVersion);
+                            tabletId, tabletVersion, partitionId, visibleVersion);
                     visibleVersion = tabletVersion;
                     visibleVersionStr = String.valueOf(visibleVersion);
                 }
@@ -915,6 +914,17 @@ public class OlapScanNode extends ScanNode {
 
     @Override
     protected void createScanRangeLocations() throws UserException {
+        // For cloud mode, set scan range in `Coordinator::exec` so that we could assign a
+        // snapshot version of all partitions.
+        if (!(Config.isCloudMode() && Config.enable_cloud_snapshot_version)) {
+            createScanRangeLocations(null);
+        }
+    }
+
+    /// Create scan range locations.
+    ///
+    /// This method will acquire partition version directly, If the visibleVersionMap is null.
+    public void createScanRangeLocations(Map<Long, Long> visibleVersionMap) throws UserException {
         scanRangeLocations = Lists.newArrayList();
         if (selectedPartitionIds.size() == 0) {
             desc.setCardinality(0);
@@ -923,7 +933,7 @@ public class OlapScanNode extends ScanNode {
         Preconditions.checkState(selectedIndexId != -1);
         // compute tablet info by selected index id and selected partition ids
         long start = System.currentTimeMillis();
-        computeTabletInfo();
+        computeTabletInfo(visibleVersionMap);
         LOG.debug("distribution prune cost: {} ms", (System.currentTimeMillis() - start));
     }
 
@@ -1013,7 +1023,7 @@ public class OlapScanNode extends ScanNode {
         return this.pointQueryEqualPredicats != null;
     }
 
-    private void computeTabletInfo() throws UserException {
+    private void computeTabletInfo(Map<Long, Long> visibleVersionMap) throws UserException {
         /**
          * The tablet info could be computed only once.
          * So the scanBackendIds should be empty in the beginning.
@@ -1048,7 +1058,16 @@ public class OlapScanNode extends ScanNode {
 
             totalTabletsNum += selectedTable.getTablets().size();
             selectedTabletsNum += tablets.size();
-            addScanRangeLocations(partition, tablets);
+
+            Long visibleVersion;
+            if (visibleVersionMap != null) {
+                visibleVersion = visibleVersionMap.get(partitionId);
+                assert visibleVersion != null : "the acquried version is not exists in the visible version map";
+            } else {
+                assert !(Config.isCloudMode() && Config.enable_cloud_snapshot_version);
+                visibleVersion = partition.getVisibleVersion();
+            }
+            addScanRangeLocations(partitionId, visibleVersion, tablets);
         }
     }
 
@@ -1125,7 +1144,7 @@ public class OlapScanNode extends ScanNode {
         scanTabletIds.clear();
         bucketSeq2locations.clear();
         try {
-            createScanRangeLocations();
+            createScanRangeLocations(null);
         } catch (AnalysisException e) {
             throw new UserException(e.getMessage());
         }

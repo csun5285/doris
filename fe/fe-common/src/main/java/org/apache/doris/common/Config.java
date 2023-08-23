@@ -2249,4 +2249,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static int statistics_sql_parallel_exec_instance_num = 1;
 
+    // The original meta read lock is not enough to keep a snapshot of partition versions,
+    // so the execution of `createScanRangeLocations` are delayed to `Coordinator::exec`,
+    // to help to acquire a snapshot of partition versions.
+    @ConfField
+    public static boolean enable_cloud_snapshot_version = true;
 }
