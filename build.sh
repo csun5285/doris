@@ -652,7 +652,6 @@ if [[ "${FE_MODULES}" != '' ]]; then
     else
         "${MVN_CMD}" package -pl ${FE_MODULES:+${FE_MODULES}} -Dskip.doc=true -DskipTests
     fi
-    "${MVN_CMD}" package -pl ${FE_MODULES:+${FE_MODULES}} -DskipTests ${SKIP_MVN_CHECK_STYLE}
     cd "${DORIS_HOME}"
 fi
 
