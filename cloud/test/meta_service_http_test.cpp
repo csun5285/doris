@@ -405,8 +405,8 @@ TEST(MetaServiceHttpTest, InstanceTest) {
 
     // case: get instance
     {
-        auto [status_code, resp] = ctx.query_with_result<InstanceInfoPB>(
-                "get_instance_info", "instance_id=test_instance");
+        auto [status_code, resp] =
+                ctx.query_with_result<InstanceInfoPB>("get_instance", "instance_id=test_instance");
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
         ASSERT_TRUE(resp.result.has_value());
@@ -432,6 +432,107 @@ TEST(MetaServiceHttpTest, InstanceTest) {
         AlterInstanceRequest req;
         req.set_instance_id("test_instance");
         auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("drop_instance", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_EQ(instance.status(), InstanceInfoPB::DELETED);
+    }
+}
+
+TEST(MetaServiceHttpTest, InstanceTestWithVersion) {
+    HttpContext ctx;
+
+    // case: normal create instance
+    {
+        CreateInstanceRequest req;
+        req.set_instance_id("test_instance");
+        req.set_user_id("test_user");
+        req.set_name("test_name");
+        ObjectStoreInfoPB obj;
+        obj.set_ak("123");
+        obj.set_sk("321");
+        obj.set_bucket("456");
+        obj.set_prefix("654");
+        obj.set_endpoint("789");
+        obj.set_region("987");
+        obj.set_external_endpoint("888");
+        obj.set_provider(ObjectStoreInfoPB::BOS);
+        req.mutable_obj_info()->CopyFrom(obj);
+
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("v1/create_instance", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
+
+    // case: request has invalid argument
+    {
+        CreateInstanceRequest req;
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("v1/create_instance", req);
+        ASSERT_EQ(status_code, 400);
+        ASSERT_EQ(resp.code(), MetaServiceCode::INVALID_ARGUMENT);
+    }
+
+    // case: rename instance
+    {
+        AlterInstanceRequest req;
+        req.set_instance_id("test_instance");
+        req.set_name("new_name");
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("v1/rename_instance", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_EQ(instance.name(), "new_name");
+    }
+
+    // The default instance sse is disabled, to execute enable first.
+    // case: enable instance sse
+    {
+        AlterInstanceRequest req;
+        req.set_instance_id("test_instance");
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("v1/enable_instance_sse", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_TRUE(instance.sse_enabled());
+    }
+
+    // case: disable instance sse
+    {
+        AlterInstanceRequest req;
+        req.set_instance_id("test_instance");
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("v1/disable_instance_sse", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_FALSE(instance.sse_enabled());
+    }
+
+    // case: get instance
+    {
+        auto [status_code, resp] = ctx.query_with_result<InstanceInfoPB>(
+                "v1/get_instance", "instance_id=test_instance");
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
+        ASSERT_TRUE(resp.result.has_value());
+        InstanceInfoPB instance = resp.result.value();
+        ASSERT_EQ(instance.instance_id(), "test_instance");
+        ASSERT_EQ(instance.status(), InstanceInfoPB::NORMAL);
+    }
+
+    // case: normal drop instance
+    {
+        AlterInstanceRequest req;
+        req.set_instance_id("test_instance");
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("v1/drop_instance", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
 

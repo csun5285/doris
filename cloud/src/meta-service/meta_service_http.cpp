@@ -123,6 +123,11 @@ static std::string format_http_request(const brpc::HttpHeader& request) {
     return ss.str();
 }
 
+static std::string_view remove_version_prefix(std::string_view path) {
+    if (path.size() > 3 && path.substr(0, 3) == "v1/") path.remove_prefix(3);
+    return path;
+}
+
 static HttpResponse process_alter_cluster(MetaServiceImpl* service, brpc::Controller* ctrl) {
     static std::unordered_map<std::string_view, AlterClusterRequest::Operation> operations {
             {"add_cluster", AlterClusterRequest::ADD_CLUSTER},
@@ -137,7 +142,7 @@ static HttpResponse process_alter_cluster(MetaServiceImpl* service, brpc::Contro
 
     auto& path = ctrl->http_request().unresolved_path();
     auto body = ctrl->request_attachment().to_string();
-    auto it = operations.find(path);
+    auto it = operations.find(remove_version_prefix(path));
     if (it == operations.end()) {
         std::string msg = "not supportted alter cluster operation: " + path;
         return http_json_reply(MetaServiceCode::INVALID_ARGUMENT, msg);
@@ -168,7 +173,7 @@ static HttpResponse process_alter_obj_store_info(MetaServiceImpl* service, brpc:
     };
 
     auto& path = ctrl->http_request().unresolved_path();
-    auto it = operations.find(path);
+    auto it = operations.find(remove_version_prefix(path));
     if (it == operations.end()) {
         std::string msg = "not supportted alter obj store info operation: " + path;
         return http_json_reply(MetaServiceCode::INVALID_ARGUMENT, msg);
@@ -208,9 +213,10 @@ static HttpResponse process_alter_instance(MetaServiceImpl* service, brpc::Contr
     };
 
     auto& path = ctrl->http_request().unresolved_path();
-    auto it = operations.find(path);
+    auto it = operations.find(remove_version_prefix(path));
     if (it == operations.end()) {
-        std::string msg = "not supportted alter instance operation: " + path;
+        std::string msg = "not supportted alter instance operation: '" + path +
+                          "', remove version prefix=" + std::string(remove_version_prefix(path));
         return http_json_reply(MetaServiceCode::INVALID_ARGUMENT, msg);
     }
 
@@ -334,30 +340,57 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"add_node", process_alter_cluster},
             {"drop_node", process_alter_cluster},
             {"decommission_node", process_alter_cluster},
+            {"v1/add_cluster", process_alter_cluster},
+            {"v1/drop_cluster", process_alter_cluster},
+            {"v1/rename_cluster", process_alter_cluster},
+            {"v1/update_cluster_endpoint", process_alter_cluster},
+            {"v1/update_cluster_mysql_user_name", process_alter_cluster},
+            {"v1/add_node", process_alter_cluster},
+            {"v1/drop_node", process_alter_cluster},
+            {"v1/decommission_node", process_alter_cluster},
             // for alter instance
             {"create_instance", process_create_instance},
             {"drop_instance", process_alter_instance},
             {"rename_instance", process_alter_instance},
             {"enable_instance_sse", process_alter_instance},
             {"disable_instance_sse", process_alter_instance},
+            {"v1/create_instance", process_create_instance},
+            {"v1/drop_instance", process_alter_instance},
+            {"v1/rename_instance", process_alter_instance},
+            {"v1/enable_instance_sse", process_alter_instance},
+            {"v1/disable_instance_sse", process_alter_instance},
             // for alter obj store info
             {"add_obj_info", process_alter_obj_store_info},
             {"legacy_update_ak_sk", process_alter_obj_store_info},
             {"update_ak_sk", process_update_ak_sk},
+            {"v1/add_obj_info", process_alter_obj_store_info},
+            {"v1/legacy_update_ak_sk", process_alter_obj_store_info},
+            {"v1/update_ak_sk", process_update_ak_sk},
             // for tools
             {"decode_key", process_decode_key},
             {"encode_key", process_encode_key},
+            {"v1/decode_key", process_decode_key},
+            {"v1/encode_key", process_encode_key},
             // for get
-            {"get_instance_info", process_get_instance_info},
+            {"get_instance", process_get_instance_info},
             {"get_obj_store_info", process_get_obj_store_info},
             {"get_cluster", process_get_cluster},
             {"get_tablet_stats", process_get_tablet_stats},
             {"get_stage", process_get_stage},
+            {"v1/get_instance", process_get_instance_info},
+            {"v1/get_obj_store_info", process_get_obj_store_info},
+            {"v1/get_cluster", process_get_cluster},
+            {"v1/get_tablet_stats", process_get_tablet_stats},
+            {"v1/get_stage", process_get_stage},
             // misc
             {"abort_txn", process_abort_txn},
             {"abort_tablet_job", process_abort_tablet_job},
             {"alter_ram_user", process_alter_ram_user},
             {"alter_iam", process_alter_iam},
+            {"v1/abort_txn", process_abort_txn},
+            {"v1/abort_tablet_job", process_abort_tablet_job},
+            {"v1/alter_ram_user", process_alter_ram_user},
+            {"v1/alter_iam", process_alter_iam},
     };
 
     auto cntl = static_cast<brpc::Controller*>(controller);

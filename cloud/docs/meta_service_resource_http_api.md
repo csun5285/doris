@@ -3,6 +3,18 @@
 
 [TOC]
 
+## API 版本
+
+未来所有的接口都会带上版本号，建议使用时带上版本以区分不同版本。目前已经给所有已有接口都加上 `v1/` 表示版本号。
+
+以 `create_instance` 为例，带 API 版本的接口为：
+
+```
+PUT /MetaService/http/v1/create_instance?token=<token> HTTP/1.1
+```
+
+为了保证兼容性，之前的接口（即不带 `v1/`）仍然能访问。
+
 ## 创建instance
 
 ### 接口描述
