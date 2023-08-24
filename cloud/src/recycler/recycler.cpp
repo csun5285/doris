@@ -833,7 +833,7 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
                 tablet_key_end = std::string(tablet_keys.back()) + '\x00';
                 txn->remove(tablet_keys.front(), tablet_key_end);
             } else {
-                for (auto k : tablet_idx_keys) {
+                for (auto k : tablet_keys) {
                     txn->remove(k);
                 }
             }
