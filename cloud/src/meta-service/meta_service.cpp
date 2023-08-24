@@ -1801,6 +1801,11 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
                                   const ::selectdb::GetVersionRequest* request,
                                   ::selectdb::GetVersionResponse* response,
                                   ::google::protobuf::Closure* done) {
+    if (request->batch_mode()) {
+        batch_get_version(controller, request, response, done);
+        return;
+    }
+
     RPC_PREPROCESS(get_version);
     // TODO(dx): For auth
     std::string cloud_unique_id;
@@ -1860,6 +1865,83 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     }
     msg = "failed to get txn";
     code = MetaServiceCode::KV_TXN_GET_ERR;
+}
+
+void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* controller,
+                                        const ::selectdb::GetVersionRequest* request,
+                                        ::selectdb::GetVersionResponse* response,
+                                        ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_version);
+
+    std::string cloud_unique_id;
+    if (request->has_cloud_unique_id()) {
+        cloud_unique_id = request->cloud_unique_id();
+    }
+
+    int64_t db_id = request->has_db_id() ? request->db_id() : -1;
+    if (db_id == -1 || request->table_ids_size() == 0 ||
+        request->table_ids_size() != request->partition_ids_size()) {
+        msg = "param error, db_id=" + std::to_string(db_id) +
+              " num table_ids=" + std::to_string(request->table_ids_size()) +
+              " num partition_ids=" + std::to_string(request->partition_ids_size());
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        LOG(WARNING) << msg;
+        return;
+    }
+
+    instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
+        return;
+    }
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        msg = "failed to create txn";
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        return;
+    }
+
+    size_t num_acquired = request->table_ids_size();
+    response->mutable_versions()->Reserve(num_acquired);
+    response->mutable_table_ids()->CopyFrom(request->table_ids());
+    response->mutable_partition_ids()->CopyFrom(request->partition_ids());
+    for (size_t i = 0; i < num_acquired; ++i) {
+        int64_t table_id = request->table_ids(i);
+        int64_t partition_id = request->partition_ids(i);
+        VersionKeyInfo ver_key_info {instance_id, db_id, table_id, partition_id};
+        std::string ver_key;
+        version_key(ver_key_info, &ver_key);
+
+        // TODO(walter) support batch get.
+        std::string ver_val;
+        ret = txn->get(ver_key, &ver_val, true);
+        LOG(INFO) << "xxx get version_key=" << hex(ver_key);
+        if (ret == 0) {
+            VersionPB version_pb;
+            if (!version_pb.ParseFromString(ver_val)) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "malformed version value";
+                break;
+            }
+            response->add_versions(version_pb.version());
+        } else if (ret == 1) {
+            // return -1 if the target version is not exists.
+            response->add_versions(-1);
+        } else {
+            msg = "failed to get txn";
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            break;
+        }
+    }
+    if (code != MetaServiceCode::OK) {
+        response->clear_partition_ids();
+        response->clear_table_ids();
+        response->clear_versions();
+    }
 }
 
 void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,

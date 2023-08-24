@@ -616,11 +616,22 @@ message GetVersionRequest {
     optional int64 db_id = 2;
     optional int64 table_id = 3;
     optional int64 partition_id = 4;
+
+    // For batch get version.
+    optional bool batch_mode = 5;
+    repeated int64 table_ids = 6;
+    repeated int64 partition_ids = 7;
 };
 
 message GetVersionResponse {
     optional MetaServiceResponseStatus status = 1;
     optional int64 version = 2;
+
+    // For batch get version.
+    // <table_id, partition_id> --> version
+    repeated int64 table_ids = 3;
+    repeated int64 partition_ids = 4;
+    repeated int64 versions = 5;
 };
 
 message GetObjStoreInfoRequest {

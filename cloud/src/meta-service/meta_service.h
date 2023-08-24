@@ -57,6 +57,11 @@ public:
                      ::selectdb::GetVersionResponse* response,
                      ::google::protobuf::Closure* done) override;
 
+    void batch_get_version(::google::protobuf::RpcController* controller,
+                           const ::selectdb::GetVersionRequest* request,
+                           ::selectdb::GetVersionResponse* response,
+                           ::google::protobuf::Closure* done);
+
     void create_tablets(::google::protobuf::RpcController* controller,
                         const ::selectdb::CreateTabletsRequest* request,
                         ::selectdb::CreateTabletsResponse* response,
@@ -150,9 +155,9 @@ public:
                               ::google::protobuf::Closure* done) override;
 
     void update_ak_sk(google::protobuf::RpcController* controller,
-                            const ::selectdb::UpdateAkSkRequest* request,
-                            ::selectdb::UpdateAkSkResponse* response,
-                            ::google::protobuf::Closure* done) override;
+                      const ::selectdb::UpdateAkSkRequest* request,
+                      ::selectdb::UpdateAkSkResponse* response,
+                      ::google::protobuf::Closure* done) override;
 
     void create_instance(google::protobuf::RpcController* controller,
                          const ::selectdb::CreateInstanceRequest* request,
@@ -194,9 +199,9 @@ public:
                  ::google::protobuf::Closure* done) override;
 
     void alter_iam(google::protobuf::RpcController* controller,
-                 const ::selectdb::AlterIamRequest* request,
-                 ::selectdb::AlterIamResponse* response,
-                 ::google::protobuf::Closure* done) override;
+                   const ::selectdb::AlterIamRequest* request,
+                   ::selectdb::AlterIamResponse* response,
+                   ::google::protobuf::Closure* done) override;
 
     void alter_ram_user(google::protobuf::RpcController* controller,
                         const ::selectdb::AlterRamUserRequest* request,

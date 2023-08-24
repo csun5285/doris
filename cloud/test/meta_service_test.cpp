@@ -2,6 +2,7 @@
 // clang-format off
 #include "meta-service/meta_service.h"
 #include <bvar/window.h>
+#include <google/protobuf/repeated_field.h>
 
 #include "common/config.h"
 #include "common/logging.h"
@@ -138,12 +139,13 @@ static void commit_txn(MetaServiceImpl* meta_service, int64_t db_id, int64_t txn
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
 }
 
-static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id, int64_t version = -1,
-                                         int num_rows = 100) {
+static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id, int partition_id = 0,
+                                         int64_t version = -1, int num_rows = 100) {
     doris::RowsetMetaPB rowset;
     rowset.set_rowset_id(0); // required
     rowset.set_rowset_id_v2(next_rowset_id());
     rowset.set_tablet_id(tablet_id);
+    rowset.set_partition_id(partition_id);
     rowset.set_txn_id(txn_id);
     if (version > 0) {
         rowset.set_start_version(version);
@@ -180,11 +182,11 @@ static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMeta
 }
 
 static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
-                          int64_t table_id, int64_t tablet_id) {
+                          int64_t table_id, int64_t partition_id, int64_t tablet_id) {
     int64_t txn_id = 0;
     ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service, db_id, label, table_id, txn_id));
     CreateRowsetResponse res;
-    auto rowset = create_rowset(txn_id, tablet_id);
+    auto rowset = create_rowset(txn_id, tablet_id, partition_id);
     prepare_rowset(meta_service, rowset, res);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
     res.Clear();
@@ -2326,14 +2328,14 @@ TEST(MetaServiceTest, GetTabletStatsTest) {
     // Insert rowset
     config::split_tablet_stats = false;
     ASSERT_NO_FATAL_FAILURE(
-            insert_rowset(meta_service.get(), 10000, "label1", table_id, tablet_id));
+            insert_rowset(meta_service.get(), 10000, "label1", table_id, partition_id, tablet_id));
     ASSERT_NO_FATAL_FAILURE(
-            insert_rowset(meta_service.get(), 10000, "label2", table_id, tablet_id));
+            insert_rowset(meta_service.get(), 10000, "label2", table_id, partition_id, tablet_id));
     config::split_tablet_stats = true;
     ASSERT_NO_FATAL_FAILURE(
-            insert_rowset(meta_service.get(), 10000, "label3", table_id, tablet_id));
+            insert_rowset(meta_service.get(), 10000, "label3", table_id, partition_id, tablet_id));
     ASSERT_NO_FATAL_FAILURE(
-            insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
+            insert_rowset(meta_service.get(), 10000, "label4", table_id, partition_id, tablet_id));
     // Check tablet stats kv
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
@@ -2702,6 +2704,111 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
             ret = txn->get(pending_key, &pending_val);
             ASSERT_EQ(ret, 1);
         }
+    }
+}
+
+TEST(MetaServiceTest, GetVersion) {
+    auto service = get_meta_service();
+
+    int64_t table_id = 1;
+    int64_t partition_id = 1;
+    int64_t tablet_id = 1;
+
+    {
+        brpc::Controller ctrl;
+        GetVersionRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_db_id(1);
+        req.set_table_id(table_id);
+        req.set_partition_id(partition_id);
+
+        GetVersionResponse resp;
+        service->get_version(&ctrl, &req, &resp, nullptr);
+
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::VERSION_NOT_FOUND)
+                << " status is " << resp.status().DebugString();
+    }
+
+    create_tablet(service.get(), table_id, 1, partition_id, tablet_id);
+    insert_rowset(service.get(), 1, "get_version_label_1", table_id, partition_id, tablet_id);
+
+    {
+        brpc::Controller ctrl;
+        GetVersionRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_db_id(1);
+        req.set_table_id(table_id);
+        req.set_partition_id(partition_id);
+
+        GetVersionResponse resp;
+        service->get_version(&ctrl, &req, &resp, nullptr);
+
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK)
+                << " status is " << resp.status().DebugString();
+        ASSERT_EQ(resp.version(), 2);
+    }
+}
+
+TEST(MetaServiceTest, BatchGetVersion) {
+    struct TestCase {
+        std::vector<int64_t> table_ids;
+        std::vector<int64_t> partition_ids;
+        std::vector<int64_t> expected_versions;
+        std::vector<
+                std::tuple<int64_t /*table_id*/, int64_t /*partition_id*/, int64_t /*tablet_id*/>>
+                insert_rowsets;
+    };
+
+    std::vector<TestCase> cases = {
+            // all version are missing
+            {{1, 1, 2, 3}, {1, 2, 1, 2}, {-1, -1, -1, -1}, {}},
+            // update table 1, partition 1
+            {{1, 1, 2, 3}, {1, 2, 1, 2}, {2, -1, -1, -1}, {{1, 1, 1}}},
+            // update table 2, partition 1
+            // update table 3, partition 2
+            {{1, 1, 2, 3}, {1, 2, 1, 2}, {2, -1, 2, 2}, {{2, 1, 3}, {3, 2, 4}}},
+            // update table 1, partition 2 twice
+            {{1, 1, 2, 3}, {1, 2, 1, 2}, {2, 3, 2, 2}, {{1, 2, 2}, {1, 2, 2}}},
+    };
+
+    auto service = get_meta_service();
+    create_tablet(service.get(), 1, 1, 1, 1);
+    create_tablet(service.get(), 1, 1, 2, 2);
+    create_tablet(service.get(), 2, 1, 1, 3);
+    create_tablet(service.get(), 3, 1, 2, 4);
+
+    size_t num_cases = cases.size();
+    size_t label_index = 0;
+    for (size_t i = 0; i < num_cases; ++i) {
+        auto& [table_ids, partition_ids, expected_versions, insert_rowsets] = cases[i];
+        for (auto [table_id, partition_id, tablet_id] : insert_rowsets) {
+            LOG(INFO) << "insert rowset for table " << table_id << " partition " << partition_id
+                      << " table_id " << tablet_id;
+            insert_rowset(service.get(), 1, std::to_string(++label_index), table_id, partition_id,
+                          tablet_id);
+        }
+
+        brpc::Controller ctrl;
+        GetVersionRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_db_id(1);
+        req.set_table_id(-1);
+        req.set_partition_id(-1);
+        req.set_batch_mode(true);
+        std::copy(table_ids.begin(), table_ids.end(),
+                  google::protobuf::RepeatedFieldBackInserter(req.mutable_table_ids()));
+        std::copy(partition_ids.begin(), partition_ids.end(),
+                  google::protobuf::RepeatedFieldBackInserter(req.mutable_partition_ids()));
+
+        GetVersionResponse resp;
+        service->get_version(&ctrl, &req, &resp, nullptr);
+
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK)
+                << "case " << i << " status is " << resp.status().msg()
+                << ", code=" << resp.status().code();
+
+        std::vector<int64_t> versions(resp.versions().begin(), resp.versions().end());
+        EXPECT_EQ(versions, expected_versions) << "case " << i;
     }
 }
 
