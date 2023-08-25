@@ -91,7 +91,7 @@ suite("map_agg") {
             (5, "LC", "V5_3");
      """
 
-    sql "DROP TABLE IF EXISTS `test_map_agg_string_key`;"
+    sql "DROP TABLE IF EXISTS `test_map_agg_numeric_key`;"
     sql """
         CREATE TABLE `test_map_agg_numeric_key` (
             `id` int(11) NOT NULL,

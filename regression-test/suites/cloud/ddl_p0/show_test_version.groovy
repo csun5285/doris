@@ -6,6 +6,6 @@ suite("test_show_version") {
     assertEquals(strs[1], "Core")
     assertEquals(strs[2], "version:")
     def version = strs[3].split('.')
-    def reg = /[1-9]+\.\d+\.\d+/
+    def reg = /[0-9]+\.\d+\.\d+/
     assertTrue(strs[3].matches(reg))
 }

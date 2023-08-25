@@ -855,7 +855,7 @@ suite("test_stream_load", "p0") {
         DISTRIBUTED BY HASH(`k1`, `k2`) BUCKETS 3
         PROPERTIES ("replication_allocation" = "tag.location.default: 1");
     """
-    
+    sql """ drop user if exists common_user""" 
     sql """create USER common_user@'%' IDENTIFIED BY '123456'"""
     sql """GRANT LOAD_PRIV ON *.* TO 'common_user'@'%';"""
     //cloud-mode
