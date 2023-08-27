@@ -152,6 +152,7 @@ public abstract class PrivEntry implements Comparable<PrivEntry> {
         isAnyHost = origHost.equals(ANY_HOST);
 
         origUser = Text.readString(in);
+        origUserId = Text.readString(in);
         try {
             userPattern = PatternMatcher.createMysqlPattern(origUser, CaseSensibility.USER.getCaseSensibility());
         } catch (PatternMatcherException e) {

@@ -1681,9 +1681,12 @@ public class Auth implements Writable {
             DbPrivTable dbPrivTable = (DbPrivTable) PrivTable.read(in);
             TablePrivTable tablePrivTable = (TablePrivTable) PrivTable.read(in);
             ResourcePrivTable resourcePrivTable = (ResourcePrivTable) PrivTable.read(in);
+            ResourcePrivTable cloudClusterPrivTable = (ResourcePrivTable) PrivTable.read(in);
+            ResourcePrivTable cloudStagePrivTable = (ResourcePrivTable) PrivTable.read(in);
             propertyMgr = UserPropertyMgr.read(in);
             try {
-                upgradeToVersion116(userPrivTable, catalogPrivTable, dbPrivTable, tablePrivTable, resourcePrivTable);
+                upgradeToVersion116(userPrivTable, catalogPrivTable, dbPrivTable, tablePrivTable,
+                        resourcePrivTable, cloudClusterPrivTable, cloudStagePrivTable);
             } catch (Exception e) {
                 // will not generate exception
                 LOG.warn("upgrade failed,", e);
@@ -1705,7 +1708,8 @@ public class Auth implements Writable {
     }
 
     private void upgradeToVersion116(UserPrivTable userPrivTable, CatalogPrivTable catalogPrivTable,
-            DbPrivTable dbPrivTable, TablePrivTable tablePrivTable, ResourcePrivTable resourcePrivTable)
+            DbPrivTable dbPrivTable, TablePrivTable tablePrivTable, ResourcePrivTable resourcePrivTable,
+                                     ResourcePrivTable cloudClusterPrivTable, ResourcePrivTable cloudStagePrivTable)
             throws AnalysisException, DdlException, PatternMatcherException {
         //OPERATOR and Admin role not save users,if not inituser,root will do not have admin role
         initUser();
@@ -1760,17 +1764,27 @@ public class Auth implements Writable {
             roleManager.addOrMergeRole(newRole, false);
         }
 
-        List<PrivEntry> resourcePrivTableEntries = resourcePrivTable.getEntries();
-        for (PrivEntry privEntry : resourcePrivTableEntries) {
+        updateResourcePrivTableEntries(resourcePrivTable, ResourceTypeEnum.GENERAL);
+
+        if (Config.isCloudMode()) {
+            updateResourcePrivTableEntries(cloudClusterPrivTable, ResourceTypeEnum.CLUSTER);
+            updateResourcePrivTableEntries(cloudStagePrivTable, ResourceTypeEnum.STAGE);
+        }
+
+    }
+
+    private void updateResourcePrivTableEntries(ResourcePrivTable privTable, ResourceTypeEnum type)
+            throws AnalysisException, DdlException {
+        List<PrivEntry> privTableEntries = privTable.getEntries();
+        for (PrivEntry privEntry : privTableEntries) {
             ResourcePrivEntry resourcePrivEntry = (ResourcePrivEntry) privEntry;
             ResourcePattern resourcePattern = new ResourcePattern(
-                    ClusterNamespace.getNameFromFullName(resourcePrivEntry.origResource), ResourceTypeEnum.GENERAL);
+                    ClusterNamespace.getNameFromFullName(resourcePrivEntry.origResource), type);
             resourcePattern.analyze();
             Role newRole = new Role(roleManager.getUserDefaultRoleName(resourcePrivEntry.userIdentity),
                     resourcePattern, resourcePrivEntry.privSet);
             roleManager.addOrMergeRole(newRole, false);
         }
-
     }
 
     @Override

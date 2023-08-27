@@ -916,8 +916,6 @@ public class Role implements Writable, GsonPostProcessable {
             TablePattern tblPattern = TablePattern.read(in);
             PrivBitSet privs = PrivBitSet.read(in);
             tblPatternToPrivs.put(tblPattern, privs);
-            cloudClusterPrivTable = (ResourcePrivTable) PrivTable.read(in);
-            cloudStagePrivTable = (ResourcePrivTable) PrivTable.read(in);
             grantPrivs(tblPattern, privs.copy());
         }
         size = in.readInt();
@@ -925,6 +923,20 @@ public class Role implements Writable, GsonPostProcessable {
             ResourcePattern resourcePattern = ResourcePattern.read(in);
             PrivBitSet privs = PrivBitSet.read(in);
             resourcePatternToPrivs.put(resourcePattern, privs);
+            grantPrivs(resourcePattern, privs.copy());
+        }
+        size = in.readInt();
+        for (int i = 0; i < size; i++) {
+            ResourcePattern resourcePattern = ResourcePattern.read(in);
+            PrivBitSet privs = PrivBitSet.read(in);
+            clusterPatternToPrivs.put(resourcePattern, privs);
+            grantPrivs(resourcePattern, privs.copy());
+        }
+        size = in.readInt();
+        for (int i = 0; i < size; i++) {
+            ResourcePattern resourcePattern = ResourcePattern.read(in);
+            PrivBitSet privs = PrivBitSet.read(in);
+            stagePatternToPrivs.put(resourcePattern, privs);
             grantPrivs(resourcePattern, privs.copy());
         }
         size = in.readInt();
