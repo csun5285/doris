@@ -1029,6 +1029,7 @@ public class Analyzer {
             result.setIsMaterialized(true);
             result.setIsNullable(col.isAllowNull());
             subColumnSlotRefMap.get(key).put(subColNames, result);
+            slotRefMap.put(key, result);
             return result;
         }
 
