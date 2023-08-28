@@ -187,7 +187,7 @@ Status CloudBaseCompaction::execute_compact_impl() {
             .tag("output_segments", _output_rowset->num_segments())
             .tag("output_data_size", _output_rowset->data_disk_size());
 
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
 
     DorisMetrics::instance()->base_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->base_compaction_bytes_total->increment(_input_rowsets_size);
@@ -295,6 +295,9 @@ void CloudBaseCompaction::garbage_collection() {
 
 void CloudBaseCompaction::do_lease() {
     selectdb::TabletJobInfoPB job;
+    if (_compaction_succeed) {
+        return ;
+    }
     auto idx = job.mutable_idx();
     idx->set_tablet_id(_tablet->tablet_id());
     idx->set_table_id(_tablet->table_id());

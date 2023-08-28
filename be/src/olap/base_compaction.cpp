@@ -86,7 +86,7 @@ Status BaseCompaction::execute_compact_impl() {
     RETURN_IF_ERROR(do_compaction(permits));
 
     // 3. set state to success
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
 
     // 4. add metric to base compaction
     DorisMetrics::instance()->base_compaction_deltas_total->increment(_input_rowsets.size());

@@ -71,8 +71,7 @@ Compaction::Compaction(const TabletSharedPtr& tablet, const std::string& label)
           _input_rowsets_size(0),
           _input_row_num(0),
           _input_num_segments(0),
-          _input_index_size(0),
-          _state(CompactionState::INITED) {
+          _input_index_size(0) {
     _mem_tracker = std::make_shared<MemTrackerLimiter>(MemTrackerLimiter::Type::COMPACTION, label);
     init_profile(label);
 }
@@ -718,7 +717,7 @@ bool Compaction::_check_if_includes_input_rowsets(
 }
 
 void Compaction::garbage_collection() {
-    if (_state != CompactionState::SUCCESS && _output_rowset != nullptr) {
+    if (!_compaction_succeed && _output_rowset != nullptr) {
         if (!_output_rowset->is_local()) {
             Tablet::erase_pending_remote_rowset(_output_rowset->rowset_id().to_string());
             _tablet->record_unused_remote_rowset(_output_rowset->rowset_id(),

@@ -66,7 +66,7 @@ Status ColdDataCompaction::execute_compact_impl() {
         return Status::Aborted("this replica is not cooldown replica");
     }
     RETURN_IF_ERROR(do_compaction(permits));
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
     return Status::OK();
 }
 

@@ -87,7 +87,7 @@ Status CumulativeCompaction::execute_compact_impl() {
     RETURN_IF_ERROR(do_compaction(permits));
 
     // 4. set state to success
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
 
     // 5. set cumulative point
     StorageEngine::instance()->cumu_compaction_policy()->update_cumulative_point(

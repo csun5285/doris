@@ -81,7 +81,7 @@ Status FullCompaction::execute_compact_impl() {
     RETURN_IF_ERROR(do_compaction(permits));
 
     // 3. set state to success
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
 
     // 4. set cumulative point
     Version last_version = _input_rowsets.back()->version();

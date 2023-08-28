@@ -20,6 +20,7 @@
 #include <butil/macros.h>
 #include <stdint.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -115,8 +116,7 @@ protected:
     RowsetSharedPtr _output_rowset;
     std::unique_ptr<RowsetWriter> _output_rs_writer;
 
-    enum CompactionState { INITED = 0, SUCCESS = 1 };
-    CompactionState _state;
+    std::atomic_bool _compaction_succeed = false;
 
     Version _output_version;
 

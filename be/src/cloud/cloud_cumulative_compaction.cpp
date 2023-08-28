@@ -166,7 +166,7 @@ Status CloudCumulativeCompaction::execute_compact_impl() {
             .tag("num_rowsets", _tablet->fetch_add_approximate_num_rowsets(0))
             .tag("cumu_num_rowsets", _tablet->fetch_add_approximate_cumu_num_rowsets(0));
 
-    _state = CompactionState::SUCCESS;
+    _compaction_succeed = true;
 
     DorisMetrics::instance()->cumulative_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->cumulative_compaction_bytes_total->increment(_input_rowsets_size);
@@ -409,6 +409,9 @@ void CloudCumulativeCompaction::update_cumulative_point() {
 
 void CloudCumulativeCompaction::do_lease() {
     TEST_INJECTION_POINT_RETURN_WITH_VOID("CloudCumulativeCompaction::do_lease");
+    if (_compaction_succeed) {
+        return ;
+    }
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();
     idx->set_tablet_id(_tablet->tablet_id());
