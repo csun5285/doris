@@ -2253,5 +2253,5 @@ public class Config extends ConfigBase {
     // so the execution of `createScanRangeLocations` are delayed to `Coordinator::exec`,
     // to help to acquire a snapshot of partition versions.
     @ConfField
-    public static boolean enable_cloud_snapshot_version = true;
+    public static boolean enable_cloud_snapshot_version = false;
 }
