@@ -729,10 +729,6 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = DESCRIBE_EXTEND_VARIANT_COLUMN, needForward = true)
     public boolean enableDescribeExtendVariantColumn = false;
 
-    public int getBeNumber() {
-        return beNumber;
-    }
-
     public void setBeNumberForTest(int beNumberForTest) {
         this.beNumberForTest = beNumberForTest;
     }

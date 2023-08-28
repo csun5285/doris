@@ -981,10 +981,10 @@ public class Analyzer {
 
         LOG.debug("register column ref table {}, colName {}, col {}", tblName, colName, col.toSql());
         if (col.getType().isVariantType() || (subColNames != null && !subColNames.isEmpty())) {
-            if (!col.getType().isVariantType()) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_ILLEGAL_COLUMN_REFERENCE_ERROR,
-                        Joiner.on(".").join(tblName.getTbl(), colName));
-            }
+            // if (!col.getType().isVariantType()) {
+            //     ErrorReport.reportAnalysisException(ErrorCode.ERR_ILLEGAL_COLUMN_REFERENCE_ERROR,
+            //             Joiner.on(".").join(tblName.getTbl(), colName));
+            // }
             if (subColNames == null) {
                 // Root
                 subColNames = new ArrayList<String>();

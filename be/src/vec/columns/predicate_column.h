@@ -162,6 +162,10 @@ public:
         LOG(FATAL) << "insert_from not supported in PredicateColumnType";
     }
 
+    void insert_range_from(const IColumn& src, size_t start, size_t length) override {
+        LOG(FATAL) << "insert_range_from not supported in PredicateColumnType";
+    }
+
     void insert_indices_from(const IColumn& src, const int* indices_begin,
                              const int* indices_end) override {
         LOG(FATAL) << "insert_indices_from not supported in PredicateColumnType";

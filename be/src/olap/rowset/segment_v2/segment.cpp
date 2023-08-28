@@ -445,17 +445,17 @@ Status Segment::new_iterator_with_path(const TabletColumn& tablet_column,
                                    HierarchicalDataReader::ReadType::COMPOUND);
     } else {
         // If file only exist column `v.a` and `v` but target path is `v.b`, read only read and parse root column
-        const auto* node = _sub_column_tree.find_leaf(root_path);
-        if (node == nullptr) {
-            // No such variant column in this segment, get a default one
-            RETURN_IF_ERROR(new_default_iterator(tablet_column, iter));
-            return Status::OK();
-        }
-        auto cache_iter = new CachedStreamIterator(tablet_column.path_info());
-        RETURN_IF_ERROR(add_stream(cache_iter, node));
-        path_reader->set_read_type(tablet_column.path_info(),
-                                   HierarchicalDataReader::ReadType::EXTRACT_FROM_ROOT);
-        iter->reset(cache_iter);
+        // const auto* node = _sub_column_tree.find_leaf(root_path);
+        // if (node == nullptr) {
+        //     // No such variant column in this segment, get a default one
+        RETURN_IF_ERROR(new_default_iterator(tablet_column, iter));
+        return Status::OK();
+        // }
+        // auto cache_iter = new CachedStreamIterator(tablet_column.path_info());
+        // RETURN_IF_ERROR(add_stream(cache_iter, node));
+        // path_reader->set_read_type(tablet_column.path_info(),
+        //                            HierarchicalDataReader::ReadType::EXTRACT_FROM_ROOT);
+        // iter->reset(cache_iter);
     }
     return Status::OK();
 }
