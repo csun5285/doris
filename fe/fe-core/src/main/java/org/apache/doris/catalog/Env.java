@@ -690,7 +690,7 @@ public class Env {
         this.hiveTransactionMgr = new HiveTransactionMgr();
         this.binlogManager = new BinlogManager();
         this.binlogGcer = new BinlogGcer();
-        this.remoteTableSchemaMgr = new RemoteTableSchemaMgr(10000);
+        this.remoteTableSchemaMgr = new RemoteTableSchemaMgr(Config.remote_tablet_schema_fetch_intervals);
     }
 
     public static void destroyCheckpoint() {

@@ -67,21 +67,21 @@
 9986	{"payload":{"description":"HTML ile ilk web sayfam","ref_type":"repository","pusher_type":"user","master_branch":"main"},"created_at":"2022-11-07T23:03:27Z","id":"25085159762","public":1,"repo":{"url":"https://api.github.com/repos/ilknurergnc/HTML-1","id":563104179,"name":"ilknurergnc/HTML-1"},"actor":{"gravatar_id":"","display_login":"ilknurergnc","url":"https://api.github.com/users/ilknurergnc","id":107555118,"login":"ilknurergnc","avatar_url":"https://avatars.githubusercontent.com/u/107555118?"},"type":"CreateEvent"}
 
 -- !sql_3_3 --
-170
+487
+2633
 1961
 149
-8915
-311
 6346
-2633
-487
-450
 5314
 1088
+170
 4021
 1289
+450
+8915
 710
 33999
+311
 
 -- !sql_3_4 --
 opened	4771

@@ -72,9 +72,17 @@ public class FetchRemoteTabletSchemaUtil {
         Map<Long, Set<Long>> beIdToTabletId = Maps.newHashMap();
         for (Tablet tablet : tablets) {
             for (Replica replica : tablet.getReplicas()) {
+                if (!replica.isNormal()) {
+                    continue;
+                }
+                Backend backend = Env.getCurrentEnv().getCurrentSystemInfo().getBackend(replica.getBackendId());
+                if (backend == null || !backend.isQueryAvailable()) {
+                    continue;
+                }
                 Set<Long> tabletIds = beIdToTabletId.computeIfAbsent(
                                     replica.getBackendId(), k -> Sets.newHashSet());
                 tabletIds.add(tablet.getId());
+                break;
             }
         }
 

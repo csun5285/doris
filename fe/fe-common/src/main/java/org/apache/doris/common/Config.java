@@ -2122,4 +2122,7 @@ public class Config extends ConfigBase {
 
     @ConfField
     public static int table_stats_health_threshold = 80;
+
+    @ConfField(mutable = true, description = {"周期性从 be 获取 variant 拆解列的类型，单位毫秒", "english"})
+    public static long remote_tablet_schema_fetch_intervals = 10000L;
 }
