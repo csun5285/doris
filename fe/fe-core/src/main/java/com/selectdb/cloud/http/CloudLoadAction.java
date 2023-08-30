@@ -199,8 +199,9 @@ public class CloudLoadAction extends RestBaseController {
     public Object loadQuery(HttpServletRequest request, HttpServletResponse response)
             throws InterruptedException, IOException {
         MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.increase(1L);
-        LOG.info("query request parameter {} header {}", request.getParameterMap(), getHeadersInfo(request));
         String postContent = HttpUtils.getBody(request);
+        LOG.info("query request parameter {} header {} body {}", request.getParameterMap(), getHeadersInfo(request),
+                postContent);
         Map<String, Object> resultMap = new HashMap<>(3);
         try {
             long startTime = System.currentTimeMillis();
