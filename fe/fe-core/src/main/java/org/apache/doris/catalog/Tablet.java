@@ -235,7 +235,12 @@ public class Tablet extends MetaObject implements Writable {
     }
 
     public List<Long> getNormalReplicaBackendIds() {
-        return Lists.newArrayList(getNormalReplicaBackendPathMap().keySet());
+        try {
+            return Lists.newArrayList(getNormalReplicaBackendPathMap().keySet());
+        } catch (Exception e) {
+            LOG.warn("failed to getNormalReplicaBackendIds", e);
+            return Lists.newArrayList();
+        }
     }
 
     // return map of (BE id -> path hash) of normal replicas

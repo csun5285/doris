@@ -49,7 +49,7 @@ public enum AccessPrivilege {
     }
 
     public boolean isResource() {
-        return this.flag == 12;
+        return this == USAGE_PRIV;
     }
 
     public List<Privilege> toDorisPrivilege() {

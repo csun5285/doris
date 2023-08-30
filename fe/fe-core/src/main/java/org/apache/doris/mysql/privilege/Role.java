@@ -462,7 +462,7 @@ public class Role implements Writable, GsonPostProcessable {
         LOG.debug("failed to get wanted privs: {}, granted: {}", wanted, savedPrivs);
         return false;
     }
-                                  
+
     public boolean checkColPriv(String ctl, String db, String tbl, String col, PrivPredicate wanted) {
         Optional<Privilege> colPrivilege = wanted.getColPrivilege();
         Preconditions.checkState(colPrivilege.isPresent(), "this privPredicate should not use checkColPriv:" + wanted);

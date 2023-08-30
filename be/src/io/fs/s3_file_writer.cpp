@@ -391,7 +391,7 @@ Status S3FileWriter::finalize() {
     return _st;
 }
 
-void S3FileWriter::_put_object(S3FileBuffer& buf) {
+void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed) << "closed " << _closed;
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);
@@ -407,7 +407,7 @@ void S3FileWriter::_put_object(S3FileBuffer& buf) {
                                     response.GetError().GetExceptionName(),
                                     response.GetError().GetMessage(),
                                     static_cast<int>(response.GetError().GetResponseCode()));
-        buf._on_failed(_st);
+        buf.set_val(_st);
         LOG(WARNING) << _st;
         return;
     }

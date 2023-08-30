@@ -28,6 +28,7 @@ import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.UserException;
 import org.apache.doris.mysql.privilege.Auth.PrivLevel;
 import org.apache.doris.mysql.privilege.ColPrivilegeKey;
+import org.apache.doris.mysql.privilege.PrivBitSet;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.mysql.privilege.Privilege;
 import org.apache.doris.qe.ConnectContext;
@@ -65,7 +66,8 @@ public class GrantStmt extends DdlStmt {
     // with the column permissions section placed in "colPrivileges" and the others in "privileges"
     private List<AccessPrivilegeWithCols> accessPrivileges;
 
-    public GrantStmt(UserIdentity userIdent, String role, TablePattern tblPattern, List<AccessPrivilegeWithCols> privileges) {
+    public GrantStmt(UserIdentity userIdent, String role,
+                     TablePattern tblPattern, List<AccessPrivilegeWithCols> privileges) {
         this(userIdent, role, tblPattern, null, null, privileges, ResourceTypeEnum.GENERAL);
     }
 
@@ -85,28 +87,36 @@ public class GrantStmt extends DdlStmt {
     }
 
     private GrantStmt(UserIdentity userIdent, String role, TablePattern tblPattern, ResourcePattern resourcePattern,
-            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilegeWithCols> privaccessPrivilegesileges, ResourceTypeEnum type) {
+            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilegeWithCols> accessPrivilegeWithCols,
+                      ResourceTypeEnum type) {
         this.userIdent = userIdent;
         this.role = role;
         this.tblPattern = tblPattern;
+        this.resourcePattern = resourcePattern;
         this.workloadGroupPattern = workloadGroupPattern;
         if (this.resourcePattern != null) {
             this.resourcePattern.setResourceType(type);
         }
         PrivBitSet privs = PrivBitSet.of();
-        for (AccessPrivilege accessPrivilege : privaccessPrivilegesileges) {
-            if (!accessPrivilege.isResource() || type == ResourceTypeEnum.GENERAL) {
-                privs.or(accessPrivilege.toPaloPrivilege());
+        for (AccessPrivilegeWithCols accessPrivilegeWithCol : accessPrivilegeWithCols) {
+            if (accessPrivilegeWithCol.getAccessPrivilege() == null
+                    || accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege() == null) {
+                continue;
+            }
+            if (!accessPrivilegeWithCol.getAccessPrivilege().isResource() || type == ResourceTypeEnum.GENERAL) {
+                privs.or(PrivBitSet.of(accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege()));
                 continue;
             }
 
+            // ATTN: cloud mode, GRANT USAGE_PRIV ON CLUSTER ${cluster_name} TO ROLE ${user}
+            // change USAGE_PRIV to ${type}_USAGE_PRIV
             if (type == ResourceTypeEnum.CLUSTER) {
                 privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
             } else if (type == ResourceTypeEnum.STAGE) {
                 privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
             }
         }
-        this.accessPrivileges = privs.toPrivilegeList();
+        this.accessPrivileges = privs.toAccessPrivilegeWithColsList();
     }
 
     public UserIdentity getUserIdent() {

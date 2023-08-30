@@ -486,9 +486,6 @@ public:
 
     bool is_default_at(size_t n) const override { return data[n] == T {}; }
 
-    ColumnPtr create_with_offsets(const IColumn::Offsets64& offsets, const Field& default_field,
-                                  size_t total_rows, size_t shift) const override;
-
 protected:
     Container data;
 };

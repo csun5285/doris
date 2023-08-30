@@ -229,8 +229,8 @@ import com.google.common.collect.Sets;
 import com.google.gson.GsonBuilder;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -1468,7 +1468,7 @@ public class ShowExecutor {
         if (showWarningsStmt.isFindByLabel()) {
             List<List<Comparable>> loadJobInfosByDb = loadManager.getLoadJobInfosByDb(db.getId(),
                     showWarningsStmt.getLabel(),
-                    true, null);
+                    true, null, null, null, false, null, false, null, false);
             if (CollectionUtils.isEmpty(loadJobInfosByDb)) {
                 return null;
             }

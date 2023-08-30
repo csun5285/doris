@@ -253,7 +253,6 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
     protected boolean isTypeRead = false;
 
     private String cloudClusterId;
-    
     protected byte enclose = 0;
 
     protected byte escape = 0;

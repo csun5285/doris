@@ -78,7 +78,6 @@
 #include "runtime/stream_load/stream_load_recorder.h"
 #include "util/doris_metrics.h"
 #include "util/metrics.h"
-#include "util/priority_thread_pool.hpp"
 #include "util/spinlock.h"
 #include "util/stopwatch.hpp"
 #include "util/thread.h"
@@ -908,7 +907,7 @@ Status StorageEngine::create_tablet(const TCreateTabletReq& request) {
         LOG(WARNING) << "there is no available disk that can be used to create tablet.";
         return Status::Error<CE_CMD_PARAMS_ERROR>("there is no available disk that can be used to create tablet.");
     }
-    return _tablet_manager->create_tablet(request, stores);
+    return _tablet_manager->create_tablet(request, stores, nullptr);
 }
 
 Status StorageEngine::obtain_shard_path(TStorageMedium::type storage_medium,

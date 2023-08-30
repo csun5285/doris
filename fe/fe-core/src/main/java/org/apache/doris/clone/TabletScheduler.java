@@ -60,7 +60,6 @@ import org.apache.doris.task.StorageMediaMigrationTask;
 import org.apache.doris.thrift.TFinishTaskRequest;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TStorageMedium;
-import org.apache.doris.transaction.DatabaseTransactionMgr;
 import org.apache.doris.transaction.TransactionState;
 
 import com.google.common.base.Joiner;
@@ -1091,8 +1090,12 @@ public class TabletScheduler extends MasterDaemon {
 
             long preWatermarkTxnId = replica.getPreWatermarkTxnId();
             if (preWatermarkTxnId == -1) {
-                preWatermarkTxnId = Env.getCurrentGlobalTransactionMgr()
-                        .getNextTransactionId();
+                try {
+                    preWatermarkTxnId = Env.getCurrentGlobalTransactionMgr()
+                        .getNextTransactionId(tabletCtx.getDbId());
+                } catch (AnalysisException e) {
+                    throw new SchedException(Status.SCHEDULE_FAILED, e.getMessage());
+                }
                 replica.setPreWatermarkTxnId(preWatermarkTxnId);
                 LOG.info("set decommission replica {} on backend {} of tablet {} pre watermark txn id {}",
                         replica.getId(), replica.getBackendId(), tabletCtx.getTabletId(), preWatermarkTxnId);
@@ -1109,8 +1112,12 @@ public class TabletScheduler extends MasterDaemon {
                 } catch (AnalysisException e) {
                     throw new SchedException(Status.UNRECOVERABLE, e.getMessage());
                 }
-                postWatermarkTxnId = Env.getCurrentGlobalTransactionMgr()
-                        .getTransactionIDGenerator().getNextTransactionId();
+                try {
+                    postWatermarkTxnId = Env.getCurrentGlobalTransactionMgr()
+                        .getNextTransactionId(tabletCtx.getDbId());
+                } catch (AnalysisException e) {
+                    throw new SchedException(Status.SCHEDULE_FAILED, e.getMessage());
+                }
                 replica.setPostWatermarkTxnId(postWatermarkTxnId);
                 LOG.info("set decommission replica {} on backend {} of tablet {} post watermark txn id {}",
                         replica.getId(), replica.getBackendId(), tabletCtx.getTabletId(), postWatermarkTxnId);

@@ -2528,7 +2528,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 // create partition
                 Partition partition;
                 if (Config.isNotCloudMode()) {
-                     partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
+                    partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                         olapTable.getName(), olapTable.getBaseIndexId(), partitionId, partitionName,
                         olapTable.getIndexIdToMeta(), partitionDistributionInfo,
                         partitionInfo.getDataProperty(partitionId).getStorageMedium(),

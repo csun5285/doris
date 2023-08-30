@@ -1211,7 +1211,7 @@ public enum ErrorCode {
 
     // ATTN: In Cloud has ERR_NO_CLUSTER_ERROR and ERR_UNSUPPORTED_OPERATION_ERROR, so error code not eq doris
     ERR_AUTO_INCREMENT_COLUMN_NOT_INT_DUPLICATE_TABLE(5099, new byte[]{'4', '2', '0', '0', '0'},
-            "the auto increment is only supported in duplicate table.");
+            "the auto increment is only supported in duplicate table."),
 
     ERR_AUTO_INCREMENT_COLUMN_NOT_SUPPORTED(5100, new byte[]{'4', '2', '0', '0', '0'},
             "auto increment column is not supported currently.");

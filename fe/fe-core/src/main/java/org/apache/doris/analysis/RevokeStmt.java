@@ -22,6 +22,7 @@ import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.mysql.privilege.ColPrivilegeKey;
+import org.apache.doris.mysql.privilege.PrivBitSet;
 import org.apache.doris.mysql.privilege.Privilege;
 
 import com.google.common.base.Joiner;
@@ -53,7 +54,8 @@ public class RevokeStmt extends DdlStmt {
     private List<String> roles;
     List<AccessPrivilegeWithCols> accessPrivileges;
 
-    public RevokeStmt(UserIdentity userIdent, String role, TablePattern tblPattern, List<AccessPrivilegeWithCols> privileges) {
+    public RevokeStmt(UserIdentity userIdent, String role, TablePattern tblPattern,
+                      List<AccessPrivilegeWithCols> privileges) {
         this(userIdent, role, tblPattern, null, null, privileges, ResourceTypeEnum.GENERAL);
     }
 
@@ -73,28 +75,36 @@ public class RevokeStmt extends DdlStmt {
     }
 
     private RevokeStmt(UserIdentity userIdent, String role, TablePattern tblPattern, ResourcePattern resourcePattern,
-            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilegeWithCols> accessPrivileges, ResourceTypeEnum type) {
+            WorkloadGroupPattern workloadGroupPattern, List<AccessPrivilegeWithCols> accessPrivileges,
+                       ResourceTypeEnum type) {
         this.userIdent = userIdent;
         this.role = role;
         this.tblPattern = tblPattern;
+        this.resourcePattern = resourcePattern;
         this.workloadGroupPattern = workloadGroupPattern;
         if (this.resourcePattern != null) {
             this.resourcePattern.setResourceType(type);
         }
         PrivBitSet privs = PrivBitSet.of();
-        for (AccessPrivilege accessPrivilege : accessPrivileges) {
-            if (!accessPrivilege.isResource() || type == ResourceTypeEnum.GENERAL) {
-                privs.or(accessPrivilege.toPaloPrivilege());
+        for (AccessPrivilegeWithCols accessPrivilegeWithCol : accessPrivileges) {
+            if (accessPrivilegeWithCol.getAccessPrivilege() == null
+                    || accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege() == null) {
+                continue;
+            }
+            if (!accessPrivilegeWithCol.getAccessPrivilege().isResource() || type == ResourceTypeEnum.GENERAL) {
+                privs.or(PrivBitSet.of(accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege()));
                 continue;
             }
 
+            // ATTN: cloud mode, REVOKE USAGE_PRIV ON CLUSTER ${cluster_name} FROM ROLE ${user}
+            // change USAGE_PRIV to ${type}_USAGE_PRIV
             if (type == ResourceTypeEnum.CLUSTER) {
                 privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
             } else if (type == ResourceTypeEnum.STAGE) {
                 privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
             }
         }
-        this.accessPrivileges = privs.toPrivilegeList();
+        this.accessPrivileges = privs.toAccessPrivilegeWithColsList();
     }
 
     public UserIdentity getUserIdent() {

@@ -5226,7 +5226,7 @@ public class Env {
         }
 
         ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
-                properties);
+                table.getName(), properties);
         editLog.logModifyPersistent(info);
     }
 
@@ -5241,7 +5241,7 @@ public class Env {
         tableProperty.buildTTLSeconds();
         table.setTTLSeconds(tableProperty.getTTLSeconds());
         ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
-                properties);
+                table.getName(), properties);
         editLog.logModifyTTLSeconds(info);
     }
 

@@ -53,7 +53,6 @@ import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.DatabaseTransactionMgr;
 import org.apache.doris.transaction.GlobalTransactionMgr;
-import org.apache.doris.transaction.TransactionState;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;

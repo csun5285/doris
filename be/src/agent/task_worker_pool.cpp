@@ -1391,6 +1391,7 @@ CreateTableTaskPool::CreateTableTaskPool(ExecEnv* env, ThreadModel thread_model)
 }
 
 void CreateTableTaskPool::_create_tablet_worker_thread_callback() {
+#ifndef CLOUD_MODE
     while (_is_work) {
         TAgentTaskRequest agent_task_req;
         {
@@ -1465,6 +1466,7 @@ void CreateTableTaskPool::_create_tablet_worker_thread_callback() {
         _finish_task(finish_task_request);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
     }
+#endif // !CLOUD_MODE
 }
 
 DropTableTaskPool::DropTableTaskPool(ExecEnv* env, ThreadModel thread_model)

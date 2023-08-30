@@ -18,6 +18,8 @@
 package org.apache.doris.mysql.privilege;
 
 import org.apache.doris.analysis.CompoundPredicate.Operator;
+import org.apache.doris.catalog.AccessPrivilege;
+import org.apache.doris.catalog.AccessPrivilegeWithCols;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.io.Text;
@@ -126,6 +128,18 @@ public class PrivBitSet implements Writable {
             }
         }
         return privs;
+    }
+
+    // for cloud auth
+    public List<AccessPrivilegeWithCols> toAccessPrivilegeWithColsList() {
+        List<AccessPrivilegeWithCols> accessPrivilegeWithCols = Lists.newArrayList();
+        for (int i = 0; i < Privilege.privileges.length; i++) {
+            if (get(i)) {
+                accessPrivilegeWithCols.add(
+                    new AccessPrivilegeWithCols(AccessPrivilege.fromName(Privilege.getPriv(i).getName())));
+            }
+        }
+        return accessPrivilegeWithCols;
     }
 
     public static PrivBitSet of(Privilege... privs) {
