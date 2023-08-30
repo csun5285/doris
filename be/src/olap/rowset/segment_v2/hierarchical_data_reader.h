@@ -57,8 +57,7 @@ public:
     const SubstreamCache::Node* find_leaf(const vectorized::PathInData& path);
     bool add(const vectorized::PathInData& path, StreamReader&& sub_reader);
     Status finalize(const std::vector<ColumnId>& column_ids, vectorized::MutableColumns& result);
-    Status filter(uint16_t* sel_rowid_idx, uint16_t selected_size,
-                  const std::vector<ColumnId>& filtered_cids, vectorized::Block* block);
+    Status filter(uint16_t* sel_rowid_idx, uint16_t selected_size);
     ReaderType get_reader_type() const { return _opts.io_ctx.reader_type; }
     void set_read_type(const vectorized::PathInData& path, ReadType type) {
         _column_read_type_map[path] = type;

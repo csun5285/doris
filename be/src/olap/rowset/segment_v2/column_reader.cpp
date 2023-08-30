@@ -1499,6 +1499,10 @@ Status CachedStreamIterator::next_batch(size_t* n, vectorized::MutableColumnPtr&
                 if (node->data.column == nullptr) {
                     const_cast<SubstreamCache::Node*>(node)->data.column =
                             node->data.type->create_column();
+                    VLOG_DEBUG << fmt::format(
+                            "data column is nullptr, path {},  type {}",
+                            node->path.get_path(),
+                            node->data.type->get_name());
                 }
                 if (_rows_read >= node->data.rows_read) {
                     vectorized::MutableColumnPtr column = node->data.column->assume_mutable();

@@ -1577,7 +1577,7 @@ void SegmentIterator::_init_current_block(
         if (!column_desc->path().empty()) {
             const auto* node = _path_reader->find_leaf(column_desc->path());
             // Read directly into current_columns[cid] without aditional copy
-            if (node && node->children.empty()) {
+            if (node != nullptr && node->children.empty()) {
                 auto* mnode = const_cast<SubstreamCache::Node*>(node);
                 mnode->data.column = current_columns[cid]->get_ptr();
             }
@@ -1790,22 +1790,23 @@ Status SegmentIterator::_convert_to_expected_type(const std::vector<ColumnId>& c
                     _current_return_columns[i]->assume_mutable()->get_ptr();
             RETURN_IF_ERROR(vectorized::schema_util::cast_column({original, file_column_type, ""},
                                                                  expected_type, &expected));
-            // wrap predicate column
-            if (_is_pred_column[i]) {
-                vectorized::MutableColumnPtr new_pred_column =
-                        Schema::get_predicate_column_ptr(*field_type, _opts.io_ctx.reader_type);
-                new_pred_column->insert_range_from(*expected, 0, expected->size());
-                _current_return_columns[i] = std::move(new_pred_column);
-                // TODO set datetime type
-            } else {
-                _current_return_columns[i] = expected->assume_mutable();
-            }
-            _converted_column_ids[i] = 1;
+             
+            _current_return_columns[i] = expected->assume_mutable();
+            
             VLOG_DEBUG << fmt::format("Convert {} fom file column type {} to {}, num_rows {}",
                                       field_type->path().get_path(), file_column_type->get_name(),
                                       expected_type->get_name(),
                                       _current_return_columns[i]->size());
         }
+        // wrap predicate column
+        if (_is_pred_column[i]) {
+            vectorized::MutableColumnPtr new_pred_column =
+                    Schema::get_predicate_column_ptr(*_schema->column(i), _opts.io_ctx.reader_type);
+            new_pred_column->insert_range_from(*_current_return_columns[i], 0, _current_return_columns[i]->size());
+            _current_return_columns[i] = std::move(new_pred_column);
+            // TODO set datetime type
+        }
+        _converted_column_ids[i] = 1;
     }
     return Status::OK();
 }
@@ -1827,8 +1828,10 @@ Status SegmentIterator::_next_batch_internal(vectorized::Block* block) {
             auto cid = _schema->column_id(i);
             auto column_desc = _schema->column(cid);
             if (_is_pred_column[cid]) {
-                _current_return_columns[cid] =
-                        Schema::get_predicate_column_ptr(*column_desc, _opts.io_ctx.reader_type);
+                auto file_column_type = _segment->get_data_type_of(*column_desc);
+                _current_return_columns[cid] = file_column_type->create_column();
+                // _current_return_columns[cid] =
+                //         Schema::get_predicate_column_ptr(*column_desc, _opts.io_ctx.reader_type);
                 _current_return_columns[cid]->set_rowset_segment_id(
                         {_segment->rowset_id(), _segment->id()});
                 _current_return_columns[cid]->reserve(_opts.block_row_max);
@@ -1924,8 +1927,7 @@ Status SegmentIterator::_next_batch_internal(vectorized::Block* block) {
                                                           sel_rowid_idx, selected_size));
 
                 // Filter after output column by selected row index, this could avoid duplicated column filter
-                RETURN_IF_ERROR(_path_reader->filter(sel_rowid_idx, selected_size,
-                                                     _first_read_column_ids, block));
+                RETURN_IF_ERROR(_path_reader->filter(sel_rowid_idx, selected_size));
                 // step 3.2: read remaining expr column and evaluate it.
                 if (_is_need_expr_eval) {
                     // The predicate column contains the remaining expr column, no need second read.
@@ -2032,8 +2034,7 @@ Status SegmentIterator::_next_batch_internal(vectorized::Block* block) {
         // step4: read non_predicate column
         if (selected_size > 0) {
             // Filter after output column by selected row index, this could avoid duplicated column filter
-            RETURN_IF_ERROR(_path_reader->filter(sel_rowid_idx, selected_size,
-                                                 _second_read_column_ids, block));
+            RETURN_IF_ERROR(_path_reader->filter(sel_rowid_idx, selected_size));
             RETURN_IF_ERROR(_read_columns_by_rowids(_non_predicate_columns, _block_rowids,
                                                     sel_rowid_idx, selected_size,
                                                     &_current_return_columns));

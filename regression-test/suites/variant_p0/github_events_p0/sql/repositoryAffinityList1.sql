@@ -1,4 +1,3 @@
--- ERROR: unmatched column
 SELECT
   v:repo.name as repo_name,
   count() AS stars

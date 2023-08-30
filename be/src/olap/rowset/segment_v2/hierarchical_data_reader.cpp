@@ -189,13 +189,11 @@ Status HierarchicalDataReader::finalize(const std::vector<ColumnId>& column_ids,
 // To ensure data integrity, we need to filter the data for later processing,
 // otherwise, the row numbers will not match as expected.
 // Here we just filter none predicate column, predicate column is filtered in `_output_column_by_sel_idx`
-Status HierarchicalDataReader::filter(uint16_t* sel_rowid_idx, uint16_t selected_size,
-                                      const std::vector<ColumnId>& filtered_cids,
-                                      vectorized::Block* block) {
+Status HierarchicalDataReader::filter(uint16_t* sel_rowid_idx, uint16_t selected_size) {
     if (_substream_cache.empty()) {
         return Status::OK();
     }
-    std::set<ColumnId> filtered(filtered_cids.begin(), filtered_cids.end());
+    // std::set<ColumnId> filtered(filtered_cids.begin(), filtered_cids.end());
     for (auto& leave : _substream_cache) {
         if (leave->data.column && leave->data.column->size() > 0 &&
             // filter more columns
@@ -206,13 +204,13 @@ Status HierarchicalDataReader::filter(uint16_t* sel_rowid_idx, uint16_t selected
             vectorized::ColumnPtr res_ptr = leave->data.type->create_column();
             RETURN_IF_ERROR(leave->data.column->assume_mutable()->filter_by_selector(
                     sel_rowid_idx, selected_size, res_ptr->assume_mutable().get()));
-            // leave->data.column.swap(res_ptr);
+            leave->data.column.swap(res_ptr);
             // if (leave->data.cid >= 0) {
             //     _current_return_columns[leave->data.cid] = leave->data.column->assume_mutable();
             // }
             // TODO avoid copy
-            leave->data.column->assume_mutable()->clear();
-            leave->data.column->assume_mutable()->insert_range_from(*res_ptr, 0, res_ptr->size());
+            // leave->data.column->assume_mutable()->clear();
+            // leave->data.column->assume_mutable()->insert_range_from(*res_ptr, 0, res_ptr->size());
             VLOG_DEBUG << fmt::format("filter, rows: {}, path:{}, selected_size:{}",
                                       leave->data.column->size(), leave->path.get_path(),
                                       selected_size);

@@ -1,4 +1,3 @@
---ERROR: crash column.h:496] not support
 SELECT
     v:repo.name,
     count() AS pushes,

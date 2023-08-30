@@ -21,6 +21,7 @@
 
 #include <algorithm>
 
+#include "util/slice.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_string.h"
 #include "vec/columns/predicate_column.h"
@@ -74,7 +75,34 @@ public:
     }
 
     void insert_range_from(const IColumn& src, size_t start, size_t length) override {
-        LOG(FATAL) << "insert_range_from not supported in ColumnDictionary";
+        const ColumnString& src_concrete = assert_cast<const ColumnString&>(src);
+
+        if (start + length > src_concrete.get_offsets().size()) {
+            LOG(FATAL) << "Parameter out of bound in IColumnString::insert_range_from method.";
+        }
+        std::vector<int32_t> codes;
+        _dict.reserve(_dict.size() + length);
+        for(size_t i = start; i < start + length; i++) {
+            StringRef str = src_concrete.get_data_at(i);
+            int32_t code = find_code(str);
+            if (code != -2) {
+                codes.emplace_back(code);
+            } else {
+                char* buffer = new char[str.size];
+                memcpy(buffer, str.data, str.size);
+                codes.emplace_back(_dict.size());
+                _dict.insert_value(StringRef(buffer, str.size));
+            }
+        }
+        int32_t data_array[codes.size()];
+        for (int i = 0; i < codes.size(); i++) {
+            data_array[i] = codes[i];
+        }
+        _codes.reserve(_codes.size() + codes.size());
+        char* end_ptr = (char*)_codes.get_end_ptr();
+        memcpy(end_ptr, data_array + 0, codes.size() * sizeof(T));
+        end_ptr += codes.size() * sizeof(T);
+        _codes.set_end_ptr(end_ptr);
     }
 
     void insert_indices_from(const IColumn& src, const int* indices_begin,

@@ -93,7 +93,7 @@ suite("regression_test_select_variant_without_cast", "variant_type_select"){
         qt_sql_2_2 """select v:c.c from ${table_name} order by v:c.c"""
 
         // PredicateColumnType<(doris::PrimitiveType)5>::insert_range_from
-        // qt_sql_2_3 """select v:c.e from ${table_name} where v:a > 3000 order by k"""
+        qt_sql_2_3 """select v:c.e from ${table_name} where v:a > 3000 order by k"""
         // qt_sql_2_4 """select v:f from ${table_name}"""
         qt_sql_2_5 """select v:c.e  from ${table_name} where v:c.e > 7.0 order by k"""
         qt_sql_2_6 """select sum(v:a) as sum_a from ${table_name} group by v:a order by sum_a"""
@@ -101,13 +101,15 @@ suite("regression_test_select_variant_without_cast", "variant_type_select"){
         qt_sql_2_8 """select count(v:c.c) as count_c from ${table_name} group by v:a order by count_c"""
         qt_sql_2_9 """select max(v:c.e) as max_e from ${table_name} group by v:a order by max_e"""
         // PredicateColumnType<(doris::PrimitiveType)5>::insert_range_from
-        // qt_sql_2_10 """select * from ${table_name} where v:a >= 30000 order by k"""
+        qt_sql_2_10 """select * from ${table_name} where v:a >= 30000 order by k"""
         // qt_sql_2_11 """delete from ${table_name} where v:a > 30000"""
-        // qt_sql_2_12 """select v:h from ${table_name} where v:a > 30000 order by k"""
+        qt_sql_2_12 """select v:h from ${table_name} where v:a > 30000 order by k"""
         // sql "truncate table ${table_name}"
 
 
         // test where, order, agg ...
+        // sql """ create database IF NOT EXISTS regression_test_variant_p0_github_events_p0_without_cast"""
+        // sql """ use regression_test_variant_p0_github_events_p0_without_cast"""
         set_be_config.call("ratio_of_defaults_as_sparse_column", "0.95")
         table_name = "github_events"
         sql """DROP TABLE IF EXISTS ${table_name}"""
@@ -118,9 +120,8 @@ suite("regression_test_select_variant_without_cast", "variant_type_select"){
             )
             DUPLICATE KEY(`k`)
             DISTRIBUTED BY HASH(k) BUCKETS 4 
-            properties("replication_num" = "1", "disable_auto_compaction" = "false");
+            properties("replication_num" = "1", "disable_auto_compaction" = "true");
         """
-        // 2022
         // 2015
         load_json_data.call(table_name, """${getS3Url() + '/regression/gharchive.m/2015-01-01-0.json'}""")
         load_json_data.call(table_name, """${getS3Url() + '/regression/gharchive.m/2015-01-01-1.json'}""")
@@ -136,12 +137,12 @@ suite("regression_test_select_variant_without_cast", "variant_type_select"){
         // v:repo.id   int
         // v:repo.name text
         // todo: sometime result is empty
-        // qt_sql_3 """select v:repo from ${table_name} where v:repo.id = 562172658"""
+        qt_sql_3 """select v:repo from ${table_name} where v:repo.id = 562172658"""
         // todo: result is empty, but select v:repo is not
-        // qt_sql_3_1 """select v from ${table_name} where v:repo.id = 562172658"""
+        qt_sql_3_1 """select v from ${table_name} where v:repo.id = 562172658"""
         
         qt_sql_3_2 """select * from ${table_name} order by v:repo.id desc limit 1"""
-        qt_sql_3_3 """select count() from ${table_name} group by v:type"""
+        qt_sql_3_3 """select count(*) from ${table_name} group by v:type"""
         qt_sql_3_4 """SELECT v:payload.action, count() FROM github_events  GROUP BY v:payload.action"""
         qt_sql_3_5 """SELECT v:repo.name FROM github_events ORDER BY v:created_at LIMIT 5"""
         qt_sql_3_6 """SELECT v:repo.name, count() AS stars FROM github_events GROUP BY v:repo.name ORDER BY stars DESC, 1 LIMIT 5"""
@@ -154,16 +155,16 @@ suite("regression_test_select_variant_without_cast", "variant_type_select"){
                 ORDER BY authors DESC, URL ASC
                 LIMIT 5
         """
-        // qt_sql_3_8 """
-        //     SELECT
-        //         v:repo.name,
-        //         v:payload.issue.`number`  as number,
-        //         count() AS comments
-        //     FROM github_events
-        //     GROUP BY v:repo.name, number 
-        //     ORDER BY comments DESC, number ASC
-        //     LIMIT 5
-        // """
+        qt_sql_3_8 """
+            SELECT
+                v:repo.name,
+                v:payload.issue.`number`  as number,
+                count() AS comments
+            FROM github_events
+            GROUP BY v:repo.name, number 
+            ORDER BY comments DESC, number ASC
+            LIMIT 5
+        """
         qt_sql_3_9 """
             SELECT
                 lower(split_part(v:repo.name, '/', 1)) AS org,
