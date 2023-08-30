@@ -469,7 +469,6 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
     std::vector<std::pair<TabletSharedPtr, int64_t /* version */>> tablets_to_scan;
     tablets_to_scan.reserve(_scan_ranges.size());
 #ifdef CLOUD_MODE
-    // Warm up tablet meta cache
     std::vector<std::function<Status()>> tasks;
     tasks.reserve(_scan_ranges.size());
     for (auto& scan_range : _scan_ranges) {
@@ -477,9 +476,8 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
         tasks.push_back([range = scan_range.get(), &tablet] {
             RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(range->tablet_id, &tablet.first));
             tablet.second = std::atol(range->version.c_str());
-            // Try to warm up rowset metas with version
-            tablet.first->cloud_sync_rowsets(tablet.second);
-            return Status::OK();
+            // Sync rowset metas with version
+            return tablet.first->cloud_sync_rowsets(tablet.second);
         });
     }
     RETURN_IF_ERROR(cloud::bthread_fork_and_join(tasks, 10));
