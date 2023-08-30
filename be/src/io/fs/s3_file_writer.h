@@ -76,6 +76,8 @@ private:
     Status _open();
     Status _close();
 
+    [[nodiscard]] int64_t upload_cost_ms() const { return *_upload_cost_ms; }
+
     void _wait_until_finish(std::string_view task_name);
     Status _complete();
     Status _create_multi_upload_request();
@@ -98,6 +100,7 @@ private:
 
     Key _cache_key;
     BlockFileCache* _cache;
+    std::unique_ptr<int64_t> _upload_cost_ms;
 
     // **Attention** call add_count() before submitting buf to async thread pool
     bthread::CountdownEvent _countdown_event {0};

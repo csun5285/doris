@@ -249,7 +249,7 @@ public:
     void to_string(const IColumn& column, size_t row_num, BufferWritable& ostr) const override;
     Status from_string(ReadBuffer& rb, IColumn* column) const override;
     DataTypeSerDeSPtr get_serde() const override {
-        return std::make_shared<DataTypeDecimalSerDe<T>>(scale);
+        return std::make_shared<DataTypeDecimalSerDe<T>>(scale, precision);
     };
 
     /// Decimal specific
@@ -407,10 +407,10 @@ constexpr bool IsDataTypeDecimalOrNumber =
         IsDataTypeDecimal<DataType> || IsDataTypeNumber<DataType>;
 
 template <typename FromDataType, typename ToDataType>
-std::enable_if_t<IsDataTypeDecimal<FromDataType> && IsDataTypeDecimal<ToDataType>,
-                 typename ToDataType::FieldType>
-convert_decimals(const typename FromDataType::FieldType& value, UInt32 scale_from, UInt32 scale_to,
-                 UInt8* overflow_flag = nullptr) {
+    requires IsDataTypeDecimal<FromDataType> && IsDataTypeDecimal<ToDataType>
+ToDataType::FieldType convert_decimals(const typename FromDataType::FieldType& value,
+                                       UInt32 scale_from, UInt32 scale_to,
+                                       UInt8* overflow_flag = nullptr) {
     using FromFieldType = typename FromDataType::FieldType;
     using ToFieldType = typename ToDataType::FieldType;
     using MaxFieldType =
@@ -534,9 +534,9 @@ void convert_decimal_cols(
 }
 
 template <typename FromDataType, typename ToDataType>
-std::enable_if_t<IsDataTypeDecimal<FromDataType> && IsDataTypeNumber<ToDataType>,
-                 typename ToDataType::FieldType>
-convert_from_decimal(const typename FromDataType::FieldType& value, UInt32 scale) {
+    requires IsDataTypeDecimal<FromDataType> && IsDataTypeNumber<ToDataType>
+ToDataType::FieldType convert_from_decimal(const typename FromDataType::FieldType& value,
+                                           UInt32 scale) {
     using FromFieldType = typename FromDataType::FieldType;
     using ToFieldType = typename ToDataType::FieldType;
 
@@ -578,10 +578,9 @@ convert_from_decimal(const typename FromDataType::FieldType& value, UInt32 scale
 }
 
 template <typename FromDataType, typename ToDataType>
-std::enable_if_t<IsDataTypeNumber<FromDataType> && IsDataTypeDecimal<ToDataType>,
-                 typename ToDataType::FieldType>
-convert_to_decimal(const typename FromDataType::FieldType& value, UInt32 scale,
-                   UInt8* overflow_flag) {
+    requires IsDataTypeNumber<FromDataType> && IsDataTypeDecimal<ToDataType>
+ToDataType::FieldType convert_to_decimal(const typename FromDataType::FieldType& value,
+                                         UInt32 scale, UInt8* overflow_flag) {
     using FromFieldType = typename FromDataType::FieldType;
     using ToNativeType = typename ToDataType::FieldType::NativeType;
 

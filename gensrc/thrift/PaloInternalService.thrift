@@ -228,6 +228,8 @@ struct TQueryOptions {
 
   76: optional bool enable_inverted_index_query = true;
 
+  77: optional bool truncate_char_or_varchar_columns = false
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }

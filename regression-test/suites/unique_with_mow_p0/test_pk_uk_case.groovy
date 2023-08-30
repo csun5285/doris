@@ -185,6 +185,8 @@ suite("test_pk_uk_case") {
         """
         sql "sync"
 
+        sql "sync"
+
         // count(*)
         def result0 = sql """ SELECT count(*) FROM ${tableNamePk}; """
         def result1 = sql """ SELECT count(*) FROM ${tableNameUk}; """

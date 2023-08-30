@@ -1074,6 +1074,7 @@ TEST(BlockFileCache, fd_cache_evict) {
     auto key = io::BlockFileCache::hash("key1");
     std::string remove_file_name;
     config::file_cache_max_file_reader_cache_size = 2;
+    IFileCache::init();
     {
         auto holder = cache.get_or_set(key, 0, 9, context); /// Add range [0, 8]
         auto blocks = fromHolder(holder);

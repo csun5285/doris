@@ -56,9 +56,6 @@ protected:
     void _filter_input_rowset();
 
 private:
-    // check if all input rowsets are non overlapping among segments.
-    // a rowset with overlapping segments should be compacted by cumulative compaction first.
-    Status _check_rowset_overlapping(const vector<RowsetSharedPtr>& rowsets);
 
     DISALLOW_COPY_AND_ASSIGN(BaseCompaction);
 };

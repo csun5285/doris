@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,11 +30,13 @@
 #include "common/status.h"
 #include "olap/options.h"
 #include "util/threadpool.h"
+#include "vec/common/hash_table/phmap_fwd_decl.h"
 
 namespace doris {
 namespace vectorized {
 class VDataStreamMgr;
 class ScannerScheduler;
+using ZoneList = std::unordered_map<std::string, cctz::time_zone>;
 } // namespace vectorized
 namespace pipeline {
 class TaskScheduler;
@@ -118,7 +121,7 @@ public:
     std::shared_ptr<MemTrackerLimiter> orphan_mem_tracker() { return _orphan_mem_tracker; }
     MemTrackerLimiter* orphan_mem_tracker_raw() { return _orphan_mem_tracker_raw; }
     MemTrackerLimiter* experimental_mem_tracker() { return _experimental_mem_tracker.get(); }
-    MemTracker* page_no_cache_mem_tracker() { return _page_no_cache_mem_tracker.get(); }
+    std::shared_ptr<MemTracker> page_no_cache_mem_tracker() { return _page_no_cache_mem_tracker; }
     MemTracker* brpc_iobuf_block_memory_tracker() { return _brpc_iobuf_block_memory_tracker.get(); }
 
     ThreadPool* send_batch_thread_pool() { return _send_batch_thread_pool.get(); }
@@ -172,7 +175,7 @@ public:
     BlockSpillManager* block_spill_mgr() { return _block_spill_mgr; }
 
     const std::vector<StorePath>& store_paths() const { return _store_paths; }
-    size_t store_path_to_index(const std::string& path) { return _store_path_map[path]; }
+
     StorageEngine* storage_engine() { return _storage_engine; }
     void set_storage_engine(StorageEngine* storage_engine) { _storage_engine = storage_engine; }
 
@@ -181,6 +184,8 @@ public:
     HeartbeatFlags* heartbeat_flags() { return _heartbeat_flags; }
     doris::vectorized::ScannerScheduler* scanner_scheduler() { return _scanner_scheduler; }
     FileMetaCache* file_meta_cache() { return _file_meta_cache; }
+    vectorized::ZoneList& global_zone_cache() { return *_global_zone_cache; }
+    std::shared_mutex& zone_cache_rw_lock() { return _zone_cache_rw_lock; }
 
     // only for unit test
     void set_master_info(TMasterInfo* master_info) { this->_master_info = master_info; }
@@ -202,8 +207,7 @@ private:
 
     bool _is_init;
     std::vector<StorePath> _store_paths;
-    // path => store index
-    std::map<std::string, size_t> _store_path_map;
+
     // Leave protected so that subclasses can override
     ExternalScanContextMgr* _external_scan_context_mgr = nullptr;
     doris::vectorized::VDataStreamMgr* _vstream_mgr = nullptr;
@@ -272,6 +276,9 @@ private:
     BlockSpillManager* _block_spill_mgr = nullptr;
     // To save meta info of external file, such as parquet footer.
     FileMetaCache* _file_meta_cache = nullptr;
+
+    std::unique_ptr<vectorized::ZoneList> _global_zone_cache;
+    std::shared_mutex _zone_cache_rw_lock;
 };
 
 template <>

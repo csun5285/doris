@@ -21,7 +21,6 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
     String hdfs_port = context.config.otherConfigs.get("hdfs_port")
     String externalEnvIp = context.config.otherConfigs.get("externalEnvIp")
 
-
     // problem 01 ：in hive execute "select * from delta_byte_array limit 10" ,there will be some valid data return，but doris query return nothing
     def q01 = {
         def res1_1 = sql """
@@ -114,7 +113,7 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res6_2.toString())
 
         def res6_3 = sql """
-        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/datapage_v1_snappy_compressed_checksum/datapage_v1_snappy_compressed_checksum.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
+        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/datapage_v1-snappy-compressed-checksum/datapage_v1-snappy-compressed-checksum.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
         """ 
         logger.info("record res" + res6_3.toString())
 

@@ -142,6 +142,7 @@ import org.apache.doris.catalog.Tablet;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.catalog.TabletMeta;
 import org.apache.doris.catalog.View;
+import org.apache.doris.catalog.external.ExternalTable;
 import org.apache.doris.catalog.external.HMSExternalTable;
 import org.apache.doris.clone.DynamicPartitionScheduler;
 import org.apache.doris.cluster.ClusterNamespace;
@@ -190,6 +191,7 @@ import org.apache.doris.load.ExportMgr;
 import org.apache.doris.load.Load;
 import org.apache.doris.load.LoadJob;
 import org.apache.doris.load.LoadJob.JobState;
+import org.apache.doris.load.loadv2.LoadManager;
 import org.apache.doris.load.routineload.RoutineLoadJob;
 import org.apache.doris.mtmv.MTMVJobManager;
 import org.apache.doris.mtmv.metadata.MTMVJob;
@@ -228,6 +230,7 @@ import com.google.gson.GsonBuilder;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB;
 import com.selectdb.cloud.proto.SelectdbCloud.StagePB.StageType;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -254,6 +257,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -957,7 +961,8 @@ public class ShowExecutor {
 
                 // check tbl privs
                 if (!Env.getCurrentEnv().getAccessManager()
-                        .checkTblPriv(ConnectContext.get(), db.getFullName(), table.getName(), PrivPredicate.SHOW)) {
+                        .checkTblPriv(ConnectContext.get(), showStmt.getCatalog(),
+                                db.getFullName(), table.getName(), PrivPredicate.SHOW)) {
                     continue;
                 }
                 List<String> row = Lists.newArrayList();
@@ -970,7 +975,11 @@ public class ShowExecutor {
                 // Row_format
                 row.add(null);
                 // Rows
-                row.add(String.valueOf(table.getRowCount()));
+                // Use estimatedRowCount(), not getRowCount().
+                // because estimatedRowCount() is an async call, it will not block, and it will call getRowCount()
+                // finally. So that for some table(especially external table),
+                // we can get the row count without blocking.
+                row.add(String.valueOf(table.estimatedRowCount()));
                 // Avg_row_length
                 row.add(String.valueOf(table.getAvgRowLength()));
                 // Data_length
@@ -1397,6 +1406,11 @@ public class ShowExecutor {
         }
 
         Database db = env.getInternalCatalog().getDbOrAnalysisException(showWarningsStmt.getDbName());
+        ShowResultSet showResultSet = handleShowLoadWarningV2(showWarningsStmt, db);
+        if (showResultSet != null) {
+            resultSet = showResultSet;
+            return;
+        }
 
         long dbId = db.getId();
         Load load = env.getLoadInstance();
@@ -1404,7 +1418,6 @@ public class ShowExecutor {
         LoadJob job = null;
         String label = null;
         if (showWarningsStmt.isFindByLabel()) {
-            label = showWarningsStmt.getLabel();
             jobId = load.getLatestJobIdByLabel(dbId, showWarningsStmt.getLabel());
             job = load.getLoadJob(jobId);
             if (job == null) {
@@ -1447,6 +1460,40 @@ public class ShowExecutor {
         }
 
         resultSet = new ShowResultSet(showWarningsStmt.getMetaData(), rows);
+    }
+
+    private ShowResultSet handleShowLoadWarningV2(ShowLoadWarningsStmt showWarningsStmt, Database db)
+            throws AnalysisException {
+        LoadManager loadManager = Env.getCurrentEnv().getLoadManager();
+        if (showWarningsStmt.isFindByLabel()) {
+            List<List<Comparable>> loadJobInfosByDb = loadManager.getLoadJobInfosByDb(db.getId(),
+                    showWarningsStmt.getLabel(),
+                    true, null);
+            if (CollectionUtils.isEmpty(loadJobInfosByDb)) {
+                return null;
+            }
+            List<List<String>> infoList = Lists.newArrayListWithCapacity(loadJobInfosByDb.size());
+            for (List<Comparable> comparables : loadJobInfosByDb) {
+                List<String> singleInfo = comparables.stream().map(Object::toString).collect(Collectors.toList());
+                infoList.add(singleInfo);
+            }
+            return new ShowResultSet(showWarningsStmt.getMetaData(), infoList);
+        }
+        org.apache.doris.load.loadv2.LoadJob loadJob = loadManager.getLoadJob(showWarningsStmt.getJobId());
+        if (loadJob == null) {
+            return null;
+        }
+        List<String> singleInfo;
+        try {
+            singleInfo = loadJob
+                    .getShowInfo()
+                    .stream()
+                    .map(Objects::toString)
+                    .collect(Collectors.toList());
+        } catch (DdlException e) {
+            throw new AnalysisException(e.getMessage());
+        }
+        return new ShowResultSet(showWarningsStmt.getMetaData(), Lists.newArrayList(Collections.singleton(singleInfo)));
     }
 
     private void handleShowLoadWarningsFromURL(ShowLoadWarningsStmt showWarningsStmt, URL url)
@@ -2465,8 +2512,19 @@ public class ShowExecutor {
         ShowTableStatsStmt showTableStatsStmt = (ShowTableStatsStmt) stmt;
         TableIf tableIf = showTableStatsStmt.getTable();
         long partitionId = showTableStatsStmt.getPartitionId();
+        boolean showCache = showTableStatsStmt.isCached();
         try {
-            if (partitionId > 0) {
+            if (tableIf instanceof ExternalTable && showCache) {
+                Optional<TableStatistic> tableStatistics = Env.getCurrentEnv().getStatisticsCache().getTableStatistics(
+                        tableIf.getDatabase().getCatalog().getId(),
+                        tableIf.getDatabase().getId(),
+                        tableIf.getId());
+                if (tableStatistics.isPresent()) {
+                    resultSet = showTableStatsStmt.constructResultSet(tableStatistics.get());
+                } else {
+                    resultSet = showTableStatsStmt.constructResultSet(TableStatistic.UNKNOWN);
+                }
+            } else if (partitionId > 0) {
                 TableStatistic partStats = StatisticsRepository.fetchTableLevelOfPartStats(partitionId);
                 resultSet = showTableStatsStmt.constructResultSet(partStats);
             } else {

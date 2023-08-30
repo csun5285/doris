@@ -126,6 +126,12 @@ public class TableProperty implements Writable {
                 buildInMemory();
                 buildStoragePolicy();
                 buildIsBeingSynced();
+                buildCompactionPolicy();
+                buildTimeSeriesCompactionGoalSizeMbytes();
+                buildTimeSeriesCompactionFileCountThreshold();
+                buildTimeSeriesCompactionTimeThresholdSeconds();
+                buildSkipWriteIndexOnLoad();
+                buildEnableSingleReplicaCompaction();
                 break;
             case OperationType.OP_MODIFY_PERSISTENT:
                 buildPersistent();

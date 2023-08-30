@@ -109,6 +109,10 @@ public class BrokerFileGroup implements Writable {
     private int skipLines;
     private boolean ignoreCsvRedundantCol = false;
 
+    private byte enclose;
+
+    private  byte escape;
+
     // for unit test and edit log persistence
     private BrokerFileGroup() {
     }
@@ -214,6 +218,8 @@ public class BrokerFileGroup implements Writable {
         if (lineDelimiter == null) {
             lineDelimiter = "\n";
         }
+        enclose = dataDescription.getEnclose();
+        escape = dataDescription.getEscape();
 
         fileFormat = dataDescription.getFileFormat();
         if (fileFormat != null) {
@@ -281,6 +287,14 @@ public class BrokerFileGroup implements Writable {
 
     public String getLineDelimiter() {
         return lineDelimiter;
+    }
+
+    public byte getEnclose() {
+        return enclose;
+    }
+
+    public byte getEscape() {
+        return escape;
     }
 
     public String getFileFormat() {

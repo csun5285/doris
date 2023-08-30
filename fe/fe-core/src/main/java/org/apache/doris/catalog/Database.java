@@ -649,7 +649,7 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
         dbState = DbState.valueOf(Text.readString(in));
         attachDbName = Text.readString(in);
 
-        FunctionUtil.readFields(in, name2Function);
+        FunctionUtil.readFields(in, this.getFullName(), name2Function);
 
         // read encryptKeys
         if (Env.getCurrentEnvJournalVersion() >= FeMetaVersion.VERSION_102) {
@@ -774,6 +774,10 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
 
     public boolean isInfoSchemaDb() {
         return ClusterNamespace.getNameFromFullName(fullQualifiedName).equalsIgnoreCase(InfoSchemaDb.DATABASE_NAME);
+    }
+
+    public boolean isMysqlDb() {
+        return ClusterNamespace.getNameFromFullName(fullQualifiedName).equalsIgnoreCase(MysqlDb.DATABASE_NAME);
     }
 
     public synchronized void addEncryptKey(EncryptKey encryptKey, boolean ifNotExists) throws UserException {
