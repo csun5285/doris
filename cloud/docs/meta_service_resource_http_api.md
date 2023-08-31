@@ -1742,3 +1742,157 @@ Content-Type: text/plain
  "msg": "failed to enable sse, instance has enabled sse"
 }
 ```
+
+## 获取计算集群的运行状态
+
+### 接口描述
+
+本接口用于获取多个warehouse下，获取cluster的运行状态
+
+### 请求(Request)
+
+* 请求语法
+
+```
+PUT /MetaService/http/get_cluster_status?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+{
+    "instance_ids": [string, string],
+    "status": string
+}
+```
+* 请求参数
+
+| 参数名              | 描述                | 是否必须 | 备注                                              |
+|------------------|-------------------|------|-------------------------------------------------|
+| instance_ids     | 多个warehouse的id    | 是    |                                                 |
+| cloud_unique_ids | 多个cloud_unique_id | 否    | 优先选择instance_ids                                |
+| status           | 查询过滤条件 | 否    | 可有"NORMAL", "STOPPED", "TO_RESUME",   不填返回所有状态的 |
+
+
+* 请求示例
+
+```
+curl '127.0.0.1:5008/MetaService/http/get_cluster_status?token=greedisgood9999' -d '{
+    "instance_ids":["regression_instance-dx-1219", "regression_instance-dx-0128"],
+    "status":"NORMAL"
+}
+```
+
+* 返回参数
+
+| 参数名            | 描述              | 是否必须 | 备注                                                       |
+|----------------|-----------------|------|----------------------------------------------------------|
+| code           | 返回状态码           | 是    ||
+| msg            | 出错原因            | 是    |                                  |
+| result.details | 返回clusters的状态列表 | 是    |
+
+* 成功返回示例
+
+```
+{
+    "code": "OK",
+    "msg": "",
+    "result": {
+        "details": [
+            {
+                "instance_id": "regression_instance-dx-1219",
+                "clusters": [
+                    {
+                        "cluster_id": "regression_cluster_id2",
+                        "cluster_name": "regression_cluster_name2-changed-again",
+                        "cluster_status": "NORMAL"
+                    },
+                    {
+                        "cluster_id": "regression_cluster_id3",
+                        "cluster_name": "regression_cluster_name3",
+                        "cluster_status": "NORMAL"
+                    },
+                    {
+                        "cluster_id": "regression_test_cluster_id0",
+                        "cluster_name": "regression_test_cluster_name0",
+                        "cluster_status": "NORMAL"
+                    }
+                ]
+            }
+        ]
+    }
+}
+```
+
+## 设置计算集群的运行状态
+
+### 接口描述
+
+本接口用于设置某个warehouse下计算节点的cluster的运行状态
+
+### 请求(Request)
+
+* 请求语法
+
+```
+PUT /MetaService/http/set_cluster_status?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+{
+    "cloud_unique_id": string,
+    "cluster": {
+        "cluster_id": string,
+        "cluster_status":string
+    }
+}
+```
+* 请求参数
+
+
+| 参数名            | 描述              | 是否必须 | 备注                                                       |
+|----------------|-----------------|------|----------------------------------------------------------|
+| cloud_unique_id           |            | 否    ||
+| instance_id            |             | 是    |                                  |
+| cluster_id | 待操作的cluster_id | 是    ||
+| cluster_status | 待操作的cluster状态 | 是    |可有"NORMAL", "STOPPED", "TO_RESUME"|
+
+* 请求示例
+
+```
+curl '127.0.0.1:5008/MetaService/http/set_cluster_status?token=greedisgood9999' -d '{
+    "cloud_unique_id": "regression-cloud-unique-id-fe-0128",
+    "cluster": {
+        "cluster_id": "test_cluster_1_id1",
+        "cluster_status":"STOPPED"
+    }
+}'
+```
+
+* 返回参数
+
+| 参数名            | 描述              | 是否必须 | 备注                                                       |
+|----------------|-----------------|------|----------------------------------------------------------|
+| code           | 返回状态码           | 是    ||
+| msg            | 出错原因            | 是    |                                  |
+
+* 成功返回示例
+
+```
+{
+    "code": "OK",
+    "msg": ""
+}
+```
+
+* 注意，由于这个接口是云管、fe都会用到的，在设置状态的时候会有个状态变化的限制。
+
+只允许以下状态变换：
+1. ClusterStatus::UNKNOWN -> ClusterStatus::NORMAL （云管创建cluster的时候，将初始状态直接置为NORMAL， add_cluster接口中）
+2. ClusterStatus::NORMAL -> ClusterStatus::SUSPENDED （云管暂停cluster时候设置）
+3. ClusterStatus::SUSPENDED -> ClusterStatus::TO_RESUME （fe唤起cluster时候设置）
+4. ClusterStatus::TO_RESUME -> ClusterStatus::NORMAL （云管将cluster状态拉起后设置）
+
+若不在上面的状态变化中的修改状态会报错：
+```
+{
+    "code": "INVALID_ARGUMENT",
+    "msg": "failed to set cluster status, original cluster is NORMAL and want set TO_RESUME"
+}
+```

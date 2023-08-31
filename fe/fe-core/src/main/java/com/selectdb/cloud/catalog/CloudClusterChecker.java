@@ -3,6 +3,7 @@ package com.selectdb.cloud.catalog;
 import com.selectdb.cloud.proto.SelectdbCloud;
 import com.selectdb.cloud.proto.SelectdbCloud.ClusterPB;
 import com.selectdb.cloud.proto.SelectdbCloud.ClusterPB.Type;
+import com.selectdb.cloud.proto.SelectdbCloud.ClusterStatus;
 import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
 
 import com.google.common.base.Strings;
@@ -83,6 +84,8 @@ public class CloudClusterChecker extends MasterDaemon {
                     newTagMap.put(Tag.CLOUD_CLUSTER_ID, clusterId);
                     newTagMap.put(Tag.CLOUD_CLUSTER_PUBLIC_ENDPOINT, publicEndpoint);
                     newTagMap.put(Tag.CLOUD_CLUSTER_PRIVATE_ENDPOINT, privateEndpoint);
+                    ClusterStatus clusterStatus = remoteClusterIdToPB.get(addId).getClusterStatus();
+                    newTagMap.put(Tag.CLOUD_CLUSTER_STATUS, String.valueOf(clusterStatus));
                     MetricRepo.registerClusterMetrics(clusterName, clusterId);
                     //toAdd.forEach(i -> i.setTagMap(newTagMap));
                     List<Backend> toAdd = new ArrayList<>();
@@ -181,6 +184,20 @@ public class CloudClusterChecker extends MasterDaemon {
                 currentBes.forEach(b -> b.setCloudClusterName(newClusterName));
                 // update clusterNameToId
                 Env.getCurrentSystemInfo().updateClusterNameToId(newClusterName, currentClusterName, cid);
+                // update tags
+                currentBes.forEach(b -> Env.getCurrentEnv().getEditLog().logModifyBackend(b));
+            }
+
+            String currentClusterStatus = Env.getCurrentSystemInfo().getCloudStatusById(cid);
+            String newClusterStatus = String.valueOf(cp.getClusterStatus());
+            LOG.debug("current cluster status {} {}", currentClusterStatus, newClusterStatus);
+            if (!currentClusterStatus.equals(newClusterStatus)) {
+                // cluster's status changed
+                LOG.info("cluster_status corresponding to cluster_id has been changed,"
+                        + " cluster_id : {} , current_cluster_status : {}, new_cluster_status :{}",
+                        cid, currentClusterStatus, newClusterStatus);
+                // change all be's cluster_status
+                currentBes.forEach(b -> b.setCloudClusterStatus(newClusterStatus));
                 // update tags
                 currentBes.forEach(b -> Env.getCurrentEnv().getEditLog().logModifyBackend(b));
             }

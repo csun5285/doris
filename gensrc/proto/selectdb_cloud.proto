@@ -83,6 +83,13 @@ message StagePB {
     optional string external_id = 15;
 }
 
+enum ClusterStatus {
+    UNKNOWN = 0;
+    NORMAL = 1;
+    SUSPENDED = 2;
+    TO_RESUME = 3;
+}
+
 message ClusterPB {
     enum Type {
         SQL = 0;
@@ -96,6 +103,7 @@ message ClusterPB {
     repeated string mysql_user_name = 6;
     optional string public_endpoint = 7;
     optional string private_endpoint = 8;
+    optional ClusterStatus cluster_status = 9;
 }
 
 message NodeInfoPB {
@@ -820,6 +828,7 @@ message AlterClusterRequest {
         DECOMMISSION_NODE = 7;
         NOTIFY_DECOMMISSIONED = 8;
         UPDATE_CLUSTER_ENDPOINT = 9;
+        SET_CLUSTER_STATUS = 10;
     }
     optional string instance_id = 1;
     optional string cloud_unique_id = 2; // For auth
@@ -837,6 +846,21 @@ message GetClusterRequest {
     optional string cluster_id = 3;
     optional string cluster_name = 4;
     optional string mysql_user_name = 5;
+}
+
+message GetClusterStatusRequest {
+    repeated string instance_ids = 1; // Redundant field
+    repeated string cloud_unique_ids = 2;
+    optional ClusterStatus status = 3;
+}
+
+message GetClusterStatusResponse {
+    message GetClusterStatusResponseDetail {
+        optional string instance_id = 1;
+        repeated ClusterPB clusters = 2;
+    }
+    optional MetaServiceResponseStatus status = 1;
+    repeated GetClusterStatusResponseDetail details = 2;
 }
 
 message GetClusterResponse {
@@ -1181,7 +1205,8 @@ service MetaService {
     rpc alter_instance(AlterInstanceRequest) returns (AlterInstanceResponse);
     rpc alter_cluster(AlterClusterRequest) returns (AlterClusterResponse);
     rpc get_cluster(GetClusterRequest) returns (GetClusterResponse);
-
+    rpc get_cluster_status(GetClusterStatusRequest) returns(GetClusterStatusResponse);
+    
     rpc get_tablet_stats(GetTabletStatsRequest) returns (GetTabletStatsResponse);
 
     // stage

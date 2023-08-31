@@ -138,6 +138,7 @@ static HttpResponse process_alter_cluster(MetaServiceImpl* service, brpc::Contro
             {"add_node", AlterClusterRequest::ADD_NODE},
             {"drop_node", AlterClusterRequest::DROP_NODE},
             {"decommission_node", AlterClusterRequest::DECOMMISSION_NODE},
+            {"set_cluster_status", AlterClusterRequest::SET_CLUSTER_STATUS},
     };
 
     auto& path = ctrl->http_request().unresolved_path();
@@ -321,6 +322,14 @@ static HttpResponse process_get_stage(MetaServiceImpl* service, brpc::Controller
     return http_json_reply_message(resp.status(), resp);
 }
 
+static HttpResponse process_get_cluster_status(MetaServiceImpl* service, brpc::Controller* ctrl) {
+    GetClusterStatusRequest req;
+    PARSE_MESSAGE_OR_RETURN(ctrl, req);
+    GetClusterStatusResponse resp;
+    service->get_cluster_status(ctrl, &req, &resp, nullptr);
+    return http_json_reply_message(resp.status(), resp);
+}
+
 static HttpResponse process_unknown(MetaServiceImpl*, brpc::Controller*) {
     return http_json_reply(MetaServiceCode::OK, "");
 }
@@ -340,6 +349,7 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"add_node", process_alter_cluster},
             {"drop_node", process_alter_cluster},
             {"decommission_node", process_alter_cluster},
+            {"set_cluster_status", process_alter_cluster},
             {"v1/add_cluster", process_alter_cluster},
             {"v1/drop_cluster", process_alter_cluster},
             {"v1/rename_cluster", process_alter_cluster},
@@ -348,6 +358,7 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"v1/add_node", process_alter_cluster},
             {"v1/drop_node", process_alter_cluster},
             {"v1/decommission_node", process_alter_cluster},
+            {"v1/set_cluster_status", process_alter_cluster},
             // for alter instance
             {"create_instance", process_create_instance},
             {"drop_instance", process_alter_instance},
@@ -377,11 +388,13 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"get_cluster", process_get_cluster},
             {"get_tablet_stats", process_get_tablet_stats},
             {"get_stage", process_get_stage},
+            {"get_cluster_status", process_get_cluster_status},
             {"v1/get_instance", process_get_instance_info},
             {"v1/get_obj_store_info", process_get_obj_store_info},
             {"v1/get_cluster", process_get_cluster},
             {"v1/get_tablet_stats", process_get_tablet_stats},
             {"v1/get_stage", process_get_stage},
+            {"v1/get_cluster_status", process_get_cluster_status},
             // misc
             {"abort_txn", process_abort_txn},
             {"abort_tablet_job", process_abort_tablet_job},

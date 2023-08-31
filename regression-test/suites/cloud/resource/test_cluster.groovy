@@ -601,6 +601,82 @@ suite("cloud_cluster_test", "cloud_cluster") {
             assertTrue(json.code.equalsIgnoreCase("INVALID_ARGUMENT"))
     }
 
+    // get cluster status
+    /*
+         curl '127.0.0.1:5000/MetaService/http/get_cluster_status?token=greedisgood9999' -d '{
+            "instance_ids":["instance_id_deadbeef"]
+         }'
+     */
+    def get_cluster_status = { request_body, check_func ->
+        httpTest {
+            endpoint context.config.metaServiceHttpAddress
+            uri "/MetaService/http/get_cluster_status?token=$token"
+            body request_body
+            check check_func
+        }
+    }
+
+    // set cluster status
+    /*
+         curl '127.0.0.1:5000/MetaService/http/set_cluster_status?token=greedisgood9999' -d '{
+            "instance_id": "instance_id_deadbeef",
+            "cluster": {
+                "cluster_id": "test_cluster_1_id1",
+                "cluster_status":"STOPPED"
+            }
+         }'
+     */
+    def set_cluster_status = { request_body, check_func ->
+        httpTest {
+            endpoint context.config.metaServiceHttpAddress
+            uri "/MetaService/http/set_cluster_status?token=$token"
+            body request_body
+            check check_func
+        }
+    }
+
+    def getClusterInstance = [instance_ids: ["${instance_id}"]]
+    jsonOutput = new JsonOutput()
+    js = jsonOutput.toJson(getClusterInstance)
+    get_cluster_status.call(js) {
+        respCode, body ->
+            def json = parseJson(body)
+            log.info("http cli result: ${body} ${respCode} ${json}".toString())
+            assertTrue(json.code.equalsIgnoreCase("OK"))
+    }
+
+    clusterMap = [cluster_id:"${clusterId2}", cluster_status:"SUSPENDED"]
+    instance = [instance_id: "${instance_id}", cluster: clusterMap]
+    jsonOutput = new JsonOutput()
+    js = jsonOutput.toJson(instance)
+    set_cluster_status.call(js) {
+        respCode, body ->
+            def json = parseJson(body)
+            log.info("http cli result: ${body} ${respCode} ${json}".toString())
+            assertTrue(json.code.equalsIgnoreCase("OK"))
+    }
+
+    // failed to set cluster status, status eq original status, original cluster is NORMAL
+    set_cluster_status.call(js) {
+        respCode, body ->
+            def json = parseJson(body)
+            log.info("http cli result: ${body} ${respCode} ${json}".toString())
+            assertTrue(json.code.equalsIgnoreCase("INVALID_ARGUMENT"))
+    }
+
+
+    // failed to set cluster status, original cluster is SUSPENDED and want set UNKNOWN
+    clusterMap = [cluster_id:"${clusterId2}", cluster_status:"UNKNOWN"]
+    instance = [instance_id: "${instance_id}", cluster: clusterMap]
+    jsonOutput = new JsonOutput()
+    js = jsonOutput.toJson(instance)
+    set_cluster_status.call(js) {
+        respCode, body ->
+            def json = parseJson(body)
+            log.info("http cli result: ${body} ${respCode} ${json}".toString())
+            assertTrue(json.code.equalsIgnoreCase("INVALID_ARGUMENT"))
+    }
+
     // drop cluster
     /*
          curl '127.0.0.1:5000/MetaService/http/drop_cluster?token=greedisgood9999' -d '{

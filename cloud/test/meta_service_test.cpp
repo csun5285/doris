@@ -395,6 +395,20 @@ TEST(MetaServiceTest, AlterClusterTest) {
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
+
+    // set cluster status
+    {
+        brpc::Controller cntl;
+        AlterClusterRequest req;
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->set_cluster_status(ClusterStatus::SUSPENDED);
+        req.set_op(AlterClusterRequest::SET_CLUSTER_STATUS);
+        AlterClusterResponse res;
+        meta_service->alter_cluster(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+                                    &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
 }
 
 TEST(MetaServiceTest, GetClusterTest) {

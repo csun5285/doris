@@ -4305,6 +4305,21 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
     return std::make_pair(code, msg);
 }
 
+std::string_view static print_cluster_status(const ::selectdb::ClusterStatus& status) {
+    switch (status) {
+        case ClusterStatus::UNKNOWN:
+            return "UNKNOWN";
+        case ClusterStatus::NORMAL:
+            return "NORMAL";
+        case ClusterStatus::SUSPENDED:
+            return "SUSPENDED";
+        case ClusterStatus::TO_RESUME:
+            return "TO_RESUME";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
                                     const ::selectdb::AlterClusterRequest* request,
                                     ::selectdb::AlterClusterResponse* response,
@@ -4585,6 +4600,43 @@ void MetaServiceImpl::alter_cluster(google::protobuf::RpcController* controller,
 
                     return msg;
                 });
+    } break;
+    case AlterClusterRequest::SET_CLUSTER_STATUS: {
+        msg = resource_mgr_->update_cluster(
+            instance_id, cluster,
+            [&](const ::selectdb::ClusterPB& i) {
+                return i.cluster_id() == cluster.cluster.cluster_id();
+            },
+            [&](::selectdb::ClusterPB& c, std::set<std::string>& cluster_names) {
+                std::string msg = "";
+                if (c.cluster_status() == request->cluster().cluster_status()) {
+                    code = MetaServiceCode::INVALID_ARGUMENT;
+                    ss << "failed to set cluster status, status eq original status, original cluster is "
+                       << print_cluster_status(c.cluster_status());
+                    msg = ss.str();
+                    return msg;
+                }
+                // status from -> to
+                std::set<std::pair<selectdb::ClusterStatus, selectdb::ClusterStatus>> can_work_directed_edges {
+                    {ClusterStatus::UNKNOWN, ClusterStatus::NORMAL},
+                    {ClusterStatus::NORMAL, ClusterStatus::SUSPENDED},
+                    {ClusterStatus::SUSPENDED, ClusterStatus::TO_RESUME},
+                    {ClusterStatus::TO_RESUME, ClusterStatus::NORMAL},
+                    {ClusterStatus::SUSPENDED, ClusterStatus::NORMAL},
+                };
+                auto from = c.cluster_status();
+                auto to = request->cluster().cluster_status();
+                if (can_work_directed_edges.count({from, to}) == 0) {
+                    // can't find a directed edge in set, so refuse it
+                    code = MetaServiceCode::INVALID_ARGUMENT;
+                    ss << "failed to set cluster status, original cluster is "
+                       << print_cluster_status(from) << " and want set " << print_cluster_status(to);
+                    msg = ss.str();
+                    return msg;
+                }
+                c.set_cluster_status(request->cluster().cluster_status());
+                return msg;
+            });
     } break;
     default: {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -5970,6 +6022,102 @@ void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* control
             response->add_object_files()->CopyFrom(file);
         }
     }
+}
+
+void MetaServiceImpl::get_cluster_status(google::protobuf::RpcController* controller,
+                                         const ::selectdb::GetClusterStatusRequest* request,
+                                         GetClusterStatusResponse *response,
+                                         ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_cluster_status);
+    if (request->instance_ids().empty() && request->cloud_unique_ids().empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud_unique_ids or instance_ids must be given, instance_ids.size: "
+              + std::to_string(request->instance_ids().size())
+              + " cloud_unique_ids.size: " + std::to_string(request->cloud_unique_ids().size());
+        return;
+    }
+
+    std::vector<std::string> instance_ids;
+    instance_ids.reserve(std::max(request->instance_ids().size(), request->cloud_unique_ids().size()));
+
+    // priority use instance_ids
+    if (!request->instance_ids().empty()) {
+        std::for_each(request->instance_ids().begin(), request->instance_ids().end(), [&](const auto& it) {
+            instance_ids.emplace_back(it);
+        });
+    } else if (!request->cloud_unique_ids().empty()) {
+        std::for_each(request->cloud_unique_ids().begin(), request->cloud_unique_ids().end(), [&](const auto& it){
+            std::string instance_id = get_instance_id(resource_mgr_, it);
+            if (instance_id.empty()) {
+                LOG(INFO) << "cant get instance_id from cloud_unique_id : " <<  it;
+                return;
+            }
+            instance_ids.emplace_back(instance_id);
+        });
+    }
+
+    if (instance_ids.empty()) {
+        LOG(INFO) << "can't get valid instanceids";
+        return;
+    }
+    bool has_filter = request->has_status();
+
+    RPC_RATE_LIMIT(get_cluster_status)
+
+    auto get_clusters_info = [this, &request, &response, &has_filter](const std::string& instance_id) {
+        InstanceKeyInfo key_info {instance_id};
+        std::string key;
+        std::string val;
+        instance_key(key_info, &key);
+
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            LOG(WARNING) << "failed to create txn ret=" << ret;
+            return;
+        }
+        ret = txn->get(key, &val);
+        LOG(INFO) << "get instance_key=" << hex(key);
+
+        if (ret != 0) {
+            LOG(WARNING) << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+            return;
+        }
+
+        InstanceInfoPB instance;
+        if (!instance.ParseFromString(val)) {
+            LOG(WARNING) << "failed to parse InstanceInfoPB";
+            return;
+        }
+        GetClusterStatusResponse::GetClusterStatusResponseDetail detail;
+        detail.set_instance_id(instance_id);
+        for (auto &cluster : instance.clusters()) {
+            if (cluster.type() != ClusterPB::COMPUTE) {
+                continue;
+            }
+            ClusterPB pb;
+            pb.set_cluster_name(cluster.cluster_name());
+            pb.set_cluster_id(cluster.cluster_id());
+            if (has_filter && request->status() != cluster.cluster_status()) {
+                continue;
+            }
+            // for compatible
+            if (cluster.has_cluster_status()) {
+                pb.set_cluster_status(cluster.cluster_status());
+            } else {
+                pb.set_cluster_status(ClusterStatus::NORMAL);
+            }
+            detail.add_clusters()->CopyFrom(pb);
+        }
+        if (detail.clusters().size() == 0) {
+            return;
+        }
+        response->add_details()->CopyFrom(detail);
+    };
+
+    std::for_each(instance_ids.begin(), instance_ids.end(), get_clusters_info);
+
+    msg = proto_to_json(*response);
 }
 
 void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id) {

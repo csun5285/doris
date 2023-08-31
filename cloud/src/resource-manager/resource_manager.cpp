@@ -237,7 +237,13 @@ std::pair<MetaServiceCode, std::string> ResourceManager::add_cluster(const std::
         node.set_ctime(time);
         node.set_mtime(time);
     }
-    instance.add_clusters()->CopyFrom(cluster.cluster);
+
+    auto to_add_cluster = instance.add_clusters();
+    to_add_cluster->CopyFrom(cluster.cluster);
+    // create compute cluster, set it status normal as default value
+    if (cluster.cluster.type() == ClusterPB::COMPUTE) {
+        to_add_cluster->set_cluster_status(ClusterStatus::NORMAL);
+    }
     LOG(INFO) << "instance " << instance_id << " has " << instance.clusters().size() << " clusters";
 
     InstanceKeyInfo key_info {instance_id};

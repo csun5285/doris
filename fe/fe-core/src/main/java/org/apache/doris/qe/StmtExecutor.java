@@ -177,6 +177,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.protobuf.ByteString;
+import com.selectdb.cloud.proto.SelectdbCloud.ClusterStatus;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
@@ -198,6 +199,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -598,6 +600,10 @@ public class StmtExecutor {
         }
 
         int retryTime = Config.max_query_retry_time;
+        if (Config.isCloudMode()) {
+            // be core and be restarted, need retry more times, one hour?
+            retryTime = Config.cloud_meta_service_rpc_failed_retry_times;
+        }
         try {
             for (int i = 0; i < retryTime; i++) {
                 try {
@@ -609,14 +615,60 @@ public class StmtExecutor {
                         AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}",
                                 DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
                         context.setQueryId(newQueryId);
+                        if (Config.isCloudMode()) {
+                            // sleep random millis [500, 1000] ms
+                            int randomMillis = 500 + (int) (Math.random() * (1000 - 500));
+                            LOG.debug("stmt executor retry times {}, wait randomMillis:{}, stmt:{}",
+                                    i, randomMillis, originStmt.originStmt);
+                            try {
+                                if (i > retryTime / 2) {
+                                    // sleep random millis [1000, 1500] ms
+                                    randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
+                                }
+                                Thread.sleep(randomMillis);
+                            } catch (InterruptedException e) {
+                                LOG.info("stmt executor sleep wait InterruptedException: ", e);
+                            }
+                        }
                     }
                     handleQueryStmt();
                     break;
-                } catch (RpcException e) {
-                    if (i == retryTime - 1) {
-                        throw e;
+                } catch (Exception e) {
+                    // cloud mode retry
+                    LOG.debug("due to exception {} retry {} rpc {} user {}",
+                            e.getMessage(), i, e instanceof RpcException, e instanceof UserException);
+                    // errCode = 2, detailMessage = There is no scanNode Backend available.[10003: not alive]
+                    List<String> bes = Env.getCurrentSystemInfo().getAllBackendIds().stream()
+                                .map(id -> Long.toString(id)).collect(Collectors.toList());
+                    String msg = e.getMessage();
+                    boolean isNeedRetry = false;
+                    if (e instanceof UserException
+                            && msg.contains(SystemInfoService.NO_SCAN_NODE_BACKEND_AVAILABLE_MSG)) {
+                        Matcher matcher = beIpPattern.matcher(msg);
+                        // here retry planner not be recreated, so
+                        // in cloud mode drop node, be id invalid, so need not retry
+                        // such as be ids [11000, 11001] -> after drop node 11001
+                        // don't need to retry 11001's request
+                        if (matcher.find()) {
+                            String notAliveBe = matcher.group(1);
+                            isNeedRetry = bes.contains(notAliveBe);
+                            if (isNeedRetry) {
+                                Backend abnormalBe = Env.getCurrentSystemInfo()
+                                        .getBackend(Long.parseLong(notAliveBe));
+                                String deadCloudClusterStatus = abnormalBe.getCloudClusterStatus();
+                                String deadCloudClusterClusterName = abnormalBe.getCloudClusterName();
+                                LOG.info("need retry cluster {} status {}-{}", deadCloudClusterClusterName,
+                                        deadCloudClusterStatus, ClusterStatus.valueOf(deadCloudClusterStatus));
+                                if (ClusterStatus.valueOf(deadCloudClusterStatus) != ClusterStatus.NORMAL) {
+                                    Env.waitForAutoStart(deadCloudClusterClusterName);
+                                }
+                            }
+                        }
                     }
-                    if (!context.getMysqlChannel().isSend()) {
+                    if (e instanceof RpcException || isNeedRetry) {
+                        if (i == retryTime - 1 || context.getMysqlChannel().isSend()) {
+                            throw e;
+                        }
                         LOG.warn("retry {} times. stmt: {}", (i + 1), parsedStmt.getOrigStmt().originStmt);
                     } else {
                         throw e;

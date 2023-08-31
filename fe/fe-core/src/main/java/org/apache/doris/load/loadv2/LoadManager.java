@@ -123,6 +123,15 @@ public class LoadManager implements Writable {
         Database database = checkDb(stmt.getLabel().getDbName());
         long dbId = database.getId();
         LoadJob loadJob;
+        if (Config.isCloudMode()) {
+            ConnectContext context = ConnectContext.get();
+            if (context != null) {
+                String cloudCluster = context.getCloudCluster();
+                if (!Strings.isNullOrEmpty(cloudCluster)) {
+                    Env.waitForAutoStart(cloudCluster);
+                }
+            }
+        }
         writeLock();
         try {
             if (stmt.getBrokerDesc() != null && stmt.getBrokerDesc().isMultiLoadBroker()) {
@@ -164,6 +173,15 @@ public class LoadManager implements Writable {
         Database database = checkDb(stmt.getDbName());
         long dbId = database.getId();
         BrokerLoadJob loadJob = null;
+        if (Config.isCloudMode()) {
+            ConnectContext context = ConnectContext.get();
+            if (context != null) {
+                String cloudCluster = context.getCloudCluster();
+                if (!Strings.isNullOrEmpty(cloudCluster)) {
+                    Env.waitForAutoStart(cloudCluster);
+                }
+            }
+        }
         writeLock();
         try {
             long unfinishedCopyJobNum = unprotectedGetUnfinishedCopyJobNum();
@@ -1071,6 +1089,15 @@ public class LoadManager implements Writable {
         Database database = checkDb(insertStmt.getLoadLabel().getDbName());
         long dbId = database.getId();
         LoadJob loadJob;
+        if (Config.isCloudMode()) {
+            ConnectContext context = ConnectContext.get();
+            if (context != null) {
+                String cloudCluster = context.getCloudCluster();
+                if (!Strings.isNullOrEmpty(cloudCluster)) {
+                    Env.waitForAutoStart(cloudCluster);
+                }
+            }
+        }
         writeLock();
         BrokerDesc brokerDesc = (BrokerDesc) insertStmt.getResourceDesc();
         try {

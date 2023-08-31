@@ -204,6 +204,21 @@ public class SystemInfoService {
         return new ArrayList<>(clusterIdToBackend.keySet());
     }
 
+    public String getCloudStatusByName(final String clusterName) {
+        String clusterId = clusterNameToId.getOrDefault(clusterName, "");
+        if ("".equals(clusterId)) {
+            // for rename cluster or dropped cluster
+            LOG.info("cant find clusterId by clusteName {}", clusterName);
+            return "";
+        }
+        return getCloudStatusById(clusterId);
+    }
+
+    public String getCloudStatusById(final String clusterId) {
+        return clusterIdToBackend.getOrDefault(clusterId, new ArrayList<>())
+            .stream().map(Backend::getCloudClusterStatus).findFirst().orElse("");
+    }
+
     public void updateClusterNameToId(final String newName,
             final String originalName, final String clusterId) {
         lock.lock();

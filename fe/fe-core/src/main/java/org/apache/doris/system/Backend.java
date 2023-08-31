@@ -172,6 +172,14 @@ public class Backend implements Writable {
         this.tagMap.put(locationTag.type, locationTag.value);
     }
 
+    public String getCloudClusterStatus() {
+        return tagMap.getOrDefault(Tag.CLOUD_CLUSTER_STATUS, "");
+    }
+
+    public void setCloudClusterStatus(final String clusterStatus) {
+        tagMap.put(Tag.CLOUD_CLUSTER_STATUS, clusterStatus);
+    }
+
     public String getCloudClusterName() {
         return tagMap.getOrDefault(Tag.CLOUD_CLUSTER_NAME, "");
     }

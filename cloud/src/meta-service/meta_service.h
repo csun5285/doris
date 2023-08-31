@@ -252,6 +252,11 @@ public:
                                                               const std::string& cloud_unique_id,
                                                               InstanceInfoPB* instance);
 
+    // cloud control get cluster's status by this api
+    void get_cluster_status(google::protobuf::RpcController* controller,
+                            const ::selectdb::GetClusterStatusRequest* request,
+                            ::selectdb::GetClusterStatusResponse *response,
+                            ::google::protobuf::Closure* done) override;
 private:
     std::pair<MetaServiceCode, std::string> alter_instance(
             const ::selectdb::AlterInstanceRequest* request,

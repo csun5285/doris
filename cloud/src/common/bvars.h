@@ -152,6 +152,8 @@ extern BvarLatencyRecorderWithTag g_bvar_ms_finish_tablet_job;
 extern BvarLatencyRecorderWithTag g_bvar_ms_update_delete_bitmap;
 extern BvarLatencyRecorderWithTag g_bvar_ms_get_delete_bitmap;
 extern BvarLatencyRecorderWithTag g_bvar_ms_get_delete_bitmap_update_lock;
+extern BvarLatencyRecorderWithTag g_bvar_ms_get_cluster_status;
+extern BvarLatencyRecorderWithTag g_bvar_ms_set_cluster_status;
 
 // txn_kv's bvars
 extern bvar::LatencyRecorder g_bvar_txn_kv_get;

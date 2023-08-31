@@ -24,6 +24,7 @@ import com.google.gson.annotations.SerializedName;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Replica;
+import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.qe.ConnectContext;
@@ -131,6 +132,13 @@ public class CloudReplica extends Replica {
             return -1;
         }
 
+        // if cluster is SUSPENDED, wait
+        try {
+            Env.waitForAutoStart(cluster);
+        } catch (DdlException e) {
+            // this function cant throw exception. so just log it
+            LOG.warn("cant resume cluster {}", cluster);
+        }
         String clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cluster);
 
         if (isColocated()) {
