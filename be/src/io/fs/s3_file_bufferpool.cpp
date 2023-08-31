@@ -223,14 +223,14 @@ void UploadFileBuffer::submit() {
 /**
  * write the content of the memory buffer to local file cache
  */
-void UploadFileBuffer::upload_to_local_file_cache() {
+void UploadFileBuffer::upload_to_local_file_cache(bool is_cancelled) {
     if (!config::enable_file_cache || _alloc_holder == nullptr) {
         return;
     }
     if (_holder) {
         return;
     }
-    if (cancelled()) {
+    if (is_cancelled) {
         return;
     }
     // the data is already written to S3 in this situation
@@ -242,8 +242,6 @@ void UploadFileBuffer::upload_to_local_file_cache() {
         if (data_remain_size == 0) {
             break;
         }
-        DCHECK(segment->state() == FileBlock::State::EMPTY ||
-               segment->state() == FileBlock::State::SKIP_CACHE);
         size_t segment_size = segment->range().size();
         size_t append_size = std::min(data_remain_size, segment_size);
         if (segment->state() == FileBlock::State::EMPTY) {
@@ -251,10 +249,13 @@ void UploadFileBuffer::upload_to_local_file_cache() {
                 segment->change_cache_type_self(FileCacheType::INDEX);
             }
             segment->get_or_set_downloader();
-            DCHECK(segment->is_downloader());
-            Slice s(_buffer.get_data() + pos, append_size);
-            segment->append(s);
-            segment->finalize_write();
+            // Another thread may have started downloading due to a query
+            // Just skip putting to cache from UploadFileBuffer
+            if (segment->is_downloader()) {
+                Slice s(_buffer.get_data() + pos, append_size);
+                segment->append(s);
+                segment->finalize_write();
+            }
         }
         data_remain_size -= append_size;
         pos += append_size;
@@ -283,7 +284,7 @@ FileBufferBuilder& FileBufferBuilder::set_allocate_file_segments_holder(
 }
 
 std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
-    OperationState state(_sync_after_complete_task, _cancelled);
+    OperationState state(_sync_after_complete_task, _is_cancelled);
     if (_type == BufferType::UPLOAD) {
         return std::make_shared<UploadFileBuffer>(std::move(_upload_cb), std::move(state), _offset,
                                                   std::move(_alloc_holder_cb), _index_offset);

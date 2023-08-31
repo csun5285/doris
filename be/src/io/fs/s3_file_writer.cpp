@@ -239,7 +239,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                             }
                             _countdown_event.signal();
                         })
-                        .set_cancelled([this]() { return _failed.load(); });
+                        .set_is_cancelled([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
                     // We would load the data into file cache asynchronously which indicates
                     // that this instance of S3FileWriter might have been destructed when we
@@ -287,7 +287,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 }
 
 void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
-    if (buf.cancelled()) {
+    if (buf.is_cancelled()) {
         return;
     }
     UploadPartRequest upload_request;
