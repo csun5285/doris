@@ -81,7 +81,6 @@ private:
     Status _create_multi_upload_request();
     void _put_object(UploadFileBuffer& buf);
     void _upload_one_part(int64_t part_num, UploadFileBuffer& buf);
-    FileBlocksHolderPtr _allocate_file_segments(CacheContext ctx, Key cache_key, size_t offset);
 
     std::string _bucket;
     std::string _key;

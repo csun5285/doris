@@ -23,7 +23,6 @@
 #include <aws/core/utils/HashingUtils.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/core/utils/memory/stl/AWSAllocator.h>
-#include <aws/s3/S3Client.h>
 #include <aws/s3/S3Errors.h>
 #include <aws/s3/model/AbortMultipartUploadRequest.h>
 #include <aws/s3/model/AbortMultipartUploadResult.h>
@@ -75,7 +74,6 @@ using Aws::S3::Model::UploadPartOutcome;
 namespace doris {
 namespace io {
 using namespace Aws::S3::Model;
-using Aws::S3::S3Client;
 
 bvar::Adder<uint64_t> s3_file_writer_total("s3_file_writer", "total_num");
 bvar::Adder<uint64_t> s3_bytes_written_total("s3_file_writer", "bytes_written");
@@ -246,14 +244,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                     // try to do writing into file cache, so we make the lambda capture the variable
                     // we need by value to extend their lifetime
                     builder.set_allocate_file_segments_holder(
-                            [this, k = _cache_key, offset = _bytes_appended, t = _expiration_time,
+                            [cache = _cache, k = _cache_key, offset = _bytes_appended, t = _expiration_time,
                              cold = _is_cold_data]() -> FileBlocksHolderPtr {
                                 CacheContext ctx;
                                 ctx.cache_type =
                                         t == 0 ? FileCacheType::NORMAL : FileCacheType::TTL;
                                 ctx.expiration_time = t;
                                 ctx.is_cold_data = cold;
-                                return _allocate_file_segments(std::move(ctx), k, offset);
+                                auto holder = cache->get_or_set(k, offset, config::s3_write_buffer_size, ctx);
+                                return std::make_unique<FileBlocksHolder>(std::move(holder));
                             });
                 }
                 _pending_buf = builder.build();
@@ -329,12 +328,6 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
     _bytes_written += buf.get_size();
-}
-
-FileBlocksHolderPtr S3FileWriter::_allocate_file_segments(CacheContext ctx, Key cache_key,
-                                                          size_t offset) {
-    auto holder = _cache->get_or_set(cache_key, offset, config::s3_write_buffer_size, ctx);
-    return std::make_unique<FileBlocksHolder>(std::move(holder));
 }
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
