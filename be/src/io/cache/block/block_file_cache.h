@@ -488,9 +488,6 @@ private:
     static inline uint64_t _max_file_reader_cache_size = 65533;
 
 public:
-    // should be call when BE start
-    static void init();
-
     static void set_read_only(bool read_only);
 
     static bool read_only() { return s_read_only; }

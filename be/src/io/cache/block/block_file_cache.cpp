@@ -1724,7 +1724,7 @@ std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
     std::weak_ptr<FileReader> wp;
     if (!s_read_only) [[likely]] {
         std::lock_guard lock(s_file_reader_cache_mtx);
-        if (s_file_reader_cache.size() >= _max_file_reader_cache_size) {
+        if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
             s_file_name_to_reader.erase(s_file_reader_cache.back().first);
             s_file_reader_cache.pop_back();
         }
