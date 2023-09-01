@@ -189,10 +189,15 @@ struct UploadFileBuffer final : public FileBuffer {
             read_from_cache();
         }
         _upload_to_remote(*this);
-        _state.set_val();
-        // this control flow means the buf and the stream shares one memory
-        // so we can directly use buf here
-        upload_to_local_file_cache(is_cancelled());
+        if (config::enable_flush_file_cache_async) {
+            _state.set_val();
+            // this control flow means the buf and the stream shares one memory
+            // so we can directly use buf here
+            upload_to_local_file_cache(is_cancelled());
+        } else {
+            upload_to_local_file_cache(is_cancelled());
+            _state.set_val();
+        }
         on_finish();
     }
     /**

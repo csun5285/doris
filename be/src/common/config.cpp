@@ -1149,6 +1149,8 @@ DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");
 
 DEFINE_mBool(enable_parallel_cumu_compaction, "false");
 
+DEFINE_mBool(enable_flush_file_cache_async, "false");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================

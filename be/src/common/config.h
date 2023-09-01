@@ -1148,6 +1148,8 @@ DECLARE_mInt32(buffered_reader_read_timeout_ms);
 
 DECLARE_mBool(enable_parallel_cumu_compaction);
 
+DECLARE_mBool(enable_flush_file_cache_async);
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================
