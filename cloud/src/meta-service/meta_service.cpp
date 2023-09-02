@@ -6348,7 +6348,7 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
             new_pending_info.add_delete_bitmap_keys(key);
         }
         LOG(INFO) << "xxx update delete bitmap put delete_bitmap_key=" << hex(key)
-                  << " lock_id=" << request->lock_id();
+                  << " lock_id=" << request->lock_id() << " value_size: " << val.size();
     }
 
     // no need to record pending key for compaction or schema change,
@@ -6361,7 +6361,7 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         }
         txn->put(pending_key, pending_val);
         LOG(INFO) << "xxx update delete bitmap put pending_key=" << hex(pending_key)
-                  << " lock_id=" << request->lock_id();
+                  << " lock_id=" << request->lock_id() << " value_size: " << pending_val.size();
     }
 
     ret = txn->commit();

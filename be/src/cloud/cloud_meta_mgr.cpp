@@ -692,6 +692,8 @@ Status CloudMetaMgr::update_delete_bitmap(const Tablet* tablet, int64_t lock_id,
         req.add_rowset_ids(std::get<0>(iter->first).to_string());
         req.add_segment_ids(std::get<1>(iter->first));
         req.add_versions(std::get<2>(iter->first));
+        // To save space, convert array and bitmap containers to run containers
+        iter->second.runOptimize();
         std::string bitmap_data(iter->second.getSizeInBytes(), '\0');
         iter->second.write(bitmap_data.data());
         *(req.add_segment_delete_bitmaps()) = std::move(bitmap_data);
