@@ -845,7 +845,7 @@ build_rocksdb() {
         LDFLAGS="${ldflags}" \
         PORTABLE=1 make USE_RTTI=1 -j "${PARALLEL}" static_lib
     cp librocksdb.a ${TP_LIB_DIR}/librocksdb.a
-    cp -r include/rocksdb ${TP_INCLUDE_DIR}/include/
+    cp -r include/rocksdb ${TP_INCLUDE_DIR}
     strip_lib librocksdb.a
 }
 
