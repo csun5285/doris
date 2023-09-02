@@ -46,6 +46,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -351,19 +352,43 @@ public class LoadAction extends RestBaseController {
             throw new LoadException("Invalid header host: " + reqHost);
         }
 
-        if (InetAddressValidator.getInstance().isValid(reqHost)) {
-            if (publicHostPort != null && reqHost == publicHostPort.first) {
-                return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
-            } else if (privateHostPort != null) {
-                return new TNetworkAddress(reqHost, privateHostPort.second);
-            } else {
-                return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
+        if (Config.apsaradb_env_enabled) {
+            // ip
+            if (InetAddressValidator.getInstance().isValid(reqHost)) {
+                InetAddress addr;
+                try {
+                    addr = InetAddress.getByName(reqHost);
+                } catch (Exception e) {
+                    LOG.warn("unknown host expection: {}", e.getMessage());
+                    throw new LoadException(e.getMessage());
+                }
+                if (addr.isSiteLocalAddress() && privateHostPort != null) {
+                    return new TNetworkAddress(privateHostPort.first, privateHostPort.second);
+                } else if (publicHostPort != null) {
+                    return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
+                } else {
+                    LOG.warn("Invalid ip or wrong cluster, host: {}, public endpoint: {}, private endpoint: {}",
+                            reqHostStr, publicHostPort, privateHostPort);
+                    throw new LoadException("Invalid header host: " + reqHost);
+                }
             }
-        } else {
+
+            // domin
             if (publicHostPort != null && reqHost.toLowerCase().contains("public")) {
                 return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
             } else if (privateHostPort != null) {
                 return new TNetworkAddress(privateHostPort.first, privateHostPort.second);
+            } else {
+                LOG.warn("Invalid host or wrong cluster, host: {}, public endpoint: {}, private endpoint: {}",
+                        reqHostStr, publicHostPort, privateHostPort);
+                throw new LoadException("Invalid header host: " + reqHost);
+            }
+        } else {
+            if (InetAddressValidator.getInstance().isValid(reqHost)
+                    && publicHostPort != null && reqHost == publicHostPort.first) {
+                return new TNetworkAddress(publicHostPort.first, publicHostPort.second);
+            } else if (privateHostPort != null) {
+                return new TNetworkAddress(reqHost, privateHostPort.second);
             } else {
                 return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
             }

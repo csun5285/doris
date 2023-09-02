@@ -95,6 +95,7 @@ suite("stream_load_lb") {
 
     sql """ set enable_profile = true """
 
+    // case1 cloud public endpoint
     long txnId = -1;
     streamLoad {
         table "${tableName3}"
@@ -122,32 +123,7 @@ suite("stream_load_lb") {
     order_qt_q1 "SELECT count(*) FROM ${tableName3}" // 20
     order_qt_q2 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
 
-    streamLoad {
-        table "${tableName3}"
-
-        set 'column_separator', ','
-        set 'cloud_cluster', 'stream_load_cluster_name1'
-        set 'Host', 'xxx-public-xxx'
-
-        file 'all_types.csv'
-        time 10000 // limit inflight 10s
-
-        check { loadResult, exception, startTime, endTime ->
-            if (exception != null) {
-                throw exception
-            }
-            log.info("Stream load result: ${loadResult}".toString())
-            def json = parseJson(loadResult)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(20, json.NumberTotalRows)
-            assertEquals(0, json.NumberFilteredRows)
-            txnId = json.TxnId
-        }
-    }
-
-    order_qt_q3 "SELECT count(*) FROM ${tableName3}" // 20
-    order_qt_q4 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
-
+    // case2 cloud private endpoint
     streamLoad {
         table "${tableName3}"
 
@@ -172,62 +148,101 @@ suite("stream_load_lb") {
         }
     }
 
+    order_qt_q3 "SELECT count(*) FROM ${tableName3}" // 20
+    order_qt_q4 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
+
+    // case3 cloud private endpoint
+    streamLoad {
+        table "${tableName3}"
+
+        set 'column_separator', ','
+        set 'cloud_cluster', 'stream_load_cluster_name1'
+        set 'Host', 'localhost'
+
+        file 'all_types.csv'
+        time 10000 // limit inflight 10s
+
+        check { loadResult, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${loadResult}".toString())
+            def json = parseJson(loadResult)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(20, json.NumberTotalRows)
+            assertEquals(0, json.NumberFilteredRows)
+            txnId = json.TxnId
+        }
+    }
+
     order_qt_q5 "SELECT count(*) FROM ${tableName3}" // 20
     order_qt_q6 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
 
-    streamLoad {
-        table "${tableName3}"
+    updateClusterEndpoint("stream_load_cluster_id0", "xx:xx", "xx:xx")
 
-        set 'column_separator', ','
-        set 'cloud_cluster', 'stream_load_cluster_name1'
-        set 'Host', 'xxxx-xxxxx'
-
-        file 'all_types.csv'
-        time 10000 // limit inflight 10s
-
-        check { loadResult, exception, startTime, endTime ->
-            if (exception != null) {
-                throw exception
-            }
-            log.info("Stream load result: ${loadResult}".toString())
-            def json = parseJson(loadResult)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(20, json.NumberTotalRows)
-            assertEquals(0, json.NumberFilteredRows)
-            txnId = json.TxnId
-        }
-    }
-
-    order_qt_q7 "SELECT count(*) FROM ${tableName3}" // 20
-    order_qt_q8 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
-
-    updateClusterEndpoint("stream_load_cluster_id0", ipList[1] + ":" + httpPortList[1],
+    updateClusterEndpoint("stream_load_cluster_id1", ipList[1] + ":" + httpPortList[1],
             ipList[0] + ":" + httpPortList[0])
 
-    streamLoad {
-        table "${tableName3}"
+    sleep(20000)
 
-        set 'column_separator', ','
-        set 'cloud_cluster', 'stream_load_cluster_name1'
-        set 'Host', 'xxxx-xxxxx'
+    try {
+        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'true')"
 
-        file 'all_types.csv'
-        time 10000 // limit inflight 10s
+        // case4 apsaradb public endpoint
+        streamLoad {
+            table "${tableName3}"
 
-        check { loadResult, exception, startTime, endTime ->
-            if (exception != null) {
-                throw exception
+            set 'column_separator', ','
+            set 'cloud_cluster', 'stream_load_cluster_name1'
+            set 'Host', 'xxx-public-xxx'
+
+            file 'all_types.csv'
+            time 10000 // limit inflight 10s
+
+            check { loadResult, exception, startTime, endTime ->
+                if (exception != null) {
+                    throw exception
+                }
+                log.info("Stream load result: ${loadResult}".toString())
+                def json = parseJson(loadResult)
+                assertEquals("success", json.Status.toLowerCase())
+                assertEquals(20, json.NumberTotalRows)
+                assertEquals(0, json.NumberFilteredRows)
+                txnId = json.TxnId
             }
-            log.info("Stream load result: ${loadResult}".toString())
-            def json = parseJson(loadResult)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(20, json.NumberTotalRows)
-            assertEquals(0, json.NumberFilteredRows)
-            txnId = json.TxnId
         }
-    }
 
-    order_qt_q9 "SELECT count(*) FROM ${tableName3}" // 20
-    order_qt_q10 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
+        order_qt_q7 "SELECT count(*) FROM ${tableName3}" // 20
+        order_qt_q8 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
+
+        // case5 apsaradb private endpoint
+        streamLoad {
+            table "${tableName3}"
+
+            set 'column_separator', ','
+            set 'cloud_cluster', 'stream_load_cluster_name1'
+            set 'Host', 'xxxx-xxxxx'
+
+            file 'all_types.csv'
+            time 10000 // limit inflight 10s
+
+            check { loadResult, exception, startTime, endTime ->
+                if (exception != null) {
+                    throw exception
+                }
+                log.info("Stream load result: ${loadResult}".toString())
+                def json = parseJson(loadResult)
+                assertEquals("success", json.Status.toLowerCase())
+                assertEquals(20, json.NumberTotalRows)
+                assertEquals(0, json.NumberFilteredRows)
+                txnId = json.TxnId
+            }
+        }
+
+        order_qt_q9 "SELECT count(*) FROM ${tableName3}" // 20
+        order_qt_q10 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
+    } finally {
+        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'false')"
+    }
 }
 
