@@ -333,8 +333,9 @@ Status RuntimeState::create_error_log_file() {
 #ifdef CLOUD_MODE
     _error_fs = cloud::latest_fs();
     std::stringstream ss;
-    ss << ERROR_FILE_NAME << "/" << _import_label << "_" << std::hex << _fragment_instance_id.hi
-       << "_" << _fragment_instance_id.lo;
+    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_err_packet.html
+    // shorten the path as much as possible to prevent the length of the presigned URL from exceeding the MySQL error packet size limit
+    ss << ERROR_FILE_NAME << "/" << _import_label << "_" << std::hex << _fragment_instance_id.hi;
     _s3_error_log_file_path = ss.str();
 #endif
 

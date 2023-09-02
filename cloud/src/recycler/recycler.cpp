@@ -1160,6 +1160,13 @@ int InstanceRecycler::recycle_rowsets() {
                 LOG_WARNING("rowset meta has empty resource id").tag("key", hex(k));
                 return -1;
             }
+            if (rowset.resource_id().empty()) [[unlikely]] {
+                // old version `RecycleRowsetPB` may has empty resource_id, just remove the kv.
+                LOG(INFO) << "delete the recycle rowset kv that has empty resource_id, key=" << hex(k)
+                          << " value=" << proto_to_json(rowset);
+                rowset_keys.push_back(std::string(k));
+                return -1;
+            }
             // decode rowset_id
             auto k1 = k;
             k1.remove_prefix(1);
