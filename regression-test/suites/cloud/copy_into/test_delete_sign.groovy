@@ -177,4 +177,20 @@ suite("test_delete_sign") {
             //try_sql("DROP TABLE IF EXISTS ${tableName}")
         }
     }
+
+    // copy from csv without delete_sign column
+    {
+        sql """ truncate table ${tableName}; """
+        filePath = filePathDir + "test_delete_on_0.csv"
+
+        def fileName = "test_delete_on_0_" + sqls.size() + ".csv"
+        uploadFile(fileName, filePath)
+        def sql = copy_prefix + ' (select `$1`, $2, $3, 0 from' + """ @~('${fileName}') )""" + properties
+        copyInto(sql)
+
+        fileName = "test_delete_on_0_" + (sqls.size() + 1) + ".csv"
+        uploadFile(fileName, filePath)
+        sql = copy_prefix + ' (select `$1`, $2, $3, 1 from' + """ @~('${fileName}') )""" + properties
+        copyInto(sql)
+    }
 }

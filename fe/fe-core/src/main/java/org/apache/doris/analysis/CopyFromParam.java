@@ -116,7 +116,9 @@ public class CopyFromParam {
         if (!getFileColumnNames(addDeleteSign)) {
             if (fileType == null || fileType.equalsIgnoreCase("csv")) {
                 int maxFileColumnId = getMaxFileColumnId();
-                maxFileColumnId = targetColumns.size() > maxFileColumnId ? targetColumns.size() : maxFileColumnId;
+                if (useDeleteSign && exprList == null && fileColumns.isEmpty()) {
+                    maxFileColumnId = targetColumns.size() > maxFileColumnId ? targetColumns.size() : maxFileColumnId;
+                }
                 for (int i = 1; i <= maxFileColumnId; i++) {
                     fileColumns.add(DOLLAR + i);
                 }
