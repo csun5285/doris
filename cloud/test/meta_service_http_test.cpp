@@ -105,7 +105,8 @@ public:
     }
 
     template <typename Response>
-    std::tuple<int, Response> query(std::string_view resource, std::string_view params) {
+    std::tuple<int, Response> query(std::string_view resource, std::string_view params,
+                                    std::optional<std::string_view> body = {}) {
         butil::EndPoint endpoint = server.listen_address();
 
         brpc::Channel channel;
@@ -117,6 +118,10 @@ public:
         ctrl.http_request().uri() =
                 fmt::format("0.0.0.0:{}/MetaService/http/{}?token={}&{}", endpoint.port, resource,
                             config::http_token, params);
+        if (body.has_value()) {
+            ctrl.http_request().set_method(brpc::HTTP_METHOD_POST);
+            ctrl.request_attachment().append(body->data(), body->size());
+        }
         channel.CallMethod(nullptr, &ctrl, nullptr, nullptr, nullptr);
         int status_code = ctrl.http_response().status_code();
 
@@ -1070,6 +1075,16 @@ TEST(MetaServiceHttpTest, ToUnknownUrlTest) {
     auto [status_code, content] = ctx.query<std::string>("unkown_resource_xxxxxx", "");
     ASSERT_EQ(status_code, 200);
     ASSERT_EQ(content, "{\n    \"code\": \"OK\",\n    \"msg\": \"\"\n}\n");
+}
+
+TEST(MetaServiceHttpTest, UnknownFields) {
+    // LOG:
+    // parse http request 'get_tablet_stats': INVALID_ARGUMENT:an_unknown_field: Cannot find field. body="{"table_id": 1, "an_unknown_field": "xxxx"}"
+    HttpContext ctx;
+    auto [status_code, content] = ctx.query<std::string>(
+            "get_tablet_stats", "", "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\"}");
+    ASSERT_EQ(status_code, 200);
+    ASSERT_EQ(content, "");
 }
 
 } // namespace selectdb

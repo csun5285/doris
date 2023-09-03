@@ -5,6 +5,7 @@
 #include <brpc/uri.h>
 #include <fmt/format.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
+#include <google/protobuf/message.h>
 #include <google/protobuf/service.h>
 #include <google/protobuf/util/json_util.h>
 #include <rapidjson/document.h>
@@ -24,10 +25,10 @@ namespace selectdb {
 #define PARSE_MESSAGE_OR_RETURN(ctrl, req)                                                      \
     do {                                                                                        \
         std::string body = ctrl->request_attachment().to_string();                              \
-        auto st = google::protobuf::util::JsonStringToMessage(body, &req);                      \
+        auto& unresolved_path = ctrl->http_request().unresolved_path();                         \
+        auto st = parse_json_message(unresolved_path, body, &req);                              \
         if (!st.ok()) {                                                                         \
-            std::string msg = "parse http request '" + ctrl->http_request().unresolved_path() + \
-                              "': " + st.ToString();                                            \
+            std::string msg = "parse http request '" + unresolved_path + "': " + st.ToString(); \
             LOG_WARNING(msg).tag("body", body);                                                 \
             return http_json_reply(MetaServiceCode::PROTOBUF_PARSE_ERR, msg);                   \
         }                                                                                       \
@@ -39,6 +40,24 @@ extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mg
 extern int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_id,
                                  MetaServiceCode& code, std::string& msg,
                                  std::shared_ptr<Transaction>& txn);
+
+template <typename Message>
+static google::protobuf::util::Status parse_json_message(const std::string& unresolved_path,
+                                                         const std::string& body, Message* req) {
+    static_assert(std::is_base_of_v<google::protobuf::Message, Message>);
+    auto st = google::protobuf::util::JsonStringToMessage(body, req);
+    if (!st.ok()) {
+        std::string msg = "failed to strictly parse http request for '"
+                          + unresolved_path + "' error: " + st.ToString();
+        LOG_WARNING(msg).tag("body", body);
+
+        // ignore unknown fields
+        google::protobuf::util::JsonParseOptions json_parse_options;
+        json_parse_options.ignore_unknown_fields = true;
+        return google::protobuf::util::JsonStringToMessage(body, req, json_parse_options);
+    }
+    return {};
+}
 
 std::tuple<int, std::string_view> convert_ms_code_to_http_code(MetaServiceCode ret) {
     switch (ret) {
