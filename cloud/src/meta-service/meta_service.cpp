@@ -1258,14 +1258,14 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 }
             }
 
-            LOG(INFO) << " caculated row num " << cal_row_num 
+            LOG(INFO) << " caculated row num " << cal_row_num
                       << " actual row num " << commit_attachment.loaded_rows()
                       << " prev prgress " << prev_progress_info.DebugString();
 
             if (cal_row_num != commit_attachment.loaded_rows()) {
                 if (cal_row_num == 0) {
                     LOG(WARNING) << " repeated to load task in routine load, db_id=" << db_id << " txn_id=" << txn_id
-                                 << " caculated row num " << cal_row_num 
+                                 << " caculated row num " << cal_row_num
                                  << " actual row num " << commit_attachment.loaded_rows();
                     return;
                 }
