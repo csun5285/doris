@@ -112,7 +112,7 @@ CONF_String(encryption_method, "AES_256_ECB");
 // Temporary configs for upgrade
 CONF_mBool(write_schema_kv, "true");
 CONF_mBool(split_tablet_stats, "true");
-CONF_mBool(snapshot_get_tablet_stats, "false");
+CONF_mBool(snapshot_get_tablet_stats, "true");
 
 // For instance check interval
 CONF_Int64(reserved_buffer_days, "3");
