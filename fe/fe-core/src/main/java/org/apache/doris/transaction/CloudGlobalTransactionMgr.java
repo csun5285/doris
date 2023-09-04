@@ -347,7 +347,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         Map<Long, Set<Long>> tableToPartitions = Maps.newHashMap();
         getPartitionInfo(tableList, tabletCommitInfos, tableToPartitions, partitions, backendToPartitionTablets);
         if (backendToPartitionTablets.isEmpty()) {
-            return;
+            throw new UserException("The partition info is empty, table may be dropped, txnid=" + transactionId);
         }
 
         getDeleteBitmapUpdateLock(tableToPartitions, transactionId);
