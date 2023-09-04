@@ -4224,6 +4224,64 @@ void MetaServiceImpl::alter_instance(google::protobuf::RpcController* controller
     case AlterInstanceRequest::REFRESH: {
         ret = resource_mgr_->refresh_instance(request->instance_id());
     } break;
+    case AlterInstanceRequest::SET_OVERDUE: {
+        ret = alter_instance(request, [&request](InstanceInfoPB* instance) {
+            std::string msg;
+
+            if (instance->status() == InstanceInfoPB::DELETED) {
+                msg = "can't set deleted instance to overdue, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            if (instance->status() == InstanceInfoPB::OVERDUE) {
+                msg = "the instance has already set  instance to overdue, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            instance->set_status(InstanceInfoPB::OVERDUE);
+            instance->set_mtime(
+                    duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
+
+            std::string ret = instance->SerializeAsString();
+            if (ret.empty()) {
+                msg = "failed to serialize";
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::PROTOBUF_SERIALIZE_ERR, msg);
+            }
+            LOG(INFO) << "put instance_id=" << request->instance_id()
+                    << "set instance overdue json=" << proto_to_json(*instance);
+            return std::make_pair(MetaServiceCode::OK, ret);
+        });
+    } break;
+    case AlterInstanceRequest::SET_NORMAL: {
+        ret = alter_instance(request, [&request](InstanceInfoPB* instance) {
+            std::string msg;
+
+            if (instance->status() == InstanceInfoPB::DELETED) {
+                msg = "can't set deleted instance to normal, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            if (instance->status() == InstanceInfoPB::NORMAL) {
+                msg = "the instance is already normal, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            instance->set_status(InstanceInfoPB::NORMAL);
+            instance->set_mtime(
+                    duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
+
+            std::string ret = instance->SerializeAsString();
+            if (ret.empty()) {
+                msg = "failed to serialize";
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::PROTOBUF_SERIALIZE_ERR, msg);
+            }
+            LOG(INFO) << "put instance_id=" << request->instance_id()
+                    << "set instance normal json=" << proto_to_json(*instance);
+            return std::make_pair(MetaServiceCode::OK, ret);
+        });
+    } break;
     default: {
         ss << "invalid request op, op=" << request->op();
         ret = std::make_pair(MetaServiceCode::INVALID_ARGUMENT, ss.str());
@@ -4242,6 +4300,59 @@ void MetaServiceImpl::alter_instance(google::protobuf::RpcController* controller
         LOG(WARNING) << "notify refresh instance inplace, instance_id=" << request->instance_id();
         run_bthread_work(f);
     }
+}
+
+void MetaServiceImpl::get_instance(google::protobuf::RpcController* controller,
+                                     const ::selectdb::GetInstanceRequest* request,
+                                     ::selectdb::GetInstanceResponse* response,
+                                     ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_instance);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud_unique_id must be given";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
+        return;
+    }
+    RPC_RATE_LIMIT(get_instance);
+    InstanceKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    instance_key(key_info, &key);
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        LOG(WARNING) << msg << " ret=" << ret;
+        return;
+    }
+    ret = txn->get(key, &val);
+    LOG(INFO) << "get instance_key=" << hex(key);
+
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+
+    InstanceInfoPB instance;
+    if (!instance.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse InstanceInfoPB";
+        return;
+    }
+
+    response->mutable_instance()->CopyFrom(instance);
+    return;
 }
 
 std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(

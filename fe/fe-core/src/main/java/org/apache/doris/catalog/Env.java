@@ -255,6 +255,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Queues;
 import com.selectdb.cloud.catalog.CacheHotspotManager;
 import com.selectdb.cloud.catalog.CloudClusterChecker;
+import com.selectdb.cloud.catalog.CloudInstanceStatusChecker;
 import com.selectdb.cloud.catalog.CloudReplica;
 import com.selectdb.cloud.catalog.CloudTabletRebalancer;
 import com.selectdb.cloud.catalog.CloudUpgradeMgr;
@@ -408,6 +409,7 @@ public class Env {
     private CloudClusterChecker cloudClusterCheck;
     private TabletInvertedIndex tabletInvertedIndex;
     private ColocateTableIndex colocateTableIndex;
+    private CloudInstanceStatusChecker cloudInstanceStatusChecker;
 
     private CatalogRecycleBin recycleBin;
     private FunctionSet functionSet;
@@ -634,6 +636,7 @@ public class Env {
         this.heartbeatMgr = new HeartbeatMgr(systemInfo, !isCheckpointCatalog);
         this.cacheHotspotMgr = new CacheHotspotManager(systemInfo);
         this.cloudClusterCheck = new CloudClusterChecker();
+        this.cloudInstanceStatusChecker = new CloudInstanceStatusChecker();
         this.tabletInvertedIndex = new TabletInvertedIndex();
         this.colocateTableIndex = new ColocateTableIndex();
         this.recycleBin = new CatalogRecycleBin();
@@ -1673,6 +1676,7 @@ public class Env {
             tabletStatMgr.start();
         } else {
             cloudTabletStatMgr.start();
+            cloudInstanceStatusChecker.start();
         }
         // load and export job label cleaner thread
         labelCleaner.start();

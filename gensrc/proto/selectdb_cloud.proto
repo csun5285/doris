@@ -35,6 +35,7 @@ message InstanceInfoPB {
     enum Status {
         NORMAL = 0;
         DELETED = 1;
+        OVERDUE = 2;
     }
     optional string user_id = 1;
     optional string instance_id = 2;
@@ -806,6 +807,8 @@ message AlterInstanceRequest {
         RENAME         = 3;
         ENABLE_SSE     = 4;
         DISABLE_SSE    = 5;
+        SET_OVERDUE    = 6;
+        SET_NORMAL     = 7;
     }
     optional string instance_id = 1;
     optional Operation op = 2;
@@ -814,6 +817,16 @@ message AlterInstanceRequest {
 
 message AlterInstanceResponse {
     optional MetaServiceResponseStatus status = 1;
+}
+
+message GetInstanceRequest {
+    optional string instance_id = 1;
+    optional string cloud_unique_id = 2;
+}
+
+message GetInstanceResponse {
+    optional MetaServiceResponseStatus status = 1;
+    optional InstanceInfoPB instance = 2;
 }
 
 message AlterClusterRequest {
@@ -1203,6 +1216,7 @@ service MetaService {
     rpc update_ak_sk(UpdateAkSkRequest) returns (UpdateAkSkResponse);
     rpc create_instance(CreateInstanceRequest) returns (CreateInstanceResponse);
     rpc alter_instance(AlterInstanceRequest) returns (AlterInstanceResponse);
+    rpc get_instance(GetInstanceRequest) returns (GetInstanceResponse);
     rpc alter_cluster(AlterClusterRequest) returns (AlterClusterResponse);
     rpc get_cluster(GetClusterRequest) returns (GetClusterResponse);
     rpc get_cluster_status(GetClusterStatusRequest) returns(GetClusterStatusResponse);

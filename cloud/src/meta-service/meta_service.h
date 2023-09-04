@@ -168,7 +168,12 @@ public:
                         const ::selectdb::AlterInstanceRequest* request,
                         ::selectdb::AlterInstanceResponse* response,
                         ::google::protobuf::Closure* done) override;
-
+    
+    void get_instance(google::protobuf::RpcController* controller,
+                      const ::selectdb::GetInstanceRequest* request,
+                      ::selectdb::GetInstanceResponse* response,
+                      ::google::protobuf::Closure* done) override;
+ 
     void alter_cluster(google::protobuf::RpcController* controller,
                        const ::selectdb::AlterClusterRequest* request,
                        ::selectdb::AlterClusterResponse* response,

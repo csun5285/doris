@@ -1896,3 +1896,63 @@ curl '127.0.0.1:5008/MetaService/http/set_cluster_status?token=greedisgood9999' 
     "msg": "failed to set cluster status, original cluster is NORMAL and want set TO_RESUME"
 }
 ```
+
+
+```
+
+
+
+## 设置instance状态
+
+### 接口描述
+
+本接口用于设置某个warehouse的状态为NORMAL或者OVERDUE
+
+### 请求(Request)
+
+* 请求语法
+
+```
+PUT /MetaService/http/set_instance_status?token=<token> HTTP/1.1
+Content-Length: <ContentLength>
+Content-Type: text/plain
+{
+    "instance_id": string
+    "op": string
+}
+```
+
+* 请求参数
+
+| 参数名            | 描述              | 是否必须 | 备注                                                       |
+|----------------|-----------------|------|----------------------------------------------------------|
+| instance_id            |             | 是    |                                  |
+| op | 值需要为"SET_NORMAL", "SET_OVERDUE"中的一个 | 是 | 
+
+* 请求示例
+
+```
+curl '127.0.0.1:5000/MetaService/http/set_instance_status?token=greedisgood9999' -d '{
+    "instance_id":"test_instance",
+    "op": "SET_OVERDUE"
+}'
+```
+
+* 返回参数
+
+| 参数名            | 描述              | 是否必须 | 备注                                                       |
+|----------------|-----------------|------|----------------------------------------------------------|
+| code           | 返回状态码           | 是    ||
+| msg            | 出错原因            | 是    |                                  |
+
+* 成功返回示例
+
+```
+{
+    "code": "OK",
+    "msg": ""
+}
+```
+
+
+

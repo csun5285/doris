@@ -52,6 +52,7 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.selectdb.cloud.proto.SelectdbCloud;
 import com.selectdb.cloud.proto.SelectdbCloud.ClusterPB;
+import com.selectdb.cloud.proto.SelectdbCloud.InstanceInfoPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -100,6 +101,8 @@ public class SystemInfoService {
     private Map<String, String> clusterNameToId = new ConcurrentHashMap<>();
 
     private volatile ImmutableMap<Long, DiskInfo> pathHashToDishInfoRef = ImmutableMap.of();
+
+    private InstanceInfoPB.Status instanceStatus;
 
     public static class HostInfo implements Comparable<HostInfo> {
         public String host;
@@ -1407,5 +1410,28 @@ public class SystemInfoService {
 
     public long aliveBECount() {
         return idToBackendRef.values().stream().filter(Backend::isAlive).count();
+    }
+
+    public SelectdbCloud.GetInstanceResponse getCloudInstance() {
+        SelectdbCloud.GetInstanceRequest.Builder builder =
+                SelectdbCloud.GetInstanceRequest.newBuilder();
+        builder.setCloudUniqueId(Config.cloud_unique_id);
+        final SelectdbCloud.GetInstanceRequest pRequest = builder.build();
+        SelectdbCloud.GetInstanceResponse response;
+        try {
+            response = MetaServiceProxy.getInstance().getInstance(pRequest);
+            return response;
+        } catch (RpcException e) {
+            LOG.warn("rpcToGetInstance exception: {}", e.getMessage());
+            throw new RuntimeException(e);
+        }
+    }
+
+    public InstanceInfoPB.Status getInstanceStatus() {
+        return this.instanceStatus;
+    }
+
+    public void setInstanceStatus(InstanceInfoPB.Status instanceStatus) {
+        this.instanceStatus = instanceStatus;
     }
 }

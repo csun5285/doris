@@ -71,6 +71,7 @@ import org.apache.doris.thrift.TUniqueId;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.MetricRegistry;
 import com.google.common.base.Strings;
+import com.selectdb.cloud.proto.SelectdbCloud.InstanceInfoPB;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.SpanKind;
@@ -432,6 +433,15 @@ public class ConnectProcessor {
             ending--;
         }
         String originStmt = new String(bytes, 1, ending, StandardCharsets.UTF_8);
+
+        if (Config.isCloudMode()) {
+            if (!ctx.getCurrentUserIdentity().isRootUser()
+                    && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                Exception exception = new Exception("warehouse is overdue!");
+                handleQueryException(exception, originStmt, null, null);
+                return;
+            }
+        }
 
         String sqlHash = DigestUtils.md5Hex(originStmt);
         ctx.setSqlHash(sqlHash);

@@ -282,4 +282,15 @@ public class MetaServiceClient {
         }
         return blockingStub.getDeleteBitmapUpdateLock(request);
     }
+
+    public SelectdbCloud.GetInstanceResponse
+            getInstance(SelectdbCloud.GetInstanceRequest request) {
+        if (!request.hasCloudUniqueId()) {
+            SelectdbCloud.GetInstanceRequest.Builder builder =
+                    SelectdbCloud.GetInstanceRequest.newBuilder();
+            builder.mergeFrom(request);
+            return blockingStub.getInstance(builder.setCloudUniqueId(Config.cloud_unique_id).build());
+        }
+        return blockingStub.getInstance(request);
+    }
 }
