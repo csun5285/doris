@@ -583,7 +583,11 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
             return;
         }
         DeleteBitmapUpdateLockPB lock_info;
-        CHECK(lock_info.ParseFromString(lock_val));
+        if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse DeleteBitmapUpdateLockPB";
+            return;
+        }
         if (lock_info.lock_id() != -1) {
             msg = "lock id not match";
             code = MetaServiceCode::LOCK_EXPIRED;
@@ -1034,7 +1038,11 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
             return;
         }
         DeleteBitmapUpdateLockPB lock_info;
-        CHECK(lock_info.ParseFromString(lock_val));
+        if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse DeleteBitmapUpdateLockPB";
+            return;
+        }
         if (lock_info.lock_id() != -2) {
             msg = "lock id not match";
             code = MetaServiceCode::LOCK_EXPIRED;

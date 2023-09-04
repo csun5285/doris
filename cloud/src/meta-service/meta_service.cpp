@@ -1011,7 +1011,11 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 return;
             }
             DeleteBitmapUpdateLockPB lock_info;
-            CHECK(lock_info.ParseFromString(lock_val));
+            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                return;
+            }
             if (lock_info.lock_id() != request->txn_id()) {
                 msg = "lock is expired";
                 code = MetaServiceCode::LOCK_EXPIRED;
@@ -6376,7 +6380,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         code = MetaServiceCode::KV_TXN_GET_ERR;
         return;
     }
-    CHECK(lock_info.ParseFromString(lock_val));
+    if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse DeleteBitmapUpdateLockPB";
+        return;
+    }
     if (lock_info.lock_id() != request->lock_id()) {
         LOG(WARNING) << "lock is expired, table_id=" << table_id << " key=" << hex(lock_key)
                      << " request lock_id=" << request->lock_id()
@@ -6418,7 +6426,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     // delete delete bitmpap of expired txn
     if (ret == 0) {
         PendingDeleteBitmapPB pending_info;
-        CHECK(pending_info.ParseFromString(pending_val));
+        if (!pending_info.ParseFromString(pending_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse PendingDeleteBitmapPB";
+            return;
+        }
         for (auto& delete_bitmap_key : pending_info.delete_bitmap_keys()) {
             txn->remove(delete_bitmap_key);
             LOG(INFO) << "xxx remove pending delete bitmap, delete_bitmap_key="
@@ -6612,7 +6624,11 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcControl
         using namespace std::chrono;
         int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
         if (ret == 0) {
-            CHECK(lock_info.ParseFromString(lock_val));
+            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                return;
+            }
             if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
                 LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
                           << lock_info.lock_id() << " table_id=" << table_id
