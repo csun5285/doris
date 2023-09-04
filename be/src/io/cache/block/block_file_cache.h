@@ -485,6 +485,7 @@ private:
             s_file_name_to_reader;
     static inline doris::Mutex s_file_reader_cache_mtx;
     static inline std::atomic_bool s_read_only {false};
+    static inline uint64_t _max_file_reader_cache_size = 65533;
 
 public:
     static void set_read_only(bool read_only);

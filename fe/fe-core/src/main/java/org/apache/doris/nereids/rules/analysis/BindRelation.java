@@ -200,11 +200,11 @@ public class BindRelation extends OneAnalysisRuleFactory {
 
     private LogicalPlan getLogicalPlan(TableIf table, UnboundRelation unboundRelation, List<String> tableQualifier,
                                        CascadesContext cascadesContext) {
-        String dbName = tableQualifier.get(1); //[catalogName, dbName, tableName]
         switch (table.getType()) {
             case OLAP:
                 return makeOlapScan(table, unboundRelation, tableQualifier);
             case VIEW:
+                cascadesContext.getStatementContext().addView((View) table);
                 Plan viewPlan = parseAndAnalyzeView(((View) table).getDdlSql(), cascadesContext);
                 return new LogicalSubQueryAlias<>(tableQualifier, viewPlan);
             case HMS_EXTERNAL_TABLE:
@@ -223,14 +223,12 @@ public class BindRelation extends OneAnalysisRuleFactory {
                 return new LogicalFileScan(StatementScopeIdGenerator.newRelationId(),
                         (ExternalTable) table, tableQualifier);
             case SCHEMA:
-                return new LogicalSchemaScan(unboundRelation.getRelationId(),
-                        table, ImmutableList.of(dbName));
+                return new LogicalSchemaScan(unboundRelation.getRelationId(), table, tableQualifier);
             case JDBC_EXTERNAL_TABLE:
             case JDBC:
-                return new LogicalJdbcScan(unboundRelation.getRelationId(), table, ImmutableList.of(dbName));
+                return new LogicalJdbcScan(unboundRelation.getRelationId(), table, tableQualifier);
             case ES_EXTERNAL_TABLE:
-                return new LogicalEsScan(unboundRelation.getRelationId(),
-                    (EsExternalTable) table, ImmutableList.of(dbName));
+                return new LogicalEsScan(unboundRelation.getRelationId(), (EsExternalTable) table, tableQualifier);
             default:
                 throw new AnalysisException("Unsupported tableType:" + table.getType());
         }
@@ -257,7 +255,6 @@ public class BindRelation extends OneAnalysisRuleFactory {
         CascadesContext viewContext = CascadesContext.initContext(
                 parentContext.getStatementContext(), parsedViewPlan, PhysicalProperties.ANY);
         viewContext.newAnalyzer().analyze();
-
         // we should remove all group expression of the plan which in other memo, so the groupId would not conflict
         return viewContext.getRewritePlan();
     }

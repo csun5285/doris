@@ -72,6 +72,15 @@ public:
     // read local file and save content to "content"
     Status read_file_to_string(const Path& file, std::string* content);
 
+    Status canonicalize_local_file(const std::string& dir, const std::string& file_path,
+                                   std::string* full_path);
+
+    // glob list the files match the path pattern.
+    // the result will be saved in "res", in absolute path with file size.
+    // "safe" means the path will be concat with the path prefix config::user_files_secure_path,
+    // so that it can not list any files outside the config::user_files_secure_path
+    Status safe_glob(const std::string& path, std::vector<FileInfo>* res);
+
 protected:
     Status create_file_impl(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts) override;
     Status open_file_impl(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts) override;
@@ -98,6 +107,8 @@ protected:
     Status list_impl(const Path& path, std::vector<Path>* files);
 
 private:
+    // a wrapper for glob(), return file list in "res"
+    Status _glob(const std::string& pattern, std::vector<std::string>* res);
     LocalFileSystem(Path&& root_path, std::string&& id = "");
 };
 

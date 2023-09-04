@@ -466,11 +466,14 @@ struct TMasterOpRequest {
     19: optional map<string, string> session_variables
     20: optional bool foldConstantByBe
     21: optional map<string, string> trace_carrier
-    22: optional string cloud_cluster
-    23: optional string clientNodeHost
-    24: optional i32 clientNodePort;
-    25: optional bool noAuth;
-    26: optional bool syncJournalOnly // if set to true, this request means to do nothing but just sync max journal id of master
+    22: optional string clientNodeHost
+    23: optional i32 clientNodePort
+    24: optional bool syncJournalOnly // if set to true, this request means to do nothing but just sync max journal id of master
+    25: optional string defaultCatalog
+
+    // selectdb cloud
+    1000: optional string cloud_cluster
+    1001: optional bool noAuth;
 }
 
 struct TColumnDefinition {
@@ -603,11 +606,21 @@ struct TStreamLoadPutRequest {
     40: optional PlanNodes.TFileCompressType compress_type
     41: optional i64 file_size // only for stream load with parquet or orc
     42: optional bool trim_double_quotes // trim double quotes for csv
-    43: optional string cloud_cluster
-    44: optional i32 skip_lines // csv skip line num, only used when csv header_type is not set.
-    45: optional bool enable_profile
-    46: optional bool partial_update
-    47: optional list<string> table_names
+    43: optional i32 skip_lines // csv skip line num, only used when csv header_type is not set.
+    44: optional bool enable_profile
+    45: optional bool partial_update
+    46: optional list<string> table_names
+    47: optional string load_sql // insert into sql used by stream load
+    48: optional i64 backend_id
+    49: optional i32 version // version 1 means use load_sql
+    50: optional string label
+    // only valid when file type is CSV
+    51: optional i8 enclose
+    // only valid when file type is CSV
+    52: optional i8 escape
+
+    // selectdb cloud
+    1000: optional string cloud_cluster
 }
 
 struct TStreamLoadPutResult {
@@ -967,6 +980,9 @@ enum TBinlogType {
   ALTER_JOB = 5,
   MODIFY_TABLE_ADD_OR_DROP_COLUMNS = 6,
   DUMMY = 7,
+  ALTER_DATABASE_PROPERTY = 8,
+  MODIFY_TABLE_PROPERTY = 9,
+  BARRIER = 10,
 }
 
 struct TBinlog {
@@ -978,6 +994,7 @@ struct TBinlog {
     6: optional string data
     7: optional i64 belong  // belong == -1 if type is not DUMMY
     8: optional i64 table_ref // only use for gc
+    9: optional bool remove_enable_cache
 }
 
 struct TGetBinlogResult {

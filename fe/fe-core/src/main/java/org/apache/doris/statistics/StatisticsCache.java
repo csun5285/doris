@@ -175,6 +175,14 @@ public class StatisticsCache {
         columnStatisticsCache.synchronous().refresh(new StatisticsCacheKey(catalogId, dbId, tblId, idxId, colName));
     }
 
+    public void invalidateTableStats(long catalogId, long dbId, long tblId) {
+        tableStatisticsCache.synchronous().invalidate(new StatisticsCacheKey(catalogId, dbId, tblId));
+    }
+
+    public void refreshTableStatsSync(long catalogId, long dbId, long tblId) {
+        tableStatisticsCache.synchronous().refresh(new StatisticsCacheKey(catalogId, dbId, tblId));
+    }
+
     public void refreshHistogramSync(long tblId, long idxId, String colName) {
         histogramCache.synchronous().refresh(new StatisticsCacheKey(tblId, idxId, colName));
     }
@@ -232,33 +240,36 @@ public class StatisticsCache {
 
     public void syncLoadColStats(long tableId, long idxId, String colName) {
         List<ResultRow> columnResults = StatisticsRepository.loadColStats(tableId, idxId, colName);
-        for (ResultRow r : columnResults) {
-            final StatisticsCacheKey k =
-                    new StatisticsCacheKey(tableId, idxId, colName);
-            final ColumnStatistic c = ColumnStatistic.fromResultRow(r);
-            if (c == ColumnStatistic.UNKNOWN) {
+        final StatisticsCacheKey k =
+                new StatisticsCacheKey(tableId, idxId, colName);
+        final ColumnStatistic c = ColumnStatistic.fromResultRow(columnResults);
+        if (c == ColumnStatistic.UNKNOWN) {
+            return;
+        }
+        putCache(k, c);
+        TUpdateFollowerStatsCacheRequest updateFollowerStatsCacheRequest = new TUpdateFollowerStatsCacheRequest();
+        updateFollowerStatsCacheRequest.key = GsonUtils.GSON.toJson(k);
+        updateFollowerStatsCacheRequest.colStats = GsonUtils.GSON.toJson(c);
+        for (Frontend frontend : Env.getCurrentEnv().getFrontends(FrontendNodeType.FOLLOWER)) {
+            if (frontend.getHost().equals(Env.getCurrentEnv().getSelfNode().getHost())) {
+                // Doesn't need to send request to current node.
                 continue;
             }
-            putCache(k, c);
-            TUpdateFollowerStatsCacheRequest updateFollowerStatsCacheRequest = new TUpdateFollowerStatsCacheRequest();
-            updateFollowerStatsCacheRequest.key = GsonUtils.GSON.toJson(k);
-            updateFollowerStatsCacheRequest.colStats = GsonUtils.GSON.toJson(c);
-            for (Frontend frontend : Env.getCurrentEnv().getFrontends(FrontendNodeType.FOLLOWER)) {
-                TNetworkAddress address = new TNetworkAddress(frontend.getHost(),
-                        frontend.getRpcPort());
-                FrontendService.Client client = null;
-                try {
-                    client = ClientPool.frontendPool.borrowObject(address);
-                    client.updateStatsCache(updateFollowerStatsCacheRequest);
-                } catch (Throwable t) {
-                    LOG.warn("Failed to sync stats to follower: {}", address, t);
-                } finally {
-                    if (client != null) {
-                        ClientPool.frontendPool.returnObject(address, client);
-                    }
+            TNetworkAddress address = new TNetworkAddress(frontend.getHost(),
+                    frontend.getRpcPort());
+            FrontendService.Client client = null;
+            try {
+                client = ClientPool.frontendPool.borrowObject(address);
+                client.updateStatsCache(updateFollowerStatsCacheRequest);
+            } catch (Throwable t) {
+                LOG.warn("Failed to sync stats to follower: {}", address, t);
+            } finally {
+                if (client != null) {
+                    ClientPool.frontendPool.returnObject(address, client);
                 }
             }
         }
+
     }
 
     public void putCache(StatisticsCacheKey k, ColumnStatistic c) {

@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <ostream>
 #include <string_view>
 #include <utility>
@@ -414,8 +415,10 @@ Status NewJsonReader::_open_line_reader() {
     // create decompressor.
     // _decompressor may be nullptr if this is not a compressed file
     RETURN_IF_ERROR(_create_decompressor());
-    _line_reader = NewPlainTextLineReader::create_unique(_profile, _file_reader, _decompressor.get(),
-                                           size, _line_delimiter, _line_delimiter_length, _current_offset);
+    _line_reader = NewPlainTextLineReader::create_unique(
+            _profile, _file_reader, _decompressor.get(),
+            std::make_shared<PlainTextLineReaderCtx>(_line_delimiter, _line_delimiter_length), size,
+            _current_offset);
     return Status::OK();
 }
 
@@ -1116,6 +1119,7 @@ Status NewJsonReader::_read_one_message(std::unique_ptr<uint8_t[]>* file_buf, si
         file_buf->reset(new uint8_t[file_size]);
         Slice result(file_buf->get(), file_size);
         RETURN_IF_ERROR(_file_reader->read_at(_current_offset, result, read_size, _io_ctx));
+        _current_offset += *read_size;
         break;
     }
     case TFileType::FILE_STREAM: {
@@ -1786,6 +1790,10 @@ Status NewJsonReader::_get_column_default_value(
         auto it = col_default_value_ctx.find(slot_desc->col_name());
         if (it != col_default_value_ctx.end() && it->second != nullptr) {
             auto& ctx = it->second;
+            // NULL_LITERAL means no valid value of current column
+            if (ctx->root()->node_type() == TExprNodeType::type::NULL_LITERAL) {
+                continue;
+            }
             // empty block to save default value of slot_desc->col_name()
             Block block;
             // If block is empty, some functions will produce no result. So we insert a column with

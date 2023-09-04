@@ -24,7 +24,6 @@ import org.apache.doris.common.Config;
 import org.apache.doris.nereids.annotation.Developing;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.Add;
-import org.apache.doris.nereids.trees.expressions.Between;
 import org.apache.doris.nereids.trees.expressions.BinaryArithmetic;
 import org.apache.doris.nereids.trees.expressions.BinaryOperator;
 import org.apache.doris.nereids.trees.expressions.BitAnd;
@@ -91,6 +90,7 @@ import org.apache.doris.nereids.types.coercion.FractionalType;
 import org.apache.doris.nereids.types.coercion.IntegralType;
 import org.apache.doris.nereids.types.coercion.NumericType;
 import org.apache.doris.nereids.types.coercion.PrimitiveType;
+import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -557,8 +557,17 @@ public class TypeCoercionUtils {
                 break;
             }
         }
-        if (commonType.isFloatType() && (t1.isDecimalV3Type() || t2.isDecimalV3Type())) {
+        if (commonType.isFloatLikeType() && (t1.isDecimalV3Type() || t2.isDecimalV3Type())) {
             commonType = DoubleType.INSTANCE;
+        }
+
+        if (t1.isDecimalV2Type() || t2.isDecimalV2Type()) {
+            // to be consitent with old planner
+            // see findCommonType() method in ArithmeticExpr.java
+            commonType = t1.isDecimalV2Type() && t2.isDecimalV2Type()
+                    || (ConnectContext.get() != null
+                    && ConnectContext.get().getSessionVariable().roundPreciseDecimalV2Value)
+                    ? DecimalV2Type.SYSTEM_DEFAULT : DoubleType.INSTANCE;
         }
 
         boolean isBitArithmetic = binaryArithmetic instanceof BitAnd
@@ -783,31 +792,6 @@ public class TypeCoercionUtils {
                 .map(e -> e.getDataType().isNullType() ? new NullLiteral(BooleanType.INSTANCE) : e)
                 .collect(Collectors.toList());
         return compoundPredicate.withChildren(children);
-    }
-
-    /**
-     * process between type coercion.
-     */
-    public static Expression processBetween(Between between) {
-        if (between.getLowerBound().getDataType().equals(between.getCompareExpr().getDataType())
-                && between.getUpperBound().getDataType().equals(between.getCompareExpr().getDataType())) {
-            return between;
-        }
-        Optional<DataType> optionalCommonType = TypeCoercionUtils.findWiderCommonTypeForComparison(
-                between.children()
-                        .stream()
-                        .map(Expression::getDataType)
-                        .collect(Collectors.toList()),
-                false);
-
-        return optionalCommonType
-                .map(commonType -> {
-                    List<Expression> newChildren = between.children().stream()
-                            .map(e -> TypeCoercionUtils.castIfNotMatchType(e, commonType))
-                            .collect(Collectors.toList());
-                    return between.withChildren(newChildren);
-                })
-                .orElse(between);
     }
 
     private static boolean canCompareDate(DataType t1, DataType t2) {

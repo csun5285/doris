@@ -935,4 +935,9 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         throw new MetaNotFoundException("Disallow to call replayBatchRemoveTransactionV2()");
     }
 
+    public boolean isPreviousTransactionsFinished(long endTransactionId, long dbId, long tableId,
+                                                  long partitionId) throws AnalysisException {
+        throw new AnalysisException("Disallow to call isPreviousTransactionsFinished()");
+    }
+
 }

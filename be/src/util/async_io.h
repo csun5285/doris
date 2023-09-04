@@ -28,10 +28,9 @@
 #include "common/logging.h"
 #include "common/signal_handler.h"
 #include "olap/olap_define.h"
-#include "priority_thread_pool.hpp"
+#include "work_thread_pool.hpp"
 #include "runtime/threadlocal.h"
 #include "util/metrics.h"
-#include "util/priority_work_stealing_thread_pool.hpp"
 #include "util/runtime_profile.h"
 
 

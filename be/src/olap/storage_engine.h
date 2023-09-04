@@ -61,7 +61,6 @@ class CumulativeCompaction;
 class SingleReplicaCompaction;
 class CumulativeCompactionPolicy;
 class MemTracker;
-class PriorityThreadPool;
 class StreamLoadRecorder;
 class TCloneReq;
 class TCreateTabletReq;
@@ -86,7 +85,7 @@ public:
 
     static StorageEngine* instance() { return _s_instance; }
 
-    Status create_tablet(const TCreateTabletReq& request);
+    Status create_tablet(const TCreateTabletReq& request, RuntimeProfile* profile);
 
     void clear_transaction_task(const TTransactionId transaction_id);
     void clear_transaction_task(const TTransactionId transaction_id,
@@ -253,6 +252,8 @@ private:
     void _clean_unused_txns();
 
     void _clean_unused_rowset_metas();
+
+    void _clean_unused_binlog_metas();
 
     void _clean_unused_delete_bitmap();
 

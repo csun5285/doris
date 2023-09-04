@@ -154,7 +154,9 @@ Status SegmentWriter::init(const std::vector<uint32_t>& col_ids, bool has_key,
 
         // now we create zone map for key columns in AGG_KEYS or all column in UNIQUE_KEYS or DUP_KEYS
         // and not support zone map for array type and jsonb type.
-        opts.need_zone_map = column.is_key() || _tablet_schema->keys_type() != KeysType::AGG_KEYS;
+        opts.need_zone_map =
+                (column.is_key() || _tablet_schema->keys_type() != KeysType::AGG_KEYS) &&
+                column.type() != FieldType::OLAP_FIELD_TYPE_OBJECT;
         opts.need_bloom_filter = column.is_bf_column();
         auto* tablet_index = _tablet_schema->get_ngram_bf_index(column.unique_id());
         if (tablet_index) {
@@ -462,6 +464,11 @@ Status SegmentWriter::append_block_with_partial_content(const vectorized::Block*
         }
     }
     CHECK(use_default_or_null_flag.size() == num_rows);
+
+    if (config::enable_merge_on_write_correctness_check) {
+        _tablet->add_sentinel_mark_to_delete_bitmap(_mow_context->delete_bitmap.get(),
+                                                    _mow_context->rowset_ids);
+    }
 
     // read and fill block
     auto mutable_full_columns = full_block.mutate_columns();

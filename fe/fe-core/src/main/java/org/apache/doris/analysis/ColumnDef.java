@@ -316,11 +316,14 @@ public class ColumnDef {
         if (typeDef.getType().isScalarType()) {
             final ScalarType targetType = (ScalarType) typeDef.getType();
             if (targetType.getPrimitiveType().isStringType() && !targetType.isLengthSet()) {
-                if (targetType.getPrimitiveType() != PrimitiveType.STRING) {
-                    targetType.setLength(1);
-                } else {
+                if (targetType.getPrimitiveType() == PrimitiveType.VARCHAR) {
+                    // always set varchar length MAX_VARCHAR_LENGTH
+                    targetType.setLength(ScalarType.MAX_VARCHAR_LENGTH);
+                } else if (targetType.getPrimitiveType() == PrimitiveType.STRING) {
                     // always set text length MAX_STRING_LENGTH
                     targetType.setLength(ScalarType.MAX_STRING_LENGTH);
+                } else {
+                    targetType.setLength(1);
                 }
             }
         }
@@ -335,13 +338,14 @@ public class ColumnDef {
         }
 
         // disable Bitmap Hll type in keys, values without aggregate function.
-        if (type.isBitmapType() || type.isHllType()) {
+        if (type.isBitmapType() || type.isHllType() || type.isQuantileStateType()) {
             if (isKey) {
-                throw new AnalysisException("Key column can not set bitmap or hll type:" + name);
+                throw new AnalysisException("Key column can not set complex type:" + name);
             }
             if (aggregateType == null) {
-                throw new AnalysisException("Bitmap and hll type have to use aggregate function" + name);
+                throw new AnalysisException("complex type have to use aggregate function: " + name);
             }
+            isAllowNull = false;
         }
 
         // A column is a key column if and only if isKey is true.

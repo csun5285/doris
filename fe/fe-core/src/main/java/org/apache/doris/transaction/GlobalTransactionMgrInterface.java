@@ -165,5 +165,8 @@ public interface GlobalTransactionMgrInterface extends Writable {
 
     public void replayBatchRemoveTransactionV2(BatchRemoveTransactionsOperationV2 operation)
             throws MetaNotFoundException;
+
+    public boolean isPreviousTransactionsFinished(long endTransactionId, long dbId, long tableId, long partitionId)
+            throws AnalysisException;
 }
 

@@ -22,7 +22,7 @@ suite("nereids_insert_duplicate") {
     sql 'set enable_nereids_planner=true'
     sql 'set enable_fallback_to_original_planner=false'
     sql 'set enable_nereids_dml=true'
-    sql 'set parallel_fragment_exec_instance_num=13'
+    sql 'set enable_strict_consistency_dml=true'
 
     sql '''insert into dup_t
             select * except(kaint) from src'''
@@ -101,4 +101,16 @@ suite("nereids_insert_duplicate") {
             select * except(kaint) from src where id is not null'''
     sql 'sync'
     qt_lsc2 'select * from dup_light_sc_not_null_t order by id, kint'
+
+    sql 'set delete_without_partition=true'
+    sql '''delete from dup_t where id is not null'''
+    sql '''delete from dup_t where id is null'''
+    sql '''delete from dup_light_sc_t where id is not null'''
+    sql '''delete from dup_light_sc_t where id is null'''
+    sql '''delete from dup_not_null_t where id is not null'''
+    sql '''delete from dup_not_null_t where id is null'''
+    sql '''delete from dup_light_sc_not_null_t where id is not null'''
+    sql '''delete from dup_light_sc_not_null_t where id is null'''
+    sql 'alter table dup_light_sc_t rename column ktinyint ktint'
+    sql 'alter table dup_light_sc_not_null_t rename column ktinyint ktint'
 }

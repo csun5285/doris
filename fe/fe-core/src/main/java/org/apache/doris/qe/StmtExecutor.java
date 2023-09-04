@@ -126,6 +126,7 @@ import org.apache.doris.nereids.parser.NereidsParser;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.plans.commands.Command;
 import org.apache.doris.nereids.trees.plans.commands.Forward;
+import org.apache.doris.nereids.trees.plans.commands.InsertIntoTableCommand;
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.OriginalPlanner;
@@ -220,9 +221,6 @@ public class StmtExecutor {
     private OriginStatement originStmt;
     private StatementBase parsedStmt;
     private Analyzer analyzer;
-    private QueryQueue queryQueue = null;
-    // by default, false means no query queued, then no need to poll when query finish
-    private QueueOfferToken offerRet = new QueueOfferToken(false);
     private ProfileType profileType = ProfileType.QUERY;
     private volatile Coordinator coord = null;
     private MasterOpExecutor masterOpExecutor = null;
@@ -402,7 +400,14 @@ public class StmtExecutor {
     }
 
     public boolean isInsertStmt() {
-        return parsedStmt != null && parsedStmt instanceof InsertStmt;
+        if (parsedStmt == null) {
+            return false;
+        }
+        if (parsedStmt instanceof LogicalPlanAdapter) {
+            LogicalPlan logicalPlan = ((LogicalPlanAdapter) parsedStmt).getLogicalPlan();
+            return logicalPlan instanceof InsertIntoTableCommand;
+        }
+        return parsedStmt instanceof InsertStmt;
     }
 
     /**
@@ -582,17 +587,19 @@ public class StmtExecutor {
     private void handleQueryWithRetry(TUniqueId queryId) throws Exception {
         // queue query here
         syncJournalIfNeeded();
+        QueueOfferToken offerRet = null;
+        QueryQueue queryQueue = null;
         if (!parsedStmt.isExplain() && Config.enable_workload_group && Config.enable_query_queue
                 && context.getSessionVariable().getEnablePipelineEngine()) {
-            this.queryQueue = context.getEnv().getWorkloadGroupMgr().getWorkloadGroupQueryQueue(context);
+            queryQueue = context.getEnv().getWorkloadGroupMgr().getWorkloadGroupQueryQueue(context);
             try {
-                this.offerRet = queryQueue.offer();
+                offerRet = queryQueue.offer();
             } catch (InterruptedException e) {
                 // this Exception means try lock/await failed, so no need to handle offer result
                 LOG.error("error happens when offer queue, query id=" + DebugUtil.printId(queryId) + " ", e);
                 throw new RuntimeException("interrupted Exception happens when queue query");
             }
-            if (!offerRet.isOfferSuccess()) {
+            if (offerRet != null && !offerRet.isOfferSuccess()) {
                 String retMsg = "queue failed, reason=" + offerRet.getOfferResultDetail();
                 LOG.error("query (id=" + DebugUtil.printId(queryId) + ") " + retMsg);
                 throw new UserException(retMsg);
@@ -682,7 +689,7 @@ public class StmtExecutor {
                 }
             }
         } finally {
-            if (offerRet.isOfferSuccess()) {
+            if (offerRet != null && offerRet.isOfferSuccess()) {
                 queryQueue.poll();
             }
         }
@@ -1476,7 +1483,6 @@ public class StmtExecutor {
                 LOG.warn("Fail to print fragment concurrency for Query.", e);
             }
         }
-
 
         Span fetchResultSpan = context.getTracer().spanBuilder("fetch result").setParent(Context.current()).startSpan();
         try (Scope scope = fetchResultSpan.makeCurrent()) {

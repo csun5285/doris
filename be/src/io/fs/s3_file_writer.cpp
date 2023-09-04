@@ -294,11 +294,9 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     upload_request.WithBucket(_bucket).WithKey(_key).WithPartNumber(part_num).WithUploadId(
             _upload_id);
 
-    const auto& _stream_ptr = buf.get_stream();
-
     upload_request.SetBody(buf.get_stream());
 
-    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*_stream_ptr));
+    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
     upload_request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
 
     upload_request.SetContentLength(buf.get_size());
@@ -329,26 +327,6 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
     _bytes_written += buf.get_size();
-}
-
-void S3FileWriter::_put_object(UploadFileBuffer& buf) {
-    DCHECK(!_closed);
-    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
-    Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(_bucket).WithKey(_key);
-    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
-    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
-    request.SetBody(buf.get_stream());
-    request.SetContentLength(buf.get_size());
-    auto response = _client->PutObject(request);
-    s3_bvar::s3_put_total << 1;
-    if (!response.IsSuccess()) {
-        _st = Status::InternalError("Error: [{}:{}, responseCode:{}]",
-                                    response.GetError().GetExceptionName(),
-                                    response.GetError().GetMessage(),
-                                    static_cast<int>(response.GetError().GetResponseCode()));
-        buf.set_val(_st);
-    }
 }
 
 Status S3FileWriter::_complete() {
@@ -403,7 +381,33 @@ Status S3FileWriter::finalize() {
         _pending_buf->submit();
         _pending_buf = nullptr;
     }
-    return Status::OK();
+    _wait_until_finish("finalize");
+    return _st;
+}
+
+void S3FileWriter::_put_object(UploadFileBuffer& buf) {
+    DCHECK(!_closed) << "closed " << _closed;
+    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
+    Aws::S3::Model::PutObjectRequest request;
+    request.WithBucket(_bucket).WithKey(_key);
+    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
+    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
+    request.SetBody(buf.get_stream());
+    request.SetContentLength(buf.get_size());
+    request.SetContentType("application/octet-stream");
+    auto response = _client->PutObject(request);
+    s3_bvar::s3_put_total << 1;
+    if (!response.IsSuccess()) {
+        _st = Status::InternalError("Error: [{}:{}, responseCode:{}]",
+                                    response.GetError().GetExceptionName(),
+                                    response.GetError().GetMessage(),
+                                    static_cast<int>(response.GetError().GetResponseCode()));
+        buf.set_val(_st);
+        LOG(WARNING) << _st;
+        return;
+    }
+    _bytes_written += buf.get_size();
+    s3_file_created_total << 1;
 }
 
 } // namespace io

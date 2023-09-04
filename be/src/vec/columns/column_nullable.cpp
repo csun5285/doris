@@ -293,7 +293,7 @@ void ColumnNullable::insert_range_from(const IColumn& src, size_t start, size_t 
 
 void ColumnNullable::insert_indices_from(const IColumn& src, const int* indices_begin,
                                          const int* indices_end) {
-    const ColumnNullable& src_concrete = assert_cast<const ColumnNullable&>(src);
+    const ColumnNullable& src_concrete = assert_cast_safe<const ColumnNullable&>(src);
     get_nested_column().insert_indices_from(src_concrete.get_nested_column(), indices_begin,
                                             indices_end);
     _get_null_map_column().insert_indices_from(src_concrete.get_null_map_column(), indices_begin,
@@ -671,25 +671,6 @@ ColumnPtr ColumnNullable::index(const IColumn& indexes, size_t limit) const {
     ColumnPtr indexed_data = get_nested_column().index(indexes, limit);
     ColumnPtr indexed_null_map = get_null_map_column().index(indexes, limit);
     return ColumnNullable::create(indexed_data, indexed_null_map);
-}
-
-ColumnPtr ColumnNullable::create_with_offsets(const IColumn::Offsets64& offsets,
-                                              const Field& default_field, size_t total_rows,
-                                              size_t shift) const {
-    ColumnPtr new_values;
-    ColumnPtr new_null_map;
-    if (default_field.get_type() == Field::Types::Null) {
-        auto default_column = nested_column->clone_empty();
-        default_column->insert_default();
-        /// Value in main column, when null map is 1 is implementation defined. So, take any value.
-        new_values = nested_column->create_with_offsets(offsets, (*default_column)[0], total_rows,
-                                                        shift);
-        new_null_map = null_map->create_with_offsets(offsets, Field(1u), total_rows, shift);
-    } else {
-        new_values = nested_column->create_with_offsets(offsets, default_field, total_rows, shift);
-        new_null_map = null_map->create_with_offsets(offsets, Field(0u), total_rows, shift);
-    }
-    return ColumnNullable::create(new_values, new_null_map);
 }
 
 void check_set_nullable(ColumnPtr& argument_column, ColumnVector<UInt8>::MutablePtr& null_map,
