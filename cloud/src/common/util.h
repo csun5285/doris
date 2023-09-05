@@ -1,6 +1,8 @@
 #pragma once
 
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace google::protobuf {
 class Message;
@@ -9,6 +11,7 @@ class Message;
 namespace selectdb {
 class TxnKv;
 class Transaction;
+class RangeGetIterator;
 
 std::string hex(std::string_view str);
 
@@ -44,32 +47,58 @@ std::string prettify_key(std::string_view key_hex, bool unicode = false);
 std::string proto_to_json(const ::google::protobuf::Message& msg, bool add_whitespace = false);
 
 /**
- * remove a key's values
- * @param a encode key that will be removed
- * @param txn fdb txn handler
- * @return 0 for success remove a key, negative for error
+ * Supports splitting large values (>100KB) into multiple KVs, with a logical value size of up to the fdb transaction limit (<10MB).
+ * Supports multi version format parsing of values (which can be any byte sequence format), and can recognize the version of values
+ * that are forward compatible with older versions of values.
+ * Key format:
+ *  {origin_key}{suffix: i64}
+ *  suffix (big-endian):
+ *    |Bytes 0      |Bytes 1-5    |Bytes 6-7    |
+ *    |-------------|-------------|-------------|
+ *    |version      |dummy        |sequence     |
  */
-int remove(const std::string& key, Transaction* txn);
+class ValueBuf {
+public:
+    // TODO(plat1ko): Support decompression
+    [[nodiscard]] bool to_pb(google::protobuf::Message* pb) const;
+    // TODO: More bool to_xxx(Xxx* xxx) const;
+
+    // Remove all splitted KV in `iters_` via `txn`
+    void remove(Transaction* txn) const;
+
+    // Get a key, save raw splitted values of the key to `this`, value length may be bigger than 100k
+    // Return 0 for success get a key, 1 for key not found, -1 for kv error, -2 for decode key error
+    [[nodiscard]] int get(Transaction* txn, std::string_view key, bool snapshot = false);
+
+    // User may depend on `ver_` to decide how to parse the value
+    int8_t version() const { return ver_; }
+
+private:
+    std::vector<std::unique_ptr<RangeGetIterator>> iters_;
+    int8_t ver_ {-1};
+};
 
 /**
- * get a key, return key's pb message, values length may be bigger than 100k
- * @param a encode key
+ * Get a key, return key's value, value length may be bigger than 100k
  * @param txn fdb txn handler
- * @param pb return deserialization pb message
- * @return 0 for success get a key, 1 for key not found, negative for error
+ * @param key encode key
+ * @param val return wrapped raw splitted values of the key
+ * @param snapshot if true, `key` will not be included in txn conflict detection this time
+ * @return 0 for success get a key, 1 for key not found, -1 for kv error, -2 for decode key error
  */
-int get(const std::string& key, Transaction* txn, google::protobuf::Message* pb);
+[[nodiscard]] int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot = false);
 
 /**
- * put a key, it's value may be bigger than 100k
- * @param a encode key
+ * Put a KV, it's value may be bigger than 100k
+ * TODO(plat1ko): Support compression
  * @param txn fdb txn handler
- * @param pb value that is a pb message
- * @param value_limit value exceeds 100k split size
- * @return 0 for success get a key, negative for error
+ * @param key encode key
+ * @param pb value to save
+ * @param ver value version
+ * @param split_size how many byte sized fragments are the value split into
  */
-int put(const std::string& key, Transaction* txn,
-        const google::protobuf::Message& pb, size_t value_limit = 90 * 1000);
+void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,
+         size_t split_size = 90 * 1000);
 
 } // namespace selectdb
 

@@ -175,6 +175,7 @@ int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
 
 int Transaction::get(std::string_view begin, std::string_view end,
                      std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
+    TEST_SYNC_POINT_CALLBACK("memkv::Transaction::get", &limit);
     std::lock_guard<std::mutex> l(lock_);
     std::string begin_k(begin.data(), begin.size());
     std::string end_k(end.data(), end.size());
