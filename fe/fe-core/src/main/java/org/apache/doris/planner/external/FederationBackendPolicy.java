@@ -60,11 +60,6 @@ public class FederationBackendPolicy {
     }
 
     public void init(List<String> preLocations) throws UserException {
-        if (Config.isCloudMode()) {
-            cloudInit();
-            return;
-        }
-
         Set<Tag> tags = Sets.newHashSet();
         if (ConnectContext.get() != null && ConnectContext.get().getCurrentUserIdentity() != null) {
             String qualifiedUser = ConnectContext.get().getCurrentUserIdentity().getQualifiedUser();
@@ -89,6 +84,11 @@ public class FederationBackendPolicy {
     }
 
     public void init(BeSelectionPolicy policy) throws UserException {
+        if (Config.isCloudMode()) {
+            cloudInit();
+            return;
+        }
+
         backends.addAll(policy.getCandidateBackends(Env.getCurrentSystemInfo().getIdToBackend().values()));
         if (backends.isEmpty()) {
             throw new UserException("No available backends");
