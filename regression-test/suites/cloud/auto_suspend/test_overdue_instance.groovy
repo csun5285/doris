@@ -123,4 +123,14 @@ suite('test_overdue') {
     logger.info("when warehouse transforms to normal the result of http from user is {}", obj)
     assertEquals(obj.code, 0)
 
+    // test the case when op parametr is not set
+    try {
+        alter_request = JsonOutput.toJson(new AlterRequestWithoutOp(instance_id: context.config.instanceId)) 
+        result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
+        obj = new JsonSlurper().parseText(result) 
+        logger.info("the result is {}", obj)
+        assertTrue(false, "it's not a vlid request")
+    } catch (Exception e) {
+        assertTrue(e.getMessage().contains("400"))
+    }
 }
