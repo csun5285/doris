@@ -2248,6 +2248,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int meta_service_connection_pool_size = 20;
 
+    @ConfField(mutable = true)
+    public static int insert_stmt_size_in_audit_log_limit = 4 * 1024;
+
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_light_index_change = false;
 

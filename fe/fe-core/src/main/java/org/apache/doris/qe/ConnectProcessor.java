@@ -402,9 +402,25 @@ public class ConnectProcessor {
         } else {
             if (parsedStmt instanceof InsertStmt && !((InsertStmt) parsedStmt).needLoadManager()
                     && ((InsertStmt) parsedStmt).isValuesOrConstantSelect()) {
-                // INSERT INTO VALUES may be very long, so we only log at most 1K bytes.
-                int length = Math.min(1024, origStmt.length());
-                ctx.getAuditEventBuilder().setStmt(origStmt.substring(0, length));
+                // INSERT INTO VALUES may be very long, so we only
+                // log at most Config.insert_stmt_size_limt bytes.
+                String auditStmt;
+                if (origStmt.length() > Config.insert_stmt_size_in_audit_log_limit) {
+                    auditStmt = origStmt.substring(0, Config.insert_stmt_size_in_audit_log_limit);
+                    try {
+                        String info = String.format("; the insert stmt is cut, the total "
+                                + "lines to be loaded is %d",
+                                ((SelectStmt) ((InsertStmt) parsedStmt).getQueryStmt())
+                                    .getValueList().getRows().size());
+                        auditStmt += info;
+                    } catch (Exception e) {
+                        LOG.info("try to get the lines of values of insert stmt, but something erorr "
+                                + "happened, error is {}", e.getMessage());
+                    }
+                } else {
+                    auditStmt = origStmt;
+                }
+                ctx.getAuditEventBuilder().setStmt(auditStmt);
             } else {
                 ctx.getAuditEventBuilder().setStmt(origStmt);
             }
