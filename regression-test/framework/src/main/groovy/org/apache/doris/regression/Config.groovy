@@ -122,6 +122,7 @@ class Config {
 
     public String clusterDir
     public String kafkaBrokerList
+    public String cloudVersion
 
     Config() {}
 
@@ -136,7 +137,7 @@ class Config {
            String upgradeNewBeIp, String upgradeNewBeHbPort, String upgradeNewBeHttpPort, String upgradeNewBeUniqueId,
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
            String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId,
-           String clusterDir, kafkaBrokerList) {
+           String clusterDir, kafkaBrokerList, String cloudVersion) {
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -186,6 +187,7 @@ class Config {
         this.stageIamUserId = stageIamUserId
         this.clusterDir = clusterDir
         this.kafkaBrokerList = kafkaBrokerList
+        this.cloudVersion = cloudVersion
     }
 
     static Config fromCommandLine(CommandLine cmd) {
@@ -343,6 +345,8 @@ class Config {
         log.info("stageIamSk is ${config.stageIamSk}".toString())
         config.stageIamUserId = cmd.getOptionValue(stageIamUserIdOpt, config.stageIamUserId)
         log.info("stageIamUserId is ${config.stageIamUserId}".toString())
+        config.cloudVersion = cmd.getOptionValue(cloudVersionOpt, config.cloudVersion)
+        log.info("cloudVersion is ${config.cloudVersion}".toString())
 
         config.kafkaBrokerList = cmd.getOptionValue(kafkaBrokerListOpt, config.kafkaBrokerList)
 
@@ -442,7 +446,8 @@ class Config {
             configToString(obj.stageIamSk),
             configToString(obj.stageIamUserId),
             configToString(obj.clusterDir),
-            configToString(obj.kafkaBrokerList)
+            configToString(obj.kafkaBrokerList),
+            configToString(obj.cloudVersion),
         )
 
         def declareFileNames = config.getClass()

@@ -88,6 +88,7 @@ class ConfigOptions {
     static Option stageIamUserIdOpt
     static Option clusterDirOpt
     static Option kafkaBrokerListOpt
+    static Option cloudVersionOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")
@@ -522,6 +523,11 @@ class ConfigOptions {
                 .hasArg(false)
                 .desc("kafka broker list")
                 .build()
+        cloudVersionOpt = Option.builder("cloudVersion")
+                .required(false)
+                .hasArg(false)
+                .desc("selectdb cloud version")
+                .build()
 
         Options options = new Options()
                 .addOption(helpOption)
@@ -581,7 +587,7 @@ class ConfigOptions {
                 .addOption(stageIamUserIdOpt)
                 .addOption(clusterDirOpt)
                 .addOption(kafkaBrokerListOpt)
-
+                .addOption(cloudVersionOpt)
 
         CommandLine cmd = new DefaultParser().parse(options, args, true)
         if (cmd.hasOption(helpOption)) {
