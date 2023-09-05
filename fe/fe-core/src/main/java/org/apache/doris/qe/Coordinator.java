@@ -2070,7 +2070,7 @@ public class Coordinator {
         }
 
         if (Config.isCloudMode() && Config.enable_cloud_snapshot_version) {
-            createScanRangeForOlapScanNode();
+            setVisibleVersionForOlapScanNode();
         }
 
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
@@ -2315,9 +2315,9 @@ public class Coordinator {
         // TODO: more ranges?
     }
 
-    // In cloud mode, meta read lock is not enough to keep a snapshot of partition versions.
-    // So the OlapScanNode only computes after all scan nodes are collected.
-    private void createScanRangeForOlapScanNode() throws UserException {
+    // In cloud mode, meta read lock is not enough to keep a snapshot of the partition versions.
+    // After all scan node are collected, it is possible to gain a snapshot of the partition version.
+    private void setVisibleVersionForOlapScanNode() throws UserException {
         Map<Long, Long> visibleVersionMap = new HashMap<>();
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {
@@ -2333,7 +2333,7 @@ public class Coordinator {
                 Long version = partition.getVisibleVersion();
                 visibleVersionMap.put(partitionId, version);
             }
-            scanNode.createScanRangeLocations(visibleVersionMap);
+            scanNode.updateScanRangeVersions(visibleVersionMap);
         }
     }
 

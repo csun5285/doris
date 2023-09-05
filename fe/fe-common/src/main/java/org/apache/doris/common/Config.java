@@ -2268,6 +2268,7 @@ public class Config extends ConfigBase {
     // to help to acquire a snapshot of partition versions.
     @ConfField
     public static boolean enable_cloud_snapshot_version = false;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
