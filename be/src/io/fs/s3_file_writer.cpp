@@ -150,8 +150,10 @@ Status S3FileWriter::_open() {
         _upload_id = outcome.GetResult().GetUploadId();
         return Status::OK();
     }
-    return Status::IOError("failed to create multipart upload(bucket={}, key={}, upload_id={}): {}",
-                           _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage());
+    return Status::IOError(
+            "failed to create multipart upload(bucket={}, key={}, upload_id={}, exception={}): {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
+            outcome.GetError().GetMessage());
 }
 
 Status S3FileWriter::abort() {
@@ -184,8 +186,10 @@ Status S3FileWriter::abort() {
         _aborted = true;
         return Status::OK();
     }
-    return Status::IOError("failed to abort multipart upload(bucket={}, key={}, upload_id={}): {}",
-                           _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage());
+    return Status::IOError(
+            "failed to abort multipart upload(bucket={}, key={}, upload_id={}, exception={}): {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
+            outcome.GetError().GetMessage());
 }
 
 Status S3FileWriter::close() {
@@ -245,14 +249,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                     // try to do writing into file cache, so we make the lambda capture the variable
                     // we need by value to extend their lifetime
                     builder.set_allocate_file_segments_holder(
-                            [cache = _cache, k = _cache_key, offset = _bytes_appended, t = _expiration_time,
-                             cold = _is_cold_data]() -> FileBlocksHolderPtr {
+                            [cache = _cache, k = _cache_key, offset = _bytes_appended,
+                             t = _expiration_time, cold = _is_cold_data]() -> FileBlocksHolderPtr {
                                 CacheContext ctx;
                                 ctx.cache_type =
                                         t == 0 ? FileCacheType::NORMAL : FileCacheType::TTL;
                                 ctx.expiration_time = t;
                                 ctx.is_cold_data = cold;
-                                auto holder = cache->get_or_set(k, offset, config::s3_write_buffer_size, ctx);
+                                auto holder = cache->get_or_set(k, offset,
+                                                                config::s3_write_buffer_size, ctx);
                                 return std::make_unique<FileBlocksHolder>(std::move(holder));
                             });
                 }
@@ -309,8 +314,10 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     UploadPartOutcome upload_part_outcome = upload_part_callable.get();
     if (!upload_part_outcome.IsSuccess()) {
         auto s = Status::IOError(
-                "failed to upload part (bucket={}, key={}, part_num={}, up_load_id={}): {}",
+                "failed to upload part (bucket={}, key={}, part_num={}, upload_id={}, "
+                "exception={}): {}",
                 _bucket, _path.native(), part_num, _upload_id,
+                upload_part_outcome.GetError().GetExceptionName(),
                 upload_part_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
         buf.set_val(s);
@@ -329,26 +336,6 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
     _bytes_written += buf.get_size();
-}
-
-void S3FileWriter::_put_object(UploadFileBuffer& buf) {
-    DCHECK(!_closed);
-    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
-    Aws::S3::Model::PutObjectRequest request;
-    request.WithBucket(_bucket).WithKey(_key);
-    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
-    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
-    request.SetBody(buf.get_stream());
-    request.SetContentLength(buf.get_size());
-    auto response = _client->PutObject(request);
-    s3_bvar::s3_put_total << 1;
-    if (!response.IsSuccess()) {
-        _st = Status::InternalError("Error: [{}:{}, responseCode:{}]",
-                                    response.GetError().GetExceptionName(),
-                                    response.GetError().GetMessage(),
-                                    static_cast<int>(response.GetError().GetResponseCode()));
-        buf.set_val(_st);
-    }
 }
 
 Status S3FileWriter::_complete() {
@@ -379,8 +366,11 @@ Status S3FileWriter::_complete() {
     s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
-        auto s = Status::IOError("failed to create multi part upload (bucket={}, key={}): {}",
-                                 _bucket, _path.native(), compute_outcome.GetError().GetMessage());
+        auto s = Status::IOError(
+                "failed to complete multi part upload (bucket={}, key={}, upload_id={}, "
+                "exception={}): {}",
+                _bucket, _path.native(), _upload_id, compute_outcome.GetError().GetExceptionName(),
+                compute_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
         return s;
     }
@@ -403,7 +393,33 @@ Status S3FileWriter::finalize() {
         _pending_buf->submit();
         _pending_buf = nullptr;
     }
-    return Status::OK();
+    _wait_until_finish("finalize");
+    return _st;
+}
+
+void S3FileWriter::_put_object(UploadFileBuffer& buf) {
+    DCHECK(!_closed) << "closed " << _closed;
+    LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
+    Aws::S3::Model::PutObjectRequest request;
+    request.WithBucket(_bucket).WithKey(_key);
+    Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));
+    request.SetContentMD5(Aws::Utils::HashingUtils::Base64Encode(part_md5));
+    request.SetBody(buf.get_stream());
+    request.SetContentLength(buf.get_size());
+    request.SetContentType("application/octet-stream");
+    auto response = _client->PutObject(request);
+    s3_bvar::s3_put_total << 1;
+    if (!response.IsSuccess()) {
+        _st = Status::IOError(
+                "failed to put object (bucket={}, key={}, upload_id={}, exception={}): {}", _bucket,
+                _path.native(), _upload_id, response.GetError().GetExceptionName(),
+                response.GetError().GetMessage());
+        buf.set_val(_st);
+        LOG(WARNING) << _st;
+        return;
+    }
+    _bytes_written += buf.get_size();
+    s3_file_created_total << 1;
 }
 
 } // namespace io
