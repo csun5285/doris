@@ -26,10 +26,16 @@ echo "You need put smoke-test/tpch/sf0.1/customer.tbl.gz on S3 first"
 PWD="\$(pwd)"
 
 CONF_FILE=./smoke.conf
+CLOUD_VERSION=""
 
 total=\$#
 if [ \$total -eq 1 ];then
     CONF_FILE=\$1
+fi
+
+if [ \$total -eq 2 ];then
+    CONF_FILE=\$1
+    CLOUD_VERSION=\$2
 fi
 
 JAVA_HOME=\`sed -n '/^JAVA_HOME/p' \$CONF_FILE\`
@@ -112,6 +118,9 @@ new_line="\$(sed -n '/^s3BucketName/p' \$CONF_FILE)"
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 new_line="\$(sed -n '/^s3Prefix/p' \$CONF_FILE)"
+echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
+
+new_line="cloudVersion=\"\$CLOUD_VERSION\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 # start smoke test
