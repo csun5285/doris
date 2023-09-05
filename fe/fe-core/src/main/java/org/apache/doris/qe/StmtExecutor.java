@@ -619,8 +619,8 @@ public class StmtExecutor {
                         UUID uuid = UUID.randomUUID();
                         TUniqueId newQueryId = new TUniqueId(uuid.getMostSignificantBits(),
                                 uuid.getLeastSignificantBits());
-                        AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}",
-                                DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
+                        AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}, stmt: {}",
+                                DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId), originStmt.originStmt);
                         context.setQueryId(newQueryId);
                         if (Config.isCloudMode()) {
                             // sleep random millis [500, 1000] ms
