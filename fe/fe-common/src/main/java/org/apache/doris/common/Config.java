@@ -2199,7 +2199,7 @@ public class Config extends ConfigBase {
     public static int max_meta_size_per_copy_into_job = 51200;
 
     @ConfField(mutable = true)
-    public static boolean ignore_unsupported_properties_in_cloud_mode = false;
+    public static boolean ignore_unsupported_properties_in_cloud_mode = true;
 
     @ConfField(mutable = false)
     public static int cloud_copy_txn_conflict_error_retry_num = 5;
