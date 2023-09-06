@@ -414,6 +414,8 @@ public class BrokerLoadJob extends BulkLoadJob {
             return;
         }
         jobProfile.update(createTimestamp, getSummaryInfo(true), true);
+        // jobProfile has been pushed into ProfileManager, remove reference in brokerLoadJob
+        jobProfile = null;
     }
 
     private Map<String, String> getSummaryInfo(boolean isFinished) {
