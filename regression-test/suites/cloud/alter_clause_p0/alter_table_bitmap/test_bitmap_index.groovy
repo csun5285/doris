@@ -29,7 +29,7 @@ suite("test_bitmap_index") {
                 k3 INT,
                 k4 BIGINT,
                 k5 CHAR,
-                k6 VARCHAR,
+                k6 VARCHAR(1),
                 k7 DATE,
                 k8 DATETIME,
                 k9 LARGEINT,
@@ -40,7 +40,7 @@ suite("test_bitmap_index") {
                k14 DATETIMEV2(3),
                k15 DATETIMEV2(6)
             )
-            DISTRIBUTED BY HASH(k1) BUCKETS 5;
+            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
         """
 
     sql """
@@ -65,6 +65,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -85,6 +86,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName1)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -94,7 +96,7 @@ suite("test_bitmap_index") {
             }
         }
     }
-    //sql "DROP TABLE ${tbName1} FORCE;"
+    sql "DROP TABLE ${tbName1} FORCE;"
 
 
     def tbName2 = "test_bitmap_index_agg"
@@ -106,7 +108,7 @@ suite("test_bitmap_index") {
                 k3 INT,
                 k4 BIGINT,
                 k5 CHAR,
-                k6 VARCHAR,
+                k6 VARCHAR(1),
                 k7 DATE,
                 k8 DATETIME,
                 k9 LARGEINT,
@@ -119,7 +121,7 @@ suite("test_bitmap_index") {
                 v1 INT SUM
             )
             AGGREGATE KEY(k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11,k12,k13,k14,k15)
-            DISTRIBUTED BY HASH(k1) BUCKETS 5;
+            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
         """
 
     sql """
@@ -144,6 +146,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName2)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -168,6 +171,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName2)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -177,7 +181,7 @@ suite("test_bitmap_index") {
             }
         }
     }
-    //sql "DROP TABLE ${tbName2} FORCE;"
+    sql "DROP TABLE ${tbName2} FORCE;"
 
     def tbName3 = "test_bitmap_index_unique"
     sql "DROP TABLE IF EXISTS ${tbName3}"
@@ -188,7 +192,7 @@ suite("test_bitmap_index") {
                 k3 INT,
                 k4 BIGINT,
                 k5 CHAR,
-                k6 VARCHAR,
+                k6 VARCHAR(1),
                 k7 DATE,
                 k8 DATETIME,
                 k9 LARGEINT,
@@ -201,7 +205,7 @@ suite("test_bitmap_index") {
                v1  INT
             )
             UNIQUE KEY(k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k11)
-            DISTRIBUTED BY HASH(k1) BUCKETS 5;
+            DISTRIBUTED BY HASH(k1) BUCKETS 5 properties("replication_num" = "1");
         """
 
     sql """
@@ -227,6 +231,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName3)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -247,6 +252,7 @@ suite("test_bitmap_index") {
     while (max_try_secs--) {
         String res = getJobState(tbName3)
         if (res == "FINISHED") {
+            sleep(3000)
             break
         } else {
             Thread.sleep(1000)
@@ -256,5 +262,5 @@ suite("test_bitmap_index") {
             }
         }
     }
-    //sql "DROP TABLE ${tbName3} FORCE;"
+    sql "DROP TABLE ${tbName3} FORCE;"
 }
