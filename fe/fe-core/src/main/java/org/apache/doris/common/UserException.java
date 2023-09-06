@@ -68,7 +68,7 @@ public class UserException extends Exception {
     }
 
     public String getInternalMsg() {
-        return this.internalMsg;
+        return Strings.isNullOrEmpty(internalMsg) ? getMessage() : internalMsg;
     }
 
     public InternalErrorCode getErrorCode() {
