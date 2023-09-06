@@ -474,6 +474,7 @@ public class BinaryPredicate extends Predicate implements Writable {
     @Override
     public void analyzeImpl(Analyzer analyzer) throws AnalysisException {
         super.analyzeImpl(analyzer);
+        this.checkIncludeBitmap();
         // Ignore placeholder, when it type is invalid.
         // Invalid type could happen when analyze prepared point query select statement,
         // since the value is occupied but not assigned
