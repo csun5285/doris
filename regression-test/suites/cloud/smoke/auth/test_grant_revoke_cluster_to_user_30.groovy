@@ -1,7 +1,7 @@
-suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
+suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_grant_revoke_stage_to_user, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_grant_revoke_cluster_to_user_30, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
     def role = "admin"
@@ -11,6 +11,20 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""
 
+    def getCluster = { cluster ->
+        def result = sql " SHOW CLUSTERS; "
+        for (int i = 0; i < result.size(); i++) {
+            if (result[i][0] == cluster) {
+                return result[i]
+            }
+        }
+        return null
+    }
+
+    def clusters = sql " SHOW CLUSTERS; "
+    assertTrue(!clusters.isEmpty())
+    def validCluster = clusters[0][0]
+
     // 1. change user
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
@@ -18,9 +32,9 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
 
     // ${user2} not admin role
     sql """create user ${user2} identified by 'Cloud12345'"""
+    sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     // for use default_cluster:regression_test
     sql """grant select_priv on *.*.* to ${user2}"""
-    order_qt_show_user2_grants2 """show grants for '${user2}'"""
 
 
     // 2. grant cluster
@@ -41,13 +55,27 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
 
+    // default cluster
+    sql """SET PROPERTY FOR '${user1}' 'default_cloud_cluster' = '${validCluster}'"""
+    sql """SET PROPERTY FOR '${user2}' 'default_cloud_cluster' = '${validCluster}'"""
+    def show_cluster_1 = getCluster(validCluster)
+
+    assertTrue(show_cluster_1[2].contains(user2), "Expect contain users regression_test_cloud_user2")
+
     // grant GRANT_PRIV to general user, he can grant cluster to other user.
     sql """grant GRANT_PRIV on *.*.* to ${user2}"""
 
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
-    order_qt_show_user3_grants3 """show grants for '${user2}'"""
+
+    sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
+    show_cluster_2 = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            getCluster(validCluster)
+    }
+
+    assertTrue(show_cluster_2[2].equals(user2), "Expect just only have user regression_test_cloud_user2")
+    sql """REVOKE USAGE_PRIV ON CLUSTER '${validCluster}' FROM '${user2}'"""
 
     // 3. revoke cluster
     // admin role user can revoke cluster
@@ -70,4 +98,9 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     order_qt_show_user4_grants4 """show grants for '${user1}'"""
 
     order_qt_show_user5_grants5 """show grants for '${user2}'"""
+
+    sql """drop user if exists ${user1}"""
+    sql """drop user if exists ${user2}"""
 }
+
+

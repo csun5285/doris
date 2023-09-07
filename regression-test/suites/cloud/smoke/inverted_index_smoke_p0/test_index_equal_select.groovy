@@ -17,8 +17,8 @@
 
 suite("smoke_test_index_equal_select", "smoke"){
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_index_equal_select, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_index_equal_select, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
     def indexTbName1 = "index_equal_select"
@@ -47,7 +47,8 @@ suite("smoke_test_index_equal_select", "smoke"){
                 INDEX fatherName_idx(fatherName) USING INVERTED PROPERTIES("parser"="standard") COMMENT ' fatherName index'
             )
             DUPLICATE KEY(`name`)
-            DISTRIBUTED BY HASH(`name`) BUCKETS 10;
+            DISTRIBUTED BY HASH(`name`) BUCKETS 10
+            properties("replication_num" = "1");
     """
     // insert data
     sql """ insert into ${indexTbName1} VALUES

@@ -37,9 +37,10 @@ feCloudHttpAddress = "127.0.0.1:8904"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
-suitePath = "/mnt/disk1/gavinchou/debug/regression/regression-test/suites"
-dataPath = "/mnt/disk1/gavinchou/debug/regression/regression-test/data"
-sf1DataPath = "/mnt/disk1/gavinchou/debug/regression/data"
+suitePath = "${DORIS_HOME}/regression-test/suites"
+dataPath = "${DORIS_HOME}/regression-test/data"
+pluginPath = "${DORIS_HOME}/regression-test/plugins"
+realDataPath = "${DORIS_HOME}/regression-test/realdata"
 
 // will test <group>/<suite>.groovy
 // empty group will test all group
