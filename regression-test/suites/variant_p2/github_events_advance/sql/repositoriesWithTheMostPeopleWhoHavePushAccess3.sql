@@ -1,0 +1,16 @@
+-- SELECT
+--     cast(repo:name as string),
+--     count(distinct cast(actor:login as string)) AS u,
+--     sum(star) AS stars
+-- FROM
+-- (
+--     SELECT
+--         cast(repo:name as string),
+--         CASE WHEN type = 'PushEvent' AND (ref LIKE '%/master' OR ref LIKE '%/main') THEN cast(actor:login as string) ELSE NULL END AS cast(actor:login as string),
+--         CASE WHEN type = 'WatchEvent' THEN 1 ELSE 0 END AS star
+--     FROM github_events WHERE type IN ('PushEvent', 'WatchEvent') AND cast(repo:name as string) != '/'
+-- ) t
+-- GROUP BY cast(repo:name as string)
+-- HAVING stars >= 100
+-- ORDER BY u DESC
+-- LIMIT 50

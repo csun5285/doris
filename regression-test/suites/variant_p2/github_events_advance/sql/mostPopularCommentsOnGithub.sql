@@ -1,0 +1,1 @@
+-- SELECT cast(payload:comment.body as string), count() FROM github_events WHERE cast(payload:comment.body as string) != "" AND length(cast(payload:comment.body as string)) < 100 GROUP BY cast(payload:comment.body as string)  ORDER BY count(), 1 DESC LIMIT 50

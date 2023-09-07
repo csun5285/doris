@@ -1,0 +1,1 @@
+-- SELECT cast(repo:name as string), created_at, count() AS stars FROM github_events WHERE type = 'WatchEvent' GROUP BY cast(repo:name as string), created_at ORDER BY count() DESC LIMIT 50

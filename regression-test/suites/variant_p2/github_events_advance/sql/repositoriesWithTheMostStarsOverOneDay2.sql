@@ -1,0 +1,25 @@
+-- SELECT
+--     cast(repo:name as string),
+--     day,
+--     stars
+-- FROM
+-- (
+--     SELECT
+--         row_number() OVER (PARTITION BY cast(repo:name as string) ORDER BY stars DESC) AS rank,
+--         cast(repo:name as string),
+--         day,
+--         stars
+--     FROM
+--     (
+--         SELECT
+--             cast(repo:name as string),
+--             to_date(created_at) AS day,
+--             count() AS stars
+--         FROM github_events
+--         WHERE type = 'WatchEvent'
+--         GROUP BY cast(repo:name as string), day
+--     ) t1
+-- ) t2
+-- WHERE rank = 1
+-- ORDER BY stars DESC
+-- LIMIT 50

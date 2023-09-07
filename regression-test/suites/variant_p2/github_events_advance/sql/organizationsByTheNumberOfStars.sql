@@ -1,0 +1,9 @@
+-- repo:name
+-- SELECT
+--     lower(split_part(cast(repo:name as string), '/', 1)) AS org,
+--     count() AS stars
+-- FROM github_events
+-- WHERE type = 'WatchEvent'
+-- GROUP BY org
+-- ORDER BY stars DESC, 1
+-- LIMIT 50

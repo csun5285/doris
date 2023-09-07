@@ -1,0 +1,20 @@
+-- SELECT
+--     repo_name,
+--     max(stars) AS daily_stars,
+--     sum(stars) AS total_stars,
+--     round(sum(stars) / max(stars), 0) AS rate
+-- FROM
+-- (
+--     SELECT
+--         cast(repo:name as string) as repo_name,
+--         to_date(created_at) AS day,
+--         count() AS stars
+--     FROM github_events
+--     WHERE type = 'WatchEvent'
+--     GROUP BY
+--         repo_name,
+--         day
+-- ) t
+-- GROUP BY repo_name
+-- ORDER BY rate DESC, 1
+-- LIMIT 50

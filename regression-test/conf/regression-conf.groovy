@@ -137,6 +137,9 @@ extEsPassword = "***********"
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
 s3Region = "ap-hongkong"
+// s3Endpoint = "cos.ap-beijing.myqcloud.com"
+// s3BucketName = "doris-build-1308700295"
+// s3Region = "ap-beijing"
 
 // If the failure suite num exceeds this config
 // all following suite will be skipped to fast quit the run.
