@@ -191,7 +191,7 @@ public class MetricCalculator extends TimerTask {
 
         MetricRepo.DORIS_METRIC_REGISTER.removeMetrics(MetricRepo.TABLET_NUM);
         SystemInfoService infoService = Env.getCurrentSystemInfo();
-        for (Long beId : infoService.getBackendIds(false)) {
+        for (Long beId : infoService.getAllBackendIds(false)) {
             Backend be = infoService.getBackend(beId);
             if (be == null) {
                 continue;
