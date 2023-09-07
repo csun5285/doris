@@ -36,8 +36,11 @@ suite("test_domain_connection_and_ak_sk_correction") {
         DISTRIBUTED BY HASH(O_ORDERKEY) BUCKETS 32;
     """
 
+    result = sql """ select count(*) from ${tableName} """
+    logger.info("before load the count is {}", result)
 
     def label = UUID.randomUUID().toString().replace("-", "")
+    logger.info("label is {}", label)
     def result = sql """
         LOAD LABEL ${label}
         (
@@ -56,7 +59,11 @@ suite("test_domain_connection_and_ak_sk_correction") {
     """
     logger.info("the first sql result is {}", result)
 
+    result = sql """ select count(*) from ${tableName} """
+    logger.info("after load the count is {}", result)
+
     label = UUID.randomUUID().toString().replace("-", "")
+    
     try {
         result = sql """
             LOAD LABEL ${label}
@@ -134,6 +141,34 @@ suite("test_domain_connection_and_ak_sk_correction") {
         logger.info("the fourth sql exception result is {}", e.getMessage())
         assertTrue(e.getMessage().contains("Incorrect object storage info"), e.getMessage())
     }
+
+    result = sql """ select count(*) from ${tableName} """
+    logger.info("before load the count is {}", result)
+
+    // test whether using http in endpoint is ok
+    label = UUID.randomUUID().toString().replace("-", "")
+    logger.info("label is {}", label)
+    result = sql """
+            LOAD LABEL ${label}
+            (
+                DATA INFILE("s3://${getS3BucketName()}/regression/tpch/sf1/part.tbl")
+                INTO TABLE ${tableName}
+                COLUMNS TERMINATED BY "|"
+                (p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, temp)
+            )
+            WITH S3
+            (
+                "AWS_ENDPOINT" = "http://${getS3Endpoint()}",
+                "AWS_ACCESS_KEY" = "${getS3AK()}",
+                "AWS_SECRET_KEY" = "${getS3SK()}",
+                "AWS_REGION" = "${getS3Region()}"
+            );
+        """
+    logger.info("the result of fifth of sql is {}", result)
+
+    result = sql """ select count(*) from ${tableName} """
+    logger.info("after load the count is {}", result)
+
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
     sql """ DROP TABLE IF EXISTS ${tableNameOrders} FORCE"""
 }
