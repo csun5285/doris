@@ -54,6 +54,7 @@ import org.apache.doris.analysis.QueryStmt;
 import org.apache.doris.analysis.RedirectStatus;
 import org.apache.doris.analysis.ReplacePartitionClause;
 import org.apache.doris.analysis.ReplaceTableClause;
+import org.apache.doris.analysis.ResourceTypeEnum;
 import org.apache.doris.analysis.SelectStmt;
 import org.apache.doris.analysis.SetOperationStmt;
 import org.apache.doris.analysis.SetStmt;
@@ -926,6 +927,14 @@ public class StmtExecutor {
         profile.update(context.startTime, getSummaryInfo(isFinished), isFinished);
     }
 
+    private boolean hasCloudClusterPriv() {
+        if (ConnectContext.get() == null || Strings.isNullOrEmpty(ConnectContext.get().getCloudCluster())) {
+            return false;
+        }
+        return Env.getCurrentEnv().getAuth().checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(),
+            ConnectContext.get().getCloudCluster(), PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER);
+    }
+
     // Analyze one statement to structure in memory.
     public void analyze(TQueryOptions tQueryOptions) throws UserException, InterruptedException {
         if (LOG.isDebugEnabled()) {
@@ -1060,9 +1069,11 @@ public class StmtExecutor {
                         resetAnalyzerAndStmt();
                     }
                 } catch (UserException e) {
-                    // cloud mode retry
+                    // cloud mode retry, when retry need check this user has cloud cluster auth.
+                    // if user doesn't have cloud cluster auth, don't retry, just return.
                     if (Config.isCloudMode()
-                            && e.getMessage().contains(SystemInfoService.NOT_USING_VALID_CLUSTER_MSG)) {
+                            && e.getMessage().contains(SystemInfoService.NOT_USING_VALID_CLUSTER_MSG)
+                            && hasCloudClusterPriv()) {
                         LOG.debug("cloud mode analyzeAndGenerateQueryPlan retry times {}", i);
                         // sleep random millis [500, 1000] ms
                         int randomMillis = 500 + (int) (Math.random() * (1000 - 500));

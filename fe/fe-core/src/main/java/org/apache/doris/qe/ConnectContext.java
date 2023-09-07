@@ -825,7 +825,7 @@ public class ConnectContext {
                 // find a cluster has more than one alive be
                 List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
                 AtomicBoolean hasAliveBe = new AtomicBoolean(false);
-                bes.stream().filter(Backend::isActive).findAny().ifPresent(backend -> {
+                bes.stream().filter(Backend::isAlive).findAny().ifPresent(backend -> {
                     LOG.debug("get a clusterName {}, it's has more than one alive be {}", clusterName, backend);
                     hasAliveBe.set(true);
                 });
