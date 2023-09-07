@@ -20,6 +20,8 @@ package org.apache.doris.metric;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.metric.Metric.MetricUnit;
+import org.apache.doris.system.Backend;
+import org.apache.doris.system.SystemInfoService;
 
 import java.util.HashMap;
 import java.util.List;
@@ -186,5 +188,27 @@ public class MetricCalculator extends TimerTask {
             }
         }
         MetricRepo.GAUGE_MAX_TABLET_COMPACTION_SCORE.setValue(maxCompactionScore);
+
+        MetricRepo.DORIS_METRIC_REGISTER.removeMetrics(MetricRepo.TABLET_NUM);
+        SystemInfoService infoService = Env.getCurrentSystemInfo();
+        for (Long beId : infoService.getBackendIds(false)) {
+            Backend be = infoService.getBackend(beId);
+            if (be == null) {
+                continue;
+            }
+
+            GaugeMetric<Long> tabletNum = new GaugeMetric<Long>(MetricRepo.TABLET_NUM, MetricUnit.NOUNIT,
+                    "tablet number") {
+                @Override
+                public Long getValue() {
+                    if (!Env.getCurrentEnv().isMaster()) {
+                        return 0L;
+                    }
+                    return (long) Env.getCurrentEnv().getCloudTabletRebalancer().getSnapshotTabletsByBeId(beId).size();
+                }
+            };
+            tabletNum.addLabel(new MetricLabel("backend", be.getHost() + ":" + be.getHeartbeatPort()));
+            MetricRepo.DORIS_METRIC_REGISTER.addMetrics(tabletNum);
+        }
     }
 }
