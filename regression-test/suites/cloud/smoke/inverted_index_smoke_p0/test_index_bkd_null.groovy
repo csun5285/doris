@@ -18,8 +18,8 @@
 
 suite("smoke_test_bkd_null_index", "smoke"){
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_bkd_null_index, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_bkd_null_index, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
     // prepare test table
@@ -33,7 +33,7 @@ suite("smoke_test_bkd_null_index", "smoke"){
     def indexTblName = "bkd_null_index_test"
 
     sql "DROP TABLE IF EXISTS ${indexTblName}"
-
+    // create 1 replica table
     sql """
 	CREATE TABLE IF NOT EXISTS ${indexTblName}(
 	    `id` int(11) NOT NULL,
@@ -42,11 +42,12 @@ suite("smoke_test_bkd_null_index", "smoke"){
 	) ENGINE=OLAP
 	DUPLICATE KEY(`id`)
 	COMMENT 'OLAP'
-	DISTRIBUTED BY HASH(`id`) BUCKETS 1;
+	DISTRIBUTED BY HASH(`id`) BUCKETS 1
+	PROPERTIES(
+ 	    "replication_allocation" = "tag.location.default: 1"
+	);
     """
     
-    // set enable_vectorized_engine=true
-    sql """ SET enable_vectorized_engine=true; """
     def var_result = sql "show variables"
     logger.info("show variales result: " + var_result )
 

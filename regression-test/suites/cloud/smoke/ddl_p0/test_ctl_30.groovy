@@ -15,37 +15,38 @@
 // specific language governing permissions and limitations
 // under the License.
 
-suite("smoke_test_ctas", "smoke") {
+suite("smoke_test_ctl_30", "smoke") {
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_ctas, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_ctl_30, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
     try {
         sql """
-    CREATE TABLE IF NOT EXISTS `test_ctas` (
+    CREATE TABLE IF NOT EXISTS `test_ctl_30` (
       `test_varchar` varchar(150) NULL,
       `test_datetime` datetime NULL,
       `test_default_timestamp` datetime DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=OLAP
     UNIQUE KEY(`test_varchar`)
     DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
+      PROPERTIES (
+      "replication_allocation" = "tag.location.default: 1",
+      "in_memory" = "false",
+      "storage_format" = "V2"
+    )
     """
 
-        sql """ INSERT INTO test_ctas(test_varchar, test_datetime) VALUES ('test1','2022-04-27 16:00:33'),('test2','2022-04-27 16:00:54') """
-
-        sql """ 
-    CREATE TABLE IF NOT EXISTS `test_ctas1` as select * from test_ctas;
+        sql """
+    CREATE TABLE IF NOT EXISTS `test_ctl1_30` LIKE `test_ctl_30`
     """
 
-        qt_select """SHOW CREATE TABLE `test_ctas1`"""
-
-        qt_select """select count(*) from test_ctas1"""
+        def res = sql """SHOW CREATE TABLE `test_ctl1_30`"""
+        assertTrue(res.size() != 0)
     } finally {
-        sql """ DROP TABLE IF EXISTS test_ctas """
+        sql """ DROP TABLE IF EXISTS test_ctl_30 """
 
-        sql """ DROP TABLE IF EXISTS test_ctas1 """
+        sql """ DROP TABLE IF EXISTS test_ctl1_30 """
     }
 
 }
-

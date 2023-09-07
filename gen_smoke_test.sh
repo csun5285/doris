@@ -123,6 +123,12 @@ echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 new_line="cloudVersion=\"\$CLOUD_VERSION\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
+new_line="feHttpUser=\"$feCloudHttpUser\""
+echo $new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
+
+new_line="feHttpPassword=\"$feCloudHttpPassword\""
+echo $new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
+
 # start smoke test
 
 export \$JAVA_HOME

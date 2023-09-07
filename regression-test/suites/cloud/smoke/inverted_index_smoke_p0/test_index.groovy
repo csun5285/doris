@@ -14,33 +14,19 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-
-suite("smoke_test_ctl", "smoke") {
+suite("smoke_test_index", "smoke") {
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_ctl, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_index, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
-    try {
-        sql """
-    CREATE TABLE IF NOT EXISTS `test_ctl` (
-      `test_varchar` varchar(150) NULL,
-      `test_datetime` datetime NULL,
-      `test_default_timestamp` datetime DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=OLAP
-    UNIQUE KEY(`test_varchar`)
-    DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
-    """
-
-        sql """ 
-    CREATE TABLE IF NOT EXISTS `test_ctl1` LIKE `test_ctl`
-    """
-
-        qt_select """SHOW CREATE TABLE `test_ctl1`"""
-    } finally {
-        sql """ DROP TABLE IF EXISTS test_ctl """
-
-        sql """ DROP TABLE IF EXISTS test_ctl1 """
+    // todo: test bitmap index, such as create, drop, alter table index
+    def tables = sql "show tables"
+    if (tables != null) {
+        if (tables[0] != null) {
+            def tb = tables[0][0]
+            logger.info("$tb")
+            sql "show index from ${tables[0][0]}"
+        }
     }
-
 }

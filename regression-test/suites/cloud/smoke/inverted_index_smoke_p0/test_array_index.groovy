@@ -18,8 +18,8 @@
 
 suite("smoke_test_array_index", "smoke"){
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0) {
-        log.info("case: smoke_test_array_index, cloud version ${context.config.cloudVersion} bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("case: smoke_test_array_index, cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
     // prepare test table
@@ -33,7 +33,7 @@ suite("smoke_test_array_index", "smoke"){
     def indexTblName = "array_test"
 
     sql "DROP TABLE IF EXISTS ${indexTblName}"
-
+    // create 1 replica table
     sql """
 	CREATE TABLE IF NOT EXISTS ${indexTblName}(
 		`id`int(11)NULL,
@@ -46,12 +46,10 @@ suite("smoke_test_array_index", "smoke"){
 	COMMENT 'OLAP'
 	DISTRIBUTED BY HASH(`id`) BUCKETS 1
 	PROPERTIES(
-		"persistent"="false"
+ 		"replication_allocation" = "tag.location.default: 1"
 	);
     """
     
-    // set enable_vectorized_engine=true
-    sql """ SET enable_vectorized_engine=true; """
     def var_result = sql "show variables"
     logger.info("show variales result: " + var_result )
 
@@ -71,4 +69,10 @@ suite("smoke_test_array_index", "smoke"){
     qt_sql "SELECT * FROM $indexTblName WHERE int_array element_eq 40 ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName WHERE int_array element_eq 50 ORDER BY id;"
     qt_sql "SELECT * FROM $indexTblName WHERE int_array element_eq 60 ORDER BY id;"
+
+    sql " ALTER TABLE $indexTblName drop index c_array_idx; "
+    qt_sql "SELECT * FROM $indexTblName WHERE c_array MATCH 'china' ORDER BY id;"
+    qt_sql "SELECT * FROM $indexTblName WHERE c_array MATCH 'love' ORDER BY id;"
+    qt_sql "SELECT * FROM $indexTblName WHERE c_array MATCH 'north' ORDER BY id;"
+    qt_sql "SELECT * FROM $indexTblName WHERE c_array MATCH 'korea' ORDER BY id;"
 }
