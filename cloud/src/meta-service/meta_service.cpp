@@ -6560,7 +6560,7 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
         }
         // get instance_id by cloud_unique_id
         cloned_instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-        if (instance_id.empty()) {
+        if (cloned_instance_id.empty()) {
             std::string msg =
                     fmt::format("cannot find instance_id with cloud_unique_id={}", cloud_unique_id);
             return {MetaServiceCode::INVALID_ARGUMENT, std::move(msg)};
