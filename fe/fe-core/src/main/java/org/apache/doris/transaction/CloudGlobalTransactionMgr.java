@@ -245,7 +245,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         }
 
         List<OlapTable> mowTableList = getMowTableList(tableList);
-        if (!mowTableList.isEmpty()) {
+        if (!tabletCommitInfos.isEmpty() && !mowTableList.isEmpty()) {
             calcDeleteBitmapForMow(dbId, mowTableList, transactionId, tabletCommitInfos);
         }
 
