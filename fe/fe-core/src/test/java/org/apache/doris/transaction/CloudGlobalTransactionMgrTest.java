@@ -99,6 +99,35 @@ public class CloudGlobalTransactionMgrTest {
     }
 
     @Test
+    public void testBeginTransactionConflict() throws LabelAlreadyUsedException, AnalysisException,
+            BeginTransactionException, DuplicatedRequestException, QuotaExceedException, MetaNotFoundException {
+        AtomicLong id = new AtomicLong(1000);
+        new MockUp<MetaServiceProxy>(MetaServiceProxy.class) {
+            int times = 1;
+            @Mock
+            public SelectdbCloud.BeginTxnResponse beginTxn(SelectdbCloud.BeginTxnRequest request) {
+                BeginTxnResponse.Builder beginTxnResponseBuilder = BeginTxnResponse.newBuilder();
+                if (times > 5) {
+                    beginTxnResponseBuilder.setTxnId(id.getAndIncrement())
+                            .setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder().setCode(MetaServiceCode.OK).setMsg("OK"));
+                } else {
+                    beginTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
+                            .setCode(MetaServiceCode.KV_TXN_CONFLICT).setMsg("kv txn conflict"));
+                }
+                times++;
+                return beginTxnResponseBuilder.build();
+            }
+        };
+
+        long transactionId = masterTransMgr.beginTransaction(CatalogTestUtil.testDbId1, Lists.newArrayList(CatalogTestUtil.testTableId1),
+                CatalogTestUtil.testTxnLabel1,
+                transactionSource,
+                LoadJobSourceType.FRONTEND, Config.stream_load_default_timeout_second);
+
+        Assert.assertEquals(transactionId + 1, id.get());
+    }
+
+    @Test
     public void testBeginTransactionLabelAlreadyUsedException() throws LabelAlreadyUsedException, AnalysisException,
             BeginTransactionException, DuplicatedRequestException, QuotaExceedException, MetaNotFoundException {
         new MockUp<MetaServiceProxy>(MetaServiceProxy.class) {
@@ -274,6 +303,51 @@ public class CloudGlobalTransactionMgrTest {
                 AbortTxnResponse.Builder abortTxnResponseBuilder = AbortTxnResponse.newBuilder();
                 abortTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
                         .setCode(MetaServiceCode.OK).setMsg("OK"));
+                return abortTxnResponseBuilder.build();
+            }
+        };
+        masterTransMgr.abortTransaction(CatalogTestUtil.testDbId1, CatalogTestUtil.testTxnLabel1, "User Cancelled");
+    }
+
+    @Test
+    public void testAbortTransactionConflict() throws UserException {
+        new MockUp<MetaServiceProxy>(MetaServiceProxy.class) {
+            int times = 1;
+            @Mock
+            public SelectdbCloud.AbortTxnResponse abortTxn(SelectdbCloud.AbortTxnRequest request) {
+                AbortTxnResponse.Builder abortTxnResponseBuilder = AbortTxnResponse.newBuilder();
+                if (times > 5) {
+                    abortTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
+                            .setCode(MetaServiceCode.OK).setMsg("OK"));
+                    return abortTxnResponseBuilder.build();
+                } else {
+                    abortTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
+                            .setCode(MetaServiceCode.KV_TXN_CONFLICT).setMsg("kv txn conflict"));
+                }
+                times++;
+                return abortTxnResponseBuilder.build();
+            }
+        };
+        long transactionId = 123533;
+        masterTransMgr.abortTransaction(CatalogTestUtil.testDbId1, transactionId, "User Cancelled");
+    }
+
+    @Test
+    public void testAbortTransactionByLabelConflict() throws UserException {
+        new MockUp<MetaServiceProxy>(MetaServiceProxy.class) {
+            int times = 1;
+            @Mock
+            public SelectdbCloud.AbortTxnResponse abortTxn(SelectdbCloud.AbortTxnRequest request) {
+                AbortTxnResponse.Builder abortTxnResponseBuilder = AbortTxnResponse.newBuilder();
+                if (times > 5) {
+                    abortTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
+                            .setCode(MetaServiceCode.OK).setMsg("OK"));
+                    return abortTxnResponseBuilder.build();
+                } else {
+                    abortTxnResponseBuilder.setStatus(SelectdbCloud.MetaServiceResponseStatus.newBuilder()
+                            .setCode(MetaServiceCode.KV_TXN_CONFLICT).setMsg("kv txn conflict"));
+                }
+                times++;
                 return abortTxnResponseBuilder.build();
             }
         };
