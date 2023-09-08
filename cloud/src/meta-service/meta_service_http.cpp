@@ -322,7 +322,9 @@ static HttpResponse process_get_cluster(MetaServiceImpl* service, brpc::Controll
     PARSE_MESSAGE_OR_RETURN(ctrl, req);
     GetClusterResponse resp;
     service->get_cluster(ctrl, &req, &resp, nullptr);
-    return http_json_reply_message(resp.status(), resp);
+
+    // ATTN: only returns the first cluster pb.
+    return http_json_reply_message(resp.status(), resp.cluster(0));
 }
 
 static HttpResponse process_get_tablet_stats(MetaServiceImpl* service, brpc::Controller* ctrl) {

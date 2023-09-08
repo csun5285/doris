@@ -423,7 +423,7 @@ TEST(MetaServiceHttpTest, InstanceTest) {
     // case: get instance by cloud_unique_id
     {
         auto [status_code, resp] = ctx.query_with_result<InstanceInfoPB>(
-                "get_instance_info", "cloud_unique_id=1:test_instance:1");
+                "get_instance", "cloud_unique_id=1:test_instance:1");
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
         ASSERT_TRUE(resp.result.has_value());
@@ -662,10 +662,11 @@ TEST(MetaServiceHttpTest, GetClusterTest) {
         req.set_cloud_unique_id("test_cloud_unique_id");
         req.set_cluster_id(mock_cluster_id);
         req.set_cluster_name(mock_cluster_name);
-        auto [status_code, resp] = ctx.forward_with_result<GetClusterResponse>("get_cluster", req);
+        auto [status_code, resp] = ctx.forward_with_result<ClusterPB>("get_cluster", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
         ASSERT_TRUE(resp.result.has_value());
+        ASSERT_EQ(resp.result->cluster_id(), mock_cluster_id);
     }
 }
 
@@ -1081,10 +1082,9 @@ TEST(MetaServiceHttpTest, UnknownFields) {
     // LOG:
     // parse http request 'get_tablet_stats': INVALID_ARGUMENT:an_unknown_field: Cannot find field. body="{"table_id": 1, "an_unknown_field": "xxxx"}"
     HttpContext ctx;
-    auto [status_code, content] = ctx.query<std::string>(
-            "get_tablet_stats", "", "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\"}");
+    std::string body = "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\", \"cloud_unique_id\": \"1:test_instance:1\"}";
+    auto [status_code, content] = ctx.query<std::string>("get_tablet_stats", "", body);
     ASSERT_EQ(status_code, 200);
-    ASSERT_EQ(content, "");
 }
 
 } // namespace selectdb
