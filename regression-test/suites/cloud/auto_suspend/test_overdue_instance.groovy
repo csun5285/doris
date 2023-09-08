@@ -38,6 +38,10 @@ class AlterRequest {
     String op;
 }
 
+class AlterRequestWithoutOp {
+    String instance_id
+}
+
 suite('test_overdue') {
     def user = 'test_overdue_instance_user'
     def result = sql """ SELECT DATABASE(); """
