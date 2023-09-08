@@ -1089,8 +1089,6 @@ DECLARE_mInt64(kerberos_expiration_time_seconds);
 //==============================================================================
 // begin selectdb cloud conf
 //==============================================================================
-// reader prefetch
-DECLARE_Int32(max_column_reader_prefetch_size);
 // buffered prefetch
 DECLARE_mInt32(prefetch_single_buffer_size_mb);
 
@@ -1169,6 +1167,8 @@ DECLARE_mInt32(buffered_reader_read_timeout_ms);
 DECLARE_mBool(enable_parallel_cumu_compaction);
 
 DECLARE_mBool(enable_flush_file_cache_async);
+
+DECLARE_mBool(enable_check_segment_footer);
 
 //==============================================================================
 // end selectdb cloud conf

@@ -29,7 +29,9 @@
 #include <utility>
 
 #include "cloud/io/tmp_file_mgr.h"
+#include "io/fs/file_reader.h"
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "cloud/olap/storage_engine.h"
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
 #include "common/logging.h"
@@ -48,7 +50,6 @@
 #include "olap/rowset/segment_v2/inverted_index_desc.h"
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/rowset/segment_v2/segment_writer.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
 #include "segcompaction.h"
@@ -549,13 +550,36 @@ RowsetSharedPtr BetaRowsetWriter::build() {
     Status status;
     // make sure all segments are flushed
     DCHECK_EQ(_num_segment, _next_segment_id);
-    for (auto& [_, file_writer] : _file_writers) {
+    for (auto& [segment_id, file_writer] : _file_writers) {
         status = file_writer->close();
         if (!status.ok()) {
             LOG(WARNING) << "failed to close file writer, path=" << file_writer->path()
                          << " res=" << status;
             return nullptr;
         }
+#ifdef CLOUD_MODE
+        if (config::enable_check_segment_footer) {
+            std::string path = BetaRowset::remote_segment_path(_context.tablet_id,
+                                                               _context.rowset_id, segment_id);
+            auto& fs = _rowset_meta->fs();
+            DCHECK_NE(fs, nullptr);
+            io::FileReaderSPtr file_reader;
+            io::FileBlockCachePathPolicy cache_policy;
+            auto type = config::enable_file_cache ? config::file_cache_type : "";
+            io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
+            reader_options.file_size = file_writer->bytes_appended();
+            status = fs->open_file(path, &file_reader, &reader_options);
+            if (!status.ok()) {
+                LOG(WARNING) << "failed to open file. path=" << path << ", err: " << status;
+                return nullptr;
+            }
+            status = Segment::check_segment_footer(std::move(file_reader));
+            if (!status.ok()) {
+                LOG(WARNING) << "check segment footer failed. path=" << path << ", err: " << status;
+                return nullptr;
+            }
+        }
+#endif
     }
 
     // if _segment_start_id is not zero, that means it's a transient rowset writer for
@@ -731,10 +755,9 @@ Status BetaRowsetWriter::_do_create_segment_writer(
     }
     io::FileWriterPtr file_writer;
     io::FileWriterOptions opts;
-    opts.expiration_time = _file_cache_is_persistent ? INT64_MAX
-                               : _file_cache_ttl_seconds == 0
-                                       ? 0
-                                       : _create_time + _file_cache_ttl_seconds;
+    opts.expiration_time = _file_cache_is_persistent      ? INT64_MAX
+                           : _file_cache_ttl_seconds == 0 ? 0
+                                                          : _create_time + _file_cache_ttl_seconds;
     opts.is_cold_data = !_is_hot_data;
     opts.disable_file_cache = _context.disable_file_cache;
     Status st = fs->create_file(path, &file_writer, &opts);
@@ -786,7 +809,8 @@ Status BetaRowsetWriter::_create_segment_writer(std::unique_ptr<segment_v2::Segm
     size_t total_segment_num = _num_segment - _segcompacted_point + 1 + _num_segcompacted;
     if (UNLIKELY(total_segment_num > config::max_segment_num_per_rowset)) {
         return Status::Error<TOO_MANY_SEGMENTS>(
-                "too many segments in rowset. tablet_id:{}, rowset_id:{}, max:{}, _num_segment:{}, "
+                "too many segments in rowset. tablet_id:{}, rowset_id:{}, max:{}, "
+                "_num_segment:{}, "
                 "_segcompacted_point:{}, _num_segcompacted:{}",
                 _context.tablet_id, _context.rowset_id.to_string(),
                 config::max_segment_num_per_rowset, _num_segment, _segcompacted_point,

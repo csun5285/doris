@@ -76,6 +76,8 @@ public:
                        const io::FileReaderOptions& reader_options,
                        std::shared_ptr<Segment>* output, bool is_lazy_open = false,
                        bool disable_file_cache = false);
+    
+    static Status check_segment_footer(io::FileReaderSPtr file_reader);
 
     ~Segment();
 
@@ -139,6 +141,7 @@ public:
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
     Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema);
+    Segment();
     // open segment file and read the minimum amount of necessary information (footer)
     Status _open();
     Status _parse_footer();
