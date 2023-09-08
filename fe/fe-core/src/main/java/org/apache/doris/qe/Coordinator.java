@@ -2331,6 +2331,12 @@ public class Coordinator {
                 }
                 Partition partition = table.getPartition(partitionId);
                 Long version = partition.getVisibleVersion();
+                if (version <= 0) {
+                    LOG.warn("partition {} getVisibleVerison error, the visibleVersion is {}",
+                                partition.getId(), version);
+                    throw new UserException("partition " + partition.getId()
+                                                + " getVisibleVerison error, the visibleVersion is " + version);
+                }
                 visibleVersionMap.put(partitionId, version);
             }
             scanNode.updateScanRangeVersions(visibleVersionMap);
