@@ -30,8 +30,6 @@ services:
       - "50070"
       - "8020"
       - "9000"
-    ports:
-      - "${FS_PORT}:${FS_PORT}"
     healthcheck:
       test: [ "CMD", "curl", "http://localhost:50070/" ]
       interval: 5s
@@ -87,8 +85,6 @@ services:
     container_name: doris--hive-metastore
     expose:
       - "9083"
-    ports:
-      - "${HMS_PORT}:9083"
     volumes:
       - ./scripts:/mnt/scripts
     depends_on:
