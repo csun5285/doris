@@ -97,26 +97,7 @@ public class GrantStmt extends DdlStmt {
         if (this.resourcePattern != null) {
             this.resourcePattern.setResourceType(type);
         }
-        PrivBitSet privs = PrivBitSet.of();
-        for (AccessPrivilegeWithCols accessPrivilegeWithCol : accessPrivilegeWithCols) {
-            if (accessPrivilegeWithCol.getAccessPrivilege() == null
-                    || accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege() == null) {
-                continue;
-            }
-            if (!accessPrivilegeWithCol.getAccessPrivilege().isResource() || type == ResourceTypeEnum.GENERAL) {
-                privs.or(PrivBitSet.of(accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege()));
-                continue;
-            }
-
-            // ATTN: cloud mode, GRANT USAGE_PRIV ON CLUSTER ${cluster_name} TO ROLE ${user}
-            // change USAGE_PRIV to ${type}_USAGE_PRIV
-            if (type == ResourceTypeEnum.CLUSTER) {
-                privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
-            } else if (type == ResourceTypeEnum.STAGE) {
-                privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
-            }
-        }
-        this.accessPrivileges = privs.toAccessPrivilegeWithColsList();
+        this.accessPrivileges = accessPrivilegeWithCols;
     }
 
     public UserIdentity getUserIdent() {
@@ -195,6 +176,9 @@ public class GrantStmt extends DdlStmt {
         if (tblPattern != null) {
             checkTablePrivileges(privileges, role, tblPattern, colPrivileges);
         } else if (resourcePattern != null) {
+            if (Config.isCloudMode()) {
+                PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
+            }
             checkResourcePrivileges(privileges, role, resourcePattern);
         } else if (workloadGroupPattern != null) {
             checkWorkloadGroupPrivileges(privileges, role, workloadGroupPattern);

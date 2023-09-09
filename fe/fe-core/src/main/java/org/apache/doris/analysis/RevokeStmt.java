@@ -20,6 +20,7 @@ package org.apache.doris.analysis;
 import org.apache.doris.catalog.AccessPrivilegeWithCols;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.mysql.privilege.ColPrivilegeKey;
 import org.apache.doris.mysql.privilege.PrivBitSet;
@@ -85,26 +86,7 @@ public class RevokeStmt extends DdlStmt {
         if (this.resourcePattern != null) {
             this.resourcePattern.setResourceType(type);
         }
-        PrivBitSet privs = PrivBitSet.of();
-        for (AccessPrivilegeWithCols accessPrivilegeWithCol : accessPrivileges) {
-            if (accessPrivilegeWithCol.getAccessPrivilege() == null
-                    || accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege() == null) {
-                continue;
-            }
-            if (!accessPrivilegeWithCol.getAccessPrivilege().isResource() || type == ResourceTypeEnum.GENERAL) {
-                privs.or(PrivBitSet.of(accessPrivilegeWithCol.getAccessPrivilege().toDorisPrivilege()));
-                continue;
-            }
-
-            // ATTN: cloud mode, REVOKE USAGE_PRIV ON CLUSTER ${cluster_name} FROM ROLE ${user}
-            // change USAGE_PRIV to ${type}_USAGE_PRIV
-            if (type == ResourceTypeEnum.CLUSTER) {
-                privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
-            } else if (type == ResourceTypeEnum.STAGE) {
-                privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
-            }
-        }
-        this.accessPrivileges = privs.toAccessPrivilegeWithColsList();
+        this.accessPrivileges = accessPrivileges;
     }
 
     public UserIdentity getUserIdent() {
@@ -176,6 +158,9 @@ public class RevokeStmt extends DdlStmt {
         if (tblPattern != null) {
             GrantStmt.checkTablePrivileges(privileges, role, tblPattern, colPrivileges);
         } else if (resourcePattern != null) {
+            if (Config.isCloudMode()) {
+                PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
+            }
             GrantStmt.checkResourcePrivileges(privileges, role, resourcePattern);
         } else if (workloadGroupPattern != null) {
             GrantStmt.checkWorkloadGroupPrivileges(privileges, role, workloadGroupPattern);

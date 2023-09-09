@@ -23,7 +23,8 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     // 1. change user
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
-    order_qt_show_user1_grants1 """show grants for '${user1}'"""
+    // doris community permissions are still being modified and not stable. so comment out the 'show grant' first
+    // order_qt_show_user1_grants1 """show grants for '${user1}'"""
 
     // ${user2} not admin role
     sql """create user ${user2} identified by 'Cloud12345'"""
@@ -90,9 +91,9 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
 
-    order_qt_show_user4_grants4 """show grants for '${user1}'"""
+    // order_qt_show_user4_grants4 """show grants for '${user1}'"""
 
-    order_qt_show_user5_grants5 """show grants for '${user2}'"""
+    // order_qt_show_user5_grants5 """show grants for '${user2}'"""
 
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""

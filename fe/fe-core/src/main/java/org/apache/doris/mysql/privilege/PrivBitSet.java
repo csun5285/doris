@@ -18,6 +18,7 @@
 package org.apache.doris.mysql.privilege;
 
 import org.apache.doris.analysis.CompoundPredicate.Operator;
+import org.apache.doris.analysis.ResourcePattern;
 import org.apache.doris.catalog.AccessPrivilege;
 import org.apache.doris.catalog.AccessPrivilegeWithCols;
 import org.apache.doris.catalog.Env;
@@ -34,7 +35,9 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 // ....0000000000
 //        ^     ^
@@ -188,6 +191,23 @@ public class PrivBitSet implements Writable {
     @Override
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, GsonUtils.GSON.toJson(this));
+    }
+
+    public static void convertResourcePrivToCloudPriv(ResourcePattern resourcePattern, Set<Privilege> privileges) {
+        PrivBitSet privs = PrivBitSet.of();
+        for (Privilege privilege : privileges) {
+            if (resourcePattern.isGeneralResource()) {
+                privs.or(PrivBitSet.of(privilege));
+                continue;
+            }
+
+            if (resourcePattern.isClusterResource()) {
+                privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
+            } else if (resourcePattern.isStageResource()) {
+                privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
+            }
+        }
+        privileges = new HashSet<>(privs.toPrivilegeList());
     }
 }
 
