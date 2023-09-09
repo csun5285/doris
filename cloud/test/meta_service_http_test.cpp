@@ -647,6 +647,11 @@ TEST(MetaServiceHttpTest, GetClusterTest) {
     c1.set_cluster_id(mock_cluster_id);
     c1.add_mysql_user_name()->append("m1");
     instance.add_clusters()->CopyFrom(c1);
+    ClusterPB c2;
+    c2.set_cluster_name(mock_cluster_name + "2");
+    c2.set_cluster_id(mock_cluster_id + "2");
+    c2.add_mysql_user_name()->append("m2");
+    instance.add_clusters()->CopyFrom(c2);
     val = instance.SerializeAsString();
 
     std::unique_ptr<Transaction> txn;
@@ -667,6 +672,27 @@ TEST(MetaServiceHttpTest, GetClusterTest) {
         ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
         ASSERT_TRUE(resp.result.has_value());
         ASSERT_EQ(resp.result->cluster_id(), mock_cluster_id);
+    }
+
+    // case: not found
+    {
+        GetClusterRequest req;
+        req.set_cloud_unique_id("unknown_id");
+        req.set_cluster_id("unknown_cluster_id");
+        req.set_cluster_name("unknown_cluster_name");
+        auto [status_code, resp] = ctx.forward_with_result<ClusterPB>("get_cluster", req);
+        ASSERT_EQ(status_code, 404);
+    }
+
+    // case: get all clusters
+    {
+        GetClusterRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        auto [status_code, resp] = ctx.forward_with_result<GetClusterResponse>("get_cluster", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.status.code(), MetaServiceCode::OK);
+        ASSERT_TRUE(resp.result.has_value());
+        ASSERT_EQ(resp.result->cluster_size(), 2);
     }
 }
 

@@ -315,11 +315,26 @@ static HttpResponse process_get_instance_info(MetaServiceImpl* service, brpc::Co
 static HttpResponse process_get_cluster(MetaServiceImpl* service, brpc::Controller* ctrl) {
     GetClusterRequest req;
     PARSE_MESSAGE_OR_RETURN(ctrl, req);
+
+    bool get_all_cluster_info = false;
+    // if cluster_id、cluster_name、mysql_user_name all empty, get this instance's all cluster info.
+    if (req.cluster_id().empty() && req.cluster_name().empty() && req.mysql_user_name().empty()) {
+        get_all_cluster_info = true;
+    }
+
     GetClusterResponse resp;
     service->get_cluster(ctrl, &req, &resp, nullptr);
 
-    // ATTN: only returns the first cluster pb.
-    return http_json_reply_message(resp.status(), resp.cluster(0));
+    if (resp.status().code() == MetaServiceCode::OK) {
+        if (get_all_cluster_info) {
+            return http_json_reply_message(resp.status(), resp);
+        } else {
+            // ATTN: only returns the first cluster pb.
+            return http_json_reply_message(resp.status(), resp.cluster(0));
+        }
+    } else {
+        return http_json_reply(resp.status());
+    }
 }
 
 static HttpResponse process_get_tablet_stats(MetaServiceImpl* service, brpc::Controller* ctrl) {
