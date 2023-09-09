@@ -1314,6 +1314,53 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
     ASSERT_EQ(ret, 1);
 }
 
+TEST(MetaServiceTest, CheckNotTimeoutTxnConflictTest) {
+    auto meta_service = get_meta_service();
+
+    const int64_t db_id = 666;
+    const int64_t table_id = 777;
+    const std::string label = "test_label";
+    const std::string cloud_unique_id = "test_cloud_unique_id";
+    int64_t txn_id = -1;
+
+    brpc::Controller begin_txn_cntl;
+    BeginTxnRequest begin_txn_req;
+    BeginTxnResponse begin_txn_res;
+    TxnInfoPB txn_info_pb;
+
+    begin_txn_req.set_cloud_unique_id(cloud_unique_id);
+    txn_info_pb.set_db_id(db_id);
+    txn_info_pb.set_label(label);
+    txn_info_pb.add_table_ids(table_id);
+    txn_info_pb.set_timeout_ms(3);
+    begin_txn_req.mutable_txn_info()->CopyFrom(txn_info_pb);
+
+    meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&begin_txn_cntl),
+                            &begin_txn_req, &begin_txn_res, nullptr);
+    ASSERT_EQ(begin_txn_res.status().code(), MetaServiceCode::OK);
+    txn_id = begin_txn_res.txn_id();
+    ASSERT_GT(txn_id, -1);
+
+    brpc::Controller check_txn_conflict_cntl;
+    CheckTxnConflictRequest check_txn_conflict_req;
+    CheckTxnConflictResponse check_txn_conflict_res;
+
+    check_txn_conflict_req.set_cloud_unique_id(cloud_unique_id);
+    check_txn_conflict_req.set_db_id(db_id);
+    check_txn_conflict_req.set_end_txn_id(txn_id + 1);
+    check_txn_conflict_req.add_table_ids(table_id);
+
+    // wait txn timeout
+    sleep(5);
+    // first time to check txn conflict
+    meta_service->check_txn_conflict(
+            reinterpret_cast<::google::protobuf::RpcController*>(&begin_txn_cntl),
+            &check_txn_conflict_req, &check_txn_conflict_res, nullptr);
+
+    ASSERT_EQ(check_txn_conflict_res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(check_txn_conflict_res.finished(), true);
+}
+
 TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
     int ret = 0;
 

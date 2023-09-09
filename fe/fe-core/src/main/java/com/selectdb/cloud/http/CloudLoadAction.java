@@ -9,6 +9,7 @@ import com.selectdb.cloud.storage.RemoteBase.ObjectInfo;
 
 import com.google.common.base.Strings;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import org.apache.commons.validator.routines.InetAddressValidator;
 import org.apache.doris.analysis.CopyStmt;
 import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.catalog.Env;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -112,9 +114,37 @@ public class CloudLoadAction extends RestBaseController {
         return map;
     }
 
-    private boolean internalEndpoint(String host) {
-        return !(!Strings.isNullOrEmpty(host) && (isIP(host)
-                || Arrays.stream(Config.cloud_aliyun_internal_endpoint_white_list).anyMatch(host::contains)));
+    private boolean internalEndpoint(String host) throws DdlException {
+        if (!Config.apsaradb_env_enabled) {
+            return !(!Strings.isNullOrEmpty(host) && (isIP(host)
+                    || Arrays.stream(Config.cloud_aliyun_internal_endpoint_white_list).anyMatch(host::contains)));
+        }
+
+        String reqHostStr = host.replaceAll("\\s+", "");
+        if (reqHostStr.isEmpty()) {
+            LOG.warn("Invalid header host: {}", reqHostStr);
+            throw new DdlException("Invalid header host: " + reqHostStr);
+        }
+
+        String[] pair = reqHostStr.split(":");
+        if (pair.length != 1 && pair.length != 2) {
+            LOG.warn("Invalid header host: {}", reqHostStr);
+            throw new DdlException("Invalid header host: " + reqHostStr);
+        }
+        String reqHost = pair[0];
+
+        if (InetAddressValidator.getInstance().isValid(reqHost)) {
+            InetAddress addr;
+            try {
+                addr = InetAddress.getByName(reqHost);
+            } catch (Exception e) {
+                LOG.warn("unknown host expection: {}", e.getMessage());
+                throw new DdlException(e.getMessage());
+            }
+            return addr.isSiteLocalAddress();
+        }
+
+        return !reqHost.toLowerCase().contains("public");
     }
 
     // curl  -u user:password -H "fileName: file" -T file -L http://127.0.0.1:12104/copy/upload

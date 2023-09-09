@@ -2251,6 +2251,22 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int insert_stmt_size_in_audit_log_limit = 4 * 1024;
 
+    @ConfField(mutable = true)
+    public static boolean enable_running_txn_check = true;
+
+    // When this configuration is true, check whether the load task of BE is healthy through the report of fragment
+    @ConfField(mutable = true)
+    public static boolean enable_check_fragment = true;
+
+    // When the reporting interval of the fragment exceeds this configuration value,
+    // the load is considered to have failed
+    @ConfField(mutable = true)
+    public static int fragment_report_tolerance_time_sec = 20;
+
+    // the compensation time for BE startup
+    @ConfField(mutable = true)
+    public static int be_start_time_compensation_ms = 500;
+
     @ConfField(mutable = true, masterOnly = true)
     public static boolean enable_light_index_change = false;
 

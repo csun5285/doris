@@ -2514,6 +2514,48 @@ public class Coordinator {
                             + backendExecState.backend.getId() + " is down");
                     return false;
                 }
+
+                if (Config.enable_check_fragment) {
+                    /*
+                    if (!uniqueIds.contains(state.getKey())) {
+                        continue;
+                    }
+                    */
+
+                    // The startup time of BE is earlier than the load start time,
+                    // so there is no need to retry the load task
+                    if (backendExecState.backend.getLastStartTime()
+                            < backendExecState.getInitTsMs() - Config.be_start_time_compensation_ms) {
+                        continue;
+                    }
+
+                    // The startup time of BE is later than the load start time.
+                    // So The load execution fragment on this BE has been lost and
+                    // needs to be retried, otherwise it may wait until the load times out
+                    if (backendExecState.backend.getLastStartTime()
+                            > backendExecState.getInitTsMs() + Config.be_start_time_compensation_ms) {
+                        queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend "
+                                + backendExecState.backend.getId() + " restart after exec load");
+                        LOG.warn("backend last start time {} later than coordinator init time {}",
+                                backendExecState.backend.getLastStartTime(),
+                                backendExecState.getInitTsMs());
+                        return false;
+                    }
+
+                    // When the load start time is close to the BE start time (diff
+                    // is less than Config.be_start_time_compensation_ms), it is not accurate
+                    // to judge whether the load needs to be retried based on the BE start time.
+                    // Instead, use the report of be fragment to judge whether the load has failed
+                    long currentTs = System.currentTimeMillis() / 1000;
+                    if (currentTs - backendExecState.getLastUpdateTs() > Config.fragment_report_tolerance_time_sec) {
+                        queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "the fragment of backend "
+                                + backendExecState.backend.getId() + " does not report");
+                        LOG.warn("the fragment of backend {} does not report, current ts {} last report ts {}",
+                                backendExecState.backend.getId(), currentTs,
+                                backendExecState.getLastUpdateTs());
+                        return false;
+                    }
+                }
             }
         }
         return true;
@@ -2779,6 +2821,8 @@ public class Coordinator {
         Backend backend;
         long lastMissingHeartbeatTime = -1;
         TUniqueId instanceId;
+        long lastUpdateTs = -1;
+        long initTsMs = -1;
 
         public BackendExecState(PlanFragmentId fragmentId, int instanceId, int profileFragmentId,
                                 TExecPlanFragmentParams rpcParams, Map<TNetworkAddress, Long> addressToBackendID,
@@ -2799,6 +2843,16 @@ public class Coordinator {
             this.instanceProfile = new RuntimeProfile(name);
             this.hasCanceled = false;
             this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
+            this.lastUpdateTs = System.currentTimeMillis() / 1000;
+            this.initTsMs = System.currentTimeMillis();
+        }
+
+        public long getLastUpdateTs() {
+            return lastUpdateTs;
+        }
+
+        public long getInitTsMs() {
+            return initTsMs;
         }
 
         /**
@@ -2833,6 +2887,8 @@ public class Coordinator {
             if (statsErrorEstimator != null) {
                 statsErrorEstimator.updateExactReturnedRows(params);
             }
+
+            this.lastUpdateTs = System.currentTimeMillis() / 1000;
             return true;
         }
 

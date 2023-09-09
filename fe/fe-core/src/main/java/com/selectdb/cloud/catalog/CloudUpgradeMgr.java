@@ -24,6 +24,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.util.MasterDaemon;
 import org.apache.doris.system.Backend;
+import org.apache.doris.transaction.CloudGlobalTransactionMgr;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -63,8 +64,12 @@ public class CloudUpgradeMgr extends MasterDaemon {
                     break;
                 }
                 try {
-                    isFinished = Env.getCurrentGlobalTransactionMgr().isPreviousTransactionsFinished(
-                        txnpair.second, txnpair.first, tableIdList);
+                    if (Config.enable_running_txn_check) {
+                        isFinished = ((CloudGlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr())
+                                .isPreviousNonTimeoutTxnFinished(txnpair.second, txnpair.first, tableIdList);
+                    } else {
+                        isFinished = true;
+                    }
                 } catch (AnalysisException e) {
                     throw new RuntimeException(e);
                 }

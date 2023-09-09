@@ -1751,6 +1751,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
     std::vector<int64_t> src_table_ids(request->table_ids().begin(), request->table_ids().end());
     std::sort(src_table_ids.begin(), src_table_ids.end());
     std::unique_ptr<RangeGetIterator> it;
+    int64_t skip_timeout_txn_cnt = 0;
+    int total_iteration_cnt = 0;
     do {
         ret = txn->get(begin_txn_run_key, end_txn_run_key, &it, 1000);
         if (ret != 0) {
@@ -1765,7 +1767,10 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
                    << " end_txn_run_val=" << hex(end_txn_run_val)
                    << " it->has_next()=" << it->has_next();
 
+        auto now_time = system_clock::now();
+        uint64_t check_time = duration_cast<milliseconds>(now_time.time_since_epoch()).count();
         while (it->has_next()) {
+            total_iteration_cnt++;
             auto [k, v] = it->next();
             LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k);
             TxnRunningPB running_val_pb;
@@ -1777,6 +1782,12 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
                 LOG(WARNING) << ss.str();
                 return;
             }
+
+            if (running_val_pb.timeout_time() < check_time) {
+                skip_timeout_txn_cnt++;
+                break;
+            }
+
             LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k)
                       << " running_val_pb=" << running_val_pb.ShortDebugString();
             std::vector<int64_t> running_table_ids(running_val_pb.table_ids().begin(),
@@ -1789,6 +1800,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
             result.resize(iter - result.begin());
             if (result.size() > 0) {
                 response->set_finished(false);
+                LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
+                          << " total iteration count: " << total_iteration_cnt;
                 return;
             }
 
@@ -1798,6 +1811,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
         }
         begin_txn_run_key.push_back('\x00'); // Update to next smallest key for iteration
     } while (it->more());
+    LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
+              << " total iteration count: " << total_iteration_cnt;
     response->set_finished(true);
 }
 

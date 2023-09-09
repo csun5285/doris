@@ -599,7 +599,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 }
 
                 Backend backend = Env.getCurrentSystemInfo().getBackend(be);
-                if (tabletNum < minTabletsNum && !backend.isDecommissioned()) {
+                if (tabletNum < minTabletsNum && !backend.isDecommissioned() && !backend.isSmoothUpgradeSrc()) {
                     destBe = be;
                     minTabletsNum = tabletNum;
                 }

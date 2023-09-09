@@ -743,6 +743,38 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         return checkTxnConflictResponse.getFinished();
     }
 
+    public boolean isPreviousNonTimeoutTxnFinished(long endTransactionId, long dbId, List<Long> tableIdList)
+            throws AnalysisException {
+        LOG.info("isPreviousNonTimeoutTxnFinished(), endTransactionId:{}, dbId:{}, tableIdList:{}",
+                endTransactionId, dbId, tableIdList);
+
+        if (endTransactionId <= 0) {
+            throw new AnalysisException("Invaid endTransactionId:" + endTransactionId);
+        }
+        CheckTxnConflictRequest.Builder builder = CheckTxnConflictRequest.newBuilder();
+        builder.setDbId(dbId);
+        builder.setEndTxnId(endTransactionId);
+        builder.addAllTableIds(tableIdList);
+        builder.setCloudUniqueId(Config.cloud_unique_id);
+        builder.setIgnoreTimeoutTxn(true);
+
+        final CheckTxnConflictRequest checkTxnConflictRequest = builder.build();
+        CheckTxnConflictResponse checkTxnConflictResponse = null;
+        try {
+            LOG.info("CheckTxnConflictRequest:{}", checkTxnConflictRequest);
+            checkTxnConflictResponse = MetaServiceProxy
+                    .getInstance().checkTxnConflict(checkTxnConflictRequest);
+            LOG.info("CheckTxnConflictResponse: {}", checkTxnConflictResponse);
+        } catch (RpcException e) {
+            throw new AnalysisException(e.getMessage());
+        }
+
+        if (checkTxnConflictResponse.getStatus().getCode() != MetaServiceCode.OK) {
+            throw new AnalysisException(checkTxnConflictResponse.getStatus().getMsg());
+        }
+        return checkTxnConflictResponse.getFinished();
+    }
+
     @Override
     public void removeExpiredAndTimeoutTxns() {
 
