@@ -321,8 +321,6 @@ public class Role implements Writable, GsonPostProcessable {
             if (ctx.getNoAuth()) {
                 return true;
             }
-        } else {
-            LOG.warn("use checkGlobalInter while can't get connectContext");
         }
         globalPrivTable.getPrivs(savedPrivs);
         if (Privilege.satisfy(savedPrivs, wanted)) {
