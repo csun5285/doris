@@ -135,6 +135,8 @@ import org.apache.doris.datasource.property.constants.HMSProperties;
 import org.apache.doris.external.elasticsearch.EsRepository;
 import org.apache.doris.external.iceberg.IcebergCatalogMgr;
 import org.apache.doris.external.iceberg.IcebergTableCreationRecordMgr;
+import org.apache.doris.metric.GaugeMetricImpl;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.mtmv.MTMVJobFactory;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.persist.AlterDatabasePropertyInfo;
@@ -951,6 +953,31 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
 
         db.dropTable(table.getName());
+
+        // empty data size recoreded in DORIS_METRIC_REGISTER
+        if (table.getType() == TableType.OLAP) {
+            OlapTable olapTable = (OlapTable) table;
+            String dbName = olapTable.getDBName();
+            String tableName = olapTable.getName();
+            String metricKey = dbName + "." + tableName;
+            LOG.info("empty_table_size: drop table {}", metricKey);
+            GaugeMetricImpl<Long> metric = MetricRepo.CLOUD_DB_TABLE_DATA_SIZE.remove(metricKey);
+            if (metric != null) {
+                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
+            }
+            metric = MetricRepo.CLOUD_DB_TABLE_ROWSET_COUNT.remove(metricKey);
+            if (metric != null) {
+                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
+            }
+            metric = MetricRepo.CLOUD_DB_TABLE_ROW_COUNT.remove(metricKey);
+            if (metric != null) {
+                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
+            }
+            metric = MetricRepo.CLOUD_DB_TABLE_SEGMENT_COUNT.remove(metricKey);
+            if (metric != null) {
+                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
+            }
+        }
         if (!isForceDrop) {
             Env.getCurrentRecycleBin().recycleTable(db.getId(), table, isReplay, recycleTime);
         } else {
