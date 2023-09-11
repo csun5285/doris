@@ -209,9 +209,9 @@ public class SystemInfoService {
 
     public String getCloudStatusByName(final String clusterName) {
         String clusterId = clusterNameToId.getOrDefault(clusterName, "");
-        if ("".equals(clusterId)) {
+        if (Strings.isNullOrEmpty(clusterId)) {
             // for rename cluster or dropped cluster
-            LOG.info("cant find clusterId by clusteName {}", clusterName);
+            LOG.warn("cant find clusterId by clusteName {}", clusterName);
             return "";
         }
         return getCloudStatusById(clusterId);

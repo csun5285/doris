@@ -5430,17 +5430,17 @@ public class Env {
             return;
         }
         if (Strings.isNullOrEmpty(clusterName)) {
-            LOG.info("auto start in cloud mode, but clusterName empty {}", clusterName);
+            LOG.warn("auto start in cloud mode, but clusterName empty {}", clusterName);
             return;
         }
         String clusterStatus = Env.getCurrentSystemInfo().getCloudStatusByName(clusterName);
-        if ("".equals(clusterStatus)) {
+        if (Strings.isNullOrEmpty(clusterStatus)) {
             // for cluster rename or cluster dropped
-            LOG.info("cant find clusterStatus in fe, clusterName {}", clusterName);
+            LOG.warn("cant find clusterStatus in fe, clusterName {}", clusterName);
             return;
         }
         // nofity ms -> wait for clusterStatus to normal
-        LOG.info("auto start wait cluster {} status {}-{}", clusterName, clusterStatus,
+        LOG.debug("auto start wait cluster {} status {}-{}", clusterName, clusterStatus,
                 ClusterStatus.valueOf(clusterStatus));
         if (ClusterStatus.valueOf(clusterStatus) != ClusterStatus.NORMAL) {
             SelectdbCloud.AlterClusterRequest.Builder builder = SelectdbCloud.AlterClusterRequest.newBuilder();
@@ -5460,7 +5460,7 @@ public class Env {
                 }
                 LOG.info("notify to resume cluster {}, response: {} ", clusterName, response);
             } catch (RpcException e) {
-                LOG.info("failed to notify to resume cluster {}", clusterName, e);
+                LOG.warn("failed to notify to resume cluster {}", clusterName, e);
                 throw new DdlException("notify to resume cluster not ok");
             }
         }
