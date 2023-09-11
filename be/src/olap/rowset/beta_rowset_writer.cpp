@@ -558,7 +558,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
             return nullptr;
         }
 #ifdef CLOUD_MODE
-        if (config::enable_check_segment_footer) {
+        if (config::enable_check_segment_footer && !_rowset_meta->is_local()) {
             std::string path = BetaRowset::remote_segment_path(_context.tablet_id,
                                                                _context.rowset_id, segment_id);
             auto& fs = _rowset_meta->fs();
