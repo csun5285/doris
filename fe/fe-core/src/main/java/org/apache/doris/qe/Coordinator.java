@@ -24,7 +24,6 @@ import org.apache.doris.analysis.StorageBackend;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.catalog.OlapTable;
-import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Reference;
@@ -124,6 +123,7 @@ import com.google.common.collect.Sets;
 import com.google.common.hash.Funnel;
 import com.google.common.hash.Hashing;
 import com.google.common.hash.PrimitiveSink;
+import com.selectdb.cloud.catalog.CloudPartition;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Context;
@@ -155,6 +155,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class Coordinator {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
@@ -2317,28 +2318,63 @@ public class Coordinator {
 
     // In cloud mode, meta read lock is not enough to keep a snapshot of the partition versions.
     // After all scan node are collected, it is possible to gain a snapshot of the partition version.
-    private void setVisibleVersionForOlapScanNode() throws UserException {
-        Map<Long, Long> visibleVersionMap = new HashMap<>();
+    private void setVisibleVersionForOlapScanNode() throws RpcException, UserException {
+        Map<Long, Long> partitionAndTables = new HashMap<>();
+        long dbId = -1;
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {
                 continue;
             }
+
             OlapScanNode scanNode = (OlapScanNode) node;
             OlapTable table = scanNode.getOlapTable();
             for (Long partitionId : scanNode.getSelectedPartitionIds()) {
-                if (visibleVersionMap.containsKey(partitionId)) {
-                    continue;
+                if (dbId == -1) {
+                    CloudPartition partition = (CloudPartition) table.getPartition(partitionId);
+                    dbId = partition.getDbId();
                 }
-                Partition partition = table.getPartition(partitionId);
-                Long version = partition.getVisibleVersion();
-                if (version <= 0) {
-                    LOG.warn("partition {} getVisibleVerison error, the visibleVersion is {}",
-                                partition.getId(), version);
-                    throw new UserException("partition " + partition.getId()
-                                                + " getVisibleVerison error, the visibleVersion is " + version);
+                if (!partitionAndTables.containsKey(partitionId)) {
+                    partitionAndTables.put(partitionId, table.getId());
                 }
-                visibleVersionMap.put(partitionId, version);
             }
+        }
+
+        if (partitionAndTables.isEmpty()) {
+            return;
+        }
+
+        List<Long> tables = new ArrayList<>();
+        List<Long> partitions = new ArrayList<>();
+        for (Map.Entry<Long, Long> entry : partitionAndTables.entrySet()) {
+            partitions.add(entry.getKey());
+            tables.add(entry.getValue());
+        }
+
+        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(dbId, tables, partitions);
+        assert versions.size() == partitions.size() : "the got num versions is not equals to acquired num versions";
+        if (versions.stream().anyMatch(x -> x <= 0)) {
+            int size = versions.size();
+            for (int i = 0; i < size; ++i) {
+                if (versions.get(i) <= 0) {
+                    LOG.warn("partition {} getVisibleVersion error, the visibleVersion is {}",
+                            partitions.get(i), versions.get(i));
+                    throw new UserException("partition " + partitions.get(i)
+                            + "getVisibleVersion error, the visibleVersion is " + versions.get(i));
+                }
+            }
+        }
+
+        // ATTN: the table ids are ignored here because the both id are allocated from a same id generator.
+        Map<Long, Long> visibleVersionMap = IntStream.range(0, versions.size())
+                .boxed()
+                .collect(Collectors.toMap(partitions::get, versions::get));
+
+        for (ScanNode node : scanNodes) {
+            if (!(node instanceof OlapScanNode)) {
+                continue;
+            }
+
+            OlapScanNode scanNode = (OlapScanNode) node;
             scanNode.updateScanRangeVersions(visibleVersionMap);
         }
     }

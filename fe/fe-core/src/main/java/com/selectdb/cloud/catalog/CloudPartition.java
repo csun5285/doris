@@ -16,12 +16,11 @@ import org.apache.logging.log4j.Logger;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Optional;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Internal representation of partition-related metadata.
@@ -48,6 +47,10 @@ public class CloudPartition extends Partition {
         super();
     }
 
+    public long getDbId() {
+        return this.dbId;
+    }
+
     public void setDbId(long dbId) {
         this.dbId = dbId;
     }
@@ -64,43 +67,61 @@ public class CloudPartition extends Partition {
     @Override
     public long getVisibleVersion() {
         LOG.debug("getVisibleVersion use CloudPartition {}", super.getName());
-        int retryTime = 0;
-        long version = -1;
-        boolean succ = false;
-        while (retryTime++ < Config.cloud_meta_service_rpc_failed_retry_times) {
-            version = getVersionFromMeta(System.currentTimeMillis()
-                    + Config.default_get_version_from_ms_timeout_second * 1000L);
-            LOG.debug("cloud get version from metaService, use previous version, parition={} version={} retryTime={}",
-                    getName(), version, retryTime);
-            if (version != -1) {
-                // get version from metaService success, set visible version
-                super.setVisibleVersion(version);
-                succ = true;
-                break;
-            } else {
-                // sleep random millis [20, 200] ms, retry rpc failed
-                int randomMillis = 20 + (int) (Math.random() * (200 - 20));
-                version = super.getVisibleVersion();
-                try {
-                    if (retryTime > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
-                        // sleep random millis [500, 1000] ms, retry rpc failed
-                        randomMillis = 500 + (int) (Math.random() * (1000 - 500));
-                    }
-                    Thread.sleep(randomMillis);
-                } catch (InterruptedException ie) {
-                    LOG.info("stmt executor sleep wait InterruptedException: ", ie);
-                }
 
-                LOG.warn("failed to get version from metaService, use previous version, "
-                        + "parition={} version={} retryTime={}", getName(), version, retryTime);
+        SelectdbCloud.GetVersionRequest request = SelectdbCloud.GetVersionRequest.newBuilder()
+                .setDbId(this.dbId)
+                .setTableId(this.tableId)
+                .setPartitionId(super.getId())
+                .setBatchMode(false)
+                .build();
+
+        try {
+            SelectdbCloud.GetVersionResponse resp = getVersionFromMeta(request);
+            long version = -1;
+            if (resp.getStatus().getCode() == MetaServiceCode.OK) {
+                version = resp.getVersion();
+            } else {
+                assert resp.getStatus().getCode() == MetaServiceCode.VERSION_NOT_FOUND;
+                version = 0;
             }
+            LOG.debug("get version from meta service, version: {}, partition: {}", version, super.getId());
+            super.setVisibleVersion(version);
+            return version;
+        } catch (RpcException e) {
+            throw new RuntimeException("get version from meta service failed");
         }
-        if (!succ) {
-            LOG.warn("failed to get version from metaService times={}, internal error parition={} version={}",
-                    retryTime, getName(), version);
-            throw new RuntimeException("internal error");
+    }
+
+    // Get visible versions for the specified partitions.
+    //
+    // Return the visible version in order of the specified partition ids, -1 means version NOT FOUND.
+    public static List<Long> getSnapshotVisibleVersion(Long dbId, List<Long> tableIds, List<Long> partitionIds)
+            throws RpcException {
+        assert tableIds.size() == partitionIds.size() : "The number of partition ids should equals to tablet ids";
+
+        SelectdbCloud.GetVersionRequest req = SelectdbCloud.GetVersionRequest.newBuilder()
+                .setDbId(dbId)
+                .setTableId(-1)
+                .setPartitionId(-1)
+                .setBatchMode(true)
+                .addAllTableIds(tableIds)
+                .addAllPartitionIds(partitionIds)
+                .build();
+
+        LOG.debug("getVisibleVersion use CloudPartition {}", partitionIds.toString());
+        SelectdbCloud.GetVersionResponse resp = getVersionFromMeta(req);
+        if (resp.getStatus().getCode() != MetaServiceCode.OK) {
+            throw new RpcException("get visible version", "unexpected status " + resp.getStatus());
         }
-        return version;
+
+        List<Long> versions = resp.getVersionsList();
+        if (versions.size() != partitionIds.size()) {
+            throw new RpcException("get visible version",
+                    "wrong number of versions, required " + partitionIds.size() + ", but got " + versions.size());
+        }
+
+        LOG.debug("get version from meta service, partitions: {}, versions: {}", partitionIds, versions);
+        return versions;
     }
 
     @Override
@@ -146,60 +167,51 @@ public class CloudPartition extends Partition {
         return getVisibleVersion() > 1;
     }
 
-    /**
-     * calc all constant exprs by BE
-     * @return failed: -1, success: other
-     */
-    public long getVersionFromMeta(long timeoutTs) {
-        SelectdbCloud.GetVersionRequest.Builder builder = SelectdbCloud.GetVersionRequest.newBuilder();
-        builder.setDbId(this.dbId).setTableId(this.tableId).setPartitionId(super.getId());
-        final SelectdbCloud.GetVersionRequest pRequest = builder.build();
+    private static SelectdbCloud.GetVersionResponse getVersionFromMeta(SelectdbCloud.GetVersionRequest req)
+            throws RpcException {
+        for (int retryTime = 0; retryTime < Config.cloud_meta_service_rpc_failed_retry_times; retryTime++) {
+            try {
+                long deadline = System.currentTimeMillis() + Config.default_get_version_from_ms_timeout_second * 1000L;
+                Future<SelectdbCloud.GetVersionResponse> future =
+                        MetaServiceProxy.getInstance().getVisibleVersionAsync(req);
 
-        try {
-            Future<SelectdbCloud.GetVersionResponse> future =
-                    MetaServiceProxy.getInstance().getVisibleVersionAsync(pRequest);
-
-            SelectdbCloud.GetVersionResponse pResult = null;
-            while (pResult == null) {
-                long currentTs = System.currentTimeMillis();
-                if (currentTs >= timeoutTs) {
-                    throw new TimeoutException("query timeout");
+                SelectdbCloud.GetVersionResponse resp = null;
+                while (resp == null) {
+                    try {
+                        resp = future.get(Math.max(0, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        LOG.warn("get version from meta service: future get interrupted exception");
+                    }
                 }
-                try {
-                    pResult = future.get(timeoutTs - currentTs, TimeUnit.MILLISECONDS);
-                } catch (InterruptedException e) {
-                    // continue to get result
-                    LOG.warn("future get interrupted Exception", e);
+
+                if (resp.hasStatus() && (resp.getStatus().getCode() == MetaServiceCode.OK
+                            || resp.getStatus().getCode() == MetaServiceCode.VERSION_NOT_FOUND)) {
+                    LOG.debug("get version from meta service, code: {}", resp.getStatus().getCode());
+                    return resp;
                 }
+
+                LOG.warn("get version from meta service failed, status: {}, retry time: {}",
+                        resp.getStatus(), retryTime);
+            } catch (RpcException | ExecutionException | TimeoutException | RuntimeException e) {
+                LOG.warn("get version from meta service failed, retry times: {} exception: ", retryTime, e);
             }
 
-            MetaServiceCode code = null;
-            if (pResult.hasStatus() && pResult.getStatus().hasCode()) {
-                code = pResult.getStatus().getCode();
+            // sleep random millis [20, 200] ms, retry rpc failed
+            int randomMillis = 20 + (int) (Math.random() * (200 - 20));
+            if (retryTime > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
+                // sleep random millis [500, 1000] ms, retry rpc failed
+                randomMillis = 500 + (int) (Math.random() * (1000 - 500));
             }
-
-            if (code == null) {
-                throw new RuntimeException("impossible, code must present");
+            try {
+                Thread.sleep(randomMillis);
+            } catch (InterruptedException e) {
+                LOG.warn("get version from meta service: sleep get interrupted exception");
             }
-
-            if (code == SelectdbCloud.MetaServiceCode.OK) {
-                // java8 lambda syntax, Assignment function ref.
-                AtomicLong version = new AtomicLong(-1);
-                Optional.ofNullable(pResult.getVersion()).ifPresent(version::set);
-                LOG.debug("get version {}", version);
-                return version.get();
-            } else if (code == SelectdbCloud.MetaServiceCode.VERSION_NOT_FOUND) {
-                LOG.debug("partition {} has no data", getId());
-                return 0;
-            }
-
-            LOG.warn("get version from meta error, code : {}, msg: {}", code,
-                    Optional.ofNullable(pResult.getStatus().getMsg()).orElse(""));
-            return -1;
-        } catch (RpcException | ExecutionException | TimeoutException | RuntimeException e) {
-            LOG.warn("get version from meta service exception: ", e);
-            return -1;
         }
+
+        LOG.warn("get version from meta service failed after retry {} times",
+                Config.cloud_meta_service_rpc_failed_retry_times);
+        throw new RpcException("get version from meta service", "failed after retry n times");
     }
 
     public static CloudPartition read(DataInput in) throws IOException {
