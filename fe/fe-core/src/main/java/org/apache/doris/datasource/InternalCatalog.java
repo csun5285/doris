@@ -3181,10 +3181,9 @@ public class InternalCatalog implements CatalogIf<Database> {
             List<Partition> oldPartitions = truncateTableInternal(olapTable, newPartitions, truncateEntireTable);
             for (Partition oldPartition : oldPartitions) {
                 oldPartitionsIds.add(oldPartition.getId());
-                for (MaterializedIndex index : oldPartition.getMaterializedIndices(IndexExtState.ALL)) {
-                    oldPartitionIndexIds.add(index.getId());
-                }
             }
+            oldPartitionIndexIds = olapTable.getIndexIdList();
+
             // write edit log
             TruncateTableInfo info = new TruncateTableInfo(db.getId(), olapTable.getId(), newPartitions,
                     truncateEntireTable);
