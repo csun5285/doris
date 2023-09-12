@@ -344,6 +344,14 @@ Status Segment::_create_column_readers() {
                 SubcolumnReader {std::move(reader),
                                  get_data_type_from_column_meta(_footer.columns(iter->second))});
     }
+    for (uint32_t ordinal = 0; ordinal < _footer.sparse_columns().size(); ++ordinal) {
+        auto& column_pb = _footer.sparse_columns(ordinal);
+        if (column_pb.has_column_path_info()) {
+            vectorized::PathInData path;
+            path.from_protobuf(column_pb.column_path_info());
+            _sparse_column_path_to.emplace(path, ordinal);
+        }
+    }
     return Status::OK();
 }
 
@@ -364,6 +372,25 @@ static Status new_default_iterator(const TabletColumn& tablet_column,
     return Status::OK();
 }
 
+Status Segment::new_iterator_with_sparse_column_path(const TabletColumn& tablet_column,
+                                                     std::unique_ptr<ColumnIterator>* iter) {
+    if (_sparse_column_path_to.find(tablet_column.path_info()) == _sparse_column_path_to.end()) {
+        RETURN_IF_ERROR(new_default_iterator(tablet_column, iter));
+    } else {
+        vectorized::PathInData root_path({tablet_column.path_info().get_parts()[0]});
+        auto root = _sub_column_tree.find_leaf(root_path);
+        ColumnIterator* it;
+        RETURN_IF_ERROR(root->data.reader->new_iterator(&it));
+        auto stream_iter = new ExtractReader(
+                tablet_column,
+                std::make_unique<StreamReader>(root->data.file_column_type->create_column(),
+                                               std::unique_ptr<ColumnIterator>(it),
+                                               root->data.file_column_type));
+        iter->reset(stream_iter);
+    }
+    return Status::OK();
+}
+
 Status Segment::new_iterator_with_path(const TabletColumn& tablet_column,
                                        std::unique_ptr<ColumnIterator>* iter,
                                        StorageReadOptions* opt) {
@@ -371,7 +398,7 @@ Status Segment::new_iterator_with_path(const TabletColumn& tablet_column,
         // Could be compaction ..etc and read flat leaves nodes data
         auto node = _sub_column_tree.find_leaf(tablet_column.path_info());
         if (!node) {
-            RETURN_IF_ERROR(new_default_iterator(tablet_column, iter));
+            RETURN_IF_ERROR(new_iterator_with_sparse_column_path(tablet_column, iter));
             return Status::OK();
         }
         ColumnIterator* it;
@@ -426,14 +453,7 @@ Status Segment::new_iterator_with_path(const TabletColumn& tablet_column,
             RETURN_IF_ERROR(new_default_iterator(tablet_column, iter));
             return Status::OK();
         }
-        ColumnIterator* it;
-        RETURN_IF_ERROR(root->data.reader->new_iterator(&it));
-        auto stream_iter = new ExtractReader(
-                tablet_column,
-                std::make_unique<StreamReader>(root->data.file_column_type->create_column(),
-                                               std::unique_ptr<ColumnIterator>(it),
-                                               root->data.file_column_type));
-        iter->reset(stream_iter);
+        RETURN_IF_ERROR(new_iterator_with_sparse_column_path(tablet_column, iter));
     }
     return Status::OK();
 }
