@@ -1895,6 +1895,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             }
             txnState.addTableIndexes(table);
             plan.setTableName(table.getName());
+            plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
             return plan;
         } finally {
             table.readUnlock();
@@ -1954,6 +1955,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 throw new UserException("txn does not exist: " + request.getTxnId());
             }
             txnState.addTableIndexes(table);
+            plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
             return plan;
         } finally {
             table.readUnlock();

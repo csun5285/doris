@@ -575,6 +575,12 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         return plan_status;
     }
 
+#ifdef CLOUD_MODE
+    if (ctx->two_phase_commit && ctx->is_mow_table()) {
+        return Status::NotSupported("stream load 2pc is unsupported for mow table");
+    }
+#endif
+
     VLOG_NOTICE << "params is " << apache::thrift::ThriftDebugString(ctx->put_result.params);
     // if we not use streaming, we must download total content before we begin
     // to process this load

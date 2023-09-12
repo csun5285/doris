@@ -115,6 +115,8 @@ public:
     // also print the load source info if detail is set to true
     std::string brief(bool detail = false) const;
 
+    bool is_mow_table() const;
+
 public:
     // load type, eg: ROUTINE LOAD/MANUAL LOAD
     TLoadType::type load_type;

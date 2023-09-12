@@ -39,18 +39,10 @@ Status CloudStreamLoadExecutor::commit_txn(StreamLoadContext* ctx) {
     }
 
     // forward to fe to excute commit transaction for MoW table
-    if (!ctx->commit_infos.empty()) {
-        int64_t tablet_id = ctx->commit_infos.at(0).tabletId;
-        TabletSharedPtr tablet;
-        cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
-        if (tablet == nullptr) {
-            LOG(WARNING) << "failed to get tablet info, tablet_id: " << tablet_id;
-            return Status::InternalError("failed to get tablet info");
-        }
-        if (tablet->enable_unique_key_merge_on_write()) {
-            return StreamLoadExecutor::commit_txn(ctx);
-        }
+    if (ctx->is_mow_table()) {
+        return StreamLoadExecutor::commit_txn(ctx);
     }
+
     auto st = meta_mgr()->commit_txn(ctx, false);
     if (!st.ok()) {
         LOG(WARNING) << "Failed to commit txn: " << st << ", " << ctx->brief();
