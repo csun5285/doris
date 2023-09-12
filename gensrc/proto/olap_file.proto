@@ -254,6 +254,7 @@ message TabletSchemaPB {
     repeated string partial_update_input_columns = 21;
     optional bool enable_single_replica_compaction = 22 [default=false];
     optional bool skip_write_index_on_load = 23 [default=false];
+    repeated ColumnPB sparse_column = 24;  // sparse column within a variant column
 }
 
 enum TabletStatePB {

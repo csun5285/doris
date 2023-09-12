@@ -1983,8 +1983,8 @@ private:
             if (!variant.is_finalized()) {
                 variant.assume_mutable()->finalize();
             }
-
-            if (variant.is_scalar_variant()) {
+            if (variant.is_scalar_variant() ||
+                (!data_type_to->is_nullable() && !WhichDataType(data_type_to).is_string())) {
                 ColumnPtr nested = variant.get_root();
                 auto nested_from_type = variant.get_root_type();
                 DCHECK(nested_from_type->is_nullable());
@@ -2010,23 +2010,12 @@ private:
                             Block({{nested, nested_from_type, ""}, {col_to, data_type_to, ""}}),
                             {0}, 1, input_rows_count);
                 }
+            } else if (WhichDataType(data_type_to).is_string()) {
+                return ConvertImplGenericToString::execute2(context, block, arguments, result,
+                                                            input_rows_count);
             } else {
-                // Could not cast to any other types when it hierarchical like '{"a" : 1}'
-                if (!data_type_to->is_nullable() && !WhichDataType(data_type_to).is_string()) {
-                    // TODO we should convert as many as possible here, for examle
-                    // this variant column's root is a number column, to convert to number column
-                    // is also acceptable
-                    // return Status::InvalidArgument(fmt::format("Could not cast from variant to {}",
-                    //                                            data_type_to->get_name()));
-                    col_to->assume_mutable()->insert_many_defaults(input_rows_count);
-                    col_to = make_nullable(col_to, true);
-                } else if (WhichDataType(data_type_to).is_string()) {
-                    return ConvertImplGenericToString::execute2(context, block, arguments, result,
-                                                                input_rows_count);
-                } else {
-                    assert_cast<ColumnNullable&>(*col_to->assume_mutable())
-                            .insert_many_defaults(input_rows_count);
-                }
+                assert_cast<ColumnNullable&>(*col_to->assume_mutable())
+                        .insert_many_defaults(input_rows_count);
             }
             if (col_to->size() != input_rows_count) {
                 return Status::InternalError("Unmatched row count {}, expected {}", col_to->size(),

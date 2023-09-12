@@ -86,8 +86,9 @@ TabletColumn get_least_type_column(const TabletColumn& original, const DataTypeP
 // 2. finalize variant column to each subcolumn least commn types, default ignore sparse sub columns
 // 2. encode sparse sub columns
 void parse_variant_columns(Block& block, const std::vector<int>& variant_pos);
-void finalize_variant_columns(Block& block, const std::vector<int>& variant_pos,
-                              bool ignore_sparse = true);
+void finalize_variant_columns(
+        Block& block, const std::vector<int>& variant_pos, bool ignore_sparse = true,
+        std::unordered_map<int, std::vector<TabletColumn>>* variant_sparse_subcolumns = nullptr);
 void encode_variant_sparse_subcolumns(Block& block, const std::vector<int>& variant_pos);
 
 // Pick the tablet schema with the highest schema version as the reference.

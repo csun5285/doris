@@ -65,6 +65,7 @@ public:
     PathInData& operator=(const PathInData& other);
     static UInt128 get_parts_hash(const Parts& parts_);
     bool empty() const { return parts.empty(); }
+    size_t size() const { return parts.size(); }
     const vectorized::String& get_path() const { return path; }
     const Parts& get_parts() const { return parts; }
     bool is_nested(size_t i) const { return parts[i].is_nested; }
@@ -76,6 +77,7 @@ public:
     std::string to_jsonpath() const;
 
     PathInData pop_front() const;
+    PathInData pop_front_part(int n) const;
     void to_protobuf(segment_v2::ColumnPathInfo* pb, int32_t parent_col_unique_id) const;
     void from_protobuf(const segment_v2::ColumnPathInfo& pb);
 

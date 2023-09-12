@@ -96,6 +96,10 @@ public:
                                   std::unique_ptr<ColumnIterator>* iter,
                                   StorageReadOptions* opt = nullptr);
 
+    Status new_iterator_with_root(const TabletColumn& tablet_column,
+                                  std::unique_ptr<ColumnIterator>* iter,
+                                  const SubcolumnColumnReaders::Node* root);
+
     Status new_column_iterator(int32_t unique_id, std::unique_ptr<ColumnIterator>* iter);
 
     Status new_bitmap_index_iterator(const TabletColumn& tablet_column,
@@ -182,6 +186,9 @@ private:
 
     // subcolumn tree of each subcolumn's unique id
     SubcolumnColumnReaders _sub_column_tree;
+
+    // each sprase column's path info
+    SubcolumnColumnReaders _sparse_column_tree;
 
     // used to guarantee that short key index will be loaded at most once in a thread-safe way
     DorisCallOnce<Status> _load_index_once;
