@@ -157,13 +157,22 @@ Status ExtractReader::extract_to(vectorized::MutableColumnPtr& dst, size_t nrows
             dst_var.get_root()->insert_range_from(*cast_column, 0, nrows);
             dst_var.set_num_rows(dst_var.get_root()->size());
         }
-        CHECK_EQ(dst_var.size(), nrows);
-    } else {
-        CHECK(false) << "Not implemented extract to type " << dst->get_name();
-    }
 #ifndef NDEBUG
-    assert_cast<vectorized::ColumnObject&>(*dst).check_consistency();
+        assert_cast<vectorized::ColumnObject&>(*dst).check_consistency();
 #endif
+    } else {
+        vectorized::ColumnPtr cast_column;
+        const Field* field_type = FieldFactory::create(_col);
+        const auto& expected_type = Schema::get_data_type_ptr(*field_type);
+        RETURN_IF_ERROR(vectorized::schema_util::cast_column(
+                {extracted_column->get_ptr(),
+                 vectorized::make_nullable(
+                         std::make_shared<vectorized::ColumnObject::MostCommonType>()),
+                 ""},
+                expected_type, &cast_column));
+        dst->insert_range_from(*cast_column, 0, nrows);
+    }
+    CHECK_EQ(dst->size(), nrows);
     return Status::OK();
 }
 
@@ -177,8 +186,7 @@ Status ExtractReader::next_batch(size_t* n, vectorized::MutableColumnPtr& dst, b
 Status ExtractReader::read_by_rowids(const rowid_t* rowids, const size_t count,
                                      vectorized::MutableColumnPtr& dst) {
     _root_reader->column->clear();
-    RETURN_IF_ERROR(
-            _root_reader->iterator->read_by_rowids(rowids, count, _root_reader->column));
+    RETURN_IF_ERROR(_root_reader->iterator->read_by_rowids(rowids, count, _root_reader->column));
     RETURN_IF_ERROR(extract_to(dst, count));
     return Status::OK();
 }
