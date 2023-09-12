@@ -173,29 +173,15 @@ PROPERTIES (
         }
     }
 
-    sql """
-    select * from ${table1}
-    """
-    // test if alter ttl time takes effect
-    sql """
-    alter table ${table1} set ("file_cache_ttl_seconds"="0")
-    """
-    // sql """
-    // alter table ${table1} set ("persistent"="true")
-    // """
-    // wait for cache syncing processing
-    sleep(360000)
-    println "fuck"
-
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
     String backendId;
     def backendIdToBackendIP = [:]
     def backendIdToBackendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[9].equals("true")) {
-            backendIdToBackendIP.put(backend[0], backend[2])
-            backendIdToBackendBrpcPort.put(backend[0], backend[6])
+        if (backend[8].equals("true")) {
+            backendIdToBackendIP.put(backend[0], backend[1])
+            backendIdToBackendBrpcPort.put(backend[0], backend[5])
         }
     }
 

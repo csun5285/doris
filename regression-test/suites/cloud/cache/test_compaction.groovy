@@ -9,8 +9,10 @@ suite("test_compaction") {
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
     for (String[] backend in backends) {
-        backendId_to_backendIP.put(backend[0], backend[2])
-        backendId_to_backendHttpPort.put(backend[0], backend[5])
+        if (backend[8].equals("true")) {
+            backendId_to_backendIP.put(backend[0], backend[1])
+            backendId_to_backendHttpPort.put(backend[0], backend[4])
+        }
     }
 
     backend_id = backendId_to_backendIP.keySet()[0]

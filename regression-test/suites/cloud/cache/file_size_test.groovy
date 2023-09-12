@@ -43,9 +43,9 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
     def backendIdToBackendIP = [:]
     def backendIdToBackendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[9].equals("true")) {
-            backendIdToBackendIP.put(backend[0], backend[2])
-            backendIdToBackendBrpcPort.put(backend[0], backend[6])
+        if (backend[8].equals("true")) {
+            backendIdToBackendIP.put(backend[0], backend[1])
+            backendIdToBackendBrpcPort.put(backend[0], backend[5])
         }
     }
 

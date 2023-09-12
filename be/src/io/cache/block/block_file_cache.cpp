@@ -276,7 +276,6 @@ void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, boo
 
     result.push_back(cell.file_block);
 
-    DCHECK(cell.queue_iterator);
     if (cell.cache_type != FileCacheType::TTL) {
         auto& queue = get_queue(cell.cache_type);
         DCHECK(cell.queue_iterator) << "impossible";

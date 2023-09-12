@@ -10,10 +10,10 @@ suite("test_stale_rowset") {
     def backendId_to_backendHttpPort = [:]
     def backendId_to_backendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[9].equals("true")) {
-            backendId_to_backendIP.put(backend[0], backend[2])
-            backendId_to_backendHttpPort.put(backend[0], backend[5])
-            backendId_to_backendBrpcPort.put(backend[0], backend[6])
+        if (backend[8].equals("true")) {
+            backendId_to_backendIP.put(backend[0], backend[1])
+            backendId_to_backendHttpPort.put(backend[0], backend[4])
+            backendId_to_backendBrpcPort.put(backend[0], backend[5])
         }
     }
 
