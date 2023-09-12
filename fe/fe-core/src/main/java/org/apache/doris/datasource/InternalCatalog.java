@@ -3254,10 +3254,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                     info.isEntireTable());
             for (Partition oldPartition : oldPartitions) {
                 oldPartitionsIds.add(oldPartition.getId());
-                for (MaterializedIndex index : oldPartition.getMaterializedIndices(IndexExtState.ALL)) {
-                    oldPartitionIndexIds.add(index.getId());
-                }
             }
+            oldPartitionIndexIds = olapTable.getIndexIdList();
 
             if (!Env.isCheckpointThread()) {
                 // add tablet to inverted index
