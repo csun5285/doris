@@ -49,9 +49,22 @@ suite('test_overdue') {
     def stmt0 = """ show databases """
     def stmt_json = JsonOutput.toJson(new Stmt(stmt: stmt0))
 
+
     sql """ drop user if exists ${user} """
     sql """ create user ${user} """
     sql """ GRANT SELECT_PRIV ON *.*.* TO ${user}@'%'; """
+
+    // set wrarehouse to normal
+    try {
+        alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
+        result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
+        obj = new JsonSlurper().parseText(result)
+        logger.info("try to set warehouse normal, the result is {}", obj)
+        sleep(40000)
+    }
+    catch (Exception e) {
+        logger.info("the error msg is {}", e.getMessage())
+    }
 
     // when warehouse is noraml
     result = sql """ show databases """
@@ -73,34 +86,42 @@ suite('test_overdue') {
     assertEquals(obj.code, 0)
 
     // when warehouse is overdue
-    def alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_OVERDUE")) 
-    result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
-    obj = new JsonSlurper().parseText(result)
-    logger.info("try to set warehouse overdue, the result is {}", obj)
-    sleep(40000)
-
-    result = sql """ show databases """
-    logger.info("when warehouse is overdue the result of sql from root is {}", result)
-
     try {
-        result = connect(user = "${user}", password = '', url = context.config.jdbcUrl) {
-            sql """ show databases """
+        def alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_OVERDUE")) 
+        result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
+        obj = new JsonSlurper().parseText(result)
+        logger.info("try to set warehouse overdue, the result is {}", obj)
+        sleep(40000)
+
+        result = sql """ show databases """
+        logger.info("when warehouse is overdue the result of sql from root is {}", result)
+
+        try {
+            result = connect(user = "${user}", password = '', url = context.config.jdbcUrl) {
+                sql """ show databases """
+            }
+            logger.info("when warehouse is overdue the result of sql from user is {}", result)
+            assertTrue(false, "since warehouse is overdue, the sql from normal user should not success")
+        } catch (Exception e) {
+            logger.info("when warehouse is overdue the exception of sql from user is {}", e.getMessage())
         }
-        logger.info("when warehouse is overdue the result of sql from user is {}", result)
-        assertTrue(false, "since warehouse is overdue, the sql from normal user should not success")
+
+        result = http_post(context.config.feHttpAddress, url0, stmt_json)
+        obj = new JsonSlurper().parseText(result)
+        logger.info("when warehouse is overdue the result of http from root is {}", obj)
+        assertEquals(obj.code, 0)
+
+        result = http_post(context.config.feHttpAddress, url0, stmt_json, "${user}", "")
+        obj = new JsonSlurper().parseText(result)
+        logger.info("when warehouse is overdue the result of http from user is {}", obj)
+        assertEquals(obj.code, 1)
     } catch (Exception e) {
-        logger.info("when warehouse is overdue the exception of sql from user is {}", e.getMessage())
+        alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
+        result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
+        obj = new JsonSlurper().parseText(result)
+        logger.info("try to set warehouse normal, the result is {}", obj)
+        throw e
     }
-
-    result = http_post(context.config.feHttpAddress, url0, stmt_json)
-    obj = new JsonSlurper().parseText(result)
-    logger.info("when warehouse is overdue the result of http from root is {}", obj)
-    assertEquals(obj.code, 0)
-
-    result = http_post(context.config.feHttpAddress, url0, stmt_json, "${user}", "")
-    obj = new JsonSlurper().parseText(result)
-    logger.info("when warehouse is overdue the result of http from user is {}", obj)
-    assertEquals(obj.code, 1)
 
     // when warehouse transforms to normal
     alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
