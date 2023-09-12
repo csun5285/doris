@@ -1166,7 +1166,8 @@ void ColumnObject::merge_sparse_to_root_column() {
     subcolumns.get_mutable_root()->data.get_finalized_column_ptr() = mresult->get_ptr();
 }
 
-void ColumnObject::finalize(bool ignore_sparse) {
+void ColumnObject::finalize(bool ignore_sparse,
+                            std::vector<TabletColumn>* sparse_subcolumns_schema) {
     Subcolumns new_subcolumns;
     // finalize root first
     if (!ignore_sparse || !is_null_root()) {
@@ -1191,6 +1192,19 @@ void ColumnObject::finalize(bool ignore_sparse) {
                                !check_if_valid_column_name(entry->path))) {
             // TODO seperate ambiguous path
             sparse_columns.add(entry->path, entry->data);
+            if (sparse_subcolumns_schema != nullptr) {
+                const std::string& column_name = entry->path.get_path();
+                const vectorized::DataTypePtr& final_data_type_from_object =
+                        entry->data.get_least_common_type();
+                TabletColumn tablet_column;
+                vectorized::PathInDataBuilder full_path_builder;
+                auto full_path = full_path_builder.append(entry->path.get_parts(), false).build();
+                vectorized::schema_util::get_column_by_type(
+                        final_data_type_from_object, column_name, tablet_column,
+                        vectorized::schema_util::ExtraInfo {
+                                .unique_id = -1, .parent_unique_id = -1, .path_info = full_path});
+                sparse_subcolumns_schema->emplace_back(std::move(tablet_column));
+            }
             continue;
         }
 

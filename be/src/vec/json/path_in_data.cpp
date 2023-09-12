@@ -151,10 +151,14 @@ size_t PathInData::Hash::operator()(const PathInData& value) const {
 }
 
 PathInData PathInData::pop_front() const {
+    return pop_front_part(1);
+}
+
+PathInData PathInData::pop_front_part(int n) const {
     PathInData new_path;
     Parts new_parts;
     if (!parts.empty()) {
-        std::copy(parts.begin() + 1, parts.end(), std::back_inserter(new_parts));
+        std::copy(parts.begin() + n, parts.end(), std::back_inserter(new_parts));
     }
     new_path.build_path(new_parts);
     new_path.build_parts(new_parts);

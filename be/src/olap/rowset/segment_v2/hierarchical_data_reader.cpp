@@ -157,13 +157,27 @@ Status ExtractReader::extract_to(vectorized::MutableColumnPtr& dst, size_t nrows
             dst_var.get_root()->insert_range_from(*cast_column, 0, nrows);
             dst_var.set_num_rows(dst_var.get_root()->size());
         }
-        CHECK_EQ(dst_var.size(), nrows);
-    } else {
-        CHECK(false) << "Not implemented extract to type " << dst->get_name();
-    }
+        for (auto& entry : dst_var.get_subcolumns()) {
+            if (entry->data.size() == 0) {
+                entry->data.insertManyDefaults(nrows);
+            }
+        }
 #ifndef NDEBUG
-    assert_cast<vectorized::ColumnObject&>(*dst).check_consistency();
+        assert_cast<vectorized::ColumnObject&>(*dst).check_consistency();
 #endif
+    } else {
+        vectorized::ColumnPtr cast_column;
+        const Field* field_type = FieldFactory::create(_col);
+        const auto& expected_type = Schema::get_data_type_ptr(*field_type);
+        RETURN_IF_ERROR(vectorized::schema_util::cast_column(
+                {extracted_column->get_ptr(),
+                 vectorized::make_nullable(
+                         std::make_shared<vectorized::ColumnObject::MostCommonType>()),
+                 ""},
+                expected_type, &cast_column));
+        dst->insert_range_from(*cast_column, 0, nrows);
+    }
+    CHECK_EQ(dst->size(), nrows);
     return Status::OK();
 }
 

@@ -336,7 +336,7 @@ void JsonFunctions::merge_objects(rapidjson::Value& dst_object, rapidjson::Value
             // CHECK_EQ(src_it->value.GetType(), dst_it->value.GetType())
             //             << "src type:" << src_it->value.GetType()
             //             << ", dst type:" << dst_it->value.GetType();
-            if (src_it->value.IsObject()) {
+            if (src_it->value.IsObject() && !dst_it->value.IsNull()) {
                 merge_objects(dst_it->value, src_it->value, allocator);
             } else {
                 if (dst_it->value.IsNull()) {
