@@ -629,8 +629,9 @@ message GetVersionRequest {
 
     // For batch get version.
     optional bool batch_mode = 5;
-    repeated int64 table_ids = 6;
-    repeated int64 partition_ids = 7;
+    repeated int64 db_ids = 6;
+    repeated int64 table_ids = 7;
+    repeated int64 partition_ids = 8;
 };
 
 message GetVersionResponse {
@@ -638,10 +639,11 @@ message GetVersionResponse {
     optional int64 version = 2;
 
     // For batch get version.
-    // <table_id, partition_id> --> version
-    repeated int64 table_ids = 3;
-    repeated int64 partition_ids = 4;
-    repeated int64 versions = 5;
+    // <db_id, table_id, partition_id> --> version
+    repeated int64 db_ids = 3;
+    repeated int64 table_ids = 4;
+    repeated int64 partition_ids = 5;
+    repeated int64 versions = 6;
 };
 
 message GetObjStoreInfoRequest {

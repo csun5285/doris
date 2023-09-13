@@ -1897,10 +1897,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
         cloud_unique_id = request->cloud_unique_id();
     }
 
-    int64_t db_id = request->has_db_id() ? request->db_id() : -1;
-    if (db_id == -1 || request->table_ids_size() == 0 ||
-        request->table_ids_size() != request->partition_ids_size()) {
-        msg = "param error, db_id=" + std::to_string(db_id) +
+    if (request->db_ids_size() == 0 || request->table_ids_size() == 0 ||
+        request->table_ids_size() != request->partition_ids_size() ||
+        request->db_ids_size() != request->partition_ids_size()) {
+        msg = "param error, num db_ids=" + std::to_string(request->db_ids_size()) +
               " num table_ids=" + std::to_string(request->table_ids_size()) +
               " num partition_ids=" + std::to_string(request->partition_ids_size());
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -1926,9 +1926,11 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
 
     size_t num_acquired = request->table_ids_size();
     response->mutable_versions()->Reserve(num_acquired);
+    response->mutable_db_ids()->CopyFrom(request->db_ids());
     response->mutable_table_ids()->CopyFrom(request->table_ids());
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
     for (size_t i = 0; i < num_acquired; ++i) {
+        int64_t db_id = request->db_ids(i);
         int64_t table_id = request->table_ids(i);
         int64_t partition_id = request->partition_ids(i);
         VersionKeyInfo ver_key_info {instance_id, db_id, table_id, partition_id};

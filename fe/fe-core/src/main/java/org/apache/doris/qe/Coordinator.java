@@ -2319,8 +2319,10 @@ public class Coordinator {
     // In cloud mode, meta read lock is not enough to keep a snapshot of the partition versions.
     // After all scan node are collected, it is possible to gain a snapshot of the partition version.
     private void setVisibleVersionForOlapScanNode() throws RpcException, UserException {
-        Map<Long, Long> partitionAndTables = new HashMap<>();
-        long dbId = -1;
+        List<Long> dbs = new ArrayList<>();
+        List<Long> tables = new ArrayList<>();
+        List<Long> partitions = new ArrayList<>();
+        Set<Long> partitionSet = new HashSet<>();
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {
                 continue;
@@ -2329,28 +2331,20 @@ public class Coordinator {
             OlapScanNode scanNode = (OlapScanNode) node;
             OlapTable table = scanNode.getOlapTable();
             for (Long partitionId : scanNode.getSelectedPartitionIds()) {
-                if (dbId == -1) {
+                if (!partitionSet.contains(partitionId)) {
                     CloudPartition partition = (CloudPartition) table.getPartition(partitionId);
-                    dbId = partition.getDbId();
-                }
-                if (!partitionAndTables.containsKey(partitionId)) {
-                    partitionAndTables.put(partitionId, table.getId());
+                    dbs.add(partition.getDbId());
+                    tables.add(table.getId());
+                    partitions.add(partitionId);
                 }
             }
         }
 
-        if (partitionAndTables.isEmpty()) {
+        if (partitions.isEmpty()) {
             return;
         }
 
-        List<Long> tables = new ArrayList<>();
-        List<Long> partitions = new ArrayList<>();
-        for (Map.Entry<Long, Long> entry : partitionAndTables.entrySet()) {
-            partitions.add(entry.getKey());
-            tables.add(entry.getValue());
-        }
-
-        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(dbId, tables, partitions);
+        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(dbs, tables, partitions);
         assert versions.size() == partitions.size() : "the got num versions is not equals to acquired num versions";
         if (versions.stream().anyMatch(x -> x <= 0)) {
             int size = versions.size();
@@ -2359,7 +2353,7 @@ public class Coordinator {
                     LOG.warn("partition {} getVisibleVersion error, the visibleVersion is {}",
                             partitions.get(i), versions.get(i));
                     throw new UserException("partition " + partitions.get(i)
-                            + "getVisibleVersion error, the visibleVersion is " + versions.get(i));
+                            + " getVisibleVersion error, the visibleVersion is " + versions.get(i));
                 }
             }
         }

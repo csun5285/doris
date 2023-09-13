@@ -2852,10 +2852,12 @@ TEST(MetaServiceTest, BatchGetVersion) {
         brpc::Controller ctrl;
         GetVersionRequest req;
         req.set_cloud_unique_id("test_cloud_unique_id");
-        req.set_db_id(1);
+        req.set_db_id(-1);
         req.set_table_id(-1);
         req.set_partition_id(-1);
         req.set_batch_mode(true);
+        for (size_t i = 0; i < table_ids.size(); ++i)
+            req.add_db_ids(1);
         std::copy(table_ids.begin(), table_ids.end(),
                   google::protobuf::RepeatedFieldBackInserter(req.mutable_table_ids()));
         std::copy(partition_ids.begin(), partition_ids.end(),

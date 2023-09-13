@@ -95,15 +95,19 @@ public class CloudPartition extends Partition {
     // Get visible versions for the specified partitions.
     //
     // Return the visible version in order of the specified partition ids, -1 means version NOT FOUND.
-    public static List<Long> getSnapshotVisibleVersion(Long dbId, List<Long> tableIds, List<Long> partitionIds)
+    public static List<Long> getSnapshotVisibleVersion(List<Long> dbIds, List<Long> tableIds, List<Long> partitionIds)
             throws RpcException {
-        assert tableIds.size() == partitionIds.size() : "The number of partition ids should equals to tablet ids";
+        assert dbIds.size() == partitionIds.size() :
+                "partition ids size: " + partitionIds.size() + " should equals to db ids size: " + dbIds.size();
+        assert tableIds.size() == partitionIds.size() :
+                "partition ids size: " + partitionIds.size() + " should equals to tablet ids size: " + tableIds.size();
 
         SelectdbCloud.GetVersionRequest req = SelectdbCloud.GetVersionRequest.newBuilder()
-                .setDbId(dbId)
+                .setDbId(-1)
                 .setTableId(-1)
                 .setPartitionId(-1)
                 .setBatchMode(true)
+                .addAllDbIds(dbIds)
                 .addAllTableIds(tableIds)
                 .addAllPartitionIds(partitionIds)
                 .build();
