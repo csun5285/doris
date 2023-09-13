@@ -14,11 +14,13 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import java.util.Date
+import java.text.SimpleDateFormat
 
-suite("test_stream_load", "smoke") {
+suite("smoke_test_stream_load_30", "smoke") {
     if (context.config.cloudVersion != null && !context.config.cloudVersion.isEmpty()
-            && (compareCloudVersion(context.config.cloudVersion, "2.4.0") < 0 || compareCloudVersion(context.config.cloudVersion, "3.0.0") >= 0)) {
-        log.info("cloud version ${context.config.cloudVersion} less than 2.4.0 or bigger than 3.0.0, skip".toString());
+            && compareCloudVersion(context.config.cloudVersion, "3.0.0") < 0) {
+        log.info("cloud version ${context.config.cloudVersion} less than 3.0.0, skip".toString());
         return
     }
 
@@ -52,6 +54,7 @@ suite("test_stream_load", "smoke") {
         PARTITION partition_c VALUES [("1000000000"), ("10000000000")),
         PARTITION partition_d VALUES [("10000000000"), (MAXVALUE)))
         DISTRIBUTED BY HASH(`k1`, `k2`) BUCKETS 3
+        PROPERTIES ("replication_allocation" = "tag.location.default: 1");
     """
     
     // test strict_mode success
@@ -65,7 +68,7 @@ suite("test_stream_load", "smoke") {
 
         file 'test_strict_mode.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
     }
 
     sql "sync"
@@ -82,7 +85,7 @@ suite("test_stream_load", "smoke") {
 
         file 'test_strict_mode_fail.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -96,6 +99,7 @@ suite("test_stream_load", "smoke") {
         }
     }
 
+    sql "sync"
     sql """ DROP TABLE IF EXISTS ${tableName} """
     sql """
         CREATE TABLE IF NOT EXISTS ${tableName} (
@@ -105,6 +109,12 @@ suite("test_stream_load", "smoke") {
         DUPLICATE KEY(`id`)
         COMMENT 'OLAP'
         DISTRIBUTED BY HASH(`id`) BUCKETS 1
+        PROPERTIES (
+        "replication_allocation" = "tag.location.default: 1",
+        "in_memory" = "false",
+        "storage_format" = "V2",
+        "disable_auto_compaction" = "false"
+        );
     """
 
     streamLoad {
@@ -116,7 +126,7 @@ suite("test_stream_load", "smoke") {
 
         file 'test_line_delimiter.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -156,6 +166,7 @@ suite("test_stream_load", "smoke") {
     )
     DISTRIBUTED BY HASH(k1, k2, k5)
     BUCKETS 3
+    PROPERTIES ( "replication_allocation" = "tag.location.default: 1");
     """
 
     streamLoad {
@@ -166,7 +177,7 @@ suite("test_stream_load", "smoke") {
 
         file 'test_time.data'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -179,6 +190,7 @@ suite("test_stream_load", "smoke") {
             assertEquals(0, json.NumberFilteredRows)
         }
     }
+    sql "sync"
     order_qt_sql1 " SELECT * FROM ${tableName2}"
 
     // test common case
@@ -188,12 +200,14 @@ suite("test_stream_load", "smoke") {
     def tableName6 = "test_unique_key"
     def tableName7 = "test_unique_key_with_delete"
     def tableName8 = "test_array"
+    def tableName10 = "test_struct"
     sql """ DROP TABLE IF EXISTS ${tableName3} """
     sql """ DROP TABLE IF EXISTS ${tableName4} """
     sql """ DROP TABLE IF EXISTS ${tableName5} """
     sql """ DROP TABLE IF EXISTS ${tableName6} """
     sql """ DROP TABLE IF EXISTS ${tableName7} """
     sql """ DROP TABLE IF EXISTS ${tableName8} """
+    sql """ DROP TABLE IF EXISTS ${tableName10} """
     sql """
     CREATE TABLE IF NOT EXISTS ${tableName3} (
       `k1` int(11) NULL,
@@ -211,6 +225,9 @@ suite("test_stream_load", "smoke") {
       `k13` datetime NULL
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
     """
 
     sql """
@@ -222,6 +239,9 @@ suite("test_stream_load", "smoke") {
       `k5` largeint(40) NULL
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
     """
 
     sql """
@@ -232,6 +252,9 @@ suite("test_stream_load", "smoke") {
       `v2` hll hll_union
     ) ENGINE=OLAP
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
     """
 
     sql """
@@ -242,6 +265,9 @@ suite("test_stream_load", "smoke") {
     ) ENGINE=OLAP
     UNIQUE KEY(k1, k2)
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
     """
 
     sql """
@@ -253,7 +279,8 @@ suite("test_stream_load", "smoke") {
     UNIQUE KEY(k1, k2)
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
     PROPERTIES (
-    "function_column.sequence_type" = "int"
+    "function_column.sequence_type" = "int",
+    "replication_allocation" = "tag.location.default: 1"
     );
     """
     sql """
@@ -272,6 +299,31 @@ suite("test_stream_load", "smoke") {
     ) ENGINE=OLAP
     DUPLICATE KEY(`k1`)
     DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
+    """
+
+    sql """
+    CREATE TABLE IF NOT EXISTS ${tableName10} (
+      `k1` INT(11) NULL COMMENT "",
+      `k2` STRUCT<
+               f1:SMALLINT,
+               f2:INT(11),
+               f3:BIGINT,
+               f4:CHAR,
+               f5:VARCHAR(20),
+               f6:DATE,
+               f7:DATETIME,
+               f8:FLOAT,
+               f9:DOUBLE,
+               f10:DECIMAL(20, 6)> NULL COMMENT ""
+    ) ENGINE=OLAP
+    DUPLICATE KEY(`k1`)
+    DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+    PROPERTIES (
+    "replication_allocation" = "tag.location.default: 1"
+    );
     """
 
     // load all columns
@@ -282,7 +334,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -301,7 +353,7 @@ suite("test_stream_load", "smoke") {
     sql """truncate table ${tableName3}"""
     sql """sync"""
 
-    // load part of columns. NOTE: Load result is different from Doris
+    // load part of columns
     streamLoad {
         table "${tableName3}"
 
@@ -310,7 +362,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -318,12 +370,11 @@ suite("test_stream_load", "smoke") {
             }
             log.info("Stream load result: ${result}".toString())
             def json = parseJson(result)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(2500, json.NumberLoadedRows)
+            assertEquals("fail", json.Status.toLowerCase())
+            assertEquals(0, json.NumberLoadedRows)
         }
     }
-    sql """truncate table ${tableName3}"""
-    sql """sync"""
+    sql "sync"
 
     // load with skip 2 columns, with gzip
     streamLoad {
@@ -335,7 +386,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv.gz'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -368,7 +419,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -399,7 +450,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -430,7 +481,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -461,7 +512,7 @@ suite("test_stream_load", "smoke") {
 
         file 'all_types.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -488,7 +539,7 @@ suite("test_stream_load", "smoke") {
 
         file 'bitmap_hll.csv.bz2'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -517,7 +568,7 @@ suite("test_stream_load", "smoke") {
 
         file 'unique_key.csv.lz4'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -549,7 +600,7 @@ suite("test_stream_load", "smoke") {
 
         file 'unique_key_with_delete.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -578,7 +629,7 @@ suite("test_stream_load", "smoke") {
 
         file 'array_malformat.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -607,7 +658,7 @@ suite("test_stream_load", "smoke") {
 
         file 'array_malformat.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -632,7 +683,7 @@ suite("test_stream_load", "smoke") {
 
         file 'array_normal.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -661,7 +712,7 @@ suite("test_stream_load", "smoke") {
 
         file 'array_normal.csv'
         time 10000 // limit inflight 10s
-        isCloud true
+	isCloud true
 
         check { result, exception, startTime, endTime ->
             if (exception != null) {
@@ -674,5 +725,259 @@ suite("test_stream_load", "smoke") {
         }
     }
     sql "sync"
+
+    // ===== test struct stream load
+    // malformat without strictmode
+    streamLoad {
+        table "${tableName10}"
+
+        set 'column_separator', '|'
+
+        file 'struct_malformat.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(5, json.NumberTotalRows)
+            assertEquals(5, json.NumberLoadedRows)
+            assertEquals(0, json.NumberFilteredRows)
+            assertEquals(0, json.NumberUnselectedRows)
+        }
+    }
+    sql "sync"
+    qt_all111 "SELECT * from ${tableName10} order by k1" // 5
+    sql """truncate table ${tableName10}"""
+    sql """sync"""
+
+    // malformat with strictmode
+    streamLoad {
+        table "${tableName10}"
+
+        set 'column_separator', '|'
+        set 'strict_mode', 'true'
+
+        file 'struct_malformat.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("fail", json.Status.toLowerCase())
+            assertEquals(5, json.NumberTotalRows)
+            assertEquals(3, json.NumberLoadedRows)
+            assertEquals(2, json.NumberFilteredRows)
+            assertEquals(0, json.NumberUnselectedRows)
+        }
+    }
+    sql "sync"
+
+    // normal load
+    streamLoad {
+        table "${tableName10}"
+
+        set 'column_separator', '|'
+
+        file 'struct_normal.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(13, json.NumberTotalRows)
+            assertEquals(13, json.NumberLoadedRows)
+            assertEquals(0, json.NumberFilteredRows)
+            assertEquals(0, json.NumberUnselectedRows)
+        }
+    }
+    sql "sync"
+    qt_all112 "SELECT * from ${tableName10} order by k1" // 10
+    sql """truncate table ${tableName10}"""
+    sql """sync"""
+
+    // test immutable partition success
+    def tableName9 = "test_immutable_partition"
+    sql """ DROP TABLE IF EXISTS ${tableName9} """
+    sql """
+        CREATE TABLE IF NOT EXISTS ${tableName9} (
+            `k1` bigint(20) NULL,
+            `k2` bigint(20) NULL,
+            `v1` tinyint(4) SUM NULL,
+            `v2` tinyint(4) REPLACE NULL,
+            `v3` tinyint(4) REPLACE_IF_NOT_NULL NULL
+        ) ENGINE=OLAP
+        AGGREGATE KEY(`k1`, `k2`)
+        COMMENT 'OLAP'
+        PARTITION BY RANGE(`k1`)
+        (PARTITION partition_a VALUES [("-9223372036854775808"), ("10")),
+        PARTITION partition_b VALUES [("10"), ("20")),
+        PARTITION partition_c VALUES [("20"), ("30")),
+        PARTITION partition_d VALUES [("30"), ("40")))
+        DISTRIBUTED BY HASH(`k1`, `k2`) BUCKETS 3
+        PROPERTIES ("replication_allocation" = "tag.location.default: 1");
+    """
+
+    sql """ALTER TABLE ${tableName9} ADD PARTITION partition_e VALUES less than ('3000') properties ('mutable' = 'false')"""
+    sql """ALTER TABLE ${tableName9} MODIFY PARTITION partition_b set ('mutable' = 'false')"""
+
+    streamLoad {
+        table "${tableName9}"
+
+        set 'column_separator', '\t'
+        set 'columns', 'k1, k2, v1, v2, v3'
+        set 'partitions', 'partition_a, partition_b, partition_c, partition_d, partition_e'
+        set 'strict_mode', 'true'
+
+        file 'test_immutable_partition.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(11, json.NumberTotalRows)
+            assertEquals(0, json.NumberFilteredRows)
+            assertEquals(5, json.NumberUnselectedRows)
+        }
+    }
+    
+    sql "sync"
+    order_qt_sql1 "select * from ${tableName9} order by k1, k2"
+
+    // test common user
+    def tableName13 = "test_common_user"
+    sql """ DROP TABLE IF EXISTS ${tableName13} """
+    sql """
+        CREATE TABLE IF NOT EXISTS ${tableName13} (
+            `k1` bigint(20) NULL,
+            `k2` bigint(20) NULL,
+            `v1` tinyint(4) SUM NULL,
+            `v2` tinyint(4) REPLACE NULL,
+            `v3` tinyint(4) REPLACE_IF_NOT_NULL NULL
+        ) ENGINE=OLAP
+        AGGREGATE KEY(`k1`, `k2`)
+        COMMENT 'OLAP'
+        PARTITION BY RANGE(`k1`)
+        (PARTITION partition_a VALUES [("-9223372036854775808"), ("10")),
+        PARTITION partition_b VALUES [("10"), ("20")),
+        PARTITION partition_c VALUES [("20"), ("30")),
+        PARTITION partition_d VALUES [("30"), ("40")))
+        DISTRIBUTED BY HASH(`k1`, `k2`) BUCKETS 3
+        PROPERTIES ("replication_allocation" = "tag.location.default: 1");
+    """
+    sql """ drop user if exists common_user""" 
+    sql """create USER common_user@'%' IDENTIFIED BY '123456'"""
+    sql """GRANT LOAD_PRIV ON *.* TO 'common_user'@'%';"""
+    //cloud-mode
+    if (!context.config.metaServiceHttpAddress.isEmpty()) {
+        def clusters = sql " SHOW CLUSTERS; "
+        assertTrue(!clusters.isEmpty())
+        def validCluster = clusters[0][0]
+        sql """GRANT USAGE_PRIV ON CLUSTER ${validCluster} TO common_user""";
+    }
+
+    streamLoad {
+        table "${tableName13}"
+
+        set 'column_separator', '|'
+        set 'columns', 'k1, k2, v1, v2, v3'
+        set 'strict_mode', 'true'
+        set 'Authorization', 'Basic  Y29tbW9uX3VzZXI6MTIzNDU2'
+
+        file 'test_auth.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(2, json.NumberTotalRows)
+            assertEquals(0, json.NumberFilteredRows)
+            assertEquals(0, json.NumberUnselectedRows)
+        }
+    }
+    
+    sql "sync"
+    sql """DROP USER 'common_user'@'%'"""
+
+    // test default value
+    def tableName14 = "test_default_value"
+    sql """ DROP TABLE IF EXISTS ${tableName14} """
+    sql """
+        CREATE TABLE IF NOT EXISTS ${tableName14} (
+            `k1` bigint(20) NULL DEFAULT "1",
+            `k2` bigint(20) NULL ,
+            `v1` tinyint(4) NULL,
+            `v2` tinyint(4) NULL,
+            `v3` tinyint(4) NULL,
+            `v4` DATETIME NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=OLAP
+        DISTRIBUTED BY HASH(`k1`) BUCKETS 3
+        PROPERTIES ("replication_allocation" = "tag.location.default: 1");
+    """
+
+    streamLoad {
+        table "${tableName14}"
+
+        set 'column_separator', '|'
+        set 'columns', 'k2, v1, v2, v3'
+        set 'strict_mode', 'true'
+
+        file 'test_default_value.csv'
+        time 10000 // limit inflight 10s
+	isCloud true
+
+        check { result, exception, startTime, endTime ->
+            if (exception != null) {
+                throw exception
+            }
+            log.info("Stream load result: ${result}".toString())
+            def json = parseJson(result)
+            assertEquals("success", json.Status.toLowerCase())
+            assertEquals(2, json.NumberTotalRows)
+            assertEquals(0, json.NumberFilteredRows)
+            assertEquals(0, json.NumberUnselectedRows)
+        }
+    }
+    
+    sql "sync"
+    def res = sql "select * from ${tableName14}"
+    def time = res[0][5].toString().split("T")[0].split("-")
+    def year = time[0].toString()
+    SimpleDateFormat sdf= new SimpleDateFormat("yyyy-MM-dd")
+    def now = sdf.format(new Date()).toString().split("-")
+
+    // parse time is correct
+    // Due to the time difference in parsing, should deal with three situations:
+    // 2023-6-29 -> 2023-6-30
+    // 2023-6-30 -> 2023-7-1
+    // 2023-12-31 -> 2024-1-1
+    // now only compare year simply, you can retry if this test is error.
+    assertEquals(year, now[0])
+    // parse k1 default value
+    assertEquals(res[0][0], 1)
+    assertEquals(res[1][0], 1)
 }
 
