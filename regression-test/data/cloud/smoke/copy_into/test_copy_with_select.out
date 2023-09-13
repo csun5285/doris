@@ -13,16 +13,16 @@
 8	Customer#000000008	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	17	27-147-574-9335	6819.74	BUILDING	among the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
 9	Customer#000000009	xKiAFTjUsCuxfeleNqefumTrjS	8	18-338-906-3675	8324.07	FURNITURE	r theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
 10	Customer#000000010	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	5	15-741-346-9870	2753.54	HOUSEHOLD	es regular deposits haggle. fur
-11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.6	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.60	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
 12	Customer#000000012	9PWKuhzT4Zr1Q	13	23-791-276-1263	3396.49	HOUSEHOLD	 to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
 13	Customer#000000013	nsXQu0oVjD7PM659uC3SRSp	3	13-761-547-5974	3857.34	BUILDING	ounts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
-14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.3	FURNITURE	, ironic packages across the unus
+14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.30	FURNITURE	, ironic packages across the unus
 15	Customer#000000015	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	23	33-687-542-7601	2788.52	HOUSEHOLD	 platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
 16	Customer#000000016	cYiaeMLZSMAOQ2 d0W,	10	20-781-609-3107	4681.03	FURNITURE	kly silent courts. thinly regular theodolites sleep fluffily after 
 17	Customer#000000017	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	2	12-970-682-3487	6.34	AUTOMOBILE	packages wake! blithely even pint
 18	Customer#000000018	3txGO AiuFux3zT0Z9NYaFRnZt	6	16-155-215-1315	5494.43	BUILDING	s sleep. carefully even instructions nag furiously alongside of t
 19	Customer#000000019	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	18	28-396-526-5053	8914.71	HOUSEHOLD	 nag. furiously careful packages are slyly at the accounts. furiously regular in
-20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.4	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
+20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.40	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
 
 -- !sql --
 15000
@@ -38,16 +38,16 @@
 8	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	Customer#000000008	17	27-147-574-9335	6819.74	BUILDING	among the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
 9	xKiAFTjUsCuxfeleNqefumTrjS	Customer#000000009	8	18-338-906-3675	8324.07	FURNITURE	r theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
 10	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	Customer#000000010	5	15-741-346-9870	2753.54	HOUSEHOLD	es regular deposits haggle. fur
-11	PkWS 3HlXqwTuzrKg633BEi	Customer#000000011	23	33-464-151-3439	-272.6	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+11	PkWS 3HlXqwTuzrKg633BEi	Customer#000000011	23	33-464-151-3439	-272.60	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
 12	9PWKuhzT4Zr1Q	Customer#000000012	13	23-791-276-1263	3396.49	HOUSEHOLD	 to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
 13	nsXQu0oVjD7PM659uC3SRSp	Customer#000000013	3	13-761-547-5974	3857.34	BUILDING	ounts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
-14	KXkletMlL2JQEA 	Customer#000000014	1	11-845-129-3851	5266.3	FURNITURE	, ironic packages across the unus
+14	KXkletMlL2JQEA 	Customer#000000014	1	11-845-129-3851	5266.30	FURNITURE	, ironic packages across the unus
 15	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	Customer#000000015	23	33-687-542-7601	2788.52	HOUSEHOLD	 platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
 16	cYiaeMLZSMAOQ2 d0W,	Customer#000000016	10	20-781-609-3107	4681.03	FURNITURE	kly silent courts. thinly regular theodolites sleep fluffily after 
 17	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	Customer#000000017	2	12-970-682-3487	6.34	AUTOMOBILE	packages wake! blithely even pint
 18	3txGO AiuFux3zT0Z9NYaFRnZt	Customer#000000018	6	16-155-215-1315	5494.43	BUILDING	s sleep. carefully even instructions nag furiously alongside of t
 19	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	Customer#000000019	18	28-396-526-5053	8914.71	HOUSEHOLD	 nag. furiously careful packages are slyly at the accounts. furiously regular in
-20	JrPk8Pqplj4Ne	Customer#000000020	22	32-957-234-8742	7603.4	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
+20	JrPk8Pqplj4Ne	Customer#000000020	22	32-957-234-8742	7603.40	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
 
 -- !sql --
 15000
@@ -63,16 +63,16 @@
 8	Customer#000000008	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	17	27-147-574-9335	6819.74	BUILDING	\N
 9	Customer#000000009	xKiAFTjUsCuxfeleNqefumTrjS	8	18-338-906-3675	8324.07	FURNITURE	\N
 10	Customer#000000010	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	5	15-741-346-9870	2753.54	HOUSEHOLD	\N
-11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.6	BUILDING	\N
+11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.60	BUILDING	\N
 12	Customer#000000012	9PWKuhzT4Zr1Q	13	23-791-276-1263	3396.49	HOUSEHOLD	\N
 13	Customer#000000013	nsXQu0oVjD7PM659uC3SRSp	3	13-761-547-5974	3857.34	BUILDING	\N
-14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.3	FURNITURE	\N
+14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.30	FURNITURE	\N
 15	Customer#000000015	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	23	33-687-542-7601	2788.52	HOUSEHOLD	\N
 16	Customer#000000016	cYiaeMLZSMAOQ2 d0W,	10	20-781-609-3107	4681.03	FURNITURE	\N
 17	Customer#000000017	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	2	12-970-682-3487	6.34	AUTOMOBILE	\N
 18	Customer#000000018	3txGO AiuFux3zT0Z9NYaFRnZt	6	16-155-215-1315	5494.43	BUILDING	\N
 19	Customer#000000019	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	18	28-396-526-5053	8914.71	HOUSEHOLD	\N
-20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.4	FURNITURE	\N
+20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.40	FURNITURE	\N
 
 -- !sql --
 15000
@@ -88,16 +88,16 @@
 8	Customer#000000008	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	17	\N	6819.74	BUILDING	\N
 9	Customer#000000009	xKiAFTjUsCuxfeleNqefumTrjS	8	\N	8324.07	FURNITURE	\N
 10	Customer#000000010	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	5	\N	2753.54	HOUSEHOLD	\N
-11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	\N	-272.6	BUILDING	\N
+11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	\N	-272.60	BUILDING	\N
 12	Customer#000000012	9PWKuhzT4Zr1Q	13	\N	3396.49	HOUSEHOLD	\N
 13	Customer#000000013	nsXQu0oVjD7PM659uC3SRSp	3	\N	3857.34	BUILDING	\N
-14	Customer#000000014	KXkletMlL2JQEA 	1	\N	5266.3	FURNITURE	\N
+14	Customer#000000014	KXkletMlL2JQEA 	1	\N	5266.30	FURNITURE	\N
 15	Customer#000000015	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	23	\N	2788.52	HOUSEHOLD	\N
 16	Customer#000000016	cYiaeMLZSMAOQ2 d0W,	10	\N	4681.03	FURNITURE	\N
 17	Customer#000000017	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	2	\N	6.34	AUTOMOBILE	\N
 18	Customer#000000018	3txGO AiuFux3zT0Z9NYaFRnZt	6	\N	5494.43	BUILDING	\N
 19	Customer#000000019	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	18	\N	8914.71	HOUSEHOLD	\N
-20	Customer#000000020	JrPk8Pqplj4Ne	22	\N	7603.4	FURNITURE	\N
+20	Customer#000000020	JrPk8Pqplj4Ne	22	\N	7603.40	FURNITURE	\N
 
 -- !sql --
 13000
@@ -119,7 +119,7 @@
 2014	Customer#000002014	9h6q AmXz1tebZ5DFZQal1FrA0T,S1g	2	12-508-570-5979	2183.31	BUILDING	ing requests integrate about the quickly even ideas. fluffily iron
 2015	Customer#000002015	pnHOFtSK7IYUaGdDnQX3ced	2	12-933-556-9543	7793.53	BUILDING	g. regular, express packages wake quickly carefully bold accounts. slyly regular deposits are unusual deposits. 
 2016	Customer#000002016	g3bzz5x,FEgV6epU	14	24-980-669-6118	6916.67	MACHINERY	yly ironic deposits cajole fluffily deposits. quietly re
-2017	Customer#000002017	MwQVopgHV2Dk0X2Oj Tr,G97 cPX0iGpEySzmiBG	22	32-950-527-2067	9454.7	BUILDING	ounts. slyly special deposits believe carefully. fluffily express accounts after the foxes sleep fluffily 
+2017	Customer#000002017	MwQVopgHV2Dk0X2Oj Tr,G97 cPX0iGpEySzmiBG	22	32-950-527-2067	9454.70	BUILDING	ounts. slyly special deposits believe carefully. fluffily express accounts after the foxes sleep fluffily 
 2018	Customer#000002018	eKAhxd3gdiGEQMlB4h0jzS93G3qnk9FpSe3D	3	13-139-998-8060	8135.51	MACHINERY	ave to run. slyly ironic accounts cajole. furiously express dependencies haggle fluffily to the iro
 2019	Customer#000002019	MsytT6QI1lwygFQ,DhtHjgx3XwAZh0uLAaMSS	17	27-240-967-6638	1510.37	BUILDING	hs. slyly express tithes sublate. ideas sleep quickly
 2020	Customer#000002020	c b2MCHbGOvsKchTLv,DWirJV9U52RKiupvMM8yq	24	34-362-873-8653	5681.87	AUTOMOBILE	y regular pinto beans wake past the silent requests! slowly even instructions are slyly. care
@@ -138,29 +138,29 @@
 20008	Customer#000000008	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	17	27-147-574-9335	6819.74	BUILDING	among the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
 20009	Customer#000000009	xKiAFTjUsCuxfeleNqefumTrjS	8	18-338-906-3675	8324.07	FURNITURE	r theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
 20010	Customer#000000010	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	5	15-741-346-9870	2753.54	HOUSEHOLD	es regular deposits haggle. fur
-20011	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.6	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+20011	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.60	BUILDING	ckages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
 20012	Customer#000000012	9PWKuhzT4Zr1Q	13	23-791-276-1263	3396.49	HOUSEHOLD	 to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
 20013	Customer#000000013	nsXQu0oVjD7PM659uC3SRSp	3	13-761-547-5974	3857.34	BUILDING	ounts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
-20014	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.3	FURNITURE	, ironic packages across the unus
+20014	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.30	FURNITURE	, ironic packages across the unus
 20015	Customer#000000015	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	23	33-687-542-7601	2788.52	HOUSEHOLD	 platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
 20016	Customer#000000016	cYiaeMLZSMAOQ2 d0W,	10	20-781-609-3107	4681.03	FURNITURE	kly silent courts. thinly regular theodolites sleep fluffily after 
 20017	Customer#000000017	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	2	12-970-682-3487	6.34	AUTOMOBILE	packages wake! blithely even pint
 20018	Customer#000000018	3txGO AiuFux3zT0Z9NYaFRnZt	6	16-155-215-1315	5494.43	BUILDING	s sleep. carefully even instructions nag furiously alongside of t
 20019	Customer#000000019	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	18	28-396-526-5053	8914.71	HOUSEHOLD	 nag. furiously careful packages are slyly at the accounts. furiously regular in
-20020	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.4	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
+20020	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.40	FURNITURE	g alongside of the special excuses-- fluffily enticing packages wake 
 
 -- !sql --
 12000
 
 -- !sql --
 33001	Customer#000003001	h6YZPM3Tu0zRyjHXTxA0afGB,jap 5q8r	9	19-701-953-9452	4224.75	HOUSEHOLD	ructions promise blithely bold requests. pen
-33002	Customer#000003002	,FbyPTJ4CXTEKbURvrfWRg5ZgrP8ovyrYOWQ	3	13-794-902-6716	9402.1	BUILDING	 sleep carefully ironic deposits. carefully bold pinto beans are carefully
+33002	Customer#000003002	,FbyPTJ4CXTEKbURvrfWRg5ZgrP8ovyrYOWQ	3	13-794-902-6716	9402.10	BUILDING	 sleep carefully ironic deposits. carefully bold pinto beans are carefully
 33003	Customer#000003003	cngA,ufUGgVF95S3jyJE9bSLWwscEsGbd	16	26-514-652-9208	4105.33	MACHINERY	sits. fluffily ironic dolphins poach. ironic deposits mold carefully: blithely silent instruct
 33004	Customer#000003004	bP4r8H2vdZRETi7AKNrLkVEFicYe ,8m j4qkH	13	23-507-607-3025	4322.42	BUILDING	inal accounts. express, sly deposits according to the ruthlessly reg
 33005	Customer#000003005	VJlb4k3dTYyMuGNpXwuTPUitl7H8f0tv	16	26-205-995-7792	874.34	AUTOMOBILE	ructions snooze against the carefully bold dolphins. silent, bold accounts boost furiously aft
 33006	Customer#000003006	O6R9AI0LvXXu6	2	12-152-193-2602	7976.94	MACHINERY	otes. final, express theodolites wake slyly ironic platelets; quickly express packages along the packages u
 33007	Customer#000003007	RJksljcm81BgQWR oovq,8pXB, 5JYJnOVhwio	13	23-541-967-2544	9539.29	FURNITURE	thely. ironic accounts affix furiously to the furiously ironic packages. quickly regular packa
-33008	Customer#000003008	ZseWyQumgKYdU,J0DXa	5	15-531-973-6741	-63.7	HOUSEHOLD	ay idly regular deposits. furiously final platelets cajole silently. busily
+33008	Customer#000003008	ZseWyQumgKYdU,J0DXa	5	15-531-973-6741	-63.70	HOUSEHOLD	ay idly regular deposits. furiously final platelets cajole silently. busily
 33009	Customer#000003009	USj5S94TAjoX5B,	6	16-859-384-9143	5354.45	FURNITURE	 blithely express accounts are furiously. bold accounts
 33010	Customer#000003010	RLFLo7xYIkbpZQMnS1klsx	18	28-586-427-3443	-690.44	HOUSEHOLD	egular courts sleep furiously against the furiously 
 33011	Customer#000003011	bdqHddpQl9vMET4Ca0yU	7	17-943-758-1725	9690.52	BUILDING	g the carefully final foxes. blithely bold foxes sleep bl
@@ -188,14 +188,14 @@
 8	Customer#000000008	I0B10bB0AymmC, 0PrRYBCP1yGJ8xcBPmWhl5	17	27-147-574-9335	6819.74	BUILDING	mong the slyly regular theodolites kindle blithely courts. carefully even theodolites haggle slyly along the ide
 9	Customer#000000009	xKiAFTjUsCuxfeleNqefumTrjS	8	18-338-906-3675	8324.07	FURNITURE	 theodolites according to the requests wake thinly excuses: pending requests haggle furiousl
 10	Customer#000000010	6LrEaV6KR6PLVcgl2ArL Q3rqzLzcT1 v2	5	15-741-346-9870	2753.54	HOUSEHOLD	s regular deposits haggle. fur
-11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.6	BUILDING	kages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
+11	Customer#000000011	PkWS 3HlXqwTuzrKg633BEi	23	33-464-151-3439	-272.60	BUILDING	kages. requests sleep slyly. quickly even pinto beans promise above the slyly regular pinto beans. 
 12	Customer#000000012	9PWKuhzT4Zr1Q	13	23-791-276-1263	3396.49	HOUSEHOLD	to the carefully final braids. blithely regular requests nag. ironic theodolites boost quickly along
 13	Customer#000000013	nsXQu0oVjD7PM659uC3SRSp	3	13-761-547-5974	3857.34	BUILDING	unts sleep carefully after the close frays. carefully bold notornis use ironic requests. blithely
-14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.3	FURNITURE	 ironic packages across the unus
+14	Customer#000000014	KXkletMlL2JQEA 	1	11-845-129-3851	5266.30	FURNITURE	 ironic packages across the unus
 15	Customer#000000015	YtWggXoOLdwdo7b0y,BZaGUQMLJMX1Y,EC,6Dn	23	33-687-542-7601	2788.52	HOUSEHOLD	platelets. regular deposits detect asymptotes. blithely unusual packages nag slyly at the fluf
 16	Customer#000000016	cYiaeMLZSMAOQ2 d0W,	10	20-781-609-3107	4681.03	FURNITURE	ly silent courts. thinly regular theodolites sleep fluffily after 
 17	Customer#000000017	izrh 6jdqtp2eqdtbkswDD8SG4SzXruMfIXyR7	2	12-970-682-3487	6.34	AUTOMOBILE	ackages wake! blithely even pint
 18	Customer#000000018	3txGO AiuFux3zT0Z9NYaFRnZt	6	16-155-215-1315	5494.43	BUILDING	 sleep. carefully even instructions nag furiously alongside of t
 19	Customer#000000019	uc,3bHIx84H,wdrmLOjVsiqXCq2tr	18	28-396-526-5053	8914.71	HOUSEHOLD	nag. furiously careful packages are slyly at the accounts. furiously regular in
-20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.4	FURNITURE	 alongside of the special excuses-- fluffily enticing packages wake 
+20	Customer#000000020	JrPk8Pqplj4Ne	22	32-957-234-8742	7603.40	FURNITURE	 alongside of the special excuses-- fluffily enticing packages wake 
 
