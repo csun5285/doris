@@ -88,6 +88,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /*
  * MaterializedViewHandler is responsible for ADD/DROP materialized view.
@@ -889,6 +890,7 @@ public class MaterializedViewHandler extends AlterHandler {
 
     public void processBatchDropRollup(List<AlterClause> dropRollupClauses, Database db, OlapTable olapTable)
             throws DdlException, MetaNotFoundException {
+        List<Long> deleteIndexList = null;
         olapTable.writeLockOrDdlException();
         try {
             olapTable.checkNormalStateForAlter();
@@ -921,13 +923,20 @@ public class MaterializedViewHandler extends AlterHandler {
             editLog.logBatchDropRollup(new BatchDropInfo(dbId, tableId, tableName, indexIdSet));
             LOG.info("finished drop rollup index[{}] in table[{}]",
                     String.join("", rollupNameSet), olapTable.getName());
+
+            if (Config.isCloudMode()) {
+                deleteIndexList = indexIdSet.stream().collect(Collectors.toList());
+            }
         } finally {
             olapTable.writeUnlock();
         }
+        // we try best to drop index in foundationdb, after write editlog
+        dropCloudMaterializedIndex(olapTable.getId(), deleteIndexList);
     }
 
     public void processDropMaterializedView(DropMaterializedViewStmt dropMaterializedViewStmt, Database db,
             OlapTable olapTable) throws DdlException, MetaNotFoundException {
+        List<Long> deleteIndexList = null;
         olapTable.writeLockOrDdlException();
         try {
             olapTable.checkNormalStateForAlter();
@@ -941,6 +950,11 @@ public class MaterializedViewHandler extends AlterHandler {
             editLog.logDropRollup(
                     new DropInfo(db.getId(), olapTable.getId(), olapTable.getName(), mvIndexId, false, 0));
             LOG.info("finished drop materialized view [{}] in table [{}]", mvName, olapTable.getName());
+
+            if (Config.isCloudMode()) {
+                deleteIndexList = new ArrayList<Long>();
+                deleteIndexList.add(mvIndexId);
+            }
         } catch (MetaNotFoundException e) {
             if (dropMaterializedViewStmt.isIfExists()) {
                 LOG.info(e.getMessage());
@@ -950,6 +964,9 @@ public class MaterializedViewHandler extends AlterHandler {
         } finally {
             olapTable.writeUnlock();
         }
+
+        // we try best to drop index in foundationdb, after write editlog
+        dropCloudMaterializedIndex(olapTable.getId(), deleteIndexList);
     }
 
     /**
@@ -1039,6 +1056,12 @@ public class MaterializedViewHandler extends AlterHandler {
         } finally {
             olapTable.writeUnlock();
         }
+
+        // In cloud mode, we try best to drop index in foundationdb
+        List<Long> deleteIndexList = new ArrayList<Long>();
+        deleteIndexList.add(rollupIndexId);
+        dropCloudMaterializedIndex(tableId, deleteIndexList);
+
         LOG.info("replay drop rollup {}", dropInfo.getIndexId());
     }
 
@@ -1307,5 +1330,42 @@ public class MaterializedViewHandler extends AlterHandler {
         } finally {
             olapTables.values().forEach(TableIf::readUnlock);
         }
+    }
+
+    protected void sleepSeveralSeconds() {
+        try {
+            Thread.sleep(10000);
+        } catch (InterruptedException ie) {
+            LOG.warn("ignore InterruptedException");
+        }
+    }
+
+    /**
+     * for cloud mode, drop rollupIndex/materializedIndexId in foundationdb
+     * @param tableId
+     * @param materializedIndexId
+     */
+    private void dropCloudMaterializedIndex(long tableId, List<Long> indexIdList) {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+        if (indexIdList == null || indexIdList.size() == 0) {
+            LOG.warn("indexIdList is empty");
+            return;
+        }
+        long tryTimes = 1;
+        while (true) {
+            try {
+                Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(tableId, indexIdList);
+                break;
+            } catch (Exception e) {
+                LOG.warn("tryTimes:{}, dropCloudMaterializedIndex exception:", tryTimes, e);
+            }
+            sleepSeveralSeconds();
+            tryTimes++;
+        }
+
+        LOG.info("dropCloudMaterializedIndex finished, tableId:{}, indexIdList:{}",
+                tableId, indexIdList);
     }
 }
