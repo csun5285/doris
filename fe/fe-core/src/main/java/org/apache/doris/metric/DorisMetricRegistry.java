@@ -23,6 +23,8 @@ import com.google.common.collect.Lists;
 
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -75,6 +77,33 @@ public class DorisMetricRegistry {
         // Same reason as comment in addMetrics()
         if (!Env.isCheckpointThread()) {
             metrics = metrics.stream().filter(m -> !(m.getName().equals(name))).collect(Collectors.toList());
+        }
+    }
+
+    public synchronized void removeMetricsByNameAndLabels(String name, List<MetricLabel> labels) {
+        if (!Env.isCheckpointThread()) {
+            Iterator<Metric> iterator = metrics.iterator();
+            while (iterator.hasNext()) {
+                Metric metric = iterator.next();
+                boolean delete = true;
+                if (metric.getName().equals(name)) {
+                    HashMap<String, String> labelsCheck = new HashMap<>();
+                    for (MetricLabel metricLabel : (List<MetricLabel>) metric.getLabels()) {
+                        labelsCheck.put(metricLabel.getKey(), metricLabel.getValue());
+                    }
+                    for (MetricLabel label : labels) {
+                        if (!(labelsCheck.containsKey(label.getKey())
+                                && labelsCheck.get(label.getKey()).equals(label.getValue()))) {
+                            delete = false;
+                        }
+                    }
+                } else {
+                    delete = false;
+                }
+                if (delete) {
+                    iterator.remove();
+                }
+            }
         }
     }
 }

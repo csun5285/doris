@@ -18,6 +18,9 @@
 package org.apache.doris.mysql.privilege;
 
 import org.apache.doris.analysis.CompoundPredicate.Operator;
+import org.apache.doris.analysis.ResourcePattern;
+import org.apache.doris.catalog.AccessPrivilege;
+import org.apache.doris.catalog.AccessPrivilegeWithCols;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.io.Text;
@@ -31,7 +34,10 @@ import com.google.gson.annotations.SerializedName;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 // ....0000000000
 //        ^     ^
@@ -127,6 +133,18 @@ public class PrivBitSet implements Writable {
         return privs;
     }
 
+    // for cloud auth
+    public List<AccessPrivilegeWithCols> toAccessPrivilegeWithColsList() {
+        List<AccessPrivilegeWithCols> accessPrivilegeWithCols = Lists.newArrayList();
+        for (int i = 0; i < Privilege.privileges.length; i++) {
+            if (get(i)) {
+                accessPrivilegeWithCols.add(
+                    new AccessPrivilegeWithCols(AccessPrivilege.fromName(Privilege.getPriv(i).getName())));
+            }
+        }
+        return accessPrivilegeWithCols;
+    }
+
     public static PrivBitSet of(Privilege... privs) {
         PrivBitSet bitSet = new PrivBitSet();
         for (Privilege priv : privs) {
@@ -135,7 +153,7 @@ public class PrivBitSet implements Writable {
         return bitSet;
     }
 
-    public static PrivBitSet of(List<Privilege> privs) {
+    public static PrivBitSet of(Collection<Privilege> privs) {
         PrivBitSet bitSet = new PrivBitSet();
         for (Privilege priv : privs) {
             bitSet.set(priv.getIdx());
@@ -173,6 +191,23 @@ public class PrivBitSet implements Writable {
     @Override
     public void write(DataOutput out) throws IOException {
         Text.writeString(out, GsonUtils.GSON.toJson(this));
+    }
+
+    public static void convertResourcePrivToCloudPriv(ResourcePattern resourcePattern, Set<Privilege> privileges) {
+        PrivBitSet privs = PrivBitSet.of();
+        for (Privilege privilege : privileges) {
+            if (resourcePattern.isGeneralResource()) {
+                privs.or(PrivBitSet.of(privilege));
+                continue;
+            }
+
+            if (resourcePattern.isClusterResource()) {
+                privs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
+            } else if (resourcePattern.isStageResource()) {
+                privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
+            }
+        }
+        privileges = new HashSet<>(privs.toPrivilegeList());
     }
 }
 

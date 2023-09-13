@@ -776,7 +776,7 @@ void DeltaWriter::set_tablet_load_rowset_num_info(
     if (auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
         version_cnt > (config::max_tablet_version_num / 2)) [[unlikely]] {
         auto load_info = tablet_infos->Add();
-        load_info->set_current_rowset_nums(_tablet->fetch_add_approximate_num_rowsets(0));
+        load_info->set_current_rowset_nums(version_cnt);
         load_info->set_max_config_rowset_nums(config::max_tablet_version_num);
     }
 }

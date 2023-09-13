@@ -158,6 +158,8 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
     aws_config.region = s3_conf.region;
     if (s3_conf.max_connections > 0) {
         aws_config.maxConnections = s3_conf.max_connections;
+    } else {
+        aws_config.maxConnections = config::doris_remote_scanner_thread_pool_thread_num;
     }
     if (aws_config.maxConnections < config::async_remote_io_thread_pool_thread_num) {
         aws_config.maxConnections = config::async_remote_io_thread_pool_thread_num;

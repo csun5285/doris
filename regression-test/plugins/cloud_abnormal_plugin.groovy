@@ -155,8 +155,6 @@ Suite.metaClass.restartProcess = { String nodeIp, String processName, String ins
             sleep(5000)
         }
     }
-    // sleep 5 seconds for service ready
-    sleep(5000)
 }
 
 Suite.metaClass.checkBrokerLoadLoading = { String label /* param */ ->

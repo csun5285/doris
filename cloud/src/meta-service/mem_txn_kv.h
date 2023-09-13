@@ -188,12 +188,11 @@ public:
 
     std::pair<std::string_view, std::string_view> next() override {
         if (idx_ < 0 || idx_ >= kvs_size_) return {};
-
-        auto inc = [this](int*) { ++idx_; };
-        std::unique_ptr<int, decltype(inc)> defer((int*)0x01, std::move(inc));
-
-        return {kvs_[idx_].first, kvs_[idx_].second};
+        auto& kv = kvs_[idx_++];
+        return {kv.first, kv.second};
     }
+
+    void seek(size_t pos) override { idx_ = pos; }
 
     bool more() override { return more_; }
 
@@ -201,6 +200,16 @@ public:
     int reset() override {
         idx_ = 0;
         return 0;
+    }
+
+    std::string next_begin_key() override {
+        std::string k;
+        if (!more()) return k;
+        auto& key = kvs_[kvs_size_ - 1].first;
+        k.reserve(key.size() + 1);
+        k.append(key);
+        k.push_back('\x00');
+        return k;
     }
 
 private:

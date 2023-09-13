@@ -370,11 +370,12 @@ public class EditLog {
                     exportMgr.replayCreateExportJob(job);
                     break;
                 }
-                case OperationType.OP_EXPORT_UPDATE_STATE:
+                case OperationType.OP_EXPORT_UPDATE_STATE: {
                     ExportJob.StateTransfer op = (ExportJob.StateTransfer) journal.getData();
                     ExportMgr exportMgr = env.getExportMgr();
                     exportMgr.replayUpdateJobState(op);
                     break;
+                }
                 case OperationType.OP_FINISH_DELETE: {
                     DeleteInfo info = (DeleteInfo) journal.getData();
                     DeleteHandler deleteHandler = env.getDeleteHandler();
@@ -772,6 +773,7 @@ public class EditLog {
                 case OperationType.OP_MODIFY_REPLICATION_NUM: {
                     ModifyTablePropertyOperationLog log = (ModifyTablePropertyOperationLog) journal.getData();
                     env.replayModifyTableProperty(opCode, log);
+                    env.getBinlogManager().addModifyTableProperty(log, logId);
                     break;
                 }
                 case OperationType.OP_MODIFY_DISTRIBUTION_BUCKET_NUM: {
@@ -1061,6 +1063,7 @@ public class EditLog {
                     LOG.info("replay alter database property: {}", alterDatabasePropertyInfo);
                     env.replayAlterDatabaseProperty(alterDatabasePropertyInfo.getDbName(),
                             alterDatabasePropertyInfo.getProperties());
+                    env.getBinlogManager().addAlterDatabaseProperty(alterDatabasePropertyInfo, logId);
                     break;
                 }
                 case OperationType.OP_GC_BINLOG: {
@@ -1070,8 +1073,8 @@ public class EditLog {
                     break;
                 }
                 case OperationType.OP_BARRIER: {
-                    // the log only for barrier commit seq, not need to replay
-                    LOG.info("replay barrier");
+                    BarrierLog log = (BarrierLog) journal.getData();
+                    env.getBinlogManager().addBarrierLog(log, logId);
                     break;
                 }
                 default: {
@@ -1651,20 +1654,26 @@ public class EditLog {
         logEdit(OperationType.OP_MODIFY_DISTRIBUTION_TYPE, tableInfo);
     }
 
-    public void logDynamicPartition(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_DYNAMIC_PARTITION, info);
+    private long logModifyTableProperty(short op, ModifyTablePropertyOperationLog info) {
+        long logId = logEdit(op, info);
+        Env.getCurrentEnv().getBinlogManager().addModifyTableProperty(info, logId);
+        return logId;
     }
 
-    public void logModifyReplicationNum(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_MODIFY_REPLICATION_NUM, info);
+    public void logDynamicPartition(ModifyTablePropertyOperationLog info) {
+        logModifyTableProperty(OperationType.OP_DYNAMIC_PARTITION, info);
+    }
+
+    public long logModifyReplicationNum(ModifyTablePropertyOperationLog info) {
+        return logModifyTableProperty(OperationType.OP_MODIFY_REPLICATION_NUM, info);
     }
 
     public void logModifyDefaultDistributionBucketNum(ModifyTableDefaultDistributionBucketNumOperationLog info) {
         logEdit(OperationType.OP_MODIFY_DISTRIBUTION_BUCKET_NUM, info);
     }
 
-    public void logModifyInMemory(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_MODIFY_IN_MEMORY, info);
+    public long logModifyInMemory(ModifyTablePropertyOperationLog info) {
+        return logModifyTableProperty(OperationType.OP_MODIFY_IN_MEMORY, info);
     }
 
     // SELECTDB_CODE_BEGIN
@@ -1677,8 +1686,8 @@ public class EditLog {
     }
     // SELECTDB_CODE_END
 
-    public void logUpdateBinlogConfig(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_UPDATE_BINLOG_CONFIG, info);
+    public long logUpdateBinlogConfig(ModifyTablePropertyOperationLog info) {
+        return logModifyTableProperty(OperationType.OP_UPDATE_BINLOG_CONFIG, info);
     }
 
     public void logAlterLightSchemaChange(AlterLightSchemaChangeInfo info) {
@@ -1867,15 +1876,20 @@ public class EditLog {
     }
 
     public long logAlterDatabaseProperty(AlterDatabasePropertyInfo log) {
-        return logEdit(OperationType.OP_ALTER_DATABASE_PROPERTY, log);
+        long logId = logEdit(OperationType.OP_ALTER_DATABASE_PROPERTY, log);
+        Env.getCurrentEnv().getBinlogManager().addAlterDatabaseProperty(log, logId);
+        return logId;
     }
 
     public long logGcBinlog(BinlogGcInfo log) {
         return logEdit(OperationType.OP_GC_BINLOG, log);
     }
 
-    public long logBarrier() {
-        return logEdit(OperationType.OP_BARRIER, new BarrierLog());
+    public long logBarrier(BarrierLog log) {
+        long logId = logEdit(OperationType.OP_BARRIER, log);
+        Env.getCurrentEnv().getBinlogManager().addBarrierLog(log, logId);
+        LOG.info("logId {}, barrier {}", logId, log);
+        return logId;
     }
 
 }

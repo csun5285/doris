@@ -216,6 +216,17 @@ public:
         return Status::OK();
     }
 
+    Status add_document() {
+        try {
+            _index_writer->addDocument(_doc.get());
+        } catch (const CLuceneError& e) {
+            _dir->deleteDirectory();
+            return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
+                    "CLuceneError add_document: {}", e.what());
+        }
+        return Status::OK();
+    }
+
     Status add_nulls(uint32_t count) override {
         _null_bitmap.addRange(_rid, _rid + count);
         _rid += count;
@@ -228,7 +239,7 @@ public:
 
             for (int i = 0; i < count; ++i) {
                 new_fulltext_field(empty_value.c_str(), 0);
-                _index_writer->addDocument(_doc.get());
+                RETURN_IF_ERROR(add_document());
             }
         }
         return Status::OK();
@@ -274,7 +285,7 @@ public:
             auto* v = (Slice*)values;
             for (int i = 0; i < count; ++i) {
                 new_fulltext_field(v->get_data(), v->get_size());
-                _index_writer->addDocument(_doc.get());
+                RETURN_IF_ERROR(add_document());
                 ++v;
                 _rid++;
             }
@@ -307,7 +318,7 @@ public:
                 auto value = join(strings, " ");
                 new_fulltext_field(value.c_str(), value.length());
                 _rid++;
-                _index_writer->addDocument(_doc.get());
+                RETURN_IF_ERROR(add_document());
                 values++;
             }
         } else if constexpr (field_is_numeric_type(field_type)) {

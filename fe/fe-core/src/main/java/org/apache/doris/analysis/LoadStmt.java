@@ -499,10 +499,13 @@ public class LoadStmt extends DdlStmt {
                 RemoteBase remote = null;
                 ObjectInfo objectInfo = null;
                 try {
-                    String endPoint = brokerDescProperties.get(AWS_ENDPOINT);
-                    tryConnect(endPoint);
+                    String endpoint = brokerDescProperties.get(AWS_ENDPOINT);
+                    endpoint = endpoint.replaceFirst("^http://", "");
+                    endpoint = endpoint.replaceFirst("^https://", "");
+                    brokerDescProperties.put(AWS_ENDPOINT, endpoint);
+                    tryConnect(endpoint);
                     String provider = "";
-                    provider = getProviderFromEndpoint(endPoint);
+                    provider = getProviderFromEndpoint(endpoint);
                     if (provider.equals("")) {
                         throw new Exception("the provider in endpoint is invalid");
                     }

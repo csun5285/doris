@@ -93,6 +93,15 @@ Status Segment::open(io::FileSystemSPtr fs, const std::string& path, uint32_t se
     return Status::OK();
 }
 
+Status Segment::check_segment_footer(io::FileReaderSPtr file_reader) {
+    Segment segment;
+    segment._file_reader = std::move(file_reader);
+    return segment._parse_footer();
+}
+
+Segment::Segment()
+        : _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {}
+
 Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema)
         : _segment_id(segment_id),
           _rowset_id(rowset_id),
@@ -159,7 +168,8 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
 
     RETURN_IF_ERROR(load_index());
     if (read_options.delete_condition_predicates->num_of_column_predicate() == 0 &&
-        read_options.push_down_agg_type_opt != TPushAggOp::NONE) {
+        read_options.push_down_agg_type_opt != TPushAggOp::NONE &&
+        read_options.push_down_agg_type_opt != TPushAggOp::COUNT_ON_INDEX) {
         iter->reset(vectorized::new_vstatistics_iterator(this->shared_from_this(), *schema));
     } else {
         iter->reset(new SegmentIterator(this->shared_from_this(), schema));
@@ -173,8 +183,10 @@ Status Segment::_parse_footer() {
     // Footer := SegmentFooterPB, FooterPBSize(4), FooterPBChecksum(4), MagicNumber(4)
     auto file_size = _file_reader->size();
     if (file_size < 12) {
-        return Status::Corruption("Bad segment file {}: file size {} < 12",
-                                  _file_reader->path().native(), file_size);
+        std::string err_msg = fmt::format("Bad segment file {}: file size {} < 12",
+                                          _file_reader->path().native(), file_size);
+        DCHECK(false) << err_msg;
+        return Status::Corruption(std::move(err_msg));
     }
 
     uint8_t fixed_buf[12];
@@ -190,15 +202,20 @@ Status Segment::_parse_footer() {
 
     // validate magic number
     if (memcmp(fixed_buf + 8, k_segment_magic, k_segment_magic_length) != 0) {
-        return Status::Corruption("Bad segment file {}: magic number not match",
-                                  _file_reader->path().native());
+        std::string err_msg = fmt::format("Bad segment file {}: magic number not match",
+                                          _file_reader->path().native());
+        DCHECK(false) << err_msg;
+        return Status::Corruption(std::move(err_msg));
     }
 
     // read footer PB
     uint32_t footer_length = decode_fixed32_le(fixed_buf);
     if (file_size < 12 + footer_length) {
-        return Status::Corruption("Bad segment file {}: file size {} < {}",
-                                  _file_reader->path().native(), file_size, 12 + footer_length);
+        std::string err_msg =
+                fmt::format("Bad segment file {}: file size {} < {}", _file_reader->path().native(),
+                            file_size, 12 + footer_length);
+        DCHECK(false) << err_msg;
+        return Status::Corruption(err_msg);
     }
     _meta_mem_usage += footer_length;
     _segment_meta_mem_tracker->consume(footer_length);
@@ -213,15 +230,19 @@ Status Segment::_parse_footer() {
     uint32_t expect_checksum = decode_fixed32_le(fixed_buf + 4);
     uint32_t actual_checksum = crc32c::Value(footer_buf.data(), footer_buf.size());
     if (actual_checksum != expect_checksum) {
-        return Status::Corruption(
+        std::string err_msg = fmt::format(
                 "Bad segment file {}: footer checksum not match, actual={} vs expect={}",
                 _file_reader->path().native(), actual_checksum, expect_checksum);
+        DCHECK(false) << err_msg;
+        return Status::Corruption(std::move(err_msg));
     }
 
     // deserialize footer PB
     if (!_footer.ParseFromString(footer_buf)) {
-        return Status::Corruption("Bad segment file {}: failed to parse SegmentFooterPB",
-                                  _file_reader->path().native());
+        std::string err_msg = fmt::format("Bad segment file {}: failed to parse SegmentFooterPB",
+                                          _file_reader->path().native());
+        DCHECK(false) << err_msg;
+        return Status::Corruption(std::move(err_msg));
     }
     if (_footer.num_rows() == 0) {
         // this is a pad segment

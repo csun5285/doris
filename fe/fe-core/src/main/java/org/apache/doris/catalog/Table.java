@@ -18,6 +18,7 @@
 package org.apache.doris.catalog;
 
 import org.apache.doris.alter.AlterCancelException;
+import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.CreateTableStmt;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.MetaNotFoundException;
@@ -558,5 +559,8 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
     @Override
     public Optional<ColumnStatistic> getColumnStatistic(String colName) {
         return Optional.empty();
+    }
+
+    public void analyze(Analyzer analyzer) {
     }
 }

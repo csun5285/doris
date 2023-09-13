@@ -35,6 +35,7 @@ message InstanceInfoPB {
     enum Status {
         NORMAL = 0;
         DELETED = 1;
+        OVERDUE = 2;
     }
     optional string user_id = 1;
     optional string instance_id = 2;
@@ -612,6 +613,7 @@ message CheckTxnConflictRequest {
     optional int64 db_id = 2;
     optional int64 end_txn_id = 3;
     repeated int64 table_ids = 4;
+    optional bool ignore_timeout_txn = 5;
 }
 
 message CheckTxnConflictResponse {
@@ -627,8 +629,9 @@ message GetVersionRequest {
 
     // For batch get version.
     optional bool batch_mode = 5;
-    repeated int64 table_ids = 6;
-    repeated int64 partition_ids = 7;
+    repeated int64 db_ids = 6;
+    repeated int64 table_ids = 7;
+    repeated int64 partition_ids = 8;
 };
 
 message GetVersionResponse {
@@ -636,10 +639,11 @@ message GetVersionResponse {
     optional int64 version = 2;
 
     // For batch get version.
-    // <table_id, partition_id> --> version
-    repeated int64 table_ids = 3;
-    repeated int64 partition_ids = 4;
-    repeated int64 versions = 5;
+    // <db_id, table_id, partition_id> --> version
+    repeated int64 db_ids = 3;
+    repeated int64 table_ids = 4;
+    repeated int64 partition_ids = 5;
+    repeated int64 versions = 6;
 };
 
 message GetObjStoreInfoRequest {
@@ -806,6 +810,8 @@ message AlterInstanceRequest {
         RENAME         = 3;
         ENABLE_SSE     = 4;
         DISABLE_SSE    = 5;
+        SET_OVERDUE    = 6;
+        SET_NORMAL     = 7;
     }
     optional string instance_id = 1;
     optional Operation op = 2;
@@ -814,6 +820,16 @@ message AlterInstanceRequest {
 
 message AlterInstanceResponse {
     optional MetaServiceResponseStatus status = 1;
+}
+
+message GetInstanceRequest {
+    optional string instance_id = 1;
+    optional string cloud_unique_id = 2;
+}
+
+message GetInstanceResponse {
+    optional MetaServiceResponseStatus status = 1;
+    optional InstanceInfoPB instance = 2;
 }
 
 message AlterClusterRequest {
@@ -1203,6 +1219,7 @@ service MetaService {
     rpc update_ak_sk(UpdateAkSkRequest) returns (UpdateAkSkResponse);
     rpc create_instance(CreateInstanceRequest) returns (CreateInstanceResponse);
     rpc alter_instance(AlterInstanceRequest) returns (AlterInstanceResponse);
+    rpc get_instance(GetInstanceRequest) returns (GetInstanceResponse);
     rpc alter_cluster(AlterClusterRequest) returns (AlterClusterResponse);
     rpc get_cluster(GetClusterRequest) returns (GetClusterResponse);
     rpc get_cluster_status(GetClusterStatusRequest) returns(GetClusterStatusResponse);

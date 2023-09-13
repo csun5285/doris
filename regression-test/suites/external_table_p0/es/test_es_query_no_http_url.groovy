@@ -23,16 +23,21 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         String es_6_port = context.config.otherConfigs.get("es_6_port")
         String es_7_port = context.config.otherConfigs.get("es_7_port")
         String es_8_port = context.config.otherConfigs.get("es_8_port")
+        String es_6_catalog = "es_6_catalog"
+        String es_7_catalog = "es_7_catalog"
+        String es_8_catalog = "es_8_catalog"
+        String external_table_v1 = "external_table_test_v1"
+        String external_table_v2 = "external_table_test_v2"
 
-        sql """drop catalog if exists es6;"""
-        sql """drop catalog if exists es7;"""
-        sql """drop catalog if exists es8;"""
-        sql """drop table if exists test_v1;"""
-        sql """drop table if exists test_v2;"""
+        sql """drop catalog if exists $es_6_catalog;"""
+        sql """drop catalog if exists $es_7_catalog;"""
+        sql """drop catalog if exists $es_8_catalog;"""
+        sql """drop table if exists $external_table_v1;"""
+        sql """drop table if exists $external_table_v2;"""
 
         // test old create-catalog syntax for compatibility
         sql """
-            create catalog if not exists es6
+            create catalog if not exists $es_6_catalog
             properties (
                 "type"="es",
                 "elasticsearch.hosts"="${externalEnvIp}:$es_6_port",
@@ -42,7 +47,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         """
 
         // test new create catalog syntax
-        sql """create catalog if not exists es7 properties(
+        sql """create catalog if not exists $es_7_catalog properties(
             "type"="es",
             "hosts"="${externalEnvIp}:$es_7_port",
             "nodes_discovery"="false",
@@ -50,7 +55,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         );
         """
 
-        sql """create catalog if not exists es8 properties(
+        sql """create catalog if not exists $es_8_catalog properties(
             "type"="es",
             "hosts"="${externalEnvIp}:$es_8_port",
             "nodes_discovery"="false",
@@ -60,7 +65,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
 
         // test external table for datetime
         sql """
-            CREATE TABLE `test_v1` (
+            CREATE TABLE $external_table_v1 (
                 `c_datetime` array<datev2> NULL,
                 `c_long` array<bigint(20)> NULL,
                 `c_unsigned_long` array<largeint(40)> NULL,
@@ -95,10 +100,10 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
                 "http_ssl_enabled"="false"
             );
         """
-        order_qt_sql51 """select * from test_v1 where test2='text#1'"""
+        order_qt_sql51 """select * from $external_table_v1 where test2='text#1'"""
 
        sql """
-            CREATE TABLE `test_v2` (
+            CREATE TABLE $external_table_v2 (
                 `c_datetime` array<datev2> NULL,
                 `c_long` array<bigint(20)> NULL,
                 `c_unsigned_long` array<largeint(40)> NULL,
@@ -133,16 +138,16 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
                 "http_ssl_enabled"="false"
             );
         """
-        order_qt_sql52 """select * from test_v2 where test2='text#1'"""
+        order_qt_sql52 """select * from $external_table_v2 where test2='text#1'"""
 
-        // es6
-        sql """switch es6"""
+        // $es_6_catalog
+        sql """switch $es_6_catalog"""
         order_qt_sql61 """select * from test1 where test2='text#1'"""
-        // es7
-        sql """switch es7"""
+        // $es_7_catalog
+        sql """switch $es_7_catalog"""
         order_qt_sql71 """select * from test1 where test2='text#1'"""
-        // es8
-        sql """switch es8"""
+        // $es_8_catalog
+        sql """switch $es_8_catalog"""
         order_qt_sql81 """select * from test1 where test2='text#1'"""
     }
 }

@@ -37,7 +37,7 @@ bool SegmentCache::lookup(const SegmentCache::CacheKey& key, SegmentCacheHandle*
     if (lru_handle == nullptr) {
         return false;
     }
-    *handle = SegmentCacheHandle(_cache.get(), lru_handle);
+    handle->init(_cache.get(), lru_handle);
     return true;
 }
 
@@ -56,7 +56,7 @@ void SegmentCache::insert(const SegmentCache::CacheKey& key, SegmentCache::Cache
 
     auto lru_handle = _cache->insert(key.encode(), &value, sizeof(SegmentCache::CacheValue),
                                      deleter, CachePriority::NORMAL, meta_mem_usage);
-    *handle = SegmentCacheHandle(_cache.get(), lru_handle);
+    handle->init(_cache.get(), lru_handle);
 }
 
 void SegmentCache::erase(const SegmentCache::CacheKey& key) {
@@ -66,9 +66,12 @@ void SegmentCache::erase(const SegmentCache::CacheKey& key) {
 Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
                                     SegmentCacheHandle* cache_handle, bool use_cache,
                                     bool is_lazy_open, bool disable_file_cache) {
+    if (cache_handle->is_inited()) {
+        return Status::OK();
+    }
+
     SegmentCache::CacheKey cache_key(rowset->rowset_id());
     if (_segment_cache->lookup(cache_key, cache_handle)) {
-        cache_handle->owned = false;
         return Status::OK();
     }
 
@@ -76,20 +79,18 @@ Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
     // Todo: How to handle the space size of lazy open segments in cache
     RETURN_IF_ERROR(rowset->load_segments(&segments, is_lazy_open, disable_file_cache));
 
-    cache_handle->owned = !(use_cache && !disable_file_cache);
     if (use_cache && !disable_file_cache) {
         // memory of SegmentCache::CacheValue will be handled by SegmentCache
         SegmentCache::CacheValue* cache_value = new SegmentCache::CacheValue();
         cache_value->segments = std::move(segments);
         _segment_cache->insert(cache_key, *cache_value, cache_handle);
     } else {
-        cache_handle->segments = std::move(segments);
+        cache_handle->init(std::move(segments));
     }
-
     return Status::OK();
 }
 
-void SegmentLoader::erase_segment(const SegmentCache::CacheKey& key) {
+void SegmentLoader::erase_segments(const SegmentCache::CacheKey& key) {
     _segment_cache->erase(key);
 }
 

@@ -65,6 +65,20 @@ public class MetaServiceProxy {
         return MetaServiceProxy.SingletonHolder.get();
     }
 
+    public SelectdbCloud.GetInstanceResponse getInstance(SelectdbCloud.GetInstanceRequest request)
+            throws RpcException {
+        if (metaServiceHostPort == null) {
+            throw new RpcException("", "cloud mode, please configure cloud_unique_id and meta_service_endpoint");
+        }
+        TNetworkAddress metaAddress = new TNetworkAddress(metaServiceHostPort.first, metaServiceHostPort.second);
+        try {
+            final MetaServiceClient client = getProxy(metaAddress);
+            return client.getInstance(request);
+        } catch (Exception e) {
+            throw new RpcException(metaAddress.hostname, e.getMessage(), e);
+        }
+    }
+
     public void removeProxy(TNetworkAddress address) {
         LOG.warn("begin to remove proxy: {}", address);
         MetaServiceClient service;

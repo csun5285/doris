@@ -36,6 +36,7 @@ import org.apache.doris.system.SystemInfoService;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.selectdb.cloud.proto.SelectdbCloud.InstanceInfoPB;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.base64.Base64;
@@ -71,6 +72,7 @@ public class BaseController {
             UserIdentity currentUser = checkPassword(authInfo);
 
             if (checkAuth) {
+                checkInstanceOverdue(currentUser);
                 checkGlobalAuth(currentUser, PrivPredicate.of(PrivBitSet.of(Privilege.ADMIN_PRIV,
                         Privilege.NODE_PRIV), CompoundPredicate.Operator.OR));
             }
@@ -131,6 +133,11 @@ public class BaseController {
             return null;
         }
 
+        if (checkAuth && !sessionValue.currentUser.isRootUser()
+                && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+            return null;
+        }
+
         updateCookieAge(request, PALO_SESSION_ID, PALO_SESSION_EXPIRED_TIME, response);
 
         ConnectContext ctx = new ConnectContext();
@@ -187,6 +194,13 @@ public class BaseController {
             sb.append("user: ").append(fullUserName).append(", remote ip: ").append(remoteIp);
             sb.append(", password: ").append("********").append(", cluster: ").append(cluster);
             return sb.toString();
+        }
+    }
+
+    protected void checkInstanceOverdue(UserIdentity currentUsr) {
+        if (!currentUsr.isRootUser()
+                && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+            throw new UnauthorizedException("The warehouse is overdue!");
         }
     }
 

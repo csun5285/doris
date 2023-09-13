@@ -768,7 +768,8 @@ Status SegmentIterator::_apply_index_except_leafnode_of_andnode() {
     for (auto pred : _col_preds_except_leafnode_of_andnode) {
         auto column_name = _schema->column(pred->column_id())->name();
         if (!_remaining_conjunct_roots.empty() &&
-            _check_column_pred_all_push_down(column_name, true) &&
+            _check_column_pred_all_push_down(column_name, true,
+                                             pred->type() == PredicateType::MATCH) &&
             !pred->predicate_params()->marked_by_runtime_filter) {
             int32_t unique_id = _schema->unique_id(pred->column_id());
             _need_read_data_indices[unique_id] = false;
@@ -887,7 +888,8 @@ Status SegmentIterator::_apply_inverted_index_on_column_predicate(
         }
 
         auto column_name = _schema->column(pred->column_id())->name();
-        if (_check_column_pred_all_push_down(column_name) &&
+        if (_check_column_pred_all_push_down(column_name, false,
+                                             pred->type() == PredicateType::MATCH) &&
             !pred->predicate_params()->marked_by_runtime_filter) {
             _need_read_data_indices[unique_id] = false;
         }
@@ -954,9 +956,19 @@ bool SegmentIterator::_need_read_data(ColumnId cid) {
         // occurring, return true here that column data needs to be read
         return true;
     }
+    // Check the following conditions:
+    // 1. If the column represented by the unique ID is an inverted index column (indicated by '_need_read_data_indices.count(unique_id) > 0 && !_need_read_data_indices[unique_id]')
+    //    and it's not marked for projection in '_output_columns'.
+    // 2. Or, if the column is an inverted index column and it's marked for projection in '_output_columns',
+    //    and the operation is a push down of the 'COUNT_ON_INDEX' aggregation function.
+    // If any of the above conditions are met, log a debug message indicating that there's no need to read data for the indexed column.
+    // Then, return false.
     int32_t unique_id = _opts.tablet_schema->column(cid).unique_id();
-    if (_need_read_data_indices.count(unique_id) > 0 && !_need_read_data_indices[unique_id] &&
-        _output_columns.count(unique_id) < 1) {
+    if ((_need_read_data_indices.count(unique_id) > 0 && !_need_read_data_indices[unique_id] &&
+         _output_columns.count(unique_id) < 1) ||
+        (_need_read_data_indices.count(unique_id) > 0 && !_need_read_data_indices[unique_id] &&
+         _output_columns.count(unique_id) == 1 &&
+         _opts.push_down_agg_type_opt == TPushAggOp::COUNT_ON_INDEX)) {
         VLOG_DEBUG << "SegmentIterator no need read data for column: "
                    << _opts.tablet_schema->column_by_uid(unique_id).name();
         return false;
@@ -1579,7 +1591,9 @@ Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32
         if (_cur_rowid == 0 || _cur_rowid != range_from) {
             _cur_rowid = range_from;
             _opts.stats->block_first_read_seek_num += 1;
-            SCOPED_RAW_TIMER(&_opts.stats->block_first_read_seek_ns);
+            if (_opts.runtime_state && _opts.runtime_state->enable_profile()) {
+                SCOPED_RAW_TIMER(&_opts.stats->block_first_read_seek_ns);
+            }
             RETURN_IF_ERROR(_seek_columns(_first_read_column_ids, _cur_rowid));
         }
         size_t rows_to_read = range_to - range_from;
@@ -2165,12 +2179,12 @@ Status SegmentIterator::current_block_row_locations(std::vector<RowLocation>* bl
  *                  call _check_column_pred_all_push_down will return false.
 */
 bool SegmentIterator::_check_column_pred_all_push_down(const std::string& column_name,
-                                                       bool in_compound) {
+                                                       bool in_compound, bool is_match) {
     if (_remaining_conjunct_roots.empty()) {
         return true;
     }
 
-    if (in_compound) {
+    if (in_compound || is_match) {
         auto preds_in_remaining_vconjuct = _column_pred_in_remaining_vconjunct[column_name];
         for (auto pred_info : preds_in_remaining_vconjuct) {
             auto column_sign = _gen_predicate_result_sign(&pred_info);

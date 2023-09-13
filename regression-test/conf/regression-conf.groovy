@@ -24,7 +24,13 @@ jdbcUrl = "jdbc:mysql://127.0.0.1:8902/?"
 jdbcUser = "root"
 jdbcPassword = ""
 
-feHttpAddress = "127.0.0.1:8900"
+feSourceThriftAddress = "127.0.0.1:9020"
+feTargetThriftAddress = "127.0.0.1:9020"
+syncerAddress = "127.0.0.1:9190"
+feSyncerUser = "root"
+feSyncerPassword = ""
+
+feHttpAddress = "127.0.0.1:8030"
 feHttpUser = "root"
 feHttpPassword = ""
 
@@ -88,12 +94,32 @@ sk = "xmT2Uoz0vgGkbKr6A4mGWcWCiBVcYJSV"
 s3Region = "ap-hongkong"
 s3Provider = "COS"
 
+// broker load test config
+enableBrokerLoad=true
+ak=""
+sk=""
 
-// enableJdbcTest：开启 jdbc 外表测试，需要启动 MySQL 和 Postgresql 的 container。
-// mysql_57_port 和 pg_14_port 分别对应 MySQL 和 Postgresql 的对外端口，默认为 3316 和 5442。
-// enableHiveTest：开启 hive 外表测试，需要启动 hive 的 container。
-// hms_port 对应 hive metastore 的对外端口，默认为 9183。
-enableEsTest=true
+// jdbc connector test config
+// To enable jdbc test, you need first start mysql/pg container.
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableJdbcTest=false
+mysql_57_port=3316
+pg_14_port=5442
+oracle_11_port=1521
+sqlserver_2022_port=1433
+clickhouse_22_port=8123
+doris_port=9030
+
+// hive catalog test config
+// To enable hive test, you need first start hive container.
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableHiveTest=false
+hms_port=9183
+hdfs_port=8120
+
+// elasticsearch catalog test config
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableEsTest=false
 es_6_port=19200
 es_7_port=29200
 es_8_port=39200
@@ -106,6 +132,38 @@ stageIamBucket = ""
 // used for oss and obs, which does not support external id. Create role (or agency) and use for all instances.
 stageIamRole = ""
 stageIamArn = ""
+
+//hive  catalog test config for bigdata
+enableExternalHiveTest = false
+extHiveHmsHost = "***.**.**.**"
+extHiveHmsPort = 7004
+extHdfsPort = 4007
+extHiveHmsUser = "****"
+extHiveHmsPassword= "***********"
+
+//paimon catalog test config for bigdata
+enableExternalPaimonTest = false
+
+//mysql jdbc connector test config for bigdata
+enableExternalMysqlTest = false
+extMysqlHost = "***.**.**.**"
+extMysqlPort = 3306
+extMysqlUser = "****"
+extMysqlPassword = "***********"
+
+//postgresql jdbc connector test config for bigdata
+enableExternalPgTest = false
+extPgHost = "***.**.**.*"
+extPgPort = 5432
+extPgUser = "****"
+extPgPassword = "***********"
+
+// elasticsearch external test config for bigdata
+enableExternalEsTest = false
+extEsHost = "***********"
+extEsPort = 9200
+extEsUser = "*******"
+extEsPassword = "***********"
 
 // used for cos and s3, which support external id.
 // this is policy arn for s3

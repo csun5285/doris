@@ -84,7 +84,9 @@ public class CloudClusterChecker extends MasterDaemon {
                     newTagMap.put(Tag.CLOUD_CLUSTER_ID, clusterId);
                     newTagMap.put(Tag.CLOUD_CLUSTER_PUBLIC_ENDPOINT, publicEndpoint);
                     newTagMap.put(Tag.CLOUD_CLUSTER_PRIVATE_ENDPOINT, privateEndpoint);
-                    ClusterStatus clusterStatus = remoteClusterIdToPB.get(addId).getClusterStatus();
+                    // For old versions that do no have status field set
+                    ClusterStatus clusterStatus = remoteClusterIdToPB.get(addId).hasClusterStatus()
+                            ? remoteClusterIdToPB.get(addId).getClusterStatus() : ClusterStatus.NORMAL;
                     newTagMap.put(Tag.CLOUD_CLUSTER_STATUS, String.valueOf(clusterStatus));
                     MetricRepo.registerClusterMetrics(clusterName, clusterId);
                     //toAdd.forEach(i -> i.setTagMap(newTagMap));
@@ -189,7 +191,10 @@ public class CloudClusterChecker extends MasterDaemon {
             }
 
             String currentClusterStatus = Env.getCurrentSystemInfo().getCloudStatusById(cid);
-            String newClusterStatus = String.valueOf(cp.getClusterStatus());
+
+            // For old versions that do no have status field set
+            ClusterStatus clusterStatus = cp.hasClusterStatus() ? cp.getClusterStatus() : ClusterStatus.NORMAL;
+            String newClusterStatus = String.valueOf(clusterStatus);
             LOG.debug("current cluster status {} {}", currentClusterStatus, newClusterStatus);
             if (!currentClusterStatus.equals(newClusterStatus)) {
                 // cluster's status changed

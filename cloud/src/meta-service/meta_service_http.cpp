@@ -12,6 +12,7 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
+#include <vector>
 
 #include <optional>
 #include <type_traits>
@@ -225,24 +226,28 @@ static HttpResponse process_create_instance(MetaServiceImpl* service, brpc::Cont
 }
 
 static HttpResponse process_alter_instance(MetaServiceImpl* service, brpc::Controller* ctrl) {
-    static std::unordered_map<std::string_view, AlterInstanceRequest::Operation> operations {
-            {"rename_instance", AlterInstanceRequest::RENAME},
-            {"enable_instance_sse", AlterInstanceRequest::ENABLE_SSE},
-            {"disable_instance_sse", AlterInstanceRequest::DISABLE_SSE},
-            {"drop_instance", AlterInstanceRequest::DROP},
+    static std::unordered_map<std::string_view, std::vector<AlterInstanceRequest::Operation>> operations {
+            {"rename_instance", {AlterInstanceRequest::RENAME}},
+            {"enable_instance_sse", {AlterInstanceRequest::ENABLE_SSE}},
+            {"disable_instance_sse", {AlterInstanceRequest::DISABLE_SSE}},
+            {"drop_instance", {AlterInstanceRequest::DROP}},
+            {"set_instance_status", {AlterInstanceRequest::SET_NORMAL, AlterInstanceRequest::SET_OVERDUE}}
     };
 
     auto& path = ctrl->http_request().unresolved_path();
     auto it = operations.find(remove_version_prefix(path));
     if (it == operations.end()) {
         std::string msg = "not supportted alter instance operation: '" + path +
-                          "', remove version prefix=" + std::string(remove_version_prefix(path));
+                        "', remove version prefix=" + std::string(remove_version_prefix(path));
         return http_json_reply(MetaServiceCode::INVALID_ARGUMENT, msg);
     }
 
     AlterInstanceRequest req;
     PARSE_MESSAGE_OR_RETURN(ctrl, req);
-    req.set_op(it->second);
+    // for unresolve path whose corresponding operation is signal, we need set opreation by ourselves.
+    if ((it->second).size() == 1) {
+        req.set_op((it->second)[0]);
+    }
     AlterInstanceResponse resp;
     service->alter_instance(ctrl, &req, &resp, nullptr);
     return http_json_reply(resp.status());
@@ -401,11 +406,13 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"rename_instance", process_alter_instance},
             {"enable_instance_sse", process_alter_instance},
             {"disable_instance_sse", process_alter_instance},
+            {"set_instance_status", process_alter_instance},
             {"v1/create_instance", process_create_instance},
             {"v1/drop_instance", process_alter_instance},
             {"v1/rename_instance", process_alter_instance},
             {"v1/enable_instance_sse", process_alter_instance},
             {"v1/disable_instance_sse", process_alter_instance},
+            {"v1/set_instance_status", process_alter_instance},
             // for alter obj store info
             {"add_obj_info", process_alter_obj_store_info},
             {"legacy_update_ak_sk", process_alter_obj_store_info},

@@ -341,7 +341,7 @@ Status AggregationNode::prepare_profile(RuntimeState* state) {
     _get_results_timer = ADD_TIMER(runtime_profile(), "GetResultsTime");
     _serialize_data_timer = ADD_TIMER(runtime_profile(), "SerializeDataTime");
     _serialize_result_timer = ADD_TIMER(runtime_profile(), "SerializeResultTime");
-    _deserialize_data_timer = ADD_TIMER(runtime_profile(), "DeserializeDataTime");
+    _deserialize_data_timer = ADD_TIMER(runtime_profile(), "DeserializeAndMergeTime");
     _hash_table_compute_timer = ADD_TIMER(runtime_profile(), "HashTableComputeTime");
     _hash_table_iterate_timer = ADD_TIMER(runtime_profile(), "HashTableIterateTime");
     _insert_keys_to_column_timer = ADD_TIMER(runtime_profile(), "InsertKeysToColumnTime");
@@ -505,6 +505,7 @@ Status AggregationNode::alloc_resource(doris::RuntimeState* state) {
 
     for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
         RETURN_IF_ERROR(_aggregate_evaluators[i]->open(state));
+        _aggregate_evaluators[i]->set_version(state->be_exec_version());
     }
 
     // move _create_agg_status to open not in during prepare,
@@ -685,11 +686,13 @@ Status AggregationNode::_get_without_key_result(RuntimeState* state, Block* bloc
                 }
             }
 
-            ColumnPtr ptr = std::move(columns[i]);
-            // unless `count`, other aggregate function dispose empty set should be null
-            // so here check the children row return
-            ptr = make_nullable(ptr, _children[0]->rows_returned() == 0);
-            columns[i] = std::move(*ptr).mutate();
+            if (column_type->is_nullable() && !data_types[i]->is_nullable()) {
+                ColumnPtr ptr = std::move(columns[i]);
+                // unless `count`, other aggregate function dispose empty set should be null
+                // so here check the children row return
+                ptr = make_nullable(ptr, _children[0]->rows_returned() == 0);
+                columns[i] = ptr->assume_mutable();
+            }
         }
     }
 

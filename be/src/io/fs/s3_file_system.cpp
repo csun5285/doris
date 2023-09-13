@@ -81,6 +81,8 @@
 namespace doris {
 namespace io {
 
+bvar::Adder<uint64_t> s3_file_size_counter("s3_file_system", "file_size");
+
 #ifndef CHECK_S3_CLIENT
 #define CHECK_S3_CLIENT(client)                         \
     if (!client) {                                      \
@@ -339,6 +341,7 @@ Status S3FileSystem::file_size_impl(const Path& file, int64_t* file_size) const 
         return Status::IOError("failed to get file size {}, {}", file.native(),
                                error_msg(key, outcome));
     }
+    s3_file_size_counter << 1;
     return Status::OK();
 }
 

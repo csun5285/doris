@@ -24,7 +24,6 @@ import org.apache.doris.analysis.StorageBackend;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.catalog.OlapTable;
-import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.Reference;
@@ -124,6 +123,7 @@ import com.google.common.collect.Sets;
 import com.google.common.hash.Funnel;
 import com.google.common.hash.Hashing;
 import com.google.common.hash.PrimitiveSink;
+import com.selectdb.cloud.catalog.CloudPartition;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Context;
@@ -155,6 +155,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class Coordinator {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
@@ -2070,7 +2071,7 @@ public class Coordinator {
         }
 
         if (Config.isCloudMode() && Config.enable_cloud_snapshot_version) {
-            createScanRangeForOlapScanNode();
+            setVisibleVersionForOlapScanNode();
         }
 
         Map<TNetworkAddress, Long> assignedBytesPerHost = Maps.newHashMap();
@@ -2315,25 +2316,60 @@ public class Coordinator {
         // TODO: more ranges?
     }
 
-    // In cloud mode, meta read lock is not enough to keep a snapshot of partition versions.
-    // So the OlapScanNode only computes after all scan nodes are collected.
-    private void createScanRangeForOlapScanNode() throws UserException {
-        Map<Long, Long> visibleVersionMap = new HashMap<>();
+    // In cloud mode, meta read lock is not enough to keep a snapshot of the partition versions.
+    // After all scan node are collected, it is possible to gain a snapshot of the partition version.
+    private void setVisibleVersionForOlapScanNode() throws RpcException, UserException {
+        List<Long> dbs = new ArrayList<>();
+        List<Long> tables = new ArrayList<>();
+        List<Long> partitions = new ArrayList<>();
+        Set<Long> partitionSet = new HashSet<>();
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {
                 continue;
             }
+
             OlapScanNode scanNode = (OlapScanNode) node;
             OlapTable table = scanNode.getOlapTable();
             for (Long partitionId : scanNode.getSelectedPartitionIds()) {
-                if (visibleVersionMap.containsKey(partitionId)) {
-                    continue;
+                if (!partitionSet.contains(partitionId)) {
+                    CloudPartition partition = (CloudPartition) table.getPartition(partitionId);
+                    dbs.add(partition.getDbId());
+                    tables.add(table.getId());
+                    partitions.add(partitionId);
                 }
-                Partition partition = table.getPartition(partitionId);
-                Long version = partition.getVisibleVersion();
-                visibleVersionMap.put(partitionId, version);
             }
-            scanNode.createScanRangeLocations(visibleVersionMap);
+        }
+
+        if (partitions.isEmpty()) {
+            return;
+        }
+
+        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(dbs, tables, partitions);
+        assert versions.size() == partitions.size() : "the got num versions is not equals to acquired num versions";
+        if (versions.stream().anyMatch(x -> x <= 0)) {
+            int size = versions.size();
+            for (int i = 0; i < size; ++i) {
+                if (versions.get(i) <= 0) {
+                    LOG.warn("partition {} getVisibleVersion error, the visibleVersion is {}",
+                            partitions.get(i), versions.get(i));
+                    throw new UserException("partition " + partitions.get(i)
+                            + " getVisibleVersion error, the visibleVersion is " + versions.get(i));
+                }
+            }
+        }
+
+        // ATTN: the table ids are ignored here because the both id are allocated from a same id generator.
+        Map<Long, Long> visibleVersionMap = IntStream.range(0, versions.size())
+                .boxed()
+                .collect(Collectors.toMap(partitions::get, versions::get));
+
+        for (ScanNode node : scanNodes) {
+            if (!(node instanceof OlapScanNode)) {
+                continue;
+            }
+
+            OlapScanNode scanNode = (OlapScanNode) node;
+            scanNode.updateScanRangeVersions(visibleVersionMap);
         }
     }
 
@@ -2507,6 +2543,48 @@ public class Coordinator {
                     queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend "
                             + backendExecState.backend.getId() + " is down");
                     return false;
+                }
+
+                if (Config.enable_check_fragment) {
+                    /*
+                    if (!uniqueIds.contains(state.getKey())) {
+                        continue;
+                    }
+                    */
+
+                    // The startup time of BE is earlier than the load start time,
+                    // so there is no need to retry the load task
+                    if (backendExecState.backend.getLastStartTime()
+                            < backendExecState.getInitTsMs() - Config.be_start_time_compensation_ms) {
+                        continue;
+                    }
+
+                    // The startup time of BE is later than the load start time.
+                    // So The load execution fragment on this BE has been lost and
+                    // needs to be retried, otherwise it may wait until the load times out
+                    if (backendExecState.backend.getLastStartTime()
+                            > backendExecState.getInitTsMs() + Config.be_start_time_compensation_ms) {
+                        queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "backend "
+                                + backendExecState.backend.getId() + " restart after exec load");
+                        LOG.warn("backend last start time {} later than coordinator init time {}",
+                                backendExecState.backend.getLastStartTime(),
+                                backendExecState.getInitTsMs());
+                        return false;
+                    }
+
+                    // When the load start time is close to the BE start time (diff
+                    // is less than Config.be_start_time_compensation_ms), it is not accurate
+                    // to judge whether the load needs to be retried based on the BE start time.
+                    // Instead, use the report of be fragment to judge whether the load has failed
+                    long currentTs = System.currentTimeMillis() / 1000;
+                    if (currentTs - backendExecState.getLastUpdateTs() > Config.fragment_report_tolerance_time_sec) {
+                        queryStatus = new Status(TStatusCode.INTERNAL_ERROR, "the fragment of backend "
+                                + backendExecState.backend.getId() + " does not report");
+                        LOG.warn("the fragment of backend {} does not report, current ts {} last report ts {}",
+                                backendExecState.backend.getId(), currentTs,
+                                backendExecState.getLastUpdateTs());
+                        return false;
+                    }
                 }
             }
         }
@@ -2773,6 +2851,8 @@ public class Coordinator {
         Backend backend;
         long lastMissingHeartbeatTime = -1;
         TUniqueId instanceId;
+        long lastUpdateTs = -1;
+        long initTsMs = -1;
 
         public BackendExecState(PlanFragmentId fragmentId, int instanceId, int profileFragmentId,
                                 TExecPlanFragmentParams rpcParams, Map<TNetworkAddress, Long> addressToBackendID,
@@ -2793,6 +2873,16 @@ public class Coordinator {
             this.instanceProfile = new RuntimeProfile(name);
             this.hasCanceled = false;
             this.lastMissingHeartbeatTime = backend.getLastMissingHeartbeatTime();
+            this.lastUpdateTs = System.currentTimeMillis() / 1000;
+            this.initTsMs = System.currentTimeMillis();
+        }
+
+        public long getLastUpdateTs() {
+            return lastUpdateTs;
+        }
+
+        public long getInitTsMs() {
+            return initTsMs;
         }
 
         /**
@@ -2827,6 +2917,8 @@ public class Coordinator {
             if (statsErrorEstimator != null) {
                 statsErrorEstimator.updateExactReturnedRows(params);
             }
+
+            this.lastUpdateTs = System.currentTimeMillis() / 1000;
             return true;
         }
 

@@ -24,6 +24,7 @@ import org.apache.doris.analysis.LiteralExpr;
 import org.apache.doris.analysis.NullLiteral;
 import org.apache.doris.analysis.Queriable;
 import org.apache.doris.analysis.QueryStmt;
+import org.apache.doris.analysis.SelectStmt;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
 import org.apache.doris.analysis.StatementBase;
@@ -71,6 +72,7 @@ import org.apache.doris.thrift.TUniqueId;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.MetricRegistry;
 import com.google.common.base.Strings;
+import com.selectdb.cloud.proto.SelectdbCloud.InstanceInfoPB;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.SpanKind;
@@ -195,6 +197,16 @@ public class ConnectProcessor {
 
     private void handleStmtReset() {
         ctx.getState().setOk();
+    }
+
+    private void handleStmtClose() {
+        packetBuf = packetBuf.order(ByteOrder.LITTLE_ENDIAN);
+        int stmtId = packetBuf.getInt();
+        LOG.debug("close stmt id: {}", stmtId);
+        ConnectContext.get().removePrepareStmt(String.valueOf(stmtId));
+        // No response packet is sent back to the client, see
+        // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_stmt_close.html
+        ctx.getState().setNoop();
     }
 
     private void debugPacket() {
@@ -391,9 +403,25 @@ public class ConnectProcessor {
         } else {
             if (parsedStmt instanceof InsertStmt && !((InsertStmt) parsedStmt).needLoadManager()
                     && ((InsertStmt) parsedStmt).isValuesOrConstantSelect()) {
-                // INSERT INTO VALUES may be very long, so we only log at most 1K bytes.
-                int length = Math.min(1024, origStmt.length());
-                ctx.getAuditEventBuilder().setStmt(origStmt.substring(0, length));
+                // INSERT INTO VALUES may be very long, so we only
+                // log at most Config.insert_stmt_size_limt bytes.
+                String auditStmt;
+                if (origStmt.length() > Config.insert_stmt_size_in_audit_log_limit) {
+                    auditStmt = origStmt.substring(0, Config.insert_stmt_size_in_audit_log_limit);
+                    try {
+                        String info = String.format("; the insert stmt is cut, the total "
+                                + "lines to be loaded is %d",
+                                ((SelectStmt) ((InsertStmt) parsedStmt).getQueryStmt())
+                                    .getValueList().getRows().size());
+                        auditStmt += info;
+                    } catch (Exception e) {
+                        LOG.info("try to get the lines of values of insert stmt, but something erorr "
+                                + "happened, error is {}", e.getMessage());
+                    }
+                } else {
+                    auditStmt = origStmt;
+                }
+                ctx.getAuditEventBuilder().setStmt(auditStmt);
             } else {
                 ctx.getAuditEventBuilder().setStmt(origStmt);
             }
@@ -432,6 +460,15 @@ public class ConnectProcessor {
             ending--;
         }
         String originStmt = new String(bytes, 1, ending, StandardCharsets.UTF_8);
+
+        if (Config.isCloudMode()) {
+            if (!ctx.getCurrentUserIdentity().isRootUser()
+                    && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                Exception exception = new Exception("warehouse is overdue!");
+                handleQueryException(exception, originStmt, null, null);
+                return;
+            }
+        }
 
         String sqlHash = DigestUtils.md5Hex(originStmt);
         ctx.setSqlHash(sqlHash);
@@ -669,8 +706,7 @@ public class ConnectProcessor {
                 handleStmtReset();
                 break;
             case COM_STMT_CLOSE:
-                // TODO
-                handleStmtReset();
+                handleStmtClose();
                 break;
             default:
                 ctx.getState().setError(ErrorCode.ERR_UNKNOWN_COM_ERROR, "Unsupported command(" + command + ")");
@@ -819,6 +855,9 @@ public class ConnectProcessor {
             int idx = request.isSetStmtIdx() ? request.getStmtIdx() : 0;
             executor = new StmtExecutor(ctx, new OriginStatement(request.getSql(), idx), true);
             ctx.setExecutor(executor);
+            if (request.isSetDefaultCatalog()) {
+                ctx.getEnv().changeCatalog(ctx, request.getDefaultCatalog());
+            }
             TUniqueId queryId; // This query id will be set in ctx
             if (request.isSetQueryId()) {
                 queryId = request.getQueryId();

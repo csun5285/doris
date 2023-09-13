@@ -135,7 +135,8 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             TxnCoordinator coordinator, LoadJobSourceType sourceType, long listenerId, long timeoutSecond)
             throws AnalysisException, LabelAlreadyUsedException, BeginTransactionException, DuplicatedRequestException,
             QuotaExceedException, MetaNotFoundException {
-        LOG.info("try to begin transaction.");
+
+        LOG.info("try to begin transaction, dbId: {}, label: {}", dbId, label);
         if (Config.disable_load_job) {
             throw new AnalysisException("disable_load_job is set to true, all load jobs are prevented");
         }
@@ -149,44 +150,57 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 checkValidTimeoutSecond(timeoutSecond, Config.max_load_timeout_second, Config.min_load_timeout_second);
         }
 
-        Preconditions.checkNotNull(coordinator);
-        Preconditions.checkNotNull(label);
-        FeNameFormat.checkLabel(label);
-
-        TxnInfoPB.Builder txnInfoBuilder = TxnInfoPB.newBuilder();
-        txnInfoBuilder.setDbId(dbId);
-        txnInfoBuilder.addAllTableIds(tableIdList);
-        txnInfoBuilder.setLabel(label);
-        txnInfoBuilder.setListenerId(listenerId);
-
-        if (requestId != null) {
-            UniqueIdPB.Builder uniqueIdBuilder = UniqueIdPB.newBuilder();
-            uniqueIdBuilder.setHi(requestId.getHi());
-            uniqueIdBuilder.setLo(requestId.getLo());
-            txnInfoBuilder.setRequestId(uniqueIdBuilder);
-        }
-
-        txnInfoBuilder.setCoordinator(TxnUtil.txnCoordinatorToPb(coordinator));
-        txnInfoBuilder.setLoadJobSourceType(LoadJobSourceTypePB.forNumber(sourceType.value()));
-        txnInfoBuilder.setTimeoutMs(timeoutSecond * 1000);
-        txnInfoBuilder.setPrecommitTimeoutMs(Config.stream_load_default_precommit_timeout_second * 1000);
-
-        final BeginTxnRequest beginTxnRequest = BeginTxnRequest.newBuilder()
-                .setTxnInfo(txnInfoBuilder.build())
-                .setCloudUniqueId(Config.cloud_unique_id)
-                .build();
         BeginTxnResponse beginTxnResponse = null;
-        try {
-            LOG.info("beginTxnRequest: {}", beginTxnRequest);
-            beginTxnResponse = MetaServiceProxy.getInstance().beginTxn(beginTxnRequest);
-            LOG.info("beginTxnResponse: {}", beginTxnResponse);
-        } catch (RpcException e) {
-            LOG.warn("beginTransaction() rpc failed, RpcException= {}", e);
-            throw new BeginTransactionException("beginTransaction() rpc failed, RpcException=" + e.toString());
-        }
+        int retryTime = 0;
 
-        Preconditions.checkNotNull(beginTxnResponse);
-        Preconditions.checkNotNull(beginTxnResponse.getStatus());
+        try {
+            Preconditions.checkNotNull(coordinator);
+            Preconditions.checkNotNull(label);
+            FeNameFormat.checkLabel(label);
+
+            TxnInfoPB.Builder txnInfoBuilder = TxnInfoPB.newBuilder();
+            txnInfoBuilder.setDbId(dbId);
+            txnInfoBuilder.addAllTableIds(tableIdList);
+            txnInfoBuilder.setLabel(label);
+            txnInfoBuilder.setListenerId(listenerId);
+
+            if (requestId != null) {
+                UniqueIdPB.Builder uniqueIdBuilder = UniqueIdPB.newBuilder();
+                uniqueIdBuilder.setHi(requestId.getHi());
+                uniqueIdBuilder.setLo(requestId.getLo());
+                txnInfoBuilder.setRequestId(uniqueIdBuilder);
+            }
+
+            txnInfoBuilder.setCoordinator(TxnUtil.txnCoordinatorToPb(coordinator));
+            txnInfoBuilder.setLoadJobSourceType(LoadJobSourceTypePB.forNumber(sourceType.value()));
+            txnInfoBuilder.setTimeoutMs(timeoutSecond * 1000);
+            txnInfoBuilder.setPrecommitTimeoutMs(Config.stream_load_default_precommit_timeout_second * 1000);
+
+            final BeginTxnRequest beginTxnRequest = BeginTxnRequest.newBuilder()
+                    .setTxnInfo(txnInfoBuilder.build())
+                    .setCloudUniqueId(Config.cloud_unique_id)
+                    .build();
+
+            while (retryTime < Config.meta_service_rpc_retry_times) {
+                LOG.debug("retryTime:{}, beginTxnRequest:{}", retryTime, beginTxnRequest);
+                beginTxnResponse = MetaServiceProxy.getInstance().beginTxn(beginTxnRequest);
+                LOG.debug("retryTime:{}, beginTxnResponse:{}", retryTime, beginTxnResponse);
+
+                if (beginTxnResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+                LOG.info("beginTxn KV_TXN_CONFLICT, retryTime:{}", retryTime);
+                backoff();
+                retryTime++;
+                continue;
+            }
+
+            Preconditions.checkNotNull(beginTxnResponse);
+            Preconditions.checkNotNull(beginTxnResponse.getStatus());
+        } catch (Exception e) {
+            LOG.warn("beginTxn failed, exception:", e);
+            throw new BeginTransactionException("beginTxn failed, errMsg:" + e.getMessage());
+        }
 
         if (beginTxnResponse.getStatus().getCode() != MetaServiceCode.OK) {
             switch (beginTxnResponse.getStatus().getCode()) {
@@ -245,7 +259,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         }
 
         List<OlapTable> mowTableList = getMowTableList(tableList);
-        if (!mowTableList.isEmpty()) {
+        if (!tabletCommitInfos.isEmpty() && !mowTableList.isEmpty()) {
             calcDeleteBitmapForMow(dbId, mowTableList, transactionId, tabletCommitInfos);
         }
 
@@ -268,46 +282,44 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 builder.setCommitAttachment(TxnUtil
                         .rlTaskTxnCommitAttachmentToPb(rlTaskTxnCommitAttachment));
             } else {
-                throw new UserException("Invalid txnCommitAttachment");
+                throw new UserException("invalid txnCommitAttachment");
             }
         }
 
         final CommitTxnRequest commitTxnRequest = builder.build();
         CommitTxnResponse commitTxnResponse = null;
         int retryTime = 0;
-        while (retryTime++ < Config.meta_service_rpc_retry_times) {
-            try {
-                LOG.info("commitTxn, transactionId={}, commitTxnRequest:{}", transactionId, commitTxnRequest);
+
+        try {
+            while (retryTime < Config.meta_service_rpc_retry_times) {
+                LOG.debug("retryTime:{}, commitTxnRequest:{}", retryTime, commitTxnRequest);
                 commitTxnResponse = MetaServiceProxy.getInstance().commitTxn(commitTxnRequest);
-                LOG.info("commitTxn, transactionId={}, commitTxnResponse: {}", transactionId, commitTxnResponse);
+                LOG.debug("retryTime:{}, commitTxnResponse:{}", retryTime, commitTxnResponse);
                 if (commitTxnResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
                     break;
                 }
-            } catch (Exception e) {
-                LOG.warn("ignore commitTxn exception, transactionId={}, retryTime={}", transactionId, retryTime, e);
+                // sleep random [20, 200] ms, avoid txn conflict
+                LOG.info("commitTxn KV_TXN_CONFLICT, transactionId:{}, retryTime:{}", transactionId, retryTime);
+                backoff();
+                retryTime++;
+                continue;
             }
-            // sleep random millis [20, 200] ms, avoid txn conflict
-            int randomMillis = 20 + (int) (Math.random() * (200 - 20));
-            LOG.debug("randomMillis:{}", randomMillis);
-            try {
-                Thread.sleep(randomMillis);
-            } catch (InterruptedException e) {
-                LOG.info("InterruptedException: ", e);
-            }
-        }
 
-        if (commitTxnResponse == null || !commitTxnResponse.hasStatus()) {
-            throw new UserException("internal error, txnid=" + transactionId);
+            Preconditions.checkNotNull(commitTxnResponse);
+            Preconditions.checkNotNull(commitTxnResponse.getStatus());
+        } catch (Exception e) {
+            LOG.warn("commitTxn failed, transactionId:{}, exception:", transactionId, e);
+            throw new UserException("commitTxn() failed, errMsg:" + e.getMessage());
         }
 
         if (commitTxnResponse.getStatus().getCode() != MetaServiceCode.OK
                 && commitTxnResponse.getStatus().getCode() != MetaServiceCode.TXN_ALREADY_VISIBLE) {
-            LOG.warn("commitTxn failed, transactionId={}, for {} times, commitTxnResponse:{}",
+            LOG.warn("commitTxn failed, transactionId:{}, retryTime:{}, commitTxnResponse:{}",
                     transactionId, retryTime, commitTxnResponse);
             StringBuilder internalMsgBuilder =
-                    new StringBuilder("commitTxn failed, transactionId=");
+                    new StringBuilder("commitTxn failed, transactionId:");
             internalMsgBuilder.append(transactionId);
-            internalMsgBuilder.append(" code=");
+            internalMsgBuilder.append(" code:");
             internalMsgBuilder.append(commitTxnResponse.getStatus().getCode());
             throw new UserException("internal error, try later", internalMsgBuilder.toString());
         }
@@ -315,7 +327,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         TransactionState txnState = TxnUtil.transactionStateFromPb(commitTxnResponse.getTxnInfo());
         TxnStateChangeCallback cb = callbackFactory.getCallback(txnState.getCallbackId());
         if (cb != null) {
-            LOG.info("commitTxn, run txn callback, transactionId={} callbackId={}, txnState={}",
+            LOG.info("commitTxn, run txn callback, transactionId:{} callbackId:{}, txnState:{}",
                     txnState.getTransactionId(), txnState.getCallbackId(), txnState);
             cb.afterCommitted(txnState, true);
             cb.afterVisible(txnState, true);
@@ -347,7 +359,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         Map<Long, Set<Long>> tableToPartitions = Maps.newHashMap();
         getPartitionInfo(tableList, tabletCommitInfos, tableToPartitions, partitions, backendToPartitionTablets);
         if (backendToPartitionTablets.isEmpty()) {
-            return;
+            throw new UserException("The partition info is empty, table may be dropped, txnid=" + transactionId);
         }
 
         getDeleteBitmapUpdateLock(tableToPartitions, transactionId);
@@ -588,22 +600,33 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         final AbortTxnRequest abortTxnRequest = builder.build();
         AbortTxnResponse abortTxnResponse = null;
+        int retryTime = 0;
         try {
-            LOG.info("abortTxnRequest:{}", abortTxnRequest);
-            abortTxnResponse = MetaServiceProxy
-                    .getInstance().abortTxn(abortTxnRequest);
-            LOG.info("abortTxnResponse: {}", abortTxnResponse);
+            while (retryTime < Config.meta_service_rpc_retry_times) {
+                LOG.debug("retryTime:{}, abortTxnRequest:{}", retryTime, abortTxnRequest);
+                abortTxnResponse = MetaServiceProxy
+                        .getInstance().abortTxn(abortTxnRequest);
+                LOG.debug("retryTime:{}, abortTxnResponse:{}", retryTime, abortTxnResponse);
+                if (abortTxnResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+                // sleep random [20, 200] ms, avoid txn conflict
+                LOG.info("abortTxn KV_TXN_CONFLICT, transactionId:{}, retryTime:{}", transactionId, retryTime);
+                backoff();
+                retryTime++;
+                continue;
+            }
+            Preconditions.checkNotNull(abortTxnResponse);
+            Preconditions.checkNotNull(abortTxnResponse.getStatus());
         } catch (RpcException e) {
-            throw new UserException(e);
+            LOG.warn("abortTxn failed, transactionId:{}, Exception", transactionId, e);
+            throw new UserException("abortTxn failed, errMsg:" + e.getMessage());
         }
 
-        if (abortTxnResponse.getStatus().getCode() != MetaServiceCode.OK) {
-            throw new UserException(abortTxnResponse.getStatus().getMsg());
-        }
         TransactionState txnState = TxnUtil.transactionStateFromPb(abortTxnResponse.getTxnInfo());
         TxnStateChangeCallback cb = callbackFactory.getCallback(txnState.getCallbackId());
         if (cb != null) {
-            LOG.info("run txn callback, txnId={} callbackId={}", txnState.getTransactionId(),
+            LOG.info("run txn callback, txnId:{} callbackId:{}", txnState.getTransactionId(),
                     txnState.getCallbackId());
             cb.afterAborted(txnState, true, txnState.getReason());
         }
@@ -624,28 +647,40 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         final AbortTxnRequest abortTxnRequest = builder.build();
         AbortTxnResponse abortTxnResponse = null;
-        try {
-            LOG.info("abortTxnRequest:{}", abortTxnRequest);
-            abortTxnResponse = MetaServiceProxy
-                    .getInstance().abortTxn(abortTxnRequest);
-            LOG.info("abortTxnResponse: {}", abortTxnResponse);
-        } catch (RpcException e) {
-            throw new UserException(e);
-        }
+        int retryTime = 0;
 
-        if (abortTxnResponse.getStatus().getCode() != MetaServiceCode.OK) {
-            throw new UserException(abortTxnResponse.getStatus().getMsg());
+        try {
+            while (retryTime < Config.meta_service_rpc_retry_times) {
+                LOG.debug("retyTime:{}, abortTxnRequest:{}", retryTime, abortTxnRequest);
+                abortTxnResponse = MetaServiceProxy
+                        .getInstance().abortTxn(abortTxnRequest);
+                LOG.debug("retryTime:{}, abortTxnResponse:{}", retryTime, abortTxnResponse);
+                if (abortTxnResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+
+                // sleep random [20, 200] ms, avoid txn conflict
+                LOG.info("abortTxn KV_TXN_CONFLICT, dbId:{}, label:{}, retryTime:{}", dbId, label, retryTime);
+                backoff();
+                retryTime++;
+                continue;
+            }
+            Preconditions.checkNotNull(abortTxnResponse);
+            Preconditions.checkNotNull(abortTxnResponse.getStatus());
+        } catch (Exception e) {
+            LOG.warn("abortTxn failed, label:{}, exception:", label, e);
+            throw new UserException("abortTxn failed, errMsg:" + e.getMessage());
         }
 
         TransactionState txnState = TxnUtil.transactionStateFromPb(abortTxnResponse.getTxnInfo());
         TxnStateChangeCallback cb = callbackFactory.getCallback(txnState.getCallbackId());
         if (cb == null) {
-            LOG.info("no callback to run for this txn, txnId={} callbackId={}", txnState.getTransactionId(),
+            LOG.info("no callback to run for this txn, txnId:{} callbackId:{}", txnState.getTransactionId(),
                         txnState.getCallbackId());
             return;
         }
 
-        LOG.info("run txn callback, txnId={} callbackId={}", txnState.getTransactionId(), txnState.getCallbackId());
+        LOG.info("run txn callback, txnId:{} callbackId:{}", txnState.getTransactionId(), txnState.getCallbackId());
         cb.afterAborted(txnState, true, txnState.getReason());
         if (MetricRepo.isInit) {
             MetricRepo.COUNTER_TXN_FAILED.increase(1L);
@@ -656,7 +691,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     public void abortTransaction2PC(Long dbId, long transactionId, List<Table> tableList) throws UserException {
         LOG.info("try to abortTransaction2PC, dbId:{}, transactionId:{}", dbId, transactionId);
         abortTransaction(dbId, transactionId, "User Abort", null);
-        LOG.info(" abortTransaction2PC successfully, dbId:{}, transactionId:{}", dbId, transactionId);
+        LOG.info("abortTransaction2PC successfully, dbId:{}, transactionId:{}", dbId, transactionId);
     }
 
     @Override
@@ -690,6 +725,38 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         builder.setEndTxnId(endTransactionId);
         builder.addAllTableIds(tableIdList);
         builder.setCloudUniqueId(Config.cloud_unique_id);
+
+        final CheckTxnConflictRequest checkTxnConflictRequest = builder.build();
+        CheckTxnConflictResponse checkTxnConflictResponse = null;
+        try {
+            LOG.info("CheckTxnConflictRequest:{}", checkTxnConflictRequest);
+            checkTxnConflictResponse = MetaServiceProxy
+                    .getInstance().checkTxnConflict(checkTxnConflictRequest);
+            LOG.info("CheckTxnConflictResponse: {}", checkTxnConflictResponse);
+        } catch (RpcException e) {
+            throw new AnalysisException(e.getMessage());
+        }
+
+        if (checkTxnConflictResponse.getStatus().getCode() != MetaServiceCode.OK) {
+            throw new AnalysisException(checkTxnConflictResponse.getStatus().getMsg());
+        }
+        return checkTxnConflictResponse.getFinished();
+    }
+
+    public boolean isPreviousNonTimeoutTxnFinished(long endTransactionId, long dbId, List<Long> tableIdList)
+            throws AnalysisException {
+        LOG.info("isPreviousNonTimeoutTxnFinished(), endTransactionId:{}, dbId:{}, tableIdList:{}",
+                endTransactionId, dbId, tableIdList);
+
+        if (endTransactionId <= 0) {
+            throw new AnalysisException("Invaid endTransactionId:" + endTransactionId);
+        }
+        CheckTxnConflictRequest.Builder builder = CheckTxnConflictRequest.newBuilder();
+        builder.setDbId(dbId);
+        builder.setEndTxnId(endTransactionId);
+        builder.addAllTableIds(tableIdList);
+        builder.setCloudUniqueId(Config.cloud_unique_id);
+        builder.setIgnoreTimeoutTxn(true);
 
         final CheckTxnConflictRequest checkTxnConflictRequest = builder.build();
         CheckTxnConflictResponse checkTxnConflictResponse = null;
@@ -935,4 +1002,20 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         throw new MetaNotFoundException("Disallow to call replayBatchRemoveTransactionV2()");
     }
 
+    public boolean isPreviousTransactionsFinished(long endTransactionId, long dbId, long tableId,
+                                                  long partitionId) throws AnalysisException {
+        throw new AnalysisException("Disallow to call isPreviousTransactionsFinished()");
+    }
+
+    /**
+     * backoff policy implement by sleep random ms in [20ms, 200ms]
+     */
+    private void backoff() {
+        int randomMillis = 20 + (int) (Math.random() * (200 - 20));
+        try {
+            Thread.sleep(randomMillis);
+        } catch (InterruptedException e) {
+            LOG.info("InterruptedException: ", e);
+        }
+    }
 }

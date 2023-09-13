@@ -70,6 +70,7 @@ struct TS3StorageParam {
     7: optional i32 conn_timeout_ms = 1000
     8: optional string root_path
     9: optional string bucket
+    10: optional bool use_path_style = false
 }
 
 struct TStoragePolicy {
@@ -103,7 +104,8 @@ enum TCompressionType {
     LZ4 = 4,
     LZ4F = 5,
     ZLIB = 6,
-    ZSTD = 7
+    ZSTD = 7,
+    LZ4HC = 8
 }
 
 
@@ -339,6 +341,7 @@ struct TSnapshotRequest {
     10: optional bool is_copy_tablet_task
     11: optional Types.TVersion start_version
     12: optional Types.TVersion end_version
+    13: optional bool is_copy_binlog
 }
 
 struct TReleaseSnapshotRequest {
@@ -417,16 +420,16 @@ struct TTabletMetaInfo {
     // 4: optional TTabletMetaType Deprecated_meta_type
     5: optional bool is_in_memory
 
-    // 6: optional string Deprecated_storage_policy
     6: optional string storage_policy;
-    7: optional bool is_persistent
-    8: optional i64 storage_policy_id
-    9: optional Types.TReplicaId replica_id
-    10: optional TBinlogConfig binlog_config
-    11: optional string compaction_policy
-    12: optional i64 time_series_compaction_goal_size_mbytes
-    13: optional i64 time_series_compaction_file_count_threshold
-    14: optional i64 time_series_compaction_time_threshold_seconds
+    7: optional i64 storage_policy_id
+    8: optional Types.TReplicaId replica_id
+    9: optional TBinlogConfig binlog_config
+    10: optional string compaction_policy
+    11: optional i64 time_series_compaction_goal_size_mbytes
+    12: optional i64 time_series_compaction_file_count_threshold
+    13: optional i64 time_series_compaction_time_threshold_seconds
+    14: optional bool enable_single_replica_compaction
+    15: optional bool skip_write_index_on_load
 }
 
 struct TUpdateTabletMetaInfoReq {

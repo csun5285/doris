@@ -73,7 +73,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ConnectContext {
     private static final Logger LOG = LogManager.getLogger(ConnectContext.class);
     protected static ThreadLocal<ConnectContext> threadLocalInfo = new ThreadLocal<>();
-    public static boolean isMajorVersionUpgrade = false;
+
     private static final String SSL_PROTOCOL = "TLS";
 
     // set this id before analyze
@@ -274,10 +274,6 @@ public class ConnectContext {
             mysqlChannel = new DummyMysqlChannel();
         }
         sessionVariable = VariableMgr.newSessionVariable();
-        if (connection != null && isMajorVersionUpgrade) {
-            VariableMgr.setGlobalPipelineTask(sessionVariable.parallelExecInstanceNum);
-            sessionVariable = VariableMgr.newSessionVariable();
-        }
         command = MysqlCommand.COM_SLEEP;
         if (Config.use_fuzzy_session_variable) {
             sessionVariable.initFuzzyModeVariables();
@@ -298,6 +294,10 @@ public class ConnectContext {
 
     public void addPreparedStmt(String stmtName, PrepareStmtContext ctx) {
         this.preparedStmtCtxs.put(stmtName, ctx);
+    }
+
+    public void removePrepareStmt(String stmtName) {
+        this.preparedStmtCtxs.remove(stmtName);
     }
 
     public PrepareStmtContext getPreparedStmt(String stmtName) {
@@ -825,7 +825,7 @@ public class ConnectContext {
                 // find a cluster has more than one alive be
                 List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
                 AtomicBoolean hasAliveBe = new AtomicBoolean(false);
-                bes.stream().filter(Backend::isActive).findAny().ifPresent(backend -> {
+                bes.stream().filter(Backend::isAlive).findAny().ifPresent(backend -> {
                     LOG.debug("get a clusterName {}, it's has more than one alive be {}", clusterName, backend);
                     hasAliveBe.set(true);
                 });

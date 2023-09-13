@@ -151,8 +151,13 @@ public:
     virtual std::pair<std::string_view, std::string_view> next() = 0;
 
     /**
+     * Repositions the offset to `pos`
+     */
+    virtual void seek(size_t pos) = 0;
+
+    /**
      * Checks if there are more KVs to be get from the range, caller usually wants
-     * to issue a nother `get` with the last key of this iteration.
+     * to issue another `get` with the last key of this iteration.
      *
      * @return if there are more kvs that this iterator cannot cover
      */
@@ -172,6 +177,11 @@ public:
      * @returns 0 for success otherwise failure
      */
     virtual int reset() = 0;
+
+    /**
+     * Get the begin key of the next iterator if `more()` is true, otherwise returns empty string.
+     */
+    virtual std::string next_begin_key() = 0;
 
     RangeGetIterator(const RangeGetIterator&) = delete;
     RangeGetIterator& operator=(const RangeGetIterator&) = delete;
@@ -291,13 +301,11 @@ public:
 
     std::pair<std::string_view, std::string_view> next() override {
         if (idx_ < 0 || idx_ >= kvs_size_) return {};
-
-        auto inc = [this](int*) { ++idx_; };
-        std::unique_ptr<int, decltype(inc)> defer((int*)0x01, std::move(inc));
-
-        return {{(char*)kvs_[idx_].key, (size_t)kvs_[idx_].key_length},
-                {(char*)kvs_[idx_].value, (size_t)kvs_[idx_].value_length}};
+        auto& kv = kvs_[idx_++];
+        return {{(char*)kv.key, (size_t)kv.key_length}, {(char*)kv.value, (size_t)kv.value_length}};
     }
+
+    void seek(size_t pos) override { idx_ = pos; }
 
     bool has_next() override { return (idx_ < kvs_size_); }
 
@@ -312,6 +320,16 @@ public:
     int reset() override {
         idx_ = 0;
         return 0;
+    }
+
+    std::string next_begin_key() override {
+        std::string k;
+        if (!more()) return k;
+        auto& kv = kvs_[kvs_size_ - 1];
+        k.reserve((size_t)kv.key_length + 1);
+        k.append((char*)kv.key, (size_t)kv.key_length);
+        k.push_back('\x00');
+        return k;
     }
 
     RangeGetIterator(const RangeGetIterator&) = delete;

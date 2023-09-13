@@ -18,6 +18,9 @@
 // clang-format on
 
 namespace selectdb {
+namespace config {
+extern int16_t value_version;
+}
 
 /**
  * This is a naïve implementation of hex, DONOT use it on retical path.
@@ -216,112 +219,98 @@ std::vector<std::string_view> split_string(const std::string_view& str, int n) {
     return substrings;
 }
 
-int remove(const std::string& key, Transaction* txn) {
-    std::string key0 = key;
-    selectdb::encode_int64(0, &key0);
-    std::string key1 = key;
-    selectdb::encode_int64(std::numeric_limits<int64_t>::max(), &key1);
-    VLOG_DEBUG << "remove key_start=" << hex(key0) << " key_end=" << hex(key1);
-    txn->remove(key0, key1);
-    auto ret = txn->commit();
-    if (ret != 0) {
-        std::string msg = ret == -1 ? "KV_TXN_CONFLICT" : "KV_TXN_COMMIT_ERR";
-        LOG(WARNING) << fmt::format("failed to commit kv txn, ret={}, reason={}", ret, msg);
-        return -1;
-    }
-    return 0;
-}
-
-int get(const std::string& key, Transaction* txn, google::protobuf::Message* pb) {
-    int ret = 0;
-    if (txn == nullptr) {
-        LOG(WARNING) << "not give txn";
-        return -1;
-    }
-
-    // give a key prefix, range get key
-    std::string key0 = key;
-    selectdb::encode_int64(0, &key0);
-    std::string key1 = key;
-    selectdb::encode_int64(std::numeric_limits<int64_t>::max(), &key1);
-    std::unique_ptr<RangeGetIterator> it;
+bool ValueBuf::to_pb(google::protobuf::Message* pb) const {
     butil::IOBuf merge;
-    do {
-        ret = txn->get(key0, key1, &it);
-        if (ret != 0) {
-            LOG(WARNING) << "internal error, failed to get instance, ret=" << ret;
-            return -1;
-        }
-
+    for (auto&& it : iters_) {
+        it->reset();
         while (it->has_next()) {
             auto [k, v] = it->next();
-            if (!it->has_next()) {
-                key0 = k;
-            }
-            // merge value to string
-            merge.append(v.data(), v.size());
+            merge.append_user_data((void*)v.data(), v.size(), +[](void*) {});
         }
-        key0.push_back('\x00'); // Update to next smallest key for iteration
-    } while (it->more());
-
-    butil::IOBufAsZeroCopyInputStream merge_stream(merge);
-    if (merge.size() == 0) {
-        LOG(INFO) << "not found key=" << hex(key);
-        return 1;
     }
+    butil::IOBufAsZeroCopyInputStream merge_stream(merge);
+    bool ret = pb->ParseFromZeroCopyStream(&merge_stream);
+    if (!ret) [[unlikely]] {
+        LOG_WARNING("failed to parse to pb");
+    }
+    return ret;
+}
 
-    // string to PB
-    if (!pb->ParseFromZeroCopyStream(&merge_stream)) {
-        LOG(WARNING) << "value deserialize to pb err" << typeid(pb).name();
+void ValueBuf::remove(Transaction* txn) const {
+    for (auto&& it : iters_) {
+        it->reset();
+        while (it->has_next()) {
+            txn->remove(it->next().first);
+        }
+    }
+}
+
+int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
+    iters_.clear();
+    ver_ = -1;
+
+    std::string begin_key {key};
+    std::string end_key {key};
+    encode_int64(INT64_MAX, &end_key);
+    std::unique_ptr<RangeGetIterator> it;
+    if (txn->get(begin_key, end_key, &it, snapshot) != 0) {
         return -1;
     }
-
+    if (!it->has_next()) { // Not found
+        return 1;
+    }
+    // Extract version
+    auto [k, _] = it->next();
+    if (k.size() == key.size()) { // Old version KV
+        DCHECK(k == key) << hex(k) << ' ' << hex(key);
+        DCHECK_EQ(it->size(), 1) << hex(k) << ' ' << hex(key);
+        ver_ = 0;
+    } else {
+        k.remove_prefix(key.size());
+        int64_t suffix;
+        if (decode_int64(&k, &suffix) != 0) [[unlikely]] {
+            LOG_WARNING("failed to decode key").tag("key", hex(k));
+            return -2;
+        }
+        ver_ = suffix >> 56 & 0xff;
+    }
+    bool more = it->more();
+    if (!more) {
+        iters_.push_back(std::move(it));
+        return 0;
+    }
+    begin_key = it->next_begin_key();
+    iters_.push_back(std::move(it));
+    do {
+        if (txn->get(begin_key, end_key, &it, snapshot) != 0) {
+            return -1;
+        }
+        more = it->more();
+        if (more) {
+            begin_key = it->next_begin_key();
+        }
+        iters_.push_back(std::move(it));
+    } while (more);
     return 0;
 }
 
-int put(const std::string& key, Transaction* txn,
-        const google::protobuf::Message& pb, size_t value_limit) {
-    assert(value_limit > 0 && value_limit <= 90 * 1000);
-    int ret = 0;
-    if (txn == nullptr) {
-        LOG(WARNING) << "not give txn";
-        return -1;
-    }
+int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot) {
+    return val->get(txn, key, snapshot);
+}
 
+void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,
+         size_t split_size) {
     std::string value;
-    if (!pb.SerializeToString(&value)) {
-        LOG(WARNING) << "failed to serialize pb to string";
-        return -1;
+    bool ret = pb.SerializeToString(&value); // Always success
+    DCHECK(ret) << hex(key) << ' ' << pb.ShortDebugString();
+    auto split_vec = split_string(value, split_size);
+    int64_t suffix_base = ver;
+    suffix_base <<= 56;
+    for (size_t i = 0; i < split_vec.size(); ++i) {
+        std::string k(key);
+        encode_int64(suffix_base + i, &k);
+        txn->put(k, split_vec[i]);
     }
-
-    // after test, if > 99946, fdb commit error, code=2103 msg=Value length exceeds limit
-    // const int value_limit = 90 * 1000;
-    auto split_vec = split_string(value, value_limit);
-    // LOG(INFO) << "value.size=" << value.size() << " vec=" << split_vec.size();
-    // generate key suffix
-    std::vector<std::string> keys;
-    keys.reserve(split_vec.size());
-    for (int i = 0; i < split_vec.size(); i++) {
-        keys.emplace_back(key);
-        selectdb::encode_int64(i, &keys.back());
-        txn->put(keys.back(), split_vec.at(i));
-        VLOG_DEBUG << "put key=" << hex(keys.back()) << " i=" << i;
-    }
-    // remove not need key, [split_vec.size, max_int_64)
-    std::string remove_key0 = key;
-    selectdb::encode_int64(split_vec.size(), &remove_key0);
-    std::string remove_key1 = key;
-    selectdb::encode_int64(std::numeric_limits<int64_t>::max(), &remove_key1);
-    VLOG_DEBUG << "remove key_start=" << hex(remove_key0) << " key_end=" << hex(remove_key1);
-    txn->remove(remove_key0, remove_key1);
-
-    ret = txn->commit();
-    if (ret != 0) {
-        std::string msg = ret == -1 ? "KV_TXN_CONFLICT" : "KV_TXN_COMMIT_ERR";
-        LOG(WARNING) << fmt::format("failed to commit kv txn, ret={}, reason={}", ret, msg);
-        return -1;
-    }
-    return 0;
 }
 
 } // namespace selectdb

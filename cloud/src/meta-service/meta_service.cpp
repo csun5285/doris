@@ -1011,7 +1011,11 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 return;
             }
             DeleteBitmapUpdateLockPB lock_info;
-            CHECK(lock_info.ParseFromString(lock_val));
+            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                return;
+            }
             if (lock_info.lock_id() != request->txn_id()) {
                 msg = "lock is expired";
                 code = MetaServiceCode::LOCK_EXPIRED;
@@ -1747,6 +1751,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
     std::vector<int64_t> src_table_ids(request->table_ids().begin(), request->table_ids().end());
     std::sort(src_table_ids.begin(), src_table_ids.end());
     std::unique_ptr<RangeGetIterator> it;
+    int64_t skip_timeout_txn_cnt = 0;
+    int total_iteration_cnt = 0;
     do {
         ret = txn->get(begin_txn_run_key, end_txn_run_key, &it, 1000);
         if (ret != 0) {
@@ -1761,7 +1767,10 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
                    << " end_txn_run_val=" << hex(end_txn_run_val)
                    << " it->has_next()=" << it->has_next();
 
+        auto now_time = system_clock::now();
+        uint64_t check_time = duration_cast<milliseconds>(now_time.time_since_epoch()).count();
         while (it->has_next()) {
+            total_iteration_cnt++;
             auto [k, v] = it->next();
             LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k);
             TxnRunningPB running_val_pb;
@@ -1773,6 +1782,12 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
                 LOG(WARNING) << ss.str();
                 return;
             }
+
+            if (running_val_pb.timeout_time() < check_time) {
+                skip_timeout_txn_cnt++;
+                break;
+            }
+
             LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k)
                       << " running_val_pb=" << running_val_pb.ShortDebugString();
             std::vector<int64_t> running_table_ids(running_val_pb.table_ids().begin(),
@@ -1785,6 +1800,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
             result.resize(iter - result.begin());
             if (result.size() > 0) {
                 response->set_finished(false);
+                LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
+                          << " total iteration count: " << total_iteration_cnt;
                 return;
             }
 
@@ -1794,6 +1811,8 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
         }
         begin_txn_run_key.push_back('\x00'); // Update to next smallest key for iteration
     } while (it->more());
+    LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
+              << " total iteration count: " << total_iteration_cnt;
     response->set_finished(true);
 }
 
@@ -1878,10 +1897,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
         cloud_unique_id = request->cloud_unique_id();
     }
 
-    int64_t db_id = request->has_db_id() ? request->db_id() : -1;
-    if (db_id == -1 || request->table_ids_size() == 0 ||
-        request->table_ids_size() != request->partition_ids_size()) {
-        msg = "param error, db_id=" + std::to_string(db_id) +
+    if (request->db_ids_size() == 0 || request->table_ids_size() == 0 ||
+        request->table_ids_size() != request->partition_ids_size() ||
+        request->db_ids_size() != request->partition_ids_size()) {
+        msg = "param error, num db_ids=" + std::to_string(request->db_ids_size()) +
               " num table_ids=" + std::to_string(request->table_ids_size()) +
               " num partition_ids=" + std::to_string(request->partition_ids_size());
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -1907,9 +1926,11 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
 
     size_t num_acquired = request->table_ids_size();
     response->mutable_versions()->Reserve(num_acquired);
+    response->mutable_db_ids()->CopyFrom(request->db_ids());
     response->mutable_table_ids()->CopyFrom(request->table_ids());
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
     for (size_t i = 0; i < num_acquired; ++i) {
+        int64_t db_id = request->db_ids(i);
         int64_t table_id = request->table_ids(i);
         int64_t partition_id = request->partition_ids(i);
         VersionKeyInfo ver_key_info {instance_id, db_id, table_id, partition_id};
@@ -4224,6 +4245,64 @@ void MetaServiceImpl::alter_instance(google::protobuf::RpcController* controller
     case AlterInstanceRequest::REFRESH: {
         ret = resource_mgr_->refresh_instance(request->instance_id());
     } break;
+    case AlterInstanceRequest::SET_OVERDUE: {
+        ret = alter_instance(request, [&request](InstanceInfoPB* instance) {
+            std::string msg;
+
+            if (instance->status() == InstanceInfoPB::DELETED) {
+                msg = "can't set deleted instance to overdue, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            if (instance->status() == InstanceInfoPB::OVERDUE) {
+                msg = "the instance has already set  instance to overdue, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            instance->set_status(InstanceInfoPB::OVERDUE);
+            instance->set_mtime(
+                    duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
+
+            std::string ret = instance->SerializeAsString();
+            if (ret.empty()) {
+                msg = "failed to serialize";
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::PROTOBUF_SERIALIZE_ERR, msg);
+            }
+            LOG(INFO) << "put instance_id=" << request->instance_id()
+                    << "set instance overdue json=" << proto_to_json(*instance);
+            return std::make_pair(MetaServiceCode::OK, ret);
+        });
+    } break;
+    case AlterInstanceRequest::SET_NORMAL: {
+        ret = alter_instance(request, [&request](InstanceInfoPB* instance) {
+            std::string msg;
+
+            if (instance->status() == InstanceInfoPB::DELETED) {
+                msg = "can't set deleted instance to normal, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            if (instance->status() == InstanceInfoPB::NORMAL) {
+                msg = "the instance is already normal, instance_id = " + request->instance_id();
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::INVALID_ARGUMENT, msg);
+            }
+            instance->set_status(InstanceInfoPB::NORMAL);
+            instance->set_mtime(
+                    duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
+
+            std::string ret = instance->SerializeAsString();
+            if (ret.empty()) {
+                msg = "failed to serialize";
+                LOG(WARNING) << msg;
+                return std::make_pair(MetaServiceCode::PROTOBUF_SERIALIZE_ERR, msg);
+            }
+            LOG(INFO) << "put instance_id=" << request->instance_id()
+                    << "set instance normal json=" << proto_to_json(*instance);
+            return std::make_pair(MetaServiceCode::OK, ret);
+        });
+    } break;
     default: {
         ss << "invalid request op, op=" << request->op();
         ret = std::make_pair(MetaServiceCode::INVALID_ARGUMENT, ss.str());
@@ -4242,6 +4321,59 @@ void MetaServiceImpl::alter_instance(google::protobuf::RpcController* controller
         LOG(WARNING) << "notify refresh instance inplace, instance_id=" << request->instance_id();
         run_bthread_work(f);
     }
+}
+
+void MetaServiceImpl::get_instance(google::protobuf::RpcController* controller,
+                                     const ::selectdb::GetInstanceRequest* request,
+                                     ::selectdb::GetInstanceResponse* response,
+                                     ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_instance);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud_unique_id must be given";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
+        return;
+    }
+    RPC_RATE_LIMIT(get_instance);
+    InstanceKeyInfo key_info {instance_id};
+    std::string key;
+    std::string val;
+    instance_key(key_info, &key);
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        LOG(WARNING) << msg << " ret=" << ret;
+        return;
+    }
+    ret = txn->get(key, &val);
+    LOG(INFO) << "get instance_key=" << hex(key);
+
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+
+    InstanceInfoPB instance;
+    if (!instance.ParseFromString(val)) {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse InstanceInfoPB";
+        return;
+    }
+
+    response->mutable_instance()->CopyFrom(instance);
+    return;
 }
 
 std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
@@ -6265,7 +6397,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         code = MetaServiceCode::KV_TXN_GET_ERR;
         return;
     }
-    CHECK(lock_info.ParseFromString(lock_val));
+    if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+        msg = "failed to parse DeleteBitmapUpdateLockPB";
+        return;
+    }
     if (lock_info.lock_id() != request->lock_id()) {
         LOG(WARNING) << "lock is expired, table_id=" << table_id << " key=" << hex(lock_key)
                      << " request lock_id=" << request->lock_id()
@@ -6307,7 +6443,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     // delete delete bitmpap of expired txn
     if (ret == 0) {
         PendingDeleteBitmapPB pending_info;
-        CHECK(pending_info.ParseFromString(pending_val));
+        if (!pending_info.ParseFromString(pending_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse PendingDeleteBitmapPB";
+            return;
+        }
         for (auto& delete_bitmap_key : pending_info.delete_bitmap_keys()) {
             txn->remove(delete_bitmap_key);
             LOG(INFO) << "xxx remove pending delete bitmap, delete_bitmap_key="
@@ -6501,7 +6641,11 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcControl
         using namespace std::chrono;
         int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
         if (ret == 0) {
-            CHECK(lock_info.ParseFromString(lock_val));
+            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                return;
+            }
             if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
                 LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
                           << lock_info.lock_id() << " table_id=" << table_id

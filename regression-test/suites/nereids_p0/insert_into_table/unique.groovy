@@ -22,7 +22,7 @@ suite("nereids_insert_unique") {
     sql 'set enable_nereids_planner=true'
     sql 'set enable_fallback_to_original_planner=false'
     sql 'set enable_nereids_dml=true'
-    sql 'set parallel_fragment_exec_instance_num=13'
+    sql 'set enable_strict_consistency_dml=true'
 
     sql '''insert into uni_t
             select * except(kaint) from src'''
@@ -177,4 +177,10 @@ suite("nereids_insert_unique") {
             select * except(kaint) from src where id is not null'''
     sql 'sync'
     qt_lsc4 'select * from uni_light_sc_mow_not_null_t order by id, kint'
+
+    sql 'alter table uni_light_sc_t rename column ktinyint ktint'
+    sql 'alter table uni_light_sc_mow_t rename column ktinyint ktint'
+    sql 'alter table uni_light_sc_not_null_t rename column ktinyint ktint'
+    sql 'alter table uni_light_sc_mow_not_null_t rename column ktinyint ktint'
+
 }

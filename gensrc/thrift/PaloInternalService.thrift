@@ -228,6 +228,8 @@ struct TQueryOptions {
 
   76: optional bool enable_inverted_index_query = true;
 
+  77: optional bool truncate_char_or_varchar_columns = false
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }
@@ -428,6 +430,8 @@ struct TExecPlanFragmentParams {
 
   // scan node id -> scan range params, only for external file scan
   24: optional map<Types.TPlanNodeId, PlanNodes.TFileScanRangeParams> file_scan_params
+
+  1000: optional bool is_mow_table;
 }
 
 struct TExecPlanFragmentParamsList {
@@ -655,6 +659,8 @@ struct TPipelineFragmentParams {
   28: optional string table_name
   // scan node id -> scan range params, only for external file scan
   29: optional map<Types.TPlanNodeId, PlanNodes.TFileScanRangeParams> file_scan_params
+
+  1000: optional bool is_mow_table;
 }
 
 struct TPipelineFragmentParamsList {

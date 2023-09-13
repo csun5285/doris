@@ -604,22 +604,6 @@ ColumnPtr ColumnVector<T>::index(const IColumn& indexes, size_t limit) const {
     return select_index_impl(*this, indexes, limit);
 }
 
-template <typename T>
-ColumnPtr ColumnVector<T>::create_with_offsets(const IColumn::Offsets64& offsets,
-                                               const Field& default_field, size_t total_rows,
-                                               size_t shift) const {
-    if (offsets.size() + shift != size())
-        LOG(FATAL) << fmt::format(
-                "Incompatible sizes of offsets ({}), shift ({}) and size of column {}",
-                offsets.size(), shift, size());
-    auto res = this->create();
-    auto& res_data = res->get_data();
-    T default_value = safe_get<T>(default_field);
-    res_data.resize_fill(total_rows, default_value);
-    for (size_t i = 0; i < offsets.size(); ++i) res_data[offsets[i]] = data[i + shift];
-    return res;
-}
-
 /// Explicit template instantiations - to avoid code bloat in headers.
 template class ColumnVector<UInt8>;
 template class ColumnVector<UInt16>;

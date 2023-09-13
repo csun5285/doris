@@ -102,7 +102,7 @@ FROM data_source [data_source_properties]
 
     Filter raw data. For a detailed introduction to this part, you can refer to the [Column Mapping, Transformation and Filtering] document.
 
-    Tips: When using dynamic multiple tables, please note that this parameter should be consistent with the type of each dynamic table, otherwise it will result in import failure.
+    Tips: Dynamic multiple tables are not supported.
 
   - `where_predicates`
 
@@ -159,7 +159,7 @@ FROM data_source [data_source_properties]
 
      These three parameters represent:
 
-     1. The maximum execution time of each subtask, in seconds. The range is 5 to 60. Default is 10.
+     1. The maximum execution time of each subtask, in seconds. The range is 1 to 60. Default is 10.
      2. The maximum number of lines read by each subtask. Must be greater than or equal to 200000. The default is 200000.
      3. The maximum number of bytes read by each subtask. The unit is bytes and the range is 100MB to 1GB. The default is 100MB.
 

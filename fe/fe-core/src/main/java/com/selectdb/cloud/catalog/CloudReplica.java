@@ -203,6 +203,9 @@ public class CloudReplica extends Replica {
 
     @Override
     public boolean checkVersionCatchUp(long expectedVersion, boolean ignoreAlter) {
+        // ATTN: expectedVersion is not used here, and OlapScanNode.addScanRangeLocations
+        // depends this feature to implement snapshot partition version. See comments in
+        // OlapScanNode.addScanRangeLocations for deatils.
         if (ignoreAlter && getState() == ReplicaState.ALTER
                 && getVersion() == Partition.PARTITION_INIT_VERSION) {
             return true;

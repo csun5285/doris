@@ -227,9 +227,7 @@ public:
         use by date, datetime, basic type
     */
     void insert_many_fix_len_data(const char* data_ptr, size_t num) override {
-        if constexpr (!std::is_same_v<T, vectorized::Int64>) {
-            insert_many_in_copy_way(data_ptr, num);
-        } else if (IColumn::is_date) {
+        if (IColumn::is_date) {
             insert_date_column(data_ptr, num);
         } else if (IColumn::is_date_time) {
             insert_datetime_column(data_ptr, num);
@@ -487,9 +485,6 @@ public:
     ColumnPtr index(const IColumn& indexes, size_t limit) const override;
 
     bool is_default_at(size_t n) const override { return data[n] == T {}; }
-
-    ColumnPtr create_with_offsets(const IColumn::Offsets64& offsets, const Field& default_field,
-                                  size_t total_rows, size_t shift) const override;
 
 protected:
     Container data;

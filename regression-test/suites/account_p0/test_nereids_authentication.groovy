@@ -28,6 +28,7 @@ suite("test_nereids_authentication", "query") {
     }
 
     sql "set enable_nereids_planner = true"
+    sql "set enable_fallback_to_original_planner = false"
 
     def dbName = "nereids_authentication"
     sql "DROP DATABASE IF EXISTS ${dbName}"
@@ -64,7 +65,7 @@ suite("test_nereids_authentication", "query") {
             fail()
         } catch (Exception e) {
             log.info(e.getMessage())
-            assertTrue(e.getMessage().contains('Permission denied'))
+            assertTrue(e.getMessage().contains('denied to user'))
         }
     }
 
@@ -74,7 +75,7 @@ suite("test_nereids_authentication", "query") {
             fail()
         } catch (Exception e) {
             log.info(e.getMessage())
-            assertTrue(e.getMessage().contains('Permission denied'))
+            assertTrue(e.getMessage().contains('denied to user'))
         }
     }
 

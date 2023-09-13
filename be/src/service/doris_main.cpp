@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
             Status st = doris::io::FileCacheFactory::instance().create_file_cache(
                     cache_path.path, cache_path.init_settings());
             if (!st) {
-                LOG(FATAL) << st;
+                LOG(FATAL) << "failed to init file cache, err: " << st;
                 exit(-1);
             }
         }

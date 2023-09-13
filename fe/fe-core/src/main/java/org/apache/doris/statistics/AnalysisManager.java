@@ -58,6 +58,7 @@ import org.apache.doris.statistics.AnalysisInfo.ScheduleType;
 import org.apache.doris.statistics.util.StatisticsUtil;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.logging.log4j.LogManager;
@@ -179,6 +180,8 @@ public class AnalysisManager extends Daemon implements Writable {
                 }
                 TableName tableName = new TableName(analyzeDBStmt.getCtlIf().getName(), db.getFullName(),
                         table.getName());
+                // columnNames null means to add all visitable columns.
+                // Will get all the visible columns in analyzeTblStmt.check()
                 AnalyzeTblStmt analyzeTblStmt = new AnalyzeTblStmt(analyzeDBStmt.getAnalyzeProperties(), tableName,
                         null, db.getId(), table);
                 try {
@@ -439,6 +442,7 @@ public class AnalysisManager extends Daemon implements Writable {
         Map<String, Set<String>> colToPartitions = validateAndGetPartitions(table, columnNames,
                 partitionNames, analysisType, analysisMode);
         taskInfoBuilder.setColToPartitions(colToPartitions);
+        taskInfoBuilder.setTaskIds(Lists.newArrayList());
 
         return taskInfoBuilder.build();
     }
@@ -511,6 +515,7 @@ public class AnalysisManager extends Daemon implements Writable {
                 AnalysisInfoBuilder indexTaskInfoBuilder = new AnalysisInfoBuilder(jobInfo);
                 AnalysisInfo analysisInfo = indexTaskInfoBuilder.setIndexId(indexId)
                         .setTaskId(taskId).setLastExecTimeInMs(System.currentTimeMillis()).build();
+                jobInfo.addTaskId(taskId);
                 if (isSync) {
                     return;
                 }
@@ -537,6 +542,7 @@ public class AnalysisManager extends Daemon implements Writable {
             AnalysisInfo analysisInfo = colTaskInfoBuilder.setColName(colName).setIndexId(indexId)
                     .setTaskId(taskId).setLastExecTimeInMs(System.currentTimeMillis()).build();
             analysisTasks.put(taskId, createTask(analysisInfo));
+            jobInfo.addTaskId(taskId);
             if (isSync) {
                 continue;
             }
@@ -580,6 +586,7 @@ public class AnalysisManager extends Daemon implements Writable {
         AnalysisInfo analysisInfo = colTaskInfoBuilder.setIndexId(-1L).setLastExecTimeInMs(System.currentTimeMillis())
                 .setTaskId(taskId).setColName("TableRowCount").setExternalTableLevelTask(true).build();
         analysisTasks.put(taskId, createTask(analysisInfo));
+        jobInfo.addTaskId(taskId);
         if (isSync) {
             // For sync job, don't need to persist, return here and execute it immediately.
             return;
@@ -708,7 +715,10 @@ public class AnalysisManager extends Daemon implements Writable {
     }
 
     public String getJobProgress(long jobId) {
-        List<AnalysisInfo> tasks = findTasks(jobId);
+        List<AnalysisInfo> tasks = findTasksByTaskIds(jobId);
+        if (tasks == null) {
+            return "N/A";
+        }
         int finished = 0;
         int failed = 0;
         int inProgress = 0;
@@ -764,6 +774,8 @@ public class AnalysisManager extends Daemon implements Writable {
         }
         if (dropStatsStmt.dropTableRowCount()) {
             StatisticsRepository.dropExternalTableStatistics(tblId);
+            // Table cache key doesn't care about catalog id and db id, because the table id is globally unique.
+            Env.getCurrentEnv().getStatisticsCache().invalidateTableStats(-1, -1, tblId);
         }
     }
 
@@ -862,7 +874,7 @@ public class AnalysisManager extends Daemon implements Writable {
                             return;
                         }
                         try {
-                            task.doExecute();
+                            task.execute();
                             updateSyncTaskStatus(task, AnalysisState.FINISHED);
                         } catch (Throwable t) {
                             colNames.add(task.info.colName);
@@ -919,6 +931,14 @@ public class AnalysisManager extends Daemon implements Writable {
         synchronized (analysisTaskInfoMap) {
             return analysisTaskInfoMap.values().stream().filter(i -> i.jobId == jobId).collect(Collectors.toList());
         }
+    }
+
+    public List<AnalysisInfo> findTasksByTaskIds(long jobId) {
+        AnalysisInfo jobInfo = analysisJobInfoMap.get(jobId);
+        if (jobInfo != null && jobInfo.taskIds != null) {
+            return jobInfo.taskIds.stream().map(id -> analysisTaskInfoMap.get(id)).collect(Collectors.toList());
+        }
+        return null;
     }
 
     public void removeAll(List<AnalysisInfo> analysisInfos) {

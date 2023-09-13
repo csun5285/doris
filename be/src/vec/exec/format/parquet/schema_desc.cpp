@@ -263,7 +263,7 @@ TypeDescriptor FieldDescriptor::convert_to_doris_type(tparquet::LogicalType logi
             }
         }
     } else if (logicalType.__isset.TIME) {
-        type = TypeDescriptor(TYPE_TIMEV2);
+        type = TypeDescriptor(TYPE_TIME);
     } else if (logicalType.__isset.TIMESTAMP) {
         type = TypeDescriptor(TYPE_DATETIMEV2);
         const auto& time_unit = logicalType.TIMESTAMP.unit;
@@ -480,7 +480,7 @@ Status FieldDescriptor::parse_map_field(const std::vector<tparquet::SchemaElemen
     }
     auto& map_key = t_schemas[curr_pos + 2];
     if (!is_required_node(map_key)) {
-        return Status::InvalidArgument("the third level(map key) in map group must be required");
+        LOG(WARNING) << "Filed " << map_schema.name << " is map type, but with nullable key column";
     }
 
     if (map_key_value.num_children == 1) {

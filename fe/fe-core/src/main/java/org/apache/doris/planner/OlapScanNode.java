@@ -25,6 +25,7 @@ import org.apache.doris.analysis.CastExpr;
 import org.apache.doris.analysis.CreateMaterializedViewStmt;
 import org.apache.doris.analysis.DescriptorTable;
 import org.apache.doris.analysis.Expr;
+import org.apache.doris.analysis.FunctionCallExpr;
 import org.apache.doris.analysis.InPredicate;
 import org.apache.doris.analysis.IntLiteral;
 import org.apache.doris.analysis.PartitionNames;
@@ -78,7 +79,6 @@ import org.apache.doris.thrift.TPaloScanRange;
 import org.apache.doris.thrift.TPlanNode;
 import org.apache.doris.thrift.TPlanNodeType;
 import org.apache.doris.thrift.TPrimitiveType;
-import org.apache.doris.thrift.TPushAggOp;
 import org.apache.doris.thrift.TScanRange;
 import org.apache.doris.thrift.TScanRangeLocation;
 import org.apache.doris.thrift.TScanRangeLocations;
@@ -101,7 +101,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -172,7 +171,6 @@ public class OlapScanNode extends ScanNode {
 
     private boolean useTopnOpt = false;
 
-    private TPushAggOp pushDownAggNoGroupingOp = null;
 
     // List of tablets will be scanned by current olap_scan_node
     private ArrayList<Long> scanTabletIds = Lists.newArrayList();
@@ -225,9 +223,6 @@ public class OlapScanNode extends ScanNode {
                                       this.reasonOfPreAggregation + " " + reason;
     }
 
-    public void setPushDownAggNoGrouping(TPushAggOp pushDownAggNoGroupingOp) {
-        this.pushDownAggNoGroupingOp = pushDownAggNoGroupingOp;
-    }
 
     public boolean isPreAggregation() {
         return isPreAggregation;
@@ -360,8 +355,7 @@ public class OlapScanNode extends ScanNode {
             return;
         }
         Expr vconjunct = convertConjunctsToAndCompoundPredicate(conjuncts).replaceSubPredicate(whereExpr);
-        conjuncts = splitAndCompoundPredicateToConjuncts(vconjunct).stream().filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        conjuncts = splitAndCompoundPredicateToConjuncts(vconjunct).stream().collect(Collectors.toList());
     }
 
     /**
@@ -706,8 +700,37 @@ public class OlapScanNode extends ScanNode {
         }
     }
 
-    private void addScanRangeLocations(Long partitionId, Long visibleVersion,
-                                       List<Tablet> tablets) throws UserException {
+    // Update the visible version of the scan range locations.
+    public void updateScanRangeVersions(Map<Long, Long> visibleVersionMap) {
+        Map<Long, TScanRangeLocations> locationsMap = scanRangeLocations.stream()
+                .collect(Collectors.toMap(loc -> loc.getScanRange().getPaloScanRange().getTabletId(), loc -> loc));
+        for (Long partitionId : selectedPartitionIds) {
+            final Partition partition = olapTable.getPartition(partitionId);
+            final MaterializedIndex selectedTable = partition.getIndex(selectedIndexId);
+            final List<Tablet> tablets = selectedTable.getTablets();
+            Long visibleVersion = visibleVersionMap.get(partitionId);
+            assert visibleVersion != null : "the acquried version is not exists in the visible version map";
+            String visibleVersionStr = String.valueOf(visibleVersion);
+            for (Tablet tablet : tablets) {
+                TScanRangeLocations locations = locationsMap.get(tablet.getId());
+                if (locations == null) {
+                    continue;
+                }
+                TPaloScanRange scanRange = locations.getScanRange().getPaloScanRange();
+                scanRange.setVersion(visibleVersionStr);
+            }
+        }
+    }
+
+    private void addScanRangeLocations(Partition partition,
+            List<Tablet> tablets) throws UserException {
+        long visibleVersion = Partition.PARTITION_INIT_VERSION;
+
+        // For cloud mode, set scan range visible version in Coordinator.exec so that we could
+        // assign a snapshot version of all partitions.
+        if (!(Config.isCloudMode() && Config.enable_cloud_snapshot_version)) {
+            visibleVersion = partition.getVisibleVersion();
+        }
         String visibleVersionStr = String.valueOf(visibleVersion);
 
         Set<Tag> allowedTags = Sets.newHashSet();
@@ -727,7 +750,7 @@ public class OlapScanNode extends ScanNode {
                 }
                 if (tabletVersion != visibleVersion) {
                     LOG.warn("tablet {} version {} is not equal to partition {} version {}",
-                            tabletId, tabletVersion, partitionId, visibleVersion);
+                            tabletId, tabletVersion, partition.getId(), visibleVersion);
                     visibleVersion = tabletVersion;
                     visibleVersionStr = String.valueOf(visibleVersion);
                 }
@@ -741,6 +764,9 @@ public class OlapScanNode extends ScanNode {
             paloRange.setTabletId(tabletId);
 
             // random shuffle List && only collect one copy
+            //
+            // ATTN: visibleVersion is not used in cloud mode, see CloudReplica.checkVersionCatchup
+            // for details.
             List<Replica> replicas = tablet.getQueryableReplicas(visibleVersion);
             if (replicas.isEmpty()) {
                 LOG.warn("no queryable replica found in tablet {}. visible version {}", tabletId, visibleVersion);
@@ -914,17 +940,6 @@ public class OlapScanNode extends ScanNode {
 
     @Override
     protected void createScanRangeLocations() throws UserException {
-        // For cloud mode, set scan range in `Coordinator::exec` so that we could assign a
-        // snapshot version of all partitions.
-        if (!(Config.isCloudMode() && Config.enable_cloud_snapshot_version)) {
-            createScanRangeLocations(null);
-        }
-    }
-
-    /// Create scan range locations.
-    ///
-    /// This method will acquire partition version directly, If the visibleVersionMap is null.
-    public void createScanRangeLocations(Map<Long, Long> visibleVersionMap) throws UserException {
         scanRangeLocations = Lists.newArrayList();
         if (selectedPartitionIds.size() == 0) {
             desc.setCardinality(0);
@@ -933,7 +948,7 @@ public class OlapScanNode extends ScanNode {
         Preconditions.checkState(selectedIndexId != -1);
         // compute tablet info by selected index id and selected partition ids
         long start = System.currentTimeMillis();
-        computeTabletInfo(visibleVersionMap);
+        computeTabletInfo();
         LOG.debug("distribution prune cost: {} ms", (System.currentTimeMillis() - start));
     }
 
@@ -1023,7 +1038,7 @@ public class OlapScanNode extends ScanNode {
         return this.pointQueryEqualPredicats != null;
     }
 
-    private void computeTabletInfo(Map<Long, Long> visibleVersionMap) throws UserException {
+    private void computeTabletInfo() throws UserException {
         /**
          * The tablet info could be computed only once.
          * So the scanBackendIds should be empty in the beginning.
@@ -1058,16 +1073,7 @@ public class OlapScanNode extends ScanNode {
 
             totalTabletsNum += selectedTable.getTablets().size();
             selectedTabletsNum += tablets.size();
-
-            Long visibleVersion;
-            if (visibleVersionMap != null) {
-                visibleVersion = visibleVersionMap.get(partitionId);
-                assert visibleVersion != null : "the acquried version is not exists in the visible version map";
-            } else {
-                assert !(Config.isCloudMode() && Config.enable_cloud_snapshot_version);
-                visibleVersion = partition.getVisibleVersion();
-            }
-            addScanRangeLocations(partitionId, visibleVersion, tablets);
+            addScanRangeLocations(partition, tablets);
         }
     }
 
@@ -1144,7 +1150,7 @@ public class OlapScanNode extends ScanNode {
         scanTabletIds.clear();
         bucketSeq2locations.clear();
         try {
-            createScanRangeLocations(null);
+            createScanRangeLocations();
         } catch (AnalysisException e) {
             throw new UserException(e.getMessage());
         }
@@ -1303,33 +1309,12 @@ public class OlapScanNode extends ScanNode {
         return shouldColoScan;
     }
 
-    public void getColumnDesc(List<TColumn> columnsDesc, List<String> keyColumnNames,
-                        List<TPrimitiveType> keyColumnTypes) {
-        if (selectedIndexId != -1) {
-            for (Column col : olapTable.getSchemaByIndexId(selectedIndexId, true)) {
-                TColumn tColumn = col.toThrift();
-                col.setIndexFlag(tColumn, olapTable);
-                if (columnsDesc != null) {
-                    columnsDesc.add(tColumn);
-                }
-                if ((Util.showHiddenColumns() || (!Util.showHiddenColumns() && col.isVisible())) && col.isKey()) {
-                    if (keyColumnNames != null) {
-                        keyColumnNames.add(col.getName());
-                    }
-                    if (keyColumnTypes != null) {
-                        keyColumnTypes.add(col.getDataType().toThrift());
-                    }
-                }
-            }
-        }
-    }
-
     @Override
     protected void toThrift(TPlanNode msg) {
         List<String> keyColumnNames = new ArrayList<String>();
         List<TPrimitiveType> keyColumnTypes = new ArrayList<TPrimitiveType>();
         List<TColumn> columnsDesc = new ArrayList<TColumn>();
-        getColumnDesc(columnsDesc, keyColumnNames, keyColumnTypes);
+        olapTable.getColumnDesc(selectedIndexId, columnsDesc, keyColumnNames, keyColumnTypes);
         List<TOlapTableIndex> indexDesc = Lists.newArrayList();
 
         // Add extra row id column
@@ -1381,9 +1366,10 @@ public class OlapScanNode extends ScanNode {
         msg.olap_scan_node.setTableName(olapTable.getName());
         msg.olap_scan_node.setEnableUniqueKeyMergeOnWrite(olapTable.getEnableUniqueKeyMergeOnWrite());
 
-        if (pushDownAggNoGroupingOp != null) {
-            msg.olap_scan_node.setPushDownAggTypeOpt(pushDownAggNoGroupingOp);
-        }
+        msg.setPushDownAggTypeOpt(pushDownAggNoGroupingOp);
+
+        msg.olap_scan_node.setPushDownAggTypeOpt(pushDownAggNoGroupingOp);
+        // In TOlapScanNode , pushDownAggNoGroupingOp field is deprecated.
 
         if (outputColumnUniqueIds != null) {
             msg.olap_scan_node.setOutputColumnUniqueIds(outputColumnUniqueIds);
@@ -1598,4 +1584,32 @@ public class OlapScanNode extends ScanNode {
                 olapTable.getId(), selectedIndexId == -1 ? olapTable.getBaseIndexId() : selectedIndexId,
                 scanReplicaIds);
     }
+
+    @Override
+    public boolean pushDownAggNoGrouping(FunctionCallExpr aggExpr) {
+        KeysType type = getOlapTable().getKeysType();
+        if (type == KeysType.UNIQUE_KEYS || type == KeysType.PRIMARY_KEYS) {
+            return false;
+        }
+
+        String aggFunctionName = aggExpr.getFnName().getFunction();
+        if (aggFunctionName.equalsIgnoreCase("COUNT") && type != KeysType.DUP_KEYS) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public boolean pushDownAggNoGroupingCheckCol(FunctionCallExpr aggExpr, Column col) {
+        KeysType type = getOlapTable().getKeysType();
+
+        // The value column of the agg does not support zone_map index.
+        if (type == KeysType.AGG_KEYS && !col.isKey()) {
+            return false;
+        }
+
+        return true;
+    }
 }
+

@@ -61,6 +61,7 @@
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "common/exception.h"
 #include "common/status.h"
+#include "io/fs/local_file_system.h"
 #include "io/fs/stream_load_pipe.h"
 #include "io/io_common.h"
 #include "olap/data_dir.h"
@@ -115,12 +116,12 @@
 #include "vec/core/block.h"
 #include "vec/core/column_with_type_and_name.h"
 #include "vec/data_types/data_type.h"
+#include "vec/exec/format/avro//avro_jni_reader.h"
 #include "vec/exec/format/csv/csv_reader.h"
 #include "vec/exec/format/generic_reader.h"
 #include "vec/exec/format/json/new_json_reader.h"
 #include "vec/exec/format/orc/vorc_reader.h"
 #include "vec/exec/format/parquet/vparquet_reader.h"
-#include "vec/exec/scan/avro_jni_reader.h"
 #include "vec/jsonb/serialize.h"
 #include "vec/runtime/vdata_stream_mgr.h"
 
@@ -177,7 +178,7 @@ template <typename T>
 concept CanCancel = requires(T* response) { response->mutable_status(); };
 
 template <CanCancel T>
-void offer_failed(T* response, google::protobuf::Closure* done, const PriorityThreadPool& pool) {
+void offer_failed(T* response, google::protobuf::Closure* done, const FifoThreadPool& pool) {
     brpc::ClosureGuard closure_guard(done);
     response->mutable_status()->set_status_code(TStatusCode::CANCELLED);
     response->mutable_status()->add_error_msgs("fail to offer request to the work pool, pool=" +
@@ -185,7 +186,7 @@ void offer_failed(T* response, google::protobuf::Closure* done, const PriorityTh
 }
 
 template <typename T>
-void offer_failed(T* response, google::protobuf::Closure* done, const PriorityThreadPool& pool) {
+void offer_failed(T* response, google::protobuf::Closure* done, const FifoThreadPool& pool) {
     brpc::ClosureGuard closure_guard(done);
     LOG(WARNING) << "fail to offer request to the work pool, pool=" << pool.get_info();
 }
@@ -283,6 +284,7 @@ void PInternalServiceImpl::tablet_writer_open(google::protobuf::RpcController* c
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -295,6 +297,7 @@ void PInternalServiceImpl::exec_plan_fragment(google::protobuf::RpcController* c
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -331,6 +334,7 @@ void PInternalServiceImpl::exec_plan_fragment_prepare(google::protobuf::RpcContr
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -347,6 +351,7 @@ void PInternalServiceImpl::exec_plan_fragment_start(google::protobuf::RpcControl
     });
     if (!ret) {
         offer_failed(result, done, _light_work_pool);
+        return;
     }
 }
 
@@ -359,6 +364,7 @@ void PInternalServiceImpl::tablet_writer_add_block(google::protobuf::RpcControll
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -380,6 +386,7 @@ void PInternalServiceImpl::tablet_writer_add_block_by_http(
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -409,6 +416,7 @@ void PInternalServiceImpl::_tablet_writer_add_block(google::protobuf::RpcControl
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -430,6 +438,7 @@ void PInternalServiceImpl::tablet_writer_cancel(google::protobuf::RpcController*
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -507,6 +516,7 @@ void PInternalServiceImpl::cancel_plan_fragment(google::protobuf::RpcController*
     });
     if (!ret) {
         offer_failed(result, done, _light_work_pool);
+        return;
     }
 }
 
@@ -520,6 +530,7 @@ void PInternalServiceImpl::fetch_data(google::protobuf::RpcController* controlle
     });
     if (!ret) {
         offer_failed(result, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -568,6 +579,8 @@ void PInternalServiceImpl::fetch_table_schema(google::protobuf::RpcController* c
         case TFileFormatType::FORMAT_CSV_GZ:
         case TFileFormatType::FORMAT_CSV_BZ2:
         case TFileFormatType::FORMAT_CSV_LZ4FRAME:
+        case TFileFormatType::FORMAT_CSV_LZ4BLOCK:
+        case TFileFormatType::FORMAT_CSV_SNAPPYBLOCK:
         case TFileFormatType::FORMAT_CSV_LZOP:
         case TFileFormatType::FORMAT_CSV_DEFLATE: {
             // file_slots is no use
@@ -624,6 +637,7 @@ void PInternalServiceImpl::fetch_table_schema(google::protobuf::RpcController* c
     });
     if (!ret) {
         offer_failed(result, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -651,6 +665,7 @@ void PInternalServiceImpl::tablet_fetch_data(google::protobuf::RpcController* co
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -663,6 +678,7 @@ void PInternalServiceImpl::get_column_ids_by_tablet_ids(google::protobuf::RpcCon
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -676,7 +692,7 @@ void PInternalServiceImpl::_get_column_ids_by_tablet_ids(
     for (const auto& param : params) {
         int64_t index_id = param.indexid();
         auto tablet_ids = param.tablet_ids();
-        std::set<std::vector<int32_t>> filter_set;
+        std::set<std::set<int32_t>> filter_set;
         for (const int64_t tablet_id : tablet_ids) {
             TabletSharedPtr tablet = tablet_mgr->get_tablet(tablet_id);
             if (tablet == nullptr) {
@@ -689,9 +705,10 @@ void PInternalServiceImpl::_get_column_ids_by_tablet_ids(
             }
             // check schema consistency, column ids should be the same
             const auto& columns = tablet->tablet_schema()->columns();
-            std::vector<int32_t> column_ids(columns.size());
-            std::transform(columns.begin(), columns.end(), column_ids.begin(),
-                           [](const TabletColumn& c) { return c.unique_id(); });
+            std::set<int32_t> column_ids;
+            for (const auto& col : columns) {
+                column_ids.insert(col.unique_id());
+            }
             filter_set.insert(column_ids);
         }
         if (filter_set.size() > 1) {
@@ -779,6 +796,7 @@ void PInternalServiceImpl::get_info(google::protobuf::RpcController* controller,
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -791,6 +809,7 @@ void PInternalServiceImpl::update_cache(google::protobuf::RpcController* control
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -803,6 +822,7 @@ void PInternalServiceImpl::fetch_cache(google::protobuf::RpcController* controll
     });
     if (!ret) {
         offer_failed(result, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -815,6 +835,7 @@ void PInternalServiceImpl::clear_cache(google::protobuf::RpcController* controll
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -834,6 +855,7 @@ void PInternalServiceImpl::merge_filter(::google::protobuf::RpcController* contr
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -855,6 +877,7 @@ void PInternalServiceImpl::apply_filter(::google::protobuf::RpcController* contr
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -876,6 +899,7 @@ void PInternalServiceImpl::apply_filterv2(::google::protobuf::RpcController* con
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -909,6 +933,7 @@ void PInternalServiceImpl::send_data(google::protobuf::RpcController* controller
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -932,6 +957,7 @@ void PInternalServiceImpl::commit(google::protobuf::RpcController* controller,
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -954,6 +980,7 @@ void PInternalServiceImpl::rollback(google::protobuf::RpcController* controller,
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -972,6 +999,7 @@ void PInternalServiceImpl::fold_constant_expr(google::protobuf::RpcController* c
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -993,12 +1021,20 @@ void PInternalServiceImpl::transmit_block(google::protobuf::RpcController* contr
                                           google::protobuf::Closure* done) {
     int64_t receive_time = GetCurrentTimeNanos();
     response->set_receive_time(receive_time);
-    PriorityThreadPool& pool = request->has_block() ? _heavy_work_pool : _light_work_pool;
+
+    if (!request->has_block() && config::brpc_light_work_pool_threads == -1) {
+        // under high concurrency, thread pool will have a lot of lock contention.
+        _transmit_block(controller, request, response, done, Status::OK());
+        return;
+    }
+
+    FifoThreadPool& pool = request->has_block() ? _heavy_work_pool : _light_work_pool;
     bool ret = pool.try_offer([this, controller, request, response, done]() {
         _transmit_block(controller, request, response, done, Status::OK());
     });
     if (!ret) {
         offer_failed(response, done, pool);
+        return;
     }
 }
 
@@ -1017,6 +1053,7 @@ void PInternalServiceImpl::transmit_block_by_http(google::protobuf::RpcControlle
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -1083,6 +1120,7 @@ void PInternalServiceImpl::check_rpc_channel(google::protobuf::RpcController* co
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -1121,6 +1159,7 @@ void PInternalServiceImpl::reset_rpc_channel(google::protobuf::RpcController* co
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -1137,6 +1176,7 @@ void PInternalServiceImpl::hand_shake(google::protobuf::RpcController* controlle
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
     }
 }
 
@@ -1355,6 +1395,7 @@ void PInternalServiceImpl::request_slave_tablet_pull_rowset(
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
     Status::OK().to_protobuf(response->mutable_status());
 }
@@ -1426,6 +1467,7 @@ void PInternalServiceImpl::response_slave_tablet_pull_rowset(
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -1610,6 +1652,7 @@ void PInternalServiceImpl::multiget_data(google::protobuf::RpcController* contro
     });
     if (!ret) {
         offer_failed(response, done, _heavy_work_pool);
+        return;
     }
 }
 
@@ -1689,6 +1732,28 @@ void PInternalServiceImpl::get_file_cache_meta_by_tablet_id(
                     }
                 });
             });
+}
+
+void PInternalServiceImpl::glob(google::protobuf::RpcController* controller,
+                                const PGlobRequest* request, PGlobResponse* response,
+                                google::protobuf::Closure* done) {
+    bool ret = _heavy_work_pool.try_offer([request, response, done]() {
+        brpc::ClosureGuard closure_guard(done);
+        std::vector<io::FileInfo> files;
+        Status st = io::global_local_filesystem()->safe_glob(request->pattern(), &files);
+        if (st.ok()) {
+            for (auto& file : files) {
+                PGlobResponse_PFileInfo* pfile = response->add_files();
+                pfile->set_file(file.file_name);
+                pfile->set_size(file.file_size);
+            }
+        }
+        st.to_protobuf(response->mutable_status());
+    });
+    if (!ret) {
+        offer_failed(response, done, _heavy_work_pool);
+        return;
+    }
 }
 
 } // namespace doris

@@ -122,6 +122,8 @@ enum TFileFormatType {
     FORMAT_JSON_LZOP,
     FORMAT_JSON_DEFLATE,
     FORMAT_AVRO,
+    FORMAT_CSV_LZ4BLOCK,
+    FORMAT_CSV_SNAPPYBLOCK,
 }
 
 // In previous versions, the data compression format and file format were stored together, as TFileFormatType,
@@ -138,6 +140,8 @@ enum TFileCompressType {
     LZ4FRAME,
     DEFLATE,
     LZOP,
+    LZ4BLOCK,
+    SNAPPYBLOCK
 }
 
 struct THdfsConf {
@@ -249,7 +253,10 @@ struct TEsScanRange {
 struct TFileTextScanRangeParams {
     1: optional string column_separator;
     2: optional string line_delimiter;
-    3: optional string array_delimiter;
+    3: optional string collection_delimiter;// array ,map ,struct delimiter 
+    4: optional string mapkv_delimiter;
+    5: optional i8 enclose;
+    6: optional i8 escape;
 }
 
 struct TFileScanSlotInfo {
@@ -627,7 +634,8 @@ enum TPushAggOp {
 	NONE = 0,
 	MINMAX = 1,
 	COUNT = 2,
-	MIX = 3
+	MIX = 3,
+	COUNT_ON_INDEX = 4
 }
 
 struct TOlapScanNode {
@@ -644,7 +652,7 @@ struct TOlapScanNode {
   // It's limit for scanner instead of scanNode so we add a new limit.
   10: optional i64 sort_limit
   11: optional bool enable_unique_key_merge_on_write
-  12: optional TPushAggOp push_down_agg_type_opt
+  12: optional TPushAggOp push_down_agg_type_opt //Deprecated
   13: optional bool use_topn_opt
   14: optional list<Descriptors.TOlapTableIndex> indexes_desc
   15: optional set<i32> output_column_unique_ids
@@ -1150,6 +1158,10 @@ struct TPlanNode {
   46: optional TNestedLoopJoinNode nested_loop_join_node
   47: optional TTestExternalScanNode test_external_scan_node
 
+  48: optional TPushAggOp push_down_agg_type_opt
+
+  49: optional i64 push_down_count
+  
   101: optional list<Exprs.TExpr> projections
   102: optional Types.TTupleId output_tuple_id
   103: optional TPartitionSortNode partition_sort_node
