@@ -134,9 +134,9 @@ private:
     }
 
     void string_to_json(const char* str, size_t len) {
-        os_.put('"');
+        // os_.put('"');
         if (nullptr == str) {
-            os_.put('"');
+            // os_.put('"');
             return;
         }
         char char_buffer[16];
@@ -176,7 +176,7 @@ private:
                 }
             }
         }
-        os_.put('"');
+        // os_.put('"');
     }
 
     // convert object
