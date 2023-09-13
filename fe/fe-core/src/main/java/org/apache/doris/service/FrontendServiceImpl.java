@@ -1817,16 +1817,17 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             ctx.setQualifiedUser(request.getUser());
             ctx.setRemoteIP(request.getUserIp());
             String fullUserName = ClusterNamespace.getFullName(SystemInfoService.DEFAULT_CLUSTER, request.getUser());
-
-            List<UserIdentity> currentUser = Lists.newArrayList();
-            try {
-                Env.getCurrentEnv().getAuth().checkPlainPassword(fullUserName,
-                        request.getUserIp(), request.getPasswd(), currentUser);
-            } catch (AuthenticationException e) {
-                throw new UserException(e.formatErrMsg());
+            if (fullUserName != null) {
+                List<UserIdentity> currentUser = Lists.newArrayList();
+                try {
+                    Env.getCurrentEnv().getAuth().checkPlainPassword(fullUserName,
+                            request.getUserIp(), request.getPasswd(), currentUser);
+                } catch (AuthenticationException e) {
+                    throw new UserException(e.formatErrMsg());
+                }
+                Preconditions.checkState(currentUser.size() == 1);
+                ctx.setCurrentUserIdentity(currentUser.get(0));
             }
-            Preconditions.checkState(currentUser.size() == 1);
-            ctx.setCurrentUserIdentity(currentUser.get(0));
 
             LOG.info("stream load use cloud cluster {}", request.getCloudCluster());
             if (Strings.isNullOrEmpty(request.getCloudCluster())) {
