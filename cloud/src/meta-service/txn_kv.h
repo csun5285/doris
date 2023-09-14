@@ -51,7 +51,7 @@ public:
 
     /**
      * @param snapshot if true, `key` will not be included in txn conflict detection this time
-     * @return 0 for success get a key, 1 for key not found, negative for error
+     * @return 0 for success get a key, 1 for key not found, -2 for txn too old, other negative values for error
      */
     virtual int get(std::string_view key, std::string* val, bool snapshot = false) = 0;
 

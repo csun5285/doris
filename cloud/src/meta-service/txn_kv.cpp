@@ -227,7 +227,8 @@ int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_error err=" << fdb_get_error(err)
                      << " key=" << hex(key);
-        return -2;
+        // txn too old == 1007
+        return err == 1007 ? -2 : -3;
     }
 
     fdb_bool_t found;

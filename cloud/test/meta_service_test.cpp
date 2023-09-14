@@ -2875,5 +2875,48 @@ TEST(MetaServiceTest, BatchGetVersion) {
     }
 }
 
+TEST(MetaServiceTest, BatchGetVersionFallback) {
+    constexpr size_t N = 100;
+    size_t i = 0;
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("batch_get_version_ret", [&](void* args) {
+        if (i++ == N / 10) {
+            *reinterpret_cast<int*>(args) = -2;
+        }
+    });
+
+    sp->enable_processing();
+
+    auto service = get_meta_service();
+    for (int64_t i = 1; i <= N; ++i) {
+        create_tablet(service.get(), 1, 1, i, i);
+        insert_rowset(service.get(), 1, std::to_string(i), 1, i, i);
+    }
+
+    brpc::Controller ctrl;
+    GetVersionRequest req;
+    req.set_cloud_unique_id("test_cloud_unique_id");
+    req.set_db_id(-1);
+    req.set_table_id(-1);
+    req.set_partition_id(-1);
+    req.set_batch_mode(true);
+    for (size_t i = 1; i <= N; ++i) {
+        req.add_db_ids(1);
+        req.add_table_ids(1);
+        req.add_partition_ids(i);
+    }
+
+    GetVersionResponse resp;
+    service->get_version(&ctrl, &req, &resp, nullptr);
+
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::OK)
+            << "case " << i << " status is " << resp.status().msg()
+            << ", code=" << resp.status().code();
+
+    ASSERT_EQ(resp.versions_size(), N);
+}
+
 } // namespace selectdb
 // vim: et tw=100 ts=4 sw=4 cc=80:
