@@ -1916,46 +1916,54 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
         return;
     }
 
-    std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        msg = "failed to create txn";
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
-        return;
-    }
-
-    size_t num_acquired = request->table_ids_size();
+    size_t num_acquired = request->partition_ids_size();
     response->mutable_versions()->Reserve(num_acquired);
     response->mutable_db_ids()->CopyFrom(request->db_ids());
     response->mutable_table_ids()->CopyFrom(request->table_ids());
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
-    for (size_t i = 0; i < num_acquired; ++i) {
-        int64_t db_id = request->db_ids(i);
-        int64_t table_id = request->table_ids(i);
-        int64_t partition_id = request->partition_ids(i);
-        VersionKeyInfo ver_key_info {instance_id, db_id, table_id, partition_id};
-        std::string ver_key;
-        version_key(ver_key_info, &ver_key);
 
-        // TODO(walter) support batch get.
-        std::string ver_val;
-        ret = txn->get(ver_key, &ver_val, true);
-        LOG(INFO) << "xxx get version_key=" << hex(ver_key);
-        if (ret == 0) {
-            VersionPB version_pb;
-            if (!version_pb.ParseFromString(ver_val)) {
-                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-                msg = "malformed version value";
+    while (code == MetaServiceCode::OK &&
+            response->versions_size() < response->partition_ids_size()) {
+        std::unique_ptr<Transaction> txn;
+        ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            msg = "failed to create txn";
+            code = MetaServiceCode::KV_TXN_CREATE_ERR;
+            break;
+        }
+        for (size_t i = response->versions_size(); i < num_acquired; ++i) {
+            int64_t db_id = request->db_ids(i);
+            int64_t table_id = request->table_ids(i);
+            int64_t partition_id = request->partition_ids(i);
+            std::string ver_key = version_key({instance_id, db_id, table_id, partition_id});
+
+            // TODO(walter) support batch get.
+            std::string ver_val;
+            ret = txn->get(ver_key, &ver_val, true);
+            TEST_SYNC_POINT_CALLBACK("batch_get_version_ret", &ret);
+            LOG(INFO) << "xxx get version_key=" << hex(ver_key);
+            if (ret == 0) {
+                VersionPB version_pb;
+                if (!version_pb.ParseFromString(ver_val)) {
+                    code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                    msg = "malformed version value";
+                    break;
+                }
+                response->add_versions(version_pb.version());
+            } else if (ret == 1) {
+                // return -1 if the target version is not exists.
+                response->add_versions(-1);
+            } else if (ret == -2) {
+                // txn too old, fallback to non-snapshot versions.
+                LOG(WARNING) << "batch_get_version execution time exceeds the txn mvcc window, "
+                        "fallback to acquire non-snapshot versions, partition_ids_size="
+                        << request->partition_ids_size() << ", index=" << i;
+                break;
+            } else {
+                msg = "failed to get txn";
+                code = MetaServiceCode::KV_TXN_GET_ERR;
                 break;
             }
-            response->add_versions(version_pb.version());
-        } else if (ret == 1) {
-            // return -1 if the target version is not exists.
-            response->add_versions(-1);
-        } else {
-            msg = "failed to get txn";
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            break;
         }
     }
     if (code != MetaServiceCode::OK) {
