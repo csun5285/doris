@@ -61,11 +61,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
     }
 
     @Override
-    public void setMetricNumber(int metricNumber) {
-    }
-
-    @Override
-    public void visitJvm(StringBuilder sb, JvmStats jvmStats) {
+    public void visitJvm(JvmStats jvmStats) {
         // heap
         sb.append(Joiner.on(" ").join(HELP, JVM_HEAP_SIZE_BYTES, "jvm heap stat\n"));
         sb.append(Joiner.on(" ").join(TYPE, JVM_HEAP_SIZE_BYTES, "gauge\n"));
@@ -151,7 +147,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
     }
 
     @Override
-    public void visit(StringBuilder sb, String prefix, @SuppressWarnings("rawtypes") Metric metric) {
+    public void visit(String prefix, @SuppressWarnings("rawtypes") Metric metric) {
         // title
         final String fullName = prefix + metric.getName();
         if (!metricNames.contains(fullName)) {
@@ -177,7 +173,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
     }
 
     @Override
-    public void visitHistogram(StringBuilder sb, String prefix, String name, Histogram histogram) {
+    public void visitHistogram(String prefix, String name, Histogram histogram) {
         // The diff between cloud and branch-1.2-lts
         // branch-1.2-lts want to format the label, but it don't have another label except 'quantile'
         // so it is useless
@@ -257,7 +253,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
     }
 
     @Override
-    public void getNodeInfo(StringBuilder sb) {
+    public void getNodeInfo() {
         final String NODE_INFO = "node_info";
         sb.append(Joiner.on(" ").join(TYPE, NODE_INFO, "gauge\n"));
         sb.append(NODE_INFO).append("{type=\"fe_node_num\", state=\"total\"} ")
