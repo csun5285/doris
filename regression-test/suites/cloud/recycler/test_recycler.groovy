@@ -8,6 +8,7 @@ suite("test_recycler") {
 
     def caseStartTime = System.currentTimeMillis()
     def recyclerLastSuccessTime = -1
+    def recyclerLastFinishTime = -1
 
     // Make sure to complete at least one round of recycling
     def getRecycleJobInfo = {
@@ -26,25 +27,24 @@ suite("test_recycler") {
                 logger.info("recycleJobInfoResult:${recycleJobInfoResult}")
                 assertEquals(respCode, 200)
                 def info = parseJson(recycleJobInfoResult.trim())
-                if (info.last_success_time_ms != null) {
+                if (info.last_finish_time_ms != null) {
+                    recyclerLastFinishTime = Long.parseLong(info.last_finish_time_ms)
+                    assertTrue(info.last_success_time_ms != null)
                     recyclerLastSuccessTime = Long.parseLong(info.last_success_time_ms)
                 }
         }
     }
 
-    int retry = 60 // 10min
-    boolean success = false
     do {
         triggerRecycle(token, instanceId)
         Thread.sleep(10000)
         getRecycleJobInfo()
         logger.info("caseStartTime=${caseStartTime}, recyclerLastSuccessTime=${recyclerLastSuccessTime}")
-        if (recyclerLastSuccessTime > caseStartTime) {
-            success = true
+        if (recyclerLastFinishTime > caseStartTime) {
             break
         }
-    } while (retry--)
-    assertTrue(success)
+    } while (true)
+    assertEquals(recyclerLastFinishTime, recyclerLastSuccessTime)
 
     // Make sure to complete at least one round of checking
     def checkerLastSuccessTime = -1
