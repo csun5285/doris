@@ -50,7 +50,21 @@ suite("test_show_data") {
         (13,14,15,16); """
   
   // wait for heartbeat
-  sleep(60000);
+
+  long start = System.currentTimeMillis()
+  long dataSize = 0
+  long current = -1
+  do {
+    current = System.currentTimeMillis()
+    def res = sql """ show data properties("entire_warehouse"="true","db_names"="SHOW_DATA_1"); """
+    for (row : res) {
+      print row
+      if (row[0].toString() == "SHOW_DATA_1") {
+        dataSize = row[1].toInteger()
+      }
+    }
+    sleep(1000)
+  } while (dataSize == 0 && current - start < 180000)
 
   qt_show_1 """ show data properties("entire_warehouse"="true","db_names"="SHOW_DATA_1"); """
 
