@@ -129,16 +129,13 @@ Status BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_context) 
     _rowset_meta->set_segments_overlap(_context.segments_overlap);
     _rowset_meta->set_txn_id(_context.txn_id);
     _rowset_meta->set_txn_expiration(_context.txn_expiration);
-    _file_cache_ttl_seconds = _context.ttl_seconds;
-    _file_cache_is_persistent = _context.is_persistent;
-    _is_hot_data = _context.is_hot_data;
     if (_context.rowset_state == PREPARED || _context.rowset_state == COMMITTED) {
         _is_pending = true;
         _rowset_meta->set_load_id(_context.load_id);
     } else {
         _rowset_meta->set_version(_context.version);
+        DCHECK_NE(_context.newest_write_timestamp, -1);
         _rowset_meta->set_newest_write_timestamp(_context.newest_write_timestamp);
-        _create_time = _context.newest_write_timestamp;
     }
     _rowset_meta->set_tablet_uid(_context.tablet_uid);
     _rowset_meta->set_tablet_schema(_context.tablet_schema);
@@ -755,10 +752,9 @@ Status BetaRowsetWriter::_do_create_segment_writer(
     }
     io::FileWriterPtr file_writer;
     io::FileWriterOptions opts;
-    opts.expiration_time = _file_cache_is_persistent      ? INT64_MAX
-                           : _file_cache_ttl_seconds == 0 ? 0
-                                                          : _create_time + _file_cache_ttl_seconds;
-    opts.is_cold_data = !_is_hot_data;
+    opts.expiration_time =
+            _context.ttl_seconds == 0 ? 0 : _context.newest_write_timestamp + _context.ttl_seconds;
+    opts.is_cold_data = !_context.is_hot_data;
     opts.disable_file_cache = _context.disable_file_cache;
     Status st = fs->create_file(path, &file_writer, &opts);
     if (!st.ok()) {
