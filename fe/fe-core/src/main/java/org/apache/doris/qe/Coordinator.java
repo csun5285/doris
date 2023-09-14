@@ -2336,6 +2336,7 @@ public class Coordinator {
                     dbs.add(partition.getDbId());
                     tables.add(table.getId());
                     partitions.add(partitionId);
+                    partitionSet.add(partitionId);
                 }
             }
         }
