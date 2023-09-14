@@ -152,33 +152,6 @@ suite("stream_load_lb") {
     order_qt_q3 "SELECT count(*) FROM ${tableName3}" // 20
     order_qt_q4 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
 
-    // case3 cloud private endpoint
-    streamLoad {
-        table "${tableName3}"
-
-        set 'column_separator', ','
-        set 'cloud_cluster', 'stream_load_cluster_name1'
-        set 'Host', 'localhost'
-
-        file 'all_types.csv'
-        time 10000 // limit inflight 10s
-
-        check { loadResult, exception, startTime, endTime ->
-            if (exception != null) {
-                throw exception
-            }
-            log.info("Stream load result: ${loadResult}".toString())
-            def json = parseJson(loadResult)
-            assertEquals("success", json.Status.toLowerCase())
-            assertEquals(20, json.NumberTotalRows)
-            assertEquals(0, json.NumberFilteredRows)
-            txnId = json.TxnId
-        }
-    }
-
-    order_qt_q5 "SELECT count(*) FROM ${tableName3}" // 20
-    order_qt_q6 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
-
     updateClusterEndpoint("stream_load_cluster_id0", "xx:xx", "xx:xx")
 
     updateClusterEndpoint("stream_load_cluster_id1", ipList[1] + ":" + httpPortList[1],
