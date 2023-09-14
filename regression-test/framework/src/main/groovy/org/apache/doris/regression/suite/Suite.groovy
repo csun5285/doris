@@ -842,7 +842,7 @@ class Suite implements GroovyInterceptable {
         }
 
         for (int i = 0; i < fragNum; ++i) {
-            String exec_sql = "show query profile '/" + profileRes[0][1] + "/" + i.toString() + "'"
+            String exec_sql = "show query profile '/" + profileRes[0][0] + "/" + i.toString() + "'"
             List<List<Object>> result = sql exec_sql
             for (row : result) {
                 println row

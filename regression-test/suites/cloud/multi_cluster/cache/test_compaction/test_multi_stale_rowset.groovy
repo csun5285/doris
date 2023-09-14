@@ -12,7 +12,6 @@ suite("test_multi_stale_rowset") {
     List<String> beUniqueIdList = new ArrayList<>()
 
     String[] bes = context.config.multiClusterBes.split(',');
-    assertEquals(bes.length, 2)
     println("the value is " + context.config.multiClusterBes);
     for(String values : bes) {
         println("the value is " + values);

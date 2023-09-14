@@ -84,6 +84,7 @@ public class SetUserPropertyVar extends SetVar {
                 }
                 // check value, clusterName is valid.
                 if (key.equals(UserProperty.DEFAULT_CLOUD_CLUSTER)
+                        && !Strings.isNullOrEmpty(value)
                         && !Env.getCurrentSystemInfo().getCloudClusterNames().contains(value)) {
                     ErrorReport.reportAnalysisException(ErrorCode.ERR_ClOUD_CLUSTER_ERROR, value);
                 }
