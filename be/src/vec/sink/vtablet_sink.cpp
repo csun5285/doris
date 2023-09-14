@@ -88,6 +88,7 @@
 #include "vec/common/string_ref.h"
 #include "vec/core/block.h"
 #include "vec/core/column_with_type_and_name.h"
+#include "vec/core/future_block.h"
 #include "vec/core/types.h"
 #include "vec/data_types/data_type_decimal.h"
 #include "vec/data_types/data_type_nullable.h"
@@ -1342,6 +1343,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
 
     auto num_rows = block.rows();
     int filtered_rows = 0;
+    auto number_filtered_rows0 = _number_filtered_rows;
     {
         SCOPED_RAW_TIMER(&_validate_data_ns);
         _filter_bitmap.Reset(block.rows());
@@ -1411,6 +1413,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
                     vectorized::Block::filter_block_internal(&block, filter_col, block.columns()));
         }
     }
+    handle_block(input_block, rows, _number_filtered_rows - number_filtered_rows0);
     // Add block to node channel
     for (size_t i = 0; i < _channels.size(); i++) {
         for (const auto& entry : channel_to_payload[i]) {

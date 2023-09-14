@@ -677,6 +677,7 @@ struct TLoadTxnCommitRequest {
     13: optional string token
     14: optional i64 db_id
     15: optional list<string> tbls
+    16: optional i64 table_id
 }
 
 struct TLoadTxnCommitResult {
@@ -1084,6 +1085,20 @@ struct TUpdateFollowerStatsCacheRequest {
     2: optional string colStats;
 }
 
+struct TRequestGroupCommitFragmentRequest {
+    1: optional i64 db_id
+    2: optional i64 table_id
+    3: optional i64 backend_id
+}
+
+struct TRequestGroupCommitFragmentResult {
+    1: optional Status.TStatus status
+    2: i64 base_schema_version
+    // valid when status is OK
+    3: optional PaloInternalService.TExecPlanFragmentParams params
+    4: optional PaloInternalService.TPipelineFragmentParams pipeline_params
+}
+
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1150,4 +1165,6 @@ service FrontendService {
     TGetBinlogLagResult getBinlogLag(1: TGetBinlogLagRequest request)
 
     Status.TStatus updateStatsCache(1: TUpdateFollowerStatsCacheRequest request)
+
+    TRequestGroupCommitFragmentResult requestGroupCommitFragment(1: TRequestGroupCommitFragmentRequest request)
 }

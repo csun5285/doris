@@ -177,6 +177,8 @@ public class ConnectContext {
 
     private Map<String, String> resultAttachedInfo;
 
+    private Map<Long, Backend> insertGroupCommitTableToBeMap = new HashMap<>();
+
     public void setUserQueryTimeout(int queryTimeout) {
         if (queryTimeout > 0) {
             sessionVariable.setQueryTimeoutS(queryTimeout);
@@ -852,6 +854,14 @@ public class ConnectContext {
 
     public void setStatsErrorEstimator(StatsErrorEstimator statsErrorEstimator) {
         this.statsErrorEstimator = statsErrorEstimator;
+    }
+
+    public void setInsertGroupCommit(long tableId, Backend backend) {
+        insertGroupCommitTableToBeMap.put(tableId, backend);
+    }
+
+    public Backend getInsertGroupCommit(long tableId) {
+        return insertGroupCommitTableToBeMap.get(tableId);
     }
 }
 

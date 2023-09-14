@@ -70,6 +70,7 @@ class ClientCache;
 class HeartbeatFlags;
 class FrontendServiceClient;
 class FileMetaCache;
+class GroupCommitMgr;
 
 // Execution environment for queries/plan fragments.
 // Contains all required global structures, and handles to
@@ -173,6 +174,7 @@ public:
     std::shared_ptr<NewLoadStreamMgr> new_load_stream_mgr() { return _new_load_stream_mgr; }
     SmallFileMgr* small_file_mgr() { return _small_file_mgr; }
     BlockSpillManager* block_spill_mgr() { return _block_spill_mgr; }
+    GroupCommitMgr* group_commit_mgr() { return _group_commit_mgr; }
 
     const std::vector<StorePath>& store_paths() const { return _store_paths; }
 
@@ -279,6 +281,7 @@ private:
 
     std::unique_ptr<vectorized::ZoneList> _global_zone_cache;
     std::shared_mutex _zone_cache_rw_lock;
+    GroupCommitMgr* _group_commit_mgr = nullptr;
 };
 
 template <>

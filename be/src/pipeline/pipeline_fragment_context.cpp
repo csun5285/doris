@@ -116,7 +116,7 @@ PipelineFragmentContext::PipelineFragmentContext(
         const TUniqueId& query_id, const TUniqueId& instance_id, const int fragment_id,
         int backend_num, std::shared_ptr<QueryContext> query_ctx, ExecEnv* exec_env,
         const std::function<void(RuntimeState*, Status*)>& call_back,
-        const report_status_callback& report_status_cb)
+        const report_status_callback& report_status_cb, bool group_commit)
         : _query_id(query_id),
           _fragment_instance_id(instance_id),
           _fragment_id(fragment_id),
@@ -127,7 +127,8 @@ PipelineFragmentContext::PipelineFragmentContext(
           _call_back(call_back),
           _report_thread_active(false),
           _report_status_cb(report_status_cb),
-          _is_report_on_cancel(true) {
+          _is_report_on_cancel(true),
+          _group_commit(group_commit) {
     _report_thread_future = _report_thread_promise.get_future();
     _fragment_watcher.start();
 }
@@ -437,6 +438,7 @@ Status PipelineFragmentContext::_build_pipelines(ExecNode* node, PipelinePtr cur
     case TPlanNodeType::ODBC_SCAN_NODE:
     case TPlanNodeType::FILE_SCAN_NODE:
     case TPlanNodeType::META_SCAN_NODE:
+    case TPlanNodeType::GROUP_COMMIT_SCAN_NODE:
     case TPlanNodeType::ES_HTTP_SCAN_NODE:
     case TPlanNodeType::ES_SCAN_NODE: {
         OperatorBuilderPtr operator_t = std::make_shared<ScanOperatorBuilder>(node->id(), node);
@@ -749,7 +751,8 @@ Status PipelineFragmentContext::_create_sink(int sender_id, const TDataSink& thr
                                                             _sink.get());
         break;
     }
-    case TDataSinkType::OLAP_TABLE_SINK: {
+    case TDataSinkType::OLAP_TABLE_SINK:
+    case TDataSinkType::GROUP_COMMIT_OLAP_TABLE_SINK: {
         sink_ = std::make_shared<OlapTableSinkOperatorBuilder>(next_operator_builder_id(),
                                                                _sink.get());
         break;

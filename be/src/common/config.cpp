@@ -1200,6 +1200,9 @@ DEFINE_mBool(enable_merge_on_write_correctness_check, "true");
 // The secure path with user files, used in the `local` table function.
 DEFINE_mString(user_files_secure_path, "${DORIS_HOME}");
 
+// the count of thread to group commit insert
+DEFINE_Int32(group_commit_insert_threads, "10");
+
 #ifdef BE_TEST
 // test s3
 DEFINE_String(test_s3_resource, "resource");

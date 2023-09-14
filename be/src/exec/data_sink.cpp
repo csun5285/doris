@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "common/config.h"
+#include "vec/sink/group_commit_vtablet_sink.h"
 #include "vec/sink/multi_cast_data_stream_sink.h"
 #include "vec/sink/vdata_stream_sender.h"
 #include "vec/sink/vjdbc_table_sink.h"
@@ -151,6 +152,14 @@ Status DataSink::create_data_sink(ObjectPool* pool, const TDataSink& thrift_sink
         Status status;
         DCHECK(thrift_sink.__isset.olap_table_sink);
         sink->reset(new stream_load::VOlapTableSink(pool, row_desc, output_exprs, &status));
+        RETURN_IF_ERROR(status);
+        break;
+    }
+    case TDataSinkType::GROUP_COMMIT_OLAP_TABLE_SINK: {
+        Status status;
+        DCHECK(thrift_sink.__isset.olap_table_sink);
+        sink->reset(
+                new stream_load::GroupCommitVOlapTableSink(pool, row_desc, output_exprs, &status));
         RETURN_IF_ERROR(status);
         break;
     }
@@ -299,7 +308,14 @@ Status DataSink::create_data_sink(ObjectPool* pool, const TDataSink& thrift_sink
         sink->reset(new vectorized::MultiCastDataStreamSink(multi_cast_data_streamer));
         break;
     }
-
+    case TDataSinkType::GROUP_COMMIT_OLAP_TABLE_SINK: {
+        Status status;
+        DCHECK(thrift_sink.__isset.olap_table_sink);
+        sink->reset(
+                new stream_load::GroupCommitVOlapTableSink(pool, row_desc, output_exprs, &status));
+        RETURN_IF_ERROR(status);
+        break;
+    }
     default: {
         std::stringstream error_msg;
         std::map<int, const char*>::const_iterator i =
