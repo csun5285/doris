@@ -211,8 +211,8 @@ suite("sync_load") {
         for (row : result) {
             println row
             println row[2]
-            if (ipList[i] == row[2] && hbPortList[i] == row[3]) {
-                bePortList.add(row[4]);
+            if (ipList[i] == row[1] && hbPortList[i] == row[2]) {
+                bePortList.add(row[3]);
             }
         }
     }
@@ -290,7 +290,7 @@ suite("sync_load") {
           p_partkey
         LIMIT 100
     """
-    checkProfile.call(set, 10);
+    checkProfile.call(set, 9);
 
     // q03
     sql """

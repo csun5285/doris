@@ -66,6 +66,7 @@ suite("stream_load_2pc") {
         println row
     }
 
+    sql "SET PROPERTY 'default_cloud_cluster' = ''"
     sql """ use @stream_load_2pc_cluster_name0 """
 
     // case1 specific cluster

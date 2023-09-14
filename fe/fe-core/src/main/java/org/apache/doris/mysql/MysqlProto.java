@@ -318,6 +318,21 @@ public class MysqlProto {
                 context.getState().setError(ErrorCode.ERR_BAD_DB_ERROR, "Only one dot can be in the name: " + db);
                 return false;
             }
+
+            if (Config.isCloudMode()) {
+                try {
+                    dbName = Env.getCurrentEnv().analyzeCloudCluster(dbName, context);
+                } catch (DdlException e) {
+                    context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
+                    sendResponsePacket(context);
+                    return false;
+                }
+
+                if (dbName == null || dbName.isEmpty()) {
+                    return true;
+                }
+            }
+
             String dbFullName = ClusterNamespace.getFullName(context.getClusterName(), dbName);
 
             // check catalog and db exists

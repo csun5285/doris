@@ -157,4 +157,13 @@ suite("default_cluster") {
         exception "errCode = 2,"
     }
 
+    sql "SET PROPERTY 'default_cloud_cluster' = ''"
+
+    result  = sql "show property"
+    for (row : result) {
+        println row
+        if(row[0] == "default_cloud_cluster") {
+            assertTrue(row[1].toString().isEmpty())
+        }
+    }
 }

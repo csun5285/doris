@@ -5398,6 +5398,7 @@ public class Env {
 
         String[] res = name.split("@");
         if (res.length != 1 && res.length != 2) {
+            LOG.warn("invalid database name {}", name);
             throw new DdlException("Invalid database name: " + name, ErrorCode.ERR_BAD_DB_ERROR);
         }
 

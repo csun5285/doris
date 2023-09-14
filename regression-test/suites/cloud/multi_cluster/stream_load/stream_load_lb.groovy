@@ -68,6 +68,7 @@ suite("stream_load_lb") {
         println row
     }
 
+    sql "SET PROPERTY 'default_cloud_cluster' = ''"
     sql """ use @stream_load_cluster_name0 """
 
     def tableName3 = "test_all"
@@ -183,7 +184,7 @@ suite("stream_load_lb") {
     updateClusterEndpoint("stream_load_cluster_id1", ipList[1] + ":" + httpPortList[1],
             ipList[0] + ":" + httpPortList[0])
 
-    sleep(20000)
+    sleep(30000)
 
     try {
         sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'true')"

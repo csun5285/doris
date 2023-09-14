@@ -66,6 +66,7 @@ suite("stream_load") {
         println row
     }
 
+    sql "SET PROPERTY 'default_cloud_cluster' = ''"
     sql """ use @stream_load_cluster_name0 """
 
     // case1 specific cluster
