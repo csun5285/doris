@@ -6110,12 +6110,15 @@ public class Env {
 
         int tryCnt = 0;
         while (true) {
+            if (tryCnt++ < Config.drop_rpc_retry_num) {
+                break;
+            }
+
             try {
                 if (indexs.isEmpty()) {
                     break;
                 }
                 Env.getCurrentInternalCatalog().dropCloudMaterializedIndex(olapTable.getId(), indexs);
-                tryCnt++;
             } catch (Exception e) {
                 LOG.warn("failed to drop index {} of table {}, try cnt {}, execption {}",
                         indexs, olapTable.getId(), tryCnt, e);
@@ -6191,9 +6194,11 @@ public class Env {
 
         int tryCnt = 0;
         while (true) {
+            if (tryCnt++ < Config.drop_rpc_retry_num) {
+                break;
+            }
             try {
                 Env.getCurrentInternalCatalog().dropCloudPartition(tableId, partitionIds, indexIds);
-                tryCnt++;
             } catch (Exception e) {
                 LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                         partitionIds, tableId, tryCnt, e);

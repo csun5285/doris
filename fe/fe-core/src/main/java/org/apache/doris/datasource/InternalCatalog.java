@@ -3195,10 +3195,12 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
+                if (tryCnt++ < Config.drop_rpc_retry_num) {
+                    break;
+                }
                 try {
                     Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
-                    tryCnt++;
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                             oldPartitionsIds, olapTable.getId(), tryCnt, e);
@@ -3286,10 +3288,12 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode() && !Env.isCheckpointThread()) {
             int tryCnt = 0;
             while (true) {
+                if (tryCnt++ < Config.drop_rpc_retry_num) {
+                    break;
+                }
                 try {
                     Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
-                    tryCnt++;
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                             oldPartitionsIds, olapTable.getId(), tryCnt, e);

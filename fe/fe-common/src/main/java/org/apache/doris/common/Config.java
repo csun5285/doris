@@ -2288,6 +2288,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static boolean enable_cloud_snapshot_version = false;
 
+    @ConfField(mutable = true)
+    public static int drop_rpc_retry_num = 200;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
