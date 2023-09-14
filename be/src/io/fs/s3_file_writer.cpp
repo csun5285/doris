@@ -110,11 +110,6 @@ S3FileWriter::~S3FileWriter() {
         _bytes_written = 0;
     }
     s3_bytes_written_total << _bytes_written;
-    CHECK(_closed) << ", closed: " << _closed;
-    // in case there are task which might run after this object is destroyed
-    // for example, if the whole task failed and some task are still pending
-    // in threadpool
-    _wait_until_finish("dtor");
     s3_file_being_written << -1;
 }
 

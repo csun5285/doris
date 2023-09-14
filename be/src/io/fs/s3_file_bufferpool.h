@@ -185,9 +185,7 @@ struct UploadFileBuffer final : public FileBuffer {
     * 5. reclaim self
     */
     void on_upload() {
-        if (_buffer.empty()) {
-            read_from_cache();
-        }
+        DCHECK(!_buffer.empty());
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
             _state.set_val();
