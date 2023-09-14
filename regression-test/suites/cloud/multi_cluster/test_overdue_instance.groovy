@@ -43,6 +43,66 @@ class AlterRequestWithoutOp {
 }
 
 suite('test_overdue') {
+    def token = context.config.metaServiceToken
+    def instance_id = context.config.multiClusterInstance
+
+    List<String> ipList = new ArrayList<>()
+    List<String> hbPortList = new ArrayList<>()
+    List<String> httpPortList = new ArrayList<>()
+    List<String> beUniqueIdList = new ArrayList<>()
+
+    String[] bes = context.config.multiClusterBes.split(',');
+    println("the value is " + context.config.multiClusterBes);
+    for(String values : bes) {
+        println("the value is " + values);
+        String[] beInfo = values.split(':');
+        ipList.add(beInfo[0]);
+        hbPortList.add(beInfo[1]);
+        httpPortList.add(beInfo[2]);
+        beUniqueIdList.add(beInfo[3]);
+    }
+
+    println("the ip is " + ipList);
+    println("the heartbeat port is " + hbPortList);
+    println("the http port is " + httpPortList);
+    println("the be unique id is " + beUniqueIdList);
+
+    for (unique_id : beUniqueIdList) {
+        resp = get_cluster.call(unique_id);
+        for (cluster : resp) {
+            if (cluster.type == "COMPUTE") {
+                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
+            }
+        }
+    }
+    sleep(20000)
+
+    List<List<Object>> result0  = sql "show clusters"
+    assertTrue(result0.size() == 0);
+
+    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                     "regression_cluster_name0", "regression_cluster_id0");
+    sleep(20000)
+
+    result0  = sql "show clusters"
+    assertTrue(result0.size() == 1);
+
+    for (row : result0) {
+        println row
+    }
+
+    // add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
+    //               "regression_cluster_name0", "regression_cluster_id0");
+
+    sleep(20000)
+
+    result0  = sql "show clusters"
+    assertTrue(result0.size() == 1);
+
+    for (row : result0) {
+        println row
+    }
+    
     def user = 'test_overdue_instance_user'
     def result = sql """ SELECT DATABASE(); """
     def url0 = '/api/query/default_cluster/' + result[0][0]
