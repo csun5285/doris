@@ -144,8 +144,8 @@ suite("test_lease_compaction") {
 
         // cluster0 trigger cumu compaction
         assertTrue(triggerCompaction(ipList[0], httpPortList[0], "cumulative").contains("Success"));
-        // cluster1 trigger cumu compaction failed
-        assertTrue(triggerCompaction(ipList[1], httpPortList[1], "cumulative").contains("already started"));
+        // cluster1 trigger cumu compaction failed (no suitable versions)
+        assertTrue(triggerCompaction(ipList[1], httpPortList[1], "cumulative").contains("E-2000"));
         // wait cluster0 compaction success
         waitForCompaction(ipList[0], httpPortList[0]);
 
