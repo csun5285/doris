@@ -38,6 +38,7 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_system.h"
 #include "io/fs/remote_file_system.h"
@@ -106,6 +107,7 @@ Status Compaction::execute_compact() {
 }
 
 Status Compaction::do_compaction(int64_t permits) {
+    TEST_INJECTION_POINT("Compaction::do_compaction");
     uint32_t checksum_before;
     uint32_t checksum_after;
     if (config::enable_compaction_checksum) {
