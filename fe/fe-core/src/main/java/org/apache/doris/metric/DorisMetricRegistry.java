@@ -22,14 +22,13 @@ import org.apache.doris.catalog.Env;
 import com.google.common.collect.Lists;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class DorisMetricRegistry {
-
     ConcurrentHashMap<String, MetricList> metrics = new ConcurrentHashMap<>();
     ConcurrentHashMap<String, MetricList> systemMetrics = new ConcurrentHashMap<>();
 
@@ -42,15 +41,17 @@ public class DorisMetricRegistry {
         // And if you add a metric in Checkpoint thread, it will cause the metric to be added repeatedly,
         // and the Checkpoint Catalog may be saved incorrectly, resulting in FE memory leaks.
         if (!Env.isCheckpointThread()) {
+            String labelId = computeLabelId(metric.getLabels());
             metrics.computeIfAbsent(metric.getName(), (k) -> new MetricList())
-                    .addMetrics(metric);
+                    .addMetrics(labelId, metric);
         }
     }
 
     public void addSystemMetrics(Metric sysMetric) {
         if (!Env.isCheckpointThread()) {
+            String labelId = computeLabelId(sysMetric.getLabels());
             systemMetrics.computeIfAbsent(sysMetric.getName(), (k) -> new MetricList())
-                    .addMetrics(sysMetric);
+                    .addMetrics(labelId, sysMetric);
         }
     }
 
@@ -95,43 +96,36 @@ public class DorisMetricRegistry {
         if (!Env.isCheckpointThread()) {
             MetricList metricList = metrics.get(name);
             if (metricList != null) {
-                HashMap<String, String> labelsCheck = new HashMap<>();
-                for (MetricLabel metricLabel : labels) {
-                    labelsCheck.put(metricLabel.getKey(), metricLabel.getValue());
-                }
-                metricList.removeByLabels(labelsCheck);
+                String labelId = computeLabelId(labels);
+                metricList.removeByLabelId(labelId);
             }
         }
     }
 
-    public static class MetricList {
-        private final Collection<Metric> metrics = Lists.newArrayList();
+    private static String computeLabelId(List<MetricLabel> labels) {
+        TreeMap<String, String> labelMap = new TreeMap<>();
+        for (MetricLabel label : labels) {
+            labelMap.put(label.getKey(), label.getValue().replace("\\", "\\\\").replace("\"", "\\\""));
+        }
+        return labelMap.entrySet()
+                .stream()
+                .map(e -> String.format("%s=\"%s\"", e.getKey(), e.getValue()))
+                .collect(Collectors.joining(" "));
+    }
 
-        private synchronized void addMetrics(Metric metric) {
-            metrics.add(metric);
+    public static class MetricList {
+        private final HashMap<String, Metric> metrics = new HashMap<>();
+
+        private synchronized void addMetrics(String labelId, Metric metric) {
+            metrics.put(labelId, metric);
         }
 
         private synchronized List<Metric> getMetrics() {
-            return new ArrayList<>(metrics);
+            return new ArrayList<>(metrics.values());
         }
 
-        private synchronized void removeByLabels(HashMap<String, String> labelsCheck) {
-            Iterator<Metric> iterator = metrics.iterator();
-            OUTER: while (iterator.hasNext()) {
-                Metric metric = iterator.next();
-                if (labelsCheck.size() != metric.getLabels().size()) {
-                    continue;
-                }
-
-                for (MetricLabel label : (List<MetricLabel>) metric.getLabels()) {
-                    if (!(labelsCheck.containsKey(label.getKey())
-                                && labelsCheck.get(label.getKey()).equals(label.getValue()))) {
-                        continue OUTER;
-                    }
-                }
-
-                iterator.remove();
-            }
+        private synchronized void removeByLabelId(String labelId) {
+            metrics.remove(labelId);
         }
     }
 }
