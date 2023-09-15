@@ -4,7 +4,6 @@
 #include <rapidjson/encodings.h>
 #include <rapidjson/error/en.h>
 
-#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -107,13 +106,10 @@ static void export_fdb_status_details(const std::string& status_str) {
     auto get_nanoseconds = [&](const std::vector<const char*>& v) -> int64_t {
         constexpr double NANOSECONDS = 1e9;
         auto node = document.FindMember("cluster");
-        std::cout << "cluster";
         for (const auto& name : v) {
-            std::cout << "." << name;
             if (!node->value.HasMember(name)) return BVAR_FDB_INVALID_VALUE;
             node = node->value.FindMember(name);
         }
-        std::cout << std::endl;
         if (node->value.IsInt64()) return node->value.GetInt64() * NANOSECONDS;
         DCHECK(node->value.IsDouble());
         return static_cast<int64_t>(node->value.GetDouble() * NANOSECONDS);
