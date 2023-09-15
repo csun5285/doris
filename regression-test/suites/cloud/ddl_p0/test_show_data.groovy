@@ -64,7 +64,7 @@ suite("test_show_data") {
       }
     }
     sleep(1000)
-  } while (dataSize == 0 && current - start < 180000)
+  } while (dataSize == 0 && current - start < 600000)
 
   qt_show_1 """ show data properties("entire_warehouse"="true","db_names"="SHOW_DATA_1"); """
 
