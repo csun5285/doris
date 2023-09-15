@@ -138,7 +138,7 @@ Status Compaction::do_compaction(int64_t permits) {
 bool Compaction::should_vertical_compaction() {
     using namespace std::chrono;
     // some conditions that not use vertical compaction
-    return config::enable_vertical_compaction && !_tablet->enable_unique_key_merge_on_write() &&
+    return config::enable_vertical_compaction &&
            (config::fuzzy_vertical_compaction
                     ? (duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count() &
                        1)
