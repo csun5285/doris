@@ -75,7 +75,7 @@ suite("async_load") {
 
     def before_cluster1_load_rows = get_be_metric(ipList[1], httpPortList[1], "load_rows");
     log.info("before_cluster1_load_rows : ${before_cluster1_load_rows}".toString())
-    def before_cluster1_flush = get_be_metric(ipList[0], httpPortList[0], "memtable_flush_total");
+    def before_cluster1_flush = get_be_metric(ipList[1], httpPortList[1], "memtable_flush_total");
     log.info("before_cluster1_flush : ${before_cluster1_flush}".toString())
 
     // tpch_sf1_p1 is writted to test unique key table merge correctly.
