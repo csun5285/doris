@@ -3205,7 +3205,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
-                if (tryCnt++ < Config.drop_rpc_retry_num) {
+                if (tryCnt++ > Config.drop_rpc_retry_num) {
+                    LOG.warn("failed to drop partition {} of table {}, try cnt {} reaches maximum retry count",
+                            oldPartitionsIds, olapTable.getId(), tryCnt);
                     break;
                 }
                 try {
@@ -3298,7 +3300,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode() && !Env.isCheckpointThread()) {
             int tryCnt = 0;
             while (true) {
-                if (tryCnt++ < Config.drop_rpc_retry_num) {
+                if (tryCnt++ > Config.drop_rpc_retry_num) {
+                    LOG.warn("failed to drop partition {} of table {}, try cnt {} reaches maximum retry count",
+                            oldPartitionsIds, olapTable.getId(), tryCnt);
                     break;
                 }
                 try {

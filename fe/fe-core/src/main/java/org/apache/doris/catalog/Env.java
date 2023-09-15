@@ -6110,7 +6110,9 @@ public class Env {
 
         int tryCnt = 0;
         while (true) {
-            if (tryCnt++ < Config.drop_rpc_retry_num) {
+            if (tryCnt++ > Config.drop_rpc_retry_num) {
+                LOG.warn("failed to drop index {} of table {}, try cnt {} reaches maximum retry count",
+                            indexs, olapTable.getId(), tryCnt);
                 break;
             }
 
@@ -6194,7 +6196,9 @@ public class Env {
 
         int tryCnt = 0;
         while (true) {
-            if (tryCnt++ < Config.drop_rpc_retry_num) {
+            if (tryCnt++ > Config.drop_rpc_retry_num) {
+                LOG.warn("failed to drop partition {} of table {}, try cnt {} reaches maximum retry count",
+                        partitionIds, tableId, tryCnt);
                 break;
             }
             try {
