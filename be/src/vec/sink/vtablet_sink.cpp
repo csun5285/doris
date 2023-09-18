@@ -1195,7 +1195,8 @@ size_t VOlapTableSink::get_pending_bytes() const {
 
 Status VOlapTableSink::find_tablet(RuntimeState* state, vectorized::Block* block, int row_index,
                                    const VOlapTablePartition** partition, uint32_t& tablet_index,
-                                   bool& stop_processing, bool& is_continue) {
+                                   bool& stop_processing, bool& is_continue,
+                                   Bitmap* filter_bitmap) {
     Status status = Status::OK();
     *partition = nullptr;
     tablet_index = 0;
@@ -1212,6 +1213,7 @@ Status VOlapTableSink::find_tablet(RuntimeState* state, vectorized::Block* block
                 },
                 &stop_processing));
         _number_filtered_rows++;
+        filter_bitmap->Set(row_index, true);
         if (stop_processing) {
             return Status::EndOfFile("Encountered unqualified data, stop processing");
         }
@@ -1278,7 +1280,7 @@ Status VOlapTableSink::_single_partition_generate(RuntimeState* state, vectorize
         }
         bool is_continue = false;
         RETURN_IF_ERROR(find_tablet(state, block, i, &partition, tablet_index, stop_processing,
-                                    is_continue));
+                                    is_continue, &_filter_bitmap));
         if (is_continue) {
             continue;
         }
@@ -1382,7 +1384,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
             bool is_continue = false;
             uint32_t tablet_index = 0;
             RETURN_IF_ERROR(find_tablet(state, &block, i, &partition, tablet_index, stop_processing,
-                                        is_continue));
+                                        is_continue, &_filter_bitmap));
             if (is_continue) {
                 continue;
             }
@@ -1413,7 +1415,8 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
                     vectorized::Block::filter_block_internal(&block, filter_col, block.columns()));
         }
     }
-    handle_block(input_block, rows, _number_filtered_rows - number_filtered_rows0);
+    handle_block(input_block, rows, _number_filtered_rows - number_filtered_rows0, _state, &block,
+                 &_filter_bitmap);
     // Add block to node channel
     for (size_t i = 0; i < _channels.size(); i++) {
         for (const auto& entry : channel_to_payload[i]) {
@@ -1428,7 +1431,6 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
             }
         }
     }
-
     // check intolerable failure
     for (const auto& index_channel : _channels) {
         RETURN_IF_ERROR(index_channel->check_intolerable_failure());
@@ -1647,6 +1649,10 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
         // shutdown it.
         _send_batch_thread_pool_token->wait();
     }
+
+//    if (_wal_writer.get() != nullptr) {
+//        _wal_writer->finalize();
+//    }
 
     DataSink::close(state, exec_status);
     return _close_status;

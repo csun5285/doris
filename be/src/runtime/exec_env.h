@@ -71,6 +71,7 @@ class HeartbeatFlags;
 class FrontendServiceClient;
 class FileMetaCache;
 class GroupCommitMgr;
+class WalManager;
 
 // Execution environment for queries/plan fragments.
 // Contains all required global structures, and handles to
@@ -188,6 +189,7 @@ public:
     FileMetaCache* file_meta_cache() { return _file_meta_cache; }
     vectorized::ZoneList& global_zone_cache() { return *_global_zone_cache; }
     std::shared_mutex& zone_cache_rw_lock() { return _zone_cache_rw_lock; }
+    WalManager* wal_mgr() { return _wal_manager.get(); }
 
     // only for unit test
     void set_master_info(TMasterInfo* master_info) { this->_master_info = master_info; }
@@ -282,6 +284,7 @@ private:
     std::unique_ptr<vectorized::ZoneList> _global_zone_cache;
     std::shared_mutex _zone_cache_rw_lock;
     GroupCommitMgr* _group_commit_mgr = nullptr;
+    std::shared_ptr<WalManager> _wal_manager;
 };
 
 template <>

@@ -520,6 +520,8 @@ struct TLoadTxnBeginRequest {
     10: optional i64 timeout
     11: optional Types.TUniqueId request_id
     12: optional string token
+    13: optional string auth_code_uuid
+    14: optional i64 table_id
 }
 
 struct TLoadTxnBeginResult {
@@ -618,6 +620,7 @@ struct TStreamLoadPutRequest {
     51: optional i8 enclose
     // only valid when file type is CSV
     52: optional i8 escape
+    53: optional i64 table_id
 
     // selectdb cloud
     1000: optional string cloud_cluster
@@ -678,6 +681,7 @@ struct TLoadTxnCommitRequest {
     14: optional i64 db_id
     15: optional list<string> tbls
     16: optional i64 table_id
+    17: optional string auth_code_uuid
 }
 
 struct TLoadTxnCommitResult {
@@ -714,6 +718,7 @@ struct TLoadTxn2PCRequest {
     8: optional i64 auth_code
     9: optional string token
     10: optional i64 thrift_rpc_timeout_ms
+    11: optional string auth_code_uuid
 }
 
 struct TLoadTxn2PCResult {
@@ -752,6 +757,7 @@ struct TLoadTxnRollbackRequest {
     11: optional string token
     12: optional i64 db_id
     13: optional list<string> tbls
+    14: optional string auth_code_uuid
 }
 
 struct TLoadTxnRollbackResult {

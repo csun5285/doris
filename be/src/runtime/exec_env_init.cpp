@@ -44,6 +44,7 @@
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/schema_cache.h"
 #include "olap/segment_loader.h"
+#include "olap/wal_manager.h"
 #include "pipeline/task_queue.h"
 #include "pipeline/task_scheduler.h"
 #include "runtime/block_spill_manager.h"
@@ -192,6 +193,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _small_file_mgr = new SmallFileMgr(this, config::small_file_dir);
     _block_spill_mgr = new BlockSpillManager(_store_paths);
     _group_commit_mgr = new GroupCommitMgr(this);
+    _wal_manager = WalManager::create_shared(this, config::group_commit_replay_wal_dir);
     _file_meta_cache = new FileMetaCache(config::max_external_file_meta_cache_num);
 
     _backend_client_cache->init_metrics("backend");
@@ -210,6 +212,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _init_mem_env();
 
     RETURN_IF_ERROR(_load_channel_mgr->init(MemInfo::mem_limit()));
+    RETURN_IF_ERROR(_wal_manager->init());
     _heartbeat_flags = new HeartbeatFlags();
     _register_metrics();
     _is_init = true;
@@ -431,6 +434,7 @@ void ExecEnv::_destroy() {
     // info is deconstructed then BE process will core at coordinator back method in fragment mgr.
     SAFE_DELETE(_master_info);
 
+    _wal_manager.reset();
     _new_load_stream_mgr.reset();
     _send_batch_thread_pool.reset(nullptr);
     _buffered_reader_prefetch_thread_pool.reset(nullptr);

@@ -286,6 +286,15 @@ Status StreamLoadAction::_on_header(HttpRequest* http_req, std::shared_ptr<Strea
     if (!http_req->header(HTTP_COMMENT).empty()) {
         ctx->load_comment = http_req->header(HTTP_COMMENT);
     }
+    if (!http_req->header(HTTP_DB_ID_KY).empty()) {
+        ctx->db_id = std::stoll(http_req->header(HTTP_DB_ID_KY));
+    }
+    if (!http_req->header(HTTP_TABLE_ID_KY).empty()) {
+        ctx->table_id = std::stoll(http_req->header(HTTP_TABLE_ID_KY));
+    }
+    if (!http_req->header(HTTP_WAL_ID_KY).empty()) {
+        ctx->wal_id = std::stoll(http_req->header(HTTP_WAL_ID_KY));
+    }
     // begin transaction
     int64_t begin_txn_start_time = MonotonicNanos();
     RETURN_IF_ERROR(_exec_env->stream_load_executor()->begin_txn(ctx.get()));
@@ -345,11 +354,16 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
     set_request_auth(&request, ctx->auth);
     request.db = ctx->db;
     request.tbl = ctx->table;
+    request.__set_table_id(ctx->table_id);
+    request.__set_auth_code(ctx->auth.auth_code);
     request.txnId = ctx->txn_id;
     request.formatType = ctx->format;
     request.__set_compress_type(ctx->compress_type);
     request.__set_header_type(ctx->header_type);
     request.__set_loadId(ctx->id.to_thrift());
+    if (_exec_env->master_info()->__isset.backend_id) {
+        request.__set_backend_id(_exec_env->master_info()->backend_id);
+    }
     if (ctx->use_streaming) {
         auto pipe = std::make_shared<io::StreamLoadPipe>(
                 io::kMaxPipeBufferedBytes /* max_buffered_bytes */, 64 * 1024 /* min_chunk_size */,
@@ -580,6 +594,8 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         return Status::NotSupported("stream load 2pc is unsupported for mow table");
     }
 #endif
+
+    ctx->put_result.params.__set_wal_id(ctx->wal_id);
 
     VLOG_NOTICE << "params is " << apache::thrift::ThriftDebugString(ctx->put_result.params);
     // if we not use streaming, we must download total content before we begin

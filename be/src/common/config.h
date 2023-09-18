@@ -1212,6 +1212,12 @@ DECLARE_mString(user_files_secure_path);
 // This config can be set to limit thread number in group commit insert thread pool.
 DECLARE_mInt32(group_commit_insert_threads);
 
+// Real time load config
+DECLARE_String(group_commit_replay_wal_dir);
+DECLARE_Int32(group_commit_replay_wal_retry_num);
+DECLARE_Int32(group_commit_replay_wal_retry_interval_seconds);
+DECLARE_Int32(group_commit_sync_wal_batch);
+
 #ifdef BE_TEST
 // test s3
 DECLARE_String(test_s3_resource);

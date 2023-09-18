@@ -286,6 +286,8 @@ public class LoadScanProvider {
                 }
                 throw new UserException(
                         "Not supported file format: " + fileFormat + ", and compression: " + compressType);
+            } else if (lowerFileFormat.equals("wal")) {
+                return TFileFormatType.FORMAT_WAL;
             } else {
                 throw new UserException("Not supported file format: " + fileFormat);
             }

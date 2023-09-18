@@ -1041,7 +1041,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             cluster = SystemInfoService.DEFAULT_CLUSTER;
         }
 
-        if (Strings.isNullOrEmpty(request.getToken())) {
+        if (request.isSetAuthCode()) {
+            // TODO(cmy): find a way to check
+        } else {
             checkPasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), request.getDb(), request.getTbl(),
                     request.getUserIp(), PrivPredicate.LOAD);
         }
@@ -1050,19 +1052,31 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (Strings.isNullOrEmpty(request.getLabel())) {
             throw new UserException("empty label in begin request");
         }
+        OlapTable table;
+        Database db;
         // check database
         Env env = Env.getCurrentEnv();
-        String fullDbName = ClusterNamespace.getFullName(cluster, request.getDb());
-        Database db = env.getInternalCatalog().getDbNullable(fullDbName);
-        if (db == null) {
-            String dbName = fullDbName;
-            if (Strings.isNullOrEmpty(request.getCluster())) {
-                dbName = request.getDb();
+        if (request.isSetTableId() && request.getTableId() > 0) {
+            Pair<Database, Table> pair = env.getInternalCatalog()
+                    .getDbAndTableByTableId(request.getTableId(), TableType.OLAP);
+            if (pair == null) {
+                throw new UserException("unknown table_id=" + request.getTableId());
             }
-            throw new UserException("unknown database, database=" + dbName);
-        }
+            db = pair.first;
+            table = (OlapTable) pair.second;
+        } else {
+            String fullDbName = ClusterNamespace.getFullName(cluster, request.getDb());
+            db = env.getInternalCatalog().getDbNullable(fullDbName);
+            if (db == null) {
+                String dbName = fullDbName;
+                if (Strings.isNullOrEmpty(request.getCluster())) {
+                    dbName = request.getDb();
+                }
+                throw new UserException("unknown database, database=" + dbName);
+            }
 
-        OlapTable table = (OlapTable) db.getTableOrMetaException(request.tbl, TableType.OLAP);
+            table = (OlapTable) db.getTableOrMetaException(request.tbl, TableType.OLAP);
+        }
         // begin
         long timeoutSecond = request.isSetTimeout() ? request.getTimeout() : Config.stream_load_default_timeout_second;
         long txnId = Env.getCurrentGlobalTransactionMgr().beginTransaction(
@@ -1827,7 +1841,17 @@ public class FrontendServiceImpl implements FrontendService.Iface {
     }
 
     private TExecPlanFragmentParams streamLoadPutImpl(TStreamLoadPutRequest request) throws UserException {
-        if (Config.isCloudMode()) {
+        if (request.isSetAuthCode()) {
+            String clientAddr = getClientAddrAsString();
+            ConnectContext ctx = new ConnectContext();
+            ctx.setThreadLocalInfo();
+            ctx.setRemoteIP(clientAddr);
+            long backendId = request.getBackendId();
+            Backend backend = Env.getCurrentSystemInfo().getBackend(backendId);
+            Preconditions.checkNotNull(backend);
+            ctx.setCloudCluster(backend.getCloudClusterName());
+            LOG.info("streamLoadPutImpl set context: cluster {}", ctx.getCloudCluster());
+        } else if (Config.isCloudMode()) {
             ConnectContext ctx = new ConnectContext();
             ctx.setThreadLocalInfo();
             ctx.setQualifiedUser(request.getUser());
@@ -1868,18 +1892,30 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
 
         Env env = Env.getCurrentEnv();
-        String fullDbName = ClusterNamespace.getFullName(cluster, request.getDb());
-        Database db = env.getInternalCatalog().getDbNullable(fullDbName);
-        if (db == null) {
-            String dbName = fullDbName;
-            if (Strings.isNullOrEmpty(request.getCluster())) {
-                dbName = request.getDb();
+        Database db;
+        Table table;
+        if (request.isSetTableId() && request.getTableId() > 0) {
+            Pair<Database, Table> pair = env.getInternalCatalog()
+                    .getDbAndTableByTableId(request.getTableId(), TableType.OLAP);
+            if (pair == null) {
+                throw new UserException("unknown table_id=" + request.getTableId());
             }
-            throw new UserException("unknown database, database=" + dbName);
+            db = pair.first;
+            table = pair.second;
+        } else {
+            String fullDbName = ClusterNamespace.getFullName(cluster, request.getDb());
+            db = env.getInternalCatalog().getDbNullable(fullDbName);
+            if (db == null) {
+                String dbName = fullDbName;
+                if (Strings.isNullOrEmpty(request.getCluster())) {
+                    dbName = request.getDb();
+                }
+                throw new UserException("unknown database, database=" + dbName);
+            }
+            table = db.getTableOrMetaException(request.getTbl(), TableType.OLAP);
         }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
-        Table table = db.getTableOrMetaException(request.getTbl(), TableType.OLAP);
-        return generatePlanFragmentParams(request, db, fullDbName, (OlapTable) table, timeoutMs);
+        return generatePlanFragmentParams(request, db, db.getFullName(), (OlapTable) table, timeoutMs);
     }
 
     private TExecPlanFragmentParams generatePlanFragmentParams(TStreamLoadPutRequest request, Database db,
@@ -2885,6 +2921,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 execPlanFragmentParams.setTxnConf(new TTxnParams());
                 execPlanFragmentParams.txn_conf.setTxnId(txnId);
                 execPlanFragmentParams.setImportLabel(label.getLabelName());
+                execPlanFragmentParams.setWalId(txnId);
                 result.setParams(execPlanFragmentParams);
             }
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());

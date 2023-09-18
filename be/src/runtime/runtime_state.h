@@ -215,6 +215,8 @@ public:
 
     void set_import_label(const std::string& import_label) { _import_label = import_label; }
 
+    const std::string& import_label() { return _import_label; }
+
     const std::vector<std::string>& export_output_files() const { return _export_output_files; }
 
     void add_export_output_file(const std::string& file) { _export_output_files.push_back(file); }
@@ -222,6 +224,10 @@ public:
     void set_db_name(const std::string& db_name) { _db_name = db_name; }
 
     const std::string& db_name() { return _db_name; }
+
+    void set_wal_id(int64_t wal_id) { _wal_id = wal_id; }
+
+    int64_t wal_id() { return _wal_id; }
 
     const std::string& load_dir() const { return _load_dir; }
 
@@ -515,6 +521,7 @@ private:
     std::string _db_name;
     std::string _load_dir;
     int64_t _load_job_id;
+    int64_t _wal_id = -1;
 
     // mini load
     int64_t _normal_row_number;
