@@ -765,7 +765,7 @@ Status CloudMetaMgr::get_delete_bitmap_update_lock(const Tablet* tablet, int64_t
                          << "ms : " << res.status().msg();
             bthread_usleep(duration_ms * 1000);
             continue;
-        } else if (!st.ok()) { // Other errors, return error status
+        } else {
             break;
         }
     } while (++retry_times <= 100);
