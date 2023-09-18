@@ -96,8 +96,9 @@ public:
                                   std::unique_ptr<ColumnIterator>* iter,
                                   StorageReadOptions* opt = nullptr);
 
-    Status new_iterator_with_sparse_column_path(const TabletColumn& tablet_column,
-                                                std::unique_ptr<ColumnIterator>* iter);
+    Status new_iterator_with_root(const TabletColumn& tablet_column,
+                                  std::unique_ptr<ColumnIterator>* iter,
+                                  const SubcolumnColumnReaders::Node* root);
 
     Status new_column_iterator(int32_t unique_id, std::unique_ptr<ColumnIterator>* iter);
 
@@ -194,8 +195,8 @@ private:
             _column_path_to_footer_ordinal;
 
     // each sprase column's path info
-    std::unordered_map<vectorized::PathInData, uint32_t, vectorized::PathInData::Hash>
-            _sparse_column_path_to;
+    SubcolumnColumnReaders _sparse_column_tree;
+
     // used to guarantee that short key index will be loaded at most once in a thread-safe way
     DorisCallOnce<Status> _load_index_once;
     // used to guarantee that primary key bloom filter will be loaded at most once in a thread-safe way

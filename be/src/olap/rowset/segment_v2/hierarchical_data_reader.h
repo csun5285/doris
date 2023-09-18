@@ -125,18 +125,18 @@ private:
             container_variant.add_sub_column({}, std::move(column), type);
         }
 
+        // todo(fix): select v:b -> v.b, v.b.c and v.b.a maybe in v
         RETURN_IF_ERROR(tranverse([&](SubstreamReaderTree::Node& node) {
             vectorized::MutableColumnPtr column = node.data.column->get_ptr();
-            bool add = container_variant.add_sub_column(node.path.pop_front(), std::move(column),
-                                                        node.data.type);
+            bool add = container_variant.add_sub_column(
+                    node.path.pop_front_part(_col.path_info().size()), std::move(column),
+                    node.data.type);
             if (!add) {
                 return Status::InternalError("Duplicated {}, type {}", node.path.get_path(),
                                              node.data.type->get_name());
             }
             return Status::OK();
         }));
-
-        // TODO select v:b -> v.b / v.b.c but v.d maybe in v
 
         // copy container variant to dst variant, todo avoid copy
         variant.insert_range_from(container_variant, 0, nrows);

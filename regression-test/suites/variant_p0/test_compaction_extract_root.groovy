@@ -17,8 +17,8 @@
 
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_compaction_sparse_column") {
-    def tableName = "test_compaction"
+suite("test_compaction_extract_root") {
+    def tableName = "test_t"
 
     try {
         String backend_id;
@@ -54,19 +54,19 @@ suite("test_compaction_sparse_column") {
             );
         """
 
-        sql """insert into ${tableName} select 0, '{"a": 11245, "b" : 42000}'  as json_str
-            union  all select 0, '{"a": 1123}' as json_str union all select 0, '{"a" : 1234, "xxxx" : "aaaaa"}' as json_str from numbers("number" = "4096") limit 4096 ;"""
+        sql """insert into ${tableName}  select 0, '{"a": 11245, "b" : {"state" : "open", "code" : 2}}'  as json_str
+            union  all select 8, '{"a": 1123}' as json_str union all select 0, '{"a" : 1234, "b" : "aaaaa"}' as json_str from numbers("number" = "4096") limit 4096 ;"""
 
         
-        sql """insert into ${tableName} select 1, '{"a": 11245, "b" : 42001}'  as json_str
+        sql """insert into ${tableName} select 1, '{"a": 11245, "b" : {"state" : "colse", "code" : 2}}'  as json_str
             union  all select 1, '{"a": 1123}' as json_str union all select 1, '{"a" : 1234, "xxxx" : "bbbbb"}' as json_str from numbers("number" = "4096") limit 4096 ;"""
 
         
-        sql """insert into ${tableName} select 2, '{"a": 11245, "b" : 42002}'  as json_str
+        sql """insert into ${tableName} select 2, '{"a": 11245, "b" : {"state" : "flat", "code" : 3}}'  as json_str
             union  all select 2, '{"a": 1123}' as json_str union all select 2, '{"a" : 1234, "xxxx" : "ccccc"}' as json_str from numbers("number" = "4096") limit 4096 ;"""
 
         
-        sql """insert into ${tableName} select 3, '{"a" : 1234, "xxxx" : "ddddd", "point" : 1}'  as json_str
+        sql """insert into ${tableName}  select 3, '{"a" : 1234, "xxxx" : 4, "point" : 5}'  as json_str
             union  all select 3, '{"a": 1123}' as json_str union all select 3, '{"a": 11245, "b" : 42003}' as json_str from numbers("number" = "4096") limit 4096 ;"""
 
 
@@ -77,6 +77,9 @@ suite("test_compaction_sparse_column") {
         sql """insert into ${tableName} select 5, '{"a" : 1234, "xxxx" : "fffff", "point" : 42000}'  as json_str
             union  all select 5, '{"a": 1123}' as json_str union all select 5, '{"a": 11245, "b" : 42005}' as json_str from numbers("number" = "4096") limit 4096 ;"""
 
+        // // fix cast to strint tobe {}
+        qt_select_b_1 """ SELECT count(cast(v:b as string)) FROM ${tableName};"""
+        qt_select_b_2 """ SELECT count(cast(v:b as int)) FROM ${tableName};"""
 
         //TabletId,ReplicaId,BackendId,SchemaHash,Version,LstSuccessVersion,LstFailedVersion,LstFailedTime,LocalDataSize,RemoteDataSize,RowCount,State,LstConsistencyCheckTime,CheckVersion,VersionCount,PathHash,MetaUrl,CompactionStatus
         String[][] tablets = sql """ show tablets from ${tableName}; """
@@ -128,22 +131,9 @@ suite("test_compaction_sparse_column") {
             }
         }
         assert (rowCount <= 8)
-        qt_select_b """ SELECT count(cast(v:b as int)) FROM ${tableName};"""
-        qt_select_xxxx """ SELECT count(cast(v:xxxx as string)) FROM ${tableName};"""
-        qt_select_point """ SELECT count(cast(v:point as bigint)) FROM ${tableName};"""
-        qt_select_1 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'aaaaa';"""
-        qt_select_2 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'bbbbb';"""
-        qt_select_3 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'ccccc';"""
-        qt_select_4 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'eeeee';"""
-        qt_select_5 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'ddddd';"""
-        qt_select_6 """ SELECT count(cast(v:xxxx as string)) FROM ${tableName} where cast(v:xxxx as string) = 'fffff';"""
-        qt_select_1_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42000;"""
-        qt_select_2_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42001;"""
-        qt_select_3_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42002;"""
-        qt_select_4_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42003;"""
-        qt_select_5_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42004;"""
-        qt_select_6_1 """ SELECT count(cast(v:b as int)) FROM ${tableName} where cast(v:b as int) = 42005;"""
-        qt_select_all """SELECT * from ${tableName} where (cast(v:point as int) = 1);"""
+        // fix cast to strint tobe {}
+        qt_select_b_3 """ SELECT count(cast(v:b as string)) FROM ${tableName};"""
+        qt_select_b_4 """ SELECT count(cast(v:b as int)) FROM ${tableName};"""
     } finally {
         // try_sql("DROP TABLE IF EXISTS ${tableName}")
     }

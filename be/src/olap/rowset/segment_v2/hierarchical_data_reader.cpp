@@ -157,6 +157,11 @@ Status ExtractReader::extract_to(vectorized::MutableColumnPtr& dst, size_t nrows
             dst_var.get_root()->insert_range_from(*cast_column, 0, nrows);
             dst_var.set_num_rows(dst_var.get_root()->size());
         }
+        for (auto& entry : dst_var.get_subcolumns()) {
+            if (entry->data.size() == 0) {
+                entry->data.insertManyDefaults(nrows);
+            }
+        }
 #ifndef NDEBUG
         assert_cast<vectorized::ColumnObject&>(*dst).check_consistency();
 #endif

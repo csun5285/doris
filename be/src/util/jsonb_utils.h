@@ -50,8 +50,10 @@ public:
     const std::string to_json_string(const JsonbValue* val) {
         os_.clear();
         os_.seekp(0);
-
-        if (val) {
+        if (val && val->isString()) {
+            string_to_json(((JsonbStringVal*)val)->getBlob(), ((JsonbStringVal*)val)->length(),
+                           true);
+        } else if (val) {
             intern_json(val);
         }
 
@@ -111,7 +113,8 @@ private:
             break;
         }
         case JsonbType::T_String: {
-            string_to_json(((JsonbStringVal*)val)->getBlob(), ((JsonbStringVal*)val)->length());
+            string_to_json(((JsonbStringVal*)val)->getBlob(), ((JsonbStringVal*)val)->length(),
+                           false);
             break;
         }
         case JsonbType::T_Binary: {
@@ -133,10 +136,14 @@ private:
         }
     }
 
-    void string_to_json(const char* str, size_t len) {
-        // os_.put('"');
+    void string_to_json(const char* str, size_t len, bool origin_string) {
+        if (!origin_string) {
+            os_.put('"');
+        }
         if (nullptr == str) {
-            // os_.put('"');
+            if (!origin_string) {
+                os_.put('"');
+            }
             return;
         }
         char char_buffer[16];
@@ -176,7 +183,9 @@ private:
                 }
             }
         }
-        // os_.put('"');
+        if (!origin_string) {
+            os_.put('"');
+        }
     }
 
     // convert object
@@ -189,7 +198,7 @@ private:
         while (iter < iter_fence) {
             // write key
             if (iter->klen()) {
-                string_to_json(iter->getKeyStr(), iter->klen());
+                string_to_json(iter->getKeyStr(), iter->klen(), false);
             } else {
                 os_.write(iter->getKeyId());
             }
