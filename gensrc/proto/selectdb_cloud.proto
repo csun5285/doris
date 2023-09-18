@@ -479,10 +479,12 @@ message TabletStatsPB {
     optional int64 num_rows = 3;
     optional int64 num_rowsets = 4;
     optional int64 num_segments = 5;
-    optional int64 last_compaction_time = 6;
+    reserved 6;
     optional int64 base_compaction_cnt = 7;
     optional int64 cumulative_compaction_cnt = 8;
     optional int64 cumulative_point = 9;
+    optional int64 last_base_compaction_time_ms = 10;
+    optional int64 last_cumu_compaction_time_ms = 11;
 }
 
 message ObjectFilePB {

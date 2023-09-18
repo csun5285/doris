@@ -16,9 +16,9 @@ public:
     CloudTabletMgr();
     ~CloudTabletMgr();
 
-    // If the tablet is not in cache, mgr will get tablet meta first and sync rowsets after.
-    // If sync_rowsets is false, it will not sync rowsets. 
-    Status get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool sync_rowsets = true);
+    // If the tablet is in cache, return this tablet directly; otherwise will get tablet meta first,
+    // sync rowsets after, and download segment data in background if `warmup_data` is true.
+    Status get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool warmup_data = false);
 
     void erase_tablet(int64_t tablet_id);
 

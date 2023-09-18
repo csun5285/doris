@@ -29,7 +29,8 @@ public:
 
     virtual Status get_tablet_meta(int64_t tablet_id, std::shared_ptr<TabletMeta>* tablet_meta) = 0;
 
-    virtual Status sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async = false) = 0;
+    // If `warmup_delta_data` is true, download the new version rowset data in background
+    virtual Status sync_tablet_rowsets(Tablet* tablet, bool warmup_delta_data = false) = 0;
 
     virtual Status prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                   std::shared_ptr<RowsetMeta>* existed_rs_meta = nullptr) = 0;

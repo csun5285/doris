@@ -481,6 +481,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     // 4. modify rowsets in memory
     RETURN_IF_ERROR(modify_rowsets(&stats));
 
+#ifndef CLOUD_MODE
     // 5. update last success compaction time
     int64_t now = UnixMillis();
     // TODO(yingchun): do the judge in Tablet class
@@ -492,7 +493,6 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         _tablet->set_last_full_compaction_success_time(now);
     }
 
-#ifndef CLOUD_MODE
     int64_t current_max_version;
     {
         std::shared_lock rdlock(_tablet->get_header_lock());

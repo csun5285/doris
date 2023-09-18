@@ -69,7 +69,6 @@
 #include "util/defer_op.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
-#include "util/brpc_client_cache.h"
 
 namespace apache {
 namespace thrift {
@@ -720,9 +719,11 @@ void BackendService::sync_load_for_tablets(TSyncLoadForTabletsResponse&,
         std::for_each(tablet_ids.cbegin(), tablet_ids.cend(), [](int64_t tablet_id) {
             // TODO(liuchangliang): batch sync
             TabletSharedPtr tablet;
-            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet, false);
-            if (st) {
-                tablet->cloud_sync_rowsets(-1, true);
+            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet, true);
+            if (!st.ok()) return;
+            st = tablet->cloud_sync_rowsets(-1, true);
+            if (!st.ok()) {
+                LOG(WARNING) << "failed to sync load for tablet " << tablet_id << ": " << st;
             }
         });
     };

@@ -264,7 +264,6 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         tablet_stats_pb.set_data_size(dist(rng) + compaction->size_input_rowsets());
         tablet_stats_pb.set_num_rowsets(dist(rng) + compaction->num_input_rowsets());
         tablet_stats_pb.set_num_segments(dist(rng) + compaction->num_input_segments());
-        tablet_stats_pb.set_last_compaction_time(dist(rng));
 
         std::string tablet_stats_val = tablet_stats_pb.SerializeAsString();
         ASSERT_FALSE(tablet_stats_val.empty());
@@ -383,7 +382,6 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         EXPECT_EQ(stats.data_size()                , tablet_stats_pb.data_size() + (req.job().compaction(0).size_output_rowsets() - req.job().compaction(0).size_input_rowsets()));
         EXPECT_EQ(stats.num_rowsets()              , tablet_stats_pb.num_rowsets() + (req.job().compaction(0).num_output_rowsets() - req.job().compaction(0).num_input_rowsets()));
         EXPECT_EQ(stats.num_segments()             , tablet_stats_pb.num_segments() + (req.job().compaction(0).num_output_segments() - req.job().compaction(0).num_input_segments()));
-        // EXPECT_EQ(stats.last_compaction_time     (), now);
         // clang-format on
 
         // Check job removed, tablet meta updated

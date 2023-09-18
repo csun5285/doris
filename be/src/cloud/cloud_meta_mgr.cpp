@@ -242,7 +242,7 @@ TRY_AGAIN:
     return Status::OK();
 }
 
-Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) {
+Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool warmup_delta_data) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::sync_tablet_rowsets", Status::OK(), tablet);
 
     std::shared_ptr<selectdb::MetaService_Stub> stub;
@@ -385,8 +385,10 @@ TRY_AGAIN:
             //   after doing EMPTY_CUMULATIVE compaction, MS cp is 13, get_rowset will return [2-11][12-12].
             bool version_overlap = tablet->local_max_version() >= rowsets.front()->start_version();
             tablet->cloud_add_rowsets(std::move(rowsets), version_overlap,
-                                      need_download_data_async);
+                                      warmup_delta_data);
         }
+        tablet->set_last_base_compaction_success_time(stats.last_base_compaction_time_ms());
+        tablet->set_last_cumu_compaction_success_time(stats.last_cumu_compaction_time_ms());
         tablet->set_base_compaction_cnt(stats.base_compaction_cnt());
         tablet->set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());
         tablet->set_cumulative_layer_point(stats.cumulative_point());

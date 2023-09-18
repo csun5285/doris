@@ -353,7 +353,7 @@ DEFINE_mInt64(max_segment_size_in_vertical_compaction, "268435456");
 // In ordered data compaction, min segment size for input rowset
 DEFINE_mInt32(ordered_data_compaction_min_segment_size, "10485760");
 
-DEFINE_mInt32(min_compaction_failure_interval_sec, "5");
+DEFINE_mInt32(min_compaction_failure_interval_ms, "5000");
 
 // This config can be set to limit thread number in compaction thread pool.
 DEFINE_mInt32(max_base_compaction_threads, "4");
@@ -373,6 +373,7 @@ DEFINE_mInt64(compaction_promotion_size_mbytes, "1024");
 DEFINE_mInt32(check_auto_compaction_interval_seconds, "5");
 DEFINE_mInt64(base_compaction_num_cumulative_deltas, "5");
 DEFINE_mInt64(base_compaction_interval_seconds_since_last_operation, "86400");
+DEFINE_mInt32(cumu_compaction_interval_seconds, "1800");
 DEFINE_Bool(enable_dup_key_base_compaction_skip_big_file, "true");
 
 // output rowset of cumulative compaction total disk size exceed this config ratio of
