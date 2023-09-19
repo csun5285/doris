@@ -18,6 +18,7 @@
 #include "service/backend_service.h"
 
 #include <arrow/record_batch.h>
+#include <brpc/controller.h>
 #include <fmt/format.h>
 #include <gen_cpp/BackendService.h>
 #include <gen_cpp/BackendService_types.h>
@@ -65,7 +66,9 @@
 #include "runtime/routine_load/routine_load_task_executor.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/stream_load_recorder.h"
+#include "service/backend_service.h"
 #include "util/arrow/row_batch.h"
+#include "util/brpc_client_cache.h"
 #include "util/defer_op.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
