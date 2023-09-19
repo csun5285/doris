@@ -126,6 +126,7 @@ public class InternalQuery {
         // If user does not set the timeout, then use max_cbo_statistics_task_timeout_sec
         timeout = timeout > 0 ? timeout : Config.max_cbo_statistics_task_timeout_sec;
         context.getSessionVariable().setQueryTimeoutS(timeout);
+        context.setCloudCluster();
     }
 
     private void parseSql() throws DdlException {
