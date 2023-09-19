@@ -350,8 +350,8 @@ Status Segment::_create_column_readers(const SegmentFooterPB& footer) {
                 SubcolumnReader {std::move(reader),
                                  get_data_type_from_column_meta(footer.columns(iter->second))});
     }
-    for (uint32_t ordinal = 0; ordinal < _footer.sparse_columns().size(); ++ordinal) {
-        auto& column_pb = _footer.sparse_columns(ordinal);
+    for (uint32_t ordinal = 0; ordinal < footer.sparse_columns().size(); ++ordinal) {
+        auto& column_pb = footer.sparse_columns(ordinal);
         if (column_pb.has_column_path_info()) {
             vectorized::PathInData path;
             path.from_protobuf(column_pb.column_path_info());
