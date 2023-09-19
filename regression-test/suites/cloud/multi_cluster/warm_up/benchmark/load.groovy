@@ -18,7 +18,9 @@ suite("test_warm_up_benchmark") {
 
     String[] bes = context.config.multiClusterBes.split(',');
     println("the value is " + context.config.multiClusterBes);
+    int num = 0
     for(String values : bes) {
+        if (num++ == 2) break;
         println("the value is " + values);
         String[] beInfo = values.split(':');
         ipList.add(beInfo[0]);
