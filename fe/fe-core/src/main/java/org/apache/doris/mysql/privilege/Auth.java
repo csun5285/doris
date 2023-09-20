@@ -260,6 +260,12 @@ public class Auth implements Writable {
     public boolean checkGlobalPriv(UserIdentity currentUser, PrivPredicate wanted) {
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkGlobalPriv(wanted)) {
@@ -281,6 +287,12 @@ public class Auth implements Writable {
         }
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkCtlPriv(ctl, wanted)) {
@@ -302,6 +314,12 @@ public class Auth implements Writable {
         }
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkDbPriv(ctl, db, wanted)) {
@@ -323,6 +341,12 @@ public class Auth implements Writable {
         }
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkTblPriv(ctl, db, tbl, wanted)) {
@@ -364,6 +388,12 @@ public class Auth implements Writable {
     public boolean checkResourcePriv(UserIdentity currentUser, String resourceName, PrivPredicate wanted) {
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkResourcePriv(resourceName, wanted)) {
@@ -380,6 +410,12 @@ public class Auth implements Writable {
     public boolean checkWorkloadGroupPriv(UserIdentity currentUser, String workloadGroupName, PrivPredicate wanted) {
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<Role> roles = getRolesByUserWithLdap(currentUser);
             for (Role role : roles) {
                 if (role.checkWorkloadGroupPriv(workloadGroupName, wanted)) {
@@ -397,6 +433,12 @@ public class Auth implements Writable {
                                   PrivPredicate wanted, ResourceTypeEnum type) {
         readLock();
         try {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                if (ctx.getNoAuth()) {
+                    return true;
+                }
+            }
             Set<String> roles = userRoleManager.getRolesByUser(currentUser);
             for (String roleName : roles) {
                 if (roleManager.getRole(roleName).checkCloudPriv(cloudName, wanted, type)) {
@@ -417,6 +459,9 @@ public class Auth implements Writable {
     public boolean checkHasPriv(ConnectContext ctx, PrivPredicate priv, PrivLevel... levels) {
         readLock();
         try {
+            if (ctx.getNoAuth()) {
+                return true;
+            }
             Set<Role> roles = getRolesByUserWithLdap(ctx.getCurrentUserIdentity());
             for (Role role : roles) {
                 if (role.checkHasPriv(priv, levels)) {
@@ -1416,6 +1461,9 @@ public class Auth implements Writable {
     public boolean checkCanEnterCluster(ConnectContext ctx, String clusterName) {
         readLock();
         try {
+            if (ctx.getNoAuth()) {
+                return true;
+            }
             Set<String> roles = userRoleManager.getRolesByUser(ctx.getCurrentUserIdentity());
             for (String roleName : roles) {
                 if (roleManager.getRole(roleName).checkCanEnterCluster(clusterName)) {

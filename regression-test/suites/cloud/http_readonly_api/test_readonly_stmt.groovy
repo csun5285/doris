@@ -78,6 +78,7 @@ suite("test_readonly_stmt") {
 
     logger.info("stmt1 msg is {}", obj.msg)
     logger.info("stmt1 code is {}", obj.code)
+    assertEquals(obj.code, 1)
 
     // test show databases
     sql """ show databases """
@@ -92,6 +93,8 @@ suite("test_readonly_stmt") {
     logger.info("stmt2 data size is {}", obj.data.data.size)
     logger.info("stmt2 data is {}", obj.data.data)
 
+    assertEquals(obj.code, 0)
+
     // test show columns
     def ret = sql """ SHOW FULL COLUMNS FROM ${tableName} """
     logger.info("stmt3 from mysql is {}", ret)
@@ -105,6 +108,7 @@ suite("test_readonly_stmt") {
     logger.info("stmt3 code is {}", obj.code)
     logger.info("stmt3 data is {}", obj.data.data)
 
+    assertEquals(obj.code, 0)
 
     sql """
     CREATE TABLE IF NOT EXISTS ${tableName2} (
@@ -125,4 +129,6 @@ suite("test_readonly_stmt") {
     logger.info("stmt4 msg is {}", obj.msg)
     logger.info("stmt4 code is {}", obj.code)
     logger.info("stmt4 data is {}", obj.data.data)
+
+    assertEquals(obj.code, 0)
 }
