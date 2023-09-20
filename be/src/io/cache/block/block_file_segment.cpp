@@ -28,10 +28,10 @@
 #include <thread>
 
 #include "common/status.h"
+#include "io/cache/block/block_file_cache.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
-#include "io/cache/block/block_file_cache.h"
 
 namespace doris {
 namespace io {
@@ -121,7 +121,10 @@ void FileBlock::reset_downloader(std::lock_guard<doris::Mutex>& segment_lock) {
 
 void FileBlock::reset_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock) {
     if (_downloaded_size == range().size()) {
-        set_downloaded(segment_lock);
+        Status st = set_downloaded(segment_lock);
+        if (!st.ok()) {
+            LOG_WARNING("reset downloader error").error(st);
+        }
     } else {
         _downloaded_size = 0;
         _download_state = State::EMPTY;
@@ -205,16 +208,14 @@ bool FileBlock::change_cache_type(FileCacheType new_type) {
     return true;
 }
 
-Status FileBlock::change_cache_type_self(FileCacheType new_type) {
+void FileBlock::change_cache_type_self(FileCacheType new_type) {
     std::lock_guard cache_lock(_cache->_mutex);
     std::unique_lock segment_lock(_mutex);
-    Status st = Status::OK();
     if (_cache_type == FileCacheType::TTL || new_type == _cache_type) {
-        return st;
+        return;
     }
     _cache_type = new_type;
     _cache->change_cache_type(_file_key, _segment_range.left, new_type, cache_lock);
-    return st;
 }
 
 FileBlock::~FileBlock() {

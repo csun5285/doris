@@ -109,7 +109,7 @@ public:
     };
 
     /// Restore cache from local filesystem.
-    Status initialize();
+    [[nodiscard]] Status initialize();
 
     /// Cache capacity in bytes.
     size_t capacity() const { return _total_size; }
@@ -164,7 +164,7 @@ public:
             const Key& key) const;
 
     // when cache change to read-write  from read-only, it need reinitialize
-    Status reinitialize();
+    [[nodiscard]] Status reinitialize();
 
     bool get_lazy_open_success() {
         return _lazy_open_done;
@@ -423,7 +423,7 @@ private:
 
     size_t get_available_cache_size(FileCacheType cache_type) const;
 
-    Status load_cache_info_into_memory();
+    [[nodiscard]] Status load_cache_info_into_memory();
 
     bool try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
 

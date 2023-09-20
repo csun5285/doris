@@ -12,6 +12,7 @@
 
 #include "cloud/utils.h"
 #include "common/config.h"
+#include "common/logging.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
@@ -60,8 +61,14 @@ static void _append_data_to_file_cache(FileBlocksHolderPtr holder, Slice data) {
                           size_t append_size =
                                   std::min(data.size - offset, file_segment->range().size());
                           Slice append_data(data.data + offset, append_size);
-                          file_segment->append(append_data);
-                          file_segment->finalize_write();
+                          Status st;
+                          st = file_segment->append(append_data);
+                          if (st.ok()) {
+                            st = file_segment->finalize_write();
+                          }
+                          if (!st.ok()) {
+                            LOG_WARNING("failed to append data to file cache").error(st);
+                          }
                       }
                       offset += file_segment->range().size();
                   });
