@@ -2341,4 +2341,7 @@ public class Config extends ConfigBase {
 
     @ConfField
     public static boolean forbid_running_alter_job = false;
+
+    @ConfField
+    public static boolean forbid_function_stmt = true;
 }
