@@ -350,12 +350,27 @@ Status S3FileWriter::_complete() {
     complete_request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
 
     _wait_until_finish("Complete");
+    if (_failed || _completed_parts.size() != _cur_part_num) {
+        auto st = Status::IOError("error status {}, complete parts {}, cur part num {}", _st,
+                                  _completed_parts.size(), _cur_part_num);
+        LOG(WARNING) << st;
+        _st = st;
+        return st;
+    }
     // make sure _completed_parts are ascending order
     std::sort(_completed_parts.begin(), _completed_parts.end(),
               [](auto& p1, auto& p2) { return p1->GetPartNumber() < p2->GetPartNumber(); });
     CompletedMultipartUpload completed_upload;
-    for (auto& part : _completed_parts) {
-        completed_upload.AddParts(*part);
+    for (size_t i = 0; i < _completed_parts.size(); i++) {
+        if (_completed_parts[i]->GetPartNumber() != i + 1) [[unlikely]] {
+            auto st = Status::IOError(
+                    "error status {}, part num not continous, expected num {}, actual num {}", _st,
+                    i + 1, _completed_parts[i]->GetPartNumber());
+            LOG(WARNING) << st;
+            _st = st;
+            return st;
+        }
+        completed_upload.AddParts(*_completed_parts[i]);
     }
 
     complete_request.WithMultipartUpload(completed_upload);
@@ -397,6 +412,9 @@ Status S3FileWriter::finalize() {
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed) << "closed " << _closed;
+    if (_failed) {
+        return;
+    }
     LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);

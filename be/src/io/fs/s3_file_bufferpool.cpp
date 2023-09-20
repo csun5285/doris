@@ -171,7 +171,10 @@ void UploadFileBuffer::read_from_cache() {
         }
         size_t segment_size = segment->range().size();
         Slice s(_buffer.get_data() + pos, segment_size);
-        segment->read_at(s, 0);
+        if (auto st = segment->read_at(s, 0); !st.ok()) [[unlikely]] {
+            set_val(std::move(st));
+            return;
+        }
         pos += segment_size;
     }
 
