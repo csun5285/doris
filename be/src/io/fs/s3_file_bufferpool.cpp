@@ -149,8 +149,13 @@ void UploadFileBuffer::upload_to_local_file_cache(bool is_cancelled) {
             // Just skip putting to cache from UploadFileBuffer
             if (segment->is_downloader()) {
                 Slice s(_buffer.get_data() + pos, append_size);
-                segment->append(s);
-                segment->finalize_write();
+                Status st = segment->append(s);
+                if (st.ok()) {
+                    st = segment->finalize_write();
+                }
+                if (!st.ok()) {
+                    LOG_WARNING("failed to append data to file cache").error(st);
+                }
             }
         }
         data_remain_size -= append_size;

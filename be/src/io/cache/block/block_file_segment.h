@@ -107,13 +107,13 @@ public:
     State wait();
 
     // append data to cache file
-    Status append(Slice data);
+    [[nodiscard]] Status append(Slice data);
 
     // read data from cache file
-    Status read_at(Slice buffer, size_t read_offset);
+    [[nodiscard]] Status read_at(Slice buffer, size_t read_offset);
 
     // finish write, release the file writer
-    Status finalize_write(bool need_to_get_file_size = false);
+    [[nodiscard]] Status finalize_write(bool need_to_get_file_size = false);
 
     // set downloader if state == EMPTY
     uint64_t get_or_set_downloader();
@@ -140,7 +140,7 @@ public:
 
     bool change_cache_type(FileCacheType new_type);
 
-    Status change_cache_type_self(FileCacheType new_type);
+    void change_cache_type_self(FileCacheType new_type);
 
     void update_expiration_time(int64_t expiration_time) { _expiration_time = expiration_time; }
 
@@ -156,7 +156,7 @@ private:
     std::string get_info_for_log_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
     bool has_finalized_state() const;
 
-    Status set_downloaded(std::lock_guard<doris::Mutex>& segment_lock);
+    [[nodiscard]] Status set_downloaded(std::lock_guard<doris::Mutex>& segment_lock);
     bool is_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
 
     void complete_unlocked(std::lock_guard<doris::Mutex>& segment_lock);
