@@ -163,7 +163,12 @@ Status S3FileWriter::abort() {
         _pending_buf = nullptr;
     }
     // upload id is empty means there was no create multi upload
+    // but the put object task might already be summitted to threadpool
     if (_upload_id.empty()) {
+        LOG(INFO) << "early quit when put object, though the object might already be uploaded "
+                     "before calling abort";
+        _wait_until_finish("early quit when put object");
+        _aborted = true;
         return Status::OK();
     }
     VLOG_DEBUG << "S3FileWriter::abort, path: " << _path.native();
@@ -393,6 +398,10 @@ Status S3FileWriter::finalize() {
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed) << "closed " << _closed;
     LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
+    // the task might already be aborted
+    if (_failed) [[unlikely]] {
+        return;
+    }
     Aws::S3::Model::PutObjectRequest request;
     request.WithBucket(_bucket).WithKey(_key);
     Aws::Utils::ByteBuffer part_md5(Aws::Utils::HashingUtils::CalculateMD5(*buf.get_stream()));

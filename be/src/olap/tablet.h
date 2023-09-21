@@ -194,19 +194,18 @@ public:
     // Synchronize the rowsets from meta service.
     // If tablet state is not `TABLET_RUNNING`, sync tablet meta and all visible rowsets.
     // If `query_version` > 0 and local max_version of the tablet >= `query_version`, do nothing.
-    // If 'need_download_data_async' is true, it means that we need to download the new version 
+    // If 'warmup_delta_data' is true, it means that we need to download the new version 
     // rowsets datas async.
-    Status cloud_sync_rowsets(int64_t query_version = -1, bool need_download_data_async = false);
+    Status cloud_sync_rowsets(int64_t query_version = -1, bool warmup_delta_data = false);
 
     // Synchronize the tablet meta from meta service.
     Status cloud_sync_meta();
 
     // If `version_overlap` is true, function will delete rowsets with overlapped version in this tablet.
+    // If 'warmup_delta_data' is true, download the new version rowset data in background.
     // MUST hold EXCLUSIVE `_meta_lock`.
-    // If 'need_download_data_async' is true, it means that we need to download the new version 
-    // rowsets datas async.
     void cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
-                           bool need_download_data_async = false);
+                           bool warmup_delta_data = false);
 
     // It is only used in CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets.
     // To add rowset after downloading segments
@@ -228,7 +227,7 @@ public:
     int64_t fetch_add_approximate_num_rows    (int64_t x) { return _approximate_num_rows    .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_data_size   (int64_t x) { return _approximate_data_size   .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_rowsets (int64_t x) { return _approximate_cumu_num_rowsets.fetch_add(x, std::memory_order_relaxed); }
-    int64_t fetch_add_approximate_cumu_data_size   (int64_t x) { return _approximate_cumu_data_size  .fetch_add(x, std::memory_order_relaxed); }
+    int64_t fetch_add_approximate_cumu_num_deltas   (int64_t x) { return _approximate_cumu_num_deltas.fetch_add(x, std::memory_order_relaxed); }
     // clang-format on
     // meta lock must be held when calling this function
     void reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, int64_t num_rows,
@@ -309,7 +308,7 @@ public:
     int64_t last_cumu_no_suitable_version_ms() const {
         return _last_cumu_no_suitable_version_millis.load(std::memory_order_relaxed);
     }
-    void set_last_cumu_no_suitable_version_time(int64_t millis) {
+    void set_last_cumu_no_suitable_version_ms(int64_t millis) {
         _last_cumu_no_suitable_version_millis.store(millis, std::memory_order_relaxed);
     }
 
@@ -766,7 +765,8 @@ private:
     std::atomic<int64_t> _approximate_num_segments {-1};
     std::atomic<int64_t> _approximate_data_size {-1};
     std::atomic<int64_t> _approximate_cumu_num_rowsets {-1};
-    std::atomic<int64_t> _approximate_cumu_data_size {-1};
+    // Number of sorted arrays (e.g. for rowset with N segments, if rowset is overlapping, delta is N, otherwise 1) after cumu point
+    std::atomic<int64_t> _approximate_cumu_num_deltas {-1};
 
     // cumulative compaction policy
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;

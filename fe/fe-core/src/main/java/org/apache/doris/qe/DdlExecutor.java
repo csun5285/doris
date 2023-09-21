@@ -157,8 +157,16 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof DropDbStmt) {
             env.dropDb((DropDbStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateFunctionStmt) {
+            if (Config.forbid_function_stmt) {
+                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
+                throw new DdlException("Unsupported operation");
+            }
             env.createFunction((CreateFunctionStmt) ddlStmt);
         } else if (ddlStmt instanceof DropFunctionStmt) {
+            if (Config.forbid_function_stmt) {
+                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
+                throw new DdlException("Unsupported operation");
+            }
             env.dropFunction((DropFunctionStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateEncryptKeyStmt) {
             EncryptKeyHelper.createEncryptKey((CreateEncryptKeyStmt) ddlStmt);

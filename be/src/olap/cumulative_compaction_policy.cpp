@@ -305,26 +305,33 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         new_compaction_score -= rs_meta->get_compaction_score();
         ++rs_begin;
     }
-    if (rs_begin == input_rowsets->end() && *compaction_score >= max_compaction_score) {
-        // No suitable level size found in `input_rowsets` but score of `input_rowsets` exceed max compaction score,
-        // which means `input_rowsets` will never change and this tablet will never execute cumulative compaction.
-        // MUST execute compaction on these `input_rowsets` to reduce compaction score.
-        RowsetSharedPtr rs_with_max_score;
-        uint32_t max_score = 1;
-        for (auto& rs : *input_rowsets) {
-            if (rs->rowset_meta()->get_compaction_score() > max_score) {
-                max_score = rs->rowset_meta()->get_compaction_score();
-                rs_with_max_score = rs;
+    if (rs_begin == input_rowsets->end()) { // No suitable level size found in `input_rowsets`
+        if (tablet->keys_type() != DUP_KEYS) {
+            // While tablet's key type is not `DUP_KEYS`, compacting rowset in such tablets has a significant
+            // positive impact on queries and reduces space amplification, so we ignore level limitation and
+            // pick candidate rowsets as input rowsets.
+            return transient_size;
+        } else if (*compaction_score >= max_compaction_score) {
+            // Score of `input_rowsets` exceed max compaction score, which means `input_rowsets` will never change and
+            // this tablet will never execute cumulative compaction. MUST execute compaction on these `input_rowsets`
+            // to reduce compaction score.
+            RowsetSharedPtr rs_with_max_score;
+            uint32_t max_score = 1;
+            for (auto& rs : *input_rowsets) {
+                if (rs->rowset_meta()->get_compaction_score() > max_score) {
+                    max_score = rs->rowset_meta()->get_compaction_score();
+                    rs_with_max_score = rs;
+                }
             }
-        }
-        if (rs_with_max_score) {
-            input_rowsets->clear();
-            input_rowsets->push_back(std::move(rs_with_max_score));
-            *compaction_score = max_score;
+            if (rs_with_max_score) {
+                input_rowsets->clear();
+                input_rowsets->push_back(std::move(rs_with_max_score));
+                *compaction_score = max_score;
+                return transient_size;
+            }
+            // Exceeding max compaction score, do compaction on all candidate rowsets anyway
             return transient_size;
         }
-        // no rowset is OVERLAPPING, execute compaction on all input rowsets
-        return transient_size;
     }
     input_rowsets->erase(input_rowsets->begin(), rs_begin);
     *compaction_score = new_compaction_score;

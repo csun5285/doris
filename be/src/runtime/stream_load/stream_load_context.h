@@ -132,6 +132,8 @@ public:
 
     std::string db;
     int64_t db_id = -1;
+    int64_t table_id = -1;
+    int64_t wal_id = -1;
     std::string table;
     std::string label;
     // optional

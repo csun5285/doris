@@ -16,6 +16,7 @@
 // under the License.
 
 #pragma once
+#include "olap/wal_writer.h"
 #include "vtablet_sink.h"
 
 namespace doris {
@@ -27,7 +28,22 @@ public:
     GroupCommitVOlapTableSink(ObjectPool* pool, const RowDescriptor& row_desc,
                               const std::vector<TExpr>& texprs, Status* status);
 
-    void handle_block(vectorized::Block* input_block, int64_t rows, int64_t filter_rows) override;
+    Status write_wal(vectorized::Block* block, RuntimeState* state, int64_t num_rows,
+                     int64_t filtered_rows, Bitmap* filter_bitmap);
+
+    void handle_block(vectorized::Block* input_block, int64_t rows, int64_t filter_rows,
+                      RuntimeState* state, vectorized::Block* output_block,
+                      Bitmap* filter_bitmap) override;
+    Status init(const TDataSink& sink) override;
+    Status prepare(RuntimeState* state) override;
+    Status close(RuntimeState* state, Status exec_status) override;
+    Status open(RuntimeState* state) override;
+
+private:
+    std::shared_ptr<WalWriter> _wal_writer = nullptr;
+    int64_t _tb_id;
+    int64_t _db_id;
+    int64_t _wal_id;
 };
 
 } // namespace stream_load

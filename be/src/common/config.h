@@ -401,7 +401,7 @@ DECLARE_mInt64(vertical_compaction_max_segment_size);
 // In ordered data compaction, min segment size for input rowset
 DECLARE_mInt32(ordered_data_compaction_min_segment_size);
 
-DECLARE_mInt32(min_compaction_failure_interval_sec);
+DECLARE_mInt32(min_compaction_failure_interval_ms);
 
 // This config can be set to limit thread number in compaction thread pool.
 DECLARE_mInt32(max_base_compaction_threads);
@@ -421,6 +421,7 @@ DECLARE_mInt64(compaction_promotion_size_mbytes);
 DECLARE_mInt32(check_auto_compaction_interval_seconds);
 DECLARE_mInt64(base_compaction_num_cumulative_deltas);
 DECLARE_mInt64(base_compaction_interval_seconds_since_last_operation);
+DECLARE_mInt32(cumu_compaction_interval_seconds);
 DECLARE_Bool(enable_dup_key_base_compaction_skip_big_file);
 
 // output rowset of cumulative compaction total disk size exceed this config ratio of
@@ -1225,6 +1226,12 @@ DECLARE_mInt32(group_commit_insert_threads);
 
 // BitmapValue serialize version.
 DECLARE_Int16(bitmap_serialize_version);
+
+// Real time load config
+DECLARE_String(group_commit_replay_wal_dir);
+DECLARE_Int32(group_commit_replay_wal_retry_num);
+DECLARE_Int32(group_commit_replay_wal_retry_interval_seconds);
+DECLARE_Int32(group_commit_sync_wal_batch);
 
 #ifdef BE_TEST
 // test s3

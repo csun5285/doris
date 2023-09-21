@@ -792,7 +792,7 @@ Status Tablet::cloud_sync_meta() {
 
 // There are only two tablet_states RUNNING and NOT_READY in cloud mode
 // This function will erase the tablet from `CloudTabletMgr` when it can't find this tablet in MS.
-Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data_async) {
+Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data) {
     do {
         // Sync tablet if not running.
         // This could happen when BE didn't finish schema change job and another BE committed this schema change job.
@@ -849,7 +849,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool need_download_data
             return Status::OK();
         }
     }
-    auto st = cloud::meta_mgr()->sync_tablet_rowsets(this, need_download_data_async);
+    auto st = cloud::meta_mgr()->sync_tablet_rowsets(this, warmup_delta_data);
     if (st.is<NOT_FOUND>()) {
         cloud::tablet_mgr()->erase_tablet(tablet_id());
     }
@@ -872,13 +872,13 @@ void Tablet::update_base_size(const Rowset& rs) {
 }
 
 void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
-                               bool need_download_data_async) {
+                               bool warmup_delta_data) {
     if (to_add.empty()) {
         return;
     }
     auto add_rowsets_directy = [=, this](std::vector<RowsetSharedPtr>& add_rowsets) {
         for (auto& rs : add_rowsets) {
-            if (version_overlap || need_download_data_async) {
+            if (version_overlap || warmup_delta_data) {
 #ifndef BE_TEST
                 // Warmup rowset data in background
                 for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
@@ -887,7 +887,7 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
                     constexpr int64_t interval = 600; // 10 mins
                     // When BE restart and receive the `load_sync` rpc, it will sync all historical rowsets first time.
                     // So we need to filter out the old rowsets avoid to download the whole table.
-                    if (need_download_data_async &&
+                    if (warmup_delta_data &&
                         ::time(nullptr) - rowset_meta->newest_write_timestamp() >= interval) {
                         continue;
                     }
@@ -972,14 +972,6 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
         add_rowsets_directy(to_add_directy);
     } else {
         add_rowsets_directy(to_add);
-    }
-
-    // Update rowset tree
-    if (keys_type() == UNIQUE_KEYS && enable_unique_key_merge_on_write()) {
-        std::vector<RowsetSharedPtr> all_rowsets;
-        for (auto& [v, rs] : _rs_version_map) {
-            all_rowsets.push_back(rs);
-        }
     }
 }
 
@@ -4098,16 +4090,16 @@ void Tablet::reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, 
     _approximate_num_segments.store(num_segments, std::memory_order_relaxed);
     _approximate_num_rows.store(num_rows, std::memory_order_relaxed);
     _approximate_data_size.store(data_size, std::memory_order_relaxed);
-    int64_t cumu_data_size = 0;
+    int64_t cumu_num_deltas = 0;
     int64_t cumu_num_rowsets = 0;
     auto cp = _cumulative_point.load(std::memory_order_relaxed);
     for (auto& [v, r] : _rs_version_map) {
         if (v.second < cp) continue;
-        cumu_data_size += r->data_disk_size();
+        cumu_num_deltas += r->is_segments_overlapping() ? r->num_segments() : 1;
         ++cumu_num_rowsets;
     }
     _approximate_cumu_num_rowsets.store(cumu_num_rowsets, std::memory_order_relaxed);
-    _approximate_cumu_data_size.store(cumu_data_size, std::memory_order_relaxed);
+    _approximate_cumu_num_deltas.store(cumu_num_deltas, std::memory_order_relaxed);
 }
 
 int64_t Tablet::get_cloud_base_compaction_score() {
@@ -4128,7 +4120,9 @@ int64_t Tablet::get_cloud_base_compaction_score() {
 }
 
 int64_t Tablet::get_cloud_cumu_compaction_score() {
-    return _approximate_cumu_num_rowsets.load(std::memory_order_relaxed);
+    // TODO(plat1ko): Propose an algorithm that considers tablet's key type, number of delete rowsets,
+    //  number of tablet versions simultaneously.
+    return _approximate_cumu_num_deltas.load(std::memory_order_relaxed);
 }
 
 // FIXME(plat1ko): Use traverse_rowsets

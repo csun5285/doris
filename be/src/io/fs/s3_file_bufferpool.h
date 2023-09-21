@@ -188,10 +188,13 @@ struct UploadFileBuffer final : public FileBuffer {
         DCHECK(!_buffer.empty());
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
+            // If we call is_cancelled() after _state.set_val() then there might one situation where
+            // s3 file writer is already destructed
+            bool cancelled = is_cancelled();
             _state.set_val();
             // this control flow means the buf and the stream shares one memory
             // so we can directly use buf here
-            upload_to_local_file_cache(is_cancelled());
+            upload_to_local_file_cache(cancelled);
         } else {
             upload_to_local_file_cache(is_cancelled());
             _state.set_val();

@@ -272,7 +272,10 @@ int Transaction::get(std::string_view begin, std::string_view end,
     }
 
     std::unique_ptr<RangeGetIterator> ret(new RangeGetIterator(fut));
-    ret->init();
+    if (ret->init() != 0) {
+        LOG(WARNING) << "failed to fdb_future_get_keyvalue_array";
+        return -2;
+    }
 
     *(iter) = std::move(ret);
 

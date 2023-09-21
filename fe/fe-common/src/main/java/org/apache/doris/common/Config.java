@@ -2291,6 +2291,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int drop_rpc_retry_num = 200;
 
+    @ConfField(mutable = true)
+    public static boolean forbid_function_stmt = true;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
@@ -2369,4 +2372,5 @@ public class Config extends ConfigBase {
                     + "The larger the value, the more uniform the distribution of the hash algorithm, "
                     + "but it will increase the memory overhead."})
     public static int virtual_node_number = 2048;
+
 }
