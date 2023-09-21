@@ -1611,7 +1611,7 @@ public class Config extends ConfigBase {
      * condition，try to set this timeout longer.
      */
     @ConfField(mutable = true)
-    public static long remote_fragment_exec_timeout_ms = 5000; // 5 sec
+    public static long remote_fragment_exec_timeout_ms = 30000; // 30 sec
 
     /**
      * Max data version of backends serialize block.
@@ -2341,4 +2341,32 @@ public class Config extends ConfigBase {
 
     @ConfField
     public static boolean forbid_running_alter_job = false;
+
+    @ConfField
+    public static int table_stats_health_threshold = 80;
+
+    @ConfField(description = {
+            "暂时性配置项，开启后会自动将所有的olap表修改为可light schema change",
+            "temporary config filed, will make all olap tables enable light schema change"
+    })
+    public static boolean enable_convert_light_weight_schema_change = true;
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "查询information_schema.metadata_name_ids表时,获取一个数据库中所有表用的时间",
+            "When querying the information_schema.metadata_name_ids table,"
+                    + " the time used to obtain all tables in one database"
+    })
+    public static long query_metadata_name_ids_timeout = 3;
+
+    @ConfField(mutable = true, masterOnly = true, description = {
+            "是否禁止LocalDeployManager删除节点",
+            "Whether to disable LocalDeployManager drop node"})
+    public static boolean disable_local_deploy_manager_drop_node = true;
+
+    @ConfField(mutable = true, description = {
+            "开启 file cache 后，一致性哈希算法中，每个节点的虚拟节点数。"
+                    + "该值越大，哈希算法的分布越均匀，但是会增加内存开销。",
+            "When file cache is enabled, the number of virtual nodes of each node in the consistent hash algorithm. "
+                    + "The larger the value, the more uniform the distribution of the hash algorithm, "
+                    + "but it will increase the memory overhead."})
+    public static int virtual_node_number = 2048;
 }

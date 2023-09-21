@@ -264,7 +264,9 @@ public class EditLog {
                     ModifyPartitionInfo info = (ModifyPartitionInfo) journal.getData();
                     LOG.info("Begin to unprotect modify partition. db = " + info.getDbId() + " table = "
                             + info.getTableId() + " partitionId = " + info.getPartitionId());
+                    BatchModifyPartitionsInfo infos = new BatchModifyPartitionsInfo(info);
                     env.getAlterInstance().replayModifyPartition(info);
+                    env.getBinlogManager().addModifyPartitions(infos, logId);
                     break;
                 }
                 case OperationType.OP_BATCH_MODIFY_PARTITION: {
@@ -272,6 +274,7 @@ public class EditLog {
                     for (ModifyPartitionInfo modifyPartitionInfo : info.getModifyPartitionInfos()) {
                         env.getAlterInstance().replayModifyPartition(modifyPartitionInfo);
                     }
+                    env.getBinlogManager().addModifyPartitions(info, logId);
                     break;
                 }
                 case OperationType.OP_ERASE_TABLE: {
@@ -570,6 +573,11 @@ public class EditLog {
                     Env.getCurrentGlobalTransactionMgr().replayBatchRemoveTransactionV2(operation);
                     break;
                 }
+                case OperationType.OP_SET_TABLE_STATUS: {
+                    final SetTableStatusOperationLog log = (SetTableStatusOperationLog) journal.getData();
+                    env.replaySetTableStatus(log);
+                    break;
+                }
                 case OperationType.OP_CREATE_REPOSITORY: {
                     Repository repository = (Repository) journal.getData();
                     env.getBackupHandler().getRepoMgr().addAndInitRepoIfNotExist(repository, true);
@@ -786,6 +794,7 @@ public class EditLog {
                     ReplacePartitionOperationLog replaceTempPartitionLog =
                             (ReplacePartitionOperationLog) journal.getData();
                     env.replayReplaceTempPartition(replaceTempPartitionLog);
+                    env.getBinlogManager().addReplacePartitions(replaceTempPartitionLog, logId);
                     break;
                 }
                 case OperationType.OP_INSTALL_PLUGIN: {
@@ -820,6 +829,11 @@ public class EditLog {
                 case OperationType.OP_MODIFY_COMMENT: {
                     ModifyCommentOperationLog operation = (ModifyCommentOperationLog) journal.getData();
                     env.getAlterInstance().replayModifyComment(operation);
+                    break;
+                }
+                case OperationType.OP_SET_PARTITION_VERSION: {
+                    SetPartitionVersionOperationLog log = (SetPartitionVersionOperationLog) journal.getData();
+                    env.replaySetPartitionVersion(log);
                     break;
                 }
                 case OperationType.OP_ALTER_ROUTINE_LOAD_JOB: {
@@ -1263,11 +1277,16 @@ public class EditLog {
     }
 
     public void logModifyPartition(ModifyPartitionInfo info) {
-        logEdit(OperationType.OP_MODIFY_PARTITION, info);
+        long logId = logEdit(OperationType.OP_MODIFY_PARTITION, info);
+        BatchModifyPartitionsInfo infos = new BatchModifyPartitionsInfo(info);
+        LOG.info("log modify partition, logId:{}, infos: {}", logId, infos.toJson());
+        Env.getCurrentEnv().getBinlogManager().addModifyPartitions(infos, logId);
     }
 
     public void logBatchModifyPartition(BatchModifyPartitionsInfo info) {
-        logEdit(OperationType.OP_BATCH_MODIFY_PARTITION, info);
+        long logId = logEdit(OperationType.OP_BATCH_MODIFY_PARTITION, info);
+        LOG.info("log modify partition, logId:{}, infos: {}", logId, info.toJson());
+        Env.getCurrentEnv().getBinlogManager().addModifyPartitions(info, logId);
     }
 
     public void logDropTable(DropInfo info) {
@@ -1695,7 +1714,9 @@ public class EditLog {
     }
 
     public void logReplaceTempPartition(ReplacePartitionOperationLog info) {
-        logEdit(OperationType.OP_REPLACE_TEMP_PARTITION, info);
+        long logId = logEdit(OperationType.OP_REPLACE_TEMP_PARTITION, info);
+        LOG.info("log replace temp partition, logId: {}, info: {}", logId, info.toJson());
+        Env.getCurrentEnv().getBinlogManager().addReplacePartitions(info, logId);
     }
 
     public void logInstallPlugin(PluginInfo plugin) {
@@ -1718,6 +1739,10 @@ public class EditLog {
         logEdit(OperationType.OP_ALTER_ROUTINE_LOAD_JOB, log);
     }
 
+    public void logSetPartitionVersion(SetPartitionVersionOperationLog log) {
+        logEdit(OperationType.OP_SET_PARTITION_VERSION, log);
+    }
+
     public void logGlobalVariableV2(GlobalVarPersistInfo info) {
         logEdit(OperationType.OP_GLOBAL_VARIABLE_V2, info);
     }
@@ -1728,6 +1753,10 @@ public class EditLog {
 
     public void logBatchRemoveTransactions(BatchRemoveTransactionsOperationV2 op) {
         logEdit(OperationType.OP_BATCH_REMOVE_TXNS_V2, op);
+    }
+
+    public void logSetTableStatus(SetTableStatusOperationLog log) {
+        logEdit(OperationType.OP_SET_TABLE_STATUS, log);
     }
 
     public void logModifyComment(ModifyCommentOperationLog op) {

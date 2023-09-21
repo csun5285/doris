@@ -332,6 +332,9 @@ DECLARE_mInt32(default_num_rows_per_column_file_block);
 DECLARE_mInt32(pending_data_expire_time_sec);
 // inc_rowset snapshot rs sweep time interval
 DECLARE_mInt32(tablet_rowset_stale_sweep_time_sec);
+// tablet stale rowset sweep by threshold size
+DECLARE_Bool(tablet_rowset_stale_sweep_by_size);
+DECLARE_mInt32(tablet_rowset_stale_sweep_threshold_size);
 // garbage sweep policy
 DECLARE_Int32(max_garbage_sweep_interval);
 DECLARE_Int32(min_garbage_sweep_interval);
@@ -831,6 +834,7 @@ DECLARE_mInt32(max_remote_storage_count);
 // and the valid values are: 0.9.0.x, 0.8.x.y.
 DECLARE_String(kafka_api_version_request);
 DECLARE_String(kafka_broker_version_fallback);
+DECLARE_mString(kafka_debug);
 
 // The number of pool siz of routine load consumer.
 // If you meet the error describe in https://github.com/edenhill/librdkafka/issues/3608
@@ -895,6 +899,9 @@ DECLARE_mInt32(jsonb_type_length_soft_limit_bytes);
 // used for olap scanner to save memory, when the size of unused_object_pool
 // is greater than object_pool_buffer_size, release the object in the unused_object_pool.
 DECLARE_Int32(object_pool_buffer_size);
+
+// Threshold fo reading a small file into memory
+DECLARE_mInt32(in_memory_file_size);
 
 // ParquetReaderWrap prefetch buffer size
 DECLARE_Int32(parquet_reader_max_buffer_size);
@@ -1061,6 +1068,9 @@ DECLARE_Bool(enable_shrink_memory);
 DECLARE_mInt32(schema_cache_capacity);
 DECLARE_mInt32(schema_cache_sweep_time_sec);
 
+// max number of segment cache
+DECLARE_mInt32(segment_cache_capacity);
+
 // enable binlog
 DECLARE_Bool(enable_feature_binlog);
 
@@ -1104,6 +1114,7 @@ DECLARE_Int64(file_cache_max_file_segment_size); // 1MB
 DECLARE_Int64(file_cache_min_file_segment_size);
 DECLARE_Bool(clear_file_cache);
 DECLARE_Bool(enable_file_cache_query_limit);
+DECLARE_mInt32(file_cache_wait_sec_after_fail); // zero for no waiting and retrying
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]
@@ -1211,6 +1222,9 @@ DECLARE_mString(user_files_secure_path);
 
 // This config can be set to limit thread number in group commit insert thread pool.
 DECLARE_mInt32(group_commit_insert_threads);
+
+// BitmapValue serialize version.
+DECLARE_Int16(bitmap_serialize_version);
 
 #ifdef BE_TEST
 // test s3

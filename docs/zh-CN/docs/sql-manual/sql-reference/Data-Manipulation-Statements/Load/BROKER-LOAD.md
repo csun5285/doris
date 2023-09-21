@@ -67,6 +67,7 @@ WITH BROKER broker_name
   [COLUMNS TERMINATED BY "column_separator"]
   [FORMAT AS "file_type"]
   [LINES TERMINATED BY "line_delimiter"]
+  [COMPRESS_TYPE AS "compress_type"]
   [(column_list)]
   [COLUMNS FROM PATH AS (c1, c2, ...)]
   [SET (column_mapping)]
@@ -104,6 +105,9 @@ WITH BROKER broker_name
   - `FORMAT AS`
 
     指定文件类型，支持 CSV、PARQUET 和 ORC 格式。默认为 CSV。
+
+  - `COMPRESS_TYPE AS`
+    指定文件压缩类型, 支持GZ/BZ2/LZ4FRAME。
 
   - `column list`
 
@@ -174,6 +178,10 @@ WITH BROKER broker_name
     - `strict_mode`
 
       是否对数据进行严格限制。默认为 false。
+
+    - `partial_columns`
+
+      布尔类型，为 true 表示使用部分列更新，默认值为 false，该参数只允许在表模型为 Unique 且采用 Merge on Write 时设置。
 
     - `timezone`
 

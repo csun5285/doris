@@ -64,6 +64,7 @@ public class LoadLoadingTask extends LoadTask {
     private final long jobDeadlineMs;
     private final long execMemLimit;
     private final boolean strictMode;
+    private final boolean isPartialUpdate;
     private final long txnId;
     private final String timezone;
     // timeout of load job, in seconds
@@ -82,7 +83,7 @@ public class LoadLoadingTask extends LoadTask {
 
     public LoadLoadingTask(Database db, OlapTable table,
             BrokerDesc brokerDesc, List<BrokerFileGroup> fileGroups,
-            long jobDeadlineMs, long execMemLimit, boolean strictMode,
+            long jobDeadlineMs, long execMemLimit, boolean strictMode, boolean isPartialUpdate,
             long txnId, LoadTaskCallback callback, String timezone,
             long timeoutS, int loadParallelism, int sendBatchParallelism,
             boolean loadZeroTolerance, Profile jobProfile, boolean singleTabletLoadPerSink,
@@ -95,6 +96,7 @@ public class LoadLoadingTask extends LoadTask {
         this.jobDeadlineMs = jobDeadlineMs;
         this.execMemLimit = execMemLimit;
         this.strictMode = strictMode;
+        this.isPartialUpdate = isPartialUpdate;
         this.txnId = txnId;
         this.failMsg = new FailMsg(FailMsg.CancelType.LOAD_RUN_FAIL);
         // No need to retry for cloud mode, txn id should not be reused
@@ -114,7 +116,7 @@ public class LoadLoadingTask extends LoadTask {
             int fileNum, UserIdentity userInfo) throws UserException {
         this.loadId = loadId;
         planner = new LoadingTaskPlanner(callback.getCallbackId(), txnId, db.getId(), table, brokerDesc, fileGroups,
-                strictMode, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
+                strictMode, isPartialUpdate, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
                 this.useNewLoadScanNode, userInfo);
         planner.plan(loadId, fileStatusList, fileNum);
     }
@@ -123,7 +125,7 @@ public class LoadLoadingTask extends LoadTask {
             int fileNum, UserIdentity userInfo, String clusterId) throws UserException {
         this.loadId = loadId;
         planner = new LoadingTaskPlanner(callback.getCallbackId(), txnId, db.getId(), table, brokerDesc, fileGroups,
-                strictMode, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
+                strictMode, isPartialUpdate, timezone, this.timeoutS, this.loadParallelism, this.sendBatchParallelism,
                 this.useNewLoadScanNode, userInfo);
         boolean needCleanCtx = false;
         try {

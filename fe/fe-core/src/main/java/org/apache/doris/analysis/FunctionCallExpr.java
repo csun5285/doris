@@ -551,6 +551,26 @@ public class FunctionCallExpr extends Expr {
             sb.append("DISTINCT ");
         }
         int len = children.size();
+
+        if (fnName.getFunction().equalsIgnoreCase("char")) {
+            for (int i = 1; i < len; ++i) {
+                sb.append(children.get(i).toSql());
+                if (i < len - 1) {
+                    sb.append(", ");
+                }
+            }
+            sb.append(" using ");
+            String encodeType = children.get(0).toSql();
+            if (encodeType.charAt(0) == '\'') {
+                encodeType = encodeType.substring(1, encodeType.length());
+            }
+            if (encodeType.charAt(encodeType.length() - 1) == '\'') {
+                encodeType = encodeType.substring(0, encodeType.length() - 1);
+            }
+            sb.append(encodeType).append(")");
+            return sb.toString();
+        }
+
         // XXX_diff are used by nereids only
         if (fnName.getFunction().equalsIgnoreCase("years_diff") || fnName.getFunction().equalsIgnoreCase("months_diff")
                 || fnName.getFunction().equalsIgnoreCase("days_diff")
@@ -1180,7 +1200,8 @@ public class FunctionCallExpr extends Expr {
                 || fnName.getFunction().equalsIgnoreCase("array_cum_sum")
                 || fnName.getFunction().equalsIgnoreCase("array_intersect")
                 || fnName.getFunction().equalsIgnoreCase("arrays_overlap")
-                || fnName.getFunction().equalsIgnoreCase("array_concat")) {
+                || fnName.getFunction().equalsIgnoreCase("array_concat")
+                || fnName.getFunction().equalsIgnoreCase("array")) {
             Type[] childTypes = collectChildReturnTypes();
             Type compatibleType = childTypes[0];
             for (int i = 1; i < childTypes.length; ++i) {
@@ -1196,9 +1217,7 @@ public class FunctionCallExpr extends Expr {
             for (int i = 0; i < childTypes.length; i++) {
                 uncheckedCastChild(compatibleType, i);
             }
-        }
-
-        if (fnName.getFunction().equalsIgnoreCase("array_exists")) {
+        } else if (fnName.getFunction().equalsIgnoreCase("array_exists")) {
             Type[] newArgTypes = new Type[1];
             if (!(getChild(0) instanceof CastExpr)) {
                 Expr castExpr = getChild(0).castTo(ArrayType.create(Type.BOOLEAN, true));
@@ -1213,13 +1232,14 @@ public class FunctionCallExpr extends Expr {
                 throw new AnalysisException(getFunctionNotFoundError(collectChildReturnTypes()));
             }
             fn.setReturnType(getChild(0).getType());
-        }
-
-        // make nested type with function param can be Compatible otherwise be will not deal with type
-        if (fnName.getFunction().equalsIgnoreCase("array_position")
+        } else if (fnName.getFunction().equalsIgnoreCase("array_position")
                 || fnName.getFunction().equalsIgnoreCase("array_contains")
                 || fnName.getFunction().equalsIgnoreCase("countequal")) {
+            // make nested type with function param can be Compatible otherwise be will not deal with type
             Type[] childTypes = collectChildReturnTypes();
+            if (childTypes[0].isNull()) {
+                childTypes[0] = new ArrayType(Type.NULL);
+            }
             Type compatibleType = ((ArrayType) childTypes[0]).getItemType();
             for (int i = 1; i < childTypes.length; ++i) {
                 compatibleType = Type.getAssignmentCompatibleType(compatibleType, childTypes[i], true);
@@ -1550,6 +1570,10 @@ public class FunctionCallExpr extends Expr {
             fn.setReturnType(new ArrayType(getChild(0).type));
         }
 
+        if (fnName.getFunction().equalsIgnoreCase("map_agg")) {
+            fn.setReturnType(new MapType(getChild(0).type, getChild(1).type));
+        }
+
         if (fnName.getFunction().equalsIgnoreCase("group_uniq_array")
                 || fnName.getFunction().equalsIgnoreCase("group_array")) {
             fn.setReturnType(new ArrayType(getChild(0).type));
@@ -1612,6 +1636,21 @@ public class FunctionCallExpr extends Expr {
                 fn.setReturnType(ret);
                 fn.getReturnType().getPrimitiveType().setTimeType();
             }
+        }
+
+        if (fn.getFunctionName().getFunction().equals("from_microsecond")) {
+            Type ret = ScalarType.createDatetimeV2Type(6);
+            fn.setReturnType(ret);
+        }
+
+        if (fn.getFunctionName().getFunction().equals("from_millisecond")) {
+            Type ret = ScalarType.createDatetimeV2Type(3);
+            fn.setReturnType(ret);
+        }
+
+        if (fn.getFunctionName().getFunction().equals("from_second")) {
+            Type ret = ScalarType.createDatetimeV2Type(0);
+            fn.setReturnType(ret);
         }
 
         if (fnName.getFunction().equalsIgnoreCase("map")) {
@@ -1717,8 +1756,10 @@ public class FunctionCallExpr extends Expr {
                         || (children.get(0).getType().isDecimalV2()
                         && ((ArrayType) args[ix]).getItemType().isDecimalV2()))) {
                     continue;
-                } else if ((fnName.getFunction().equalsIgnoreCase("array_distinct") || fnName.getFunction()
-                        .equalsIgnoreCase("array_remove") || fnName.getFunction().equalsIgnoreCase("array_sort")
+                } else if ((fnName.getFunction().equalsIgnoreCase("array")
+                        || fnName.getFunction().equalsIgnoreCase("array_distinct")
+                        || fnName.getFunction().equalsIgnoreCase("array_remove")
+                        || fnName.getFunction().equalsIgnoreCase("array_sort")
                         || fnName.getFunction().equalsIgnoreCase("array_reverse_sort")
                         || fnName.getFunction().equalsIgnoreCase("array_overlap")
                         || fnName.getFunction().equalsIgnoreCase("array_union")

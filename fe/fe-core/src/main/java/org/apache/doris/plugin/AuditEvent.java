@@ -97,6 +97,9 @@ public class AuditEvent {
 
     @AuditField(value = "TraceId")
     public String traceId = "";
+    @AuditField(value = "WorkloadGroup")
+    public String workloadGroup = "";
+    // note: newly added fields should be always before fuzzyVariables
     @AuditField(value = "FuzzyVariables")
     public String fuzzyVariables = "";
 
@@ -233,6 +236,11 @@ public class AuditEvent {
 
         public AuditEventBuilder setFuzzyVariables(String variables) {
             auditEvent.fuzzyVariables = variables;
+            return this;
+        }
+
+        public AuditEventBuilder setWorkloadGroup(String workloadGroup) {
+            auditEvent.workloadGroup = workloadGroup;
             return this;
         }
 

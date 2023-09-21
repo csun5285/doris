@@ -664,6 +664,9 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
     auto get_send_data = [&]() { return vectorized::Block(request.block()); };
 
     auto send_data = get_send_data();
+    CHECK(send_data.rows() == request.tablet_ids_size())
+            << "block rows: " << send_data.rows()
+            << ", tablet_ids_size: " << request.tablet_ids_size();
 
     auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
     auto write_tablet_data = [&](uint32_t tablet_id,

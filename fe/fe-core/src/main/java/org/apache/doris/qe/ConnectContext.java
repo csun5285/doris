@@ -179,6 +179,8 @@ public class ConnectContext {
 
     private Map<Long, Backend> insertGroupCommitTableToBeMap = new HashMap<>();
 
+    private String workloadGroupName = "";
+
     public void setUserQueryTimeout(int queryTimeout) {
         if (queryTimeout > 0) {
             sessionVariable.setQueryTimeoutS(queryTimeout);
@@ -863,5 +865,14 @@ public class ConnectContext {
     public Backend getInsertGroupCommit(long tableId) {
         return insertGroupCommitTableToBeMap.get(tableId);
     }
+
+    public void setWorkloadGroupName(String workloadGroupName) {
+        this.workloadGroupName = workloadGroupName;
+    }
+
+    public String getWorkloadGroupName() {
+        return this.workloadGroupName;
+    }
+
 }
 

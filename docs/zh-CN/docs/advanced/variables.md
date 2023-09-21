@@ -633,7 +633,7 @@ try (Connection conn = DriverManager.getConnection("jdbc:mysql://127.0.0.1:9030/
 
     <version since="dev"></version>
 
-    如果设置为true，对于查询请求，将不再返回实际结果集，而仅返回行数。默认为 false。
+    如果设置为true，对于查询请求，将不再返回实际结果集，而仅返回行数。对于导入和insert，Sink 丢掉了数据，不会有实际的写发生。额默认为 false。
 
     该参数可以用于测试返回大量数据集时，规避结果集传输的耗时，重点关注底层查询执行的耗时。
 
@@ -669,6 +669,12 @@ try (Connection conn = DriverManager.getConnection("jdbc:mysql://127.0.0.1:9030/
   是否在使用 JDBC Catalog 功能查询 ClickHouse 时增加 final 关键字，默认为 false
 
   用于 ClickHouse 的 ReplacingMergeTree 表引擎查询去重
+
+* `enable_unique_key_partial_update`
+
+  <version since="2.0.2">
+  是否在对insert into语句启用部分列更新的语义，默认为 false
+  </version>
 
 ***
 

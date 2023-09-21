@@ -207,6 +207,8 @@ suite("test_alter_table_column") {
         file "baseall.txt"
     }
 
+    sql "sync"
+
     def tbName3 = "p_test"
     sql "DROP TABLE IF EXISTS ${tbName3};"
     sql """

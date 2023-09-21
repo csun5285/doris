@@ -944,7 +944,7 @@ public class DataDescription implements InsertStmt.DataDesc {
         boolean hasSourceSequenceCol = false;
         if (!parsedColumnExprList.isEmpty()) {
             for (ImportColumnDesc importColumnDesc : parsedColumnExprList) {
-                if (importColumnDesc.getColumnName().equals(sequenceCol)) {
+                if (importColumnDesc.getColumnName().equalsIgnoreCase(sequenceCol)) {
                     hasSourceSequenceCol = true;
                     break;
                 }
@@ -952,7 +952,7 @@ public class DataDescription implements InsertStmt.DataDesc {
         } else {
             List<Column> columns = olapTable.getBaseSchema();
             for (Column column : columns) {
-                if (column.getName().equals(sequenceCol)) {
+                if (column.getName().equalsIgnoreCase(sequenceCol)) {
                     hasSourceSequenceCol = true;
                     break;
                 }

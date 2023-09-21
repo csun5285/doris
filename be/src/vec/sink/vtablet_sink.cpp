@@ -704,7 +704,7 @@ Status VNodeChannel::none_of(std::initializer_list<bool> vars) {
         if (!vars_str.empty()) {
             vars_str.pop_back(); // 0/1/0/ -> 0/1/0
         }
-        st = Status::InternalError(vars_str);
+        st = Status::Uninitialized(vars_str);
     }
 
     return st;
@@ -731,6 +731,8 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
     // tablet_ids has already set when add row
     request.set_packet_seq(_next_packet_seq);
     auto block = mutable_block->to_block();
+    CHECK(block.rows() == request.tablet_ids_size())
+            << "block rows: " << block.rows() << ", tablet_ids_size: " << request.tablet_ids_size();
     if (block.rows() > 0) {
         SCOPED_ATOMIC_TIMER(&_serialize_batch_ns);
         size_t uncompressed_bytes = 0, compressed_bytes = 0;
@@ -1319,6 +1321,10 @@ Status VOlapTableSink::_single_partition_generate(RuntimeState* state, vectorize
 Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block, bool eos) {
     SCOPED_CONSUME_MEM_TRACKER(_mem_tracker.get());
     Status status = Status::OK();
+
+    if (state->query_options().dry_run_query) {
+        return status;
+    }
 
     auto rows = input_block->rows();
     auto bytes = input_block->bytes();

@@ -160,6 +160,10 @@ void NewJsonReader::_init_file_description() {
     _file_description.path = _range.path;
     _file_description.start_offset = _range.start_offset;
     _file_description.file_size = _range.__isset.file_size ? _range.file_size : 0;
+
+    if (_range.__isset.fs_name) {
+        _file_description.fs_name = _range.fs_name;
+    }
 }
 
 Status NewJsonReader::init_reader(
@@ -773,7 +777,6 @@ Status NewJsonReader::_parse_json_doc(size_t* size, bool* eof) {
         if (*size == 0) {
             *eof = true;
         }
-        _current_offset += *size;
     }
 
     _bytes_read_counter += *size;
@@ -1239,10 +1242,13 @@ Status NewJsonReader::_simdjson_handle_simple_json(RuntimeState* /*state*/, Bloc
             // prevent from endless loop
             _next_row = _total_rows + 1;
             fmt::memory_buffer error_msg;
-            fmt::format_to(error_msg, "Parse json data for array failed. code: {}, error info: {}",
-                           e.error(), e.what());
+            fmt::format_to(error_msg, "Parse json data failed. code: {}, error info: {}", e.error(),
+                           e.what());
             RETURN_IF_ERROR(_state->append_error_msg_to_file(
-                    [&]() -> std::string { return ""; },
+                    [&]() -> std::string {
+                        return std::string(_simdjson_ondemand_padding_buffer.data(),
+                                           _original_doc_size);
+                    },
                     [&]() -> std::string { return fmt::to_string(error_msg); }, eof));
             _counter->num_rows_filtered++;
             // Before continuing to process other rows, we need to first clean the fail parsed row.
@@ -1338,7 +1344,10 @@ Status NewJsonReader::_simdjson_handle_flat_array_complex_json(
             fmt::format_to(error_msg, "Parse json data failed. code: {}, error info: {}", e.error(),
                            e.what());
             RETURN_IF_ERROR(_state->append_error_msg_to_file(
-                    [&]() -> std::string { return ""; },
+                    [&]() -> std::string {
+                        return std::string(_simdjson_ondemand_padding_buffer.data(),
+                                           _original_doc_size);
+                    },
                     [&]() -> std::string { return fmt::to_string(error_msg); }, eof));
             _counter->num_rows_filtered++;
             // Before continuing to process other rows, we need to first clean the fail parsed row.
@@ -1406,7 +1415,10 @@ Status NewJsonReader::_simdjson_handle_nested_complex_json(
             fmt::format_to(error_msg, "Parse json data failed. code: {}, error info: {}", e.error(),
                            e.what());
             RETURN_IF_ERROR(_state->append_error_msg_to_file(
-                    [&]() -> std::string { return ""; },
+                    [&]() -> std::string {
+                        return std::string(_simdjson_ondemand_padding_buffer.data(),
+                                           _original_doc_size);
+                    },
                     [&]() -> std::string { return fmt::to_string(error_msg); }, eof));
             _counter->num_rows_filtered++;
             // Before continuing to process other rows, we need to first clean the fail parsed row.
@@ -1655,6 +1667,7 @@ Status NewJsonReader::_simdjson_parse_json_doc(size_t* size, bool* eof) {
         *size -= 3;
     }
     memcpy(&_simdjson_ondemand_padding_buffer.front(), json_str, *size);
+    _original_doc_size = *size;
     auto error =
             _ondemand_json_parser
                     ->iterate(std::string_view(_simdjson_ondemand_padding_buffer.data(), *size),
