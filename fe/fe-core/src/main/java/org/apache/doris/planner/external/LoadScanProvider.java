@@ -89,7 +89,8 @@ public class LoadScanProvider {
 
         TFileScanRangeParams params = new TFileScanRangeParams();
         params.setFormatType(
-                formatType(fileGroupInfo.getFileGroup().getFileFormat(), fileGroupInfo.getFileGroup().getCompressType()));
+                formatType(fileGroupInfo.getFileGroup().getFileFormat(),
+                    fileGroupInfo.getFileGroup().getCompressType()));
         params.setCompressType(fileGroupInfo.getFileGroup().getCompressType());
         params.setStrictMode(fileGroupInfo.isStrictMode());
         if (fileGroupInfo.getFileGroup().getFileFormat() != null

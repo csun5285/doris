@@ -497,7 +497,7 @@ public class DeleteHandler implements Writable {
         TransactionStatus status = null;
         try {
             unprotectedCommitJob(job, db, table, timeoutMs);
-            GlobalTransactionMgr transactionMgr = Env.getCurrentGlobalTransactionMgr();
+            GlobalTransactionMgrInterface transactionMgr = Env.getCurrentGlobalTransactionMgr();
             long dbId = db.getId();
             long transactionId = job.getTransactionId();
             TransactionState transactionState = transactionMgr.getTransactionState(dbId, transactionId);

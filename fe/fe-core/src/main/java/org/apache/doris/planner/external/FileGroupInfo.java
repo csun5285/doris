@@ -32,6 +32,7 @@ import org.apache.doris.planner.FileLoadScanNode;
 import org.apache.doris.system.Backend;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TExternalScanRange;
+import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TFileScanRange;
@@ -295,10 +296,11 @@ public class FileGroupInfo {
         return locations;
     }
 
-    private TFileFormatType formatType(String fileFormat, TFileCompressType compressType, String path) throws UserException {
+    private TFileFormatType formatType(String fileFormat, TFileCompressType compressType, String path)
+            throws UserException {
         if (fileFormat == null) {
             // get file format by the file path
-            return Util.getFileFormatTypeFromPath(path);
+            return Util.getFileFormatTypeFromPath(path, compressType);
         }
         TFileFormatType formatType = Util.getFileFormatTypeFromName(fileFormat, compressType);
         if (formatType == TFileFormatType.FORMAT_UNKNOWN) {
