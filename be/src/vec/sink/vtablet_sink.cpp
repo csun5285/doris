@@ -1650,9 +1650,6 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
         _send_batch_thread_pool_token->wait();
     }
 
-//    if (_wal_writer.get() != nullptr) {
-//        _wal_writer->finalize();
-//    }
 
     DataSink::close(state, exec_status);
     return _close_status;

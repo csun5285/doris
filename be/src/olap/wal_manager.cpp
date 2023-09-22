@@ -237,7 +237,7 @@ Status WalManager::delete_wal(int64_t wal_id) {
     {
         std::lock_guard<std::shared_mutex> wrlock(_wal_lock);
         std::string wal_path = _wal_path_map[wal_id];
-        //RETURN_IF_ERROR(io::global_local_filesystem()->delete_file(wal_path));
+        RETURN_IF_ERROR(io::global_local_filesystem()->delete_file(wal_path));
         LOG(INFO) << "delete file=" << wal_path;
         _wal_path_map.erase(wal_id);
     }

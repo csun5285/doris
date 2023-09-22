@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "common/config.h"
+#include "common/status.h"
 #include "gen_cpp/HeartbeatService_types.h"
 #include "gen_cpp/internal_service.pb.h"
 #include "io/fs/local_file_system.h"
@@ -43,7 +44,6 @@ namespace doris {
 
 extern TLoadTxnBeginResult k_stream_load_begin_result;
 extern Status k_stream_load_plan_status;
-extern std::string k_response;
 extern std::string k_request_line;
 
 ExecEnv* _env = nullptr;
@@ -85,7 +85,6 @@ public:
 };
 
 TEST_F(WalManagerTest, recovery_normal) {
-    k_response = "OK";
     k_request_line = "{\"Status\": \"Success\",    \"Message\": \"Test\"}";
 
     std::string db_id = "1";
@@ -125,6 +124,7 @@ TEST_F(WalManagerTest, recovery_normal) {
 TEST_F(WalManagerTest, recover_fail) {
     k_request_line = "{\"Status\": \"Fail\",    \"Message\": \"Test\"}";
     config::group_commit_replay_wal_retry_num = 3;
+    config::group_commit_replay_wal_retry_interval_seconds = 1;
 
     std::string db_id = "1";
     std::string tb_id = "1";

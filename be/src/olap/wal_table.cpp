@@ -45,7 +45,6 @@ WalTable::WalTable(ExecEnv* exec_env, int64_t db_id, int64_t table_id)
 WalTable::~WalTable() {}
 
 #ifdef BE_TEST
-std::string k_response;
 std::string k_request_line;
 #endif
 
@@ -203,30 +202,27 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
     evhttp_connection_free(conn);
     event_base_free(base);
 
-    const char* response = evhttp_request_get_response_code_line(req);
-#else
-    const char* response = k_response.c_str();
 #endif
     bool retry = false;
     std::string status;
     std::string msg;
-    if (response != nullptr && 0 == strcmp(response, "OK")) {
-        std::stringstream out;
-        rapidjson::Document doc;
+    std::stringstream out;
+    rapidjson::Document doc;
 #ifndef BE_TEST
-        size_t len = 0;
-        auto input = evhttp_request_get_input_buffer(req);
-        char* request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
-        while (request_line != nullptr) {
-            std::string s(request_line);
-            out << request_line;
-            request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
-        }
-        doc.Parse(out.str().c_str());
+    size_t len = 0;
+    auto input = evhttp_request_get_input_buffer(req);
+    char* request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
+    while (request_line != nullptr) {
+        std::string s(request_line);
+        out << request_line;
+        request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
+    }
 #else
-        const char* request_line = k_request_line.c_str();
-        doc.Parse(request_line);
+    out << k_request_line;
 #endif
+    auto out_str = out.str();
+    if (!out_str.empty()) {
+        doc.Parse(out_str.c_str());
         status = std::string(doc["Status"].GetString());
         msg = std::string(doc["Message"].GetString());
         LOG(INFO) << "replay wal " << wal_id << " status:" << status << ",msg:" << msg;
@@ -242,9 +238,9 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
     } else {
         retry = true;
     }
+
     if (retry) {
-        LOG(INFO) << "fail to replay wal =" << wal << ",response:" << response
-                  << ",status:" << status << ",msg:" << msg;
+        LOG(INFO) << "fail to replay wal =" << wal << ",status:" << status << ",msg:" << msg;
         std::lock_guard<std::mutex> lock(_replay_wal_lock);
         auto it = _replay_wal_map.find(wal);
         if (it != _replay_wal_map.end()) {
@@ -254,8 +250,7 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
             _replay_wal_map.emplace(wal, replay_wal_info {0, UnixMillis(), false});
         }
     } else {
-        LOG(INFO) << "success to replay wal =" << wal << ",response:" << response
-                  << ",status:" << status << ",msg:" << msg;
+        LOG(INFO) << "success to replay wal =" << wal << ",status:" << status << ",msg:" << msg;
         _exec_env->wal_mgr()->delete_wal(wal_id);
         std::lock_guard<std::mutex> lock(_replay_wal_lock);
         _replay_wal_map.erase(wal);
