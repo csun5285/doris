@@ -809,6 +809,7 @@ if [[ "${BUILD_JAVA_UDF}" -eq 1 && "${BUILD_BE}" -eq 0 && "${BUILD_FE}" -eq 0 ]]
 fi
 
 if [[ ${BUILD_CLOUD} -eq 1 ]]; then
+    rm -rf "${DORIS_HOME}/output/ms"
     cp -r -p "${DORIS_HOME}/cloud/output" "${DORIS_HOME}/output/ms"
 fi
 

@@ -38,7 +38,7 @@ add_executable(meta_service_test
    meta_service_test.cpp
    meta_service_job_test.cpp
    meta_service_http_test.cpp
-   detach_schema_kv_test.cpp
+   schema_kv_test.cpp
 )
 
 add_executable(meta_server_test

@@ -89,6 +89,15 @@ private:
 [[nodiscard]] int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot = false);
 
 /**
+ * Test whether key exists
+ * @param txn fdb txn handler
+ * @param key encode key
+ * @param snapshot if true, `key` will not be included in txn conflict detection this time
+ * @return 0 for key existed, 1 for key not found, negative for kv error
+ */
+[[nodiscard]] int key_exists(Transaction* txn, std::string_view key, bool snapshot = false);
+
+/**
  * Put a KV, it's value may be bigger than 100k
  * TODO(plat1ko): Support compression
  * @param txn fdb txn handler

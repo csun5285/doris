@@ -12,7 +12,7 @@
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
 
-static std::string instance_id = "DetachSchemaKVTest";
+static std::string instance_id = "schema_kv_test";
 
 namespace selectdb {
 extern std::unique_ptr<MetaServiceImpl> get_meta_service();
@@ -69,6 +69,19 @@ static void get_rowset(MetaServiceImpl* meta_service, int64_t table_id, int64_t 
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
 
+static void check_get_tablet(MetaServiceImpl* meta_service, int64_t tablet_id,
+                             int32_t schema_version) {
+    brpc::Controller cntl;
+    GetTabletRequest req;
+    GetTabletResponse res;
+    req.set_tablet_id(tablet_id);
+    meta_service->get_tablet(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
+    ASSERT_TRUE(res.has_tablet_meta()) << tablet_id;
+    EXPECT_TRUE(res.tablet_meta().has_schema()) << tablet_id;
+    EXPECT_EQ(res.tablet_meta().schema_version(), schema_version) << tablet_id;
+};
+
 TEST(DetachSchemaKVTest, TabletTest) {
     auto meta_service = get_meta_service();
     meta_service->resource_mgr_.reset(); // Do not use resource manager
@@ -103,18 +116,6 @@ TEST(DetachSchemaKVTest, TabletTest) {
         EXPECT_TRUE(saved_rowset.has_tablet_schema());
     }
 
-    auto check_get_tablet = [&meta_service](int64_t tablet_id, int32_t schema_version) {
-        brpc::Controller cntl;
-        GetTabletRequest req;
-        GetTabletResponse res;
-        req.set_tablet_id(tablet_id);
-        meta_service->get_tablet(&cntl, &req, &res, nullptr);
-        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
-        ASSERT_TRUE(res.has_tablet_meta()) << tablet_id;
-        EXPECT_TRUE(res.tablet_meta().has_schema()) << tablet_id;
-        EXPECT_EQ(res.tablet_meta().schema_version(), schema_version) << tablet_id;
-    };
-
     // old MS write, new MS read
     {
         constexpr auto table_id = 10011, index_id = 10012, partition_id = 10013, tablet_id = 10014;
@@ -141,7 +142,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
         txn->put(tablet_idx_key, tablet_idx_val);
         ASSERT_EQ(txn->commit(), 0);
         // check get tablet response
-        check_get_tablet(tablet_id, 1);
+        check_get_tablet(meta_service.get(), tablet_id, 1);
     }
 
     auto check_new_saved_tablet_val = [](Transaction* txn, int64_t table_id, int64_t index_id,
@@ -175,7 +176,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
         EXPECT_EQ(saved_rowset.index_id(), index_id);
         EXPECT_EQ(saved_rowset.schema_version(), 1);
         // check get tablet response
-        check_get_tablet(tablet_id, 1);
+        check_get_tablet(meta_service.get(), tablet_id, 1);
         // check get rowset response
         GetRowsetResponse get_rowset_res;
         get_rowset(meta_service.get(), table_id, index_id, partition_id, tablet_id, get_rowset_res);
@@ -220,15 +221,15 @@ TEST(DetachSchemaKVTest, TabletTest) {
         check_new_saved_tablet_val(txn.get(), 10031, 10034, 10033, 100038, 2);
         check_new_saved_tablet_val(txn.get(), 10031, 10034, 10033, 100039, 2);
         // check get tablet response
-        check_get_tablet(100031, 1);
-        check_get_tablet(100032, 2);
-        check_get_tablet(100033, 2);
-        check_get_tablet(100034, 3);
-        check_get_tablet(100035, 3);
-        check_get_tablet(100036, 3);
-        check_get_tablet(100037, 1);
-        check_get_tablet(100038, 2);
-        check_get_tablet(100039, 2);
+        check_get_tablet(meta_service.get(), 100031, 1);
+        check_get_tablet(meta_service.get(), 100032, 2);
+        check_get_tablet(meta_service.get(), 100033, 2);
+        check_get_tablet(meta_service.get(), 100034, 3);
+        check_get_tablet(meta_service.get(), 100035, 3);
+        check_get_tablet(meta_service.get(), 100036, 3);
+        check_get_tablet(meta_service.get(), 100037, 1);
+        check_get_tablet(meta_service.get(), 100038, 2);
+        check_get_tablet(meta_service.get(), 100039, 2);
     }
 }
 
@@ -559,6 +560,29 @@ TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
     insert_existed_rowset(10011, 10012, 10013, 10014, 10015);
     google::protobuf::Arena arena;
     insert_existed_rowset(10021, 10022, 10023, 10024, 10025, &arena);
+}
+
+TEST(SchemaKVTest, InsertExistedRowsetTest) {
+    auto meta_service = get_meta_service();
+    meta_service->resource_mgr_.reset(); // Do not use resource manager
+
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    config::write_schema_kv = true;
+    config::meta_schema_value_version = 0;
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), 10001, 10002, 10003, 10004, next_rowset_id(), 1));
+    check_get_tablet(meta_service.get(), 10004, 1);
+
+    config::meta_schema_value_version = 1;
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), 10001, 10002, 10003, 10005, next_rowset_id(), 2));
+    check_get_tablet(meta_service.get(), 10005, 2);
 }
 
 } // namespace selectdb

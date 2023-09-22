@@ -13,6 +13,7 @@
 #include "meta-service/doris_txn.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_helper.h"
+#include "meta-service/meta_service_schema.h"
 #include "meta-service/meta_service_tablet_stats.h"
 #include "meta-service/txn_kv.h"
 #include "rate-limiter/rate_limiter.h"
@@ -253,7 +254,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
 
     while (code == MetaServiceCode::OK &&
-            response->versions_size() < response->partition_ids_size()) {
+           response->versions_size() < response->partition_ids_size()) {
         std::unique_ptr<Transaction> txn;
         ret = txn_kv_->create_txn(&txn);
         if (ret != 0) {
@@ -286,8 +287,8 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
             } else if (ret == -2) {
                 // txn too old, fallback to non-snapshot versions.
                 LOG(WARNING) << "batch_get_version execution time exceeds the txn mvcc window, "
-                        "fallback to acquire non-snapshot versions, partition_ids_size="
-                        << request->partition_ids_size() << ", index=" << i;
+                                "fallback to acquire non-snapshot versions, partition_ids_size="
+                             << request->partition_ids_size() << ", index=" << i;
                 break;
             } else {
                 msg = "failed to get txn";
@@ -301,85 +302,6 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
         response->clear_table_ids();
         response->clear_versions();
     }
-}
-
-void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
-                   const std::string& instance_id, int64_t index_id,
-                   const doris::TabletSchemaPB& schema, std::string& schema_key,
-                   std::string& schema_val) {
-    DCHECK(schema_key.empty());
-    DCHECK(schema_val.empty());
-    meta_schema_key({instance_id, index_id, schema.schema_version()}, &schema_key);
-    if (txn->get(schema_key, &schema_val) == 0) {
-        DCHECK([&] {
-            auto transform = [](std::string_view type) -> std::string_view {
-                if (type == "DECIMALV2") return "DECIMAL";
-                if (type == "BITMAP") return "OBJECT";
-                return type;
-            };
-            doris::TabletSchemaPB saved_schema;
-            if (!saved_schema.ParseFromString(schema_val)) {
-                LOG(WARNING) << "failed to parse from string";
-                return false;
-            }
-            if (saved_schema.column_size() != schema.column_size()) {
-                LOG(WARNING) << "saved_schema.column_size()=" << saved_schema.column_size()
-                             << " schema.column_size()=" << schema.column_size();
-                return false;
-            }
-            // Sort by column id
-            std::sort(saved_schema.mutable_column()->begin(), saved_schema.mutable_column()->end(),
-                      [](auto& c1, auto& c2) { return c1.unique_id() < c2.unique_id(); });
-            auto& schema_ref = const_cast<doris::TabletSchemaPB&>(schema);
-            std::sort(schema_ref.mutable_column()->begin(), schema_ref.mutable_column()->end(),
-                      [](auto& c1, auto& c2) { return c1.unique_id() < c2.unique_id(); });
-            for (int i = 0; i < saved_schema.column_size(); ++i) {
-                auto& saved_column = saved_schema.column(i);
-                auto& column = schema.column(i);
-                if (saved_column.unique_id() != column.unique_id() ||
-                    transform(saved_column.type()) != transform(column.type())) {
-                    LOG(WARNING) << "existed column: " << saved_column.DebugString()
-                                 << "\nto save column: " << column.DebugString();
-                    return false;
-                }
-            }
-            if (saved_schema.index_size() != schema.index_size()) {
-                LOG(WARNING) << "saved_schema.index_size()=" << saved_schema.index_size()
-                             << " schema.index_size()=" << schema.index_size();
-                return false;
-            }
-            // Sort by index id
-            std::sort(saved_schema.mutable_index()->begin(), saved_schema.mutable_index()->end(),
-                      [](auto& i1, auto& i2) { return i1.index_id() < i2.index_id(); });
-            std::sort(schema_ref.mutable_index()->begin(), schema_ref.mutable_index()->end(),
-                      [](auto& i1, auto& i2) { return i1.index_id() < i2.index_id(); });
-            for (int i = 0; i < saved_schema.index_size(); ++i) {
-                auto& saved_index = saved_schema.index(i);
-                auto& index = schema.index(i);
-                if (saved_index.index_id() != index.index_id() ||
-                    saved_index.index_type() != index.index_type()) {
-                    LOG(WARNING) << "existed index: " << saved_index.DebugString()
-                                 << "\nto save index: " << index.DebugString();
-                    return false;
-                }
-            }
-            return true;
-        }()) << hex(schema_key)
-             << "\n existed: " <<
-                [&]() {
-                    doris::TabletSchemaPB saved_schema;
-                    saved_schema.ParseFromString(schema_val);
-                    return saved_schema.ShortDebugString();
-                }()
-             << "\n to_save: " << schema.ShortDebugString();
-        return; // schema has already been saved
-    }
-    if (!schema.SerializeToString(&schema_val)) [[unlikely]] {
-        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-        msg = "failed to serialize tablet schema value";
-        return;
-    }
-    txn->put(schema_key, schema_val);
 }
 
 void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
@@ -430,7 +352,6 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
         tablet_meta.clear_rs_metas(); // Strip off rowset meta
     }
 
-    std::string schema_key, schema_val;
     if (tablet_meta.has_schema()) {
         // Temporary hard code to fix wrong column type string generated by FE
         auto fix_column_type = [](doris::TabletSchemaPB* schema) {
@@ -446,8 +367,9 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
             auto [_, success] = saved_schema.emplace(index_id, tablet_meta.schema_version());
             if (success) { // schema may not be saved
                 fix_column_type(tablet_meta.mutable_schema());
-                put_schema_kv(code, msg, txn.get(), instance_id, index_id, tablet_meta.schema(),
-                              schema_key, schema_val);
+                auto schema_key =
+                        meta_schema_key({instance_id, index_id, tablet_meta.schema_version()});
+                put_schema_kv(code, msg, txn.get(), schema_key, tablet_meta.schema());
                 if (code != MetaServiceCode::OK) return;
             }
             tablet_meta.set_allocated_schema(nullptr);
@@ -581,15 +503,15 @@ void internal_get_tablet(MetaServiceCode& code, std::string& msg, int& ret,
         }
         auto key = meta_schema_key(
                 {instance_id, tablet_meta->index_id(), tablet_meta->schema_version()});
-        std::string val;
-        ret = txn->get(key, &val);
+        ValueBuf val_buf;
+        ret = selectdb::get(txn, key, &val_buf);
         if (ret != 0) {
             code = MetaServiceCode::KV_TXN_GET_ERR;
             msg = fmt::format("failed to get schema, err={}",
                               ret == 1 ? "not found" : "internal error");
             return;
         }
-        if (!tablet_meta->mutable_schema()->ParseFromString(val)) {
+        if (!parse_schema_value(val_buf, tablet_meta->mutable_schema())) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
             msg = fmt::format("malformed schema value, key={}", key);
             return;
@@ -776,11 +698,10 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
         }
     } else {
         // get schema from txn kv
-        std::string schema_key, schema_val;
-        meta_schema_key(
-                {instance_id, existed_rowset_meta.index_id(), existed_rowset_meta.schema_version()},
-                &schema_key);
-        ret = txn->get(schema_key, &schema_val, true);
+        std::string schema_key = meta_schema_key({instance_id, existed_rowset_meta.index_id(),
+                                                  existed_rowset_meta.schema_version()});
+        ValueBuf val_buf;
+        ret = selectdb::get(txn, schema_key, &val_buf, true);
         if (ret != 0) {
             code = MetaServiceCode::KV_TXN_GET_ERR;
             msg = fmt::format("failed to get schema, schema_version={}: {}",
@@ -788,7 +709,7 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
                               ret == 1 ? "not found" : "internal error");
             return;
         }
-        if (!existed_rowset_meta.mutable_tablet_schema()->ParseFromString(schema_val)) {
+        if (!parse_schema_value(val_buf, existed_rowset_meta.mutable_tablet_schema())) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
             msg = fmt::format("malformed schema value, key={}", schema_key);
             return;
@@ -1029,8 +950,6 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         return;
     }
     // write schema kv if rowset_meta has schema
-    std::string schema_key;
-    std::string schema_val;
     if (config::write_schema_kv && rowset_meta.has_tablet_schema()) {
         if (!rowset_meta.has_index_id()) {
             TabletIndexPB tablet_idx;
@@ -1042,8 +961,9 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         DCHECK(rowset_meta.tablet_schema().has_schema_version());
         DCHECK_GE(rowset_meta.tablet_schema().schema_version(), 0);
         rowset_meta.set_schema_version(rowset_meta.tablet_schema().schema_version());
-        put_schema_kv(code, msg, txn.get(), instance_id, rowset_meta.index_id(),
-                      rowset_meta.tablet_schema(), schema_key, schema_val);
+        auto schema_key = meta_schema_key(
+                {instance_id, rowset_meta.index_id(), rowset_meta.schema_version()});
+        put_schema_kv(code, msg, txn.get(), schema_key, rowset_meta.tablet_schema());
         if (code != MetaServiceCode::OK) return;
         rowset_meta.set_allocated_tablet_schema(nullptr);
     }
@@ -1308,8 +1228,8 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
             }
         } else {
             auto key = meta_schema_key({instance_id, idx.index_id(), rowset_meta.schema_version()});
-            std::string val;
-            ret = txn->get(key, &val);
+            ValueBuf val_buf;
+            ret = selectdb::get(txn.get(), key, &val_buf);
             if (ret != 0) {
                 code = MetaServiceCode::KV_TXN_GET_ERR;
                 msg = fmt::format(
@@ -1319,7 +1239,7 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
                 return;
             }
             auto schema = rowset_meta.mutable_tablet_schema();
-            if (!schema->ParseFromString(val)) {
+            if (!parse_schema_value(val_buf, schema)) {
                 code = MetaServiceCode::PROTOBUF_PARSE_ERR;
                 msg = fmt::format("malformed schema value, key={}", key);
                 return;
@@ -1765,7 +1685,8 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     // 1.Check whether the lock expires
     auto table_id = request->table_id();
     auto partition_id = request->partition_id();
-    std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+    std::string lock_key =
+            meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
     ret = txn->get(lock_key, &lock_val);
@@ -1975,10 +1896,11 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 }
 
-void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcController* controller,
-                                       const ::selectdb::GetDeleteBitmapUpdateLockRequest* request,
-                                       ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
-                                       ::google::protobuf::Closure* done)  {
+void MetaServiceImpl::get_delete_bitmap_update_lock(
+        google::protobuf::RpcController* controller,
+        const ::selectdb::GetDeleteBitmapUpdateLockRequest* request,
+        ::selectdb::GetDeleteBitmapUpdateLockResponse* response,
+        ::google::protobuf::Closure* done) {
     RPC_PREPROCESS(get_delete_bitmap_update_lock);
     std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
     if (cloud_unique_id.empty()) {

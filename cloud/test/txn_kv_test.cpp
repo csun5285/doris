@@ -195,6 +195,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
     std::unique_ptr<Transaction> txn;
     int ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ValueBuf val_buf;
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
@@ -204,6 +206,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
 
     // Check get
     ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
     ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
@@ -225,6 +229,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
     // Check remove
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
 }
@@ -264,6 +270,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     ASSERT_EQ(ret, 0);
     ValueBuf val_buf;
     doris::TabletSchemaPB saved_schema;
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
     std::cout << "num iterators=" << val_buf.iters_.size() << std::endl;
@@ -314,6 +322,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     // Check remove
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
 }
