@@ -92,9 +92,12 @@ public class FeConstants {
     public static String FS_PREFIX_GFS = "gfs";
     public static String FS_PREFIX_JFS = "jfs";
     public static String FS_PREFIX_HDFS = "hdfs";
+    public static String FS_PREFIX_VIEWFS = "viewfs";
     public static String FS_PREFIX_FILE = "file";
     public static final String INTERNAL_DB_NAME = "__internal_schema";
     public static String TEMP_MATERIZLIZE_DVIEW_PREFIX = "internal_tmp_materialized_view_";
     public static final String INTERNAL_FILE_CACHE_HOTSPOT_TABLE_NAME = "selectdb_cache_hotspot";
     public static boolean disablePreHeat = false;
+
+    public static String METADATA_FAILURE_RECOVERY_KEY = "metadata_failure_recovery";
 }

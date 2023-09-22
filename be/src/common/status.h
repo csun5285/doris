@@ -20,7 +20,6 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "gen_cpp/Status_types.h" // for TStatus
-#include "service/backend_options.h"
 #ifdef ENABLE_STACKTRACE
 #include "util/stack_util.h"
 #endif
@@ -54,7 +53,6 @@ TStatusError(MEM_LIMIT_EXCEEDED);
 TStatusError(THRIFT_RPC_ERROR);
 TStatusError(TIMEOUT);
 TStatusError(TOO_MANY_TASKS);
-TStatusError(SERVICE_UNAVAILABLE);
 TStatusError(UNINITIALIZED);
 TStatusError(ABORTED);
 TStatusError(DATA_QUALITY_ERROR);
@@ -119,6 +117,7 @@ E(NOT_INITIALIZED, -236);
 E(ALREADY_CANCELLED, -237);
 E(TOO_MANY_SEGMENTS, -238);
 E(ALREADY_CLOSED, -239);
+E(SERVICE_UNAVAILABLE, -240);
 E(CE_CMD_PARAMS_ERROR, -300);
 E(CE_BUFFER_TOO_SMALL, -301);
 E(CE_CMD_NOT_VALID, -302);
@@ -417,7 +416,6 @@ public:
     ERROR_CTOR(RpcError, THRIFT_RPC_ERROR)
     ERROR_CTOR(TimedOut, TIMEOUT)
     ERROR_CTOR(TooManyTasks, TOO_MANY_TASKS)
-    ERROR_CTOR(ServiceUnavailable, SERVICE_UNAVAILABLE)
     ERROR_CTOR(Uninitialized, UNINITIALIZED)
     ERROR_CTOR(Aborted, ABORTED)
     ERROR_CTOR(DataQualityError, DATA_QUALITY_ERROR)

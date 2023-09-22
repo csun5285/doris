@@ -77,6 +77,7 @@
 #include "io/fs/s3_file_writer.h"
 #include "util/s3_uri.h"
 #include "util/s3_util.h"
+#include "service/backend_options.h"
 
 namespace doris {
 namespace io {

@@ -573,11 +573,6 @@ public class EditLog {
                     Env.getCurrentGlobalTransactionMgr().replayBatchRemoveTransactionV2(operation);
                     break;
                 }
-                case OperationType.OP_SET_TABLE_STATUS: {
-                    final SetTableStatusOperationLog log = (SetTableStatusOperationLog) journal.getData();
-                    env.replaySetTableStatus(log);
-                    break;
-                }
                 case OperationType.OP_CREATE_REPOSITORY: {
                     Repository repository = (Repository) journal.getData();
                     env.getBackupHandler().getRepoMgr().addAndInitRepoIfNotExist(repository, true);
@@ -829,11 +824,6 @@ public class EditLog {
                 case OperationType.OP_MODIFY_COMMENT: {
                     ModifyCommentOperationLog operation = (ModifyCommentOperationLog) journal.getData();
                     env.getAlterInstance().replayModifyComment(operation);
-                    break;
-                }
-                case OperationType.OP_SET_PARTITION_VERSION: {
-                    SetPartitionVersionOperationLog log = (SetPartitionVersionOperationLog) journal.getData();
-                    env.replaySetPartitionVersion(log);
                     break;
                 }
                 case OperationType.OP_ALTER_ROUTINE_LOAD_JOB: {
@@ -1739,10 +1729,6 @@ public class EditLog {
         logEdit(OperationType.OP_ALTER_ROUTINE_LOAD_JOB, log);
     }
 
-    public void logSetPartitionVersion(SetPartitionVersionOperationLog log) {
-        logEdit(OperationType.OP_SET_PARTITION_VERSION, log);
-    }
-
     public void logGlobalVariableV2(GlobalVarPersistInfo info) {
         logEdit(OperationType.OP_GLOBAL_VARIABLE_V2, info);
     }
@@ -1753,10 +1739,6 @@ public class EditLog {
 
     public void logBatchRemoveTransactions(BatchRemoveTransactionsOperationV2 op) {
         logEdit(OperationType.OP_BATCH_REMOVE_TXNS_V2, op);
-    }
-
-    public void logSetTableStatus(SetTableStatusOperationLog log) {
-        logEdit(OperationType.OP_SET_TABLE_STATUS, log);
     }
 
     public void logModifyComment(ModifyCommentOperationLog op) {

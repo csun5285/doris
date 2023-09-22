@@ -11,6 +11,7 @@
 #include "olap/cumulative_compaction_policy.h"
 #include "util/trace.h"
 #include "util/uuid_generator.h"
+#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;

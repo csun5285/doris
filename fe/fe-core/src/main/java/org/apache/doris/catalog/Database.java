@@ -874,7 +874,8 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
         return null;
     }
 
-    public Map<Long, Table> getIdToTable() {
+    @Override
+    public Map<Long, TableIf> getIdToTable() {
         return new HashMap<>(idToTable);
     }
 

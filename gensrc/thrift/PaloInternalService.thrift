@@ -246,6 +246,8 @@ struct TQueryOptions {
   // use is_report_success any more
   84: optional bool enable_profile = false;
 
+  85: optional bool enable_page_cache = false;
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }

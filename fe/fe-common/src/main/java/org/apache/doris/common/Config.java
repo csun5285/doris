@@ -271,16 +271,6 @@ public class Config extends ConfigBase {
                     + "each element is a CIDR representation of the network address"})
     public static String priority_networks = "";
 
-    @ConfField(description = {"是否重置 BDBJE 的复制组，如果所有的可选节点都无法启动，"
-            + "可以将元数据拷贝到另一个节点，并将这个配置设置为 true，尝试重启 FE。更多信息请参阅官网的元数据故障恢复文档。",
-            "If true, FE will reset bdbje replication group(that is, to remove all electable nodes info) "
-                    + "and is supposed to start as Master. "
-                    + "If all the electable nodes can not start, we can copy the meta data "
-                    + "to another node and set this config to true to try to restart the FE. "
-                    + "For more information, please refer to the metadata failure recovery document "
-                    + "on the official website."})
-    public static String metadata_failure_recovery = "false";
-
     @ConfField(mutable = true, description = {"是否忽略元数据延迟，如果 FE 的元数据延迟超过这个阈值，"
             + "则非 Master FE 仍然提供读服务。这个配置可以用于当 Master FE 因为某些原因停止了较长时间，"
             + "但是仍然希望非 Master FE 可以提供读服务。",
@@ -440,6 +430,13 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true, description = {"导入 Publish 阶段的最大超时时间，单位是秒。",
             "Maximal waiting time for all publish version tasks of one transaction to be finished, in seconds."})
     public static int publish_version_timeout_second = 30; // 30 seconds
+
+    @ConfField(mutable = true, masterOnly = true, description = {"导入 Publish 阶段的等待时间，单位是秒。超过此时间，"
+            + "则只需每个tablet包含一个成功副本，则导入成功。值为 -1 时，表示无限等待。",
+            "Waiting time for one transaction changing to \"at least one replica success\", in seconds."
+            + "If time exceeds this, and for each tablet it has at least one replica publish successful, "
+            + "then the load task will be successful." })
+    public static int publish_wait_time_second = 300;
 
     @ConfField(mutable = true, masterOnly = true, description = {"提交事务的最大超时时间，单位是秒。"
             + "该参数仅用于事务型 insert 操作中。",

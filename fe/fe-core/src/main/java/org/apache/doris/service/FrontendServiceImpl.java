@@ -428,7 +428,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         int schemaVersion = 0;
         try {
             if (!env.isMaster()) {
-                status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+                status.setStatusCode(TStatusCode.NOT_MASTER);
                 status.addToErrorMsgs("retry rpc request to master.");
                 TAddColumnsResult result = new TAddColumnsResult();
                 result.setStatus(status);
@@ -1118,7 +1118,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to loadTxnBegin:{}, request:{}, backend:{}",
                     NOT_MASTER_ERR_MSG, request, clientAddr);
@@ -1213,7 +1213,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get beginTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
@@ -1321,7 +1321,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to loadTxnPreCommit:{}, request:{}, backend:{}",
                     NOT_MASTER_ERR_MSG, request, clientAddr);
@@ -1429,7 +1429,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to loadTxn2PC:{}, request:{}, backend:{}",
                     NOT_MASTER_ERR_MSG, request, clientAddr);
@@ -1514,7 +1514,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to loadTxnCommit:{}, request:{}, backend:{}",
                     NOT_MASTER_ERR_MSG, request, clientAddr);
@@ -1595,7 +1595,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get commitTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
@@ -1707,7 +1707,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to loadTxnRollback:{}, request:{}, backend:{}",
                     NOT_MASTER_ERR_MSG, request, clientAddr);
@@ -1782,7 +1782,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get rollbackTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
@@ -2724,7 +2724,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get getSnapshot: {}", NOT_MASTER_ERR_MSG);
             return result;
@@ -2801,6 +2801,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
     }
 
     // Restore Snapshot
+    @Override
     public TRestoreSnapshotResult restoreSnapshot(TRestoreSnapshotRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         LOG.trace("receive restore snapshot info request: {}", request);
@@ -2810,7 +2811,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get restoreSnapshot: {}", NOT_MASTER_ERR_MSG);
             return result;
@@ -2827,6 +2828,8 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             status.setStatusCode(TStatusCode.INTERNAL_ERROR);
             status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
             return result;
+        } finally {
+            ConnectContext.remove();
         }
 
         return result;
@@ -2891,6 +2894,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             ctx.setCluster(cluster);
             ctx.setQualifiedUser(request.getUser());
             UserIdentity currentUserIdentity = new UserIdentity(request.getUser(), "%");
+            currentUserIdentity.setIsAnalyzed();
             ctx.setCurrentUserIdentity(currentUserIdentity);
 
             Analyzer analyzer = new Analyzer(ctx.getEnv(), ctx);
@@ -2918,7 +2922,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         result.setStatus(status);
 
         if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.ILLEGAL_STATE);
+            status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
             LOG.error("failed to get getMasterToken: {}", NOT_MASTER_ERR_MSG);
             return result;
