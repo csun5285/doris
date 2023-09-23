@@ -109,10 +109,6 @@ TaskWorkerPool::TaskWorkerPool(const TaskWorkerType task_worker_type, ExecEnv* e
           _thread_model(thread_model),
           _is_doing_work(false),
           _task_worker_type(task_worker_type) {
-    _backend.__set_host(BackendOptions::get_localhost());
-    _backend.__set_be_port(config::be_port);
-    _backend.__set_http_port(config::webserver_port);
-
     string task_worker_type_name = TYPE_STRING(task_worker_type);
     _name = strings::Substitute("TaskWorkerPool.$0", task_worker_type_name);
 
@@ -371,7 +367,7 @@ void TaskWorkerPool::_alter_inverted_index_worker_thread_callback() {
 
         // Return result to fe
         TFinishTaskRequest finish_task_request;
-        finish_task_request.__set_backend(_backend);
+        finish_task_request.__set_backend(BackendOptions::get_local_backend());
         finish_task_request.__set_task_type(agent_task_req.task_type);
         finish_task_request.__set_signature(agent_task_req.signature);
         std::vector<TTabletInfo> finish_tablet_infos;
@@ -690,6 +686,7 @@ void TaskWorkerPool::_report_disk_state_worker_thread_callback() {
             disk.__set_data_used_capacity(root_path_info.local_used_capacity);
             disk.__set_remote_used_capacity(root_path_info.remote_used_capacity);
             disk.__set_disk_available_capacity(root_path_info.available);
+            disk.__set_trash_used_capacity(root_path_info.trash_used_capacity);
             disk.__set_used(root_path_info.is_used);
             request.disks[root_path_info.path] = disk;
         }
@@ -2064,7 +2061,7 @@ void TaskWorkerPool::_calc_delete_bimtap_worker_thread_callback() {
         }
 
         status.to_thrift(&finish_task_request.task_status);
-        finish_task_request.__set_backend(_backend);
+        finish_task_request.__set_backend(BackendOptions::get_local_backend());
         finish_task_request.__set_task_type(agent_task_req.task_type);
         finish_task_request.__set_signature(agent_task_req.signature);
         finish_task_request.__set_report_version(_s_report_version);

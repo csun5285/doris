@@ -537,7 +537,7 @@ public class OlapScanNode extends ScanNode {
         // point query could do lazy evaluation, since stmt is a prepared statment
         preparedStatment = analyzer.getPrepareStmt();
         if (preparedStatment == null || !preparedStatment.isPointQueryShortCircuit()) {
-            computeColumnFilter();
+            computeColumnsFilter();
             computePartitionInfo();
         }
         computeTupleState(analyzer);
@@ -1144,7 +1144,7 @@ public class OlapScanNode extends ScanNode {
         // Lazy evaluation
         selectedIndexId = olapTable.getBaseIndexId();
         // Only key columns
-        computeColumnFilter(olapTable.getBaseSchemaKeyColumns());
+        computeColumnsFilter(olapTable.getBaseSchemaKeyColumns());
         computePartitionInfo();
         scanBackendIds.clear();
         scanTabletIds.clear();

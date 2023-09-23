@@ -130,7 +130,7 @@ public class SystemInfoService {
         }
 
         public String getIdent() {
-            return host;
+            return host + "_" + port;
         }
 
         @Override

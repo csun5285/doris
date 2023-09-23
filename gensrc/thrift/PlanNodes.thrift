@@ -348,6 +348,11 @@ struct TTableFormatFileDesc {
     5: optional TTransactionalHiveDesc transactional_hive_params
 }
 
+enum TTextSerdeType {
+    JSON_TEXT_SERDE = 0,
+    HIVE_TEXT_SERDE = 1,
+}
+
 struct TFileScanRangeParams {
     // deprecated, move to TFileScanRange
     1: optional Types.TFileType file_type;
@@ -389,6 +394,8 @@ struct TFileScanRangeParams {
     // Map of slot to its position in table schema. Only for Hive external table.
     19: optional map<string, i32> slot_name_to_schema_pos
     20: optional list<Exprs.TExpr> pre_filter_exprs_list
+    21: optional Types.TUniqueId load_id
+    22: optional TTextSerdeType  text_serde_type 
 }
 
 struct TFileRangeDesc {
@@ -413,6 +420,9 @@ struct TFileRangeDesc {
     9: optional i64 modification_time
     10: optional Types.TFileType file_type;
     11: optional TFileCompressType compress_type;
+    // for hive table, different files may have different fs,
+    // so fs_name should be with TFileRangeDesc
+    12: optional string fs_name
 }
 
 // TFileScanRange represents a set of descriptions of a file and the rules for reading and converting it.

@@ -11,6 +11,7 @@
 #include "olap/rowset/segment_v2/inverted_index_desc.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
+#include "service/backend_options.h"
 
 namespace doris::cloud {
 using namespace ErrorCode;

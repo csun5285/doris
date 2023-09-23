@@ -37,7 +37,7 @@ suite("view_p0") {
     """
     
     qt_sql "select * from test_varchar_view;"
-    qt_sql "select cast( id as varchar) from test_view_table;"
+    qt_sql "select cast( id as varchar(*)) from test_view_table;"
     
     // array view
     sql """DROP TABLE IF EXISTS test_array_tbl_1"""
@@ -122,5 +122,12 @@ suite("view_p0") {
     qt_sql "select * from test_time_diff"
 
     sql "drop view if exists test_time_diff"
-    
+
+    sql "drop view if exists test_vv1;"
+
+    sql "create view test_vv1 as select char(field2) from test_array_tbl_2;"
+
+    qt_sql2 "select * from test_vv1;"
+
+    sql "drop view if exists test_vv1;"
 }

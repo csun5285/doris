@@ -420,7 +420,7 @@ Status SegmentWriter::append_block_with_partial_content(const vectorized::Block*
         RowsetSharedPtr rowset;
         auto st = _tablet->lookup_row_key(key, have_input_seq_column, specified_rowsets, &loc,
                                           _mow_context->max_version, segment_caches, &rowset);
-        if (st.is<NOT_FOUND>()) {
+        if (st.is<KEY_NOT_FOUND>()) {
             if (_tablet_schema->is_strict_mode()) {
                 ++num_rows_filtered;
                 // delete the invalid newly inserted row
@@ -437,7 +437,7 @@ Status SegmentWriter::append_block_with_partial_content(const vectorized::Block*
             use_default_or_null_flag.emplace_back(true);
             continue;
         }
-        if (!st.ok() && !st.is<ALREADY_EXIST>()) {
+        if (!st.ok() && !st.is<KEY_ALREADY_EXISTS>()) {
             LOG(WARNING) << "failed to lookup row key, error: " << st;
             return st;
         }
@@ -455,7 +455,7 @@ Status SegmentWriter::append_block_with_partial_content(const vectorized::Block*
             _tablet->prepare_to_read(loc, pos, &_rssid_to_rid);
         }
 
-        if (st.is<ALREADY_EXIST>()) {
+        if (st.is<KEY_ALREADY_EXISTS>()) {
             // although we need to mark delete current row, we still need to read missing columns
             // for this row, we need to ensure that each column is aligned
             _mow_context->delete_bitmap->add({_opts.rowset_ctx->rowset_id, _segment_id, 0}, pos);
@@ -903,11 +903,9 @@ Status SegmentWriter::finalize_footer(uint64_t* segment_file_size) {
     // finish
     RETURN_IF_ERROR(_file_writer->finalize());
     *segment_file_size = _file_writer->bytes_appended();
-    return Status::OK();
-}
-
-Status SegmentWriter::finalize_footer() {
-    RETURN_IF_ERROR(_write_footer());
+    if (*segment_file_size == 0) {
+        return Status::Corruption("Bad segment, file size = 0");
+    }
     return Status::OK();
 }
 
@@ -916,17 +914,15 @@ Status SegmentWriter::finalize(uint64_t* segment_file_size, uint64_t* index_size
     timer.start();
     // check disk capacity
     if (_data_dir != nullptr && _data_dir->reach_capacity_limit((int64_t)estimate_segment_size())) {
-        return Status::InternalError("disk {} exceed capacity limit.", _data_dir->path_hash());
+        return Status::Error<DISK_REACH_CAPACITY_LIMIT>("disk {} exceed capacity limit.",
+                                                        _data_dir->path_hash());
     }
     // write data
     RETURN_IF_ERROR(finalize_columns_data());
     // write index
     RETURN_IF_ERROR(finalize_columns_index(index_size));
     // write footer
-    RETURN_IF_ERROR(finalize_footer());
-    // finish
-    RETURN_IF_ERROR(_file_writer->finalize());
-    *segment_file_size = _file_writer->bytes_appended();
+    RETURN_IF_ERROR(finalize_footer(segment_file_size));
 
     if (timer.elapsed_time() > 5000000000l) {
         LOG(INFO) << "segment flush consumes a lot time_ns " << timer.elapsed_time()

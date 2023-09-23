@@ -253,6 +253,7 @@ terminal String
     KW_ADMIN,
     KW_AFTER,
     KW_AGGREGATE,
+    KW_AGG_STATE,
     KW_ALIAS,
     KW_ALL,
     KW_ALTER,
@@ -261,10 +262,11 @@ terminal String
     KW_ANTI,
     KW_APPEND,
     KW_ARRAY,
-    KW_AUTO_INCREMENT,
     KW_AS,
     KW_ASC,
     KW_AUTHORS,
+    KW_AUTO,
+    KW_AUTO_INCREMENT,
     KW_BACKEND,
     KW_BACKENDS,
     KW_BACKUP,
@@ -275,7 +277,6 @@ terminal String
     KW_BINLOG,
     KW_BITMAP,
     KW_BITMAP_UNION,
-    KW_NGRAM_BF,
     KW_BLOB,
     KW_BOOLEAN,
     KW_BRIEF,
@@ -307,11 +308,13 @@ terminal String
     KW_COMMITTED,
     KW_COMPACT,
     KW_COMPLETE,
+    KW_COMPRESS_TYPE,
     KW_CONFIG,
     KW_CONNECTION,
     KW_CONNECTION_ID,
     KW_CONSISTENT,
     KW_CONVERT,
+    KW_CONVERT_LSC,
     KW_COPY,
     KW_COUNT,
     KW_CREATE,
@@ -364,6 +367,7 @@ terminal String
     KW_EVENTS,
     KW_EXCEPT,
     KW_EXCLUDE,
+    KW_EXECUTE,
     KW_EXISTS,
     KW_EXPIRED,
     KW_EXPORT,
@@ -402,14 +406,16 @@ terminal String
     KW_HAVING,
     KW_HDFS,
     KW_HELP,
+    KW_HISTOGRAM,
     KW_HLL,
     KW_HLL_UNION,
-    KW_HOTSPOT,
     KW_HOSTNAME,
+    KW_HOTSPOT,
     KW_HOUR,
     KW_HUB,
     KW_IDENTIFIED,
     KW_IF,
+    KW_IGNORE,
     KW_IMMEDIATE,
     KW_IN,
     KW_INCREMENTAL,
@@ -424,10 +430,10 @@ terminal String
     KW_INTERSECT,
     KW_INTERVAL,
     KW_INTO,
+    KW_INVERTED,
     KW_IS,
     KW_ISNULL,
     KW_ISOLATION,
-    KW_INVERTED,
     KW_JOB,
     KW_JOIN,
     KW_JSON,
@@ -446,6 +452,7 @@ terminal String
     KW_LEVEL,
     KW_LIKE,
     KW_LIMIT,
+    KW_LINES,
     KW_LINK,
     KW_LIST,
     KW_LOAD,
@@ -454,6 +461,15 @@ terminal String
     KW_LOCK,
     KW_LOW_PRIORITY,
     KW_MAP,
+    KW_MATCH,
+    KW_MATCH_ALL,
+    KW_MATCH_ANY,
+    KW_MATCH_ELEMENT_EQ,
+    KW_MATCH_ELEMENT_GE,
+    KW_MATCH_ELEMENT_GT,
+    KW_MATCH_ELEMENT_LE,
+    KW_MATCH_ELEMENT_LT,
+    KW_MATCH_PHRASE,
     KW_MATERIALIZED,
     KW_MAX,
     KW_MAX_VALUE,
@@ -465,21 +481,14 @@ terminal String
     KW_MINUTE,
     KW_MODIFY,
     KW_MONTH,
-    KW_MATCH,
-    KW_MATCH_ANY,
-    KW_MATCH_ALL,
-    KW_MATCH_PHRASE,
-    KW_MATCH_ELEMENT_EQ,
-    KW_MATCH_ELEMENT_LT,
-    KW_MATCH_ELEMENT_GT,
-    KW_MATCH_ELEMENT_LE,
-    KW_MATCH_ELEMENT_GE,
+    KW_MTMV,
     KW_NAME,
     KW_NAMES,
     KW_NATURAL,
     KW_NEGATIVE,
     KW_NEVER,
     KW_NEXT,
+    KW_NGRAM_BF,
     KW_NO,
     KW_NOT,
     KW_NULL,
@@ -506,14 +515,14 @@ terminal String
     KW_PASSWORD_REUSE,
     KW_PATH,
     KW_PAUSE,
+    KW_PERCENT,
     KW_PERIOD,
     KW_PIPE,
     KW_PLUGIN,
     KW_PLUGINS,
     KW_POLICY,
     KW_PRECEDING,
-    KW_PERCENT,
-    KW_RECYCLE,
+    KW_PREPARE,
     KW_PROC,
     KW_PROCEDURE,
     KW_PROCESSLIST,
@@ -522,7 +531,6 @@ terminal String
     KW_PROPERTY,
     KW_QUANTILE_STATE,
     KW_QUANTILE_UNION,
-    KW_AGG_STATE,
     KW_QUERY,
     KW_QUOTA,
     KW_RANDOM,
@@ -530,6 +538,7 @@ terminal String
     KW_READ,
     KW_REBALANCE,
     KW_RECOVER,
+    KW_RECYCLE,
     KW_REFRESH,
     KW_REGEXP,
     KW_RELEASE,
@@ -611,6 +620,7 @@ terminal String
     KW_TRUE,
     KW_TRUNCATE,
     KW_TYPE,
+    KW_TYPECAST,
     KW_TYPES,
     KW_UNBOUNDED,
     KW_UNCOMMITTED,
@@ -619,6 +629,7 @@ terminal String
     KW_UNIQUE,
     KW_UNLOCK,
     KW_UNSIGNED,
+    KW_UP,
     KW_UPDATE,
     KW_USE,
     KW_USER,
@@ -630,6 +641,7 @@ terminal String
     KW_VERBOSE,
     KW_VERSION,
     KW_VIEW,
+    KW_WARM,
     KW_WARNINGS,
     KW_WEEK,
     KW_WHEN,
@@ -639,17 +651,7 @@ terminal String
     KW_WORK,
     KW_WORKLOAD,
     KW_WRITE,
-    KW_YEAR,
-    KW_MTMV,
-    KW_TYPECAST,
-    KW_HISTOGRAM,
-    KW_AUTO,
-    KW_PREPARE,
-    KW_EXECUTE,
-    KW_LINES,
-    KW_IGNORE,
-    KW_WARM,
-    KW_UP;
+    KW_YEAR;
 
 terminal COMMA, COLON, DOT, DOTDOTDOT, AT, STAR, LPAREN, RPAREN, SEMICOLON, LBRACKET, RBRACKET, LBRACE, RBRACE, DIVIDE, MOD, ADD, SUBTRACT, PLACEHOLDER, ARROW;
 terminal BITAND, BITOR, BITXOR, BITNOT;
@@ -850,7 +852,7 @@ nonterminal MultiPartitionDesc multi_partition_desc;
 
 nonterminal List<AccessPrivilegeWithCols> privilege_list;
 nonterminal List<String> string_list;
-nonterminal List<Long> integer_list, cancel_rollup_job_id_list;
+nonterminal List<Long> integer_list, job_id_list;
 nonterminal AccessPrivilegeWithCols privilege_type;
 
 nonterminal DataDescription data_desc, mysql_data_desc;
@@ -899,8 +901,8 @@ nonterminal GroupByClause group_by_clause, grouping_elements;
 //
 nonterminal String keyword, ident, ident_or_text, variable_name,
         charset_name_or_default, old_or_new_charset_name_or_default, opt_collate,
-        collation_name_or_default, type_func_name_keyword, type_function_name, opt_file_format, time_unit,
-        literal_or_ident;
+        collation_name_or_default, type_func_name_keyword, type_function_name, opt_file_format, opt_file_compress_type,
+        time_unit, literal_or_ident;
 nonterminal PassVar text_or_password;
 
 // sync job
@@ -2016,7 +2018,12 @@ create_stmt ::=
     | KW_CREATE KW_ROW KW_POLICY opt_if_not_exists:ifNotExists ident:policyName KW_ON table_name:tbl KW_AS ident:filterType KW_TO user_identity:user
     KW_USING LPAREN expr:wherePredicate RPAREN
     {:
-        RESULT = new CreatePolicyStmt(PolicyTypeEnum.ROW, ifNotExists, policyName, tbl, filterType, user, wherePredicate);
+        RESULT = new CreatePolicyStmt(PolicyTypeEnum.ROW, ifNotExists, policyName, tbl, filterType, user, null, wherePredicate);
+    :}
+    | KW_CREATE KW_ROW KW_POLICY opt_if_not_exists:ifNotExists ident:policyName KW_ON table_name:tbl KW_AS ident:filterType KW_TO KW_ROLE ident:role
+    KW_USING LPAREN expr:wherePredicate RPAREN
+    {:
+        RESULT = new CreatePolicyStmt(PolicyTypeEnum.ROW, ifNotExists, policyName, tbl, filterType, null, role, wherePredicate);
     :}
     /* storage policy */
     | KW_CREATE KW_STORAGE KW_POLICY opt_if_not_exists:ifNotExists ident:policyName opt_properties:properties
@@ -2505,6 +2512,7 @@ data_desc ::=
     opt_field_term:colSep
     opt_line_term:lineDelimiter
     opt_file_format:fileFormat
+    opt_file_compress_type:fileCompressType
     opt_col_list:colList
     opt_columns_from_path:columnsFromPath
     opt_col_mapping_list:colMappingList
@@ -2514,7 +2522,7 @@ data_desc ::=
     sequence_col_clause:sequenceColName
     opt_properties:properties
     {:
-         RESULT = new DataDescription(tableName, partitionNames, files, colList, colSep, lineDelimiter, fileFormat,
+        RESULT = new DataDescription(tableName, partitionNames, files, colList, colSep, lineDelimiter, fileFormat, fileCompressType,
         columnsFromPath, isNeg, colMappingList, preFilterExpr, whereExpr, mergeType, deleteExpr, sequenceColName, properties);
     :}
     | opt_merge_type:mergeType KW_DATA KW_FROM KW_TABLE ident:srcTableName
@@ -2619,6 +2627,13 @@ opt_file_format ::=
     {: RESULT = null; :}
     | KW_FORMAT KW_AS ident_or_text:format
     {: RESULT = format; :}
+    ;
+
+opt_file_compress_type ::=
+    /* Empty */
+    {: RESULT = null; :}
+    | KW_COMPRESS_TYPE KW_AS ident_or_text:compress_type
+    {: RESULT = compress_type; :}
     ;
 
 opt_columns_from_path ::=
@@ -3175,17 +3190,13 @@ drop_stmt ::=
     {:
         RESULT = new DropSqlBlockRuleStmt(ifExists, ruleNames);
     :}
-    | KW_DROP KW_ROW KW_POLICY opt_if_exists:ifExists ident:policyName KW_ON table_name:tbl
+    | KW_DROP KW_ROW KW_POLICY opt_if_exists:ifExists ident:policyName
     {:
-        RESULT = new DropPolicyStmt(PolicyTypeEnum.ROW, ifExists, policyName, tbl, null);
-    :}
-    | KW_DROP KW_ROW KW_POLICY opt_if_exists:ifExists ident:policyName KW_ON table_name:tbl KW_FOR user_identity:user
-    {:
-        RESULT = new DropPolicyStmt(PolicyTypeEnum.ROW, ifExists, policyName, tbl, user);
+        RESULT = new DropPolicyStmt(PolicyTypeEnum.ROW, ifExists, policyName);
     :}
     | KW_DROP KW_STORAGE KW_POLICY opt_if_exists:ifExists ident:policyName
     {:
-        RESULT = new DropPolicyStmt(PolicyTypeEnum.STORAGE, ifExists, policyName, null, null);
+        RESULT = new DropPolicyStmt(PolicyTypeEnum.STORAGE, ifExists, policyName);
     :}
     | KW_DROP KW_STAGE opt_if_exists:ifExists ident:stageName
     {:
@@ -3839,15 +3850,19 @@ show_stmt ::=
     :}
     | KW_SHOW KW_ROW KW_POLICY KW_FOR user_identity:user
     {:
-        RESULT = new ShowPolicyStmt(PolicyTypeEnum.ROW, user);
+        RESULT = new ShowPolicyStmt(PolicyTypeEnum.ROW, user, null);
+    :}
+    | KW_SHOW KW_ROW KW_POLICY KW_FOR KW_ROLE STRING_LITERAL:role
+    {:
+        RESULT = new ShowPolicyStmt(PolicyTypeEnum.ROW, null, role);
     :}
     | KW_SHOW KW_ROW KW_POLICY
     {:
-        RESULT = new ShowPolicyStmt(PolicyTypeEnum.ROW, null);
+        RESULT = new ShowPolicyStmt(PolicyTypeEnum.ROW, null, null);
     :}
     | KW_SHOW KW_STORAGE KW_POLICY
     {:
-        RESULT = new ShowPolicyStmt(PolicyTypeEnum.STORAGE, null);
+        RESULT = new ShowPolicyStmt(PolicyTypeEnum.STORAGE, null, null);
     :}
     /* show stage */
     | KW_SHOW KW_STAGES
@@ -4316,6 +4331,10 @@ show_param ::=
     {:
         RESULT = new ShowClusterStmt();
     :}
+    | KW_CONVERT_LSC KW_FROM opt_db:db
+    {:
+        RESULT = new ShowConvertLSCStmt(db);
+    :}
     ;
 
 opt_tmp ::=
@@ -4547,7 +4566,7 @@ cancel_stmt ::=
     :}
     ;
 
-cancel_rollup_job_id_list ::=
+job_id_list ::=
     {:
         RESULT = null;
     :}
@@ -4566,9 +4585,13 @@ cancel_param ::=
     {:
         RESULT = new CancelExportStmt(db, parser.where);
     :}
-    | KW_ALTER KW_TABLE opt_alter_type:type KW_FROM table_name:table cancel_rollup_job_id_list:list
+    | KW_ALTER KW_TABLE opt_alter_type:type KW_FROM table_name:table job_id_list:list
     {:
         RESULT = new CancelAlterTableStmt(type, table, list);
+    :}
+    | KW_BUILD KW_INDEX KW_ON table_name:table job_id_list:list
+    {:
+        RESULT = new CancelAlterTableStmt(ShowAlterStmt.AlterType.INDEX, table, list);
     :}
     | KW_DECOMMISSION KW_BACKEND string_list:hostPorts
     {:
@@ -6364,6 +6387,8 @@ type ::=
   {: ScalarType type = ScalarType.createVarcharType(lenStr);
      RESULT = type;
   :}
+  | KW_VARCHAR LPAREN STAR RPAREN
+  {: RESULT = ScalarType.createVarcharType(-1); :}
   | KW_VARCHAR
   {: RESULT = ScalarType.createVarcharType(-1); :}
   | KW_ARRAY LESSTHAN type:value_type GREATERTHAN
@@ -6480,7 +6505,7 @@ cast_expr ::=
   KW_CAST LPAREN expr:e KW_AS type_def:targetType RPAREN
   {:
     CastExpr castExpr = new CastExpr(targetType, e);
-    if (targetType.getType().getLength() != -1
+    if (targetType.getType().getRawLength() != -1
         && (targetType.getType().getPrimitiveType() == PrimitiveType.VARCHAR
         || targetType.getType().getPrimitiveType() == PrimitiveType.CHAR)) {
         // transfer cast(xx as char(N)/varchar(N)) to substr(cast(xx as char), 1, N)
@@ -7652,8 +7677,6 @@ keyword ::=
     | KW_OPEN:id
     {: RESULT = id; :}
     | KW_PARAMETER:id
-    {: RESULT = id; :}
-    | KW_PARTITIONS:id
     {: RESULT = id; :}
     | KW_PASSWORD:id
     {: RESULT = id; :}

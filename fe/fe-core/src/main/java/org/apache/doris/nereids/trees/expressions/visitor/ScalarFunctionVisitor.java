@@ -65,6 +65,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapContain
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapCount;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapEmpty;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapFromArray;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapFromBase64;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapFromString;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapHasAll;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapHasAny;
@@ -75,9 +76,11 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapMin;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapNot;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapOr;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapOrCount;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapRemove;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapSubsetInRange;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapSubsetLimit;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapToArray;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapToBase64;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapToString;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapXor;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.BitmapXorCount;
@@ -531,6 +534,14 @@ public interface ScalarFunctionVisitor<R, C> {
         return visitScalarFunction(bitmapFromString, context);
     }
 
+    default R visitBitmapFromBase64(BitmapFromBase64 bitmapFromBase64, C context) {
+        return visitScalarFunction(bitmapFromBase64, context);
+    }
+
+    default R visitBitmapToBase64(BitmapToBase64 bitmapToBase64, C context) {
+        return visitScalarFunction(bitmapToBase64, context);
+    }
+
     default R visitBitmapHasAll(BitmapHasAll bitmapHasAll, C context) {
         return visitScalarFunction(bitmapHasAll, context);
     }
@@ -565,6 +576,10 @@ public interface ScalarFunctionVisitor<R, C> {
 
     default R visitBitmapOrCount(BitmapOrCount bitmapOrCount, C context) {
         return visitScalarFunction(bitmapOrCount, context);
+    }
+
+    default R visitBitmapRemove(BitmapRemove bitmapRemove, C context) {
+        return visitScalarFunction(bitmapRemove, context);
     }
 
     default R visitBitmapSubsetInRange(BitmapSubsetInRange bitmapSubsetInRange, C context) {

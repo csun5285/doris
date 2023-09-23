@@ -60,7 +60,6 @@ import org.apache.doris.nereids.glue.LogicalPlanAdapter;
 import org.apache.doris.nereids.minidump.MinidumpUtils;
 import org.apache.doris.nereids.parser.NereidsParser;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
-import org.apache.doris.nereids.trees.plans.commands.CreatePolicyCommand;
 import org.apache.doris.plugin.AuditEvent.EventType;
 import org.apache.doris.proto.Data;
 import org.apache.doris.qe.QueryState.MysqlStateType;
@@ -324,6 +323,7 @@ public class ConnectProcessor {
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
                 .setCloudCluster(Config.isCloudMode() && ctx.cloudCluster != null
                             ? ctx.cloudCluster : "UNKNOWN")
+                .setWorkloadGroup(ctx.getWorkloadGroupName())
                 .setFuzzyVariables(!printFuzzyVariables ? "" : ctx.getSessionVariable().printFuzzyVariables());
 
         if (ctx.getState().isQuery()) {
@@ -437,7 +437,9 @@ public class ConnectProcessor {
     // Process COM_QUERY statement,
     // only throw an exception when there is a problem interacting with the requesting client
     private void handleQuery(MysqlCommand mysqlCommand) {
-        MetricRepo.COUNTER_REQUEST_ALL.increase(1L);
+        if (MetricRepo.isInit) {
+            MetricRepo.COUNTER_REQUEST_ALL.increase(1L);
+        }
         if (Config.isCloudMode() && Strings.isNullOrEmpty(ctx.cloudCluster)) {
             ctx.setCloudCluster();
             LOG.debug("handle Query set ctx cloud cluster, get cluster: {}", ctx.getCloudCluster());
@@ -485,14 +487,6 @@ public class ConnectProcessor {
         if (mysqlCommand == MysqlCommand.COM_QUERY && ctx.getSessionVariable().isEnableNereidsPlanner()) {
             try {
                 stmts = new NereidsParser().parseSQL(originStmt);
-                for (StatementBase stmt : stmts) {
-                    LogicalPlanAdapter logicalPlanAdapter = (LogicalPlanAdapter) stmt;
-                    // TODO: remove this after we could process CreatePolicyCommand
-                    if (logicalPlanAdapter.getLogicalPlan() instanceof CreatePolicyCommand) {
-                        stmts = null;
-                        break;
-                    }
-                }
             } catch (Exception e) {
                 // TODO: We should catch all exception here until we support all query syntax.
                 LOG.debug("Nereids parse sql failed. Reason: {}. Statement: \"{}\".",
@@ -855,8 +849,19 @@ public class ConnectProcessor {
             int idx = request.isSetStmtIdx() ? request.getStmtIdx() : 0;
             executor = new StmtExecutor(ctx, new OriginStatement(request.getSql(), idx), true);
             ctx.setExecutor(executor);
+            // Set default catalog only if the catalog exists.
             if (request.isSetDefaultCatalog()) {
-                ctx.getEnv().changeCatalog(ctx, request.getDefaultCatalog());
+                CatalogIf catalog = ctx.getEnv().getCatalogMgr().getCatalog(request.getDefaultCatalog());
+                if (catalog != null) {
+                    ctx.getEnv().changeCatalog(ctx, request.getDefaultCatalog());
+                    // Set default db only when the default catalog is set and the dbname exists in default catalog.
+                    if (request.isSetDefaultDatabase()) {
+                        DatabaseIf db = ctx.getCurrentCatalog().getDbNullable(request.getDefaultDatabase());
+                        if (db != null) {
+                            ctx.getEnv().changeDb(ctx, request.getDefaultDatabase());
+                        }
+                    }
+                }
             }
             TUniqueId queryId; // This query id will be set in ctx
             if (request.isSetQueryId()) {
@@ -948,4 +953,5 @@ public class ConnectProcessor {
         }
     }
 }
+
 

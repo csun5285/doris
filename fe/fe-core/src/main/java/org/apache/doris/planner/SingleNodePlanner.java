@@ -2047,7 +2047,8 @@ public class SingleNodePlanner {
                 throw new UserException("Not supported table type" + tblRef.getTable().getType());
         }
         if (scanNode instanceof OlapScanNode || scanNode instanceof EsScanNode
-                || scanNode instanceof FileQueryScanNode) {
+                || scanNode instanceof OdbcScanNode || scanNode instanceof JdbcScanNode
+                || scanNode instanceof FileQueryScanNode || scanNode instanceof MysqlScanNode) {
             if (analyzer.enableInferPredicate()) {
                 PredicatePushDown.visitScanNode(scanNode, tblRef.getJoinOp(), analyzer);
             }
@@ -2196,7 +2197,7 @@ public class SingleNodePlanner {
 
     /**
      * Create a tree of PlanNodes for the given tblRef, which can be a BaseTableRef,
-     * CollectionTableRef or an InlineViewRef.
+     * TableValuedFunctionRef, CollectionTableRef or an InlineViewRef.
      * <p>
      * 'fastPartitionKeyScans' indicates whether to try to produce the slots with
      * metadata instead of table scans. Only applicable to BaseTableRef which is also

@@ -532,7 +532,7 @@ public class ScalarType extends Type {
     public String toString() {
         if (type == PrimitiveType.CHAR) {
             if (isWildcardChar()) {
-                return "CHAR(*)";
+                return "CHARACTER";
             }
             return "CHAR(" + len + ")";
         } else  if (type == PrimitiveType.DECIMALV2) {
@@ -567,7 +567,9 @@ public class ScalarType extends Type {
         StringBuilder stringBuilder = new StringBuilder();
         switch (type) {
             case CHAR:
-                if (Strings.isNullOrEmpty(lenStr)) {
+                if (isWildcardVarchar()) {
+                    stringBuilder.append("character");
+                } else if (Strings.isNullOrEmpty(lenStr)) {
                     stringBuilder.append("char").append("(").append(len).append(")");
                 } else {
                     stringBuilder.append("char").append("(`").append(lenStr).append("`)");
@@ -575,7 +577,7 @@ public class ScalarType extends Type {
                 break;
             case VARCHAR:
                 if (isWildcardVarchar()) {
-                    stringBuilder.append("varchar");
+                    stringBuilder.append("varchar(*)");
                 } else if (Strings.isNullOrEmpty(lenStr)) {
                     stringBuilder.append("varchar").append("(").append(len).append(")");
                 } else {
@@ -678,7 +680,7 @@ public class ScalarType extends Type {
             case HLL:
             case STRING:
             case JSONB: {
-                scalarType.setLen(len);
+                scalarType.setLen(getLength());
                 break;
             }
             case DECIMALV2:
@@ -686,13 +688,15 @@ public class ScalarType extends Type {
             case DECIMAL64:
             case DECIMAL128:
             case DATETIMEV2: {
-                Preconditions.checkArgument(precision >= scale);
+                Preconditions.checkArgument(precision >= scale,
+                        String.format("given precision %d is out of scale bound %d", precision, scale));
                 scalarType.setScale(scale);
                 scalarType.setPrecision(precision);
                 break;
             }
             case TIMEV2: {
-                Preconditions.checkArgument(precision >= scale);
+                Preconditions.checkArgument(precision >= scale,
+                        String.format("given precision %d is out of scale bound %d", precision, scale));
                 scalarType.setScale(scale);
                 scalarType.setPrecision(precision);
                 break;
@@ -728,6 +732,20 @@ public class ScalarType extends Type {
 
     @Override
     public int getLength() {
+        if (len == -1) {
+            if (type == PrimitiveType.CHAR) {
+                return MAX_CHAR_LENGTH;
+            } else if (type == PrimitiveType.STRING) {
+                return MAX_STRING_LENGTH;
+            } else {
+                return MAX_VARCHAR_LENGTH;
+            }
+        }
+        return len;
+    }
+
+    @Override
+    public int getRawLength() {
         return len;
     }
 
@@ -736,15 +754,7 @@ public class ScalarType extends Type {
     }
 
     public void setMaxLength() {
-        if (type == PrimitiveType.CHAR) {
-            this.len = MAX_CHAR_LENGTH;
-        }
-        if (type == PrimitiveType.VARCHAR) {
-            this.len = MAX_VARCHAR_LENGTH;
-        }
-        if (type == PrimitiveType.STRING) {
-            this.len = MAX_STRING_LENGTH;
-        }
+        this.len = -1;
     }
 
     public boolean isLengthSet() {
@@ -780,12 +790,12 @@ public class ScalarType extends Type {
 
     @Override
     public boolean isWildcardVarchar() {
-        return (type == PrimitiveType.VARCHAR || type == PrimitiveType.HLL) && len == -1;
+        return (type == PrimitiveType.VARCHAR || type == PrimitiveType.HLL) && (len == -1 || len == MAX_VARCHAR_LENGTH);
     }
 
     @Override
     public boolean isWildcardChar() {
-        return type == PrimitiveType.CHAR && len == -1;
+        return type == PrimitiveType.CHAR && (len == -1 || len == MAX_CHAR_LENGTH);
     }
 
     @Override
@@ -841,11 +851,9 @@ public class ScalarType extends Type {
         }
         ScalarType scalarType = (ScalarType) t;
         if (type == PrimitiveType.VARCHAR && scalarType.isWildcardVarchar()) {
-            Preconditions.checkState(!isWildcardVarchar());
             return true;
         }
         if (type == PrimitiveType.CHAR && scalarType.isWildcardChar()) {
-            Preconditions.checkState(!isWildcardChar());
             return true;
         }
         if (type.isStringType() && scalarType.isStringType()) {

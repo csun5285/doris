@@ -103,20 +103,9 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
     return std::make_pair(align_left, align_size);
 }
 
-Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
-                                            const IOContext* io_ctx) {
-    DCHECK(!closed());
-    DCHECK(io_ctx);
-    if (offset > size()) {
-        return Status::IOError(
-                fmt::format("offset exceeds file size(offset: {), file size: {}, path: {})", offset,
-                            size(), path().native()));
-    }
-    size_t bytes_req = std::min(result.size, size() - offset);
-    if (UNLIKELY(bytes_req == 0)) {
-        *bytes_read = 0;
-        return Status::OK();
-    }
+Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, size_t* bytes_read,
+                                                const IOContext* io_ctx) {
+    size_t bytes_req = result.size;
     ReadStatistics stats;
     // session variable chooses to close file cache for this query
     if (io_ctx != nullptr && io_ctx->disable_file_cache) {
@@ -266,6 +255,40 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         _metrics_hook(io_ctx->file_cache_stats);
     }
     return Status::OK();
+}
+
+Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                            const IOContext* io_ctx) {
+    DCHECK(!closed());
+    DCHECK(io_ctx);
+    if (offset > size()) {
+        return Status::InvalidArgument(
+                fmt::format("offset exceeds file size(offset: {), file size: {}, path: {})", offset,
+                            size(), path().native()));
+    }
+    size_t bytes_req = std::min(result.size, size() - offset);
+    if (UNLIKELY(bytes_req == 0)) {
+        *bytes_read = 0;
+        return Status::OK();
+    }
+    Status cache_st = _read_from_cache(offset, result, bytes_read, io_ctx);
+    if (UNLIKELY(!cache_st.ok())) {
+        if (config::file_cache_wait_sec_after_fail > 0) {
+            // only for debug, wait and retry to load data from file cache
+            // return error if failed again
+            LOG(WARNING) << "Failed to read data from file cache, and wait "
+                         << config::file_cache_wait_sec_after_fail
+                         << " seconds to reload data: " << cache_st.to_string();
+            sleep(config::file_cache_wait_sec_after_fail);
+            cache_st = _read_from_cache(offset, result, bytes_read, io_ctx);
+        } else {
+            // fail over to remote file reader, and return the status of remote read
+            LOG(WARNING) << "Failed to read data from file cache, and fail over to remote file: "
+                         << cache_st.to_string();
+            return _remote_file_reader->read_at(offset, result, bytes_read, io_ctx);
+        }
+    }
+    return cache_st;
 }
 
 void CachedRemoteFileReader::_update_state(const ReadStatistics& read_stats,

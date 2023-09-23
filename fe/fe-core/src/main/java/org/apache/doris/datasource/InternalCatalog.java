@@ -2387,7 +2387,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                 "Can not create UNIQUE KEY table that enables Merge-On-write"
                     + " with storage policy(" + storagePolicy + ")");
         }
-        olapTable.setStoragePolicy(storagePolicy);
+        // Consider one situation: if the table has no storage policy but some partitions
+        // have their own storage policy then it might be erased by the following function.
+        // So we only set the storage policy if the table's policy is not null or empty
+        if (!Strings.isNullOrEmpty(storagePolicy)) {
+            olapTable.setStoragePolicy(storagePolicy);
+        }
 
         TTabletType tabletType;
         try {
@@ -2850,6 +2855,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         HiveConf hiveConf = new HiveConf();
         hiveConf.set(HMSProperties.HIVE_METASTORE_URIS,
                 hiveTable.getHiveProperties().get(HMSProperties.HIVE_METASTORE_URIS));
+        if (!Strings.isNullOrEmpty(hiveTable.getHiveProperties().get(HMSProperties.HIVE_VERSION))) {
+            hiveConf.set(HMSProperties.HIVE_VERSION, hiveTable.getHiveProperties().get(HMSProperties.HIVE_VERSION));
+        }
         PooledHiveMetaStoreClient client = new PooledHiveMetaStoreClient(hiveConf, 1);
         if (!client.tableExists(hiveTable.getHiveDb(), hiveTable.getHiveTable())) {
             throw new DdlException(String.format("Table [%s] dose not exist in Hive.", hiveTable.getHiveDbTable()));
@@ -3396,11 +3404,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             fullNameToDb.put(db.getFullName(), db);
             Env.getCurrentGlobalTransactionMgr().addDatabaseTransactionMgr(db.getId());
 
-            ConnectContext connectContext = new ConnectContext();
-            connectContext.setCluster(SystemInfoService.DEFAULT_CLUSTER);
-            connectContext.setDatabase(db.getFullName());
-            Analyzer analyzer = new Analyzer(Env.getCurrentEnv(), connectContext);
-            db.analyze(analyzer);
+            db.analyze();
         }
         // ATTN: this should be done after load Db, and before loadAlterJob
         recreateTabletInvertIndex();
@@ -3414,7 +3418,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         return icebergTableCreationRecordMgr;
     }
 
-    public ConcurrentHashMap<Long, Database> getIdToDb() {
+    @Override
+    public ConcurrentHashMap<Long, DatabaseIf> getIdToDb() {
         return new ConcurrentHashMap<>(idToDb);
     }
 
@@ -4280,4 +4285,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         return dbToDataSize;
     }
     // --------------- END CLOUD ---------------
+
+    @Override
+    public Collection<DatabaseIf> getAllDbs() {
+        return new HashSet<>(idToDb.values());
+    }
 }

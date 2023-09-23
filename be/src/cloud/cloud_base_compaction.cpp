@@ -6,6 +6,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "util/thread.h"
 #include "util/uuid_generator.h"
+#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;

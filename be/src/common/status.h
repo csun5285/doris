@@ -20,7 +20,6 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "gen_cpp/Status_types.h" // for TStatus
-#include "service/backend_options.h"
 #ifdef ENABLE_STACKTRACE
 #include "util/stack_util.h"
 #endif
@@ -54,7 +53,6 @@ TStatusError(MEM_LIMIT_EXCEEDED);
 TStatusError(THRIFT_RPC_ERROR);
 TStatusError(TIMEOUT);
 TStatusError(TOO_MANY_TASKS);
-TStatusError(SERVICE_UNAVAILABLE);
 TStatusError(UNINITIALIZED);
 TStatusError(ABORTED);
 TStatusError(DATA_QUALITY_ERROR);
@@ -119,6 +117,7 @@ E(NOT_INITIALIZED, -236);
 E(ALREADY_CANCELLED, -237);
 E(TOO_MANY_SEGMENTS, -238);
 E(ALREADY_CLOSED, -239);
+E(SERVICE_UNAVAILABLE, -240);
 E(CE_CMD_PARAMS_ERROR, -300);
 E(CE_BUFFER_TOO_SMALL, -301);
 E(CE_CMD_NOT_VALID, -302);
@@ -277,12 +276,15 @@ E(INVERTED_INDEX_NO_TERMS, -6005);
 E(INVERTED_INDEX_RENAME_FILE_FAILED, -6006);
 E(INVERTED_INDEX_EVALUATE_SKIPPED, -6007);
 E(INVERTED_INDEX_BUILD_WAITTING, -6008);
+E(KEY_NOT_FOUND, -6009);
+E(KEY_ALREADY_EXISTS, -6010);
+E(ENTRY_NOT_FOUND, -6011);
 #undef E
 } // namespace ErrorCode
 
 // clang-format off
 // whether to capture stacktrace
-inline bool capture_stacktrace(int code) {
+constexpr bool capture_stacktrace(int code) {
     return code != ErrorCode::OK
         && code != ErrorCode::END_OF_FILE
         && code != ErrorCode::MEM_LIMIT_EXCEEDED
@@ -314,7 +316,14 @@ inline bool capture_stacktrace(int code) {
         && code != ErrorCode::TRANSACTION_NOT_EXIST
         && code != ErrorCode::TRANSACTION_ALREADY_VISIBLE
         && code != ErrorCode::TOO_MANY_TRANSACTIONS
-        && code != ErrorCode::TRANSACTION_ALREADY_COMMITTED;
+        && code != ErrorCode::TRANSACTION_ALREADY_COMMITTED
+        && code != ErrorCode::ENTRY_NOT_FOUND
+        && code != ErrorCode::KEY_NOT_FOUND
+        && code != ErrorCode::KEY_ALREADY_EXISTS
+        && code != ErrorCode::CANCELLED
+        && code != ErrorCode::UNINITIALIZED
+        && code != ErrorCode::PIP_WAIT_FOR_RF
+        && code != ErrorCode::PIP_WAIT_FOR_SC;
 }
 // clang-format on
 
@@ -382,10 +391,10 @@ public:
 
     static Status OK() { return Status(); }
 
-#define ERROR_CTOR(name, code)                                                  \
-    template <typename... Args>                                                 \
-    static Status name(std::string_view msg, Args&&... args) {                  \
-        return Error<ErrorCode::code, false>(msg, std::forward<Args>(args)...); \
+#define ERROR_CTOR(name, code)                                                 \
+    template <typename... Args>                                                \
+    static Status name(std::string_view msg, Args&&... args) {                 \
+        return Error<ErrorCode::code, true>(msg, std::forward<Args>(args)...); \
     }
     ERROR_CTOR(PublishTimeout, PUBLISH_TIMEOUT)
     ERROR_CTOR(MemoryAllocFailed, MEM_ALLOC_FAILED)
@@ -407,7 +416,6 @@ public:
     ERROR_CTOR(RpcError, THRIFT_RPC_ERROR)
     ERROR_CTOR(TimedOut, TIMEOUT)
     ERROR_CTOR(TooManyTasks, TOO_MANY_TASKS)
-    ERROR_CTOR(ServiceUnavailable, SERVICE_UNAVAILABLE)
     ERROR_CTOR(Uninitialized, UNINITIALIZED)
     ERROR_CTOR(Aborted, ABORTED)
     ERROR_CTOR(DataQualityError, DATA_QUALITY_ERROR)

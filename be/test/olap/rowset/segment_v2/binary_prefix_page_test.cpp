@@ -133,7 +133,7 @@ public:
         Slice v1 = Slice("1039");
         bool exact_match;
         ret = page_decoder->seek_at_or_after_value(&v1, &exact_match);
-        EXPECT_TRUE(ret.is<NOT_FOUND>());
+        EXPECT_TRUE(ret.is<ENTRY_NOT_FOUND>());
 
         Slice v2 = Slice("1000");
         ret = page_decoder->seek_at_or_after_value(&v2, &exact_match);
@@ -244,7 +244,7 @@ public:
         Slice v1 = Slice("1039");
         bool exact_match;
         ret = page_decoder->seek_at_or_after_value(&v1, &exact_match);
-        EXPECT_TRUE(ret.is<NOT_FOUND>());
+        EXPECT_TRUE(ret.is<ENTRY_NOT_FOUND>());
 
         Slice v2 = Slice("1000");
         ret = page_decoder->seek_at_or_after_value(&v2, &exact_match);

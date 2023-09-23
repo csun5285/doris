@@ -356,9 +356,7 @@ Status NewOlapScanner::_init_tablet_reader_params(
         }
     }
 
-    if (!config::disable_storage_page_cache) {
-        _tablet_reader_params.use_page_cache = true;
-    }
+    _tablet_reader_params.use_page_cache = _state->enable_page_cache();
 
     if (_tablet->enable_unique_key_merge_on_write() && !_state->skip_delete_bitmap()) {
         _tablet_reader_params.delete_bitmap = &_tablet->tablet_meta()->delete_bitmap();
@@ -415,10 +413,9 @@ Status NewOlapScanner::_init_return_columns() {
                                 : _tablet_schema->field_index(slot->col_name());
 
         if (index < 0) {
-            std::stringstream ss;
-            ss << "field name is invalid. field=" << slot->col_name()
-               << ", field_name_to_index=" << _tablet_schema->get_all_field_names();
-            return Status::InternalError(ss.str());
+            return Status::InternalError(
+                    "field name is invalid. field={}, field_name_to_index={}, col_unique_id={}",
+                    slot->col_name(), _tablet_schema->get_all_field_names(), slot->col_unique_id());
         }
         _return_columns.push_back(index);
         if (slot->is_nullable() && !_tablet_schema->column(index).is_nullable()) {

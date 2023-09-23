@@ -45,7 +45,6 @@
 #include <unordered_set>
 #include <utility>
 
-#include "agent/task_worker_pool.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "gutil/strings/substitute.h"
@@ -54,6 +53,7 @@
 #include "olap/binlog.h"
 #include "olap/cumulative_compaction.h"
 #include "olap/data_dir.h"
+#include "olap/full_compaction.h"
 #include "olap/memtable_flush_executor.h"
 #include "olap/olap_define.h"
 #include "olap/olap_meta.h"
@@ -163,21 +163,29 @@ StorageEngine::~StorageEngine() {
     _s_instance = nullptr;
 }
 
-void StorageEngine::load_data_dirs(const std::vector<DataDir*>& data_dirs) {
+Status StorageEngine::load_data_dirs(const std::vector<DataDir*>& data_dirs) {
     std::vector<std::thread> threads;
-    for (auto data_dir : data_dirs) {
-        threads.emplace_back([data_dir] {
-            auto res = data_dir->load();
-            if (!res.ok()) {
-                LOG(WARNING) << "io error when init load tables. res=" << res
-                             << ", data dir=" << data_dir->path();
-                // TODO(lingbin): why not exit progress, to force OP to change the conf
-            }
-        });
+    std::vector<Status> results(data_dirs.size());
+    for (size_t i = 0; i < data_dirs.size(); ++i) {
+        threads.emplace_back(
+                [&results, data_dir = data_dirs[i]](size_t index) {
+                    results[index] = data_dir->load();
+                    if (!results[index].ok()) {
+                        LOG(WARNING) << "io error when init load tables. res=" << results[index]
+                                     << ", data dir=" << data_dir->path();
+                    }
+                },
+                i);
     }
     for (auto& thread : threads) {
         thread.join();
     }
+    for (const auto& result : results) {
+        if (!result.ok()) {
+            return result;
+        }
+    }
+    return Status::OK();
 }
 
 Status StorageEngine::_open() {
@@ -192,7 +200,7 @@ Status StorageEngine::_open() {
     RETURN_NOT_OK_STATUS_WITH_WARN(_check_file_descriptor_number(), "check fd number failed");
 
     auto dirs = get_stores<false>();
-    load_data_dirs(dirs);
+    RETURN_IF_ERROR(load_data_dirs(dirs));
 
     _memtable_flush_executor.reset(new MemTableFlushExecutor());
     _memtable_flush_executor->init(dirs);
@@ -627,10 +635,13 @@ Status StorageEngine::start_trash_sweep(double* usage, bool ignore_guard) {
     std::unique_lock<std::mutex> l(_trash_sweep_lock, std::defer_lock);
     if (!l.try_lock()) {
         LOG(INFO) << "trash and snapshot sweep is running.";
+        if (ignore_guard) {
+            _need_clean_trash.store(true, std::memory_order_relaxed);
+        }
         return res;
     }
 
-    LOG(INFO) << "start trash and snapshot sweep.";
+    LOG(INFO) << "start trash and snapshot sweep. is_clean=" << ignore_guard;
 
     const int32_t snapshot_expire = config::snapshot_expire_time_sec;
     const int32_t trash_expire = config::trash_file_expire_time_sec;
@@ -706,6 +717,7 @@ Status StorageEngine::start_trash_sweep(double* usage, bool ignore_guard) {
     for (auto data_dir : get_stores()) {
         data_dir->perform_remote_rowset_gc();
         data_dir->perform_remote_tablet_gc();
+        data_dir->update_trash_capacity();
     }
 
     return res;
@@ -1036,7 +1048,7 @@ Status StorageEngine::create_tablet(const TCreateTabletReq& request, RuntimeProf
     return _tablet_manager->create_tablet(request, stores, profile);
 }
 
-Status StorageEngine::obtain_shard_path(TStorageMedium::type storage_medium,
+Status StorageEngine::obtain_shard_path(TStorageMedium::type storage_medium, int64_t path_hash,
                                         std::string* shard_path, DataDir** store) {
     LOG(INFO) << "begin to process obtain root path. storage_medium=" << storage_medium;
 
@@ -1051,18 +1063,30 @@ Status StorageEngine::obtain_shard_path(TStorageMedium::type storage_medium,
                 "no available disk can be used to create tablet.");
     }
 
+    *store = nullptr;
+    if (path_hash != -1) {
+        for (auto data_dir : stores) {
+            if (data_dir->path_hash() == path_hash) {
+                *store = data_dir;
+                break;
+            }
+        }
+    }
+    if (*store == nullptr) {
+        *store = stores[0];
+    }
+
     Status res = Status::OK();
     uint64_t shard = 0;
-    res = stores[0]->get_shard(&shard);
+    res = (*store)->get_shard(&shard);
     if (!res.ok()) {
         LOG(WARNING) << "fail to get root path shard. res=" << res;
         return res;
     }
 
     std::stringstream root_path_stream;
-    root_path_stream << stores[0]->path() << "/" << DATA_PREFIX << "/" << shard;
+    root_path_stream << (*store)->path() << "/" << DATA_PREFIX << "/" << shard;
     *shard_path = root_path_stream.str();
-    *store = stores[0];
 
     LOG(INFO) << "success to process obtain root path. path=" << shard_path;
     return res;
@@ -1125,6 +1149,15 @@ void StorageEngine::notify_listeners() {
     }
 }
 
+void StorageEngine::notify_listener(TaskWorkerPool::TaskWorkerType task_worker_type) {
+    std::lock_guard<std::mutex> l(_report_mtx);
+    for (auto& listener : _report_listeners) {
+        if (listener->task_worker_type() == task_worker_type) {
+            listener->notify_thread();
+        }
+    }
+}
+
 Status StorageEngine::execute_task(EngineTask* task) {
     RETURN_IF_ERROR(task->execute());
     return task->finish();
@@ -1145,6 +1178,11 @@ void StorageEngine::create_cumulative_compaction(
 void StorageEngine::create_base_compaction(TabletSharedPtr best_tablet,
                                            std::shared_ptr<BaseCompaction>& base_compaction) {
     base_compaction.reset(new BaseCompaction(best_tablet));
+}
+
+void StorageEngine::create_full_compaction(TabletSharedPtr best_tablet,
+                                           std::shared_ptr<FullCompaction>& full_compaction) {
+    full_compaction.reset(new FullCompaction(best_tablet));
 }
 
 void StorageEngine::create_single_replica_compaction(
