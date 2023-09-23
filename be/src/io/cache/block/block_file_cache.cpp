@@ -1668,6 +1668,7 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
             if (cell.file_block->change_cache_type(FileCacheType::TTL)) {
                 auto& queue = get_queue(cell.cache_type);
                 queue.remove(cell.queue_iterator.value(), cache_lock);
+                cell.queue_iterator.reset();
                 cell.cache_type = FileCacheType::TTL;
                 cell.file_block->update_expiration_time(new_expiration_time);
             }
