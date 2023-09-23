@@ -94,7 +94,8 @@ suite('test_overdue') {
     // add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
     //               "regression_cluster_name0", "regression_cluster_id0");
 
-    sleep(20000)
+    // sleep(20000)
+    sql """ use @regression_cluster_name0 """
 
     result0  = sql "show clusters"
     assertTrue(result0.size() == 1);
