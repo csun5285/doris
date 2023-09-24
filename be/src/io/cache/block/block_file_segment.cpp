@@ -98,7 +98,7 @@ uint64_t FileBlock::get_caller_id() {
 uint64_t FileBlock::get_or_set_downloader() {
     std::lock_guard segment_lock(_mutex);
 
-    if (_downloader_id == 0) {
+    if (_downloader_id == 0 && _download_state != State::DOWNLOADED) {
         DCHECK(_download_state != State::DOWNLOADING);
 
         _downloader_id = get_caller_id();
