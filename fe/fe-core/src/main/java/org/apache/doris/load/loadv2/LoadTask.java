@@ -84,9 +84,11 @@ public abstract class LoadTask extends MasterTask {
     protected void exec() {
         boolean isFinished = false;
         try {
-            if (startTimeMs > System.currentTimeMillis()) {
+            while (startTimeMs > System.currentTimeMillis()) {
                 try {
                     Thread.sleep(1000);
+                    LOG.info("LoadTask:{} backoff startTimeMs:{} now:{}",
+                            signature, startTimeMs, System.currentTimeMillis());
                 } catch (InterruptedException e) {
                     LOG.info("ignore InterruptedException: ", e);
                 }
