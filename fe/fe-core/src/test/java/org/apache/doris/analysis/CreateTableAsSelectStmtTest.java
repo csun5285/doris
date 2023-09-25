@@ -617,6 +617,7 @@ public class CreateTableAsSelectStmtTest extends TestWithFeService {
                         + "PROPERTIES (\n"
                         + "\"replication_allocation\" = \"tag.location.default: 1\",\n"
                         + "\"is_being_synced\" = \"false\",\n"
+                        + "\"persistent\" = \"false\",\n"
                         + "\"storage_format\" = \"V2\",\n"
                         + "\"light_schema_change\" = \"true\",\n"
                         + "\"disable_auto_compaction\" = \"false\",\n"
