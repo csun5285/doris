@@ -170,7 +170,7 @@ public class CloudSchemaChangeJobV2Test {
 
         new MockUp<CloudPartition>(CloudPartition.class) {
             @Mock
-            public long getVersionFromMeta(long timeoutTs) {
+            public long getVisibleVersion() {
                 return 1000;
             }
         };
