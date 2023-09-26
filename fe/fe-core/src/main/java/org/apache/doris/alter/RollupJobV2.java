@@ -386,7 +386,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 tbl.isInMemory(), tbl.isPersistent(), true, tbl.isDynamicSchema(),
                                 tbl.getName(), tbl.getTTLSeconds(),
                                 tbl.getEnableUniqueKeyMergeOnWrite(), tbl.storeRowColumn(),
-                                tbl.getIndexMetaByIndexId(rollupIndexId).getSchemaVersion());
+                                tbl.getBaseSchemaVersion());
                         requestBuilder.addTabletMetas(builder);
                     } // end for rollupTablets
                     Env.getCurrentInternalCatalog().sendCreateTabletsRpc(requestBuilder);
