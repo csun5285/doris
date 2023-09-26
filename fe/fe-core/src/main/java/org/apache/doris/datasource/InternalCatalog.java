@@ -3484,7 +3484,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                                       boolean isDynamicSchema, String tableName,
                                                                       long ttlSeconds,
                                                                       boolean enableUniqueKeyMergeOnWrite,
-                                                                      boolean storeRowColumn)
+                                                                      boolean storeRowColumn, int schemaVersion)
             throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
@@ -3499,6 +3499,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         builder.setIsInMemory(isInMemory);
         builder.setIsPersistent(isPersistent);
         builder.setTtlSeconds(ttlSeconds);
+        builder.setSchemaVersion(schemaVersion);
 
         UUID uuid = UUID.randomUUID();
         Types.PUniqueId tabletUid = Types.PUniqueId.newBuilder()
@@ -3515,6 +3516,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         builder.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
 
         OlapFile.TabletSchemaPB.Builder schemaBuilder = OlapFile.TabletSchemaPB.newBuilder();
+        schemaBuilder.setSchemaVersion(schemaVersion);
+
         if (keysType == KeysType.DUP_KEYS) {
             schemaBuilder.setKeysType(OlapFile.KeysType.DUP_KEYS);
         } else if (keysType == KeysType.UNIQUE_KEYS) {
@@ -3665,7 +3668,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
                         storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
-                        enableUniqueKeyMergeOnWrite, storeRowColumn);
+                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion());
                 requestBuilder.addTabletMetas(builder);
             }
 
