@@ -1474,7 +1474,8 @@ auto scope_timer_run(Func fn, int64_t* cost) -> decltype(fn()) {
 Status PInternalServiceImpl::_multi_get(const PMultiGetRequest& request,
                                         PMultiGetResponse* response) {
 #ifdef CLOUD_MODE
-    CHECK(false) << "UB in CLOUD_MODE";
+    // CHECK(false) << "UB in CLOUD_MODE";
+    return Status::InternalError("UB in CLOUD_MODE");
 #else // !CLOUD_MODE
     OlapReaderStatistics stats;
     vectorized::Block result_block;
