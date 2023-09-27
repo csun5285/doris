@@ -158,6 +158,7 @@ static bvar::PerSecond<bvar::Adder<uint64_t>> g_tablet_pk_not_found_per_second(
         "doris_pk", "lookup_not_found_per_second", &g_tablet_pk_not_found, 60);
 
 constexpr std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 10s;
+static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
 
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_bytes, MetricUnit::BYTES);
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_finish_count, MetricUnit::OPERATIONS);
@@ -3823,8 +3824,8 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
         new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
                                  iter->second);
     }
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(this, txn_id, -1,
-                                                   new_delete_bitmap.get()));
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
+            this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
 #else
     if (config::enable_merge_on_write_correctness_check && rowset->num_rows() != 0) {
         // only do correctness check if the rowset has at least one row written
@@ -4011,7 +4012,8 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
     location_map.clear();
 
     // 2. calc delete bimap for incremental data
-    RETURN_IF_ERROR(cloud::meta_mgr()->get_delete_bitmap_update_lock(this, -1, initiator));
+    RETURN_IF_ERROR(cloud::meta_mgr()->get_delete_bitmap_update_lock(
+            this, COMPACTION_DELETE_BITMAP_LOCK_ID, initiator));
     RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(this));
 
     calc_compaction_output_rowset_delete_bitmap(input_rowsets, rowid_conversion, version.second,

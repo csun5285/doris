@@ -48,7 +48,7 @@ static std::string debug_info(const Req& req) {
     } else if constexpr (is_any_v<Req, selectdb::UpdateDeleteBitmapRequest>) {
         return fmt::format(" tablet_id={}, lock_id={}", req.tablet_id(), req.lock_id());
     } else if constexpr (is_any_v<Req, selectdb::GetDeleteBitmapUpdateLockRequest>) {
-        return fmt::format(" partition_id={}, lock_id={}", req.partition_ids(0), req.lock_id());
+        return fmt::format(" table_id={}, lock_id={}", req.table_id(), req.lock_id());
     } else {
         static_assert(!sizeof(Req));
     }
@@ -745,7 +745,6 @@ Status CloudMetaMgr::get_delete_bitmap_update_lock(const Tablet* tablet, int64_t
     selectdb::GetDeleteBitmapUpdateLockResponse res;
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_table_id(tablet->table_id());
-    req.add_partition_ids(tablet->partition_id());
     req.set_lock_id(lock_id);
     req.set_initiator(initiator);
     req.set_expiration(10); // 10s expiration time for compaction and schema_change

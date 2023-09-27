@@ -146,6 +146,7 @@ using MetaSchemaKeyInfo    = BasicKeyInfo<21, std::tuple<std::string,  int64_t, 
 //                                                      0:instance_id  1:tablet_id  2:rowest_id  3:version  4:seg_id 
 using MetaDeleteBitmapInfo = BasicKeyInfo<22 , std::tuple<std::string, int64_t,     std::string, int64_t, int64_t>>;
 
+// partition_id of -1 indicates all partitions
 //                                                      0:instance_id  1:table_id 2:partition_id
 using MetaDeleteBitmapUpdateLockInfo = BasicKeyInfo<23 , std::tuple<std::string, int64_t, int64_t>>;
 

@@ -642,7 +642,6 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     std::map<int64_t, TabletStats> tablet_stats; // tablet_id -> stats
     std::map<int64_t, TabletIndexPB> table_ids;  // tablet_id -> {table/index/partition}_id
     std::map<int64_t, std::vector<int64_t>> table_id_tablet_ids; // table_id -> tablets_ids
-    std::map<int64_t, std::vector<int64_t>> table_id_partition_ids;
     rowsets.reserve(tmp_rowsets_meta.size());
     for (auto& [_, i] : tmp_rowsets_meta) {
         int64_t tablet_id = i.tablet_id();
@@ -709,7 +708,6 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
             }
             new_version = version + 1;
             new_versions.insert({std::move(ver_key), new_version});
-            table_id_partition_ids[table_id].push_back(partition_id);
         } else {
             new_version = new_versions[ver_key];
         }
@@ -739,36 +737,33 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     // process mow table, check lock and remove pending key
     for (auto table_id : request->mow_table_ids()) {
-        for (auto partition_id : table_id_partition_ids[table_id]) {
-            std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
-            std::string lock_val;
-            ret = txn->get(lock_key, &lock_val);
-            LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
-                      << " key=" << hex(lock_key) << " ret=" << ret;
-            if (ret != 0) {
-                ss << "failed to get delete bitmap update lock key info, instance_id="
-                   << instance_id << " table_id=" << table_id << " key=" << hex(lock_key)
-                   << " ret=" << ret;
-                msg = ss.str();
-                code = MetaServiceCode::KV_TXN_GET_ERR;
-                return;
-            }
-            DeleteBitmapUpdateLockPB lock_info;
-            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
-                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-                msg = "failed to parse DeleteBitmapUpdateLockPB";
-                return;
-            }
-            if (lock_info.lock_id() != request->txn_id()) {
-                msg = "lock is expired";
-                code = MetaServiceCode::LOCK_EXPIRED;
-                return;
-            }
-            txn->remove(lock_key);
-            LOG(INFO) << "xxx remove delete bitmap lock, lock_key=" << hex(lock_key)
-                      << " txn_id=" << txn_id;
+        std::string lock_key =
+                meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+        std::string lock_val;
+        ret = txn->get(lock_key, &lock_val);
+        LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
+                  << " key=" << hex(lock_key) << " ret=" << ret;
+        if (ret != 0) {
+            ss << "failed to get delete bitmap update lock key info, instance_id=" << instance_id
+               << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+            msg = ss.str();
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            return;
         }
+        DeleteBitmapUpdateLockPB lock_info;
+        if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse DeleteBitmapUpdateLockPB";
+            return;
+        }
+        if (lock_info.lock_id() != request->txn_id()) {
+            msg = "lock is expired";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return;
+        }
+        txn->remove(lock_key);
+        LOG(INFO) << "xxx remove delete bitmap lock, lock_key=" << hex(lock_key)
+                  << " txn_id=" << txn_id;
 
         for (auto tablet_id : table_id_tablet_ids[table_id]) {
             std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id});

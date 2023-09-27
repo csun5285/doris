@@ -448,9 +448,6 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                     .setLockId(transactionId)
                     .setInitiator(-1)
                     .setExpiration(10);
-            for (Long partitionId : entry.getValue()) {
-                builder.addPartitionIds(partitionId);
-            }
             final GetDeleteBitmapUpdateLockRequest request = builder.build();
             GetDeleteBitmapUpdateLockResponse response = null;
 

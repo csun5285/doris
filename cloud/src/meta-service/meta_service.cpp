@@ -1684,9 +1684,7 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
 
     // 1.Check whether the lock expires
     auto table_id = request->table_id();
-    auto partition_id = request->partition_id();
-    std::string lock_key =
-            meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+    std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
     ret = txn->get(lock_key, &lock_val);
@@ -1925,66 +1923,60 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(
         return;
     }
     auto table_id = request->table_id();
-    for (size_t i = 0; i < request->partition_ids_size(); i++) {
-        int64_t partition_id = request->partition_ids(i);
-        std::string lock_key =
-                meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
-        std::string lock_val;
-        DeleteBitmapUpdateLockPB lock_info;
-        ret = txn->get(lock_key, &lock_val);
-        if (ret < 0) {
-            ss << "failed to get delete bitmap update lock, instance_id=" << instance_id
-               << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
-            msg = ss.str();
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            return;
-        }
-        using namespace std::chrono;
-        int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-        if (ret == 0) {
-            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
-                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-                msg = "failed to parse DeleteBitmapUpdateLockPB";
-                return;
-            }
-            if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
-                LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
-                          << lock_info.lock_id() << " table_id=" << table_id
-                          << " partition_id=" << partition_id << " now=" << now;
-                lock_info.clear_initiators();
-            } else if (lock_info.lock_id() != request->lock_id()) {
-                ss << "already be locked. requset lock_id=" << request->lock_id()
-                   << " locked by lock_id=" << lock_info.lock_id() << " table_id=" << table_id
-                   << " partition_id=" << partition_id << " now=" << now
-                   << " expiration=" << lock_info.expiration();
-                msg = ss.str();
-                code = MetaServiceCode::LOCK_CONFLICT;
-                continue;
-            }
-        }
-
-        lock_info.set_lock_id(request->lock_id());
-        lock_info.set_expiration(now + request->expiration());
-        bool found = false;
-        for (auto initiator : lock_info.initiators()) {
-            if (request->initiator() == initiator) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            lock_info.add_initiators(request->initiator());
-        }
-        lock_info.SerializeToString(&lock_val);
-        if (lock_val.empty()) {
-            code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
-            msg = "pb serialization error";
-            return;
-        }
-        txn->put(lock_key, lock_val);
-        LOG(INFO) << "xxx put lock_key=" << hex(lock_key) << " lock_id=" << request->lock_id()
-                  << " initiators_size: " << lock_info.initiators_size();
+    std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+    std::string lock_val;
+    DeleteBitmapUpdateLockPB lock_info;
+    ret = txn->get(lock_key, &lock_val);
+    if (ret < 0) {
+        ss << "failed to get delete bitmap update lock, instance_id=" << instance_id
+           << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+        msg = ss.str();
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        return;
     }
+    using namespace std::chrono;
+    int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+    if (ret == 0) {
+        if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = "failed to parse DeleteBitmapUpdateLockPB";
+            return;
+        }
+        if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
+            LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
+                      << lock_info.lock_id() << " table_id=" << table_id << " now=" << now;
+            lock_info.clear_initiators();
+        } else if (lock_info.lock_id() != request->lock_id()) {
+            ss << "already be locked. requset lock_id=" << request->lock_id()
+               << " locked by lock_id=" << lock_info.lock_id() << " table_id=" << table_id
+               << " now=" << now << " expiration=" << lock_info.expiration();
+            msg = ss.str();
+            code = MetaServiceCode::LOCK_CONFLICT;
+            return;
+        }
+    }
+
+    lock_info.set_lock_id(request->lock_id());
+    lock_info.set_expiration(now + request->expiration());
+    bool found = false;
+    for (auto initiator : lock_info.initiators()) {
+        if (request->initiator() == initiator) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        lock_info.add_initiators(request->initiator());
+    }
+    lock_info.SerializeToString(&lock_val);
+    if (lock_val.empty()) {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "pb serialization error";
+        return;
+    }
+    txn->put(lock_key, lock_val);
+    LOG(INFO) << "xxx put lock_key=" << hex(lock_key) << " lock_id=" << request->lock_id()
+              << " initiators_size: " << lock_info.initiators_size();
 
     ret = txn->commit();
     if (ret != 0) {

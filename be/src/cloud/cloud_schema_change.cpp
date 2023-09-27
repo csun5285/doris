@@ -17,6 +17,7 @@ namespace doris::cloud {
 using namespace ErrorCode;
 
 static constexpr int ALTER_TABLE_BATCH_SIZE = 4096;
+static constexpr int SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID = -2;
 
 static std::unique_ptr<SchemaChange> get_sc_procedure(const BlockChanger& changer,
                                                       bool sc_sorting) {
@@ -382,8 +383,8 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
     }
 
     // step 3, process incremental rowset with delete bitmap update lock
-    RETURN_IF_ERROR(
-            cloud::meta_mgr()->get_delete_bitmap_update_lock(new_tablet.get(), -2, initiator));
+    RETURN_IF_ERROR(cloud::meta_mgr()->get_delete_bitmap_update_lock(
+            new_tablet.get(), SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID, initiator));
     RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(new_tablet.get()));
     int64_t new_max_version = new_tablet->max_version().second;
     LOG(INFO) << "alter table for mow table, calculate delete bitmap of "
@@ -425,8 +426,9 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
     new_delete_bitmap->merge(new_tablet->tablet_meta()->delete_bitmap());
 
     // step4, store delete bitmap
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(new_tablet.get(), -2, initiator,
-                                                            new_delete_bitmap.get()));
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(new_tablet.get(),
+                                                            SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID,
+                                                            initiator, new_delete_bitmap.get()));
 
     new_tablet->merge_delete_bitmap(*new_delete_bitmap);
     return Status::OK();
