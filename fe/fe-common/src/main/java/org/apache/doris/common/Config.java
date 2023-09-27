@@ -2288,8 +2288,13 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int drop_rpc_retry_num = 200;
 
+    // forbid java udf function stmt in cloud
     @ConfField(mutable = true)
     public static boolean forbid_function_stmt = true;
+
+    // forbid insecurity stmt in cloud
+    @ConfField(mutable = true)
+    public static boolean forbid_insecurity_stmt = true;
 
     //==========================================================================
     //                    end of cloud config
