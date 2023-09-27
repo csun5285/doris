@@ -175,12 +175,13 @@ public class MetaServiceProxy {
     }
 
     public SelectdbCloud.UpdateTabletResponse
-            updateTablet(TNetworkAddress address, SelectdbCloud.UpdateTabletRequest request) throws RpcException {
+            updateTablet(SelectdbCloud.UpdateTabletRequest request) throws RpcException {
+        TNetworkAddress metaAddress = new TNetworkAddress(metaServiceHostPort.first, metaServiceHostPort.second);
         try {
-            final MetaServiceClient client = getProxy(address);
+            final MetaServiceClient client = getProxy(metaAddress);
             return client.updateTablet(request);
         } catch (Exception e) {
-            throw new RpcException(address.hostname, e.getMessage(), e);
+            throw new RpcException(metaAddress.hostname, e.getMessage(), e);
         }
     }
 

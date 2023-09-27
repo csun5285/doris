@@ -496,11 +496,20 @@ public class Alter {
                 ModifyPartitionClause clause = ((ModifyPartitionClause) alterClause);
                 Map<String, String> properties = clause.getProperties();
                 List<String> partitionNames = clause.getPartitionNames();
-                // currently, only in memory and storage policy property could reach here
-                Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
-                ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
-                        db, tableName, partitionNames, properties);
+
+                if (Config.isCloudMode()) {
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateCloudPartitionsProperties(
+                            db, tableName, partitionNames, properties);
+                } else {
+                    // currently, only in memory and storage policy property could reach here
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
+                    ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
+                            db, tableName, partitionNames, properties);
+                }
                 OlapTable olapTable = (OlapTable) table;
                 olapTable.writeLockOrDdlException();
                 try {
@@ -508,23 +517,32 @@ public class Alter {
                 } finally {
                     olapTable.writeUnlock();
                 }
+
             } else if (alterClause instanceof ModifyTablePropertiesClause) {
                 Map<String, String> properties = alterClause.getProperties();
-                // currently, only in memory and storage policy property could reach here
-                Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD));
-                ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
+                if (Config.isCloudMode()) {
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateCloudTableProperties(db, tableName, properties);
+                } else {
+                    // currently, only in memory and storage policy property could reach here
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
+                }
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
             }

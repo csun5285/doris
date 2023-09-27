@@ -104,6 +104,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.selectdb.cloud.catalog.CloudReplica;
+import com.selectdb.cloud.proto.SelectdbCloud;
+import com.selectdb.cloud.rpc.MetaServiceProxy;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -3011,6 +3013,228 @@ public class SchemaChangeHandler extends AlterHandler {
         indexChangeJob.replay(indexChangeJob);
         if (indexChangeJob.isDone()) {
             runnableIndexChangeJob.remove(indexChangeJob.getJobId());
+        }
+    }
+
+    /**
+     * Update some specified partitions' properties of table in cloud mode
+     */
+    public void updateCloudPartitionsProperties(Database db, String tableName, List<String> partitionNames,
+                                           Map<String, String> properties) throws UserException {
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        if (properties.size() != 1) {
+            throw new UserException("Can only set one partition property at a time");
+        }
+
+        UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
+        if (properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+            olapTable.readLock();
+            try {
+                if (ttlSeconds == olapTable.getTTLSeconds()) {
+                    LOG.info("ttlSeconds:{} is equal with olapTable.getTTLSeconds():{}", ttlSeconds,
+                            olapTable.getTTLSeconds());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.ttlSeconds = ttlSeconds;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
+            boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
+            olapTable.readLock();
+            try {
+                if (isPersistent == olapTable.isPersistent()) {
+                    LOG.info("isPersistent:{} is equal with olapTable.isPersistent():{}", isPersistent,
+                            olapTable.isPersistent());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isPersistent = isPersistent;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.PERSISTENT;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+            boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+            olapTable.readLock();
+            try {
+                if (isInMemory == olapTable.isInMemory()) {
+                    LOG.info("isInMemory:{} is equal with olapTable.isInMemory():{}", isInMemory,
+                            olapTable.isPersistent());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isInMemory = isInMemory;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
+        } else {
+            LOG.warn("invalid properties:{}", properties);
+            throw new UserException("invalid properties");
+        }
+
+        for (String partitionName : partitionNames) {
+            try {
+                updateCloudPartitionMeta(db, olapTable.getName(), partitionName, param);
+            } catch (Exception e) {
+                LOG.warn("tableName:{}, partitionNames:{} updateCloudPartitionsProperties exception:",
+                        tableName, partitionNames, e);
+                throw new UserException(e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Update cloud table properties
+     */
+    public void updateCloudTableProperties(Database db, String tableName, Map<String, String> properties)
+            throws UserException {
+        if (properties.size() != 1) {
+            throw new UserException("Can only set one table property at a time");
+        }
+
+        List<Partition> partitions = Lists.newArrayList();
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
+
+        if (properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+            olapTable.readLock();
+            try {
+                if (ttlSeconds == olapTable.getTTLSeconds()) {
+                    LOG.info("ttlSeconds:{} is equal with olapTable.getTTLSeconds():{}", ttlSeconds,
+                            olapTable.getTTLSeconds());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.ttlSeconds = ttlSeconds;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
+            boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
+            olapTable.readLock();
+            try {
+                if (isPersistent == olapTable.isPersistent()) {
+                    LOG.info("isPersistent:{} is equal with olapTable.isPersistent():{}", isPersistent,
+                            olapTable.isPersistent());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isPersistent = isPersistent;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.PERSISTENT;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+            boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+            olapTable.readLock();
+            try {
+                if (isInMemory == olapTable.isInMemory()) {
+                    LOG.info("isInMemory:{} is equal with olapTable.isInMemory():{}", isInMemory,
+                            olapTable.isPersistent());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isInMemory = isInMemory;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
+        } else {
+            LOG.warn("invalid properties:{}", properties);
+            throw new UserException("invalid properties");
+        }
+
+        for (Partition partition : partitions) {
+            updateCloudPartitionMeta(db, olapTable.getName(), partition.getName(), param);
+        }
+
+        olapTable.writeLockOrDdlException();
+        try {
+            Env.getCurrentEnv().modifyTableProperties(db, olapTable, properties);
+        } finally {
+            olapTable.writeUnlock();
+        }
+    }
+
+    private static class UpdatePartitionMetaParam {
+        public enum TabletMetaType {
+            INMEMORY,
+            PERSISTENT,
+            TTL_SECONDS,
+        }
+
+        TabletMetaType type;
+        boolean isPersistent = false;
+        boolean isInMemory = false;
+        long ttlSeconds = 0;
+    }
+
+    public void updateCloudPartitionMeta(Database db,
+            String tableName,
+            String partitionName,
+            UpdatePartitionMetaParam param) throws UserException {
+        List<Long> tabletIds = new ArrayList<>();
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        olapTable.readLock();
+        try {
+            Partition partition = olapTable.getPartition(partitionName);
+            if (partition == null) {
+                throw new DdlException(
+                        "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
+            }
+            for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
+                for (Tablet tablet : index.getTablets()) {
+                    tabletIds.add(tablet.getId());
+                }
+            }
+        } finally {
+            olapTable.readUnlock();
+        }
+        for (int index = 0; index < tabletIds.size();) {
+            int nextIndex = tabletIds.size() - index > Config.cloud_txn_tablet_batch_size
+                    ? index + Config.cloud_txn_tablet_batch_size
+                    : tabletIds.size();
+            SelectdbCloud.UpdateTabletRequest.Builder requestBuilder = SelectdbCloud.UpdateTabletRequest.newBuilder();
+            while (index < nextIndex) {
+                SelectdbCloud.TabletMetaInfoPB.Builder infoBuilder = SelectdbCloud.TabletMetaInfoPB.newBuilder();
+                infoBuilder.setTabletId(tabletIds.get(index));
+                switch (param.type) {
+                    case PERSISTENT:
+                        infoBuilder.setIsPersistent(param.isPersistent);
+                        break;
+                    case INMEMORY:
+                        infoBuilder.setIsInMemory(param.isInMemory);
+                        break;
+                    case TTL_SECONDS:
+                        infoBuilder.setTtlSeconds(param.ttlSeconds);
+                        break;
+                    default:
+                        throw new UserException("Unknown TabletMetaType");
+                }
+                SelectdbCloud.TabletMetaInfoPB tabletMetaInfo = infoBuilder.build();
+                requestBuilder.addTabletMetaInfos(tabletMetaInfo);
+                index++;
+            }
+            requestBuilder.setCloudUniqueId(Config.cloud_unique_id);
+            SelectdbCloud.UpdateTabletRequest updateTabletReq = requestBuilder.build();
+            LOG.info("UpdateTabletRequest: {} ", updateTabletReq);
+
+            SelectdbCloud.UpdateTabletResponse response;
+            try {
+                response = MetaServiceProxy.getInstance().updateTablet(updateTabletReq);
+            } catch (Exception e) {
+                LOG.warn("updateTablet Exception:", e);
+                throw new UserException(e.getMessage());
+            }
+            LOG.info("response: {} ", response);
+
+            if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
+                throw new UserException(response.getStatus().getMsg());
+            }
         }
     }
 }
