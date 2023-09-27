@@ -35,6 +35,7 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "gutil/macros.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
@@ -96,6 +97,7 @@ Status LocalFileWriter::abort() {
 Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
     DCHECK(!_closed);
     _dirty = true;
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("local_file_writer::appendv", Status());
 
     // Convert the results into the iovec vector to request
     // and calculate the total bytes requested.

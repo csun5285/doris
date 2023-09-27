@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_writer.h"
@@ -150,6 +151,7 @@ bool FileBlock::is_downloader_impl(std::lock_guard<doris::Mutex>& /* segment_loc
 Status FileBlock::append(Slice data) {
     DCHECK(data.size != 0) << "Writing zero size is not allowed";
     Status st = Status::OK();
+    SYNC_POINT_RETURN_WITH_VALUE("file_block::append", st);
     if (!_cache_writer) {
         auto download_path = get_path_in_local_cache(true);
         st = global_local_filesystem()->create_file(download_path, &_cache_writer);
@@ -173,6 +175,7 @@ std::string FileBlock::get_path_in_local_cache(bool is_tmp) const {
 
 Status FileBlock::read_at(Slice buffer, size_t read_offset) {
     Status st = Status::OK();
+    SYNC_POINT_RETURN_WITH_VALUE("file_block::read_at", st);
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
         std::lock_guard lock(_mutex);
@@ -226,6 +229,7 @@ FileBlock::~FileBlock() {
 }
 
 Status FileBlock::finalize_write(bool need_to_get_file_size) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("file_block::finalize_write", Status());
     if (need_to_get_file_size) {
         int64_t downloaded_size = 0;
         std::string file_path = get_path_in_local_cache(true);
