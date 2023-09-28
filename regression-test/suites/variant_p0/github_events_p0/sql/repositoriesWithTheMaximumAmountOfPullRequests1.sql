@@ -1,0 +1,1 @@
+SELECT v:repo.name as repo_name, count(), count(distinct v:actor.login) FROM github_events WHERE v:type = 'PullRequestEvent' AND v:payload.action = 'opened' GROUP BY v:repo.name ORDER BY 2,1,3 DESC LIMIT 50
