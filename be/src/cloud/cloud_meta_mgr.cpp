@@ -22,6 +22,7 @@
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "runtime/stream_load/stream_load_context.h"
+#include "util/network_util.h"
 #include "util/s3_util.h"
 
 namespace doris::cloud {
@@ -89,19 +90,35 @@ private:
     static Status init_channel(brpc::Channel* channel) {
         static std::atomic<size_t> index = 1;
 
+        std::string ip;
+        uint16_t port;
+        Status s = get_meta_service_ip_and_port(&ip, &port);
+        if (!s.ok()) {
+            LOG(WARNING) << "fail to get meta service ip and port: " << s;
+            return s;
+        }
+
         size_t next_id = index.fetch_add(1, std::memory_order_relaxed);
         brpc::ChannelOptions options;
         options.connection_group = fmt::format("ms_{}", next_id);
-        auto endpoint = config::meta_service_endpoint;
-        int ret_code = 0;
-        if (config::meta_service_use_load_balancer) {
-            ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
+        if (channel->Init(ip.c_str(), port, &options) != 0) {
+            return Status::InternalError("fail to init brpc channel, ip: {}, port: {}", ip, port);
+        }
+        return Status::OK();
+    }
+
+    static Status get_meta_service_ip_and_port(std::string* ip, uint16_t* port) {
+        std::string parsed_host;
+        if (!parse_endpoint(config::meta_service_endpoint, &parsed_host, port)) {
+            return Status::InvalidArgument("invalid meta service endpoint: {}",
+                                           config::meta_service_endpoint);
+        }
+        if (is_valid_ip(parsed_host)) {
+            *ip = std::move(parsed_host);
         } else {
-            ret_code = channel->Init(endpoint.c_str(), &options);
+            RETURN_IF_ERROR(hostname_to_ip(parsed_host, *ip));
         }
-        if (ret_code != 0) {
-            return Status::InternalError("fail to init brpc channel, endpoint: {}", endpoint);
-        }
+
         return Status::OK();
     }
 

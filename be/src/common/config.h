@@ -1124,7 +1124,6 @@ DECLARE_String(tmp_file_dirs);
 // cloud
 DECLARE_String(cloud_unique_id);
 DECLARE_String(meta_service_endpoint);
-DECLARE_Bool(meta_service_use_load_balancer);
 // Set the underlying connection type to pooled.
 DECLARE_Bool(meta_service_connection_pooled);
 DECLARE_mInt64(meta_service_connection_pool_size);
