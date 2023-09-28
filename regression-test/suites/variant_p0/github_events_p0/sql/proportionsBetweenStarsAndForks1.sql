@@ -2,7 +2,7 @@ SELECT
     repo_name,
     sum(fork) AS forks,
     sum(star) AS stars,
-    round(sum(star) / sum(fork), 3) AS ratio
+    cast(round(sum(star) / sum(fork), 3) as int) AS ratio
 FROM
 (
     SELECT

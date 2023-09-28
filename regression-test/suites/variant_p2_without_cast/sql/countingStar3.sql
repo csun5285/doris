@@ -1,0 +1,1 @@
+ SELECT count() FROM github_events WHERE type = 'WatchEvent' AND repo:name IN ('apache/spark', 'GunZi200/Memory-Colour', 'isohuntto/openbay', 'wasabeef/awesome-android-ui') GROUP BY payload:action

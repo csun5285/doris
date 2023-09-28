@@ -1,5 +1,5 @@
 SELECT
-    pow(10, floor(log10(c))) AS stars,
+    cast(pow(10, floor(log10(c))) as int) AS stars,
     count(distinct k)
 FROM
 (

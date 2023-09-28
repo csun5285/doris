@@ -2,7 +2,7 @@ SELECT
     repo_name,
     comments,
     issues,
-    round(comments / issues, 2) AS ratio
+    cast(round(comments / issues, 0) as int) AS ratio
 FROM
 (
     SELECT

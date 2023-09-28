@@ -7,5 +7,5 @@ FROM github_events
 WHERE v:type = 'IssueCommentEvent' AND (v:payload.action = 'created') AND (v:payload.issue.`number` > 10)
 GROUP BY v:repo.name, number
 HAVING authors >= 4
-ORDER BY comments DESC
+ORDER BY comments DESC, v:repo.name
 LIMIT 50
