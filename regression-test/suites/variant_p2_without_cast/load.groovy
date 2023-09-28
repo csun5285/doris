@@ -78,28 +78,28 @@ suite("github_event_advance", "variant_type"){
     try {
         set_be_config.call("ratio_of_defaults_as_sparse_column", "0.95")
         table_name = "github_events"
-        // create_table.call(table_name, 10)
-        // List<Long> daysEveryMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        // // 2015
-        // def year = "2015"
-        // def monthPrefix = "0"
-        // def dayPrefix = "0"
-        // log.info("current year: ${year}")
-        // for (int i = 1; i <= 3; i++) {
-        //     def month = i < 10 ? monthPrefix + i.toString() : i.toString()
-        //     log.info("current month: ${month}")
-        //     for (int j = 1; j <= daysEveryMonth[i - 1]; j++) {
-        //         def day = j < 10 ? dayPrefix + j.toString() : j.toString()
-        //         log.info("current day: ${day}")
-        //         for (int z = 0; z < 24; z++) {
-        //             def hour = z.toString()
-        //             log.info("current hour: ${hour}")
-        //             def fileName = year + "-" + month + "-" + day + "-" + hour + ".json"
-        //             log.info("cuurent fileName: ${fileName}")
-        //             load_json_data.call(table_name, """${getS3Url() + '/regression/github_events_dataset/' + fileName}""")
-        //         }
-        //     }
-        // }
+        create_table.call(table_name, 10)
+        List<Long> daysEveryMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        // 2015
+        def year = "2015"
+        def monthPrefix = "0"
+        def dayPrefix = "0"
+        log.info("current year: ${year}")
+        for (int i = 1; i <= 3; i++) {
+            def month = i < 10 ? monthPrefix + i.toString() : i.toString()
+            log.info("current month: ${month}")
+            for (int j = 1; j <= daysEveryMonth[i - 1]; j++) {
+                def day = j < 10 ? dayPrefix + j.toString() : j.toString()
+                log.info("current day: ${day}")
+                for (int z = 0; z < 24; z++) {
+                    def hour = z.toString()
+                    log.info("current hour: ${hour}")
+                    def fileName = year + "-" + month + "-" + day + "-" + hour + ".json"
+                    log.info("cuurent fileName: ${fileName}")
+                    load_json_data.call(table_name, """${getS3Url() + '/regression/github_events_dataset/' + fileName}""")
+                }
+            }
+        }
         
         qt_sql("select count() from github_events")
     } finally {
