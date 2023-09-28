@@ -33,6 +33,7 @@
 #include "olap/rowset/rowset_reader.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
+#include "runtime/define_primitive_type.h"
 #include "vec/exec/scan/vscanner.h"
 
 namespace doris {
@@ -100,6 +101,8 @@ private:
 
     vectorized::PathInData _build_path(SlotDescriptor* slot);
     Status _init_variant_columns();
+
+    FieldType _get_field_type(PrimitiveType primitiveType);
 
     bool _aggregation;
 

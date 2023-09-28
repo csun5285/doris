@@ -834,21 +834,24 @@ struct ConvertImplFromJsonb {
                         res[i] = 0;
                     }
                 } else if constexpr (type_index == TypeIndex::Int8) {
-                    if (value->isInt8()) {
+                    if (value->isInt8() || value->isInt16() || value->isInt32() ||
+                        value->isInt64()) {
                         res[i] = (int8_t)((const JsonbIntVal*)value)->val();
                     } else {
                         null_map[i] = 1;
                         res[i] = 0;
                     }
                 } else if constexpr (type_index == TypeIndex::Int16) {
-                    if (value->isInt8() || value->isInt16()) {
+                    if (value->isInt8() || value->isInt16() || value->isInt32() ||
+                        value->isInt64()) {
                         res[i] = (int16_t)((const JsonbIntVal*)value)->val();
                     } else {
                         null_map[i] = 1;
                         res[i] = 0;
                     }
                 } else if constexpr (type_index == TypeIndex::Int32) {
-                    if (value->isInt8() || value->isInt16() || value->isInt32()) {
+                    if (value->isInt8() || value->isInt16() || value->isInt32() ||
+                        value->isInt64()) {
                         res[i] = (int32_t)((const JsonbIntVal*)value)->val();
                     } else {
                         null_map[i] = 1;
@@ -2014,14 +2017,31 @@ private:
                 return ConvertImplGenericToString::execute2(context, block, arguments, result,
                                                             input_rows_count);
             } else {
-                assert_cast<ColumnNullable&>(*col_to->assume_mutable())
-                        .insert_many_defaults(input_rows_count);
+                if (variant.empty()) {
+                    // TODO not found root cause, a tmp fix
+                    col_to->assume_mutable()->insert_many_defaults(input_rows_count);
+                    col_to = make_nullable(col_to, true);
+                } else if (!data_type_to->is_nullable() && !WhichDataType(data_type_to).is_string()) {
+                    // Could not cast to any other types when it hierarchical like '{"a" : 1}'
+                    // TODO we should convert as many as possible here, for examle
+                    // this variant column's root is a number column, to convert to number column
+                    // is also acceptable
+                    // return Status::InvalidArgument(fmt::format("Could not cast from variant to {}",
+                    //                                            data_type_to->get_name()));
+                    col_to->assume_mutable()->insert_many_defaults(input_rows_count);
+                    col_to = make_nullable(col_to, true);
+                } else if (WhichDataType(data_type_to).is_string()) {
+                    return ConvertImplGenericToString::execute2(context, block, arguments, result,
+                                                                input_rows_count);
+                } else {
+                    assert_cast<ColumnNullable&>(*col_to->assume_mutable())
+                            .insert_many_defaults(input_rows_count);
+                }
             }
             if (col_to->size() != input_rows_count) {
                 return Status::InternalError("Unmatched row count {}, expected {}", col_to->size(),
                                              input_rows_count);
             }
-
             block.replace_by_position(result, std::move(col_to));
             return Status::OK();
         }

@@ -122,6 +122,10 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
             continue;
         }
         int32_t uid = read_options.tablet_schema->column(column_id).unique_id();
+        // variant subcolumn
+        if (uid < 0) {
+            continue;
+        }
         if (_column_readers.count(uid) < 1 || !_column_readers.at(uid)->has_zone_map()) {
             continue;
         }

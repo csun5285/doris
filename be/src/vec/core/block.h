@@ -126,6 +126,12 @@ public:
         std::swap(data, new_data);
     }
 
+    void finalize() {
+        for (auto& entry : data) {
+            entry.column->assume_mutable()->finalize();
+        }
+    }
+
     void initialize_index_by_name();
 
     /// References are invalidated after calling functions above.

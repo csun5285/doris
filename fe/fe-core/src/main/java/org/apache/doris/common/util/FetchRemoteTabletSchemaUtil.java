@@ -72,9 +72,17 @@ public class FetchRemoteTabletSchemaUtil {
         Map<Long, Set<Long>> beIdToTabletId = Maps.newHashMap();
         for (Tablet tablet : tablets) {
             for (Replica replica : tablet.getReplicas()) {
+                if (!replica.isNormal()) {
+                    continue;
+                }
+                Backend backend = Env.getCurrentEnv().getCurrentSystemInfo().getBackend(replica.getBackendId());
+                if (backend == null || !backend.isQueryAvailable()) {
+                    continue;
+                }
                 Set<Long> tabletIds = beIdToTabletId.computeIfAbsent(
                                     replica.getBackendId(), k -> Sets.newHashSet());
                 tabletIds.add(tablet.getId());
+                break;
             }
         }
 
@@ -170,6 +178,7 @@ public class FetchRemoteTabletSchemaUtil {
 
     private Column initColumnFromPB(ColumnPB column) throws AnalysisException {
         try {
+            int uniqueId = column.getUniqueId();
             AggregateType aggType = getAggTypeFromAggName(column.getAggregation());
             Type type = getTypeFromTypeName(column.getType());
             String columnName = column.getName();
@@ -210,8 +219,8 @@ public class FetchRemoteTabletSchemaUtil {
                     type = new StructType(childTypes);
                 }
             } while (false);
-            return new Column(columnName, type, isKey, aggType, isNullable,
-                                                    defaultValue, "remote schema");
+            return new Column(columnName, type, isKey, aggType, isNullable, defaultValue,
+                                                "remote schema", true, null, uniqueId, null);
         } catch (Exception e) {
             throw new AnalysisException("default value to string failed");
         }

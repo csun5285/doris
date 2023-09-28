@@ -381,8 +381,16 @@ Status DeleteHandler::init(TabletSchemaSPtr tablet_schema,
             }
             int32_t col_unique_id =
                     delete_pred_related_schema->column(condition.column_name).unique_id();
-            const auto& column = tablet_schema->column_by_uid(col_unique_id);
-            uint32_t index = tablet_schema->field_index(col_unique_id);
+            TabletColumn column;
+            uint32_t index;
+            if (col_unique_id < 0) {
+                const auto& path = delete_pred_related_schema->column(condition.column_name).path_info();
+                index = tablet_schema->field_index(path);
+                column = tablet_schema->column(index);
+            } else {
+                column = tablet_schema->column_by_uid(col_unique_id);
+                index = tablet_schema->field_index(col_unique_id);
+            }
             temp.column_predicate_vec.push_back(
                     parse_to_predicate(column, index, condition, _predicate_arena.get(), true));
         }
