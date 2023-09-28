@@ -1,2 +1,2 @@
--- case has string: \\\r\\\n
+-- mismatch: case has string: \\\r\\\n
 -- SELECT repo:id, payload:issue  FROM github_events WHERE payload:issue.state = "open" order by cast(repo:id as int), id limit 10;

@@ -1,3 +1,4 @@
+-- ERROR
 -- SELECT
 --     concat('https://github.com/', repo:name, '/commit/', payload:commit_id) URL,
 --     payload:commit_id AS commit_id,
