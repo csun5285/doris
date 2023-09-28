@@ -816,8 +816,10 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
             }
             return st;
         }
-        if (tablet_meta->tablet_state() != TABLET_RUNNING) [[unlikely]] { // impossible
-            return Status::InternalError("invalid tablet state. tablet_id={}", tablet_id());
+        if (tablet_meta->tablet_state() != TABLET_RUNNING)
+                [[unlikely]] { // MoW may go to here when load while schema change
+            return Status::Error<INVALID_TABLET_STATE, false>("invalid tablet state. tablet_id={}",
+                                                              tablet_id());
         }
         {
             std::lock_guard wlock(_meta_lock);
@@ -3783,8 +3785,7 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
     {
         std::shared_lock meta_rlock(_meta_lock);
         // tablet is under alter process. The delete bitmap will be calculated after conversion.
-        if (tablet_state() == TABLET_NOTREADY &&
-            SchemaChangeHandler::tablet_in_converting(tablet_id())) {
+        if (tablet_state() == TABLET_NOTREADY) {
             LOG(INFO) << "tablet is under alter process, update delete bitmap later, tablet_id="
                       << tablet_id();
             return Status::OK();
@@ -3817,16 +3818,6 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
               << ", cur max_version: " << cur_version << ", transaction_id: " << txn_id
               << ", cost: " << watch.get_elapse_time_us() << "(us), total rows: " << total_rows;
 
-#ifdef CLOUD_MODE
-    DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
-    for (auto iter = delete_bitmap->delete_bitmap.begin();
-         iter != delete_bitmap->delete_bitmap.end(); ++iter) {
-        new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
-                                 iter->second);
-    }
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
-            this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
-#else
     if (config::enable_merge_on_write_correctness_check && rowset->num_rows() != 0) {
         // only do correctness check if the rowset has at least one row written
         // check if all the rowset has ROWSET_SENTINEL_MARK
@@ -3838,6 +3829,16 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
         _remove_sentinel_mark_from_delete_bitmap(delete_bitmap);
     }
 
+#ifdef CLOUD_MODE
+    DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
+    for (auto iter = delete_bitmap->delete_bitmap.begin();
+         iter != delete_bitmap->delete_bitmap.end(); ++iter) {
+        new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
+                                 iter->second);
+    }
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
+            this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
+#else
     // update version without write lock, compaction and publish_txn
     // will update delete bitmap, handle compaction with _rowset_update_lock
     // and publish_txn runs sequential so no need to lock here
@@ -4032,46 +4033,6 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
     // 3. store delete bitmap
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(this, -1, initiator,
                                                             output_rowset_delete_bitmap.get()));
-    return Status::OK();
-}
-
-Status Tablet::cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
-                                               bool check_pre_segments,
-                                               DeleteBitmapPtr delete_bitmap) {
-    int64_t cur_version = rowset->end_version();
-    RowsetIdUnorderedSet cur_rowset_ids = all_rs_id(cur_version - 1);
-    return cloud_calc_rowset_delete_bitmap(rowset, cur_rowset_ids, check_pre_segments,
-                                           delete_bitmap);
-}
-
-Status Tablet::cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
-                                               RowsetIdUnorderedSet specified_rowset_ids,
-                                               bool check_pre_segments,
-                                               DeleteBitmapPtr delete_bitmap) {
-    SegmentCacheHandle segment_cache_handle;
-    RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(
-            std::static_pointer_cast<BetaRowset>(rowset), &segment_cache_handle, true));
-    auto& segments = segment_cache_handle.get_segments();
-
-    int64_t cur_version = rowset->end_version();
-    std::vector<RowsetSharedPtr> specified_rowsets;
-    {
-        std::shared_lock meta_rlock(_meta_lock);
-        specified_rowsets = get_rowset_by_ids(&specified_rowset_ids);
-    }
-    OlapStopWatch watch;
-    auto token = StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
-    RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
-                                       cur_version - 1, token.get()));
-    token->wait();
-    token->get_delete_bitmap(delete_bitmap);
-    size_t total_rows = std::accumulate(
-            segments.begin(), segments.end(), 0,
-            [](size_t sum, const segment_v2::SegmentSharedPtr& s) { return sum += s->num_rows(); });
-    LOG(INFO) << "[Schema Change or Clone] construct delete bitmap tablet: " << tablet_id()
-              << ", rowset_ids: " << specified_rowset_ids.size() << ", cur max_version: " << cur_version
-              << ", transaction_id: " << -1 << ", cost: " << watch.get_elapse_time_us()
-              << "(us), total rows: " << total_rows;
     return Status::OK();
 }
 

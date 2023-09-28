@@ -574,11 +574,6 @@ public:
     Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
                                 const RowsetIdUnorderedSet& pre_rowset_ids);
 
-    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset, bool check_pre_segments,
-                                           DeleteBitmapPtr delete_bitmap);
-    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
-                                           RowsetIdUnorderedSet specified_rowset_ids,
-                                           bool check_pre_segments, DeleteBitmapPtr delete_bitmap);
     Status cloud_calc_delete_bitmap_for_compaciton(
             const std::vector<RowsetSharedPtr>& input_rowsets, const RowsetSharedPtr& output_rowset,
             const RowIdConversion& rowid_conversion, ReaderType compaction_type,

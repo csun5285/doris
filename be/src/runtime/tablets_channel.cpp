@@ -254,7 +254,12 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
 
     // 6. set txn related delete bitmap if necessary
     for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
-        (*it)->cloud_set_txn_related_delete_bitmap();
+        auto st = (*it)->cloud_set_txn_related_delete_bitmap();
+        if (!st.ok()) {
+            _add_error_tablet(tablet_errors, (*it)->tablet_id(), st);
+            it = need_wait_writers.erase(it);
+            continue;
+        }
         it++;
     }
 

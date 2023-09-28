@@ -279,6 +279,7 @@ E(INVERTED_INDEX_BUILD_WAITTING, -6008);
 E(KEY_NOT_FOUND, -6009);
 E(KEY_ALREADY_EXISTS, -6010);
 E(ENTRY_NOT_FOUND, -6011);
+E(INVALID_TABLET_STATE, -7211);
 #undef E
 } // namespace ErrorCode
 
@@ -323,7 +324,8 @@ constexpr bool capture_stacktrace(int code) {
         && code != ErrorCode::CANCELLED
         && code != ErrorCode::UNINITIALIZED
         && code != ErrorCode::PIP_WAIT_FOR_RF
-        && code != ErrorCode::PIP_WAIT_FOR_SC;
+        && code != ErrorCode::PIP_WAIT_FOR_SC
+        && code != ErrorCode::INVALID_TABLET_STATE;
 }
 // clang-format on
 
