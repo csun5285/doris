@@ -207,7 +207,6 @@ Status VSortNode::pull(doris::RuntimeState* state, vectorized::Block* output_blo
     if (*eos) {
         _runtime_profile->add_info_string("Spilled", _sorter->is_spilled() ? "true" : "false");
     }
-    LOG(INFO) << "pulled block is: " << output_block->dump_data();
     return Status::OK();
 }
 

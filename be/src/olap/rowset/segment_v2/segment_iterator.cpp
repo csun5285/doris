@@ -1607,13 +1607,11 @@ void SegmentIterator::_output_non_pred_columns(vectorized::Block* block) {
         // if loc > block->columns() means the column is delete column and should
         // not output by block, so just skip the column.
         if (loc < block->columns()) {
-            if (_current_return_columns[cid]->is_variant()) {
-                auto& variant = assert_cast<vectorized::ColumnObject&>(*_current_return_columns[cid]);
-                variant.finalize();
-            }
             block->replace_by_position(loc, std::move(_current_return_columns[cid]));
         }
     }
+    // variant column need to be finalized
+    block->finalize();
 }
 
 Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32_t& nrows_read,
