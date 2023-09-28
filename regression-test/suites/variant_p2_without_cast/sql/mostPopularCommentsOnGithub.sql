@@ -1,0 +1,1 @@
+SELECT payload:comment.body as comment, count() FROM github_events WHERE payload:comment.body != "" AND length(payload:comment.body) < 100 GROUP BY comment  ORDER BY count() DESC, comment, 1  LIMIT 1

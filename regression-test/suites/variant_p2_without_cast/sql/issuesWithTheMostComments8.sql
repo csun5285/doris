@@ -1,0 +1,13 @@
+-- SELECT
+--     concat('https://github.com/', repo:name, '/commit/', payload:commit_id) URL,
+--     payload:commit_id AS commit_id,
+--     count() AS comments,
+--     count(distinct actor:login ) AS authors
+-- FROM github_events
+-- WHERE (type = 'CommitCommentEvent') AND payload:commit_id != ""
+-- GROUP BY
+--     repo:name,
+--     payload:commit_id 
+-- HAVING authors >= 10
+-- ORDER BY count() DESC, URL, authors
+-- LIMIT 50

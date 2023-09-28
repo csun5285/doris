@@ -1,0 +1,2 @@
+-- cast empty jsonb to string, result is {}
+-- SELECT count(cast(payload:issue as string)) FROM github_events;
