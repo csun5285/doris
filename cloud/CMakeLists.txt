@@ -21,8 +21,11 @@ project(selectdb-cloud CXX C)
 
 # Write compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-# set platforms
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(cppcheck)
+
+# set platforms
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "amd64|x86_64")
     set (ARCH_AMD64 1)
 endif ()
