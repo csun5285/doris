@@ -36,6 +36,7 @@ import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
+import org.apache.doris.common.util.MetaLockUtils;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
 import org.apache.doris.load.routineload.RLTaskTxnCommitAttachment;
 import org.apache.doris.metric.MetricRepo;
@@ -81,6 +82,7 @@ import com.selectdb.cloud.proto.SelectdbCloud.TxnInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.UniqueIdPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
 import com.selectdb.cloud.transaction.TxnUtil;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.StopWatch;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -562,8 +564,15 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     public boolean commitAndPublishTransaction(DatabaseIf db, List<Table> tableList, long transactionId,
                                                List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis,
                                                TxnCommitAttachment txnCommitAttachment) throws UserException {
-
-        commitTransaction(db.getId(), tableList, transactionId, tabletCommitInfos, txnCommitAttachment);
+        if (!MetaLockUtils.tryCloudCommitLockTables(tableList, timeoutMillis, TimeUnit.MILLISECONDS)) {
+            throw new UserException("get tableList cloud commit lock timeout, tableList=("
+                    + StringUtils.join(tableList, ",") + ")");
+        }
+        try {
+            commitTransaction(db.getId(), tableList, transactionId, tabletCommitInfos, txnCommitAttachment);
+        } finally {
+            MetaLockUtils.cloudCommitUnlockTables(tableList);
+        }
         return true;
     }
 

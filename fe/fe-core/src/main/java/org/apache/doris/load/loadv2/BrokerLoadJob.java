@@ -319,7 +319,11 @@ public class BrokerLoadJob extends BulkLoadJob {
         try {
             db = getDb();
             tableList = db.getTablesOnIdOrderOrThrowException(Lists.newArrayList(fileGroupAggInfo.getAllTableIds()));
-            MetaLockUtils.writeLockTablesOrMetaException(tableList);
+            if (Config.isCloudMode()) {
+                MetaLockUtils.cloudCommitLockTables(tableList);
+            } else {
+                MetaLockUtils.writeLockTablesOrMetaException(tableList);
+            }
         } catch (MetaNotFoundException e) {
             LOG.warn(new LogBuilder(LogKey.LOAD_JOB, id)
                     .add("database_id", dbId)
@@ -398,7 +402,11 @@ public class BrokerLoadJob extends BulkLoadJob {
             String msg = Config.isCloudMode() ? e.getInternalMsg() : e.getMessage();
             cancelJobWithoutCheck(new FailMsg(FailMsg.CancelType.LOAD_RUN_FAIL, msg), true, true);
         } finally {
-            MetaLockUtils.writeUnlockTables(tableList);
+            if (Config.isCloudMode()) {
+                MetaLockUtils.cloudCommitUnlockTables(tableList);
+            } else {
+                MetaLockUtils.writeUnlockTables(tableList);
+            }
         }
     }
 
