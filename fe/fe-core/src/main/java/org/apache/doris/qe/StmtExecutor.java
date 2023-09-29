@@ -627,8 +627,8 @@ public class StmtExecutor {
 
         int retryTime = Config.max_query_retry_time;
         if (Config.isCloudMode()) {
-            // be core and be restarted, need retry more times, one hour?
-            retryTime = Config.cloud_meta_service_rpc_failed_retry_times;
+            // be core and be restarted, need retry more times
+            retryTime = Config.cloud_query_failed_retry_times;
         }
         try {
             for (int i = 0; i < retryTime; i++) {
@@ -642,14 +642,16 @@ public class StmtExecutor {
                                 DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId), originStmt.originStmt);
                         context.setQueryId(newQueryId);
                         if (Config.isCloudMode()) {
-                            // sleep random millis [500, 1000] ms
-                            int randomMillis = 500 + (int) (Math.random() * (1000 - 500));
+                            // sleep random millis [1000, 1500] ms
+                            // in the begining of Config.cloud_query_failed_retry_times/2
+                            int randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
                             LOG.debug("stmt executor retry times {}, wait randomMillis:{}, stmt:{}",
                                     i, randomMillis, originStmt.originStmt);
                             try {
                                 if (i > retryTime / 2) {
-                                    // sleep random millis [1000, 1500] ms
-                                    randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
+                                    // sleep random millis [2000, 2500] ms
+                                    // in the ending of Config.cloud_query_failed_retry_times/2
+                                    randomMillis = 2000 + (int) (Math.random() * (1000 - 500));
                                 }
                                 Thread.sleep(randomMillis);
                             } catch (InterruptedException e) {
