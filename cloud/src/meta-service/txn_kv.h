@@ -291,7 +291,17 @@ public:
     RangeGetIterator(RangeGetIterator&& o) {
         if (fut_ && owns_fut_) fdb_future_destroy(fut_);
         fut_ = o.fut_;
+        owns_fut_ = o.owns_fut_;
+        kvs_ = o.kvs_;
+        kvs_size_ = o.kvs_size_;
+        more_ = o.more_;
+        idx_ = o.idx_;
+
         o.fut_ = nullptr;
+        o.kvs_ = nullptr;
+        o.idx_ = 0;
+        o.kvs_size_ = 0;
+        o.more_ = false;
     }
 
     ~RangeGetIterator() override {
