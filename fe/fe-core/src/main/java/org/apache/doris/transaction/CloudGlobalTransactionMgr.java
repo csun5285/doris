@@ -270,8 +270,12 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 .setTxnId(transactionId)
                 .setIs2Pc(is2PC)
                 .setCloudUniqueId(Config.cloud_unique_id);
-        for (OlapTable olapTable : mowTableList) {
-            builder.addMowTableIds(olapTable.getId());
+
+        // if tablet commit info is empty, no need to pass mowTableList to meta service.
+        if (tabletCommitInfos != null && !tabletCommitInfos.isEmpty()) {
+            for (OlapTable olapTable : mowTableList) {
+                builder.addMowTableIds(olapTable.getId());
+            }
         }
 
         if (txnCommitAttachment != null) {
