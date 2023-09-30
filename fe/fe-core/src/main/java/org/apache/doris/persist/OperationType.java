@@ -320,6 +320,15 @@ public class OperationType {
 
     public static final short OP_BARRIER = 436;
 
+    // For backward compatible with 2.0.3
+    public static final short OP_UPDATE_TABLE_STATS = 455;
+
+    // For backward compatible with 2.0.3
+    public static final short OP_PERSIST_AUTO_JOB = 456;
+
+    // For backward compatible with 2.0.3
+    public static final short OP_DELETE_TABLE_STATS = 457;
+
     // cloud
     public static final short OP_UPDATE_CLOUD_REPLICA = 1000;
     public static final short OP_MODIFY_TTL_SECONDS = 1001;

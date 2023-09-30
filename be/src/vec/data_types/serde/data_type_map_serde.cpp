@@ -186,12 +186,13 @@ Status DataTypeMapSerDe::deserialize_one_cell_from_json(IColumn& column, Slice& 
     if (slice[0] != '{') {
         std::stringstream ss;
         ss << slice[0] << '\'';
-        return Status::InvalidArgument("Map does not start with '{' character, found '" + ss.str());
+        return Status::InvalidDataFormat("Map does not start with '{' character, found '" +
+                                         ss.str());
     }
     if (slice[slice.size - 1] != '}') {
         std::stringstream ss;
         ss << slice[slice.size - 1] << '\'';
-        return Status::InvalidArgument("Map does not end with '}' character, found '" + ss.str());
+        return Status::InvalidDataFormat("Map does not end with '}' character, found '" + ss.str());
     }
     // empty map
     if (slice.size == 2) {
@@ -216,10 +217,17 @@ Status DataTypeMapSerDe::deserialize_one_cell_from_json(IColumn& column, Slice& 
     bool key_added = false;
     int idx = 0;
     int elem_deserialized = 0;
+    char quote_char = 0;
     for (; idx < slice_size; ++idx) {
         char c = slice[idx];
         if (c == '"' || c == '\'') {
-            has_quote = !has_quote;
+            if (!has_quote) {
+                quote_char = c;
+                has_quote = !has_quote;
+            } else if (has_quote && quote_char == c) {
+                quote_char = 0;
+                has_quote = !has_quote;
+            }
         } else if (c == '\\' && idx + 1 < slice_size) { //escaped
             ++idx;
         } else if (!has_quote && (c == '[' || c == '{')) {
