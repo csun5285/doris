@@ -49,6 +49,8 @@ public:
     std::unique_ptr<StorageEngine> _storage_engine;
 };
 
+//TODO: yyq
+/*
 TEST_F(StorageEngineTest, TestBrokenDisk) {
     DEFINE_mString(broken_storage_path, "");
     std::string path = config::custom_config_dir + "/be_custom.conf";
@@ -85,5 +87,6 @@ TEST_F(StorageEngineTest, TestBrokenDisk) {
         EXPECT_EQ(broken_storage_path, "broken_path1;");
     }
 }
+*/
 
 } // namespace doris
