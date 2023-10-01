@@ -25,6 +25,7 @@ suite("test_mysql_jdbc_statistics", "p0,external,mysql,external_docker,external_
     if (enabled != null && enabled.equalsIgnoreCase("true")) {
         String catalog_name = "test_mysql_jdbc_statistics";
 
+        sql """drop catalog if exists ${catalog_name};"""
         sql """create catalog if not exists ${catalog_name} properties(
             "type"="jdbc",
             "user"="root",
