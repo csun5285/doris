@@ -51,6 +51,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -72,6 +73,10 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
     protected TableType type;
     protected long createTime;
     protected QueryableReentrantReadWriteLock rwLock;
+    // Used for queuing commit transaction tasks to avoid fdb transaction conflicts,
+    // especially to reduce conflicts when obtaining delete bitmap update locks for
+    // MoW table
+    protected ReentrantLock cloudCommitLock;
 
     /*
      *  fullSchema and nameToColumn should contains all columns, both visible and shadow.
@@ -112,6 +117,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
         this.fullSchema = Lists.newArrayList();
         this.nameToColumn = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
         this.rwLock = new QueryableReentrantReadWriteLock(true);
+        this.cloudCommitLock = new ReentrantLock(true);
     }
 
     public Table(long id, String tableName, TableType type, List<Column> fullSchema) {
@@ -132,6 +138,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
             Preconditions.checkArgument(type == TableType.VIEW, "Table has no columns");
         }
         this.rwLock = new QueryableReentrantReadWriteLock(true);
+        this.cloudCommitLock = new ReentrantLock(true);
         this.createTime = Instant.now().getEpochSecond();
     }
 
@@ -244,6 +251,28 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
             return true;
         }
         return false;
+    }
+
+    public void cloudCommitLock() {
+        this.cloudCommitLock.lock();
+    }
+
+    public boolean tryCloudCommitLock(long timeout, TimeUnit unit) {
+        try {
+            boolean res = this.cloudCommitLock.tryLock(timeout, unit);
+            if (!res && unit.toSeconds(timeout) >= 1) {
+                LOG.warn("Failed to try table {}'s cloud commit lock. timeout {} {}. Current owner: {}",
+                        name, timeout, unit.name(), rwLock.getOwner());
+            }
+            return res;
+        } catch (InterruptedException e) {
+            LOG.warn("failed to try cloud commit lock at table[" + name + "]", e);
+            return false;
+        }
+    }
+
+    public void cloudCommitUnlock() {
+        this.cloudCommitLock.unlock();
     }
 
     public boolean isTypeRead() {

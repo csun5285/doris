@@ -63,8 +63,9 @@ CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader
                              << ", using random instead.";
                 _cache = FileCacheFactory::instance().get_by_path(_cache_key);
             }
+        } else {
+            _cache = FileCacheFactory::instance().get_by_path(_cache_key);
         }
-        _cache = FileCacheFactory::instance().get_by_path(path().native());
     }
 }
 
@@ -155,8 +156,8 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         std::unique_ptr<char[]> buffer(new char[size]);
         {
             SCOPED_RAW_TIMER(&stats.remote_read_timer);
-            RETURN_IF_ERROR(_remote_file_reader->read_at(empty_start, Slice(buffer.get(), size),
-                                                         &size));
+            RETURN_IF_ERROR(
+                    _remote_file_reader->read_at(empty_start, Slice(buffer.get(), size), &size));
         }
         for (auto& segment : empty_segments) {
             if (segment->state() == FileBlock::State::SKIP_CACHE) {
@@ -205,7 +206,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
             current_offset = right + 1;
             continue;
         }
-        FileBlock::State segment_state = segment->state() ;
+        FileBlock::State segment_state = segment->state();
         int64_t wait_time = 0;
         static int64_t MAX_WAIT_TIME = 10;
         if (segment_state != FileBlock::State::DOWNLOADED) {

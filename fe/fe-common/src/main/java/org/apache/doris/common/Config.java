@@ -2204,6 +2204,9 @@ public class Config extends ConfigBase {
     @ConfField
     public static int cloud_meta_service_rpc_failed_retry_times = 200;
 
+    @ConfField
+    public static int cloud_query_failed_retry_times = 50;
+
 
     /**
      * check physical memmory size, requirs that
