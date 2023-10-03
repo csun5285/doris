@@ -3848,6 +3848,12 @@ public class Env {
                 sb.append(olapTable.getEnableUniqueKeyMergeOnWrite()).append("\"");
             }
 
+            // show lightSchemaChange only when it is set true
+            if (olapTable.getEnableLightSchemaChange()) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_ENABLE_LIGHT_SCHEMA_CHANGE).append("\" = \"");
+                sb.append(olapTable.getEnableLightSchemaChange()).append("\"");
+            }
+
             // enable duplicate without keys by default
             if (olapTable.isDuplicateWithoutKey()) {
                 sb.append(",\n\"")
