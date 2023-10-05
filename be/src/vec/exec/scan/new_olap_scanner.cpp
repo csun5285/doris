@@ -48,6 +48,7 @@
 #ifndef CLOUD_MODE
 #include "olap/storage_engine.h"
 #endif
+#include "cloud/cloud_tablet_hotspot.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
@@ -177,6 +178,7 @@ Status NewOlapScanner::init() {
             std::shared_lock rdlock(_tablet->get_header_lock());
             if (_tablet_reader_params.rs_splits.empty()) {
 #ifdef CLOUD_MODE
+                cloud::TabletHotspot::instance()->count(_tablet);
                 RETURN_IF_ERROR(_tablet->cloud_capture_rs_readers(
                         {0, _version}, &_tablet_reader_params.rs_splits));
 #else
