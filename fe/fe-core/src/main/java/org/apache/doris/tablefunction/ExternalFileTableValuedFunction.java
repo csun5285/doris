@@ -92,6 +92,7 @@ import java.util.stream.Collectors;
 public abstract class ExternalFileTableValuedFunction extends TableValuedFunctionIf {
     public static final Logger LOG = LogManager.getLogger(ExternalFileTableValuedFunction.class);
     protected static String DEFAULT_COLUMN_SEPARATOR = ",";
+    protected static String DEFAULT_HIVE_TEXT_COLUMN_SEPARATOR = "\001";
     protected static final String DEFAULT_LINE_DELIMITER = "\n";
     public static final String FORMAT = "format";
     public static final String TABLE_ID = "table_id";
@@ -211,13 +212,14 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
     //The keys in the passed validParams map need to be lowercase.
     protected void parseProperties(Map<String, String> validParams) throws AnalysisException {
         String formatString = validParams.getOrDefault(FORMAT, "");
+        String defaultColumnSeparator = DEFAULT_COLUMN_SEPARATOR;
         switch (formatString) {
             case "csv":
                 this.fileFormatType = TFileFormatType.FORMAT_CSV_PLAIN;
                 break;
             case "hive_text":
                 this.fileFormatType = TFileFormatType.FORMAT_CSV_PLAIN;
-                this.DEFAULT_COLUMN_SEPARATOR = "\001";
+                defaultColumnSeparator = DEFAULT_HIVE_TEXT_COLUMN_SEPARATOR;
                 this.textSerdeType = TTextSerdeType.HIVE_TEXT_SERDE;
                 break;
             case "csv_with_names":
@@ -246,8 +248,8 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             default:
                 throw new AnalysisException("format:" + formatString + " is not supported.");
         }
-        tableId = Long.valueOf(validParams.getOrDefault(TABLE_ID, "-1")).longValue();
-        columnSeparator = validParams.getOrDefault(COLUMN_SEPARATOR, DEFAULT_COLUMN_SEPARATOR);
+
+        columnSeparator = validParams.getOrDefault(COLUMN_SEPARATOR, defaultColumnSeparator);
         if (Strings.isNullOrEmpty(columnSeparator)) {
             throw new AnalysisException("column_separator can not be empty.");
         }

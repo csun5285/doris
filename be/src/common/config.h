@@ -319,6 +319,7 @@ DECLARE_mInt32(tablet_lookup_cache_clean_interval);
 DECLARE_mInt32(disk_stat_monitor_interval);
 DECLARE_mInt32(unused_rowset_monitor_interval);
 DECLARE_String(storage_root_path);
+DECLARE_mString(broken_storage_path);
 
 // Config is used to check incompatible old format hdr_ format
 // whether doris uses strict way. When config is true, process will log fatal
@@ -1217,9 +1218,6 @@ DECLARE_mBool(enable_merge_on_write_correctness_check);
 // The secure path with user files, used in the `local` table function.
 DECLARE_mString(user_files_secure_path);
 
-// This config can be set to limit thread number in group commit insert thread pool.
-DECLARE_mInt32(group_commit_insert_threads);
-
 // BitmapValue serialize version.
 DECLARE_Int16(bitmap_serialize_version);
 
@@ -1228,6 +1226,19 @@ DECLARE_String(group_commit_replay_wal_dir);
 DECLARE_Int32(group_commit_replay_wal_retry_num);
 DECLARE_Int32(group_commit_replay_wal_retry_interval_seconds);
 DECLARE_Int32(group_commit_sync_wal_batch);
+// This config can be set to limit thread number in group commit insert thread pool.
+DECLARE_mInt32(group_commit_insert_threads);
+
+// The configuration item is used to lower the priority of the scanner thread,
+// typically employed to ensure CPU scheduling for write operations.
+// Default is 0, which is default value of thread nice value, increase this value
+// to lower the priority of scan threads
+DECLARE_Int32(scan_thread_nice_value);
+// Used to modify the recycle interval of tablet schema cache
+DECLARE_mInt32(tablet_schema_cache_recycle_interval);
+
+// Use `LOG(FATAL)` to replace `throw` when true
+DECLARE_mBool(exit_on_exception);
 
 #ifdef BE_TEST
 // test s3

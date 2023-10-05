@@ -83,12 +83,12 @@ Status DataTypeArraySerDe::deserialize_one_cell_from_json(IColumn& column, Slice
     IColumn& nested_column = array_column.get_data();
     DCHECK(nested_column.is_nullable());
     if (slice[0] != '[') {
-        return Status::InvalidArgument("Array does not start with '[' character, found '{}'",
-                                       slice[0]);
+        return Status::InvalidDataFormat("Array does not start with '[' character, found '{}'",
+                                         slice[0]);
     }
     if (slice[slice.size - 1] != ']') {
-        return Status::InvalidArgument("Array does not end with ']' character, found '{}'",
-                                       slice[slice.size - 1]);
+        return Status::InvalidDataFormat("Array does not end with ']' character, found '{}'",
+                                         slice[slice.size - 1]);
     }
     // empty array []
     if (slice.size == 2) {
@@ -109,10 +109,17 @@ Status DataTypeArraySerDe::deserialize_one_cell_from_json(IColumn& column, Slice
     slices.emplace_back(slice);
     size_t slice_size = slice.size;
     // pre add total slice can reduce lasted element check.
+    char quote_char = 0;
     for (int idx = 0; idx < slice_size; ++idx) {
         char c = slice[idx];
         if (c == '"' || c == '\'') {
-            has_quote = !has_quote;
+            if (!has_quote) {
+                quote_char = c;
+                has_quote = !has_quote;
+            } else if (has_quote && quote_char == c) {
+                quote_char = 0;
+                has_quote = !has_quote;
+            }
         } else if (!has_quote && (c == '[' || c == '{')) {
             ++nested_level;
         } else if (!has_quote && (c == ']' || c == '}')) {
