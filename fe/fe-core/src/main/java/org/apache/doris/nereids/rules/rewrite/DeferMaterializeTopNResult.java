@@ -19,6 +19,7 @@ package org.apache.doris.nereids.rules.rewrite;
 
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Type;
+import org.apache.doris.common.Config;
 import org.apache.doris.nereids.properties.OrderKey;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
@@ -104,6 +105,9 @@ public class DeferMaterializeTopNResult implements RewriteRuleFactory {
     }
 
     private long getTopNOptLimitThreshold() {
+        if (!Config.enable_two_phase_read_opt) {
+            return -1;
+        }
         if (ConnectContext.get() != null && ConnectContext.get().getSessionVariable() != null) {
             if (!ConnectContext.get().getSessionVariable().enableTwoPhaseReadOpt) {
                 return -1;

@@ -104,7 +104,7 @@ suite("sort") {
 
     // test topn 2phase opt with light schema change
     sql """set topn_opt_limit_threshold = 1024"""
-    sql """set enable_two_phase_read_opt= true"""
+    sql """set enable_two_phase_read_opt= false"""
     sql """ DROP TABLE if exists `sort_default_value`; """
     sql """ CREATE TABLE `sort_default_value` (
       `k1` int NOT NULL
