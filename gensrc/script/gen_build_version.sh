@@ -27,6 +27,7 @@
 
 set -eo pipefail
 
+# selectdb version
 build_version_prefix="selectdb"
 build_version_major=0
 build_version_minor=0
@@ -34,6 +35,9 @@ build_version_patch=0
 build_version_rc_version="dev"
 
 build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
+
+#doris version
+build_base_version="2.0"
 
 unset LANG
 unset LC_CTYPE
@@ -132,6 +136,7 @@ public class Version {
   public static final String DORIS_BUILD_TIME = "${build_time}";
   public static final String DORIS_BUILD_INFO = "${build_info}";
   public static final String DORIS_JAVA_COMPILE_VERSION = "${java_version_str}";
+  public static final String BASE_BUILD_VERSION = "${build_base_version}";
 
   public static void main(String[] args) {
     System.out.println("doris_build_version_prefix: " + DORIS_BUILD_VERSION_PREFIX);
@@ -146,6 +151,7 @@ public class Version {
     System.out.println("doris_build_time: " + DORIS_BUILD_TIME);
     System.out.println("doris_build_info: " + DORIS_BUILD_INFO);
     System.out.println("doris_java_compile_version: " + DORIS_JAVA_COMPILE_VERSION);
+    System.out.println("based_version: " + BASE_BUILD_VERSION);
   }
 
 }
