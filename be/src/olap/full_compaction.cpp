@@ -25,6 +25,7 @@
 #include <ostream>
 #include <shared_mutex>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/status.h"
 #include "olap/cumulative_compaction_policy.h"
@@ -85,8 +86,8 @@ Status FullCompaction::execute_compact_impl() {
 
     // 4. set cumulative point
     Version last_version = _input_rowsets.back()->version();
-    _tablet->cumulative_compaction_policy()->update_cumulative_point(_tablet.get(), _input_rowsets,
-                                                                     _output_rowset, last_version);
+    StorageEngine::instance()->cumu_compaction_policy()->update_cumulative_point(
+            _tablet.get(), _input_rowsets, _output_rowset, last_version);
     VLOG_CRITICAL << "after cumulative compaction, current cumulative point is "
                   << _tablet->cumulative_layer_point() << ", tablet=" << _tablet->full_name();
 

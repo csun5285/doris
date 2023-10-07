@@ -29,6 +29,7 @@ set(OLAP_FILES
 add_library(Cloud STATIC
 cloud_base_compaction.cpp
 cloud_cumulative_compaction.cpp
+cloud_full_compaction.cpp
 cloud_meta_mgr.cpp
 cloud_schema_change.cpp
 cloud_stream_load_executor.cpp

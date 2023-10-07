@@ -536,6 +536,20 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
         stats->set_last_base_compaction_time_ms(now * 1000);
         // clang-format on
+    } else if (compaction.type() == TabletCompactionJobPB::FULL) {
+        // clang-format off
+        stats->set_full_compaction_cnt(stats->full_compaction_cnt() + 1);
+        if (compaction.output_cumulative_point() > stats->cumulative_point()) {
+            // After supporting parallel cumu compaction, compaction with older cumu point may be committed after
+            // new cumu point has been set, MUST NOT set cumu point back to old value
+            stats->set_cumulative_point(compaction.output_cumulative_point());
+        }
+        stats->set_num_rows(stats->num_rows() + (compaction.num_output_rows() - compaction.num_input_rows()));
+        stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
+        stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
+        stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
+        stats->set_last_full_compaction_time_ms(now);
+        // clang-format on
     } else {
         msg = "invalid compaction type";
         code = MetaServiceCode::INVALID_ARGUMENT;
