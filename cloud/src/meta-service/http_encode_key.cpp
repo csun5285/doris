@@ -82,9 +82,9 @@ static std::unordered_map<std::string_view, std::tuple<std::vector<std::string>,
     {"MetaDeleteBitmapUpdateLock", {{"instance_id", "table_id", "partition_id"},                     [](param_type& p) { return hex(meta_delete_bitmap_update_lock_key(KeyInfoSetter<MetaDeleteBitmapUpdateLockInfo>{p}.get())); }}},
     {"MetaPendingDeleteBitmap",    {{"instance_id", "tablet_id"},                                    [](param_type& p) { return hex(meta_pending_delete_bitmap_key(KeyInfoSetter<MetaPendingDeleteBitmapInfo>{p}.get())); }}},
     {"RLJobProgressKey",           {{"instance_id", "db_id", "job_id"},                              [](param_type& p) { return hex(rl_job_progress_key_info(KeyInfoSetter<RLJobProgressKeyInfo>{p}.get())); }}},
-    {"MetaServiceRegistryKey",     {{},                                                              [](param_type& p) { return hex(system_meta_service_registry_key()); }}},
-    {"MetaServiceArnInfoKey",      {{},                                                              [](param_type& p) { return hex(system_meta_service_arn_info_key()); }}},
-    {"MetaServiceEncryptionKey",   {{},                                                              [](param_type& p) { return hex(system_meta_service_encryption_key_info_key()); }}},
+    {"MetaServiceRegistryKey",     {std::vector<std::string>{},                                      [](param_type& p) { return hex(system_meta_service_registry_key()); }}},
+    {"MetaServiceArnInfoKey",      {std::vector<std::string>{},                                      [](param_type& p) { return hex(system_meta_service_arn_info_key()); }}},
+    {"MetaServiceEncryptionKey",   {std::vector<std::string>{},                                      [](param_type& p) { return hex(system_meta_service_encryption_key_info_key()); }}},
 };
 // clang-format on
 
