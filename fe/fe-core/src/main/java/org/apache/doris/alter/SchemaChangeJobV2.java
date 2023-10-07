@@ -734,7 +734,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             throw new AlterCancelException(e.getMessage());
         }
 
-        LOG.debug("jobId:{}, cloudClusterName:{}", cloudClusterName, jobId);
+        LOG.debug("jobId:{}, cloudClusterName:{}", jobId, cloudClusterName);
         if (!schemaChangeBatchTask.isFinished()) {
             LOG.info("schema change tasks not finished. job: {}", jobId);
             List<AgentTask> tasks = schemaChangeBatchTask.getUnfinishedTasks(2000);

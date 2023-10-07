@@ -65,6 +65,10 @@ add_executable(resource_test
     resource_test.cpp
 )
 
+add_executable(http_encode_key_test
+    http_encode_key_test.cpp
+)
+
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -105,6 +109,11 @@ target_link_libraries(log_test
 target_link_libraries(resource_test
     ${TEST_LINK_LIBS}
 )
+
+target_link_libraries(http_encode_key_test
+    ${TEST_LINK_LIBS}
+)
+
 # FDB related tests need to be linked with libfdb_c
 set(FDB_LINKER_FLAGS "-lfdb_c -L${THIRDPARTY_DIR}/lib")
 

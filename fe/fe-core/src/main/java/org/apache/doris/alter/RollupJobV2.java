@@ -618,7 +618,7 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
             throw new AlterCancelException(e.getMessage());
         }
 
-        LOG.debug("jobId:{}, cloudClusterName:{}", cloudClusterName, jobId);
+        LOG.debug("jobId:{}, cloudClusterName:{}", jobId, cloudClusterName);
         if (!rollupBatchTask.isFinished()) {
             LOG.info("rollup tasks not finished. job: {}", jobId);
             List<AgentTask> tasks = rollupBatchTask.getUnfinishedTasks(2000);

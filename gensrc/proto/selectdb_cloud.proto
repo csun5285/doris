@@ -415,6 +415,7 @@ message TabletCompactionJobPB {
         BASE = 1;
         CUMULATIVE = 2;
         EMPTY_CUMULATIVE = 3; // just update cumulative point
+        FULL = 4;
     }
     // IP and port of the node which initiates this job
     optional string initiator = 1; // prepare
@@ -443,6 +444,7 @@ message TabletCompactionJobPB {
     // Lease time, unix timestamp
     optional int64 lease = 23; // prepare
     optional int64 delete_bitmap_lock_initiator = 24;
+    optional int64 full_compaction_cnt = 25;  // prepare
 }
 
 message TabletSchemaChangeJobPB {
@@ -485,6 +487,8 @@ message TabletStatsPB {
     optional int64 cumulative_point = 9;
     optional int64 last_base_compaction_time_ms = 10;
     optional int64 last_cumu_compaction_time_ms = 11;
+    optional int64 full_compaction_cnt = 12;
+    optional int64 last_full_compaction_time_ms = 13;
 }
 
 message ObjectFilePB {

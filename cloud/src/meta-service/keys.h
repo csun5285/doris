@@ -76,6 +76,7 @@ struct BasicKeyInfo : Base {
     template<typename... Args>
     BasicKeyInfo(Args&&... args) : Base(std::forward<Args>(args)...) {}
     constexpr static size_t n = N;
+    using base_type = Base;
 };
 
 // ATTN: newly added key must have different type number
@@ -157,6 +158,7 @@ using MetaPendingDeleteBitmapInfo = BasicKeyInfo<24 , std::tuple<std::string, in
 using RLJobProgressKeyInfo = BasicKeyInfo<25, std::tuple<std::string, int64_t, int64_t>>;
 
 void instance_key(const InstanceKeyInfo& in, std::string* out);
+static inline std::string instance_key(const InstanceKeyInfo& in) { std::string s; instance_key(in, &s); return s; }
 
 std::string txn_key_prefix(std::string_view instance_id);
 void txn_label_key(const TxnLabelKeyInfo& in, std::string* out);

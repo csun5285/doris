@@ -3,9 +3,57 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_apsarad_internal_stage_copy_into") {
     // Internal and external stage cross use
     def tableNamExternal = "customer_internal_stage"
-    def token = "greedisgood9999"
-    def instanceId = context.config.instanceId
+    //def token = "greedisgood9999"
+    //def instanceId = context.config.instanceId
     def cloudUniqueId = context.config.cloudUniqueId
+    def token = context.config.metaServiceToken
+    def instance_id = context.config.multiClusterInstance
+
+    List<String> ipList = new ArrayList<>()
+    List<String> hbPortList = new ArrayList<>()
+    List<String> httpPortList = new ArrayList<>()
+    List<String> beUniqueIdList = new ArrayList<>()
+
+    String[] bes = context.config.multiClusterBes.split(',');
+    println("the value is " + context.config.multiClusterBes);
+    for(String values : bes) {
+        println("the value is " + values);
+        String[] beInfo = values.split(':');
+        ipList.add(beInfo[0]);
+        hbPortList.add(beInfo[1]);
+        httpPortList.add(beInfo[2]);
+        beUniqueIdList.add(beInfo[3]);
+    }
+
+    println("the ip is " + ipList);
+    println("the heartbeat port is " + hbPortList);
+    println("the http port is " + httpPortList);
+    println("the be unique id is " + beUniqueIdList);
+
+    for (unique_id : beUniqueIdList) {
+        resp = get_cluster.call(unique_id);
+        for (cluster : resp) {
+            if (cluster.type == "COMPUTE") {
+                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
+            }
+        }
+    }
+    sleep(20000)
+
+    List<List<Object>> showResult  = sql "show clusters"
+    assertTrue(showResult.size() == 0);
+
+    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
+                     "regression_cluster_name0", "regression_cluster_id0");
+    sleep(20000)
+
+    showResult  = sql "show clusters"
+    assertTrue(showResult.size() == 1);
+
+    for (row : showResult) {
+        println row
+    }
+
     try {
         sql """ DROP TABLE IF EXISTS ${tableNamExternal}; """
         sql """
@@ -77,8 +125,8 @@ suite("test_apsarad_internal_stage_copy_into") {
     }
 
     def getCloudConf = {
-        result = sql """ ADMIN SHOW FRONTEND CONFIG """
-        for (def r : result) {
+        configResult = sql """ ADMIN SHOW FRONTEND CONFIG """
+        for (def r : configResult) {
             assertTrue(r.size() > 2)
             if (r[0] == "cloud_delete_loaded_internal_stage_files") {
                 return (r[1] == "true")

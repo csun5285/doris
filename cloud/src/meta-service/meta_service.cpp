@@ -1652,7 +1652,6 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
         if (tablet_stats->data_size() < 0) tablet_stats->set_data_size(0);
 #endif
     }
-    msg = ss.str();
 }
 
 void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* controller,
