@@ -314,6 +314,18 @@ Mutable: `false`
 
 Master only: `false`
 
+### `auto_analyze_job_record_count`
+
+Determine the persist number of automatic triggered analyze job execution status
+
+Type: `long`
+
+Default: `20000`
+
+Mutable: `false`
+
+Master only: `false`
+
 ### `auto_check_statistics_in_minutes`
 
 TODO
@@ -325,6 +337,18 @@ Default: `5`
 Mutable: `true`
 
 Master only: `true`
+
+### `autobucket_min_buckets`
+
+min buckets of auto bucket
+
+Type: `int`
+
+Default: `1`
+
+Mutable: `false`
+
+Master only: `false`
 
 ### `backend_load_capacity_coeficient`
 
@@ -813,6 +837,18 @@ TODO
 Type: `int`
 
 Default: `200`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `cloud_query_failed_retry_times`
+
+TODO
+
+Type: `int`
+
+Default: `50`
 
 Mutable: `false`
 
@@ -1611,6 +1647,18 @@ Default: `true`
 Mutable: `true`
 
 Master only: `true`
+
+### `enable_auto_sample`
+
+Whether to enable automatic sampling for large tables, which, when enabled, automaticallycollects statistics through sampling for tables larger than 'huge_table_lower_bound_size_in_bytes'
+
+Type: `boolean`
+
+Default: `false`
+
+Mutable: `false`
+
+Master only: `false`
 
 ### `enable_batch_delete_by_default`
 
@@ -2519,6 +2567,42 @@ Fe https port, currently all FE's https port must be same
 Type: `int`
 
 Default: `8050`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `huge_table_auto_analyze_interval_in_millis`
+
+This controls the minimum time interval for automatic ANALYZE on large tables. Within this interval,tables larger than huge_table_lower_bound_size_in_bytes are analyzed only once.
+
+Type: `long`
+
+Default: `43200000`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `huge_table_default_sample_rows`
+
+This defines the number of sample percent for large tables when automatic sampling forlarge tables is enabled
+
+Type: `int`
+
+Default: `4194304`
+
+Mutable: `false`
+
+Master only: `false`
+
+### `huge_table_lower_bound_size_in_bytes`
+
+This defines the lower size bound for large tables. When enable_auto_sample is enabled, tables larger than this value will automatically collect statistics through sampling
+
+Type: `long`
+
+Default: `5368709120`
 
 Mutable: `false`
 

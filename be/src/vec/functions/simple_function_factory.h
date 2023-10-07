@@ -99,6 +99,7 @@ void register_function_match(SimpleFunctionFactory& factory);
 void register_function_tokenize(SimpleFunctionFactory& factory);
 
 void register_function_url(SimpleFunctionFactory& factory);
+void register_function_ip(SimpleFunctionFactory& factory);
 
 class SimpleFunctionFactory {
     using Creator = std::function<FunctionBuilderPtr()>;
@@ -273,6 +274,7 @@ public:
             register_function_width_bucket(instance);
             register_function_match(instance);
             register_function_tokenize(instance);
+            register_function_ip(instance);
         });
         return instance;
     }
