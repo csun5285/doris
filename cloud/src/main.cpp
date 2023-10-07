@@ -280,6 +280,9 @@ int main(int argc, char** argv) {
     }
     // start service
     brpc::ServerOptions options;
+    if (config::brpc_idle_timeout_sec != -1) {
+        options.idle_timeout_sec = config::brpc_idle_timeout_sec;
+    }
     if (config::brpc_num_threads != -1) {
         options.num_threads = config::brpc_num_threads;
     }
