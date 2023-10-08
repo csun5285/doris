@@ -771,7 +771,8 @@ const BlockFileCache::LRUQueue& BlockFileCache::get_queue(FileCacheType type) co
 bool BlockFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
-    auto is_overflow = [&] { return cur_cache_size + size - removed_size > _total_size; };
+    auto is_overflow = [&] { return _disk_resource_limit_mode ? removed_size < size
+                                    : cur_cache_size + size - removed_size > _total_size; };
     auto remove_file_block_if = [&](FileBlockCell* cell) {
         FileBlockSPtr file_block = cell->file_block;
         if (file_block) {
@@ -896,7 +897,8 @@ bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, si
 
     size_t max_size = queue.get_max_size();
     auto is_overflow = [&] {
-        return cur_cache_size + size - removed_size > _total_size ||
+        return _disk_resource_limit_mode ? removed_size < size : 
+               cur_cache_size + size - removed_size > _total_size ||
                (queue_size + size - removed_size > max_size) ||
                (query_context_cache_size + size - removed_size >
                 query_context->get_max_cache_size());
@@ -1071,7 +1073,10 @@ bool BlockFileCache::try_reserve_from_other_queue(FileCacheType cur_cache_type, 
     auto other_cache_types = get_other_cache_type(cur_cache_type);
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
-    auto is_overflow = [&] { return cur_cache_size + size - removed_size > _total_size; };
+    auto is_overflow = [&] {
+        return _disk_resource_limit_mode ? removed_size < size
+               : cur_cache_size + size - removed_size > _total_size;
+    };
     std::vector<FileBlockCell*> to_evict;
     std::vector<FileBlockCell*> trash;
     for (FileCacheType cache_type : other_cache_types) {
@@ -1145,7 +1150,11 @@ bool BlockFileCache::try_reserve_for_lru(const Key& key, QueryFileCacheContextPt
         size_t max_size = queue.get_max_size();
         size_t max_element_size = queue.get_max_element_size();
         auto is_overflow = [&] {
-            return cur_cache_size + size - removed_size > _total_size ||
+            if (_disk_resource_limit_mode) {
+                return removed_size < size;
+            }
+            return _disk_resource_limit_mode ? removed_size < size : 
+                   cur_cache_size + size - removed_size > _total_size ||
                    (queue_size + size - removed_size > max_size) ||
                    queue_element_size >= max_element_size;
         };
@@ -1528,7 +1537,7 @@ void BlockFileCache::change_cache_type(const Key& key, size_t offset, FileCacheT
 
 // @brief: get a path's disk capacity used percent, inode remain percent
 // @param: path
-// @param: percent.first disk used percent, percent.second inode remain percent
+// @param: percent.first disk used percent, percent.second inode used percent
 int disk_used_percentage(const std::string& path, std::pair<int, int>* percent) {
     struct statfs stat;
     int ret = statfs(path.c_str(), &stat);
@@ -1548,7 +1557,7 @@ int disk_used_percentage(const std::string& path, std::pair<int, int>* percent) 
     unsigned long long inode_total = stat.f_files;
     int inode_percentage = (inode_free * 1.0 / inode_total) * 100;
     percent->first = capacity_percentage;
-    percent->second = inode_percentage;
+    percent->second = 100 - inode_percentage;
     return 0;
 }
 
@@ -1559,24 +1568,34 @@ void BlockFileCache::check_disk_resource_limit(const std::string& path) {
         LOG_ERROR("").tag("file cache path", path).tag("error", strerror(errno));
         return;
     }
-    auto [capacity_percentage, inode_remain_percentage] = percent;
+    auto [capacity_percentage, inode_percentage] = percent;
+    auto inode_is_insufficient = [](const int& inode_remain) {
+        return inode_remain >= config::file_cache_enter_disk_resource_limit_mode_percent;
+    };
     DCHECK(capacity_percentage >= 0 && capacity_percentage <= 100);
-    DCHECK(inode_remain_percentage >= 0 && inode_remain_percentage <= 100);
-    if (((100 - capacity_percentage) < config::file_cache_enter_disk_resource_limit_mode_percent) ||
-        (inode_remain_percentage < config::file_cache_enter_disk_resource_limit_mode_percent)) {
+    DCHECK(inode_percentage >= 0 && inode_percentage <= 100);
+    // ATTN: due to that can be change, so if its invalid, set it to default value
+    if (config::file_cache_enter_disk_resource_limit_mode_percent
+        <= config::file_cache_exit_disk_resource_limit_mode_percent) {
+        LOG_WARNING("config error, set to default value")
+            .tag("enter", config::file_cache_enter_disk_resource_limit_mode_percent)
+            .tag("exit", config::file_cache_exit_disk_resource_limit_mode_percent);
+        config::file_cache_enter_disk_resource_limit_mode_percent = 90;
+        config::file_cache_exit_disk_resource_limit_mode_percent  = 80;
+    }
+    if (capacity_percentage >= config::file_cache_enter_disk_resource_limit_mode_percent
+        || inode_is_insufficient(inode_percentage)) {
         _disk_resource_limit_mode = true;
-    } else if (_disk_resource_limit_mode &&
-               ((100 - capacity_percentage) >
-                config::file_cache_exit_disk_resource_limit_mode_percent) &&
-               (inode_remain_percentage >
-                config::file_cache_exit_disk_resource_limit_mode_percent)) {
+    } else if (_disk_resource_limit_mode
+            && (capacity_percentage < config::file_cache_exit_disk_resource_limit_mode_percent)
+            && (inode_percentage < config::file_cache_exit_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = false;
     }
     if (_disk_resource_limit_mode) {
-        LOG_WARNING("file cache background thread")
-                .tag("remain space percent", 100 - capacity_percentage)
-                .tag("remain inode percent", inode_remain_percentage)
-                .tag("mode", "run in resource limit");
+        LOG_WARNING("file cache background thread").tag("space percent", capacity_percentage)
+            .tag("inode percent", inode_percentage)
+            .tag("is inode insufficient", inode_is_insufficient(inode_percentage))
+            .tag("mode", "run in resource limit");
     }
 }
 

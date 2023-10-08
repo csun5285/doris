@@ -1162,13 +1162,13 @@ TEST(BlockFileCache, disk_used_percentage_test) {
     std::string dir = "/dev";
     std::pair<int, int> percent;
     disk_used_percentage(dir, &percent);
-    int disk_used, inode_remain;
+    int disk_used, inode_used;
     auto ret = get_disk_info({ (char*)"df", (char*)"--output=pcent", (char*)"/dev", (char*)nullptr }, &disk_used);
     ASSERT_TRUE(!ret);
-    ret = get_disk_info({ (char*)"df", (char*)"--output=ipcent", (char*)"/dev", (char*)nullptr }, &inode_remain);
+    ret = get_disk_info({ (char*)"df", (char*)"--output=ipcent", (char*)"/dev", (char*)nullptr }, &inode_used);
     ASSERT_TRUE(!ret);
     ASSERT_EQ(percent.first, disk_used);
-    ASSERT_EQ(100 - percent.second, inode_remain);
+    ASSERT_EQ(percent.second, inode_used);
 }
 
 void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
@@ -1184,7 +1184,7 @@ void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
     switch (cache_type) {
         case io::FileCacheType::INDEX:
             settings.index_queue_elements = 5;
-            settings.index_queue_size = 30;
+            settings.index_queue_size = 60;
             break;
         case io::FileCacheType::NORMAL:
             settings.query_queue_size = 30;
@@ -1197,16 +1197,18 @@ void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
         default:
             break;
     }
-    settings.total_size = 50;
+    settings.total_size = 100;
     settings.max_file_block_size = 30;
     settings.max_query_cache_size = 30;
-    io::CacheContext context, other_context;
+    io::CacheContext context, other_context, index_context;
     context.cache_type = other_context.cache_type = cache_type;
     context.query_id = query_id;
     other_context.query_id = other_query_id;
-    auto key = io::BlockFileCache::hash("key1");
+    auto key_1 = io::BlockFileCache::hash("key1");
+    index_context.cache_type = io::FileCacheType::INDEX;
     {
         io::BlockFileCache cache(cache_base_path, settings);
+        cache._index_queue.hot_data_interval = 0;
         ASSERT_TRUE(cache.initialize());
         while (true) {
             if (cache.get_lazy_open_success()) {
@@ -1215,280 +1217,54 @@ void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         {
-            auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
+            auto key_index = io::BlockFileCache::hash("key_index");
+            auto holder_index = cache.get_or_set(key_index, 0, 50, index_context); // Add index range [0, 49]
+            auto segments_index = fromHolder(holder_index);
+            segments_index[0]->get_or_set_downloader();
+            download(segments_index[0]);
+            assert_range(0, segments_index[0], io::FileBlock::Range(0, 29),
+                         io::FileBlock::State::DOWNLOADED);
+            assert_range(1, segments_index[1], io::FileBlock::Range(30, 49),
+                         io::FileBlock::State::EMPTY);
+            segments_index[1]->get_or_set_downloader();
+            download(segments_index[1]);
+            assert_range(2, segments_index[1], io::FileBlock::Range(30, 49),
+                         io::FileBlock::State::DOWNLOADED);
+
+
+            auto holder_index_1 = cache.get_or_set(key_index, 50, 10, index_context); // Add index range [50, 59]
+            auto segments_index_1 = fromHolder(holder_index_1);
+            segments_index_1[0]->get_or_set_downloader();
+            download(segments_index_1[0]);
+            assert_range(0, segments_index_1[0], io::FileBlock::Range(50, 59),
+                         io::FileBlock::State::DOWNLOADED);
+        }
+        ASSERT_EQ(cache.get_file_blocks_num(io::FileCacheType::INDEX), 3);
+        ASSERT_EQ(cache.get_used_cache_size(io::FileCacheType::INDEX), 60);
+        {
+            cache._disk_resource_limit_mode = true;
+            auto holder = cache.get_or_set(key_1, 0, 10, context); /// Add range [0, 9]
             auto segments = fromHolder(holder);
             /// Range was not present in cache. It should be added in cache as one while file segment.
             ASSERT_EQ(segments.size(), 1);
-            assert_range(1, segments[0], io::FileBlock::Range(0, 9),
+            assert_range(3, segments[0], io::FileBlock::Range(0, 9),
                          io::FileBlock::State::EMPTY);
             ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            assert_range(2, segments[0], io::FileBlock::Range(0, 9),
+            assert_range(4, segments[0], io::FileBlock::Range(0, 9),
                          io::FileBlock::State::DOWNLOADING);
             download(segments[0]);
-            assert_range(3, segments[0], io::FileBlock::Range(0, 9),
+            assert_range(5, segments[0], io::FileBlock::Range(0, 9),
                          io::FileBlock::State::DOWNLOADED);
+
+            // ATTN: in disk limit mode, will remove 5*size
+            /// Current index cache:    [__________][_______][_____]
+            ///                         ^          ^^       ^^     ^
+            ///                         0         29 30    4950    59
+            // get size 10, in disk limit mode, will remove size 5 * 10 by other lru queue
+            // so will remove index queue range 0~49
+            ASSERT_EQ(cache.get_file_blocks_num(io::FileCacheType::INDEX), 1);
+            ASSERT_EQ(cache.get_used_cache_size(io::FileCacheType::INDEX), 10);
         }
-        /// Current cache:    [__________]
-        ///                   ^          ^
-        ///                   0          9
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 1);
-        ASSERT_EQ(cache.get_used_cache_size(cache_type), 10);
-        {
-            /// Want range [5, 14], but [0, 9] already in cache, so only [10, 14] will be put in cache.
-            auto holder = cache.get_or_set(key, 5, 10, context);
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 2);
-
-            assert_range(4, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(5, segments[1], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::EMPTY);
-
-            ASSERT_TRUE(segments[1]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            download(segments[1]);
-            assert_range(6, segments[1], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::DOWNLOADED);
-        }
-
-        /// Current cache:    [__________][_____]
-        ///                   ^          ^^     ^
-        ///                   0          910    14
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 2);
-        ASSERT_EQ(cache.get_used_cache_size(cache_type), 15);
-
-        {
-            auto holder = cache.get_or_set(key, 9, 1, context); /// Get [9, 9]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 1);
-            assert_range(7, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-        }
-        {
-            auto holder = cache.get_or_set(key, 9, 2, context); /// Get [9, 10]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 2);
-            assert_range(8, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(9, segments[1], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::DOWNLOADED);
-        }
-        {
-            auto holder = cache.get_or_set(key, 10, 1, context); /// Get [10, 10]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 1);
-            assert_range(10, segments[0], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::DOWNLOADED);
-        }
-        complete(cache.get_or_set(key, 17, 4, context)); /// Get [17, 20]
-        complete(cache.get_or_set(key, 24, 3, context)); /// Get [24, 26]
-
-        /// Current cache:    [__________][_____]   [____]    [___]
-        ///                   ^          ^^     ^   ^    ^    ^   ^
-        ///                   0          910    14  17   20   24  26
-        ///
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 4);
-        ASSERT_EQ(cache.get_used_cache_size(cache_type), 22);
-        {
-            auto holder = cache.get_or_set(key, 0, 31, context); /// Get [0, 25]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 7);
-            assert_range(11, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(12, segments[1], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::DOWNLOADED);
-            /// Missing [15, 16] should be added in cache.
-            assert_range(13, segments[2], io::FileBlock::Range(15, 16),
-                         io::FileBlock::State::EMPTY);
-            ASSERT_TRUE(segments[2]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            download(segments[2]);
-
-            assert_range(14, segments[3], io::FileBlock::Range(17, 20),
-                         io::FileBlock::State::DOWNLOADED);
-
-            assert_range(15, segments[4], io::FileBlock::Range(21, 23),
-                         io::FileBlock::State::EMPTY);
-
-            assert_range(16, segments[5], io::FileBlock::Range(24, 26),
-                         io::FileBlock::State::DOWNLOADED);
-
-            assert_range(17, segments[6], io::FileBlock::Range(27, 30), io::FileBlock::State::EMPTY);
-            /// Current cache:    [__________][_____][   ][____________]
-            ///                   ^                       ^            ^
-            ///                   0                        20          26
-            ///
-
-            /// Range [27, 30] must be evicted in previous getOrSet [0, 25].
-            /// Let's not invalidate pointers to returned segments from range [0, 25] and
-            /// as max elements size is reached, next attempt to put something in cache should fail.
-            /// This will also check that [27, 27] was indeed evicted.
-
-            auto holder1 = cache.get_or_set(key, 27, 4, context);
-            auto segments_1 = fromHolder(holder1); /// Get [27, 30]
-            ASSERT_EQ(segments_1.size(), 1);
-            assert_range(18, segments_1[0], io::FileBlock::Range(27, 30), io::FileBlock::State::EMPTY);
-        }
-        /// Current cache:    [__________][_____][_][____]    [___]
-        ///                   ^          ^^     ^   ^    ^    ^   ^
-        ///                   0          910    14  17   20   24  26
-        ///
-        {
-            auto holder = cache.get_or_set(key, 12, 10, context); /// Get [12, 21]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 4);
-
-            assert_range(18, segments[0], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(19, segments[1], io::FileBlock::Range(15, 16),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(20, segments[2], io::FileBlock::Range(17, 20),
-                         io::FileBlock::State::DOWNLOADED);
-
-            assert_range(21, segments[3], io::FileBlock::Range(21, 21),
-                         io::FileBlock::State::EMPTY);
-
-            ASSERT_TRUE(segments[3]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            download(segments[3]);
-            ASSERT_TRUE(segments[3]->state() == io::FileBlock::State::DOWNLOADED);
-        }
-        /// Current cache:    [__________][_____][_][____][_]    [___]
-        ///                   ^          ^^     ^   ^    ^       ^   ^
-        ///                   0          910    14  17   20      24  26
-
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 6);
-        {
-            auto holder = cache.get_or_set(key, 23, 5, context); /// Get [23, 28]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 3);
-
-            assert_range(22, segments[0], io::FileBlock::Range(23, 23),
-                         io::FileBlock::State::EMPTY);
-            assert_range(23, segments[1], io::FileBlock::Range(24, 26),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(24, segments[2], io::FileBlock::Range(27, 27),
-                         io::FileBlock::State::EMPTY);
-
-            ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            ASSERT_TRUE(segments[2]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            download(segments[0]);
-            download(segments[2]);
-        }
-        /// Current cache:    [__________][_____][_][____][_]  [_][___][_]
-        ///                   ^          ^^     ^   ^    ^        ^   ^
-        ///                   0          910    14  17   20       24  26
-
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 8);
-        {
-            auto holder5 = cache.get_or_set(key, 2, 3, context); /// Get [2, 4]
-            auto s5 = fromHolder(holder5);
-            ASSERT_EQ(s5.size(), 1);
-            assert_range(25, s5[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-
-            auto holder1 = cache.get_or_set(key, 30, 2, context); /// Get [30, 31]
-            auto s1 = fromHolder(holder1);
-            ASSERT_EQ(s1.size(), 1);
-            assert_range(26, s1[0], io::FileBlock::Range(30, 31), io::FileBlock::State::EMPTY);
-
-            ASSERT_TRUE(s1[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            download(s1[0]);
-
-            /// Current cache:    [__________][_____][_][____][_]  [_][___][_]    [__]
-            ///                   ^          ^^     ^   ^    ^        ^   ^  ^    ^  ^
-            ///                   0          910    14  17   20       24  26 27   30 31
-
-            auto holder2 = cache.get_or_set(key, 23, 1, context); /// Get [23, 23]
-            auto s2 = fromHolder(holder2);
-            ASSERT_EQ(s2.size(), 1);
-
-            auto holder3 = cache.get_or_set(key, 24, 3, context); /// Get [24, 26]
-            auto s3 = fromHolder(holder3);
-            ASSERT_EQ(s3.size(), 1);
-
-            auto holder4 = cache.get_or_set(key, 27, 1, context); /// Get [27, 27]
-            auto s4 = fromHolder(holder4);
-            ASSERT_EQ(s4.size(), 1);
-
-            /// All cache is now unreleasable because pointers are still hold
-            auto holder6 = cache.get_or_set(key, 0, 40, context);
-            auto f = fromHolder(holder6);
-            ASSERT_EQ(f.size(), 12);
-
-            assert_range(29, f[9], io::FileBlock::Range(28, 29), io::FileBlock::State::EMPTY);
-            assert_range(30, f[11], io::FileBlock::Range(32, 39), io::FileBlock::State::EMPTY);
-        }
-        {
-            auto holder = cache.get_or_set(key, 2, 3, context); /// Get [2, 4]
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 1);
-            assert_range(31, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
-        }
-        /// Current cache:    [__________][_____][_][____][_]  [_][___][_]    [__]
-        ///                   ^          ^^     ^   ^    ^        ^   ^  ^    ^  ^
-        ///                   0          910    14  17   20       24  26 27   30 31
-        LOG_INFO("cache.get_file_blocks_num(cache_type)").tag("size", cache.get_file_blocks_num(cache_type));
-        {
-            auto holder = cache.get_or_set(key, 25, 5, context); /// Get [25, 29]
-            LOG_INFO("cache.get_file_blocks_num(cache_type)111111").tag("size",
-                                                                          cache.get_file_blocks_num(cache_type));
-            auto segments = fromHolder(holder);
-            ASSERT_EQ(segments.size(), 3);
-
-            assert_range(32, segments[0], io::FileBlock::Range(24, 26),
-                         io::FileBlock::State::DOWNLOADED);
-            assert_range(33, segments[1], io::FileBlock::Range(27, 27),
-                         io::FileBlock::State::DOWNLOADED);
-
-            assert_range(34, segments[2], io::FileBlock::Range(28, 29),
-                         io::FileBlock::State::EMPTY);
-            ASSERT_TRUE(segments[2]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-            ASSERT_TRUE(segments[2]->state() == io::FileBlock::State::DOWNLOADING);
-
-            bool lets_start_download = false;
-            std::mutex mutex;
-            std::condition_variable cv;
-
-            std::thread other_1([&] {
-                auto holder_2 =
-                    cache.get_or_set(key, 25, 5, other_context); /// Get [25, 29] once again.
-                auto segments_2 = fromHolder(holder_2);
-                ASSERT_EQ(segments.size(), 3);
-
-                assert_range(35, segments_2[0], io::FileBlock::Range(24, 26),
-                             io::FileBlock::State::DOWNLOADED);
-                assert_range(36, segments_2[1], io::FileBlock::Range(27, 27),
-                             io::FileBlock::State::DOWNLOADED);
-                assert_range(37, segments_2[2], io::FileBlock::Range(28, 29),
-                             io::FileBlock::State::DOWNLOADING);
-
-                ASSERT_TRUE(segments[2]->get_or_set_downloader() !=
-                            io::FileBlock::get_caller_id());
-                ASSERT_TRUE(segments[2]->state() == io::FileBlock::State::DOWNLOADING);
-
-                {
-                    std::lock_guard lock(mutex);
-                    lets_start_download = true;
-                }
-                cv.notify_one();
-
-                while (segments_2[2]->wait() == io::FileBlock::State::DOWNLOADING) {
-                }
-                ASSERT_TRUE(segments_2[2]->state() == io::FileBlock::State::DOWNLOADED);
-            });
-
-            {
-                std::unique_lock lock(mutex);
-                cv.wait(lock, [&] { return lets_start_download; });
-            }
-
-            download(segments[2]);
-            LOG_INFO("cache.get_file_blocks_num(cache_type)222222").tag("size",
-                                                                          cache.get_file_blocks_num(cache_type));
-            ASSERT_TRUE(segments[2]->state() == io::FileBlock::State::DOWNLOADED);
-
-            other_1.join();
-        }
-        ASSERT_EQ(cache.get_file_blocks_num(cache_type), 10);
     }
 }
 
@@ -1499,8 +1275,8 @@ TEST(BlockFileCache, run_in_resource_limit_mode) {
     }
     fs::create_directories(cache_base_path);
     {
-        doris::config::file_cache_enter_disk_resource_limit_mode_percent = 5;
-        doris::config::file_cache_exit_disk_resource_limit_mode_percent = 20;
+        doris::config::file_cache_enter_disk_resource_limit_mode_percent = 95;
+        doris::config::file_cache_exit_disk_resource_limit_mode_percent = 80;
 
         auto sp = SyncPoint::get_instance();
         Defer defer {[sp] {
@@ -1541,7 +1317,7 @@ TEST(BlockFileCache, run_in_resource_limit_mode) {
 
 
         sp->set_call_back("BlockFileCache::set_sleep_time", [](auto&& args) {
-            *try_any_cast<int64_t*>(args[0]) = 1;
+            *try_any_cast<int64_t*>(args[0]) = 100;
         });
 
         sp->set_call_back("BlockFileCache::set_stat_ret", [](auto&& args) {
