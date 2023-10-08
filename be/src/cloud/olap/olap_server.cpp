@@ -766,7 +766,7 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
         long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         if (st.is<CUMULATIVE_NO_SUITABLE_VERSION>()) {
             // Backoff strategy if no suitable version
-            tablet->set_last_cumu_no_suitable_version_time(now);
+            tablet->set_last_cumu_no_suitable_version_ms(now);
         }
         tablet->set_last_cumu_compaction_failure_time(now);
         std::lock_guard lock(_compaction_mtx);
@@ -791,7 +791,7 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
             // No cumu compaction on this tablet, reset `last_cumu_no_suitable_version_ms` to enable this tablet to
             // enter the compaction scheduling candidate set. The purpose of doing this is to have at least one BE perform
             // cumu compaction on tablet which has suitable versions for cumu compaction.
-            tablet->set_last_cumu_no_suitable_version_time(0);
+            tablet->set_last_cumu_no_suitable_version_ms(0);
         }
     };
     st = _cumu_compaction_thread_pool->submit_func([=, compaction = std::move(compaction)]() {

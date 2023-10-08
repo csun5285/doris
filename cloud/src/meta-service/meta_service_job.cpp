@@ -68,6 +68,9 @@ static inline constexpr size_t get_file_name_offset(const T (&s)[S], size_t i = 
 
 namespace selectdb {
 
+static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
+static constexpr int SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID = -2;
+
 extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
                                    const std::string& cloud_unique_id);
 
@@ -509,6 +512,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
         stats->set_cumulative_point(compaction.output_cumulative_point());
+        stats->set_last_cumu_compaction_time_ms(now * 1000);
     } else if (compaction.type() == TabletCompactionJobPB::CUMULATIVE) {
         // clang-format off
         stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
@@ -521,7 +525,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
         stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
         stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
-        stats->set_last_compaction_time(now);
+        stats->set_last_cumu_compaction_time_ms(now * 1000);
         // clang-format on
     } else if (compaction.type() == TabletCompactionJobPB::BASE) {
         // clang-format off
@@ -530,7 +534,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
         stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
         stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
-        stats->set_last_compaction_time(now);
+        stats->set_last_base_compaction_time_ms(now * 1000);
         // clang-format on
     } else {
         msg = "invalid compaction type";
@@ -570,11 +574,11 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     bool enable_unique_key_merge_on_write = compaction.has_delete_bitmap_lock_initiator();
     if (enable_unique_key_merge_on_write) {
         std::string lock_key =
-                meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+                meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
         std::string lock_val;
         ret = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
-                  << " partition_id=" << partition_id << " key=" << hex(lock_key) << " ret=" << ret;
+                  << " key=" << hex(lock_key) << " ret=" << ret;
         if (ret != 0) {
             ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
                << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
@@ -588,7 +592,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
             msg = "failed to parse DeleteBitmapUpdateLockPB";
             return;
         }
-        if (lock_info.lock_id() != -1) {
+        if (lock_info.lock_id() != COMPACTION_DELETE_BITMAP_LOCK_ID) {
             msg = "lock id not match";
             code = MetaServiceCode::LOCK_EXPIRED;
             return;
@@ -1024,12 +1028,11 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     // process mow table, check lock
     if (new_tablet_meta.enable_unique_key_merge_on_write()) {
         std::string lock_key =
-                meta_delete_bitmap_update_lock_key({instance_id, new_table_id, new_partition_id});
+                meta_delete_bitmap_update_lock_key({instance_id, new_table_id, -1});
         std::string lock_val;
         ret = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << new_table_id
-                  << " partition_id=" << new_partition_id << " key=" << hex(lock_key)
-                  << " ret=" << ret;
+                  << " key=" << hex(lock_key) << " ret=" << ret;
         if (ret != 0) {
             ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
                << " table_id=" << new_table_id << " key=" << hex(lock_key) << " ret=" << ret;
@@ -1043,7 +1046,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
             msg = "failed to parse DeleteBitmapUpdateLockPB";
             return;
         }
-        if (lock_info.lock_id() != -2) {
+        if (lock_info.lock_id() != SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID) {
             msg = "lock id not match";
             code = MetaServiceCode::LOCK_EXPIRED;
             return;

@@ -90,6 +90,12 @@ public:
     Block(const std::vector<SlotDescriptor*>& slots, size_t block_size,
           bool ignore_trivial_slot = false);
 
+    virtual ~Block() = default;
+    Block(const Block& block) = default;
+    Block& operator=(const Block& p) = default;
+    Block(Block&& block) = default;
+    Block& operator=(Block&& other) = default;
+
     // Make sure the nammes is useless when use block
     void clear_names();
 

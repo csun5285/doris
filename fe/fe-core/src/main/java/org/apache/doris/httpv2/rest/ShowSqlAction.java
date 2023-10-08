@@ -18,7 +18,10 @@
 package org.apache.doris.httpv2.rest;
 
 import org.apache.doris.analysis.Analyzer;
-import org.apache.doris.analysis.SelectStmt;
+import org.apache.doris.analysis.ExplainOptions;
+import org.apache.doris.analysis.InsertStmt;
+import org.apache.doris.analysis.Queriable;
+import org.apache.doris.analysis.QueryStmt;
 import org.apache.doris.analysis.ShowStmt;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
@@ -27,11 +30,24 @@ import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.SqlParserUtils;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
 import org.apache.doris.httpv2.util.ExecutionResultSet;
+import org.apache.doris.nereids.NereidsPlanner;
+import org.apache.doris.nereids.StatementContext;
+import org.apache.doris.nereids.glue.LogicalPlanAdapter;
+import org.apache.doris.nereids.parser.NereidsParser;
+import org.apache.doris.nereids.trees.plans.Explainable;
+import org.apache.doris.nereids.trees.plans.commands.ExplainCommand;
+import org.apache.doris.nereids.trees.plans.commands.ExplainCommand.ExplainLevel;
+import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
+import org.apache.doris.planner.OriginalPlanner;
+import org.apache.doris.planner.Planner;
 import org.apache.doris.qe.CommonResultSet;
 import org.apache.doris.qe.CommonResultSet.CommonResultSetMetaData;
 import org.apache.doris.qe.ConnectContext;
@@ -39,10 +55,12 @@ import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.qe.QueryState.MysqlStateType;
 import org.apache.doris.qe.ResultSet;
 import org.apache.doris.qe.ResultSetMetaData;
+import org.apache.doris.qe.ShowResultSet;
+import org.apache.doris.qe.ShowResultSetMetaData;
 import org.apache.doris.qe.StmtExecutor;
-import org.apache.doris.statistics.util.InternalQuery;
 import org.apache.doris.statistics.util.InternalQueryResult;
 import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
+import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 
 import com.google.common.base.Strings;
@@ -61,8 +79,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.StringReader;
 import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -86,6 +106,7 @@ public class ShowSqlAction extends RestBaseController {
         ConnectContext ctx = new ConnectContext();
         ctx.setQualifiedUser("");
         ctx.setCurrentUserIdentity(new UserIdentity("", "", false));
+        ctx.getCurrentUserIdentity().setIsAnalyzed();
         ctx.setDatabase(getFullDbName(dbName));
         ctx.setEnv(Env.getCurrentEnv());
         ctx.setRemoteIP("");
@@ -95,9 +116,31 @@ public class ShowSqlAction extends RestBaseController {
         }
         ctx.setThreadLocalInfo();
 
-        InternalShowQuery iQuery = new InternalShowQuery(dbName, stmtRequestBody.stmt, ctx);
-        try {
+        List<String> cloudClusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
 
+        // get all available cluster of the user
+        for (String cloudClusterName : cloudClusterNames) {
+            // find a cluster has more than one alive be
+            List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
+            AtomicBoolean hasAliveBe = new AtomicBoolean(false);
+            bes.stream().filter(Backend::isActive).findAny().ifPresent(backend -> {
+                hasAliveBe.set(true);
+            });
+            if (hasAliveBe.get()) {
+                // set a cluster to context cloudCluster
+                ctx.setCloudCluster(cloudClusterName);
+                LOG.debug("set context cluster name {}", cloudClusterName);
+                break;
+            }
+        }
+
+        if (Strings.isNullOrEmpty(ctx.getCloudCluster())) {
+            return ResponseEntityBuilder.okWithCommonError("No cluster with available be");
+        }
+
+        InternalShowQuery iQuery = new InternalShowQuery(dbName, stmtRequestBody.stmt, ctx,
+                stmtRequestBody.enable_nereids_planner);
+        try {
             ResultSet rs = iQuery.query();
             ExecutionResultSet result = generateResultSet(rs);
             return ResponseEntityBuilder.ok(result.getResult());
@@ -150,6 +193,7 @@ public class ShowSqlAction extends RestBaseController {
     private static class StmtRequestBody {
         public Boolean is_sync = true; // CHECKSTYLE IGNORE THIS LINE
         public Long limit = DEFAULT_ROW_LIMIT;
+        public Boolean enable_nereids_planner = true; // CHECKSTYLE IGNORE THIS LINE
         public String stmt;
         public String cloudCluster;
     }
@@ -160,16 +204,21 @@ public class ShowSqlAction extends RestBaseController {
         private final String database;
 
         private ConnectContext context;
+        private Boolean enableNereidsPlanner;
 
         private StatementBase stmt;
         private StmtExecutor executor = null;
         private ResultSet result;
-        // private final List<TResultBatch> resultBatches = Lists.newArrayList();
+        private Analyzer analyzer;
+        private Boolean isSelect = false;
+        private StatementContext statementContext;
 
-        public InternalShowQuery(String database, String sql, ConnectContext context) {
+        public InternalShowQuery(String database, String sql, ConnectContext context,
+                    Boolean enableNereidsPlanner) {
             this.database = database;
             this.sql = sql;
             this.context = context;
+            this.enableNereidsPlanner = enableNereidsPlanner;
         }
 
         /**
@@ -238,58 +287,134 @@ public class ShowSqlAction extends RestBaseController {
             context.setSqlHash(sqlHash);
         }
 
-        private void parseSql() throws DdlException {
-            SqlScanner input = new SqlScanner(new StringReader(sql),
-                    context.getSessionVariable().getSqlMode());
-            SqlParser parser = new SqlParser(input);
+        private void parseSql() throws DdlException, AnalysisException, UserException, Exception {
+            List<StatementBase> stmts = null;
 
-            try {
-                stmt = SqlParserUtils.getFirstStmt(parser);
+            if (enableNereidsPlanner) {
+                try {
+                    stmts = new NereidsParser().parseSQL(sql);
+                } catch (Exception e) {
+                    LOG.info("fall back to older optimizer");
+                }
+            }
+            if (stmts == null) {
+                SqlScanner input = new SqlScanner(new StringReader(sql),
+                        context.getSessionVariable().getSqlMode());
+                SqlParser parser = new SqlParser(input);
+
+                try {
+                    stmt = SqlParserUtils.getFirstStmt(parser);
+                    stmt.setOrigStmt(new OriginStatement(sql, 0));
+                } catch (Exception e) {
+                    LOG.warn("InernalShowQuery: Failed to parse the statement: {}. {}", sql, e);
+                    throw new DdlException("InernalShowQuery: Failed to parse the statement:" + sql);
+                }
+            } else {
+                stmt = stmts.get(0);
                 stmt.setOrigStmt(new OriginStatement(sql, 0));
-            } catch (Exception e) {
-                LOG.warn("InernalShowQuery: Failed to parse the statement: {}. {}", sql, e);
-                throw new DdlException("InernalShowQuery: Failed to parse the statement:" + sql);
+            }
+
+            if ((stmt instanceof QueryStmt && ((Queriable) stmt).isExplain())
+                    || (stmt instanceof LogicalPlanAdapter
+                        && ((LogicalPlanAdapter) stmt).getLogicalPlan() instanceof ExplainCommand)) {
+                return;
+            }
+            if (stmt instanceof InsertStmt && ((InsertStmt) stmt).getQueryStmt().isExplain()) {
+                return;
             }
 
             if (!(stmt instanceof ShowStmt)) {
                 throw new DdlException("InernalShowQuery: Only show statements are supported:" + sql);
             }
+        }
 
+        private ResultSet buildExplainResultSet(String explainString) {
+            ShowResultSetMetaData metaData =
+                    ShowResultSetMetaData.builder()
+                            .addColumn(new Column("Explain String", ScalarType.createVarchar(20)))
+                            .build();
+            List<List<String>> resultRows = new ArrayList<>();
+            for (String col : explainString.split("\n")) {
+                List<String> row = new ArrayList<>();
+                row.add(col);
+                resultRows.add(row);
+            }
+            return new ShowResultSet(metaData, resultRows);
         }
 
         private void execute() throws Exception {
             // Convert show statement to select statement here
             try {
-                Analyzer analyzer = new Analyzer(context.getEnv(), context);
-                SelectStmt selectStmt = ((ShowStmt) stmt).toSelectStmt(analyzer);
-                if (selectStmt != null) {
-                    InternalQuery selectQuery = new InternalQuery(database, sql);
-                    InternalQueryResult internalResult = selectQuery.query();
-                    result = convert(internalResult);
+                // handle for explain query stmt
+                analyzer = new Analyzer(context.getEnv(), context);
+                Planner planner;
+                if (stmt instanceof LogicalPlanAdapter) {
+                    // create plan
+                    StatementContext statementContext = new StatementContext(context, new OriginStatement(sql, 0));
+                    statementContext.setParsedStatement(stmt);
+                    planner = new NereidsPlanner(statementContext);
                 } else {
-                    executor = new StmtExecutor(context, stmt);
-                    context.setExecutor(executor);
-                    executor.execute();
-                    if (context.getState().getStateType() == MysqlStateType.ERR) {
-                        System.err.println("InernalShowQuery: execute show stmt encounter error");
-                        LOG.warn("InernalShowQuery: execute show stmt encounter error");
-                        throw new DdlException("InernalShowQuery: execute show stmt encounter error");
+                    planner = new OriginalPlanner(analyzer);
+                }
+                if (stmt instanceof LogicalPlanAdapter) {
+                    LogicalPlan explainPlan = null;
+                    LogicalPlan logicalPlan = ((LogicalPlanAdapter) stmt).getLogicalPlan();
+                    logicalPlan = ((ExplainCommand) logicalPlan).getLogicalPlan();
+                    if (!(logicalPlan instanceof Explainable)) {
+                        throw new AnalysisException("explain a plan cannot be explained");
                     }
-                    if (executor.isForwardToMaster()) {
-                        result = executor.getShowResultSet();
-                        if (result == null) {
-                            System.err.println("InernalShowQuery: execute forwardToMaster stmt get null result");
-                            LOG.warn("InernalShowQuery: execute forwardToMaster stmt get null result");
-                            throw new DdlException("InernalShowQuery: execute forwardToMaster show stmt get"
-                                    + "null result");
-                        }
-                    } else {
-                        result = executor.fetchResultForNoAuth();
-                        if (result == null) {
-                            System.err.println("InernalShowQuery: execute noraml show stmt get null result");
-                            LOG.warn("InernalShowQuery: execute noraml show stmt get null result");
-                            throw new DdlException("InernalShowQuery: execute noraml show stmt get null result");
-                        }
+                    explainPlan = ((LogicalPlan) ((Explainable) logicalPlan).getExplainPlan(context));
+                    LogicalPlanAdapter logicalPlanAdapter =
+                            new LogicalPlanAdapter(explainPlan, context.getStatementContext());
+                    logicalPlanAdapter.setIsExplain(new ExplainOptions(ExplainLevel.NORMAL));
+                    planner.plan(logicalPlanAdapter, context.getSessionVariable().toThrift());
+                    String explainString = planner.getExplainString(new ExplainOptions(ExplainLevel.NORMAL));
+                    result = buildExplainResultSet(explainString);
+                    return;
+                }
+                if (stmt instanceof QueryStmt) {
+                    stmt.analyze(analyzer);
+                    planner.plan(stmt, context.getSessionVariable().toThrift());
+                    Queriable queryStmt = (Queriable) stmt;
+                    String explainString = planner.getExplainString(queryStmt.getExplainOptions());
+                    result = buildExplainResultSet(explainString);
+                    return;
+                }
+                if (stmt instanceof InsertStmt && ((InsertStmt) stmt).getQueryStmt().isExplain()) {
+                    stmt.analyze(analyzer);
+                    planner.plan(stmt, context.getSessionVariable().toThrift());
+                    InsertStmt insertStmt = (InsertStmt) stmt;
+                    ExplainOptions explainOptions = insertStmt.getQueryStmt().getExplainOptions();
+                    insertStmt.setIsExplain(explainOptions);
+                    String explainString = planner.getExplainString(explainOptions);
+                    result = buildExplainResultSet(explainString);
+                    return;
+                }
+
+                stmt.reset();
+                executor = new StmtExecutor(context, stmt);
+                context.setExecutor(executor);
+                executor.execute();
+                if (context.getState().getStateType() == MysqlStateType.ERR) {
+                    System.err.println("InernalShowQuery: execute show stmt encounter error");
+                    LOG.warn("InernalShowQuery: execute show stmt encounter error");
+                    throw new DdlException("InernalShowQuery: execute show stmt encounter error");
+                }
+                if (executor.isForwardToMaster()) {
+                    result = executor.getShowResultSet();
+                    if (result == null) {
+                        System.err.println("InernalShowQuery: execute forwardToMaster stmt get null result");
+                        LOG.warn("InernalShowQuery: execute forwardToMaster stmt get null result");
+                        throw new DdlException("InernalShowQuery: execute forwardToMaster show stmt get"
+                                + "null result");
+                    }
+                } else {
+                    result = executor.fetchResultForNoAuth();
+                    LOG.info("shwosql: get show result");
+                    if (result == null) {
+                        System.err.println("InernalShowQuery: execute noraml show stmt get null result");
+                        LOG.warn("InernalShowQuery: execute noraml show stmt get null result");
+                        throw new DdlException("InernalShowQuery: execute noraml show stmt get null result");
                     }
                 }
             } catch (Exception e) {

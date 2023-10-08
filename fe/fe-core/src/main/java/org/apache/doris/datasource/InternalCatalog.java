@@ -336,6 +336,26 @@ public class InternalCatalog implements CatalogIf<Database> {
         return null;
     }
 
+    public Table getTableByTableId(Long tableId) {
+        for (Database db : fullNameToDb.values()) {
+            Table table = db.getTableNullable(tableId);
+            if (table != null) {
+                return table;
+            }
+        }
+        return null;
+    }
+
+    public Pair<Database, Table> getDbAndTableByTableId(Long tableId, TableType tableType) {
+        for (Database db : fullNameToDb.values()) {
+            Table table = db.getTableNullable(tableId);
+            if (table != null && tableType == table.getType()) {
+                return Pair.of(db, db.getTableNullable(tableId));
+            }
+        }
+        return null;
+    }
+
     // Use tryLock to avoid potential dead lock
     private boolean tryLock(boolean mustLock) {
         while (true) {
@@ -1726,8 +1746,29 @@ public class InternalCatalog implements CatalogIf<Database> {
                             metaChanged = true;
                             break;
                         }
+
+                        List<Column> oldSchema = indexIdToMeta.get(indexId).getSchema();
+                        List<Column> newSchema = entry.getValue().getSchema();
+                        oldSchema.sort((Column a, Column b) -> a.getUniqueId() - b.getUniqueId());
+                        newSchema.sort((Column a, Column b) -> a.getUniqueId() - b.getUniqueId());
+                        if (oldSchema.size() != newSchema.size()) {
+                            LOG.warn("schema column size diff, old schema {}, new schema {}", oldSchema, newSchema);
+                            metaChanged = true;
+                            break;
+                        } else {
+                            for (int i = 0; i < oldSchema.size(); ++i) {
+                                if (!oldSchema.get(i).equals(newSchema.get(i))) {
+                                    LOG.warn("schema diff, old schema {}, new schema {}",
+                                            oldSchema.get(i), newSchema.get(i));
+                                    metaChanged = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
+
+
 
                 if (metaChanged) {
                     throw new DdlException("Table[" + tableName + "]'s meta has been changed. try again.");
@@ -2367,7 +2408,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                 "Can not create UNIQUE KEY table that enables Merge-On-write"
                     + " with storage policy(" + storagePolicy + ")");
         }
-        olapTable.setStoragePolicy(storagePolicy);
+        // Consider one situation: if the table has no storage policy but some partitions
+        // have their own storage policy then it might be erased by the following function.
+        // So we only set the storage policy if the table's policy is not null or empty
+        if (!Strings.isNullOrEmpty(storagePolicy)) {
+            olapTable.setStoragePolicy(storagePolicy);
+        }
 
         TTabletType tabletType;
         try {
@@ -2830,6 +2876,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         HiveConf hiveConf = new HiveConf();
         hiveConf.set(HMSProperties.HIVE_METASTORE_URIS,
                 hiveTable.getHiveProperties().get(HMSProperties.HIVE_METASTORE_URIS));
+        if (!Strings.isNullOrEmpty(hiveTable.getHiveProperties().get(HMSProperties.HIVE_VERSION))) {
+            hiveConf.set(HMSProperties.HIVE_VERSION, hiveTable.getHiveProperties().get(HMSProperties.HIVE_VERSION));
+        }
         PooledHiveMetaStoreClient client = new PooledHiveMetaStoreClient(hiveConf, 1);
         if (!client.tableExists(hiveTable.getHiveDb(), hiveTable.getHiveTable())) {
             throw new DdlException(String.format("Table [%s] dose not exist in Hive.", hiveTable.getHiveDbTable()));
@@ -3171,6 +3220,23 @@ public class InternalCatalog implements CatalogIf<Database> {
                         break;
                     }
                 }
+
+                List<Column> oldSchema = copiedTbl.getFullSchema();
+                List<Column> newSchema = olapTable.getFullSchema();
+                oldSchema.sort((Column a, Column b) -> a.getUniqueId() - b.getUniqueId());
+                newSchema.sort((Column a, Column b) -> a.getUniqueId() - b.getUniqueId());
+                if (oldSchema.size() != newSchema.size()) {
+                    LOG.warn("schema column size diff, old schema {}, new schema {}", oldSchema, newSchema);
+                    metaChanged = true;
+                } else {
+                    for (int i = 0; i < oldSchema.size(); ++i) {
+                        if (!oldSchema.get(i).equals(newSchema.get(i))) {
+                            LOG.warn("schema diff, old schema {}, new schema {}", oldSchema.get(i), newSchema.get(i));
+                            metaChanged = true;
+                            break;
+                        }
+                    }
+                }
             }
 
             if (metaChanged) {
@@ -3195,10 +3261,14 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode()) {
             int tryCnt = 0;
             while (true) {
+                if (tryCnt++ > Config.drop_rpc_retry_num) {
+                    LOG.warn("failed to drop partition {} of table {}, try cnt {} reaches maximum retry count",
+                            oldPartitionsIds, olapTable.getId(), tryCnt);
+                    break;
+                }
                 try {
                     Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
-                    tryCnt++;
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                             oldPartitionsIds, olapTable.getId(), tryCnt, e);
@@ -3286,10 +3356,14 @@ public class InternalCatalog implements CatalogIf<Database> {
         if (Config.isCloudMode() && !Env.isCheckpointThread()) {
             int tryCnt = 0;
             while (true) {
+                if (tryCnt++ > Config.drop_rpc_retry_num) {
+                    LOG.warn("failed to drop partition {} of table {}, try cnt {} reaches maximum retry count",
+                            oldPartitionsIds, olapTable.getId(), tryCnt);
+                    break;
+                }
                 try {
                     Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
-                    tryCnt++;
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                             oldPartitionsIds, olapTable.getId(), tryCnt, e);
@@ -3368,11 +3442,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             fullNameToDb.put(db.getFullName(), db);
             Env.getCurrentGlobalTransactionMgr().addDatabaseTransactionMgr(db.getId());
 
-            ConnectContext connectContext = new ConnectContext();
-            connectContext.setCluster(SystemInfoService.DEFAULT_CLUSTER);
-            connectContext.setDatabase(db.getFullName());
-            Analyzer analyzer = new Analyzer(Env.getCurrentEnv(), connectContext);
-            db.analyze(analyzer);
+            db.analyze();
         }
         // ATTN: this should be done after load Db, and before loadAlterJob
         recreateTabletInvertIndex();
@@ -3386,7 +3456,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         return icebergTableCreationRecordMgr;
     }
 
-    public ConcurrentHashMap<Long, Database> getIdToDb() {
+    @Override
+    public ConcurrentHashMap<Long, DatabaseIf> getIdToDb() {
         return new ConcurrentHashMap<>(idToDb);
     }
 
@@ -3451,7 +3522,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                                       boolean isDynamicSchema, String tableName,
                                                                       long ttlSeconds,
                                                                       boolean enableUniqueKeyMergeOnWrite,
-                                                                      boolean storeRowColumn)
+                                                                      boolean storeRowColumn, int schemaVersion)
             throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
@@ -3466,6 +3537,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         builder.setIsInMemory(isInMemory);
         builder.setIsPersistent(isPersistent);
         builder.setTtlSeconds(ttlSeconds);
+        builder.setSchemaVersion(schemaVersion);
 
         UUID uuid = UUID.randomUUID();
         Types.PUniqueId tabletUid = Types.PUniqueId.newBuilder()
@@ -3482,6 +3554,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         builder.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
 
         OlapFile.TabletSchemaPB.Builder schemaBuilder = OlapFile.TabletSchemaPB.newBuilder();
+        schemaBuilder.setSchemaVersion(schemaVersion);
+
         if (keysType == KeysType.DUP_KEYS) {
             schemaBuilder.setKeysType(OlapFile.KeysType.DUP_KEYS);
         } else if (keysType == KeysType.UNIQUE_KEYS) {
@@ -3632,7 +3706,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
                         storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
-                        enableUniqueKeyMergeOnWrite, storeRowColumn);
+                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion());
                 requestBuilder.addTabletMetas(builder);
             }
 
@@ -4252,4 +4326,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         return dbToDataSize;
     }
     // --------------- END CLOUD ---------------
+
+    @Override
+    public Collection<DatabaseIf> getAllDbs() {
+        return new HashSet<>(idToDb.values());
+    }
 }

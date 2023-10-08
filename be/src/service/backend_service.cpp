@@ -18,6 +18,7 @@
 #include "service/backend_service.h"
 
 #include <arrow/record_batch.h>
+#include <brpc/controller.h>
 #include <fmt/format.h>
 #include <gen_cpp/BackendService.h>
 #include <gen_cpp/BackendService_types.h>
@@ -29,6 +30,7 @@
 #include <gen_cpp/Types_types.h>
 #include <sys/types.h>
 #include <thrift/concurrency/ThreadFactory.h>
+#include <thrift/protocol/TDebugProtocol.h>
 #include <time.h>
 
 #include <map>
@@ -54,9 +56,11 @@
 #include "io/fs/file_reader.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
+#include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet_manager.h"
+#include "olap/tablet_meta.h"
 #include "olap/txn_manager.h"
 #include "runtime/exec_env.h"
 #include "runtime/external_scan_context_mgr.h"
@@ -65,11 +69,12 @@
 #include "runtime/routine_load/routine_load_task_executor.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/stream_load_recorder.h"
+#include "service/backend_service.h"
 #include "util/arrow/row_batch.h"
+#include "util/brpc_client_cache.h"
 #include "util/defer_op.h"
 #include "util/thrift_server.h"
 #include "util/uid_util.h"
-#include "util/brpc_client_cache.h"
 
 namespace apache {
 namespace thrift {
@@ -222,35 +227,43 @@ void BackendService::get_tablet_stat(TTabletStatResult& result) {
 }
 
 int64_t BackendService::get_trash_used_capacity() {
+#ifdef CLOUD_MODE
+    LOG(FATAL) << "MUST NOT call get_trash_used_capacity";
+#else
     int64_t result = 0;
 
     std::vector<DataDirInfo> data_dir_infos;
     StorageEngine::instance()->get_all_data_dir_info(&data_dir_infos, false /*do not update */);
 
+    // uses excute sql `show trash`, then update backend trash capacity too.
+    StorageEngine::instance()->notify_listener(TaskWorkerPool::TaskWorkerType::REPORT_DISK_STATE);
+
     for (const auto& root_path_info : data_dir_infos) {
-        auto trash_path = fmt::format("{}/{}", root_path_info.path, TRASH_PREFIX);
-        result += StorageEngine::instance()->get_file_or_directory_size(trash_path);
+        result += root_path_info.trash_used_capacity;
     }
+
     return result;
+#endif
 }
 
 void BackendService::get_disk_trash_used_capacity(std::vector<TDiskTrashInfo>& diskTrashInfos) {
+#ifdef CLOUD_MODE
+    LOG(FATAL) << "MUST NOT call get_disk_trash_used_capacity";
+#else
     std::vector<DataDirInfo> data_dir_infos;
     StorageEngine::instance()->get_all_data_dir_info(&data_dir_infos, false /*do not update */);
 
+    // uses excute sql `show trash on <be>`, then update backend trash capacity too.
+    StorageEngine::instance()->notify_listener(TaskWorkerPool::TaskWorkerType::REPORT_DISK_STATE);
+
     for (const auto& root_path_info : data_dir_infos) {
         TDiskTrashInfo diskTrashInfo;
-
         diskTrashInfo.__set_root_path(root_path_info.path);
-
         diskTrashInfo.__set_state(root_path_info.is_used ? "ONLINE" : "OFFLINE");
-
-        auto trash_path = fmt::format("{}/{}", root_path_info.path, TRASH_PREFIX);
-        diskTrashInfo.__set_trash_used_capacity(
-                StorageEngine::instance()->get_file_or_directory_size(trash_path));
-
+        diskTrashInfo.__set_trash_used_capacity(root_path_info.trash_used_capacity);
         diskTrashInfos.push_back(diskTrashInfo);
     }
+#endif
 }
 
 void BackendService::submit_routine_load_task(TStatus& t_status,
@@ -383,7 +396,12 @@ void BackendService::get_stream_load_record(TStreamLoadRecordResult& result,
 }
 
 void BackendService::clean_trash() {
+#ifdef CLOUD_MODE
+    LOG(FATAL) << "MUST NOT call clean_trash";
+#else
     StorageEngine::instance()->start_trash_sweep(nullptr, true);
+    StorageEngine::instance()->notify_listener(TaskWorkerPool::TaskWorkerType::REPORT_DISK_STATE);
+#endif
 }
 
 void BackendService::check_storage_format(TCheckStorageFormatResult& result) {
@@ -435,9 +453,15 @@ void BackendService::check_pre_cache(TCheckPreCacheResponse& response,
 
 void BackendService::ingest_binlog(TIngestBinlogResult& result,
                                    const TIngestBinlogRequest& request) {
+    LOG(INFO) << "ingest binlog. request: " << apache::thrift::ThriftDebugString(request);
+
     constexpr uint64_t kMaxTimeoutMs = 1000;
+
     TStatus tstatus;
-    Defer defer {[&result, &tstatus]() { result.__set_status(tstatus); }};
+    Defer defer {[&result, &tstatus]() {
+        result.__set_status(tstatus);
+        LOG(INFO) << "ingest binlog. result: " << apache::thrift::ThriftDebugString(result);
+    }};
 
     auto set_tstatus = [&tstatus](TStatusCode::type code, std::string error_msg) {
         tstatus.__set_status_code(code);
@@ -590,6 +614,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     }
     RowsetId new_rowset_id = StorageEngine::instance()->next_rowset_id();
     rowset_meta->set_rowset_id(new_rowset_id);
+    rowset_meta->set_tablet_uid(local_tablet->tablet_uid());
 
     // Step 5: get all segment files
     // Step 5.1: get all segment files size
@@ -609,6 +634,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
             RETURN_IF_ERROR(client->head());
             return client->get_content_length(&segment_file_size);
         };
+
         status = HttpClient::execute_with_retry(max_retry, 1, get_segment_file_size_cb);
         if (!status.ok()) {
             LOG(WARNING) << "failed to get segment file size from " << get_segment_file_size_url
@@ -616,6 +642,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
             status.to_thrift(&tstatus);
             return;
         }
+
         segment_file_sizes.push_back(segment_file_size);
         segment_file_urls.push_back(std::move(get_segment_file_size_url));
     }
@@ -680,7 +707,7 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
         }
     }
 
-    // Step 6: create rowset && commit
+    // Step 6: create rowset && calculate delete bitmap && commit
     // Step 6.1: create rowset
     RowsetSharedPtr rowset;
     status = RowsetFactory::create_rowset(local_tablet->tablet_schema(),
@@ -696,11 +723,48 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
         return;
     }
 
-    // Step 6.2: commit txn
+    // Step 6.2 calculate delete bitmap before commit
+    auto calc_delete_bitmap_token =
+            StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
+    DeleteBitmapPtr delete_bitmap = std::make_shared<DeleteBitmap>(local_tablet_id);
+    RowsetIdUnorderedSet pre_rowset_ids;
+    if (local_tablet->enable_unique_key_merge_on_write()) {
+        auto beta_rowset = reinterpret_cast<BetaRowset*>(rowset.get());
+        std::vector<segment_v2::SegmentSharedPtr> segments;
+        status = beta_rowset->load_segments(&segments);
+        if (!status) {
+            LOG(WARNING) << "failed to load segments from rowset"
+                         << ". rowset_id: " << beta_rowset->rowset_id() << ", txn_id=" << txn_id
+                         << ", status=" << status.to_string();
+            status.to_thrift(&tstatus);
+            return;
+        }
+        if (segments.size() > 1) {
+            // calculate delete bitmap between segments
+            status = local_tablet->calc_delete_bitmap_between_segments(rowset, segments,
+                                                                       delete_bitmap);
+            if (!status) {
+                LOG(WARNING) << "failed to calculate delete bitmap"
+                             << ". tablet_id: " << local_tablet->tablet_id()
+                             << ". rowset_id: " << rowset->rowset_id() << ", txn_id=" << txn_id
+                             << ", status=" << status.to_string();
+                status.to_thrift(&tstatus);
+                return;
+            }
+        }
+
+        local_tablet->commit_phase_update_delete_bitmap(rowset, pre_rowset_ids, delete_bitmap,
+                                                        segments, txn_id,
+                                                        calc_delete_bitmap_token.get(), nullptr);
+        calc_delete_bitmap_token->wait();
+        calc_delete_bitmap_token->get_delete_bitmap(delete_bitmap);
+    }
+
+    // Step 6.3: commit txn
     Status commit_txn_status = StorageEngine::instance()->txn_manager()->commit_txn(
             local_tablet->data_dir()->get_meta(), rowset_meta->partition_id(),
             rowset_meta->txn_id(), rowset_meta->tablet_id(), rowset_meta->tablet_schema_hash(),
-            local_tablet->tablet_uid(), rowset_meta->load_id(), rowset, true);
+            local_tablet->tablet_uid(), rowset_meta->load_id(), rowset, false);
     if (!commit_txn_status && !commit_txn_status.is<ErrorCode::PUSH_TRANSACTION_ALREADY_EXIST>()) {
         auto err_msg = fmt::format(
                 "failed to commit txn for remote tablet. rowset_id: {}, remote_tablet_id={}, "
@@ -712,6 +776,12 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
         return;
     }
 
+    if (local_tablet->enable_unique_key_merge_on_write()) {
+        StorageEngine::instance()->txn_manager()->set_txn_related_delete_bitmap(
+                partition_id, txn_id, local_tablet_id, local_tablet->schema_hash(),
+                local_tablet->tablet_uid(), true, delete_bitmap, pre_rowset_ids);
+    }
+
     tstatus.__set_status_code(TStatusCode::OK);
 }
 void BackendService::sync_load_for_tablets(TSyncLoadForTabletsResponse&,
@@ -720,9 +790,11 @@ void BackendService::sync_load_for_tablets(TSyncLoadForTabletsResponse&,
         std::for_each(tablet_ids.cbegin(), tablet_ids.cend(), [](int64_t tablet_id) {
             // TODO(liuchangliang): batch sync
             TabletSharedPtr tablet;
-            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet, false);
-            if (st) {
-                tablet->cloud_sync_rowsets(-1, true);
+            Status st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet, true);
+            if (!st.ok()) return;
+            st = tablet->cloud_sync_rowsets(-1, true);
+            if (!st.ok()) {
+                LOG(WARNING) << "failed to sync load for tablet " << tablet_id << ": " << st;
             }
         });
     };

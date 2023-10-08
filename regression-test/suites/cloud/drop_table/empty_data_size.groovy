@@ -64,16 +64,34 @@ suite("empty_data_size") {
 
     sql """ INSERT INTO ${tableName}(test_varchar, test_datetime) VALUES ('test1','2022-04-27 16:00:33'),('test2','2022-04-27 16:00:54') """
 
-    // ensure fe will get tablet info from ms
-    sleep(65000)
+    def dataSizeMetricsStr = 'doris_fe_table_data_size{db_name="regression_test_cloud_drop_table", table_name="table_emtpy_data"'
 
-    def resJson = http_post(url)
-    // def res = new JsonSlurper().parseText(resJson)
-    assertTrue(resJson.contains("db_name=\"regression_test_cloud_drop_table\", table_name=\"table_emtpy_data\""))
+    // data size metrics of the new table should present
+    def long start = System.currentTimeMillis()
+    def boolean containsTestedTable = false
+    def long current = -1
+    while (!containsTestedTable && current - start < 600000) {
+        def resJson = http_post(url)
+        // def res = new JsonSlurper().parseText(resJson)
+        containsTestedTable = resJson.contains(dataSizeMetricsStr)
+        current = System.currentTimeMillis()
+        sleep(1000)
+    }
+    assertTrue(containsTestedTable)
 
     sql """ DROP TABLE ${tableName} """
-    resJson = http_post(url)
-    assertTrue(!resJson.contains("db_name=\"regression_test_cloud_drop_table\", table_name=\"table_emtpy_data\""))
+
+    // data size metrics of the new table should disappear 
+    start = System.currentTimeMillis()
+    containsTestedTable = true
+    current = -1
+    while (containsTestedTable && current - start < 600000) {
+        def resJson = http_post(url)
+        containsTestedTable = resJson.contains(dataSizeMetricsStr)
+        current = System.currentTimeMillis()
+        sleep(1000)
+    }
+    assertFalse(containsTestedTable)
 
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE """
 }

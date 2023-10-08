@@ -100,7 +100,7 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
         LogicalPlanAdapter logicalPlanAdapter = new LogicalPlanAdapter(logicalQuery, ctx.getStatementContext());
         planner = new NereidsPlanner(ctx.getStatementContext());
         planner.plan(logicalPlanAdapter, ctx.getSessionVariable().toThrift());
-
+        executor.checkBlockRules();
         if (ctx.getMysqlChannel() != null) {
             ctx.getMysqlChannel().reset();
         }
@@ -118,10 +118,16 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                 physicalOlapTableSink.getDatabase(),
                 physicalOlapTableSink.getTargetTable(), label, planner);
         isTxnBegin = true;
-
-        sink.init(ctx.queryId(), txn.getTxnId(), physicalOlapTableSink.getDatabase().getId(),
-                ctx.getExecTimeout(), ctx.getSessionVariable().getSendBatchParallelism(),
-                false/*single tablet*/, false/*strict mode*/, ctx.getExecTimeout()/*txn timeout*/);
+        boolean isStrictMode = (ctx.getSessionVariable().getEnableInsertStrict()
+                && physicalOlapTableSink.isPartialUpdate()
+                && physicalOlapTableSink.isFromNativeInsertStmt());
+        sink.init(ctx.queryId(), txn.getTxnId(),
+                physicalOlapTableSink.getDatabase().getId(),
+                ctx.getExecTimeout(),
+                ctx.getSessionVariable().getSendBatchParallelism(),
+                false,
+                isStrictMode,
+                ctx.getExecTimeout());
 
         sink.complete(new Analyzer(Env.getCurrentEnv(), ctx));
         TransactionState state = Env.getCurrentGlobalTransactionMgr().getTransactionState(

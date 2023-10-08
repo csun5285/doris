@@ -2725,7 +2725,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
             std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 0);
@@ -2755,7 +2755,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
             std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, partition_id});
+                    meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 1);

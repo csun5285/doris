@@ -35,6 +35,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "agent/task_worker_pool.h"
 #include "common/status.h"
 #include "gutil/ref_counted.h"
 #include "olap/calc_delete_bitmap_executor.h"
@@ -91,14 +92,14 @@ public:
     void clear_transaction_task(const TTransactionId transaction_id,
                                 const std::vector<TPartitionId>& partition_ids);
 
-    // Note: 这里只能reload原先已经存在的root path，即re-load启动时就登记的root path
-    // 是允许的，但re-load全新的path是不允许的，因为此处没有彻底更新ce调度器信息
-    void load_data_dirs(const std::vector<DataDir*>& stores);
+    // Note: Only the previously existing root path can be reloaded here, that is, the root path registered when re load starts is allowed,
+    // but the brand new path of re load is not allowed because the ce scheduler information has not been thoroughly updated here
+    Status load_data_dirs(const std::vector<DataDir*>& stores);
 
     template <bool include_unused = false>
     std::vector<DataDir*> get_stores();
 
-    // @brief 获取所有root_path信息
+    // get all info of root_path
     Status get_all_data_dir_info(std::vector<DataDirInfo>* data_dir_infos, bool need_update);
 
     int64_t get_file_or_directory_size(const std::string& file_path);
@@ -122,8 +123,8 @@ public:
     //
     // @param [out] shard_path choose an available root_path to clone new tablet
     // @return error code
-    Status obtain_shard_path(TStorageMedium::type storage_medium, std::string* shared_path,
-                             DataDir** store);
+    Status obtain_shard_path(TStorageMedium::type storage_medium, int64_t path_hash,
+                             std::string* shared_path, DataDir** store);
 
     // Load new tablet to make it effective.
     //
@@ -137,6 +138,7 @@ public:
     void register_report_listener(TaskWorkerPool* listener);
     void deregister_report_listener(TaskWorkerPool* listener);
     void notify_listeners();
+    void notify_listener(TaskWorkerPool::TaskWorkerType task_worker_type);
 
     Status execute_task(EngineTask* task);
 
@@ -187,6 +189,9 @@ public:
     void create_base_compaction(TabletSharedPtr best_tablet,
                                 std::shared_ptr<BaseCompaction>& base_compaction);
 
+    void create_full_compaction(TabletSharedPtr best_tablet,
+                                std::shared_ptr<FullCompaction>& full_compaction);
+
     void create_single_replica_compaction(
             TabletSharedPtr best_tablet,
             std::shared_ptr<SingleReplicaCompaction>& single_replica_compaction,
@@ -229,6 +234,11 @@ public:
     RowsetSharedPtr get_quering_rowset(RowsetId rs_id);
 
     void evict_querying_rowset(RowsetId rs_id);
+
+    bool add_broken_path(std::string path);
+    bool remove_broken_path(std::string path);
+
+    std::set<string> get_broken_paths() { return _broken_paths; }
 
 private:
     // Instance should be inited from `static open()`
@@ -334,6 +344,8 @@ private:
 
     void _async_publish_callback();
 
+    Status _persist_broken_paths();
+
 private:
     struct CompactionCandidate {
         CompactionCandidate(uint32_t nicumulative_compaction_, int64_t tablet_id_, uint32_t index_)
@@ -368,6 +380,9 @@ private:
     std::mutex _store_lock;
     std::mutex _trash_sweep_lock;
     std::map<std::string, DataDir*> _store_map;
+    std::set<std::string> _broken_paths;
+    std::mutex _broken_paths_mutex;
+
     uint32_t _available_storage_medium_type_count;
 
     int32_t _effective_cluster_id;
@@ -481,6 +496,10 @@ private:
     // aync publish for discontinuous versions of merge_on_write table
     scoped_refptr<Thread> _async_publish_thread;
     std::mutex _async_publish_mutex;
+
+    bool _clear_segment_cache = false;
+
+    std::atomic<bool> _need_clean_trash {false};
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
 };

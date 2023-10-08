@@ -85,6 +85,7 @@ public class CloudPartition extends Partition {
                 version = 0;
             }
             LOG.debug("get version from meta service, version: {}, partition: {}", version, super.getId());
+            // Cache visible version, see hasData() for details.
             super.setVisibleVersion(version);
             return version;
         } catch (RpcException e) {
@@ -167,8 +168,15 @@ public class CloudPartition extends Partition {
      */
     @Override
     public boolean hasData() {
-        // Every partition starts from version 1, version 1 has no deta
-        return getVisibleVersion() > 1;
+        // Every partition starts from version 1, version 1 has no data
+        final long versionNoData = 1;
+
+        // As long as version is greater than 1, it can be determined that there is data here.
+        // To avoid sending an RPC request, see the cached visible version here first.
+        if (super.getVisibleVersion() > versionNoData) {
+            return true;
+        }
+        return getVisibleVersion() > versionNoData;
     }
 
     private static SelectdbCloud.GetVersionResponse getVersionFromMeta(SelectdbCloud.GetVersionRequest req)

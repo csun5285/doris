@@ -19,8 +19,10 @@
 
 #include "cloud/utils.h"
 #include "cloud/meta_mgr.h"
+#include "common/status.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset.h"
+#include "olap/tablet_meta.h"
 #include "util/defer_op.h"
 
 namespace doris {
@@ -73,17 +75,28 @@ Status EngineCalcDeleteBitmapTask::finish() {
                 break;
             }
 
-            RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(tablet.get()));
+            auto st = tablet->cloud_sync_rowsets();
+            if (!st.ok() && !st.is<ErrorCode::INVALID_TABLET_STATE>()) {
+                return st;
+            }
+            if (st.is<ErrorCode::INVALID_TABLET_STATE>()) [[unlikely]] {
+                add_succ_tablet_id(tablet->tablet_id());
+                LOG(INFO)
+                        << "tablet is under alter process, delete bitmap will be calculated later, "
+                           "tablet_id: "
+                        << tablet->tablet_id() << " txn_id: " << transaction_id
+                        << ", request_version=" << version;
+                continue;
+            }
             int64_t max_version = tablet->max_version().second;
             if (version != max_version + 1) {
-                if (tablet->tablet_state() != TABLET_NOTREADY || max_version != 1) {
-                    _error_tablet_ids->push_back(tablet_id);
-                    res = Status::Error<ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS>("version not continuous");
-                    LOG(WARNING) << "version not continuous, current max version=" << max_version
-                                 << ", request_version=" << version
-                                 << " tablet_id=" << tablet->tablet_id();
-                    break;
-                }
+                _error_tablet_ids->push_back(tablet_id);
+                res = Status::Error<ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS>(
+                        "version not continuous");
+                LOG(WARNING) << "version not continuous, current max version=" << max_version
+                             << ", request_version=" << version
+                             << " tablet_id=" << tablet->tablet_id();
+                break;
             }
 
             total_task_num.fetch_add(1);

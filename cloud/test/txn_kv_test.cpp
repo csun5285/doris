@@ -1,5 +1,8 @@
 
 // clang-format off
+#include <bthread/bthread.h>
+#include <fmt/format.h>
+#include <foundationdb/fdb_c_options.g.h>
 #include <gen_cpp/olap_file.pb.h>
 #include <cstddef>
 #include "common/config.h"
@@ -33,6 +36,12 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     init_txn_kv();
     return RUN_ALL_TESTS();
+}
+
+TEST(TxnKvTest, Network) {
+    fdb::Network network(FDBNetworkOption {});
+    network.init();
+    network.stop();
 }
 
 TEST(TxnKvTest, GetVersionTest) {
@@ -195,6 +204,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
     std::unique_ptr<Transaction> txn;
     int ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ValueBuf val_buf;
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
@@ -204,6 +215,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
 
     // Check get
     ret = txn_kv->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
     ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
@@ -225,6 +238,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
     // Check remove
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
 }
@@ -264,6 +279,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     ASSERT_EQ(ret, 0);
     ValueBuf val_buf;
     doris::TabletSchemaPB saved_schema;
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
     std::cout << "num iterators=" << val_buf.iters_.size() << std::endl;
@@ -314,8 +331,127 @@ TEST(TxnKvTest, PutLargeValueTest) {
     // Check remove
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
+    ret = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(ret, 1);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 1);
+}
+
+TEST(TxnKvTest, RangeGetIteratorContinue) {
+    // insert data
+    std::string prefix("range_get_iterator_continue");
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        for (size_t i = 0; i < 1000; ++i) {
+            txn->put(fmt::format("{}-{:05}", prefix, i), std::to_string(i));
+        }
+        ASSERT_EQ(txn->commit(), 0);
+    }
+
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+
+    std::unique_ptr<RangeGetIterator> it;
+    std::string end = prefix + "\xFF";
+    ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+
+    size_t i = 0;
+    while (true) {
+        while (it->has_next()) {
+            auto [k, v] = it->next();
+            ASSERT_EQ(k, fmt::format("{}-{:05}", prefix, i));
+            ASSERT_EQ(v, std::to_string(i));
+            i += 1;
+        }
+        if (!it->more()) {
+            break;
+        }
+        std::string begin = it->next_begin_key();
+        ASSERT_EQ(txn->get(begin, end, &it, true, 500), 0);
+    }
+    ASSERT_EQ(i, 1000);
+}
+
+TEST(TxnKvTest, RangeGetIteratorSeek) {
+    // insert data
+    std::string prefix("range_get_iterator_seek");
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        for (size_t i = 0; i < 10; ++i) {
+            txn->put(fmt::format("{}-{:05}", prefix, i), std::to_string(i));
+        }
+        ASSERT_EQ(txn->commit(), 0);
+    }
+
+    // Seek to MID
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+
+        std::unique_ptr<RangeGetIterator> it;
+        std::string end = prefix + "\xFF";
+        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+
+        it->seek(5);
+        std::vector<std::string_view> values;
+        while (it->has_next()) {
+            auto [_, v] = it->next();
+            values.push_back(v);
+        }
+
+        std::vector<std::string_view> expected_values {"5", "6", "7", "8", "9"};
+        ASSERT_EQ(values, expected_values);
+
+        // reset
+        it->reset();
+        values.clear();
+        while (it->has_next()) {
+            auto [_, v] = it->next();
+            values.push_back(v);
+        }
+        expected_values = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
+        ASSERT_EQ(values, expected_values);
+    }
+
+    // Seek out of range?
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+
+        std::unique_ptr<RangeGetIterator> it;
+        std::string end = prefix + "\xFF";
+        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+
+        it->seek(10);
+        ASSERT_FALSE(it->has_next());
+    }
+}
+
+TEST(TxnKvTest, AbortTxn) {
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+
+    ASSERT_EQ(txn->begin(), 0);
+    txn->atomic_set_ver_key("prefix", "value");
+    ASSERT_EQ(txn->abort(), 0);
+}
+
+TEST(TxnKvTest, RunInBthread) {
+    bthread_t tid;
+    auto thread = +[](void*) -> void* {
+        std::unique_ptr<Transaction> txn;
+        EXPECT_EQ(txn_kv->create_txn(&txn), 0);
+
+        std::string value;
+        EXPECT_EQ(txn->get("not_exists_key", &value), 1);
+        txn->remove("not_exists_key");
+        EXPECT_EQ(txn->commit(), 0);
+        return nullptr;
+    };
+    bthread_start_background(&tid, nullptr, thread, nullptr);
+    bthread_join(tid, nullptr);
 }
 
 // vim: et tw=100 ts=4 sw=4 cc=80:

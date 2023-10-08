@@ -92,8 +92,8 @@ void download(io::FileBlockSPtr file_block, size_t size = 0) {
 
     std::string data(size, '0');
     Slice result(data.data(), size);
-    file_block->append(result);
-    file_block->finalize_write();
+    ASSERT_TRUE(file_block->append(result).ok());
+    ASSERT_TRUE(file_block->finalize_write().ok());
 }
 
 void complete(const io::FileBlocksHolder& holder) {
@@ -549,7 +549,7 @@ void test_file_cache(io::FileCacheType cache_type) {
         /// Test LRUCache::restore().
 
         io::BlockFileCache cache2(cache_base_path, settings);
-        cache2.initialize();
+        ASSERT_TRUE(cache2.initialize().ok());
         while(true) {
             if (cache2.get_lazy_open_success()){
                 break;
@@ -584,7 +584,7 @@ void test_file_cache(io::FileCacheType cache_type) {
         settings2.query_queue_elements = 0;
         settings2.max_file_block_size = 10;
         io::BlockFileCache cache2(caches_dir / "cache2", settings2);
-        cache2.initialize();
+        ASSERT_TRUE(cache2.initialize().ok());
         while(true) {
             if (cache2.get_lazy_open_success()){
                 break;
@@ -950,9 +950,9 @@ TEST(BlockFileCache, change_cache_type) {
         size_t size = blocks[0]->range().size();
         std::string data(size, '0');
         Slice result(data.data(), size);
-        blocks[0]->append(result);
-        ASSERT_TRUE(blocks[0]->change_cache_type_self(io::FileCacheType::INDEX));
-        blocks[0]->finalize_write();
+        ASSERT_TRUE(blocks[0]->append(result).ok());
+        blocks[0]->change_cache_type_self(io::FileCacheType::INDEX);
+        ASSERT_TRUE(blocks[0]->finalize_write().ok());
         auto key_str = key.to_string();
         auto subdir = fs::path(cache_base_path) /
                       (key_str + "_" + std::to_string(blocks[0]->expiration_time()));
@@ -999,7 +999,7 @@ TEST(BlockFileCache, fd_cache_remove) {
         assert_range(2, blocks[0], io::FileBlock::Range(0, 8), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(9);
-        blocks[0]->read_at(Slice(buffer.get(), 9), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 9), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 0)));
     }
     {
@@ -1011,7 +1011,7 @@ TEST(BlockFileCache, fd_cache_remove) {
         assert_range(2, blocks[0], io::FileBlock::Range(9, 9), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(1);
-        blocks[0]->read_at(Slice(buffer.get(), 1), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 1), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 9)));
     }
     {
@@ -1023,7 +1023,7 @@ TEST(BlockFileCache, fd_cache_remove) {
         assert_range(4, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(5);
-        blocks[0]->read_at(Slice(buffer.get(), 5), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 5), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 10)));
     }
     {
@@ -1035,7 +1035,7 @@ TEST(BlockFileCache, fd_cache_remove) {
         assert_range(4, blocks[0], io::FileBlock::Range(15, 24), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(10);
-        blocks[0]->read_at(Slice(buffer.get(), 10), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 10), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 15)));
     }
     EXPECT_FALSE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 0)));
@@ -1083,7 +1083,7 @@ TEST(BlockFileCache, fd_cache_evict) {
         assert_range(2, blocks[0], io::FileBlock::Range(0, 8), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(9);
-        blocks[0]->read_at(Slice(buffer.get(), 9), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 9), 0).ok());
         remove_file_name = blocks[0]->get_path_in_local_cache();
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 0)));
     }
@@ -1096,7 +1096,7 @@ TEST(BlockFileCache, fd_cache_evict) {
         assert_range(2, blocks[0], io::FileBlock::Range(9, 9), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(1);
-        blocks[0]->read_at(Slice(buffer.get(), 1), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 1), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 9)));
     }
     {
@@ -1108,7 +1108,7 @@ TEST(BlockFileCache, fd_cache_evict) {
         assert_range(4, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
         std::unique_ptr<char[]> buffer = std::make_unique<char[]>(5);
-        blocks[0]->read_at(Slice(buffer.get(), 5), 0);
+        ASSERT_TRUE(blocks[0]->read_at(Slice(buffer.get(), 5), 0).ok());
         EXPECT_TRUE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 10)));
     }
     EXPECT_FALSE(io::BlockFileCache::contains_file_reader(std::make_pair(key, 0)));

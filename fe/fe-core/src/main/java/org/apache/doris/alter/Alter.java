@@ -54,11 +54,9 @@ import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
-import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.ReplicaAllocation;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.TableIf.TableType;
-import org.apache.doris.catalog.Tablet;
 import org.apache.doris.catalog.View;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
@@ -189,20 +187,21 @@ public class Alter {
         boolean needProcessOutsideTableLock = false;
         if (currentAlterOps.checkTableStoragePolicy(alterClauses)) {
             String tableStoragePolicy = olapTable.getStoragePolicy();
-            if (!tableStoragePolicy.isEmpty()) {
+            String currentStoragePolicy = currentAlterOps.getTableStoragePolicy(alterClauses);
+
+            // If the two policy has one same resource, then it's safe for the table to change policy
+            // There would only be the cooldown ttl or cooldown time would be affected
+            if (!Env.getCurrentEnv().getPolicyMgr()
+                    .checkStoragePolicyIfSameResource(tableStoragePolicy, currentStoragePolicy)
+                    && !tableStoragePolicy.isEmpty()) {
                 for (Partition partition : olapTable.getAllPartitions()) {
-                    for (Tablet tablet : partition.getBaseIndex().getTablets()) {
-                        for (Replica replica : tablet.getReplicas()) {
-                            if (replica.getRowCount() > 0 || replica.getDataSize() > 0) {
-                                throw new DdlException("Do not support alter table's storage policy , this table ["
-                                        + olapTable.getName() + "] has storage policy " + tableStoragePolicy
-                                        + ", the table need to be empty.");
-                            }
-                        }
+                    if (Partition.PARTITION_INIT_VERSION < partition.getVisibleVersion()) {
+                        throw new DdlException("Do not support alter table's storage policy , this table ["
+                                + olapTable.getName() + "] has storage policy " + tableStoragePolicy
+                                + ", the table need to be empty.");
                     }
                 }
             }
-            String currentStoragePolicy = currentAlterOps.getTableStoragePolicy(alterClauses);
             // check currentStoragePolicy resource exist.
             Env.getCurrentEnv().getPolicyMgr().checkStoragePolicyExist(currentStoragePolicy);
 
@@ -497,11 +496,20 @@ public class Alter {
                 ModifyPartitionClause clause = ((ModifyPartitionClause) alterClause);
                 Map<String, String> properties = clause.getProperties();
                 List<String> partitionNames = clause.getPartitionNames();
-                // currently, only in memory and storage policy property could reach here
-                Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
-                ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
-                        db, tableName, partitionNames, properties);
+
+                if (Config.isCloudMode()) {
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateCloudPartitionsProperties(
+                            db, tableName, partitionNames, properties);
+                } else {
+                    // currently, only in memory and storage policy property could reach here
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY));
+                    ((SchemaChangeHandler) schemaChangeHandler).updatePartitionsProperties(
+                            db, tableName, partitionNames, properties);
+                }
                 OlapTable olapTable = (OlapTable) table;
                 olapTable.writeLockOrDdlException();
                 try {
@@ -509,23 +517,32 @@ public class Alter {
                 } finally {
                     olapTable.writeUnlock();
                 }
+
             } else if (alterClause instanceof ModifyTablePropertiesClause) {
                 Map<String, String> properties = alterClause.getProperties();
-                // currently, only in memory and storage policy property could reach here
-                Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD));
-                ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
+                if (Config.isCloudMode()) {
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateCloudTableProperties(db, tableName, properties);
+                } else {
+                    // currently, only in memory and storage policy property could reach here
+                    Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD));
+                    ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
+                }
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
             }
@@ -683,7 +700,7 @@ public class Alter {
                 try {
                     view.init();
                 } catch (UserException e) {
-                    throw new DdlException("failed to init view stmt", e);
+                    throw new DdlException("failed to init view stmt, reason=" + e.getMessage());
                 }
                 view.setNewFullSchema(newFullSchema);
                 String viewName = view.getName();
@@ -719,7 +736,7 @@ public class Alter {
             try {
                 view.init();
             } catch (UserException e) {
-                throw new DdlException("failed to init view stmt", e);
+                throw new DdlException("failed to init view stmt, reason=" + e.getMessage());
             }
             view.setNewFullSchema(newFullSchema);
 
@@ -804,6 +821,9 @@ public class Alter {
         // get value from properties here
         // 1. replica allocation
         ReplicaAllocation replicaAlloc = PropertyAnalyzer.analyzeReplicaAllocation(properties, "");
+        if (!replicaAlloc.isNotSet()) {
+            olapTable.checkChangeReplicaAllocation();
+        }
         Env.getCurrentSystemInfo().checkReplicaAllocation(replicaAlloc);
         // 2. in memory
         boolean newInMemory = PropertyAnalyzer.analyzeBooleanProp(properties,

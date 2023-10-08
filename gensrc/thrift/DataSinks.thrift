@@ -36,6 +36,7 @@ enum TDataSinkType {
     RESULT_FILE_SINK,
     JDBC_TABLE_SINK,
     MULTI_CAST_DATA_STREAM_SINK,
+    GROUP_COMMIT_OLAP_TABLE_SINK,
 }
 
 enum TResultSinkType {
@@ -124,6 +125,7 @@ struct TResultFileSinkOptions {
     15: optional string orc_schema
 
     16: optional bool delete_existing_files;
+    17: optional string file_suffix;
 }
 
 struct TMemoryScratchSink {

@@ -500,7 +500,7 @@ set(DORIS_LINK_LIBS
     DorisGen
     Webserver
     Geo
-    geo_type
+    GeoType
     Vec
     Cloud
     Pipeline

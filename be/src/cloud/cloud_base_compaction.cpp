@@ -6,6 +6,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "util/thread.h"
 #include "util/uuid_generator.h"
+#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -250,6 +251,10 @@ Status CloudBaseCompaction::modify_rowsets(const Merger::Statistics* merger_stat
 
     {
         std::lock_guard wrlock(_tablet->get_header_lock());
+        // clang-format off
+        _tablet->set_last_base_compaction_success_time(std::max(_tablet->last_base_compaction_success_time(), stats.last_base_compaction_time_ms()));
+        _tablet->set_last_cumu_compaction_success_time(std::max(_tablet->last_cumu_compaction_success_time(), stats.last_cumu_compaction_time_ms()));
+        // clang-format on
         if (_tablet->base_compaction_cnt() >= stats.base_compaction_cnt()) {
             // This could happen while calling `sync_tablet_rowsets` during `commit_tablet_job`
             return Status::OK();

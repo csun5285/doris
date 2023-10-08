@@ -67,7 +67,8 @@ public:
                             const int fragment_id, int backend_num,
                             std::shared_ptr<QueryContext> query_ctx, ExecEnv* exec_env,
                             const std::function<void(RuntimeState*, Status*)>& call_back,
-                            const report_status_callback& report_status_cb);
+                            const report_status_callback& report_status_cb,
+                            bool group_commit = false);
 
     ~PipelineFragmentContext();
 
@@ -122,6 +123,8 @@ public:
     }
 
     taskgroup::TaskGroup* get_task_group() const { return _query_ctx->get_task_group(); }
+
+    bool is_group_commit() { return _group_commit; }
 
 private:
     Status _create_sink(int sender_id, const TDataSink& t_data_sink, RuntimeState* state);
@@ -200,6 +203,7 @@ private:
     // If this is set to false, and '_is_report_success' is false as well,
     // This executor will not report status to FE on being cancelled.
     bool _is_report_on_cancel;
+    bool _group_commit;
 };
 } // namespace pipeline
 } // namespace doris

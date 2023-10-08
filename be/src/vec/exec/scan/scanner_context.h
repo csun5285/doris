@@ -78,6 +78,8 @@ public:
     virtual Status get_block_from_queue(RuntimeState* state, vectorized::BlockUPtr* block,
                                         bool* eos, int id, bool wait = true);
 
+    [[nodiscard]] Status validate_block_schema(Block* block);
+
     // When a scanner complete a scan, this method will be called
     // to return the scanner to the list for next scheduling.
     void push_back_scanner_and_reschedule(VScannerSPtr scanner);
@@ -153,7 +155,7 @@ public:
     // the unique id of this context
     std::string ctx_id;
     int32_t queue_idx = -1;
-    ThreadPoolToken* thread_token;
+    ThreadPoolToken* thread_token = nullptr;
     std::vector<bthread_t> _btids;
 
 private:

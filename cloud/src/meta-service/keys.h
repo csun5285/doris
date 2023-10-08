@@ -76,6 +76,7 @@ struct BasicKeyInfo : Base {
     template<typename... Args>
     BasicKeyInfo(Args&&... args) : Base(std::forward<Args>(args)...) {}
     constexpr static size_t n = N;
+    using base_type = Base;
 };
 
 // ATTN: newly added key must have different type number
@@ -146,6 +147,7 @@ using MetaSchemaKeyInfo    = BasicKeyInfo<21, std::tuple<std::string,  int64_t, 
 //                                                      0:instance_id  1:tablet_id  2:rowest_id  3:version  4:seg_id 
 using MetaDeleteBitmapInfo = BasicKeyInfo<22 , std::tuple<std::string, int64_t,     std::string, int64_t, int64_t>>;
 
+// partition_id of -1 indicates all partitions
 //                                                      0:instance_id  1:table_id 2:partition_id
 using MetaDeleteBitmapUpdateLockInfo = BasicKeyInfo<23 , std::tuple<std::string, int64_t, int64_t>>;
 
@@ -156,6 +158,7 @@ using MetaPendingDeleteBitmapInfo = BasicKeyInfo<24 , std::tuple<std::string, in
 using RLJobProgressKeyInfo = BasicKeyInfo<25, std::tuple<std::string, int64_t, int64_t>>;
 
 void instance_key(const InstanceKeyInfo& in, std::string* out);
+static inline std::string instance_key(const InstanceKeyInfo& in) { std::string s; instance_key(in, &s); return s; }
 
 std::string txn_key_prefix(std::string_view instance_id);
 void txn_label_key(const TxnLabelKeyInfo& in, std::string* out);

@@ -385,7 +385,8 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
                                 tbl.getDataSortInfo(), tbl.getCompressionType(), tbl.getStoragePolicy(),
                                 tbl.isInMemory(), tbl.isPersistent(), true, tbl.isDynamicSchema(),
                                 tbl.getName(), tbl.getTTLSeconds(),
-                                tbl.getEnableUniqueKeyMergeOnWrite(), tbl.storeRowColumn());
+                                tbl.getEnableUniqueKeyMergeOnWrite(), tbl.storeRowColumn(),
+                                tbl.getBaseSchemaVersion());
                         requestBuilder.addTabletMetas(builder);
                     } // end for rollupTablets
                     Env.getCurrentInternalCatalog().sendCreateTabletsRpc(requestBuilder);
@@ -754,11 +755,12 @@ public class RollupJobV2 extends AlterJobV2 implements GsonPostProcessable {
         jobState = JobState.CANCELLED;
         this.errMsg = errMsg;
         this.finishedTimeMs = System.currentTimeMillis();
-        LOG.info("cancel {} job {}, err: {}", this.type, jobId, errMsg);
         Env.getCurrentEnv().getEditLog().logAlterJob(this);
 
         // try best to drop roll index, when job is cancelled
         dropCloudRollupIndex();
+
+        LOG.info("cancel {} job {}, err: {}", this.type, jobId, errMsg);
         return true;
     }
 

@@ -146,7 +146,7 @@ CloudTabletMgr::~CloudTabletMgr() {
                   });
 }
 
-Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool sync_rowsets) {
+Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool warmup_data) {
     // LRU value type
     struct Value {
         TabletSharedPtr tablet;
@@ -159,7 +159,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
     TEST_SYNC_POINT_CALLBACK("CloudTabletMgr::get_tablet", handle);
 
     if (handle == nullptr) {
-        auto load_tablet = [this, &key, sync_rowsets](int64_t tablet_id) -> TabletSharedPtr {
+        auto load_tablet = [this, &key, warmup_data](int64_t tablet_id) -> TabletSharedPtr {
             TabletMetaSharedPtr tablet_meta;
             auto st = meta_mgr()->get_tablet_meta(tablet_id, &tablet_meta);
             if (!st.ok()) {
@@ -170,11 +170,11 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
             auto value = new Value();
             value->tablet = tablet;
             value->tablet_map = _tablet_map;
-            if (sync_rowsets) {
-                st = meta_mgr()->sync_tablet_rowsets(tablet.get());
-                if (!st.ok()) {
-                    LOG(WARNING) << "failed to sync tablet " << tablet_id << ": " << st;
-                }
+            // MUST sync stats to let compaction scheduler work correctly
+            st = meta_mgr()->sync_tablet_rowsets(tablet.get(), warmup_data); 
+            if (!st.ok()) {
+                LOG(WARNING) << "failed to sync tablet " << tablet_id << ": " << st;
+                return nullptr;
             }
             static auto deleter = [](const CacheKey& key, void* value) {
                 auto value1 = reinterpret_cast<Value*>(value);
@@ -315,17 +315,18 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
 
     using namespace std::chrono;
     auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    auto skip = [&now, compaction_type](Tablet* t) {
+    auto skip = [now, compaction_type](Tablet* t) {
         if (compaction_type == CompactionType::BASE_COMPACTION) {
-            return now - t->last_base_compaction_success_time() < config::base_compaction_interval_seconds_since_last_operation * 1000 ||
-                   now - StorageEngine::s_last_load_time > config::base_compaction_freeze_interval_seconds * 1000;
+            return now - t->last_base_compaction_success_time() < config::base_compaction_interval_seconds_since_last_operation * 1000;
         }
-        // FIXME(plat1ko): If tablet has too many rowsets but not be compacted for a long time, compaction should be performed
-        return now - t->last_cumu_no_suitable_version_ms() < config::min_compaction_failure_interval_sec * 1000 ||
-               now - StorageEngine::s_last_load_time > config::cu_compaction_freeze_interval_seconds * 1000;
+        // If tablet has too many rowsets but not be compacted for a long time, compaction should be performed
+        // regardless of whether there is a load job recently.
+        return now - t->last_cumu_no_suitable_version_ms() < config::min_compaction_failure_interval_ms ||
+               (now - StorageEngine::s_last_load_time > config::cu_compaction_freeze_interval_seconds * 1000
+               && now - t->last_cumu_compaction_success_time() < config::cumu_compaction_interval_seconds * 1000);
     };
     // We don't schedule tablets that are disabled for compaction
-    auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };
+    //auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };
 
     auto [num_filtered, num_disabled, num_skipped] = std::make_tuple(0, 0, 0);
 
@@ -340,7 +341,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         *max_score = std::max(*max_score, s);
 
         if (filter_out(t.get())) { ++num_filtered; continue; }
-        if (disable(t.get())) { ++num_disabled; continue; }
+        //if (disable(t.get())) { ++num_disabled; continue; }
         if (skip(t.get())) { ++num_skipped; continue; }
 
         buf.push_back({std::move(t), s});

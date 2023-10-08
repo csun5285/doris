@@ -404,6 +404,15 @@ void Block::skip_num_rows(int64_t& length) {
 size_t Block::bytes() const {
     size_t res = 0;
     for (const auto& elem : data) {
+        if (!elem.column) {
+            std::stringstream ss;
+            for (const auto& e : data) {
+                ss << e.name + " ";
+            }
+            LOG(FATAL) << fmt::format(
+                    "Column {} in block is nullptr, in method bytes. All Columns are {}", elem.name,
+                    ss.str());
+        }
         res += elem.column->byte_size();
     }
 
@@ -413,6 +422,15 @@ size_t Block::bytes() const {
 size_t Block::allocated_bytes() const {
     size_t res = 0;
     for (const auto& elem : data) {
+        if (!elem.column) {
+            std::stringstream ss;
+            for (const auto& e : data) {
+                ss << e.name + " ";
+            }
+            LOG(FATAL) << fmt::format(
+                    "Column {} in block is nullptr, in method allocated_bytes. All Columns are {}",
+                    elem.name, ss.str());
+        }
         res += elem.column->allocated_bytes();
     }
 
@@ -805,6 +823,7 @@ Status Block::serialize(int be_exec_version, PBlock* pblock,
     for (const auto& c : *this) {
         PColumnMeta* pcm = pblock->add_column_metas();
         c.to_pb_column_meta(pcm);
+        DCHECK(pcm->type() != PGenericType::UNKNOWN) << " forget to set pb type";
         // get serialized size
         content_uncompressed_size +=
                 c.type->get_uncompressed_serialized_bytes(*(c.column), pblock->be_exec_version());

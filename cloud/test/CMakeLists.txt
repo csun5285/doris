@@ -38,7 +38,7 @@ add_executable(meta_service_test
    meta_service_test.cpp
    meta_service_job_test.cpp
    meta_service_http_test.cpp
-   detach_schema_kv_test.cpp
+   schema_kv_test.cpp
 )
 
 add_executable(meta_server_test
@@ -63,6 +63,10 @@ add_executable(log_test
 
 add_executable(resource_test
     resource_test.cpp
+)
+
+add_executable(http_encode_key_test
+    http_encode_key_test.cpp
 )
 
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
@@ -105,6 +109,11 @@ target_link_libraries(log_test
 target_link_libraries(resource_test
     ${TEST_LINK_LIBS}
 )
+
+target_link_libraries(http_encode_key_test
+    ${TEST_LINK_LIBS}
+)
+
 # FDB related tests need to be linked with libfdb_c
 set(FDB_LINKER_FLAGS "-lfdb_c -L${THIRDPARTY_DIR}/lib")
 

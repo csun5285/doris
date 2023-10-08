@@ -73,6 +73,7 @@ DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_total_capacity, MetricUnit::BYTES);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_avail_capacity, MetricUnit::BYTES);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_local_used_capacity, MetricUnit::BYTES);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_remote_used_capacity, MetricUnit::BYTES);
+DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_trash_used_capacity, MetricUnit::BYTES);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_state, MetricUnit::BYTES);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_compaction_score, MetricUnit::NOUNIT);
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(disks_compaction_num, MetricUnit::NOUNIT);
@@ -86,6 +87,7 @@ DataDir::DataDir(const std::string& path, int64_t capacity_bytes,
           _fs(io::LocalFileSystem::create(path)),
           _available_bytes(0),
           _disk_capacity_bytes(0),
+          _trash_used_bytes(0),
           _storage_medium(storage_medium),
           _is_used(false),
           _tablet_manager(tablet_manager),
@@ -101,6 +103,7 @@ DataDir::DataDir(const std::string& path, int64_t capacity_bytes,
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_avail_capacity);
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_local_used_capacity);
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_remote_used_capacity);
+    INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_trash_used_capacity);
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_state);
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_compaction_score);
     INT_GAUGE_METRIC_REGISTER(_data_dir_metric_entity, disks_compaction_num);
@@ -120,6 +123,7 @@ Status DataDir::init() {
                                        "check file exist failed");
     }
 
+    update_trash_capacity();
     RETURN_NOT_OK_STATUS_WITH_WARN(update_capacity(), "update_capacity failed");
     RETURN_NOT_OK_STATUS_WITH_WARN(_init_cluster_id(), "_init_cluster_id failed");
 #ifndef CLOUD_MODE
@@ -239,9 +243,9 @@ void DataDir::health_check() {
         if (!res) {
             LOG(WARNING) << "store read/write test file occur IO Error. path=" << _path
                          << ", err: " << res;
-            if (res.is_io_error()) {
-                _is_used = false;
-            }
+            // TODO: yyq
+            // StorageEngine::instance()->add_broken_path(_path);
+            _is_used = !res.is<IO_ERROR>();
         }
     }
     disks_state->set_value(_is_used ? 1 : 0);
@@ -817,6 +821,13 @@ Status DataDir::update_capacity() {
     return Status::OK();
 }
 
+void DataDir::update_trash_capacity() {
+    auto trash_path = fmt::format("{}/{}", _path, TRASH_PREFIX);
+    _trash_used_bytes = StorageEngine::instance()->get_file_or_directory_size(trash_path);
+    disks_trash_used_capacity->set_value(_trash_used_bytes);
+    LOG(INFO) << "path: " << _path << " trash capacity: " << _trash_used_bytes;
+}
+
 void DataDir::update_local_data_size(int64_t size) {
     disks_local_used_capacity->set_value(size);
 }
@@ -881,7 +892,7 @@ Status DataDir::move_to_trash(const std::string& tablet_path) {
     }
 
     // 4. move tablet to trash
-    VLOG_NOTICE << "move file to trash. " << tablet_path << " -> " << trash_tablet_path;
+    LOG(INFO) << "move file to trash. " << tablet_path << " -> " << trash_tablet_path;
     if (rename(tablet_path.c_str(), trash_tablet_path.c_str()) < 0) {
         return Status::Error<OS_ERROR>("move file to trash failed. file={}, target={}, err={}",
                                        tablet_path, trash_tablet_path.native(), Errno::str());

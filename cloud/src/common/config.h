@@ -114,6 +114,9 @@ CONF_mBool(write_schema_kv, "true");
 CONF_mBool(split_tablet_stats, "true");
 CONF_mBool(snapshot_get_tablet_stats, "true");
 
+// Value codec version
+CONF_mInt16(meta_schema_value_version, 0);
+
 // For instance check interval
 CONF_Int64(reserved_buffer_days, "3");
 

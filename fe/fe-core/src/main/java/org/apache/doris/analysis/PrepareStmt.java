@@ -26,6 +26,7 @@ import org.apache.doris.thrift.TExpr;
 import org.apache.doris.thrift.TExprList;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 import org.apache.logging.log4j.LogManager;
@@ -169,6 +170,11 @@ public class PrepareStmt extends StatementBase {
             } finally {
                 // will be reanalyzed
                 selectStmt.reset();
+            }
+        } else if (inner instanceof NativeInsertStmt) {
+            LabelName label = ((NativeInsertStmt) inner).getLoadLabel();
+            if (label != null && !Strings.isNullOrEmpty(label.getLabelName())) {
+                throw new UserException("Only support prepare InsertStmt without label now");
             }
         }
         preparedType = PreparedType.STATEMENT;

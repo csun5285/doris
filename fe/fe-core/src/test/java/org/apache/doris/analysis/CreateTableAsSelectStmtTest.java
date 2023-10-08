@@ -607,8 +607,8 @@ public class CreateTableAsSelectStmtTest extends TestWithFeService {
         String showStr = showResultSet.getResultRows().get(0).get(1);
         Assertions.assertEquals(
                 "CREATE TABLE `varchar_len1` (\n"
-                        + "  `_col0` varchar(65533) NULL,\n"
-                        + "  `_col1` varchar(65533) NULL,\n"
+                        + "  `_col0` varchar(*) NULL,\n"
+                        + "  `_col1` varchar(*) NULL,\n"
                         + "  `userId` varchar(255) NOT NULL\n"
                         + ") ENGINE=OLAP\n"
                         + "DUPLICATE KEY(`_col0`)\n"
@@ -617,6 +617,7 @@ public class CreateTableAsSelectStmtTest extends TestWithFeService {
                         + "PROPERTIES (\n"
                         + "\"replication_allocation\" = \"tag.location.default: 1\",\n"
                         + "\"is_being_synced\" = \"false\",\n"
+                        + "\"persistent\" = \"false\",\n"
                         + "\"storage_format\" = \"V2\",\n"
                         + "\"light_schema_change\" = \"true\",\n"
                         + "\"disable_auto_compaction\" = \"false\",\n"

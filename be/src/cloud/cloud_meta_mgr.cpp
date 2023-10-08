@@ -22,6 +22,7 @@
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "runtime/stream_load/stream_load_context.h"
+#include "util/network_util.h"
 #include "util/s3_util.h"
 
 namespace doris::cloud {
@@ -48,7 +49,7 @@ static std::string debug_info(const Req& req) {
     } else if constexpr (is_any_v<Req, selectdb::UpdateDeleteBitmapRequest>) {
         return fmt::format(" tablet_id={}, lock_id={}", req.tablet_id(), req.lock_id());
     } else if constexpr (is_any_v<Req, selectdb::GetDeleteBitmapUpdateLockRequest>) {
-        return fmt::format(" partition_id={}, lock_id={}", req.partition_ids(0), req.lock_id());
+        return fmt::format(" table_id={}, lock_id={}", req.table_id(), req.lock_id());
     } else {
         static_assert(!sizeof(Req));
     }
@@ -89,19 +90,35 @@ private:
     static Status init_channel(brpc::Channel* channel) {
         static std::atomic<size_t> index = 1;
 
+        std::string ip;
+        uint16_t port;
+        Status s = get_meta_service_ip_and_port(&ip, &port);
+        if (!s.ok()) {
+            LOG(WARNING) << "fail to get meta service ip and port: " << s;
+            return s;
+        }
+
         size_t next_id = index.fetch_add(1, std::memory_order_relaxed);
         brpc::ChannelOptions options;
         options.connection_group = fmt::format("ms_{}", next_id);
-        auto endpoint = config::meta_service_endpoint;
-        int ret_code = 0;
-        if (config::meta_service_use_load_balancer) {
-            ret_code = channel->Init(endpoint.c_str(), config::rpc_load_balancer.c_str(), &options);
+        if (channel->Init(ip.c_str(), port, &options) != 0) {
+            return Status::InternalError("fail to init brpc channel, ip: {}, port: {}", ip, port);
+        }
+        return Status::OK();
+    }
+
+    static Status get_meta_service_ip_and_port(std::string* ip, uint16_t* port) {
+        std::string parsed_host;
+        if (!parse_endpoint(config::meta_service_endpoint, &parsed_host, port)) {
+            return Status::InvalidArgument("invalid meta service endpoint: {}",
+                                           config::meta_service_endpoint);
+        }
+        if (is_valid_ip(parsed_host)) {
+            *ip = std::move(parsed_host);
         } else {
-            ret_code = channel->Init(endpoint.c_str(), &options);
+            RETURN_IF_ERROR(hostname_to_ip(parsed_host, *ip));
         }
-        if (ret_code != 0) {
-            return Status::InternalError("fail to init brpc channel, endpoint: {}", endpoint);
-        }
+
         return Status::OK();
     }
 
@@ -242,7 +259,7 @@ TRY_AGAIN:
     return Status::OK();
 }
 
-Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool need_download_data_async) {
+Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool warmup_delta_data) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudMetaMgr::sync_tablet_rowsets", Status::OK(), tablet);
 
     std::shared_ptr<selectdb::MetaService_Stub> stub;
@@ -385,8 +402,10 @@ TRY_AGAIN:
             //   after doing EMPTY_CUMULATIVE compaction, MS cp is 13, get_rowset will return [2-11][12-12].
             bool version_overlap = tablet->local_max_version() >= rowsets.front()->start_version();
             tablet->cloud_add_rowsets(std::move(rowsets), version_overlap,
-                                      need_download_data_async);
+                                      warmup_delta_data);
         }
+        tablet->set_last_base_compaction_success_time(stats.last_base_compaction_time_ms());
+        tablet->set_last_cumu_compaction_success_time(stats.last_cumu_compaction_time_ms());
         tablet->set_base_compaction_cnt(stats.base_compaction_cnt());
         tablet->set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());
         tablet->set_cumulative_layer_point(stats.cumulative_point());
@@ -743,7 +762,6 @@ Status CloudMetaMgr::get_delete_bitmap_update_lock(const Tablet* tablet, int64_t
     selectdb::GetDeleteBitmapUpdateLockResponse res;
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_table_id(tablet->table_id());
-    req.add_partition_ids(tablet->partition_id());
     req.set_lock_id(lock_id);
     req.set_initiator(initiator);
     req.set_expiration(10); // 10s expiration time for compaction and schema_change

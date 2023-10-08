@@ -217,6 +217,15 @@ void FileBlock::change_cache_type_self(FileCacheType new_type) {
     if (_cache_type == FileCacheType::TTL || new_type == _cache_type) {
         return;
     }
+    if (_download_state == State::DOWNLOADED) {
+        std::error_code ec;
+        std::filesystem::rename(
+                get_path_in_local_cache(),
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
+        if (ec) {
+            LOG(ERROR) << ec.message();
+        }
+    }
     _cache_type = new_type;
     _cache->change_cache_type(_file_key, _segment_range.left, new_type, cache_lock);
 }

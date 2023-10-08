@@ -100,7 +100,7 @@ public:
     // wait for all memtables to be flushed.
     // mem_consumption() should be 0 after this function returns.
     Status cloud_build_rowset(RowsetSharedPtr* rowset = nullptr);
-    void cloud_set_txn_related_delete_bitmap();
+    Status cloud_set_txn_related_delete_bitmap();
     Status build_rowset();
     Status submit_calc_delete_bitmap_task();
     Status wait_calc_delete_bitmap();

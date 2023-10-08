@@ -11,6 +11,7 @@
 #include "olap/cumulative_compaction_policy.h"
 #include "util/trace.h"
 #include "util/uuid_generator.h"
+#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -233,6 +234,10 @@ Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merge
     LOG(INFO) << "tablet stats=" << stats.ShortDebugString();
     {
         std::lock_guard wrlock(_tablet->get_header_lock());
+        // clang-format off
+        _tablet->set_last_base_compaction_success_time(std::max(_tablet->last_base_compaction_success_time(), stats.last_base_compaction_time_ms()));
+        _tablet->set_last_cumu_compaction_success_time(std::max(_tablet->last_cumu_compaction_success_time(), stats.last_cumu_compaction_time_ms()));
+        // clang-format on
         if (_tablet->cumulative_compaction_cnt() >= stats.cumulative_compaction_cnt()) {
             // This could happen while calling `sync_tablet_rowsets` during `commit_tablet_job`, or parallel cumu compactions which are
             // committed later increase tablet.cumulative_compaction_cnt (see CloudCompactionTest.parallel_cumu_compaction)
@@ -392,6 +397,10 @@ void CloudCumulativeCompaction::update_cumulative_point() {
     LOG(INFO) << "tablet stats=" << stats.ShortDebugString();
     {
         std::lock_guard wrlock(_tablet->get_header_lock());
+        // clang-format off
+        _tablet->set_last_base_compaction_success_time(std::max(_tablet->last_base_compaction_success_time(), stats.last_base_compaction_time_ms()));
+        _tablet->set_last_cumu_compaction_success_time(std::max(_tablet->last_cumu_compaction_success_time(), stats.last_cumu_compaction_time_ms()));
+        // clang-format on
         if (_tablet->cumulative_compaction_cnt() >= stats.cumulative_compaction_cnt()) {
             // This could happen while calling `sync_tablet_rowsets` during `commit_tablet_job`
             return;

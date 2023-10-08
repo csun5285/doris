@@ -18,9 +18,6 @@
 // clang-format on
 
 namespace selectdb {
-namespace config {
-extern int16_t value_version;
-}
 
 /**
  * This is a naïve implementation of hex, DONOT use it on retical path.
@@ -296,6 +293,16 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
 
 int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot) {
     return val->get(txn, key, snapshot);
+}
+
+int key_exists(Transaction* txn, std::string_view key, bool snapshot) {
+    std::string end_key {key};
+    encode_int64(INT64_MAX, &end_key);
+    std::unique_ptr<RangeGetIterator> it;
+    if (txn->get(key, end_key, &it, snapshot, 1) != 0) {
+        return -1;
+    }
+    return !it->has_next();
 }
 
 void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,

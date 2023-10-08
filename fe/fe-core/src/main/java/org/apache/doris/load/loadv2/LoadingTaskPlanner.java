@@ -52,6 +52,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -66,6 +67,7 @@ public class LoadingTaskPlanner {
     private final BrokerDesc brokerDesc;
     private final List<BrokerFileGroup> fileGroups;
     private final boolean strictMode;
+    private final boolean isPartialUpdate;
     private final long timeoutS;    // timeout of load job, in second
     private final int loadParallelism;
     private final int sendBatchParallelism;
@@ -85,7 +87,7 @@ public class LoadingTaskPlanner {
 
     public LoadingTaskPlanner(Long loadJobId, long txnId, long dbId, OlapTable table,
             BrokerDesc brokerDesc, List<BrokerFileGroup> brokerFileGroups,
-            boolean strictMode, String timezone, long timeoutS, int loadParallelism,
+            boolean strictMode, boolean isPartialUpdate, String timezone, long timeoutS, int loadParallelism,
             int sendBatchParallelism, boolean useNewLoadScanNode, UserIdentity userInfo) {
         this.loadJobId = loadJobId;
         this.txnId = txnId;
@@ -94,6 +96,7 @@ public class LoadingTaskPlanner {
         this.brokerDesc = brokerDesc;
         this.fileGroups = brokerFileGroups;
         this.strictMode = strictMode;
+        this.isPartialUpdate = isPartialUpdate;
         this.analyzer.setTimezone(timezone);
         this.timeoutS = timeoutS;
         this.loadParallelism = loadParallelism;
@@ -111,10 +114,10 @@ public class LoadingTaskPlanner {
 
     public LoadingTaskPlanner(Long loadJobId, long txnId, long dbId, OlapTable table,
             BrokerDesc brokerDesc, List<BrokerFileGroup> brokerFileGroups,
-            boolean strictMode, String timezone, long timeoutS, int loadParallelism,
+            boolean strictMode, boolean isPartialUpdate, String timezone, long timeoutS, int loadParallelism,
             int sendBatchParallelism, boolean useNewLoadScanNode, UserIdentity userInfo,
             String cluster) {
-        this(loadJobId, txnId, dbId, table, brokerDesc, brokerFileGroups, strictMode,
+        this(loadJobId, txnId, dbId, table, brokerDesc, brokerFileGroups, strictMode, isPartialUpdate,
                 timezone, timeoutS, loadParallelism, sendBatchParallelism, useNewLoadScanNode, userInfo);
         this.cluster = cluster;
     }
@@ -125,8 +128,37 @@ public class LoadingTaskPlanner {
         TupleDescriptor destTupleDesc = descTable.createTupleDescriptor();
         TupleDescriptor scanTupleDesc = destTupleDesc;
         scanTupleDesc = descTable.createTupleDescriptor("ScanTuple");
+        if (isPartialUpdate && !table.getEnableUniqueKeyMergeOnWrite()) {
+            throw new UserException("Only unique key merge on write support partial update");
+        }
+
+        HashSet<String> partialUpdateInputColumns = new HashSet<>();
+        if (isPartialUpdate) {
+            for (Column col : table.getFullSchema()) {
+                boolean existInExpr = false;
+                for (ImportColumnDesc importColumnDesc : fileGroups.get(0).getColumnExprList()) {
+                    if (importColumnDesc.getColumnName() != null
+                            && importColumnDesc.getColumnName().equals(col.getName())) {
+                        if (!col.isVisible() && !Column.DELETE_SIGN.equals(col.getName())) {
+                            throw new UserException("Partial update should not include invisible column except"
+                                    + " delete sign column: " + col.getName());
+                        }
+                        partialUpdateInputColumns.add(col.getName());
+                        existInExpr = true;
+                        break;
+                    }
+                }
+                if (col.isKey() && !existInExpr) {
+                    throw new UserException("Partial update should include all key columns, missing: " + col.getName());
+                }
+            }
+        }
+
         // use full schema to fill the descriptor table
         for (Column col : table.getFullSchema()) {
+            if (isPartialUpdate && !partialUpdateInputColumns.contains(col.getName())) {
+                continue;
+            }
             SlotDescriptor slotDesc = descTable.addSlotDescriptor(destTupleDesc);
             slotDesc.setIsMaterialized(true);
             slotDesc.setColumn(col);
@@ -166,6 +198,15 @@ public class LoadingTaskPlanner {
             LOG.debug("plan scanTupleDesc{}", scanTupleDesc.toString());
         }
 
+        // analyze expr in whereExpr before rewrite
+        scanTupleDesc.setTable(table);
+        analyzer.registerTupleDescriptor(scanTupleDesc);
+        for (BrokerFileGroup fileGroup : fileGroups) {
+            if (fileGroup.getWhereExpr() != null) {
+                fileGroup.getWhereExpr().analyze(analyzer);
+            }
+        }
+
         // Generate plan trees
         // 1. Broker scan node
         ScanNode scanNode;
@@ -183,6 +224,7 @@ public class LoadingTaskPlanner {
                 Config.enable_single_replica_load);
         long txnTimeout = timeoutS == 0 ? ConnectContext.get().getExecTimeout() : timeoutS;
         olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, strictMode, txnTimeout);
+        olapTableSink.setPartialUpdateInputColumns(isPartialUpdate, partialUpdateInputColumns);
         olapTableSink.complete(analyzer);
 
         // 3. Plan fragment

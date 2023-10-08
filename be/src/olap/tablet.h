@@ -63,6 +63,7 @@ class Tablet;
 class CumulativeCompactionPolicy;
 class CumulativeCompaction;
 class BaseCompaction;
+class FullCompaction;
 class SingleReplicaCompaction;
 class RowsetWriter;
 struct TabletTxnInfo;
@@ -193,19 +194,18 @@ public:
     // Synchronize the rowsets from meta service.
     // If tablet state is not `TABLET_RUNNING`, sync tablet meta and all visible rowsets.
     // If `query_version` > 0 and local max_version of the tablet >= `query_version`, do nothing.
-    // If 'need_download_data_async' is true, it means that we need to download the new version 
+    // If 'warmup_delta_data' is true, it means that we need to download the new version 
     // rowsets datas async.
-    Status cloud_sync_rowsets(int64_t query_version = -1, bool need_download_data_async = false);
+    Status cloud_sync_rowsets(int64_t query_version = -1, bool warmup_delta_data = false);
 
     // Synchronize the tablet meta from meta service.
     Status cloud_sync_meta();
 
     // If `version_overlap` is true, function will delete rowsets with overlapped version in this tablet.
+    // If 'warmup_delta_data' is true, download the new version rowset data in background.
     // MUST hold EXCLUSIVE `_meta_lock`.
-    // If 'need_download_data_async' is true, it means that we need to download the new version 
-    // rowsets datas async.
     void cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
-                           bool need_download_data_async = false);
+                           bool warmup_delta_data = false);
 
     // It is only used in CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets.
     // To add rowset after downloading segments
@@ -227,7 +227,7 @@ public:
     int64_t fetch_add_approximate_num_rows    (int64_t x) { return _approximate_num_rows    .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_data_size   (int64_t x) { return _approximate_data_size   .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_rowsets (int64_t x) { return _approximate_cumu_num_rowsets.fetch_add(x, std::memory_order_relaxed); }
-    int64_t fetch_add_approximate_cumu_data_size   (int64_t x) { return _approximate_cumu_data_size  .fetch_add(x, std::memory_order_relaxed); }
+    int64_t fetch_add_approximate_cumu_num_deltas   (int64_t x) { return _approximate_cumu_num_deltas.fetch_add(x, std::memory_order_relaxed); }
     // clang-format on
     // meta lock must be held when calling this function
     void reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, int64_t num_rows,
@@ -308,7 +308,7 @@ public:
     int64_t last_cumu_no_suitable_version_ms() const {
         return _last_cumu_no_suitable_version_millis.load(std::memory_order_relaxed);
     }
-    void set_last_cumu_no_suitable_version_time(int64_t millis) {
+    void set_last_cumu_no_suitable_version_ms(int64_t millis) {
         _last_cumu_no_suitable_version_millis.store(millis, std::memory_order_relaxed);
     }
 
@@ -574,11 +574,6 @@ public:
     Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
                                 const RowsetIdUnorderedSet& pre_rowset_ids);
 
-    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset, bool check_pre_segments,
-                                           DeleteBitmapPtr delete_bitmap);
-    Status cloud_calc_rowset_delete_bitmap(const RowsetSharedPtr& rowset,
-                                           RowsetIdUnorderedSet specified_rowset_ids,
-                                           bool check_pre_segments, DeleteBitmapPtr delete_bitmap);
     Status cloud_calc_delete_bitmap_for_compaciton(
             const std::vector<RowsetSharedPtr>& input_rowsets, const RowsetSharedPtr& output_rowset,
             const RowIdConversion& rowid_conversion, ReaderType compaction_type,
@@ -623,7 +618,13 @@ public:
     void gc_binlogs(int64_t version);
     Status ingest_binlog_metas(RowsetBinlogMetasPB* metas_pb);
 
-    inline void increase_io_error_times() { ++_io_error_times; }
+    inline void report_error(const Status& st) {
+        if (st.is<ErrorCode::IO_ERROR>()) {
+            ++_io_error_times;
+        } else if (st.is<ErrorCode::CORRUPTION>()) {
+            _io_error_times = config::max_tablet_io_errors + 1;
+        }
+    }
 
     inline int64_t get_io_error_times() const { return _io_error_times; }
 
@@ -642,6 +643,9 @@ public:
     void set_binlog_config(BinlogConfig binlog_config);
     void add_sentinel_mark_to_delete_bitmap(DeleteBitmap* delete_bitmap,
                                             const RowsetIdUnorderedSet& rowsetids);
+    Status check_delete_bitmap_correctness(DeleteBitmapPtr delete_bitmap, int64_t max_version,
+                                           int64_t txn_id, const RowsetIdUnorderedSet& rowset_ids,
+                                           std::vector<RowsetSharedPtr>* rowsets = nullptr);
 
 private:
     Status _init_once_action();
@@ -670,10 +674,6 @@ private:
     bool _reconstruct_version_tracker_if_necessary();
     void _init_context_common_fields(RowsetWriterContext& context);
 
-    Status _check_pk_in_pre_segments(RowsetId rowset_id,
-                                     const std::vector<segment_v2::SegmentSharedPtr>& pre_segments,
-                                     const Slice& key, DeleteBitmapPtr delete_bitmap,
-                                     RowLocation* loc);
     void _rowset_ids_difference(const RowsetIdUnorderedSet& cur, const RowsetIdUnorderedSet& pre,
                                 RowsetIdUnorderedSet* to_add, RowsetIdUnorderedSet* to_del);
     Status _load_rowset_segments(const RowsetSharedPtr& rowset,
@@ -691,9 +691,6 @@ private:
     ////////////////////////////////////////////////////////////////////////////
 
     void _remove_sentinel_mark_from_delete_bitmap(DeleteBitmapPtr delete_bitmap);
-    Status _check_delete_bitmap_correctness(DeleteBitmapPtr delete_bitmap, int64_t max_version,
-                                            int64_t txn_id, const RowsetIdUnorderedSet& rowset_ids,
-                                            std::vector<RowsetSharedPtr>* rowsets = nullptr);
     std::string _get_rowset_info_str(RowsetSharedPtr rowset, bool delete_flag);
 
 public:
@@ -769,7 +766,8 @@ private:
     std::atomic<int64_t> _approximate_num_segments {-1};
     std::atomic<int64_t> _approximate_data_size {-1};
     std::atomic<int64_t> _approximate_cumu_num_rowsets {-1};
-    std::atomic<int64_t> _approximate_cumu_data_size {-1};
+    // Number of sorted arrays (e.g. for rowset with N segments, if rowset is overlapping, delta is N, otherwise 1) after cumu point
+    std::atomic<int64_t> _approximate_cumu_num_deltas {-1};
 
     // cumulative compaction policy
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
@@ -777,6 +775,7 @@ private:
 
     std::shared_ptr<CumulativeCompaction> _cumulative_compaction;
     std::shared_ptr<BaseCompaction> _base_compaction;
+    std::shared_ptr<FullCompaction> _full_compaction;
     std::shared_ptr<SingleReplicaCompaction> _single_replica_compaction;
 
     // whether clone task occurred during the tablet is in thread pool queue to wait for compaction

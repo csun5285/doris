@@ -206,17 +206,23 @@ public class Role implements Writable, GsonPostProcessable {
         grantPrivs(workloadGroupPattern, privs.copy());
     }
 
-    public Role(String roleName, TablePattern tablePattern, PrivBitSet tablePrivs,
+    public Role(String roleName, List<TablePattern> tablePatterns, PrivBitSet tablePrivs,
             WorkloadGroupPattern workloadGroupPattern, PrivBitSet workloadGroupPrivs) {
         this.roleName = roleName;
-        this.tblPatternToPrivs.put(tablePattern, tablePrivs);
         this.workloadGroupPatternToPrivs.put(workloadGroupPattern, workloadGroupPrivs);
-        //for init admin role,will not generate exception
+        tablePatterns.forEach(tablePattern -> {
+            // for init admin role,will not generate exception
+            try {
+                this.tblPatternToPrivs.put(tablePattern, tablePrivs);
+                grantPrivs(tablePattern, tablePrivs.copy());
+            } catch (DdlException e) {
+                LOG.warn("grant table failed,", e);
+            }
+        });
         try {
-            grantPrivs(tablePattern, tablePrivs.copy());
             grantPrivs(workloadGroupPattern, workloadGroupPrivs.copy());
         } catch (DdlException e) {
-            LOG.warn("grant failed,", e);
+            LOG.warn("grant workload group failed,", e);
         }
     }
 

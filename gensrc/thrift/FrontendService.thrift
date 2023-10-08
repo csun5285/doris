@@ -308,12 +308,15 @@ struct TGetDbsParams {
   3: optional string user_ip    // deprecated
   4: optional Types.TUserIdentity current_user_ident // to replace the user and user ip
   5: optional string catalog
+  6: optional bool get_null_catalog  //if catalog is empty , get dbName ="NULL" and dbId = -1.
 }
 
-// getDbNames returns a list of database names and catalog names
+// getDbNames returns a list of database names , database ids and catalog names ,catalog ids
 struct TGetDbsResult {
   1: optional list<string> dbs
   2: optional list<string> catalogs
+  3: optional list<i64> db_ids
+  4: optional list<i64> catalog_ids
 }
 
 // Arguments to getTableNames, which returns a list of tables that match an
@@ -349,6 +352,15 @@ struct TTableStatus {
 
 struct TListTableStatusResult {
     1: required list<TTableStatus> tables
+}
+
+struct TTableMetadataNameIds {
+    1: optional string name
+    2: optional i64 id 
+}
+
+struct TListTableMetadataNameIdsResult {
+    1: optional list<TTableMetadataNameIds> tables 
 }
 
 // getTableNames returns a list of unqualified table names
@@ -470,6 +482,7 @@ struct TMasterOpRequest {
     23: optional i32 clientNodePort
     24: optional bool syncJournalOnly // if set to true, this request means to do nothing but just sync max journal id of master
     25: optional string defaultCatalog
+    26: optional string defaultDatabase
 
     // selectdb cloud
     1000: optional string cloud_cluster
@@ -520,6 +533,8 @@ struct TLoadTxnBeginRequest {
     10: optional i64 timeout
     11: optional Types.TUniqueId request_id
     12: optional string token
+    13: optional string auth_code_uuid
+    14: optional i64 table_id
 }
 
 struct TLoadTxnBeginResult {
@@ -618,6 +633,7 @@ struct TStreamLoadPutRequest {
     51: optional i8 enclose
     // only valid when file type is CSV
     52: optional i8 escape
+    53: optional i64 table_id
 
     // selectdb cloud
     1000: optional string cloud_cluster
@@ -677,6 +693,8 @@ struct TLoadTxnCommitRequest {
     13: optional string token
     14: optional i64 db_id
     15: optional list<string> tbls
+    16: optional i64 table_id
+    17: optional string auth_code_uuid
 }
 
 struct TLoadTxnCommitResult {
@@ -713,6 +731,7 @@ struct TLoadTxn2PCRequest {
     8: optional i64 auth_code
     9: optional string token
     10: optional i64 thrift_rpc_timeout_ms
+    11: optional string auth_code_uuid
 }
 
 struct TLoadTxn2PCResult {
@@ -751,6 +770,7 @@ struct TLoadTxnRollbackRequest {
     11: optional string token
     12: optional i64 db_id
     13: optional list<string> tbls
+    14: optional string auth_code_uuid
 }
 
 struct TLoadTxnRollbackResult {
@@ -983,6 +1003,8 @@ enum TBinlogType {
   ALTER_DATABASE_PROPERTY = 8,
   MODIFY_TABLE_PROPERTY = 9,
   BARRIER = 10,
+  MODIFY_PARTITIONS = 11,
+  REPLACE_PARTITIONS = 12,
 }
 
 struct TBinlog {
@@ -1040,6 +1062,7 @@ struct TGetSnapshotResult {
 
 struct TTableRef {
     1: optional string table
+    3: optional string alias_name
 }
 
 struct TRestoreSnapshotRequest {
@@ -1084,6 +1107,20 @@ struct TUpdateFollowerStatsCacheRequest {
     2: optional string colStats;
 }
 
+struct TRequestGroupCommitFragmentRequest {
+    1: optional i64 db_id
+    2: optional i64 table_id
+    3: optional i64 backend_id
+}
+
+struct TRequestGroupCommitFragmentResult {
+    1: optional Status.TStatus status
+    2: i64 base_schema_version
+    // valid when status is OK
+    3: optional PaloInternalService.TExecPlanFragmentParams params
+    4: optional PaloInternalService.TPipelineFragmentParams pipeline_params
+}
+
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1100,6 +1137,7 @@ service FrontendService {
     TMasterOpResult forward(1: TMasterOpRequest params)
 
     TListTableStatusResult listTableStatus(1: TGetTablesParams params)
+    TListTableMetadataNameIdsResult listTableMetadataNameIds(1: TGetTablesParams params)
     TListPrivilegesResult listTablePrivilegeStatus(1: TGetTablesParams params)
     TListPrivilegesResult listSchemaPrivilegeStatus(1: TGetTablesParams params)
     TListPrivilegesResult listUserPrivilegeStatus(1: TGetTablesParams params)
@@ -1150,4 +1188,6 @@ service FrontendService {
     TGetBinlogLagResult getBinlogLag(1: TGetBinlogLagRequest request)
 
     Status.TStatus updateStatsCache(1: TUpdateFollowerStatsCacheRequest request)
+
+    TRequestGroupCommitFragmentResult requestGroupCommitFragment(1: TRequestGroupCommitFragmentRequest request)
 }

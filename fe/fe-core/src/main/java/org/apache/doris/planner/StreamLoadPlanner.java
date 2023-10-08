@@ -83,15 +83,15 @@ public class StreamLoadPlanner {
 
     // destination Db and table get from request
     // Data will load to this table
-    private Database db;
-    private OlapTable destTable;
-    private LoadTaskInfo taskInfo;
+    protected Database db;
+    protected OlapTable destTable;
+    protected LoadTaskInfo taskInfo;
 
     private Analyzer analyzer;
     private DescriptorTable descTable;
 
     private ScanNode scanNode;
-    private TupleDescriptor tupleDesc;
+    protected TupleDescriptor tupleDesc;
 
     public StreamLoadPlanner(Database db, OlapTable destTable, LoadTaskInfo taskInfo) {
         this.db = db;
@@ -221,28 +221,7 @@ public class StreamLoadPlanner {
         }
 
         // create scan node
-        FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
-        // 1. create file group
-        DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
-        dataDescription.analyzeWithoutCheckPriv(db.getFullName());
-        BrokerFileGroup fileGroup = new BrokerFileGroup(dataDescription);
-        fileGroup.parse(db, dataDescription);
-        // 2. create dummy file status
-        TBrokerFileStatus fileStatus = new TBrokerFileStatus();
-        if (taskInfo.getFileType() == TFileType.FILE_LOCAL) {
-            fileStatus.setPath(taskInfo.getPath());
-            fileStatus.setIsDir(false);
-            fileStatus.setSize(taskInfo.getFileSize()); // must set to -1, means stream.
-        } else {
-            fileStatus.setPath("");
-            fileStatus.setIsDir(false);
-            fileStatus.setSize(-1); // must set to -1, means stream.
-        }
-        // The load id will pass to csv reader to find the stream load context from new load stream manager
-        fileScanNode.setLoadInfo(loadId, taskInfo.getTxnId(), destTable, BrokerDesc.createForStreamLoad(),
-                fileGroup, fileStatus, taskInfo.isStrictMode(), taskInfo.getFileType(), taskInfo.getHiddenColumns(),
-                taskInfo.isPartialUpdate());
-        scanNode = fileScanNode;
+        scanNode = createScanNode(loadId, scanTupleDesc);
 
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
@@ -257,8 +236,7 @@ public class StreamLoadPlanner {
 
         // create dest sink
         List<Long> partitionIds = getAllPartitionIds();
-        OlapTableSink olapTableSink = new OlapTableSink(destTable, tupleDesc, partitionIds,
-                Config.enable_single_replica_load);
+        OlapTableSink olapTableSink = getOlapTableSink(partitionIds);
         int txnTimeout = timeout == 0 ? ConnectContext.get().getExecTimeout() : timeout;
         olapTableSink.init(loadId, taskInfo.getTxnId(), db.getId(), timeout,
                 taskInfo.getSendBatchParallelism(), taskInfo.isLoadToSingleTablet(), taskInfo.isStrictMode(),
@@ -433,28 +411,7 @@ public class StreamLoadPlanner {
         }
 
         // create scan node
-        FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
-        // 1. create file group
-        DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
-        dataDescription.analyzeWithoutCheckPriv(db.getFullName());
-        BrokerFileGroup fileGroup = new BrokerFileGroup(dataDescription);
-        fileGroup.parse(db, dataDescription);
-        // 2. create dummy file status
-        TBrokerFileStatus fileStatus = new TBrokerFileStatus();
-        if (taskInfo.getFileType() == TFileType.FILE_LOCAL) {
-            fileStatus.setPath(taskInfo.getPath());
-            fileStatus.setIsDir(false);
-            fileStatus.setSize(taskInfo.getFileSize()); // must set to -1, means stream.
-        } else {
-            fileStatus.setPath("");
-            fileStatus.setIsDir(false);
-            fileStatus.setSize(-1); // must set to -1, means stream.
-        }
-        // The load id will pass to csv reader to find the stream load context from new load stream manager
-        fileScanNode.setLoadInfo(loadId, taskInfo.getTxnId(), destTable, BrokerDesc.createForStreamLoad(),
-                fileGroup, fileStatus, taskInfo.isStrictMode(), taskInfo.getFileType(), taskInfo.getHiddenColumns(),
-                taskInfo.isPartialUpdate());
-        scanNode = fileScanNode;
+        scanNode = createScanNode(loadId, scanTupleDesc);
 
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
@@ -469,8 +426,7 @@ public class StreamLoadPlanner {
 
         // create dest sink
         List<Long> partitionIds = getAllPartitionIds();
-        OlapTableSink olapTableSink = new OlapTableSink(destTable, tupleDesc, partitionIds,
-                Config.enable_single_replica_load);
+        OlapTableSink olapTableSink = getOlapTableSink(partitionIds);
         int txnTimeout = timeout == 0 ? ConnectContext.get().getExecTimeout() : timeout;
         olapTableSink.init(loadId, taskInfo.getTxnId(), db.getId(), timeout,
                 taskInfo.getSendBatchParallelism(), taskInfo.isLoadToSingleTablet(), taskInfo.isStrictMode(),
@@ -536,6 +492,36 @@ public class StreamLoadPlanner {
         return pipParams;
     }
 
+    protected ScanNode createScanNode(TUniqueId loadId, TupleDescriptor scanTupleDesc)
+            throws AnalysisException, DdlException {
+        FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
+        // 1. create file group
+        DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
+        dataDescription.analyzeWithoutCheckPriv(db.getFullName());
+        BrokerFileGroup fileGroup = new BrokerFileGroup(dataDescription);
+        fileGroup.parse(db, dataDescription);
+        // 2. create dummy file status
+        TBrokerFileStatus fileStatus = new TBrokerFileStatus();
+        if (taskInfo.getFileType() == TFileType.FILE_LOCAL) {
+            fileStatus.setPath(taskInfo.getPath());
+            fileStatus.setIsDir(false);
+            fileStatus.setSize(taskInfo.getFileSize()); // must set to -1, means stream.
+        } else {
+            fileStatus.setPath("");
+            fileStatus.setIsDir(false);
+            fileStatus.setSize(-1); // must set to -1, means stream.
+        }
+        // The load id will pass to csv reader to find the stream load context from new load stream manager
+        fileScanNode.setLoadInfo(loadId, taskInfo.getTxnId(), destTable, BrokerDesc.createForStreamLoad(),
+                fileGroup, fileStatus, taskInfo.isStrictMode(), taskInfo.getFileType(), taskInfo.getHiddenColumns(),
+                taskInfo.isPartialUpdate());
+        return fileScanNode;
+    }
+
+    protected OlapTableSink getOlapTableSink(List<Long> partitionIds) {
+        return new OlapTableSink(destTable, tupleDesc, partitionIds, Config.enable_single_replica_load);
+    }
+
     // get all specified partition ids.
     // if no partition specified, return null
     private List<Long> getAllPartitionIds() throws DdlException, AnalysisException {
@@ -583,6 +569,10 @@ public class StreamLoadPlanner {
             return partitionIds;
         }
         return null;
+    }
+
+    public DescriptorTable getDescTable() {
+        return descTable;
     }
 }
 

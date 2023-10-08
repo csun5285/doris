@@ -44,6 +44,7 @@
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/schema_cache.h"
 #include "olap/segment_loader.h"
+#include "olap/wal_manager.h"
 #include "pipeline/task_queue.h"
 #include "pipeline/task_scheduler.h"
 #include "runtime/block_spill_manager.h"
@@ -53,6 +54,7 @@
 #include "runtime/exec_env.h"
 #include "runtime/external_scan_context_mgr.h"
 #include "runtime/fragment_mgr.h"
+#include "runtime/group_commit_mgr.h"
 #include "runtime/heartbeat_flags.h"
 #include "runtime/load_channel_mgr.h"
 #include "runtime/load_path_mgr.h"
@@ -190,6 +192,8 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _routine_load_task_executor = new RoutineLoadTaskExecutor(this);
     _small_file_mgr = new SmallFileMgr(this, config::small_file_dir);
     _block_spill_mgr = new BlockSpillManager(_store_paths);
+    _group_commit_mgr = new GroupCommitMgr(this);
+    _wal_manager = WalManager::create_shared(this, config::group_commit_replay_wal_dir);
     _file_meta_cache = new FileMetaCache(config::max_external_file_meta_cache_num);
 
     _backend_client_cache->init_metrics("backend");
@@ -208,6 +212,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _init_mem_env();
 
     RETURN_IF_ERROR(_load_channel_mgr->init(MemInfo::mem_limit()));
+    RETURN_IF_ERROR(_wal_manager->init());
     _heartbeat_flags = new HeartbeatFlags();
     _register_metrics();
     _is_init = true;
@@ -223,12 +228,14 @@ Status ExecEnv::init_pipeline_task_scheduler() {
     // TODO pipeline task group combie two blocked schedulers.
     auto t_queue = std::make_shared<pipeline::MultiCoreTaskQueue>(executors_size);
     auto b_scheduler = std::make_shared<pipeline::BlockedTaskScheduler>(t_queue);
-    _pipeline_task_scheduler = new pipeline::TaskScheduler(this, b_scheduler, t_queue);
+    _pipeline_task_scheduler =
+            new pipeline::TaskScheduler(this, b_scheduler, t_queue, "WithoutGroupTaskSchePool");
     RETURN_IF_ERROR(_pipeline_task_scheduler->start());
 
     auto tg_queue = std::make_shared<pipeline::TaskGroupTaskQueue>(executors_size);
     auto tg_b_scheduler = std::make_shared<pipeline::BlockedTaskScheduler>(tg_queue);
-    _pipeline_task_group_scheduler = new pipeline::TaskScheduler(this, tg_b_scheduler, tg_queue);
+    _pipeline_task_group_scheduler =
+            new pipeline::TaskScheduler(this, tg_b_scheduler, tg_queue, "WithGroupTaskSchePool");
     RETURN_IF_ERROR(_pipeline_task_group_scheduler->start());
 
     return Status::OK();
@@ -306,8 +313,11 @@ Status ExecEnv::_init_mem_env() {
     }
     // SegmentLoader caches segments in rowset granularity. So the size of
     // opened files will greater than segment_cache_capacity.
-    uint64_t segment_cache_capacity = fd_number * 2 / 5;
-    LOG(INFO) << "segment_cache_capacity = fd_number * 2 / 5, fd_number: " << fd_number
+    int64_t segment_cache_capacity = config::segment_cache_capacity;
+    if (segment_cache_capacity < 0 || segment_cache_capacity > fd_number * 2 / 5) {
+        segment_cache_capacity = fd_number * 2 / 5;
+    }
+    LOG(INFO) << "segment_cache_capacity <= fd_number * 2 / 5, fd_number: " << fd_number
               << " segment_cache_capacity: " << segment_cache_capacity;
     SegmentLoader::create_global_instance(segment_cache_capacity);
 
@@ -421,6 +431,7 @@ void ExecEnv::_destroy() {
     SAFE_DELETE(_external_scan_context_mgr);
     SAFE_DELETE(_heartbeat_flags);
     SAFE_DELETE(_scanner_scheduler);
+    SAFE_DELETE(_group_commit_mgr);
     SAFE_DELETE(_file_meta_cache);
     // Master Info is a thrift object, it could be the last one to deconstruct.
     // Master info should be deconstruct later than fragment manager, because fragment will
@@ -428,6 +439,7 @@ void ExecEnv::_destroy() {
     // info is deconstructed then BE process will core at coordinator back method in fragment mgr.
     SAFE_DELETE(_master_info);
 
+    _wal_manager.reset();
     _new_load_stream_mgr.reset();
     _send_batch_thread_pool.reset(nullptr);
     _buffered_reader_prefetch_thread_pool.reset(nullptr);

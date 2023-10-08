@@ -63,8 +63,9 @@ CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader
                              << ", using random instead.";
                 _cache = FileCacheFactory::instance().get_by_path(_cache_key);
             }
+        } else {
+            _cache = FileCacheFactory::instance().get_by_path(_cache_key);
         }
-        _cache = FileCacheFactory::instance().get_by_path(path().native());
     }
 }
 
@@ -87,9 +88,9 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
             return std::make_pair(offset, read_size);
         }
         align_left = (left / config::file_cache_max_file_segment_size) *
-                            config::file_cache_max_file_segment_size;
+                     config::file_cache_max_file_segment_size;
         align_right = (right / config::file_cache_max_file_segment_size + 1) *
-                             config::file_cache_max_file_segment_size;
+                      config::file_cache_max_file_segment_size;
     } else {
         size_t segment_size =
                 std::min(std::max(read_size, (size_t)config::file_cache_min_file_segment_size),
@@ -103,21 +104,9 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
     return std::make_pair(align_left, align_size);
 }
 
-Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
-                                            const IOContext* io_ctx) {
-    DCHECK(!closed());
-    DCHECK(io_ctx);
-    if (offset > size()) {
-        return Status::IOError(
-                fmt::format("offset exceeds file size(offset: {), file size: {}, path: {})", offset,
-                            size(), path().native()));
-    }
+Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, size_t* bytes_read,
+                                                const IOContext* io_ctx) {
     size_t bytes_req = result.size;
-    bytes_req = std::min(bytes_req, size() - offset);
-    if (UNLIKELY(bytes_req == 0)) {
-        *bytes_read = 0;
-        return Status::OK();
-    }
     ReadStatistics stats;
     // session variable chooses to close file cache for this query
     if (io_ctx != nullptr && io_ctx->disable_file_cache) {
@@ -167,8 +156,8 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         std::unique_ptr<char[]> buffer(new char[size]);
         {
             SCOPED_RAW_TIMER(&stats.remote_read_timer);
-            RETURN_IF_ERROR(_remote_file_reader->read_at(empty_start, Slice(buffer.get(), size),
-                                                         &size, io_ctx));
+            RETURN_IF_ERROR(
+                    _remote_file_reader->read_at(empty_start, Slice(buffer.get(), size), &size));
         }
         for (auto& segment : empty_segments) {
             if (segment->state() == FileBlock::State::SKIP_CACHE) {
@@ -177,12 +166,17 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
             SCOPED_RAW_TIMER(&stats.local_write_timer);
             char* cur_ptr = buffer.get() + segment->range().left - empty_start;
             size_t segment_size = segment->range().size();
-            RETURN_IF_ERROR(segment->append(Slice(cur_ptr, segment_size)));
-            RETURN_IF_ERROR(segment->finalize_write());
-            stats.bytes_write_into_file_cache += segment_size;
+            Status st = segment->append(Slice(cur_ptr, segment_size));
+            if (st.ok()) {
+                st = segment->finalize_write();
+                stats.bytes_write_into_file_cache += segment_size;
+            }
+            if (!st.ok()) {
+                LOG_WARNING("Write data to file cache failed").error(st);
+            }
         }
         // copy from memory directly
-        size_t right_offset = offset + result.size - 1;
+        size_t right_offset = offset + bytes_req - 1;
         if (empty_start <= right_offset && empty_end >= offset) {
             size_t copy_left_offset = offset < empty_start ? empty_start : offset;
             size_t copy_right_offset = right_offset < empty_end ? right_offset : empty_end;
@@ -212,35 +206,45 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
             current_offset = right + 1;
             continue;
         }
-        FileBlock::State segment_state;
+        FileBlock::State segment_state = segment->state();
         int64_t wait_time = 0;
         static int64_t MAX_WAIT_TIME = 10;
-        if (segment->state() != FileBlock::State::DOWNLOADED) {
+        if (segment_state != FileBlock::State::DOWNLOADED) {
             do {
                 {
                     SCOPED_RAW_TIMER(&stats.remote_read_timer);
                     segment_state = segment->wait();
                 }
-                if (segment_state == FileBlock::State::DOWNLOADED) {
-                    break;
-                }
                 if (segment_state != FileBlock::State::DOWNLOADING) {
-                    return Status::IOError(
-                            "File Cache State is {}, the cache downloader encounters an error, "
-                            "please "
-                            "retry it",
-                            segment_state);
+                    break;
                 }
             } while (++wait_time < MAX_WAIT_TIME);
         }
-        if (UNLIKELY(wait_time) == MAX_WAIT_TIME) {
+        if (wait_time == MAX_WAIT_TIME) [[unlikely]] {
             return Status::IOError("Waiting too long for the download to complete");
         }
-        size_t file_offset = current_offset - left;
         {
-            SCOPED_RAW_TIMER(&stats.local_read_timer);
-            RETURN_IF_ERROR(segment->read_at(
-                    Slice(result.data + (current_offset - offset), read_size), file_offset));
+            Status st;
+            /*
+             * If segment_state == EMPTY, the thread reads the data from remote.
+             * If segment_state == DOWNLOADED, when the cache file is deleted by the other process,
+             * the thread reads the data from remote too.
+             */
+            if (segment_state == FileBlock::State::DOWNLOADED) {
+                size_t file_offset = current_offset - left;
+                SCOPED_RAW_TIMER(&stats.local_read_timer);
+                st = segment->read_at(Slice(result.data + (current_offset - offset), read_size),
+                                      file_offset);
+            }
+            if (!st.ok() || segment_state == FileBlock::State::EMPTY) {
+                size_t bytes_read {0};
+                stats.hit_cache = false;
+                SCOPED_RAW_TIMER(&stats.remote_read_timer);
+                RETURN_IF_ERROR(_remote_file_reader->read_at(
+                        current_offset, Slice(result.data + (current_offset - offset), read_size),
+                        &bytes_read));
+                DCHECK(bytes_read == read_size);
+            }
         }
         *bytes_read += read_size;
         current_offset = right + 1;
@@ -252,6 +256,40 @@ Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t*
         _metrics_hook(io_ctx->file_cache_stats);
     }
     return Status::OK();
+}
+
+Status CachedRemoteFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                            const IOContext* io_ctx) {
+    DCHECK(!closed());
+    DCHECK(io_ctx);
+    if (offset > size()) {
+        return Status::InvalidArgument(
+                fmt::format("offset exceeds file size(offset: {), file size: {}, path: {})", offset,
+                            size(), path().native()));
+    }
+    size_t bytes_req = std::min(result.size, size() - offset);
+    if (UNLIKELY(bytes_req == 0)) {
+        *bytes_read = 0;
+        return Status::OK();
+    }
+    Status cache_st = _read_from_cache(offset, result, bytes_read, io_ctx);
+    if (UNLIKELY(!cache_st.ok())) {
+        if (config::file_cache_wait_sec_after_fail > 0) {
+            // only for debug, wait and retry to load data from file cache
+            // return error if failed again
+            LOG(WARNING) << "Failed to read data from file cache, and wait "
+                         << config::file_cache_wait_sec_after_fail
+                         << " seconds to reload data: " << cache_st.to_string();
+            sleep(config::file_cache_wait_sec_after_fail);
+            cache_st = _read_from_cache(offset, result, bytes_read, io_ctx);
+        } else {
+            // fail over to remote file reader, and return the status of remote read
+            LOG(WARNING) << "Failed to read data from file cache, and fail over to remote file: "
+                         << cache_st.to_string();
+            return _remote_file_reader->read_at(offset, result, bytes_read, io_ctx);
+        }
+    }
+    return cache_st;
 }
 
 void CachedRemoteFileReader::_update_state(const ReadStatistics& read_stats,

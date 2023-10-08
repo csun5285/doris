@@ -490,6 +490,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                         short shadowShortKeyColumnCount = indexShortKeyMap.get(shadowIdxId);
                         List<Column> shadowSchema = indexSchemaMap.get(shadowIdxId);
                         int shadowSchemaHash = indexSchemaVersionAndHashMap.get(shadowIdxId).schemaHash;
+                        int shadowSchemaVersion = indexSchemaVersionAndHashMap.get(shadowIdxId).schemaVersion;
                         long originIndexId = indexIdMap.get(shadowIdxId);
                         KeysType originKeysType = tbl.getKeysTypeByIndexId(originIndexId);
 
@@ -503,7 +504,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                                     bfFpp, indexes, shadowSchema, tbl.getDataSortInfo(), tbl.getCompressionType(),
                                     tbl.getStoragePolicy(), tbl.isInMemory(), tbl.isPersistent(), true,
                                     tbl.isDynamicSchema(), tbl.getName(), tbl.getTTLSeconds(),
-                                    tbl.getEnableUniqueKeyMergeOnWrite(), tbl.storeRowColumn());
+                                    tbl.getEnableUniqueKeyMergeOnWrite(), tbl.storeRowColumn(), shadowSchemaVersion);
                             requestBuilder.addTabletMetas(builder);
                         } // end for rollupTablets
                         Env.getCurrentInternalCatalog().sendCreateTabletsRpc(requestBuilder);

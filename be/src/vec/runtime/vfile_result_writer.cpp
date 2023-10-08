@@ -181,9 +181,11 @@ Status VFileResultWriter::_create_file_writer(const std::string& file_name) {
 
 // file name format as: my_prefix_{fragment_instance_id}_0.csv
 Status VFileResultWriter::_get_next_file_name(std::string* file_name) {
+    std::string suffix =
+            _file_opts->file_suffix.empty() ? _file_format_to_name() : _file_opts->file_suffix;
     std::stringstream ss;
     ss << _file_opts->file_path << print_id(_fragment_instance_id) << "_" << (_file_idx++) << "."
-       << _file_format_to_name();
+       << suffix;
     *file_name = ss.str();
     _header_sent = false;
     if (_storage_type == TStorageBackendType::LOCAL) {
@@ -599,7 +601,8 @@ Status VFileResultWriter::_delete_dir() {
     case TStorageBackendType::HDFS: {
         THdfsParams hdfs_params = parse_properties(_file_opts->broker_properties);
         std::shared_ptr<io::HdfsFileSystem> hdfs_fs = nullptr;
-        RETURN_IF_ERROR(io::HdfsFileSystem::create(hdfs_params, "", nullptr, &hdfs_fs));
+        RETURN_IF_ERROR(
+                io::HdfsFileSystem::create(hdfs_params, hdfs_params.fs_name, nullptr, &hdfs_fs));
         file_system = hdfs_fs;
         break;
     }

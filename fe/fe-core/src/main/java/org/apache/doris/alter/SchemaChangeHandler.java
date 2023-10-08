@@ -32,6 +32,7 @@ import org.apache.doris.analysis.IndexDef.IndexType;
 import org.apache.doris.analysis.ModifyColumnClause;
 import org.apache.doris.analysis.ModifyTablePropertiesClause;
 import org.apache.doris.analysis.ReorderColumnsClause;
+import org.apache.doris.analysis.ShowAlterStmt.AlterType;
 import org.apache.doris.catalog.AggregateType;
 import org.apache.doris.catalog.BinlogConfig;
 import org.apache.doris.catalog.Column;
@@ -103,6 +104,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.selectdb.cloud.catalog.CloudReplica;
+import com.selectdb.cloud.proto.SelectdbCloud;
+import com.selectdb.cloud.rpc.MetaServiceProxy;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -2018,7 +2021,12 @@ public class SchemaChangeHandler extends AlterHandler {
 
     private void enableLightSchemaChange(Database db, OlapTable olapTable) throws DdlException {
         final AlterLightSchChangeHelper alterLightSchChangeHelper = new AlterLightSchChangeHelper(db, olapTable);
-        alterLightSchChangeHelper.enableLightSchemaChange();
+        try {
+            alterLightSchChangeHelper.enableLightSchemaChange();
+        } catch (IllegalStateException e) {
+            throw new DdlException(String.format("failed to enable light schema change for table %s.%s",
+                    db.getFullName(), olapTable.getName()), e);
+        }
     }
 
     public void replayAlterLightSchChange(AlterLightSchemaChangeInfo info) throws MetaNotFoundException {
@@ -2028,7 +2036,7 @@ public class SchemaChangeHandler extends AlterHandler {
         final AlterLightSchChangeHelper alterLightSchChangeHelper = new AlterLightSchChangeHelper(db, olapTable);
         try {
             alterLightSchChangeHelper.updateTableMeta(info);
-        } catch (DdlException e) {
+        } catch (IllegalStateException e) {
             LOG.warn("failed to replay alter light schema change", e);
         } finally {
             olapTable.writeUnlock();
@@ -2336,7 +2344,14 @@ public class SchemaChangeHandler extends AlterHandler {
     @Override
     public void cancel(CancelStmt stmt) throws DdlException {
         CancelAlterTableStmt cancelAlterTableStmt = (CancelAlterTableStmt) stmt;
+        if (cancelAlterTableStmt.getAlterType() == AlterType.INDEX) {
+            cancelIndexJob(cancelAlterTableStmt);
+        } else {
+            cancelColumnJob(cancelAlterTableStmt);
+        }
+    }
 
+    private void cancelColumnJob(CancelAlterTableStmt cancelAlterTableStmt) throws DdlException {
         String dbName = cancelAlterTableStmt.getDbName();
         String tableName = cancelAlterTableStmt.getTableName();
         Preconditions.checkState(!Strings.isNullOrEmpty(dbName));
@@ -2372,6 +2387,59 @@ public class SchemaChangeHandler extends AlterHandler {
                 throw new DdlException("Job can not be cancelled. State: " + schemaChangeJobV2.getJobState());
             }
             return;
+        }
+    }
+
+    private void cancelIndexJob(CancelAlterTableStmt cancelAlterTableStmt) throws DdlException {
+        String dbName = cancelAlterTableStmt.getDbName();
+        String tableName = cancelAlterTableStmt.getTableName();
+        Preconditions.checkState(!Strings.isNullOrEmpty(dbName));
+        Preconditions.checkState(!Strings.isNullOrEmpty(tableName));
+
+        Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
+
+        List<IndexChangeJob> jobList = new ArrayList<>();
+
+        Table olapTable = db.getTableOrDdlException(tableName, Table.TableType.OLAP);
+        olapTable.writeLock();
+        try {
+            // find from index change jobs first
+            if (cancelAlterTableStmt.getAlterJobIdList() != null
+                    && cancelAlterTableStmt.getAlterJobIdList().size() > 0) {
+                for (Long jobId : cancelAlterTableStmt.getAlterJobIdList()) {
+                    IndexChangeJob job = indexChangeJobs.get(jobId);
+                    if (job == null) {
+                        continue;
+                    }
+                    jobList.add(job);
+                    LOG.debug("add build index job {} on table {} for specific id", jobId, tableName);
+                }
+            } else {
+                for (IndexChangeJob job : indexChangeJobs.values()) {
+                    if (!job.isDone() && job.getTableId() == olapTable.getId()) {
+                        jobList.add(job);
+                        LOG.debug("add build index job {} on table {} for all", job.getJobId(), tableName);
+                    }
+                }
+            }
+        } finally {
+            olapTable.writeUnlock();
+        }
+
+        // alter job v2's cancel must be called outside the table lock
+        if (jobList.size() > 0) {
+            for (IndexChangeJob job : jobList) {
+                long jobId = job.getJobId();
+                LOG.debug("cancel build index job {} on table {}", jobId, tableName);
+                if (!job.cancel("user cancelled")) {
+                    LOG.warn("cancel build index job {} on table {} failed", jobId, tableName);
+                    throw new DdlException("Job can not be cancelled. State: " + job.getJobState());
+                } else {
+                    LOG.info("cancel build index job {} on table {} success", jobId, tableName);
+                }
+            }
+        } else {
+            throw new DdlException("No job to cancel for Table[" + tableName + "]");
         }
     }
 
@@ -2837,8 +2905,8 @@ public class SchemaChangeHandler extends AlterHandler {
                     && indexChangeJob.getTableId() == tableId
                     && indexChangeJob.getPartitionName().equals(partitionName)
                     && indexChangeJob.hasSameAlterInvertedIndex(isDrop, alterIndexes)
-                    && indexChangeJob.getJobState() != IndexChangeJob.JobState.CANCELLED) {
-                // if JobState is CANCELLED, also allow user to create job again
+                    && !indexChangeJob.isDone()) {
+                // if JobState is done (CANCELLED or FINISHED), also allow user to create job again
                 return true;
             }
         }
@@ -2945,6 +3013,228 @@ public class SchemaChangeHandler extends AlterHandler {
         indexChangeJob.replay(indexChangeJob);
         if (indexChangeJob.isDone()) {
             runnableIndexChangeJob.remove(indexChangeJob.getJobId());
+        }
+    }
+
+    /**
+     * Update some specified partitions' properties of table in cloud mode
+     */
+    public void updateCloudPartitionsProperties(Database db, String tableName, List<String> partitionNames,
+                                           Map<String, String> properties) throws UserException {
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        if (properties.size() != 1) {
+            throw new UserException("Can only set one partition property at a time");
+        }
+
+        UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
+        if (properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+            olapTable.readLock();
+            try {
+                if (ttlSeconds == olapTable.getTTLSeconds()) {
+                    LOG.info("ttlSeconds:{} is equal with olapTable.getTTLSeconds():{}", ttlSeconds,
+                            olapTable.getTTLSeconds());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.ttlSeconds = ttlSeconds;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
+            boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
+            olapTable.readLock();
+            try {
+                if (isPersistent == olapTable.isPersistent()) {
+                    LOG.info("isPersistent:{} is equal with olapTable.isPersistent():{}", isPersistent,
+                            olapTable.isPersistent());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isPersistent = isPersistent;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.PERSISTENT;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+            boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+            olapTable.readLock();
+            try {
+                if (isInMemory == olapTable.isInMemory()) {
+                    LOG.info("isInMemory:{} is equal with olapTable.isInMemory():{}", isInMemory,
+                            olapTable.isPersistent());
+                    return;
+                }
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isInMemory = isInMemory;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
+        } else {
+            LOG.warn("invalid properties:{}", properties);
+            throw new UserException("invalid properties");
+        }
+
+        for (String partitionName : partitionNames) {
+            try {
+                updateCloudPartitionMeta(db, olapTable.getName(), partitionName, param);
+            } catch (Exception e) {
+                LOG.warn("tableName:{}, partitionNames:{} updateCloudPartitionsProperties exception:",
+                        tableName, partitionNames, e);
+                throw new UserException(e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Update cloud table properties
+     */
+    public void updateCloudTableProperties(Database db, String tableName, Map<String, String> properties)
+            throws UserException {
+        if (properties.size() != 1) {
+            throw new UserException("Can only set one table property at a time");
+        }
+
+        List<Partition> partitions = Lists.newArrayList();
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
+
+        if (properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
+            long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+            olapTable.readLock();
+            try {
+                if (ttlSeconds == olapTable.getTTLSeconds()) {
+                    LOG.info("ttlSeconds:{} is equal with olapTable.getTTLSeconds():{}", ttlSeconds,
+                            olapTable.getTTLSeconds());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.ttlSeconds = ttlSeconds;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.TTL_SECONDS;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)) {
+            boolean isPersistent = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_PERSISTENT));
+            olapTable.readLock();
+            try {
+                if (isPersistent == olapTable.isPersistent()) {
+                    LOG.info("isPersistent:{} is equal with olapTable.isPersistent():{}", isPersistent,
+                            olapTable.isPersistent());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isPersistent = isPersistent;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.PERSISTENT;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)) {
+            boolean isInMemory = Boolean.parseBoolean(properties.get(PropertyAnalyzer.PROPERTIES_INMEMORY));
+            olapTable.readLock();
+            try {
+                if (isInMemory == olapTable.isInMemory()) {
+                    LOG.info("isInMemory:{} is equal with olapTable.isInMemory():{}", isInMemory,
+                            olapTable.isPersistent());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.isInMemory = isInMemory;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
+        } else {
+            LOG.warn("invalid properties:{}", properties);
+            throw new UserException("invalid properties");
+        }
+
+        for (Partition partition : partitions) {
+            updateCloudPartitionMeta(db, olapTable.getName(), partition.getName(), param);
+        }
+
+        olapTable.writeLockOrDdlException();
+        try {
+            Env.getCurrentEnv().modifyTableProperties(db, olapTable, properties);
+        } finally {
+            olapTable.writeUnlock();
+        }
+    }
+
+    private static class UpdatePartitionMetaParam {
+        public enum TabletMetaType {
+            INMEMORY,
+            PERSISTENT,
+            TTL_SECONDS,
+        }
+
+        TabletMetaType type;
+        boolean isPersistent = false;
+        boolean isInMemory = false;
+        long ttlSeconds = 0;
+    }
+
+    public void updateCloudPartitionMeta(Database db,
+            String tableName,
+            String partitionName,
+            UpdatePartitionMetaParam param) throws UserException {
+        List<Long> tabletIds = new ArrayList<>();
+        OlapTable olapTable = (OlapTable) db.getTableOrMetaException(tableName, Table.TableType.OLAP);
+        olapTable.readLock();
+        try {
+            Partition partition = olapTable.getPartition(partitionName);
+            if (partition == null) {
+                throw new DdlException(
+                        "Partition[" + partitionName + "] does not exist in table[" + olapTable.getName() + "]");
+            }
+            for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
+                for (Tablet tablet : index.getTablets()) {
+                    tabletIds.add(tablet.getId());
+                }
+            }
+        } finally {
+            olapTable.readUnlock();
+        }
+        for (int index = 0; index < tabletIds.size();) {
+            int nextIndex = tabletIds.size() - index > Config.cloud_txn_tablet_batch_size
+                    ? index + Config.cloud_txn_tablet_batch_size
+                    : tabletIds.size();
+            SelectdbCloud.UpdateTabletRequest.Builder requestBuilder = SelectdbCloud.UpdateTabletRequest.newBuilder();
+            while (index < nextIndex) {
+                SelectdbCloud.TabletMetaInfoPB.Builder infoBuilder = SelectdbCloud.TabletMetaInfoPB.newBuilder();
+                infoBuilder.setTabletId(tabletIds.get(index));
+                switch (param.type) {
+                    case PERSISTENT:
+                        infoBuilder.setIsPersistent(param.isPersistent);
+                        break;
+                    case INMEMORY:
+                        infoBuilder.setIsInMemory(param.isInMemory);
+                        break;
+                    case TTL_SECONDS:
+                        infoBuilder.setTtlSeconds(param.ttlSeconds);
+                        break;
+                    default:
+                        throw new UserException("Unknown TabletMetaType");
+                }
+                SelectdbCloud.TabletMetaInfoPB tabletMetaInfo = infoBuilder.build();
+                requestBuilder.addTabletMetaInfos(tabletMetaInfo);
+                index++;
+            }
+            requestBuilder.setCloudUniqueId(Config.cloud_unique_id);
+            SelectdbCloud.UpdateTabletRequest updateTabletReq = requestBuilder.build();
+            LOG.info("UpdateTabletRequest: {} ", updateTabletReq);
+
+            SelectdbCloud.UpdateTabletResponse response;
+            try {
+                response = MetaServiceProxy.getInstance().updateTablet(updateTabletReq);
+            } catch (Exception e) {
+                LOG.warn("updateTablet Exception:", e);
+                throw new UserException(e.getMessage());
+            }
+            LOG.info("response: {} ", response);
+
+            if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
+                throw new UserException(response.getStatus().getMsg());
+            }
         }
     }
 }

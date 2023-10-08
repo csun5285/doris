@@ -254,7 +254,12 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
 
     // 6. set txn related delete bitmap if necessary
     for (auto it = need_wait_writers.begin(); it != need_wait_writers.end();) {
-        (*it)->cloud_set_txn_related_delete_bitmap();
+        auto st = (*it)->cloud_set_txn_related_delete_bitmap();
+        if (!st.ok()) {
+            _add_error_tablet(tablet_errors, (*it)->tablet_id(), st);
+            it = need_wait_writers.erase(it);
+            continue;
+        }
         it++;
     }
 
@@ -664,6 +669,9 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
     auto get_send_data = [&]() { return vectorized::Block(request.block()); };
 
     auto send_data = get_send_data();
+    CHECK(send_data.rows() == request.tablet_ids_size())
+            << "block rows: " << send_data.rows()
+            << ", tablet_ids_size: " << request.tablet_ids_size();
 
     auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
     auto write_tablet_data = [&](uint32_t tablet_id,

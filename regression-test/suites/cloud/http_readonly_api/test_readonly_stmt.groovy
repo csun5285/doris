@@ -43,7 +43,8 @@ def SUCCESS_MSG = "success"
 def SUCCESS_CODE = 0
 
 class Stmt {
-    String stmt
+    String stmt;
+    Boolean enable_nereids_planner = true;
 }
 suite("test_readonly_stmt") {
     result = sql """ SELECT DATABASE(); """
@@ -94,6 +95,7 @@ suite("test_readonly_stmt") {
     logger.info("stmt2 data is {}", obj.data.data)
 
     assertEquals(obj.code, 0)
+
     // test show columns
     def ret = sql """ SHOW FULL COLUMNS FROM ${tableName} """
     logger.info("stmt3 from mysql is {}", ret)
@@ -128,5 +130,27 @@ suite("test_readonly_stmt") {
     logger.info("stmt4 msg is {}", obj.msg)
     logger.info("stmt4 code is {}", obj.code)
     logger.info("stmt4 data is {}", obj.data.data)
+
     assertEquals(obj.code, 0)
+
+    def stmt5 = """ explain  select * from ${tableName} """
+    def stmt5_json = JsonOutput.toJson(new Stmt(stmt: stmt5));
+
+    resJson = http_post(url, stmt5_json)
+    obj = new JsonSlurper().parseText(resJson)
+    logger.info("stmt5 res is {}", obj)
+    assertEquals(0, obj.code)
+
+    sql """ SET enable_nereids_planner=true; """
+    sql """
+      explain select * from ${tableName}
+    """
+
+    def stmt6 = """ explain  select * from ${tableName} """
+    def stmt6_json = JsonOutput.toJson(new Stmt(stmt: stmt6, enable_nereids_planner: false));
+
+    resJson = http_post(url, stmt6_json)
+    obj = new JsonSlurper().parseText(resJson)
+    logger.info("stmt6 res is {}", obj)
+    assertEquals(0, obj.code)
 }

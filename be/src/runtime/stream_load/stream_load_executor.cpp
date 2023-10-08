@@ -238,6 +238,7 @@ Status StreamLoadExecutor::begin_txn(StreamLoadContext* ctx) {
     request.db = ctx->db;
     request.tbl = ctx->table;
     request.label = ctx->label;
+    request.__set_table_id(ctx->table_id);
     // set timestamp
     request.__set_timestamp(GetCurrentTimeMicros());
     if (ctx->timeout_second != -1) {
@@ -250,7 +251,7 @@ Status StreamLoadExecutor::begin_txn(StreamLoadContext* ctx) {
     int64_t duration_ns = 0;
     TNetworkAddress master_addr = _exec_env->master_info()->network_address;
     if (master_addr.hostname.empty() || master_addr.port == 0) {
-        status = Status::ServiceUnavailable("Have not get FE Master heartbeat yet");
+        status = Status::Error<SERVICE_UNAVAILABLE>("Have not get FE Master heartbeat yet");
     } else {
         SCOPED_RAW_TIMER(&duration_ns);
 #ifndef BE_TEST

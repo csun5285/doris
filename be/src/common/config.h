@@ -319,6 +319,7 @@ DECLARE_mInt32(tablet_lookup_cache_clean_interval);
 DECLARE_mInt32(disk_stat_monitor_interval);
 DECLARE_mInt32(unused_rowset_monitor_interval);
 DECLARE_String(storage_root_path);
+DECLARE_mString(broken_storage_path);
 
 // Config is used to check incompatible old format hdr_ format
 // whether doris uses strict way. When config is true, process will log fatal
@@ -332,6 +333,9 @@ DECLARE_mInt32(default_num_rows_per_column_file_block);
 DECLARE_mInt32(pending_data_expire_time_sec);
 // inc_rowset snapshot rs sweep time interval
 DECLARE_mInt32(tablet_rowset_stale_sweep_time_sec);
+// tablet stale rowset sweep by threshold size
+DECLARE_Bool(tablet_rowset_stale_sweep_by_size);
+DECLARE_mInt32(tablet_rowset_stale_sweep_threshold_size);
 // garbage sweep policy
 DECLARE_Int32(max_garbage_sweep_interval);
 DECLARE_Int32(min_garbage_sweep_interval);
@@ -398,7 +402,7 @@ DECLARE_mInt64(vertical_compaction_max_segment_size);
 // In ordered data compaction, min segment size for input rowset
 DECLARE_mInt32(ordered_data_compaction_min_segment_size);
 
-DECLARE_mInt32(min_compaction_failure_interval_sec);
+DECLARE_mInt32(min_compaction_failure_interval_ms);
 
 // This config can be set to limit thread number in compaction thread pool.
 DECLARE_mInt32(max_base_compaction_threads);
@@ -418,6 +422,7 @@ DECLARE_mInt64(compaction_promotion_size_mbytes);
 DECLARE_mInt32(check_auto_compaction_interval_seconds);
 DECLARE_mInt64(base_compaction_num_cumulative_deltas);
 DECLARE_mInt64(base_compaction_interval_seconds_since_last_operation);
+DECLARE_mInt32(cumu_compaction_interval_seconds);
 DECLARE_Bool(enable_dup_key_base_compaction_skip_big_file);
 
 // output rowset of cumulative compaction total disk size exceed this config ratio of
@@ -831,6 +836,7 @@ DECLARE_mInt32(max_remote_storage_count);
 // and the valid values are: 0.9.0.x, 0.8.x.y.
 DECLARE_String(kafka_api_version_request);
 DECLARE_String(kafka_broker_version_fallback);
+DECLARE_mString(kafka_debug);
 
 // The number of pool siz of routine load consumer.
 // If you meet the error describe in https://github.com/edenhill/librdkafka/issues/3608
@@ -895,6 +901,9 @@ DECLARE_mInt32(jsonb_type_length_soft_limit_bytes);
 // used for olap scanner to save memory, when the size of unused_object_pool
 // is greater than object_pool_buffer_size, release the object in the unused_object_pool.
 DECLARE_Int32(object_pool_buffer_size);
+
+// Threshold fo reading a small file into memory
+DECLARE_mInt32(in_memory_file_size);
 
 // ParquetReaderWrap prefetch buffer size
 DECLARE_Int32(parquet_reader_max_buffer_size);
@@ -1061,6 +1070,9 @@ DECLARE_Bool(enable_shrink_memory);
 DECLARE_mInt32(schema_cache_capacity);
 DECLARE_mInt32(schema_cache_sweep_time_sec);
 
+// max number of segment cache
+DECLARE_mInt32(segment_cache_capacity);
+
 // enable binlog
 DECLARE_Bool(enable_feature_binlog);
 
@@ -1104,6 +1116,7 @@ DECLARE_Int64(file_cache_max_file_segment_size); // 1MB
 DECLARE_Int64(file_cache_min_file_segment_size);
 DECLARE_Bool(clear_file_cache);
 DECLARE_Bool(enable_file_cache_query_limit);
+DECLARE_mInt32(file_cache_wait_sec_after_fail); // zero for no waiting and retrying
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]
@@ -1112,7 +1125,6 @@ DECLARE_String(tmp_file_dirs);
 // cloud
 DECLARE_String(cloud_unique_id);
 DECLARE_String(meta_service_endpoint);
-DECLARE_Bool(meta_service_use_load_balancer);
 // Set the underlying connection type to pooled.
 DECLARE_Bool(meta_service_connection_pooled);
 DECLARE_mInt64(meta_service_connection_pool_size);
@@ -1191,9 +1203,6 @@ DECLARE_mInt64(lookup_connection_cache_bytes_limit);
 // level of compression when using LZ4_HC, whose defalut value is LZ4HC_CLEVEL_DEFAULT
 DECLARE_mInt64(LZ4_HC_compression_level);
 
-// enable window_funnel_function with different modes
-DECLARE_mBool(enable_window_funnel_function_v2);
-
 // whether to enable hdfs hedged read.
 // If set to true, it will be enabled even if user not enable it when creating catalog
 DECLARE_Bool(enable_hdfs_hedged_read);
@@ -1208,6 +1217,28 @@ DECLARE_mBool(enable_merge_on_write_correctness_check);
 
 // The secure path with user files, used in the `local` table function.
 DECLARE_mString(user_files_secure_path);
+
+// BitmapValue serialize version.
+DECLARE_Int16(bitmap_serialize_version);
+
+// Real time load config
+DECLARE_String(group_commit_replay_wal_dir);
+DECLARE_Int32(group_commit_replay_wal_retry_num);
+DECLARE_Int32(group_commit_replay_wal_retry_interval_seconds);
+DECLARE_Int32(group_commit_sync_wal_batch);
+// This config can be set to limit thread number in group commit insert thread pool.
+DECLARE_mInt32(group_commit_insert_threads);
+
+// The configuration item is used to lower the priority of the scanner thread,
+// typically employed to ensure CPU scheduling for write operations.
+// Default is 0, which is default value of thread nice value, increase this value
+// to lower the priority of scan threads
+DECLARE_Int32(scan_thread_nice_value);
+// Used to modify the recycle interval of tablet schema cache
+DECLARE_mInt32(tablet_schema_cache_recycle_interval);
+
+// Use `LOG(FATAL)` to replace `throw` when true
+DECLARE_mBool(exit_on_exception);
 
 #ifdef BE_TEST
 // test s3
