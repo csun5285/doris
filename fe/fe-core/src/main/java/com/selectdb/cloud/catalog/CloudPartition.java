@@ -9,6 +9,7 @@ import org.apache.doris.catalog.DistributionInfo;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rpc.RpcException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -16,6 +17,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -82,11 +84,13 @@ public class CloudPartition extends Partition {
                 version = resp.getVersion();
             } else {
                 assert resp.getStatus().getCode() == MetaServiceCode.VERSION_NOT_FOUND;
-                version = 0;
             }
             LOG.debug("get version from meta service, version: {}, partition: {}", version, super.getId());
             // Cache visible version, see hasData() for details.
             super.setVisibleVersion(version);
+            if (version == 0 && isEmptyPartitionPruneDisabled()) {
+                version = 1;
+            }
             return version;
         } catch (RpcException e) {
             throw new RuntimeException("get version from meta service failed");
@@ -126,6 +130,14 @@ public class CloudPartition extends Partition {
         }
 
         LOG.debug("get version from meta service, partitions: {}, versions: {}", partitionIds, versions);
+
+        if (isEmptyPartitionPruneDisabled()) {
+            ArrayList<Long> news = new ArrayList();
+            for (Long v : versions) {
+                news.add(v == -1 ? 1 : v);
+            }
+            return news;
+        }
         return versions;
     }
 
@@ -168,6 +180,14 @@ public class CloudPartition extends Partition {
      */
     @Override
     public boolean hasData() {
+        // In order to determine whether a partition is empty, a get_version RPC is issued to
+        // the meta service. The pruning process will be very slow when there are lots of empty
+        // partitions. This option disables the empty partition prune optimization to speed SQL
+        // analysis/plan phase.
+        if (isEmptyPartitionPruneDisabled()) {
+            return true;
+        }
+
         // Every partition starts from version 1, version 1 has no data
         final long versionNoData = 1;
 
@@ -224,6 +244,14 @@ public class CloudPartition extends Partition {
         LOG.warn("get version from meta service failed after retry {} times",
                 Config.cloud_meta_service_rpc_failed_retry_times);
         throw new RpcException("get version from meta service", "failed after retry n times");
+    }
+
+    private static boolean isEmptyPartitionPruneDisabled() {
+        ConnectContext ctx = ConnectContext.get();
+        if (ctx != null && ctx.getSessionVariable().getDisableEmptyPartitionPrune()) {
+            return true;
+        }
+        return false;
     }
 
     public static CloudPartition read(DataInput in) throws IOException {

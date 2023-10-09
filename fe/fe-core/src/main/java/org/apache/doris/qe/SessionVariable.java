@@ -137,6 +137,7 @@ public class SessionVariable implements Serializable, Writable {
 
     // SELECTDB_CLOUD_BEGIN
     public static final String CLOUD_CLUSTER = "cloud_cluster";
+    public static final String DISABLE_EMPTY_PARTITION_PRUNE = "disable_empty_partition_prune";
     // SELECTDB_CLOUD_END
 
     // Compatible with  mysql
@@ -658,6 +659,8 @@ public class SessionVariable implements Serializable, Writable {
     // SELECTDB_CODE_BEGIN
     @VariableMgr.VarAttr(name = CLOUD_CLUSTER)
     public String cloudCluster = "";
+    @VariableMgr.VarAttr(name = DISABLE_EMPTY_PARTITION_PRUNE)
+    public boolean disableEmptyPartitionPrune = false;
     // SELECTDB_CODE_END
 
     // -1 means unset, BE will use its config value
@@ -1850,6 +1853,14 @@ public class SessionVariable implements Serializable, Writable {
 
     public String setCloudCluster(String cloudCluster) {
         return this.cloudCluster = cloudCluster;
+    }
+
+    public boolean getDisableEmptyPartitionPrune() {
+        return disableEmptyPartitionPrune;
+    }
+
+    public void setDisableEmptyPartitionPrune(boolean val) {
+        disableEmptyPartitionPrune = val;
     }
 
     // SELECTDB_CODE_END
