@@ -35,14 +35,13 @@
 #include "http/http_headers.h"
 #include "http/http_request.h"
 #include "http/http_status.h"
-#include "olap/olap_common.h"
 #include "olap/base_compaction.h"
 #include "olap/cumulative_compaction.h"
 #include "olap/cumulative_compaction_policy.h"
 #include "olap/cumulative_compaction_time_series_policy.h"
 #include "olap/full_compaction.h"
+#include "olap/olap_common.h"
 #include "olap/olap_define.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "util/doris_metrics.h"
 #include "util/stopwatch.hpp"
@@ -136,9 +135,10 @@ Status CompactionAction::_handle_run_compaction(HttpRequest* req, std::string* j
 
     // 3. submit compaction task
     RETURN_IF_ERROR(StorageEngine::instance()->submit_compaction_task(
-            tablet, compaction_type == PARAM_COMPACTION_BASE
-                            ? CompactionType::BASE_COMPACTION
-                            : CompactionType::CUMULATIVE_COMPACTION));
+            tablet, compaction_type == PARAM_COMPACTION_BASE ? CompactionType::BASE_COMPACTION
+                    : compaction_type == PARAM_COMPACTION_CUMULATIVE
+                            ? CompactionType::CUMULATIVE_COMPACTION
+                            : CompactionType::FULL_COMPACTION));
 
 // =======
 //     if (tablet_id == 0 && table_id != 0) {

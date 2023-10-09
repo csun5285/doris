@@ -138,7 +138,7 @@ suite("test_insert_into_lineitem_fuzzy_test") {
     def restartProcess = { String nodeIp, String processName, String installPath /* param */ ->
         logger.info("restartProcess(): nodeIp=${nodeIp} installPath=${installPath} processName=${processName}")
         stopProcess(nodeIp, processName, installPath)
-        Thread.sleep(1000)
+        Thread.sleep(5000)
         startProcess(nodeIp, processName, installPath)
 
         int tryTimes = 3

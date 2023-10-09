@@ -4,7 +4,7 @@ suite("test_apsarad_internal_stage_copy_into") {
     // Internal and external stage cross use
     def tableNamExternal = "customer_internal_stage"
     //def token = "greedisgood9999"
-    //def instanceId = context.config.instanceId
+    def instanceId = context.config.instanceId
     def cloudUniqueId = context.config.cloudUniqueId
     def token = context.config.metaServiceToken
     def instance_id = context.config.multiClusterInstance

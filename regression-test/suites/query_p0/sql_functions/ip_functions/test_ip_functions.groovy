@@ -14,28 +14,12 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+suite("test_ip_functions") {
+    sql "set batch_size = 4096;"
 
-suite("test_ctl") {
-    try {
-        sql """
-    CREATE TABLE IF NOT EXISTS `test_ctl` (
-      `test_varchar` varchar(150) NULL,
-      `test_datetime` datetime NULL,
-      `test_default_timestamp` datetime DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=OLAP
-    UNIQUE KEY(`test_varchar`)
-    DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
-    """
-
-        sql """ 
-    CREATE TABLE IF NOT EXISTS `test_ctl1` LIKE `test_ctl`
-    """
-
-        qt_select """SHOW CREATE TABLE `test_ctl1`"""
-    } finally {
-        sql """ DROP TABLE IF EXISTS test_ctl """
-
-        sql """ DROP TABLE IF EXISTS test_ctl1 """
-    }
+    qt_sql "SELECT ipv4numtostring(-1);"
+    qt_sql "SELECT ipv4numtostring(2130706433);"
+    qt_sql "SELECT ipv4numtostring(4294967298);"
+    qt_sql "SELECT inet_ntoa(3232235521);"
 
 }

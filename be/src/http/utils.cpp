@@ -77,7 +77,12 @@ bool parse_basic_auth(const HttpRequest& req, AuthInfo* auth) {
     if (!token.empty()) {
         auth->token = token;
     } else if (!auth_code.empty()) {
-        auth->auth_code = std::stoll(auth_code);
+        try {
+            auth->auth_code = std::stoll(auth_code);
+        } catch (const std::invalid_argument& e) {
+            LOG(WARNING) << "Invalid format " << e.what();
+            return false;
+        }
     } else {
         std::string full_user;
         if (!parse_basic_auth(req, &full_user, &auth->passwd)) {

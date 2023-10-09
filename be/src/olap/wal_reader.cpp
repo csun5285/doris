@@ -44,16 +44,24 @@ Status WalReader::read_block(PBlock& block) {
         return Status::EndOfFile("end of wal file");
     }
     size_t bytes_read = 0;
+    uint8_t version_buf[WalWriter::VERSION_SIZE];
+    RETURN_IF_ERROR(
+            file_reader->read_at(_offset, {version_buf, WalWriter::VERSION_SIZE}, &bytes_read));
+    _offset += WalWriter::VERSION_SIZE;
+    size_t version;
+    memcpy(&version, version_buf, WalWriter::VERSION_SIZE);
     uint8_t row_len_buf[WalWriter::LENGTH_SIZE];
     RETURN_IF_ERROR(
             file_reader->read_at(_offset, {row_len_buf, WalWriter::LENGTH_SIZE}, &bytes_read));
     _offset += WalWriter::LENGTH_SIZE;
     size_t block_len;
     memcpy(&block_len, row_len_buf, WalWriter::LENGTH_SIZE);
+    DCHECK(block_len >= 0);
     // read block
     std::string block_buf;
     block_buf.resize(block_len);
-    RETURN_IF_ERROR(file_reader->read_at(_offset, {block_buf.c_str(), block_len}, &bytes_read));
+    RETURN_IF_ERROR(file_reader->read_at(_offset, block_buf, &bytes_read));
+    DCHECK(block_len == bytes_read);
     _offset += block_len;
     RETURN_IF_ERROR(_deserialize(block, block_buf));
     // checksum

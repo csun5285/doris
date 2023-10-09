@@ -94,6 +94,8 @@ public:
     IntCounter* base_compaction_bytes_total;
     IntCounter* cumulative_compaction_deltas_total;
     IntCounter* cumulative_compaction_bytes_total;
+    IntCounter* full_compaction_deltas_total;
+    IntCounter* full_compaction_bytes_total;
 
     IntCounter* publish_task_request_total;
     IntCounter* publish_task_failed_total;

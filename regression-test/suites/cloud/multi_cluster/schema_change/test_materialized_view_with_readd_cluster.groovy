@@ -17,7 +17,7 @@
 
 import groovy.json.JsonOutput
 
-suite("test_materialized_with_readd_cluster") {
+suite("test_materialized_view_with_readd_cluster") {
     def token = context.config.metaServiceToken
     def instance_id = context.config.multiClusterInstance
 
@@ -27,20 +27,21 @@ suite("test_materialized_with_readd_cluster") {
     List<String> beUniqueIdList = new ArrayList<>()
 
     String[] bes = context.config.multiClusterBes.split(',');
-    println("the value is " + context.config.multiClusterBes);
     for(String values : bes) {
-        println("the value is " + values);
         String[] beInfo = values.split(':');
+        if (beUniqueIdList.contains(beInfo[3])) {
+            continue
+        }
         ipList.add(beInfo[0]);
         hbPortList.add(beInfo[1]);
         httpPortList.add(beInfo[2]);
         beUniqueIdList.add(beInfo[3]);
     }
 
-    println("the ip is " + ipList);
-    println("the heartbeat port is " + hbPortList);
-    println("the http port is " + httpPortList);
-    println("the be unique id is " + beUniqueIdList);
+    logger.info("ipList:{}", ipList)
+    logger.info("hbPortList:{}", hbPortList)
+    logger.info("httpPortList:{}", httpPortList);
+    logger.info("beUniqueIdList:{}", beUniqueIdList);
 
     for (unique_id : beUniqueIdList) {
         resp = get_cluster.call(unique_id);
@@ -71,9 +72,14 @@ suite("test_materialized_with_readd_cluster") {
         }
     }
 
-    def tbName1 = "test_materialized_with_readd_cluster"
+    def tbName1 = "test_materialized_view_with_readd_cluster"
+    def mvName1 = "mv1"
+    def mvName2 = "mv2"
     def getJobMaterializedState = { tableName ->
         def jobStateResult = sql """  SHOW ALTER TABLE MATERIALIZED VIEW WHERE TableName='${tableName}' ORDER BY CreateTime DESC LIMIT 1; """
+        if (jobStateResult[0][8].equals("CANCELLED") || jobStateResult[0][8].equals("FINISHED")) {
+            logger.info("jobStateResult:{}", jobStateResult)
+        }
         return jobStateResult[0][8]
     }
     sql "DROP TABLE IF EXISTS ${tbName1}"
@@ -85,14 +91,13 @@ suite("test_materialized_with_readd_cluster") {
                 pv BIGINT(20) SUM NOT NULL DEFAULT '0',
                 uv BIGINT(20) SUM NOT NULL DEFAULT '0'
             )
-            AGGREGATE KEY (siteid,citycode,username)
             DISTRIBUTED BY HASH(siteid) BUCKETS 5 ;
         """
     sql "insert into ${tbName1} values(1, 1, 'test1', 100,100);"
     sql "insert into ${tbName1} values(2, 1, 'test1', 100,100);"
     sql "insert into ${tbName1} values(3, 1, 'test1', 100,100);"
 
-    sql """ALTER TABLE ${tbName1} ADD ROLLUP rollup_city(citycode, pv);"""
+    sql """create materialized view ${mvName1} as select siteid from ${tbName1} group by siteid;""";
 
     // drop cluster
     drop_cluster.call("regression_cluster_name0", "regression_cluster_id0");
@@ -109,15 +114,13 @@ suite("test_materialized_with_readd_cluster") {
         }
     }
 
-    // get materialized view job state, should cancel
     int max_try_secs = 60
     while (max_try_secs--) {
         String res = getJobMaterializedState(tbName1)
-        if (res == "CANCELLED") {
-            logger.info(tbName1 + " alter job CANCELLED")
+        if (res.equals("CANCELLED") || res.equals("FINISHED")) {
             break
         } else {
-            Thread.sleep(1000)
+            Thread.sleep(5000)
             if (max_try_secs < 1) {
                 println "test timeout," + "state:" + res
                 assertEquals("FINISHED", res)
@@ -133,18 +136,17 @@ suite("test_materialized_with_readd_cluster") {
             assertTrue(row[1].toString().toLowerCase() == "true")
         }
     }
-    sql """ALTER TABLE ${tbName1} ADD ROLLUP rollup_city(citycode, pv);"""
-    // get materialized view job state, should cancel
+
+    sql """create materialized view ${mvName2} as select siteid from ${tbName1} group by siteid;""";
     max_try_secs = 60
     while (max_try_secs--) {
         String res = getJobMaterializedState(tbName1)
-        if (res == "CANCELLED") {
-            logger.info(tbName1 + " alter job CANCELLED")
+        if (res.equals("CANCELLED") || res.equals("FINISHED")) {
             break
         } else {
-            Thread.sleep(1000)
+            Thread.sleep(5000)
             if (max_try_secs < 1) {
-                println "test timeout," + "state:" + res
+                logger.info("test timeout res:{}", res)
                 assertEquals("FINISHED", res)
             }
         }

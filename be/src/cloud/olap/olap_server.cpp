@@ -28,6 +28,7 @@
 
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
+#include "cloud/cloud_full_compaction.h"
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
@@ -698,55 +699,52 @@ void StorageEngine::get_cumu_compaction(
     }
 }
 
-Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
-                                             CompactionType compaction_type) {
-    DCHECK(compaction_type == CompactionType::CUMULATIVE_COMPACTION ||
-           compaction_type == CompactionType::BASE_COMPACTION);
+Status StorageEngine::_submit_base_compaction_task(const TabletSharedPtr& tablet) {
     using namespace std::chrono;
-    if (compaction_type == CompactionType::BASE_COMPACTION) {
-        {
-            std::lock_guard lock(_compaction_mtx);
-            // Take a placeholder for base compaction
-            auto [_, success] = _submitted_base_compactions.emplace(tablet->tablet_id(), nullptr);
-            if (!success) {
-                return Status::AlreadyExist("other base compaction is submitted, tablet_id={}",
-                                            tablet->tablet_id());
-            }
+    {
+        std::lock_guard lock(_compaction_mtx);
+        // Take a placeholder for base compaction
+        auto [_, success] = _submitted_base_compactions.emplace(tablet->tablet_id(), nullptr);
+        if (!success) {
+            return Status::AlreadyExist(
+                    "other base compaction or full compaction is submitted, tablet_id={}",
+                    tablet->tablet_id());
         }
-        auto compaction = std::make_shared<CloudBaseCompaction>(tablet);
-        auto st = compaction->prepare_compact();
-        if (!st.ok()) {
-            long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-            tablet->set_last_base_compaction_failure_time(now);
-            std::lock_guard lock(_compaction_mtx);
-            _submitted_base_compactions.erase(tablet->tablet_id());
-            return st;
-        }
-        {
-            std::lock_guard lock(_compaction_mtx);
-            _submitted_base_compactions[tablet->tablet_id()] = compaction;
-        }
-        st = _base_compaction_thread_pool->submit_func([=, this,
-                                                        compaction = std::move(compaction)]() {
-            auto st = compaction->execute_compact();
-            if (!st.ok()) {
-                // Error log has been output in `execute_compact`
-                long now =
-                        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-                tablet->set_last_base_compaction_failure_time(now);
-            }
-            std::lock_guard lock(_compaction_mtx);
-            _submitted_base_compactions.erase(tablet->tablet_id());
-        });
-        if (!st.ok()) {
-            std::lock_guard lock(_compaction_mtx);
-            _submitted_base_compactions.erase(tablet->tablet_id());
-            return Status::InternalError("failed to submit base compaction, tablet_id={}",
-                                         tablet->tablet_id());
-        }
+    }
+    auto compaction = std::make_shared<CloudBaseCompaction>(tablet);
+    auto st = compaction->prepare_compact();
+    if (!st.ok()) {
+        long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        tablet->set_last_base_compaction_failure_time(now);
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_base_compactions.erase(tablet->tablet_id());
         return st;
     }
-    // else CompactionType::CUMULATIVE_COMPACTION
+    {
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_base_compactions[tablet->tablet_id()] = compaction;
+    }
+    st = _base_compaction_thread_pool->submit_func([=, this, compaction = std::move(compaction)]() {
+        auto st = compaction->execute_compact();
+        if (!st.ok()) {
+            // Error log has been output in `execute_compact`
+            long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+            tablet->set_last_base_compaction_failure_time(now);
+        }
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_base_compactions.erase(tablet->tablet_id());
+    });
+    if (!st.ok()) {
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_base_compactions.erase(tablet->tablet_id());
+        return Status::InternalError("failed to submit base compaction, tablet_id={}",
+                                     tablet->tablet_id());
+    }
+    return st;
+}
+
+Status StorageEngine::_submit_cumulative_compaction_task(const TabletSharedPtr& tablet) {
+    using namespace std::chrono;
     {
         std::lock_guard lock(_compaction_mtx);
         if (!config::enable_parallel_cumu_compaction &&
@@ -805,10 +803,74 @@ Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
     });
     if (!st.ok()) {
         erase_submitted_cumu_compaction();
-        return Status::InternalError("failed to submit base compaction, tablet_id={}",
+        return Status::InternalError("failed to submit cumu compaction, tablet_id={}",
                                      tablet->tablet_id());
     }
     return st;
+}
+
+Status StorageEngine::_submit_full_compaction_task(const TabletSharedPtr& tablet) {
+    using namespace std::chrono;
+    {
+        std::lock_guard lock(_compaction_mtx);
+        // Take a placeholder for full compaction
+        auto [_, success] = _submitted_full_compactions.emplace(tablet->tablet_id(), nullptr);
+        if (!success) {
+            return Status::AlreadyExist(
+                    "other full compaction or base compaction is submitted, tablet_id={}",
+                    tablet->tablet_id());
+        }
+    }
+    auto compaction = std::make_shared<CloudFullCompaction>(tablet);
+    auto st = compaction->prepare_compact();
+    if (!st.ok()) {
+        long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+        tablet->set_last_full_compaction_failure_time(now);
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_full_compactions.erase(tablet->tablet_id());
+        return st;
+    }
+    {
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_full_compactions[tablet->tablet_id()] = compaction;
+    }
+    st = _base_compaction_thread_pool->submit_func([=, this, compaction = std::move(compaction)]() {
+        auto st = compaction->execute_compact();
+        if (!st.ok()) {
+            // Error log has been output in `execute_compact`
+            long now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+            tablet->set_last_full_compaction_failure_time(now);
+        }
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_full_compactions.erase(tablet->tablet_id());
+    });
+    if (!st.ok()) {
+        std::lock_guard lock(_compaction_mtx);
+        _submitted_full_compactions.erase(tablet->tablet_id());
+        return Status::InternalError("failed to submit full compaction, tablet_id={}",
+                                     tablet->tablet_id());
+    }
+    return st;
+}
+
+Status StorageEngine::submit_compaction_task(const TabletSharedPtr& tablet,
+                                             CompactionType compaction_type) {
+    DCHECK(compaction_type == CompactionType::CUMULATIVE_COMPACTION ||
+           compaction_type == CompactionType::BASE_COMPACTION ||
+           compaction_type == CompactionType::FULL_COMPACTION);
+    switch (compaction_type) {
+    case CompactionType::BASE_COMPACTION:
+        RETURN_IF_ERROR(_submit_base_compaction_task(tablet));
+        return Status::OK();
+    case CompactionType::CUMULATIVE_COMPACTION:
+        RETURN_IF_ERROR(_submit_cumulative_compaction_task(tablet));
+        return Status::OK();
+    case CompactionType::FULL_COMPACTION:
+        RETURN_IF_ERROR(_submit_full_compaction_task(tablet));
+        return Status::OK();
+    default:
+        return Status::InternalError("unknown compaction type!");
+    }
 }
 
 Status StorageEngine::_handle_seg_compaction(BetaRowsetWriter* writer,

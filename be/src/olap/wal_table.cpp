@@ -19,23 +19,21 @@
 
 #include <event2/bufferevent.h>
 #include <event2/event.h>
-#include <event2/event_struct.h>
 #include <event2/http.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
+#include "common/status.h"
 #include "evhttp.h"
 #include "http/action/stream_load.h"
-#include "http/ev_http_server.h"
 #include "http/http_common.h"
-#include "http/http_headers.h"
 #include "http/utils.h"
-#include "io/fs/local_file_system.h"
 #include "olap/wal_manager.h"
 #include "runtime/client_cache.h"
 #include "runtime/fragment_mgr.h"
 #include "runtime/plan_fragment_executor.h"
 #include "util/path_util.h"
 #include "util/thrift_rpc_helper.h"
+#include "utils.h"
 #include "vec/exec/format/wal/wal_reader.h"
 
 namespace doris {
@@ -47,6 +45,8 @@ WalTable::~WalTable() {}
 #ifdef BE_TEST
 std::string k_request_line;
 #endif
+
+bool retry = false;
 
 void WalTable::add_wals(std::vector<std::string> wals) {
     std::lock_guard<std::mutex> lock(_replay_wal_lock);
@@ -75,7 +75,11 @@ Status WalTable::replay_wals() {
                              << ", retry_num=" << config::group_commit_replay_wal_retry_num;
                 std::string rename_path = get_tmp_path(wal);
                 LOG(INFO) << "rename wal from " << wal << " to " << rename_path;
-                std::rename(wal.c_str(), rename_path.c_str());
+                if (std::rename(wal.c_str(), rename_path.c_str()) < 0) {
+                    return Status::Error<ErrorCode::OS_ERROR>(
+                            "move file to tmp failed. file={}, target={}, err={}", wal, rename_path,
+                            Errno::str());
+                }
                 _replay_wal_map.erase(wal);
                 continue;
             }
@@ -137,6 +141,26 @@ bool WalTable::need_replay(const doris::WalTable::replay_wal_info& info) {
 #endif
 }
 
+Status WalTable::abort_txn(int64_t db_id, int64_t wal_id) {
+    TLoadTxnRollbackRequest request;
+    request.__set_auth_code(0); // this is a fake, fe not check it now
+    request.__set_db_id(db_id);
+    request.__set_txnId(wal_id);
+    std::string reason = "relay wal " + std::to_string(wal_id);
+    request.__set_reason(reason);
+    TLoadTxnRollbackResult result;
+    TNetworkAddress master_addr = _exec_env->master_info()->network_address;
+    auto st = ThriftRpcHelper::rpc<FrontendServiceClient>(
+            master_addr.hostname, master_addr.port,
+            [&request, &result](FrontendServiceConnection& client) {
+                client->loadTxnRollback(result, request);
+            },
+            10000L);
+    auto result_status = Status::create(result.status);
+    LOG(INFO) << "abort txn " << wal_id << ",st:" << st << ",result_status:" << result_status;
+    return result_status;
+}
+
 Status WalTable::replay_wal_internal(const std::string& wal) {
     LOG(INFO) << "Start replay wal for db=" << _db_id << ", table=" << _table_id << ", wal=" << wal;
     // start a new stream load
@@ -157,6 +181,9 @@ Status WalTable::replay_wal_internal(const std::string& wal) {
     auto pair = get_wal_info(wal);
     auto wal_id = pair.first;
     auto label = pair.second;
+#ifndef BE_TEST
+    RETURN_IF_ERROR(abort_txn(_db_id, wal_id));
+#endif
     RETURN_IF_ERROR(send_request(wal_id, wal, label));
     return Status::OK();
 }
@@ -172,6 +199,35 @@ std::pair<int64_t, std::string> WalTable::get_wal_info(const std::string& wal) {
 }
 
 void http_request_done(struct evhttp_request* req, void* arg) {
+    std::stringstream out;
+    std::string status;
+    std::string msg;
+    std::string wal_id;
+    size_t len = 0;
+    auto input = evhttp_request_get_input_buffer(req);
+    char* request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
+    while (request_line != nullptr) {
+        std::string s(request_line);
+        out << request_line;
+        request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
+    }
+    auto out_str = out.str();
+    rapidjson::Document doc;
+    if (!out_str.empty()) {
+        doc.Parse(out_str.c_str());
+        status = std::string(doc["Status"].GetString());
+        msg = std::string(doc["Message"].GetString());
+        wal_id = std::string(doc["Comment"].GetString());
+        LOG(INFO) << "replay wal " << wal_id << " status:" << status << ",msg:" << msg;
+        if (status.find("Success") != status.npos ||
+            status.find("Label Already Exists") != status.npos) {
+            retry = false;
+        } else {
+            retry = true;
+        }
+    } else {
+        retry = true;
+    }
     event_base_loopbreak((struct event_base*)arg);
 }
 
@@ -180,6 +236,7 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
     struct event_base* base = nullptr;
     struct evhttp_connection* conn = nullptr;
     struct evhttp_request* req = nullptr;
+    retry = false;
     event_init();
     base = event_base_new();
     conn = evhttp_connection_new("127.0.0.1", doris::config::webserver_port);
@@ -192,7 +249,7 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
     evhttp_add_header(req->output_headers, HTTP_TABLE_ID_KY.c_str(),
                       std::to_string(_table_id).c_str());
     evhttp_add_header(req->output_headers, HTTP_WAL_ID_KY.c_str(), std::to_string(wal_id).c_str());
-
+    evhttp_add_header(req->output_headers, HTTP_COMMENT.c_str(), std::to_string(wal_id).c_str());
     std::stringstream ss;
     ss << "/api/" << _db_id << "/" << _table_id << "/_stream_load";
     evhttp_make_request(conn, req, EVHTTP_REQ_PUT, ss.str().c_str());
@@ -201,46 +258,21 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
     event_base_dispatch(base);
     evhttp_connection_free(conn);
     event_base_free(base);
-
-#endif
-    bool retry = false;
-    std::string status;
-    std::string msg;
-    std::stringstream out;
-    rapidjson::Document doc;
-#ifndef BE_TEST
-    size_t len = 0;
-    auto input = evhttp_request_get_input_buffer(req);
-    char* request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
-    while (request_line != nullptr) {
-        std::string s(request_line);
-        out << request_line;
-        request_line = evbuffer_readln(input, &len, EVBUFFER_EOL_CRLF);
-    }
 #else
+    std::stringstream out;
     out << k_request_line;
-#endif
     auto out_str = out.str();
-    if (!out_str.empty()) {
-        doc.Parse(out_str.c_str());
-        status = std::string(doc["Status"].GetString());
-        msg = std::string(doc["Message"].GetString());
-        LOG(INFO) << "replay wal " << wal_id << " status:" << status << ",msg:" << msg;
-        if (status.find("Fail") != status.npos) {
-            if (msg.find("Label") != msg.npos && msg.find("has already been used") != msg.npos) {
-                retry = false;
-            } else {
-                retry = true;
-            }
-        } else {
-            retry = false;
-        }
-    } else {
+    rapidjson::Document doc;
+    doc.Parse(out_str.c_str());
+    auto status = std::string(doc["Status"].GetString());
+    if (status.find("Fail") != status.npos) {
         retry = true;
+    } else {
+        retry = false;
     }
-
+#endif
     if (retry) {
-        LOG(INFO) << "fail to replay wal =" << wal << ",status:" << status << ",msg:" << msg;
+        LOG(INFO) << "fail to replay wal =" << wal;
         std::lock_guard<std::mutex> lock(_replay_wal_lock);
         auto it = _replay_wal_map.find(wal);
         if (it != _replay_wal_map.end()) {
@@ -250,7 +282,7 @@ Status WalTable::send_request(int64_t wal_id, const std::string& wal, const std:
             _replay_wal_map.emplace(wal, replay_wal_info {0, UnixMillis(), false});
         }
     } else {
-        LOG(INFO) << "success to replay wal =" << wal << ",status:" << status << ",msg:" << msg;
+        LOG(INFO) << "success to replay wal =" << wal;
         _exec_env->wal_mgr()->delete_wal(wal_id);
         std::lock_guard<std::mutex> lock(_replay_wal_lock);
         _replay_wal_map.erase(wal);

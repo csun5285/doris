@@ -42,6 +42,7 @@ private:
     std::pair<int64_t, std::string> get_wal_info(const std::string& wal);
     std::string get_tmp_path(const std::string wal);
     Status send_request(int64_t wal_id, const std::string& wal, const std::string& label);
+    Status abort_txn(int64_t _db_id, int64_t wal_id);
 
 private:
     ExecEnv* _exec_env;

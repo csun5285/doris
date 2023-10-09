@@ -69,6 +69,7 @@ class TaskWorkerPool;
 class BetaRowsetWriter;
 class CloudCumulativeCompaction;
 class CloudBaseCompaction;
+class CloudFullCompaction;
 class CumulativeCompactionPolicy;
 
 using SegCompactionCandidates = std::vector<segment_v2::SegmentSharedPtr>;
@@ -314,6 +315,12 @@ private:
     Status _handle_seg_compaction(BetaRowsetWriter* writer,
                                   SegCompactionCandidatesSharedPtr segments);
 
+    Status _submit_base_compaction_task(const TabletSharedPtr& tablet);
+
+    Status _submit_cumulative_compaction_task(const TabletSharedPtr& tablet);
+
+    Status _submit_full_compaction_task(const TabletSharedPtr& tablet);
+
 private:
     EngineOptions _options;
     std::mutex _store_lock;
@@ -402,6 +409,8 @@ private:
     mutable std::mutex _compaction_mtx;
     // tablet_id -> submitted base compaction, guarded by `_compaction_mtx`
     std::unordered_map<int64_t, std::shared_ptr<CloudBaseCompaction>> _submitted_base_compactions;
+    // tablet_id -> submitted full compaction, guarded by `_compaction_mtx`
+    std::unordered_map<int64_t, std::shared_ptr<CloudFullCompaction>> _submitted_full_compactions;
     // Store tablets which are preparing cumu compaction, guarded by `_compaction_mtx`
     std::unordered_set<int64_t> _tablet_preparing_cumu_compaction;
     // tablet_id -> submitted cumu compactions, guarded by `_compaction_mtx`

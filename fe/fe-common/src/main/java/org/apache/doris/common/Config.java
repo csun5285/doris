@@ -19,6 +19,8 @@ package org.apache.doris.common;
 
 import org.apache.doris.common.ExperimentalUtil.ExperimentalType;
 
+import java.util.concurrent.TimeUnit;
+
 public class Config extends ConfigBase {
 
     @ConfField(description = {"用户自定义配置文件的路径，用于存放 fe_custom.conf。该文件中的配置会覆盖 fe.conf 中的配置",
@@ -562,7 +564,7 @@ public class Config extends ConfigBase {
             "Maximal number of waiting jobs for Broker Load. This is a desired number. "
                     + "In some situation, such as switch the master, "
                     + "the current number is maybe more than this value."})
-    public static int desired_max_waiting_jobs = 100;
+    public static int desired_max_waiting_jobs = 1000;
 
     @ConfField(mutable = true, masterOnly = true, description = {"FE 从 BE 获取 Stream Load 作业信息的间隔。",
             "The interval of FE fetch stream load record from BE."})
@@ -2378,4 +2380,37 @@ public class Config extends ConfigBase {
                     + "but it will increase the memory overhead."})
     public static int virtual_node_number = 2048;
 
+    @ConfField(description = {"控制对大表的自动ANALYZE的最小时间间隔，"
+            + "在该时间间隔内大小超过huge_table_lower_bound_size_in_bytes的表仅ANALYZE一次",
+            "This controls the minimum time interval for automatic ANALYZE on large tables. Within this interval,"
+                    + "tables larger than huge_table_lower_bound_size_in_bytes are analyzed only once."})
+    public static long huge_table_auto_analyze_interval_in_millis = TimeUnit.HOURS.toMillis(12);
+
+    @ConfField(description = {"定义大表的大小下界，在开启enable_auto_sample的情况下，"
+            + "大小超过该值的表将会自动通过采样收集统计信息", "This defines the lower size bound for large tables. "
+            + "When enable_auto_sample is enabled, tables larger than this value will automatically collect "
+            + "statistics through sampling"})
+    public static long huge_table_lower_bound_size_in_bytes = 5L * 1024 * 1024 * 1024;
+
+    @ConfField(description = {"定义开启开启大表自动sample后，对大表的采样比例",
+            "This defines the number of sample percent for large tables when automatic sampling for"
+                    + "large tables is enabled"})
+    public static int huge_table_default_sample_rows = 4194304;
+
+    @ConfField(description = {"是否开启大表自动sample，开启后对于大小超过huge_table_lower_bound_size_in_bytes会自动通过采样收集"
+            + "统计信息", "Whether to enable automatic sampling for large tables, which, when enabled, automatically"
+            + "collects statistics through sampling for tables larger than 'huge_table_lower_bound_size_in_bytes'"})
+    public static boolean enable_auto_sample = false;
+
+    @ConfField(description = {
+            "控制统计信息的自动触发作业执行记录的持久化行数",
+            "Determine the persist number of automatic triggered analyze job execution status"
+    })
+    public static long auto_analyze_job_record_count = 20000;
+
+    @ConfField(description = {
+            "Auto Buckets中最小的buckets数目",
+            "min buckets of auto bucket"
+    })
+    public static int autobucket_min_buckets = 1;
 }

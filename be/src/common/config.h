@@ -1105,10 +1105,10 @@ DECLARE_mInt64(kerberos_expiration_time_seconds);
 DECLARE_mInt32(prefetch_single_buffer_size_mb);
 
 // file cache
-// default enter disk resource limit mode 5%
-DECLARE_Int32(file_cache_enter_disk_resource_limit_mode_percent);
-// default exit disk resource limit mode 20%
-DECLARE_Int32(file_cache_exit_disk_resource_limit_mode_percent);
+// default enter disk resource limit mode, when disk capacity bigger than 95%
+DECLARE_mInt32(file_cache_enter_disk_resource_limit_mode_percent);
+// default exit disk resource limit mode, when disk capacity less than 80%
+DECLARE_mInt32(file_cache_exit_disk_resource_limit_mode_percent);
 DECLARE_Bool(enable_file_cache);
 // format: [{"path":"/mnt/disk3/selectdb_cloud/file_cache","total_size":21474836480,"query_limit":10737418240}]
 DECLARE_String(file_cache_path);

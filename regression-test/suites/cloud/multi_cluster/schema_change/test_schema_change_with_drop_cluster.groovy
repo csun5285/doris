@@ -27,20 +27,21 @@ suite("test_schema_change_with_drop_cluster") {
     List<String> beUniqueIdList = new ArrayList<>()
 
     String[] bes = context.config.multiClusterBes.split(',');
-    println("the value is " + context.config.multiClusterBes);
     for(String values : bes) {
-        println("the value is " + values);
         String[] beInfo = values.split(':');
+        if (beUniqueIdList.contains(beInfo[3])) {
+            continue
+        }
         ipList.add(beInfo[0]);
         hbPortList.add(beInfo[1]);
         httpPortList.add(beInfo[2]);
         beUniqueIdList.add(beInfo[3]);
     }
 
-    println("the ip is " + ipList);
-    println("the heartbeat port is " + hbPortList);
-    println("the http port is " + httpPortList);
-    println("the be unique id is " + beUniqueIdList);
+    logger.info("ipList:{}", ipList)
+    logger.info("hbPortList:{}", hbPortList)
+    logger.info("httpPortList:{}", httpPortList);
+    logger.info("beUniqueIdList:{}", beUniqueIdList);
 
     for (unique_id : beUniqueIdList) {
         resp = get_cluster.call(unique_id);
@@ -73,7 +74,10 @@ suite("test_schema_change_with_drop_cluster") {
 
     def tbName1 = "test_schema_change_with_drop_cluster"
     def getJobState = { tableName ->
-         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
+         def jobStateResult = sql """SHOW ALTER TABLE COLUMN WHERE IndexName='${tableName}' ORDER BY createtime DESC LIMIT 1"""
+        if (jobStateResult[0][9].equals("CANCELLED") || obStateResult[0][9].equals("FINISHED")) {
+            logger.info("jobStateResult:{}", jobStateResult)
+        }
          return jobStateResult[0][9]
     }
     sql "DROP TABLE IF EXISTS ${tbName1}"
@@ -102,13 +106,12 @@ suite("test_schema_change_with_drop_cluster") {
     int max_try_secs = 60
     while (max_try_secs--) {
         String res = getJobState(tbName1)
-        if (res == "CANCELLED") {
-            logger.info(tbName1 + " alter job CANCELLED")
+        if (res.equals("CANCELLED") || res.equals("FINISHED")) {
             break
         } else {
             Thread.sleep(1000)
             if (max_try_secs < 1) {
-                println "test timeout," + "state:" + res
+                logger.info("test timeout res:{}", res)
                 assertEquals("FINISHED", res)
             }
         }

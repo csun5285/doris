@@ -1122,6 +1122,7 @@ public class DataDescription implements InsertStmt.DataDesc {
                     && !fileFormat.equalsIgnoreCase(FeConstants.csv)
                     && !fileFormat.equalsIgnoreCase("orc")
                     && !fileFormat.equalsIgnoreCase("json")
+                    && !fileFormat.equalsIgnoreCase("wal")
                     && !fileFormat.equalsIgnoreCase(FeConstants.csv_with_names)
                     && !fileFormat.equalsIgnoreCase(FeConstants.csv_with_names_and_types)
                     && !fileFormat.equalsIgnoreCase("hive_text")) {

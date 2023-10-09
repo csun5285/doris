@@ -124,6 +124,8 @@ public:
     void set_base_compaction_cnt(int64_t cnt) { _base_compaction_cnt = cnt; }
     int64_t cumulative_compaction_cnt() const { return _cumulative_compaction_cnt; }
     void set_cumulative_compaction_cnt(int64_t cnt) { _cumulative_compaction_cnt = cnt; }
+    int64_t full_compaction_cnt() const { return _full_compaction_cnt; }
+    void set_full_compaction_cnt(int64_t cnt) { _full_compaction_cnt = cnt; }
     int64_t local_max_version() const { return _max_version; }
     void set_last_sync_time(int64_t time) {
         _last_sync_time.store(time, std::memory_order_relaxed);
@@ -194,7 +196,7 @@ public:
     // Synchronize the rowsets from meta service.
     // If tablet state is not `TABLET_RUNNING`, sync tablet meta and all visible rowsets.
     // If `query_version` > 0 and local max_version of the tablet >= `query_version`, do nothing.
-    // If 'warmup_delta_data' is true, it means that we need to download the new version 
+    // If 'need_download_data_async' is true, it means that we need to download the new version
     // rowsets datas async.
     Status cloud_sync_rowsets(int64_t query_version = -1, bool warmup_delta_data = false);
 
@@ -204,6 +206,8 @@ public:
     // If `version_overlap` is true, function will delete rowsets with overlapped version in this tablet.
     // If 'warmup_delta_data' is true, download the new version rowset data in background.
     // MUST hold EXCLUSIVE `_meta_lock`.
+    // If 'need_download_data_async' is true, it means that we need to download the new version
+    // rowsets datas async.
     void cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_overlap,
                            bool warmup_delta_data = false);
 
@@ -756,6 +760,7 @@ private:
     // CLOUD_MODE
     int64_t _base_compaction_cnt = 0;
     int64_t _cumulative_compaction_cnt = 0;
+    int64_t _full_compaction_cnt = 0;
     int64_t _max_version = -1;
     // FIXME(plat1ko): No need to record base size if rowsets are ordered by version
     void update_base_size(const Rowset& rs);

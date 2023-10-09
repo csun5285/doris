@@ -290,14 +290,18 @@ Status StreamLoadAction::_on_header(HttpRequest* http_req, std::shared_ptr<Strea
     if (!http_req->header(HTTP_COMMENT).empty()) {
         ctx->load_comment = http_req->header(HTTP_COMMENT);
     }
-    if (!http_req->header(HTTP_DB_ID_KY).empty()) {
-        ctx->db_id = std::stoll(http_req->header(HTTP_DB_ID_KY));
-    }
-    if (!http_req->header(HTTP_TABLE_ID_KY).empty()) {
-        ctx->table_id = std::stoll(http_req->header(HTTP_TABLE_ID_KY));
-    }
-    if (!http_req->header(HTTP_WAL_ID_KY).empty()) {
-        ctx->wal_id = std::stoll(http_req->header(HTTP_WAL_ID_KY));
+    try {
+        if (!http_req->header(HTTP_DB_ID_KY).empty()) {
+            ctx->db_id = std::stoll(http_req->header(HTTP_DB_ID_KY));
+        }
+        if (!http_req->header(HTTP_TABLE_ID_KY).empty()) {
+            ctx->table_id = std::stoll(http_req->header(HTTP_TABLE_ID_KY));
+        }
+        if (!http_req->header(HTTP_WAL_ID_KY).empty()) {
+            ctx->wal_id = std::stoll(http_req->header(HTTP_WAL_ID_KY));
+        }
+    } catch (const std::invalid_argument& e) {
+        return Status::InvalidArgument("Invalid format, {}", e.what());
     }
     // begin transaction
     int64_t begin_txn_start_time = MonotonicNanos();

@@ -1159,7 +1159,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             cluster = SystemInfoService.DEFAULT_CLUSTER;
         }
 
-        if (request.isSetAuthCode()) {
+        if (request.isSetAuthCode() || !Strings.isNullOrEmpty(request.getToken())) {
             // TODO(cmy): find a way to check
         } else {
             checkPasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), request.getDb(), request.getTbl(),

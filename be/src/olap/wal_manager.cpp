@@ -214,7 +214,12 @@ Status WalManager::add_recover_wal(const std::string& db_id, const std::string& 
     std::shared_ptr<WalTable> table_ptr;
     auto it = _table_map.find(table_id);
     if (it == _table_map.end()) {
-        table_ptr = std::make_shared<WalTable>(_exec_env, std::stoll(db_id), std::stoll(table_id));
+        try {
+            table_ptr =
+                    std::make_shared<WalTable>(_exec_env, std::stoll(db_id), std::stoll(table_id));
+        } catch (const std::invalid_argument& e) {
+            return Status::InvalidArgument("Invalid format, {}", e.what());
+        }
         _table_map.emplace(table_id, table_ptr);
     } else {
         table_ptr = it->second;
