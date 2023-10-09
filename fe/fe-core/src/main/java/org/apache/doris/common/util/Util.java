@@ -626,6 +626,8 @@ public class Util {
             }
             throw new UserException(
                     "Not supported file format: " + lowerFileFormat + ", and compression: " + compressType);
+        } else if (lowerFileFormat.equals("wal")) {
+            return TFileFormatType.FORMAT_WAL;
         } else {
             return TFileFormatType.FORMAT_UNKNOWN;
         }

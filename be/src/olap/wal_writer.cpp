@@ -43,18 +43,22 @@ Status WalWriter::finalize() {
 Status WalWriter::append_blocks(const PBlockArray& blocks) {
     size_t total_size = 0;
     for (const auto& block : blocks) {
-        total_size += LENGTH_SIZE + block->ByteSizeLong() + CHECKSUM_SIZE;
+        total_size += VERSION_SIZE + LENGTH_SIZE + block->ByteSizeLong() + CHECKSUM_SIZE;
     }
     std::string binary(total_size, '\0');
     char* row_binary = binary.data();
     size_t offset = 0;
     for (const auto& block : blocks) {
+        uint32_t version = 0;
+        memcpy(row_binary + offset, &version, VERSION_SIZE);
+        offset += VERSION_SIZE;
         unsigned long row_length = block->GetCachedSize();
         memcpy(row_binary + offset, &row_length, LENGTH_SIZE);
         offset += LENGTH_SIZE;
-        memcpy(row_binary + offset, block->SerializeAsString().data(), row_length);
+        std::string content = block->SerializeAsString();
+        memcpy(row_binary + offset, content.data(), row_length);
         offset += row_length;
-        uint32_t checksum = crc32c::Value(block->SerializeAsString().data(), row_length);
+        uint32_t checksum = crc32c::Value(content.data(), row_length);
         memcpy(row_binary + offset, &checksum, CHECKSUM_SIZE);
         offset += CHECKSUM_SIZE;
     }

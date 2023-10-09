@@ -95,7 +95,8 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
         generate_block(pblock, 0);
 
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock}));
-        file_len += pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
+        file_len += WalWriter::VERSION_SIZE + pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE +
+                    WalWriter::CHECKSUM_SIZE;
         io::global_local_filesystem()->file_size(file_name, &file_size);
         EXPECT_EQ(file_len, file_size);
     }
@@ -103,11 +104,13 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
     {
         PBlock pblock;
         generate_block(pblock, 1024);
-        file_len += pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
+        file_len += WalWriter::VERSION_SIZE + pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE +
+                    WalWriter::CHECKSUM_SIZE;
 
         PBlock pblock1;
         generate_block(pblock1, 2048);
-        file_len += pblock1.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
+        file_len += WalWriter::VERSION_SIZE + pblock1.ByteSizeLong() + WalWriter::LENGTH_SIZE +
+                    WalWriter::CHECKSUM_SIZE;
 
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock, &pblock1}));
         io::global_local_filesystem()->file_size(file_name, &file_size);
