@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 
+#include "meta-service/meta_service_schema.h"
 #include "recycler/checker.h"
 #include "recycler/s3_accessor.h"
 #ifdef UNIT_TEST
@@ -284,15 +285,21 @@ public:
         }
         // Get schema from kv
         // TODO(plat1ko): Single flight
-        std::string schema_key, schema_val;
-        meta_schema_key({instance_id_, index_id, schema_version}, &schema_key);
-        int ret = txn_get(txn_kv_.get(), schema_key, schema_val);
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            LOG(WARNING) << "failed to create txn";
+            return -1;
+        }
+        auto schema_key = meta_schema_key({instance_id_, index_id, schema_version});
+        ValueBuf val_buf;
+        ret = selectdb::get(txn.get(), schema_key, &val_buf);
         if (ret != 0) {
             LOG(WARNING) << "failed to get schema, ret=" << ret;
             return ret;
         }
         doris::TabletSchemaPB schema;
-        if (!schema.ParseFromString(schema_val)) {
+        if (!parse_schema_value(val_buf, &schema)) {
             LOG(WARNING) << "malformed schema value, key=" << hex(schema_key);
             return -1;
         }
@@ -1162,8 +1169,8 @@ int InstanceRecycler::recycle_rowsets() {
             }
             if (rowset.resource_id().empty()) [[unlikely]] {
                 // old version `RecycleRowsetPB` may has empty resource_id, just remove the kv.
-                LOG(INFO) << "delete the recycle rowset kv that has empty resource_id, key=" << hex(k)
-                          << " value=" << proto_to_json(rowset);
+                LOG(INFO) << "delete the recycle rowset kv that has empty resource_id, key="
+                          << hex(k) << " value=" << proto_to_json(rowset);
                 rowset_keys.push_back(std::string(k));
                 return -1;
             }
@@ -1199,8 +1206,8 @@ int InstanceRecycler::recycle_rowsets() {
                   << rowset_meta->start_version() << '-' << rowset_meta->end_version()
                   << "] txn_id=" << rowset_meta->txn_id()
                   << " type=" << RecycleRowsetPB_Type_Name(rowset.type())
-                  << " rowset_meta_size=" << v.size()
-                  << " creation_time" << rowset_meta->creation_time();
+                  << " rowset_meta_size=" << v.size() << " creation_time"
+                  << rowset_meta->creation_time();
         if (rowset.type() == RecycleRowsetPB::PREPARE) {
             // unable to calculate file path, can only be deleted by rowset id prefix
             num_prepare += 1;
