@@ -564,7 +564,7 @@ public class Config extends ConfigBase {
             "Maximal number of waiting jobs for Broker Load. This is a desired number. "
                     + "In some situation, such as switch the master, "
                     + "the current number is maybe more than this value."})
-    public static int desired_max_waiting_jobs = 100;
+    public static int desired_max_waiting_jobs = 1000;
 
     @ConfField(mutable = true, masterOnly = true, description = {"FE 从 BE 获取 Stream Load 作业信息的间隔。",
             "The interval of FE fetch stream load record from BE."})
