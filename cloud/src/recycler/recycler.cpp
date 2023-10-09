@@ -433,7 +433,7 @@ int InstanceRecycler::recycle_deleted_instance() {
     // 0:instance_id  1:db_id  2:tbl_id  3:partition_id
     std::string start_version_key = version_key({instance_id_, 0, 0, 0});
     std::string end_version_key = version_key({instance_id_, INT64_MAX, 0, 0});
-    txn->remove(start_txn_key, end_txn_key);
+    txn->remove(start_version_key, end_version_key);
     std::string start_meta_key = meta_key_prefix(instance_id_);
     std::string end_meta_key = meta_key_prefix(instance_id_ + '\x00');
     txn->remove(start_meta_key, end_meta_key);
