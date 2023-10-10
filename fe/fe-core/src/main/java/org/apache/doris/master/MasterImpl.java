@@ -138,7 +138,8 @@ public class MasterImpl {
                         && taskType != TTaskType.CLONE && taskType != TTaskType.PUBLISH_VERSION
                         && taskType != TTaskType.CREATE && taskType != TTaskType.UPDATE_TABLET_META_INFO
                         && taskType != TTaskType.STORAGE_MEDIUM_MIGRATE
-                        && taskType != TTaskType.ALTER_INVERTED_INDEX) {
+                        && taskType != TTaskType.ALTER_INVERTED_INDEX
+                        && taskType != TTaskType.CALCULATE_DELETE_BITMAP) {
                     return result;
                 }
             }
