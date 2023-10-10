@@ -1088,7 +1088,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
                 String clusterId = info.getClusterId();
                 String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
-                LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+                LOG.debug("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
                 if (!Strings.isNullOrEmpty(realClusterId)) {
                     clusterId = realClusterId;
                 }
@@ -1106,7 +1106,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
                     String clusterId = info.getClusterId();
                     String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
-                    LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+                    LOG.debug("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
                     if (!Strings.isNullOrEmpty(realClusterId)) {
                         clusterId = realClusterId;
                     }

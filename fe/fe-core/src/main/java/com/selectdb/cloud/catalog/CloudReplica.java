@@ -231,7 +231,7 @@ public class CloudReplica extends Replica {
         for (int i = 0; i < count; ++i) {
             String clusterId = Text.readString(in);
             String realClusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(clusterId);
-            LOG.info("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
+            LOG.debug("cluster Id {}, real cluster Id {}", clusterId, realClusterId);
 
             if (!Strings.isNullOrEmpty(realClusterId)) {
                 clusterId = realClusterId;
