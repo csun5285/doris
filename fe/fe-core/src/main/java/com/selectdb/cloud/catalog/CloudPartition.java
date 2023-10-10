@@ -85,6 +85,7 @@ public class CloudPartition extends Partition {
                 version = resp.getVersion();
             } else {
                 assert resp.getStatus().getCode() == MetaServiceCode.VERSION_NOT_FOUND;
+                version = 0;
             }
             LOG.debug("get version from meta service, version: {}, partition: {}", version, super.getId());
             // Cache visible version, see hasData() for details.
