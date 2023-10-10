@@ -10,6 +10,7 @@ import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
 import org.apache.doris.qe.ConnectContext;
+import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.rpc.RpcException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -84,6 +85,7 @@ public class CloudPartition extends Partition {
                 version = resp.getVersion();
             } else {
                 assert resp.getStatus().getCode() == MetaServiceCode.VERSION_NOT_FOUND;
+                version = 0;
             }
             LOG.debug("get version from meta service, version: {}, partition: {}", version, super.getId());
             // Cache visible version, see hasData() for details.
@@ -200,6 +202,22 @@ public class CloudPartition extends Partition {
     }
 
     private static SelectdbCloud.GetVersionResponse getVersionFromMeta(SelectdbCloud.GetVersionRequest req)
+            throws RpcException {
+        long startAt = System.nanoTime();
+        try {
+            return getVersionFromMetaInner(req);
+        } finally {
+            ConnectContext ctx = ConnectContext.get();
+            if (ctx != null) {
+                StmtExecutor executor = ctx.getExecutor();
+                if (executor != null) {
+                    executor.getSummaryProfile().addGetPartitionVersionTime(System.nanoTime() - startAt);
+                }
+            }
+        }
+    }
+
+    private static SelectdbCloud.GetVersionResponse getVersionFromMetaInner(SelectdbCloud.GetVersionRequest req)
             throws RpcException {
         for (int retryTime = 0; retryTime < Config.cloud_meta_service_rpc_failed_retry_times; retryTime++) {
             try {

@@ -11,6 +11,6 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                    std::string_view schema_key, const doris::TabletSchemaPB& schema);
 
 // Return true if parse success
-bool parse_schema_value(const ValueBuf& buf, doris::TabletSchemaPB* schema);
+[[nodiscard]] bool parse_schema_value(const ValueBuf& buf, doris::TabletSchemaPB* schema);
 
 } // namespace selectdb
