@@ -170,7 +170,7 @@ PROPERTIES (
                     String exp = sb.toString();
                     while (true) {
                         try {
-                            def result = sql exp;
+                            def result = insert_into_sql(exp, c);
                             logger.info("result:" + result);
                             break
                         } catch (Exception e) {
@@ -204,7 +204,7 @@ PROPERTIES (
                     String exp = sb.toString();
                     while (true) {
                         try {
-                            def result = sql exp;
+                            def result = insert_into_sql(exp, c);
                             logger.info("result:" + result);
                             break
                         } catch (Exception e) {
