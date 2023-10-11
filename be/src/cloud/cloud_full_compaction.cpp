@@ -103,7 +103,10 @@ Status CloudFullCompaction::pick_rowsets_to_compact() {
         std::shared_lock rlock(_tablet->get_header_lock());
         _input_rowsets = _tablet->pick_candidate_rowsets_to_full_compaction();
     }
-    DCHECK(check_version_continuity(_input_rowsets).ok());
+    if (auto st = check_version_continuity(_input_rowsets); !st.ok()) {
+        DCHECK(false) << st;
+        return st;
+    }
     if (_input_rowsets.size() <= 1) {
         return Status::Error<BE_NO_SUITABLE_VERSION>(
                 "insuffient compation input rowset, #rowsets={}", _input_rowsets.size());

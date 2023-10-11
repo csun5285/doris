@@ -319,7 +319,10 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
         return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
     }
     std::sort(candidate_rowsets.begin(), candidate_rowsets.end(), Rowset::comparator);
-    DCHECK(check_version_continuity(candidate_rowsets).ok());
+    if (auto st = check_version_continuity(candidate_rowsets); !st.ok()) {
+        DCHECK(false) << st;
+        return st;
+    }
 
     size_t compaction_score = 0;
     StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(

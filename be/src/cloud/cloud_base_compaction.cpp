@@ -100,7 +100,10 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
         _cumulative_compaction_cnt = _tablet->cumulative_compaction_cnt();
         _input_rowsets = _tablet->pick_candidate_rowsets_to_base_compaction();
     }
-    DCHECK(check_version_continuity(_input_rowsets).ok());
+    if (auto st = check_version_continuity(_input_rowsets); !st.ok()) {
+        DCHECK(false) << st;
+        return st;
+    }
     _filter_input_rowset();
     if (_input_rowsets.size() <= 1) {
         return Status::Error<BE_NO_SUITABLE_VERSION>("insuffient compation input rowset, #rowsets={}",

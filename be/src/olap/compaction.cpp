@@ -817,15 +817,15 @@ Status Compaction::check_version_continuity(const std::vector<RowsetSharedPtr>& 
     if (rowsets.empty()) {
         return Status::OK();
     }
-    RowsetSharedPtr prev_rowset = rowsets.front();
+    auto prev_rowset = rowsets.front().get();
     for (size_t i = 1; i < rowsets.size(); ++i) {
-        RowsetSharedPtr rowset = rowsets[i];
+        auto rowset = rowsets[i].get();
         if (rowset->start_version() != prev_rowset->end_version() + 1) {
             return Status::Error<CUMULATIVE_MISS_VERSION>(
                     "There are missed versions among rowsets. prev_rowset version={}-{}, rowset "
-                    "version={}-{}",
+                    "version={}-{}, tablet_id={}",
                     prev_rowset->start_version(), prev_rowset->end_version(),
-                    rowset->start_version(), rowset->end_version());
+                    rowset->start_version(), rowset->end_version(), _tablet->tablet_id());
         }
         prev_rowset = rowset;
     }
