@@ -381,6 +381,8 @@ int InstanceChecker::do_check() {
 
     auto check_rowset_objects = [&, this](const doris::RowsetMetaPB& rs_meta,
                                           std::string_view key) {
+        if (rs_meta.num_segments() == 0) return;
+        ++num_scanned_with_segment;
         if (tablet_files_cache.tablet_id != rs_meta.tablet_id()) {
             long tablet_volume = 0;
             // Clear cache
@@ -403,8 +405,6 @@ int InstanceChecker::do_check() {
             instance_volume += tablet_volume;
         }
 
-        if (rs_meta.num_segments() == 0) return;
-        ++num_scanned_with_segment;
         for (int i = 0; i < rs_meta.num_segments(); ++i) {
             auto path = segment_path(rs_meta.tablet_id(), rs_meta.rowset_id_v2(), i);
             if (tablet_files_cache.files.count(path)) continue;
