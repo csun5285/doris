@@ -69,7 +69,8 @@ public class SummaryProfile {
     public static final String WRITE_RESULT_TIME = "Write Result Time";
     public static final String WAIT_FETCH_RESULT_TIME = "Wait and Fetch Result Time";
     public static final String GET_PARTITION_VERSION_TIME = "Get Partition Version Time";
-
+    public static final String GET_PARTITION_VERSION_COUNT = "Get Partition Version Count";
+    public static final String GET_PARTITION_VERSION_BY_HAS_DATA_COUNT = "Get Partition Version Count (hasData)";
     // These info will display on FE's web ui table, every one will be displayed as
     // a column, so that should not
     // add many columns here. Add to ExcecutionSummary list.
@@ -79,7 +80,8 @@ public class SummaryProfile {
     public static final ImmutableList<String> EXECUTION_SUMMARY_KEYS = ImmutableList.of(WORKLOAD_GROUP, ANALYSIS_TIME,
             PLAN_TIME, JOIN_REORDER_TIME, CREATE_SINGLE_NODE_TIME, QUERY_DISTRIBUTED_TIME,
             INIT_SCAN_NODE_TIME, FINALIZE_SCAN_NODE_TIME, GET_SPLITS_TIME, GET_PARTITIONS_TIME,
-            GET_PARTITION_FILES_TIME, CREATE_SCAN_RANGE_TIME, GET_PARTITION_VERSION_TIME, SCHEDULE_TIME,
+            GET_PARTITION_FILES_TIME, CREATE_SCAN_RANGE_TIME, GET_PARTITION_VERSION_TIME,
+            GET_PARTITION_VERSION_BY_HAS_DATA_COUNT, GET_PARTITION_VERSION_COUNT, SCHEDULE_TIME,
             FETCH_RESULT_TIME, WRITE_RESULT_TIME, WAIT_FETCH_RESULT_TIME, DORIS_VERSION, IS_NEREIDS, IS_PIPELINE,
             IS_CACHED, TOTAL_INSTANCES_NUM, INSTANCES_NUM_PER_BE, PARALLEL_FRAGMENT_EXEC_INSTANCE, TRACE_ID);
 
@@ -99,6 +101,8 @@ public class SummaryProfile {
         builder.put(GET_PARTITION_FILES_TIME, 3);
         builder.put(CREATE_SCAN_RANGE_TIME, 2);
         builder.put(GET_PARTITION_VERSION_TIME, 1);
+        builder.put(GET_PARTITION_VERSION_COUNT, 1);
+        builder.put(GET_PARTITION_VERSION_BY_HAS_DATA_COUNT, 1);
         EXECUTION_SUMMARY_KEYS_IDENTATION = builder.build();
     }
 
@@ -134,6 +138,8 @@ public class SummaryProfile {
     private long queryFetchResultConsumeTime = 0;
     private long queryWriteResultConsumeTime = 0;
     private long getPartitionVersionTime = 0;
+    private long getPartitionVersionCount = 0;
+    private long getPartitionVersionByHasDataCount = 0;
 
     public SummaryProfile(RuntimeProfile rootProfile) {
         summaryProfile = new RuntimeProfile("Summary");
@@ -188,6 +194,9 @@ public class SummaryProfile {
                 RuntimeProfile.printCounter(queryWriteResultConsumeTime, TUnit.TIME_MS));
         executionSummaryProfile.addInfoString(WAIT_FETCH_RESULT_TIME, getPrettyQueryFetchResultFinishTime());
         executionSummaryProfile.addInfoString(GET_PARTITION_VERSION_TIME, getPrettyGetPartitionVersionTime());
+        executionSummaryProfile.addInfoString(GET_PARTITION_VERSION_COUNT, getPrettyGetPartitionVersionCount());
+        executionSummaryProfile.addInfoString(GET_PARTITION_VERSION_BY_HAS_DATA_COUNT,
+                getPrettyGetPartitionVersionByHasDataCount());
     }
 
     public void setQueryBeginTime() {
@@ -272,6 +281,11 @@ public class SummaryProfile {
 
     public void addGetPartitionVersionTime(long ns) {
         this.getPartitionVersionTime += ns;
+        this.getPartitionVersionCount += 1;
+    }
+
+    public void incGetPartitionVersionByHasDataCount() {
+        this.getPartitionVersionByHasDataCount += 1;
     }
 
     public long getQueryBeginTime() {
@@ -472,5 +486,13 @@ public class SummaryProfile {
             return "N/A";
         }
         return RuntimeProfile.printCounter(getPartitionVersionTime, TUnit.TIME_NS);
+    }
+
+    private String getPrettyGetPartitionVersionByHasDataCount() {
+        return RuntimeProfile.printCounter(getPartitionVersionByHasDataCount, TUnit.UNIT);
+    }
+
+    private String getPrettyGetPartitionVersionCount() {
+        return RuntimeProfile.printCounter(getPartitionVersionCount, TUnit.UNIT);
     }
 }
