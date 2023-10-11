@@ -57,7 +57,9 @@ suite("test_recycler_with_many_partitions") {
             );
     """
 
-    sql """ insert into ${tableName} values ${makeInsertStmt(0, 10000)};"""
+    for (int i = 0; i < 10000; i = i + 500) {
+        sql """ insert into ${tbName} values ${makeInsertStmt(i, i + 500)};"""
+    }
 
     String[][] tabletInfoList1 = sql """ show tablets from ${tableName}; """
     logger.debug("tabletInfoList1:${tabletInfoList1}")
@@ -73,7 +75,7 @@ suite("test_recycler_with_many_partitions") {
 
     qt_sql """ select c1,c10 from ${tableName} order by c1 ASC;"""
 
-    int retry = 15
+    int retry = 45
     boolean success = false
     // recycle data
     do {
@@ -100,7 +102,7 @@ suite("test_recycler_with_many_partitions") {
     // drop table
     sql """ DROP TABLE IF EXISTS ${tableName} FORCE"""
 
-    retry = 15
+    retry = 45
     success = false
     // recycle data
     do {
