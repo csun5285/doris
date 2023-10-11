@@ -237,15 +237,20 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                         .set_file_offset(_bytes_appended)
                         .set_index_offset(_index_offset)
                         .set_sync_after_complete_task([this, part_num = _cur_part_num](Status s) {
+                            bool ret = false;
                             if (!s.ok()) [[unlikely]] {
                                 VLOG_NOTICE << "failed at key: " << _key << ", load part "
                                             << part_num << ", st " << s;
                                 std::unique_lock<std::mutex> _lck {_completed_lock};
                                 _failed = true;
+                                ret = true;
                                 this->_st = std::move(s);
                             }
+                            // After the signal, there is a scenario where the previous invocation of _wait_until_finish
+                            // returns to the caller, and subsequently, the S3 file writer is destructed.
+                            // This means that accessing _failed afterwards would result in a heap use after free vulnerability.
                             _countdown_event.signal();
-                            return _failed.load();
+                            return ret;
                         })
                         .set_is_cancelled([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
