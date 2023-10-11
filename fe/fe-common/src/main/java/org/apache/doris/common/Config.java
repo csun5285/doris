@@ -2159,7 +2159,7 @@ public class Config extends ConfigBase {
     @ConfField
     public static int cloud_txn_tablet_batch_size = 50;
 
-    @ConfField
+    @ConfField(mutable = true)
     public static long tablet_rebalancer_interval_second = 20;
 
     @ConfField(mutable = true)
@@ -2168,10 +2168,10 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int min_balance_tablet_num_per_run = 2;
 
-    @ConfField
+    @ConfField(mutable = true)
     public static double cloud_rebalance_percent_threshold = 0.05;
 
-    @ConfField
+    @ConfField(mutable = true)
     public static long cloud_rebalance_number_threshold = 2;
 
     /**
@@ -2300,6 +2300,9 @@ public class Config extends ConfigBase {
     // forbid insecurity stmt in cloud
     @ConfField(mutable = true)
     public static boolean forbid_insecurity_stmt = true;
+
+    @ConfField(mutable = true)
+    public static boolean enable_table_level_balance = true;
 
     //==========================================================================
     //                    end of cloud config
