@@ -159,7 +159,11 @@ Status FileBlock::append(Slice data) {
         }
     }
 
-    RETURN_IF_ERROR(_cache_writer->append(data));
+    st = _cache_writer->append(data);
+    if (!st.ok()) {
+        _cache_writer.reset();
+        return st;
+    }
 
     std::lock_guard download_lock(_download_mutex);
 
@@ -290,8 +294,11 @@ Status FileBlock::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock 
     }
 
     if (_cache_writer) {
-        RETURN_IF_ERROR(_cache_writer->close());
+        status = _cache_writer->close();
         _cache_writer.reset();
+        if (!status.ok()) {
+            return status;
+        }
     }
 
     std::error_code ec;

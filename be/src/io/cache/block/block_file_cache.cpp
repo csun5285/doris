@@ -34,7 +34,6 @@
 #include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
-#include "common/sync_point.h"
 
 namespace fs = std::filesystem;
 
@@ -460,7 +459,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
         }
     }
     if (auto iter = _key_to_time.find(key);
-        context.cache_type == FileCacheType::TTL && context.expiration_time != 0 &&
+        (context.cache_type == FileCacheType::NORMAL || context.cache_type == FileCacheType::TTL) &&
         iter != _key_to_time.end() && iter->second != context.expiration_time) {
         std::error_code ec;
         std::filesystem::rename(get_path_in_local_cache(key, iter->second),
@@ -480,11 +479,24 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 }
                 _time_to_key_iter.first++;
             }
-            _time_to_key.insert(std::make_pair(context.expiration_time, key));
             for (auto& [_, cell] : file_blocks) {
                 cell.file_block->update_expiration_time(context.expiration_time);
             }
-            iter->second = context.expiration_time;
+            if (context.expiration_time == 0) {
+                for (auto& [_, cell] : file_blocks) {
+                    if (cell.file_block->change_cache_type(FileCacheType::NORMAL)) {
+                        auto& queue = get_queue(FileCacheType::NORMAL);
+                        cell.queue_iterator =
+                                queue.add(cell.file_block->key(), cell.file_block->offset(),
+                                          cell.file_block->range().size(), cache_lock);
+                        cell.cache_type = FileCacheType::NORMAL;
+                    }
+                }
+                _key_to_time.erase(iter);
+            } else {
+                _time_to_key.insert(std::make_pair(context.expiration_time, key));
+                iter->second = context.expiration_time;
+            }
         }
     }
 
@@ -771,8 +783,10 @@ const BlockFileCache::LRUQueue& BlockFileCache::get_queue(FileCacheType type) co
 bool BlockFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
-    auto is_overflow = [&] { return _disk_resource_limit_mode ? removed_size < size
-                                    : cur_cache_size + size - removed_size > _total_size; };
+    auto is_overflow = [&] {
+        return _disk_resource_limit_mode ? removed_size < size
+                                         : cur_cache_size + size - removed_size > _total_size;
+    };
     auto remove_file_block_if = [&](FileBlockCell* cell) {
         FileBlockSPtr file_block = cell->file_block;
         if (file_block) {
@@ -897,11 +911,11 @@ bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, si
 
     size_t max_size = queue.get_max_size();
     auto is_overflow = [&] {
-        return _disk_resource_limit_mode ? removed_size < size : 
-               cur_cache_size + size - removed_size > _total_size ||
-               (queue_size + size - removed_size > max_size) ||
-               (query_context_cache_size + size - removed_size >
-                query_context->get_max_cache_size());
+        return _disk_resource_limit_mode ? removed_size < size
+                                         : cur_cache_size + size - removed_size > _total_size ||
+                                                   (queue_size + size - removed_size > max_size) ||
+                                                   (query_context_cache_size + size - removed_size >
+                                                    query_context->get_max_cache_size());
     };
 
     /// Select the cache from the LRU queue held by query for expulsion.
@@ -1075,7 +1089,7 @@ bool BlockFileCache::try_reserve_from_other_queue(FileCacheType cur_cache_type, 
     size_t cur_cache_size = _cur_cache_size;
     auto is_overflow = [&] {
         return _disk_resource_limit_mode ? removed_size < size
-               : cur_cache_size + size - removed_size > _total_size;
+                                         : cur_cache_size + size - removed_size > _total_size;
     };
     std::vector<FileBlockCell*> to_evict;
     std::vector<FileBlockCell*> trash;
@@ -1153,10 +1167,11 @@ bool BlockFileCache::try_reserve_for_lru(const Key& key, QueryFileCacheContextPt
             if (_disk_resource_limit_mode) {
                 return removed_size < size;
             }
-            return _disk_resource_limit_mode ? removed_size < size : 
-                   cur_cache_size + size - removed_size > _total_size ||
-                   (queue_size + size - removed_size > max_size) ||
-                   queue_element_size >= max_element_size;
+            return _disk_resource_limit_mode
+                           ? removed_size < size
+                           : cur_cache_size + size - removed_size > _total_size ||
+                                     (queue_size + size - removed_size > max_size) ||
+                                     queue_element_size >= max_element_size;
         };
 
         std::vector<FileBlockCell*> to_evict;
@@ -1298,22 +1313,24 @@ Status BlockFileCache::load_cache_info_into_memory() {
     }
     auto add_cell_batch_func = [&]() {
         std::lock_guard cache_lock(_mutex);
-        std::for_each(batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args) {
-            // in async load mode, a cell may be added twice.
-            if (_files.count(args.key) == 0 || _files[args.key].count(args.offset) == 0) {
-                // if the file is tmp, it means it is the old file and it should be removed
-                if (args.is_tmp) {
-                    std::error_code ec;
-                    std::filesystem::remove(args.offset_path, ec);
-                    if (ec) {
-                        LOG(WARNING) << fmt::format("cannot remove {}: {}", args.offset_path, ec.message());
+        std::for_each(
+                batch_load_buffer.begin(), batch_load_buffer.end(), [&](const BatchLoadArgs& args) {
+                    // in async load mode, a cell may be added twice.
+                    if (_files.count(args.key) == 0 || _files[args.key].count(args.offset) == 0) {
+                        // if the file is tmp, it means it is the old file and it should be removed
+                        if (args.is_tmp) {
+                            std::error_code ec;
+                            std::filesystem::remove(args.offset_path, ec);
+                            if (ec) {
+                                LOG(WARNING) << fmt::format("cannot remove {}: {}",
+                                                            args.offset_path, ec.message());
+                            }
+                        } else {
+                            add_cell(args.key, args.ctx, args.offset, args.size,
+                                     FileBlock::State::DOWNLOADED, cache_lock);
+                        }
                     }
-                } else {
-                    add_cell(args.key, args.ctx, args.offset, args.size,
-                            FileBlock::State::DOWNLOADED, cache_lock);
-                }
-            }
-        });
+                });
         batch_load_buffer.clear();
     };
     TEST_SYNC_POINT_CALLBACK("CloudFileCache::TmpFile1");
@@ -1575,27 +1592,28 @@ void BlockFileCache::check_disk_resource_limit(const std::string& path) {
     DCHECK(capacity_percentage >= 0 && capacity_percentage <= 100);
     DCHECK(inode_percentage >= 0 && inode_percentage <= 100);
     // ATTN: due to that can be change, so if its invalid, set it to default value
-    if (config::file_cache_enter_disk_resource_limit_mode_percent
-        <= config::file_cache_exit_disk_resource_limit_mode_percent) {
+    if (config::file_cache_enter_disk_resource_limit_mode_percent <=
+        config::file_cache_exit_disk_resource_limit_mode_percent) {
         LOG_WARNING("config error, set to default value")
-            .tag("enter", config::file_cache_enter_disk_resource_limit_mode_percent)
-            .tag("exit", config::file_cache_exit_disk_resource_limit_mode_percent);
+                .tag("enter", config::file_cache_enter_disk_resource_limit_mode_percent)
+                .tag("exit", config::file_cache_exit_disk_resource_limit_mode_percent);
         config::file_cache_enter_disk_resource_limit_mode_percent = 90;
-        config::file_cache_exit_disk_resource_limit_mode_percent  = 80;
+        config::file_cache_exit_disk_resource_limit_mode_percent = 80;
     }
-    if (capacity_percentage >= config::file_cache_enter_disk_resource_limit_mode_percent
-        || inode_is_insufficient(inode_percentage)) {
+    if (capacity_percentage >= config::file_cache_enter_disk_resource_limit_mode_percent ||
+        inode_is_insufficient(inode_percentage)) {
         _disk_resource_limit_mode = true;
-    } else if (_disk_resource_limit_mode
-            && (capacity_percentage < config::file_cache_exit_disk_resource_limit_mode_percent)
-            && (inode_percentage < config::file_cache_exit_disk_resource_limit_mode_percent)) {
+    } else if (_disk_resource_limit_mode &&
+               (capacity_percentage < config::file_cache_exit_disk_resource_limit_mode_percent) &&
+               (inode_percentage < config::file_cache_exit_disk_resource_limit_mode_percent)) {
         _disk_resource_limit_mode = false;
     }
     if (_disk_resource_limit_mode) {
-        LOG_WARNING("file cache background thread").tag("space percent", capacity_percentage)
-            .tag("inode percent", inode_percentage)
-            .tag("is inode insufficient", inode_is_insufficient(inode_percentage))
-            .tag("mode", "run in resource limit");
+        LOG_WARNING("file cache background thread")
+                .tag("space percent", capacity_percentage)
+                .tag("inode percent", inode_percentage)
+                .tag("is inode insufficient", inode_is_insufficient(inode_percentage))
+                .tag("mode", "run in resource limit");
     }
 }
 

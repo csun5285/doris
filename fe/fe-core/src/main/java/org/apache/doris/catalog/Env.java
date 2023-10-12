@@ -3294,10 +3294,10 @@ public class Env {
             if (olapTable.isZOrderSort()) {
                 sb.append(olapTable.getDataSortInfo().toSql());
             }
-
-            // in memory
-            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_PERSISTENT).append("\" = \"");
-            sb.append(olapTable.isPersistent()).append("\"");
+            if (olapTable.getTTLSeconds() != 0) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS).append("\" = \"");
+                sb.append(olapTable.getTTLSeconds()).append("\"");
+            }
             if (olapTable.isInMemory()) {
                 sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_INMEMORY).append("\" = \"");
                 sb.append(olapTable.isInMemory()).append("\"");
@@ -3783,14 +3783,8 @@ public class Env {
 
             // properties
             sb.append("\nPROPERTIES (\n");
-            // persistent
-            sb.append("\"").append(PropertyAnalyzer.PROPERTIES_PERSISTENT).append("\" = \"");
-            sb.append(olapTable.isPersistent()).append("\"");
-
-            if (olapTable.getTTLSeconds() != 0L) {
-                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS).append("\" = \"");
-                sb.append(olapTable.getTTLSeconds()).append("\"");
-            }
+            sb.append("\"").append(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS).append("\" = \"");
+            sb.append(olapTable.getTTLSeconds()).append("\"");
 
             // bloom filter
             Set<String> bfColumnNames = olapTable.getCopiedBfColumns();
@@ -5231,6 +5225,7 @@ public class Env {
             tableProperty.modifyTableProperties(properties);
         }
         tableProperty.buildInMemory()
+                .buildTTLSeconds()
                 .buildStoragePolicy()
                 .buildIsBeingSynced()
                 .buildCompactionPolicy()
