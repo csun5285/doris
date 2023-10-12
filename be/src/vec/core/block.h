@@ -286,6 +286,9 @@ public:
     /** Get block data in string. */
     std::string dump_data(size_t begin = 0, size_t row_limit = 100) const;
 
+    /** Get block key data in string. */
+    std::string dump_key_data(size_t begin = 0, int column_end = 0, size_t row_limit = 100) const;
+
     /** Get one line data from block, only use in load data */
     std::string dump_one_line(size_t row, int column_end) const;
 

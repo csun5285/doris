@@ -516,6 +516,64 @@ std::string Block::dump_data(size_t begin, size_t row_limit) const {
     return out.str();
 }
 
+std::string Block::dump_key_data(size_t begin, int column_end, size_t row_limit) const {
+    assert(column_end <= columns());
+    std::vector<std::string> headers;
+    std::vector<size_t> headers_size;
+    for (size_t i = 0; i < column_end; ++i) {
+        std::string s = fmt::format("{}({})", data[i].name, data[i].type->get_name());
+        headers_size.push_back(s.size() > 15 ? s.size() : 15);
+        headers.emplace_back(s);
+    }
+
+    std::stringstream out;
+    // header upper line
+    auto line = [&]() {
+        for (size_t i = 0; i < column_end; ++i) {
+            out << std::setfill('-') << std::setw(1) << "+" << std::setw(headers_size[i]) << "-";
+        }
+        out << std::setw(1) << "+" << std::endl;
+    };
+    line();
+    // header text
+    for (size_t i = 0; i < column_end; ++i) {
+        out << std::setfill(' ') << std::setw(1) << "|" << std::left << std::setw(headers_size[i])
+            << headers[i];
+    }
+    out << std::setw(1) << "|" << std::endl;
+    // header bottom line
+    line();
+    if (rows() == 0) {
+        return out.str();
+    }
+    // content
+    for (size_t row_num = begin; row_num < rows() && row_num < row_limit + begin; ++row_num) {
+        for (size_t i = 0; i < column_end; ++i) {
+            if (data[i].column->empty()) {
+                out << std::setfill(' ') << std::setw(1) << "|" << std::setw(headers_size[i])
+                    << std::right;
+                continue;
+            }
+            std::string s;
+            if (data[i].column) {
+                s = data[i].to_string(row_num);
+            }
+            if (s.length() > headers_size[i]) {
+                s = s.substr(0, headers_size[i] - 3) + "...";
+            }
+            out << std::setfill(' ') << std::setw(1) << "|" << std::setw(headers_size[i])
+                << std::right << s;
+        }
+        out << std::setw(1) << "|" << std::endl;
+    }
+    // bottom line
+    line();
+    if (row_limit < rows()) {
+        out << rows() << " rows in block, only show first " << row_limit << " rows." << std::endl;
+    }
+    return out.str();
+}
+
 std::string Block::dump_one_line(size_t row, int column_end) const {
     assert(column_end <= columns());
     fmt::memory_buffer line;
