@@ -560,6 +560,12 @@ int InstanceChecker::do_inverted_check() {
         return 0;
     };
 
+    // TODO(Xiaocc): Currently we havn't implemented one generator-like s3 accessor list function
+    // so we choose to skip here.
+    {
+        [[maybe_unused]] int tmp_ret = 0;
+        TEST_SYNC_POINT_RETURN_WITH_VALUE("InstanceChecker::do_inverted_check", &tmp_ret);
+    }
     for (auto& [_, accessor] : accessor_map_) {
         auto s3_accessor = static_cast<S3Accessor*>(accessor.get());
         auto client = s3_accessor->s3_client();

@@ -295,6 +295,22 @@ static int create_version_kv(TxnKv* txn_kv, int64_t table_id, int64_t partition_
     return 0;
 }
 
+static int create_txn_label_kv(TxnKv* txn_kv, std::string label, int64_t db_id) {
+    std::string txn_label_key_;
+    std::string txn_label_val;
+    auto keyinfo = TxnLabelKeyInfo({instance_id, db_id, label});
+    txn_label_key(keyinfo, &txn_label_key_);
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv->create_txn(&txn) != 0) {
+        return -1;
+    }
+    txn->put(txn_label_key_, label);
+    if (txn->commit() != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_id,
                                 RecycleIndexPB::Type type) {
     std::string key;
@@ -1627,6 +1643,111 @@ TEST(RecyclerTest, recycle_stage) {
     ASSERT_EQ(1, txn->get(key, &val));
 }
 
+TEST(RecyclerTest, recycle_deleted_instance) {
+    auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
+    ASSERT_NE(txn_kv.get(), nullptr);
+    ASSERT_EQ(txn_kv->init(), 0);
+    // create internal/external stage
+    std::string internal_stage_id = "internal";
+    std::string external_stage_id = "external";
+    std::string nonexist_internal_stage_id = "non_exist_internal";
+    std::string nonexist_external_stage_id = "non_exist_external";
+
+    InstanceInfoPB instance_info;
+    create_instance(internal_stage_id, external_stage_id, instance_info);
+    InstanceRecycler recycler(txn_kv, instance_info);
+    ASSERT_EQ(recycler.init(), 0);
+    // create txn key
+    for (size_t i = 0; i < 100; i++) {
+        ASSERT_EQ(0, create_txn_label_kv(txn_kv.get(), fmt::format("fake_label{}", i), i));
+    }
+    // create version key
+    for (size_t i = 101; i < 200; i += 2) {
+        ASSERT_EQ(0, create_version_kv(txn_kv.get(), i, i + 1));
+    }
+    // create meta key
+    std::vector<doris::TabletSchemaPB> schemas;
+    for (int i = 0; i < 5; ++i) {
+        auto& schema = schemas.emplace_back();
+        schema.set_schema_version(i);
+        for (int j = 0; j < i; ++j) {
+            schema.add_index()->set_index_id(j);
+        }
+    }
+
+    constexpr int table_id = 10000, index_id = 10001, partition_id = 10002;
+    auto accessor = recycler.accessor_map_.begin()->second;
+    int64_t tablet_id_base = 10100;
+    int64_t txn_id_base = 114115;
+    for (int i = 0; i < 100; ++i) {
+        int64_t tablet_id = tablet_id_base + i;
+        // creare stats key
+        create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+        for (int j = 0; j < 10; ++j) {
+            auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
+            // create recycle key
+            create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
+                                  j % 10 < 2 ? RecycleRowsetPB::PREPARE : RecycleRowsetPB::COMPACT,
+                                  j & 1);
+            auto tmp_rowset = create_rowset("recycle_tmp_rowsets", tablet_id, index_id, 5,
+                                            schemas[j % 5], txn_id_base + j);
+            // create meta key
+            create_tmp_rowset(txn_kv.get(), accessor.get(), tmp_rowset, j & 1);
+        }
+        for (int j = 0; j < 10; ++j) {
+            // create meta key
+            create_committed_rowset(txn_kv.get(), accessor.get(), "recycle_indexes", tablet_id, j);
+        }
+    }
+
+    ASSERT_EQ(0, recycler.recycle_deleted_instance());
+
+    // check if all the objects are deleted
+    std::vector<ObjectMeta> files;
+    std::for_each(recycler.accessor_map_.begin(), recycler.accessor_map_.end(),
+                  [&](const auto& entry) {
+                      auto& acc = entry.second;
+                      ASSERT_EQ(0, acc->list("", &files));
+                      ASSERT_EQ(0, files.size());
+                  });
+
+    // check if all the keys are deleted
+    // check all related kv have been deleted
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    std::unique_ptr<RangeGetIterator> it;
+
+    std::string start_txn_key = txn_key_prefix(instance_id);
+    std::string end_txn_key = txn_key_prefix(instance_id + '\x00');
+    ASSERT_EQ(txn->get(start_txn_key, end_txn_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+
+    std::string start_version_key = version_key({instance_id, 0, 0, 0});
+    std::string end_version_key = version_key({instance_id, INT64_MAX, 0, 0});
+    ASSERT_EQ(txn->get(start_version_key, end_version_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+
+    std::string start_meta_key = meta_key_prefix(instance_id);
+    std::string end_meta_key = meta_key_prefix(instance_id + '\x00');
+    ASSERT_EQ(txn->get(start_meta_key, end_meta_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+
+    auto begin_recycle_key = recycle_key_prefix(instance_id);
+    auto end_recycle_key = recycle_key_prefix(instance_id + '\x00');
+    ASSERT_EQ(txn->get(begin_recycle_key, end_recycle_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+
+    std::string start_stats_tablet_key = stats_tablet_key({instance_id, 0, 0, 0, 0});
+    std::string end_stats_tablet_key = stats_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
+    ASSERT_EQ(txn->get(start_stats_tablet_key, end_stats_tablet_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+
+    std::string start_copy_key = copy_key_prefix(instance_id);
+    std::string end_copy_key = copy_key_prefix(instance_id + '\x00');
+    ASSERT_EQ(txn->get(start_copy_key, end_copy_key, &it), 0);
+    ASSERT_EQ(it->size(), 0);
+}
+
 TEST(RecyclerTest, multi_recycler) {
     config::recycle_concurrency = 2;
     config::recycle_interval_seconds = 10;
@@ -1696,6 +1817,126 @@ TEST(RecyclerTest, multi_recycler) {
                   << std::endl;
     }
     EXPECT_EQ(count, 10);
+}
+
+TEST(RecyclerTest, safe_exit) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+    auto checker_ = std::make_unique<Recycler>(txn_kv);
+    brpc::Server server;
+    int ret = checker_->start(&server);
+    ASSERT_TRUE(ret == 0);
+    checker_->stop();
+}
+
+TEST(CheckerTest, safe_exit) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+    auto checker_ = std::make_unique<Checker>(txn_kv);
+    int ret = checker_->start();
+    ASSERT_TRUE(ret == 0);
+    checker_->stop();
+}
+
+TEST(CheckerTest, normal_inverted_check) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("1");
+    obj_info->set_ak(config::test_s3_ak);
+    obj_info->set_sk(config::test_s3_sk);
+    obj_info->set_endpoint(config::test_s3_endpoint);
+    obj_info->set_region(config::test_s3_region);
+    obj_info->set_bucket(config::test_s3_bucket);
+    obj_info->set_prefix("CheckerTest");
+
+    auto sp = SyncPoint::get_instance();
+    sp->set_call_back("InstanceChecker::do_inverted_check::pred",
+                      [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("InstanceChecker::do_inverted_check", [&](void* p) { *((int*)p) = 0; });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [](int*) {
+        SyncPoint::get_instance()->clear_all_call_backs();
+        SyncPoint::get_instance()->disable_processing();
+    });
+
+    InstanceChecker checker(txn_kv, instance_id);
+    ASSERT_EQ(checker.init(instance), 0);
+    // Add some visible rowsets along with some rowsets that should be recycled
+    // call inverted check after do recycle which would sweep all the rowsets not visible
+    auto accessor = checker.accessor_map_.begin()->second;
+    for (int t = 10001; t <= 10100; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 1);
+        }
+    }
+    for (int t = 10101; t <= 10200; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 5);
+        }
+    }
+    ASSERT_EQ(checker.do_inverted_check(), 0);
+}
+
+// TODO(Xiaocc): We need one mocked accessor which provides one async stream like list function
+// to do the following test
+TEST(CheckerTest, DISABLED_abnormal_inverted_check) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("1");
+    obj_info->set_ak(config::test_s3_ak);
+    obj_info->set_sk(config::test_s3_sk);
+    obj_info->set_endpoint(config::test_s3_endpoint);
+    obj_info->set_region(config::test_s3_region);
+    obj_info->set_bucket(config::test_s3_bucket);
+    obj_info->set_prefix("CheckerTest");
+
+    auto sp = SyncPoint::get_instance();
+    sp->set_call_back("InstanceChecker::do_inverted_check::pred",
+                      [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("InstanceChecker::do_inverted_check", [&](void* p) { *((int*)p) = 0; });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [](int*) {
+        SyncPoint::get_instance()->clear_all_call_backs();
+        SyncPoint::get_instance()->disable_processing();
+    });
+
+    InstanceChecker checker(txn_kv, instance_id);
+    ASSERT_EQ(checker.init(instance), 0);
+    // Add some visible rowsets along with some rowsets that should be recycled
+    // call inverted check after do recycle which would sweep all the rowsets not visible
+    auto accessor = checker.accessor_map_.begin()->second;
+    for (int t = 10001; t <= 10100; ++t) {
+        for (int v = 0; v < 10; ++v) {
+            create_committed_rowset(txn_kv.get(), accessor.get(), "1", t, v, 1);
+        }
+    }
+    std::vector<doris::TabletSchemaPB> schemas;
+    for (int i = 0; i < 5; ++i) {
+        auto& schema = schemas.emplace_back();
+        schema.set_schema_version(i);
+        for (int j = 0; j < i; ++j) {
+            schema.add_index()->set_index_id(j);
+        }
+    }
+
+    // Create some rowsets not visible in S3
+    constexpr int table_id = 10101, index_id = 10102, partition_id = 10103, tablet_id = 10104;
+    create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+    for (int i = 0; i < 500; ++i) {
+        auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[i % 5]);
+        create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
+                              i % 10 < 2 ? RecycleRowsetPB::PREPARE : RecycleRowsetPB::COMPACT,
+                              i & 1);
+    }
+    ASSERT_NE(checker.do_inverted_check(), 0);
 }
 
 TEST(CheckerTest, normal) {
