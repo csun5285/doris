@@ -121,8 +121,8 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
             }
             queryId = DebugUtil.printId(r.connectContext.queryId());
         } finally {
-            LOG.info("Analyze SQL: " + sql + " cost time: " + (System.currentTimeMillis() - startTime) + "ms" +
-                    " QueryId: " + queryId);
+            LOG.info("Analyze SQL: " + sql + " cost time: " + (System.currentTimeMillis() - startTime) + "ms"
+                    + " QueryId: " + queryId);
         }
     }
 
