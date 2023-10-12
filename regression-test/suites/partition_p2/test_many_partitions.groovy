@@ -66,8 +66,10 @@ suite("test_many_partitions") {
                 "replication_num" = "1"
             );
     """
+    for (int i = 0; i < 10000; i = i + 500) {
+        sql """ insert into ${tbName} values ${makeInsertStmt(i, i + 500)};"""
+    }
 
-    sql """ insert into ${tbName} values ${makeInsertStmt(0, 10000)};"""
     qt_sql """ select c1,c10 from ${tbName} order by c1 ASC;"""
     sql """ truncate table ${tbName};"""
     qt_sql """ select c1,c10 from ${tbName} order by c1 ASC;"""

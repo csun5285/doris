@@ -9,6 +9,7 @@ import org.apache.doris.catalog.DistributionInfo;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.Config;
+import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.rpc.RpcException;
@@ -198,6 +199,11 @@ public class CloudPartition extends Partition {
         if (super.getVisibleVersion() > versionNoData) {
             return true;
         }
+
+        SummaryProfile profile = getSummaryProfile();
+        if (profile != null) {
+            profile.incGetPartitionVersionByHasDataCount();
+        }
         return getVisibleVersion() > versionNoData;
     }
 
@@ -207,12 +213,9 @@ public class CloudPartition extends Partition {
         try {
             return getVersionFromMetaInner(req);
         } finally {
-            ConnectContext ctx = ConnectContext.get();
-            if (ctx != null) {
-                StmtExecutor executor = ctx.getExecutor();
-                if (executor != null) {
-                    executor.getSummaryProfile().addGetPartitionVersionTime(System.nanoTime() - startAt);
-                }
+            SummaryProfile profile = getSummaryProfile();
+            if (profile != null) {
+                profile.addGetPartitionVersionTime(System.nanoTime() - startAt);
             }
         }
     }
@@ -270,6 +273,17 @@ public class CloudPartition extends Partition {
             return true;
         }
         return false;
+    }
+
+    private static SummaryProfile getSummaryProfile() {
+        ConnectContext ctx = ConnectContext.get();
+        if (ctx != null) {
+            StmtExecutor executor = ctx.getExecutor();
+            if (executor != null) {
+                return executor.getSummaryProfile();
+            }
+        }
+        return null;
     }
 
     public static CloudPartition read(DataInput in) throws IOException {

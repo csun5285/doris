@@ -1073,7 +1073,7 @@ public class StmtExecutor {
             int analyzeTimes = 2;
             if (Config.isCloudMode()) {
                 // be core and be restarted, need retry more times
-                analyzeTimes = 30;
+                analyzeTimes = Config.cloud_query_failed_retry_times / 2;
             }
             for (int i = 1; i <= analyzeTimes; i++) {
                 MetaLockUtils.readLockTables(tables);
@@ -1096,13 +1096,14 @@ public class StmtExecutor {
                     // cloud mode retry, when retry need check this user has cloud cluster auth.
                     // if user doesn't have cloud cluster auth, don't retry, just return.
                     if (Config.isCloudMode()
-                            && e.getMessage().contains(SystemInfoService.NOT_USING_VALID_CLUSTER_MSG)
+                            && (e.getMessage().contains(SystemInfoService.NOT_USING_VALID_CLUSTER_MSG)
+                            || e.getMessage().contains("backend -1"))
                             && hasCloudClusterPriv()) {
                         LOG.debug("cloud mode analyzeAndGenerateQueryPlan retry times {}", i);
                         // sleep random millis [500, 1000] ms
                         int randomMillis = 500 + (int) (Math.random() * (1000 - 500));
                         try {
-                            if (i > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
+                            if (i > Config.cloud_query_failed_retry_times / 2) {
                                 randomMillis = 1000 + (int) (Math.random() * (1000 - 500));
                             }
                             Thread.sleep(randomMillis);

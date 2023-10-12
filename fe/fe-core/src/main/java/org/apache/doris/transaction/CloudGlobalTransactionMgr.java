@@ -421,7 +421,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         Map<Long, Long> partitionToVersions = Maps.newHashMap();
         partitionMap.forEach((key, value) -> {
             long visibleVersion = value.getVisibleVersion();
-            long newVersion = visibleVersion == 0 ? 2 : visibleVersion + 1;
+            long newVersion = visibleVersion <= 0 ? 2 : visibleVersion + 1;
             partitionToVersions.put(key, newVersion);
         });
         return partitionToVersions;

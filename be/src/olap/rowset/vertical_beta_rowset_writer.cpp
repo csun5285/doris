@@ -145,7 +145,8 @@ Status VerticalBetaRowsetWriter::_flush_columns(
         KeyBoundsPB key_bounds;
         Slice min_key = (*segment_writer)->min_encoded_key();
         Slice max_key = (*segment_writer)->max_encoded_key();
-        DCHECK_LE(min_key.compare(max_key), 0);
+        DCHECK_LE(min_key.compare(max_key), 0)
+                << "min_key:" << min_key.to_string() << ",max_key:" << max_key.to_string();
         key_bounds.set_min_key(min_key.to_string());
         key_bounds.set_max_key(max_key.to_string());
         _segments_encoded_key_bounds.emplace_back(key_bounds);

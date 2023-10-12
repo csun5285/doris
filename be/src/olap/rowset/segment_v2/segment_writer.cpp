@@ -695,6 +695,23 @@ Status SegmentWriter::append_block(const vectorized::Block* block, size_t row_po
             // for min_max key
             set_min_key(_full_encode_keys(key_columns, 0));
             set_max_key(_full_encode_keys(key_columns, num_rows - 1));
+            Slice min_key = min_encoded_key();
+            Slice max_key = max_encoded_key();
+            if (min_key.compare(max_key) > 0) {
+                auto first_100 = block->dump_key_data(0, _num_key_columns, 100);
+                LOG(WARNING) << "wrong min_max key first_100:" << first_100;
+                if (num_rows - 100 >= 0) {
+                    auto last_100 = block->dump_key_data(num_rows - 100, _num_key_columns, 100);
+                    LOG(WARNING) << "wrong min_max key last_100:" << last_100;
+                } else {
+                    LOG(WARNING) << "wrong min_max key last_100 is same with first_100 because of "
+                                    "num_rows < 100,num_rows:"
+                                 << num_rows;
+                }
+            }
+            DCHECK_LE(min_key.compare(max_key), 0)
+                    << "min_key:" << min_key.to_string() << ",max_key:" << max_key.to_string()
+                    << ",row_pos:" << row_pos << ",num_rows:" << num_rows;
 
             key_columns.resize(_num_short_key_columns);
             for (const auto pos : short_key_pos) {

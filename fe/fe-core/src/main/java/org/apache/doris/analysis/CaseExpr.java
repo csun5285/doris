@@ -276,7 +276,6 @@ public class CaseExpr extends Expr {
         }
 
         type = returnType;
-        this.checkIncludeBitmap();
     }
 
     // case and when
