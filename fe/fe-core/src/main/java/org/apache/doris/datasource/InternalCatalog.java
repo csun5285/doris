@@ -513,6 +513,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
     public void dropDb(DropDbStmt stmt) throws DdlException {
         String dbName = stmt.getDbName();
+        LOG.info("begin drop database[{}], is force : {}", dbName, stmt.isForceDrop());
 
         // 1. check if database exists
         if (!tryLock(false)) {
@@ -571,12 +572,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                     MetaLockUtils.writeUnlockTables(tableList);
                 }
 
-                if (!stmt.isForceDrop()) {
-                    Env.getCurrentRecycleBin().recycleDatabase(db, tableNames, tableIds, false, 0);
-                    recycleTime = Env.getCurrentRecycleBin().getRecycleTimeById(db.getId());
-                } else {
-                    Env.getCurrentEnv().eraseDatabase(db.getId(), false);
-                }
+                Env.getCurrentRecycleBin().recycleDatabase(db, tableNames, tableIds, false, stmt.isForceDrop(), 0);
+                recycleTime = Env.getCurrentRecycleBin().getRecycleTimeById(db.getId());
             } finally {
                 db.writeUnlock();
             }
@@ -623,11 +620,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 } finally {
                     MetaLockUtils.writeUnlockTables(tableList);
                 }
-                if (!isForceDrop) {
-                    Env.getCurrentRecycleBin().recycleDatabase(db, tableNames, tableIds, true, recycleTime);
-                } else {
-                    Env.getCurrentEnv().eraseDatabase(db.getId(), false);
-                }
+                Env.getCurrentRecycleBin().recycleDatabase(db, tableNames, tableIds, true, isForceDrop, recycleTime);
                 Env.getCurrentEnv().getQueryStats().clear(Env.getCurrentEnv().getInternalCatalog().getId(), db.getId());
             } finally {
                 db.writeUnlock();
@@ -896,6 +889,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     public void dropTable(DropTableStmt stmt) throws DdlException {
         String dbName = stmt.getDbName();
         String tableName = stmt.getTableName();
+        LOG.info("begin to drop table: {} from db: {}, is force: {}", tableName, dbName, stmt.isForceDrop());
 
         // check database
         Database db = (Database) getDbOrDdlException(dbName);
@@ -998,14 +992,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
             }
         }
-        if (!isForceDrop) {
-            Env.getCurrentRecycleBin().recycleTable(db.getId(), table, isReplay, recycleTime);
-        } else {
-            if (table.getType() == TableType.OLAP) {
-                Env.getCurrentEnv().onEraseOlapTable((OlapTable) table, isReplay);
-            }
-        }
-
+        Env.getCurrentRecycleBin().recycleTable(db.getId(), table, isReplay, isForceDrop, recycleTime);
         if (table instanceof MaterializedView) {
             List<Long> dropIds = Env.getCurrentEnv().getMTMVJobManager().showJobs(db.getFullName(), table.getName())
                     .stream().map(MTMVJob::getId).collect(Collectors.toList());
