@@ -82,23 +82,12 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
     size_t left = offset;
     size_t right = offset + read_size - 1;
     size_t align_left, align_right;
-    if (_is_doris_table) {
-        // when the cache is read_only, we don't need to prefetch datas into cache, so we just read what we need
-        if (BlockFileCache::read_only()) [[unlikely]] {
-            return std::make_pair(offset, read_size);
-        }
-        align_left = (left / config::file_cache_max_file_segment_size) *
-                     config::file_cache_max_file_segment_size;
-        align_right = (right / config::file_cache_max_file_segment_size + 1) *
-                      config::file_cache_max_file_segment_size;
-    } else {
-        size_t segment_size =
-                std::min(std::max(read_size, (size_t)config::file_cache_min_file_segment_size),
-                         (size_t)config::file_cache_max_file_segment_size);
-        segment_size = BitUtil::next_power_of_two(segment_size);
-        align_left = (left / segment_size) * segment_size;
-        align_right = (right / segment_size + 1) * segment_size;
+    // when the cache is read_only, we don't need to prefetch datas into cache, so we just read what we need
+    if (BlockFileCache::read_only()) [[unlikely]] {
+        return std::make_pair(offset, read_size);
     }
+    align_left = (left / FILE_CACHE_MAX_FILE_BLOCK_SIZE) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
+    align_right = (right / FILE_CACHE_MAX_FILE_BLOCK_SIZE + 1) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     align_right = align_right < size() ? align_right : size();
     size_t align_size = align_right - align_left;
     return std::make_pair(align_left, align_size);
