@@ -159,6 +159,7 @@ public class StageUtil {
                     // 1. check if pattern is matched
                     for (ObjectFile objectFile : listObjectsResult.getObjectInfoList()) {
                         if (!matchPattern(objectFile.getRelativePath(), matcher)) {
+                            LOG.info("not matchPattern path:{}", objectFile.getRelativePath());
                             continue;
                         }
                         matchPatternFiles.add(objectFile);
@@ -200,15 +201,22 @@ public class StageUtil {
         }
         if (fileNum > 0 && objectFiles.size() >= fileNum) {
             reachLimitStr = ", reach num limit: " + fileNum;
+            LOG.info("reach file num limit fileNum:{} objectFiles.size:{}", fileNum, objectFiles.size());
             return true;
         }
-        if (sizeLimit > 0 && objectFiles.stream().mapToLong(f -> f.first.getSize()).sum() >= sizeLimit) {
+
+        long objectFilesSize = objectFiles.stream().mapToLong(f -> f.first.getSize()).sum();
+        if (sizeLimit > 0 && objectFilesSize >= sizeLimit) {
             reachLimitStr = ", reach size limit: " + sizeLimit;
+            LOG.info("reach size limit sizeLimit:{}, objectFilesSize:{}", sizeLimit, objectFilesSize);
             return true;
         }
-        if (metaSizeLimit > 0
-                && objectFiles.stream().mapToLong(f -> f.second.getSerializedSize()).sum() >= metaSizeLimit) {
+
+        long objectFilesSerializedSize = objectFiles.stream().mapToLong(f -> f.second.getSerializedSize()).sum();
+        if (metaSizeLimit > 0 && objectFilesSerializedSize >= metaSizeLimit) {
             reachLimitStr = ", reach meta size limit: " + metaSizeLimit;
+            LOG.info("reach meta size limit metaSizeLimit:{} objectFilesSerializedSize:{}",
+                    metaSizeLimit, objectFilesSerializedSize);
             return true;
         }
         return false;
