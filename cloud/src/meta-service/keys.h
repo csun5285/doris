@@ -25,6 +25,9 @@
 // 0x01 "meta" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id}  -> TabletMetaPB
 // 0x01 "meta" ${instance_id} "tablet_index" ${tablet_id}                                    -> TabletIndexPB
 // 0x01 "meta" ${instance_id} "schema" ${index_id} ${schema_version}                         -> TabletSchemaPB
+// 0x01 "meta" ${instance_id} "delete_bitmap_lock" ${table_id} ${partition_id}               -> DeleteBitmapUpdateLockPB
+// 0x01 "meta" ${instance_id} "delete_bitmap_pending" ${table_id}                            -> PendingDeleteBitmapPB 
+// 0x01 "meta" ${instance_id} "delete_bitmap" ${tablet_id} ${rowset_id} ${version} ${segment_id} -> roaringbitmap
 //
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} -> TabletStatsPB
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "data_size"   -> int64

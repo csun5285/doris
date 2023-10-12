@@ -2473,6 +2473,19 @@ TEST(MetaServiceTest, GetDeleteBitmapUpdateLock) {
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 }
 
+static std::string generate_random_string(int length) {
+    std::string char_set = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::random_device rd;
+    std::mt19937 generator(rd());
+    std::uniform_int_distribution<int> distribution(0, char_set.length() - 1);
+
+    std::string randomString;
+    for (int i = 0; i < length; ++i) {
+        randomString += char_set[distribution(generator)];
+    }
+    return randomString;
+}
+
 TEST(MetaServiceTest, UpdateDeleteBitmap) {
     auto meta_service = get_meta_service();
 
@@ -2521,6 +2534,12 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     update_delete_bitmap_req.add_versions(2);
     update_delete_bitmap_req.add_segment_delete_bitmaps("abc3");
 
+    std::string large_value = generate_random_string(300 * 1000);
+    update_delete_bitmap_req.add_rowset_ids("124");
+    update_delete_bitmap_req.add_segment_ids(1);
+    update_delete_bitmap_req.add_versions(2);
+    update_delete_bitmap_req.add_segment_delete_bitmaps(large_value);
+
     update_delete_bitmap_req.add_rowset_ids("124");
     update_delete_bitmap_req.add_segment_ids(0);
     update_delete_bitmap_req.add_versions(3);
@@ -2548,10 +2567,10 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl),
                                     &get_delete_bitmap_req, &get_delete_bitmap_res, nullptr);
     ASSERT_EQ(get_delete_bitmap_res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(get_delete_bitmap_res.rowset_ids_size(), 4);
-    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps_size(), 4);
-    ASSERT_EQ(get_delete_bitmap_res.versions_size(), 4);
-    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps_size(), 4);
+    ASSERT_EQ(get_delete_bitmap_res.rowset_ids_size(), 5);
+    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps_size(), 5);
+    ASSERT_EQ(get_delete_bitmap_res.versions_size(), 5);
+    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps_size(), 5);
 
     ASSERT_EQ(get_delete_bitmap_res.rowset_ids(0), "123");
     ASSERT_EQ(get_delete_bitmap_res.segment_ids(0), 0);
@@ -2569,9 +2588,14 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps(2), "abc3");
 
     ASSERT_EQ(get_delete_bitmap_res.rowset_ids(3), "124");
-    ASSERT_EQ(get_delete_bitmap_res.segment_ids(3), 0);
-    ASSERT_EQ(get_delete_bitmap_res.versions(3), 3);
-    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps(3), "abc4");
+    ASSERT_EQ(get_delete_bitmap_res.segment_ids(3), 1);
+    ASSERT_EQ(get_delete_bitmap_res.versions(3), 2);
+    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps(3), large_value);
+
+    ASSERT_EQ(get_delete_bitmap_res.rowset_ids(4), "124");
+    ASSERT_EQ(get_delete_bitmap_res.segment_ids(4), 0);
+    ASSERT_EQ(get_delete_bitmap_res.versions(4), 3);
+    ASSERT_EQ(get_delete_bitmap_res.segment_delete_bitmaps(4), "abc4");
 
     // second update delete bitmap
     UpdateDeleteBitmapRequest update_delete_bitmap_req1;
@@ -2582,6 +2606,12 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     update_delete_bitmap_req1.set_lock_id(888);
     update_delete_bitmap_req1.set_initiator(-1);
     update_delete_bitmap_req1.set_tablet_id(333);
+
+    std::string large_value1 = generate_random_string(200 * 1000);
+    update_delete_bitmap_req1.add_rowset_ids("123");
+    update_delete_bitmap_req1.add_segment_ids(0);
+    update_delete_bitmap_req1.add_versions(2);
+    update_delete_bitmap_req1.add_segment_delete_bitmaps(large_value1);
 
     update_delete_bitmap_req1.add_rowset_ids("123");
     update_delete_bitmap_req1.add_segment_ids(1);
@@ -2620,25 +2650,30 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl),
                                     &get_delete_bitmap_req1, &get_delete_bitmap_res1, nullptr);
     ASSERT_EQ(get_delete_bitmap_res1.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(get_delete_bitmap_res1.rowset_ids_size(), 3);
-    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps_size(), 3);
-    ASSERT_EQ(get_delete_bitmap_res1.versions_size(), 3);
-    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps_size(), 3);
+    ASSERT_EQ(get_delete_bitmap_res1.rowset_ids_size(), 4);
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps_size(), 4);
+    ASSERT_EQ(get_delete_bitmap_res1.versions_size(), 4);
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps_size(), 4);
 
     ASSERT_EQ(get_delete_bitmap_res1.rowset_ids(0), "123");
-    ASSERT_EQ(get_delete_bitmap_res1.segment_ids(0), 1);
+    ASSERT_EQ(get_delete_bitmap_res1.segment_ids(0), 0);
     ASSERT_EQ(get_delete_bitmap_res1.versions(0), 2);
-    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(0), "bbb0");
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(0), large_value1);
 
     ASSERT_EQ(get_delete_bitmap_res1.rowset_ids(1), "123");
     ASSERT_EQ(get_delete_bitmap_res1.segment_ids(1), 1);
-    ASSERT_EQ(get_delete_bitmap_res1.versions(1), 3);
-    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(1), "bbb1");
+    ASSERT_EQ(get_delete_bitmap_res1.versions(1), 2);
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(1), "bbb0");
 
-    ASSERT_EQ(get_delete_bitmap_res1.rowset_ids(2), "124");
+    ASSERT_EQ(get_delete_bitmap_res1.rowset_ids(2), "123");
     ASSERT_EQ(get_delete_bitmap_res1.segment_ids(2), 1);
     ASSERT_EQ(get_delete_bitmap_res1.versions(2), 3);
-    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(2), "bbb2");
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(2), "bbb1");
+
+    ASSERT_EQ(get_delete_bitmap_res1.rowset_ids(3), "124");
+    ASSERT_EQ(get_delete_bitmap_res1.segment_ids(3), 1);
+    ASSERT_EQ(get_delete_bitmap_res1.versions(3), 3);
+    ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(3), "bbb2");
 }
 
 TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {

@@ -310,6 +310,11 @@ void put(Transaction* txn, std::string_view key, const google::protobuf::Message
     std::string value;
     bool ret = pb.SerializeToString(&value); // Always success
     DCHECK(ret) << hex(key) << ' ' << pb.ShortDebugString();
+    put(txn, key, value, ver, split_size);
+}
+
+void put(Transaction* txn, std::string_view key, std::string_view value, uint8_t ver,
+         size_t split_size) {
     auto split_vec = split_string(value, split_size);
     int64_t suffix_base = ver;
     suffix_base <<= 56;

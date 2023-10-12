@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace google::protobuf {
@@ -107,6 +108,17 @@ private:
  * @param split_size how many byte sized fragments are the value split into
  */
 void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,
+         size_t split_size = 90 * 1000);
+
+/**
+ * Put a KV, it's value may be bigger than 100k
+ * @param txn fdb txn handler
+ * @param key encode key
+ * @param value value to save
+ * @param ver value version
+ * @param split_size how many byte sized fragments are the value split into
+ */
+void put(Transaction* txn, std::string_view key, std::string_view value, uint8_t ver,
          size_t split_size = 90 * 1000);
 
 } // namespace selectdb
