@@ -24,6 +24,7 @@ import org.apache.doris.analysis.LoadStmt;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
 import org.apache.doris.analysis.StatementBase;
+import org.apache.doris.analysis.UnifiedLoadStmt;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.AuthorizationInfo;
 import org.apache.doris.catalog.Database;
@@ -324,7 +325,13 @@ public abstract class BulkLoadJob extends LoadJob {
     }
 
     protected void analyzeStmt(StatementBase stmtBase, Database db) throws UserException {
-        LoadStmt stmt = (LoadStmt) stmtBase;
+        LoadStmt stmt = null;
+        if (stmtBase instanceof UnifiedLoadStmt) {
+            stmt = (LoadStmt) ((UnifiedLoadStmt) stmtBase).getProxyStmt();
+        } else {
+            stmt = (LoadStmt) stmtBase;
+        }
+
         for (DataDescription dataDescription : stmt.getDataDescriptions()) {
             dataDescription.analyzeWithoutCheckPriv(db.getFullName());
         }
