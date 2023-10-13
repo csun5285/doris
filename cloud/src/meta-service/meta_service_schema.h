@@ -5,7 +5,7 @@
 
 namespace selectdb {
 class Transaction;
-class ValueBuf;
+struct ValueBuf;
 
 void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                    std::string_view schema_key, const doris::TabletSchemaPB& schema);

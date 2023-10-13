@@ -22,7 +22,9 @@ std::tuple<int, std::string_view> convert_ms_code_to_http_code(MetaServiceCode r
 HttpResponse http_json_reply(MetaServiceCode code, const std::string& msg,
                              std::optional<std::string> body = {});
 
-HttpResponse process_http_encode_key(brpc::URI& uri);
+HttpResponse process_http_get_value(TxnKv* txn_kv, const brpc::URI& uri);
+
+HttpResponse process_http_encode_key(const brpc::URI& uri);
 
 /// Return the query value or an empty string if not exists.
 inline static std::string_view http_query(const brpc::URI& uri, const char* name) {
