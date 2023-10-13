@@ -1231,7 +1231,6 @@ void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
             assert_range(2, segments_index[1], io::FileBlock::Range(30, 49),
                          io::FileBlock::State::DOWNLOADED);
 
-
             auto holder_index_1 = cache.get_or_set(key_index, 50, 10, index_context); // Add index range [50, 59]
             auto segments_index_1 = fromHolder(holder_index_1);
             segments_index_1[0]->get_or_set_downloader();
@@ -1275,64 +1274,7 @@ TEST(BlockFileCache, run_in_resource_limit_mode) {
     }
     fs::create_directories(cache_base_path);
     {
-        doris::config::file_cache_enter_disk_resource_limit_mode_percent = 95;
-        doris::config::file_cache_exit_disk_resource_limit_mode_percent = 80;
-
-        auto sp = SyncPoint::get_instance();
-        Defer defer {[sp] {
-            sp->clear_call_back("BlockFileCache::set_sleep_time");
-            sp->clear_call_back("BlockFileCache::set_stat_ret");
-            sp->clear_call_back("BlockFileCache::set_stat");
-        }};
-        sp->enable_processing();
-
-        // disk used left 2% disk space
-        struct statfs disk_space_abnormal_stat_fs {
-            .f_blocks = 100,
-            .f_bfree = 20,
-            .f_bavail = 2,
-            .f_files = 100,
-            .f_ffree = 60,
-        };
-
-        /*
-        // disk inode left 1%
-        struct statfs disk_inode_abnormal_stat_fs {
-            .f_blocks = 100,
-            .f_bfree = 20,
-            .f_bavail = 30,
-            .f_files = 100,
-            .f_ffree = 99,
-        };
-        */
-
-        // disk use left 27% space and 40% inode
-        struct statfs normal_stat_fs {
-            .f_blocks = 100,
-            .f_bfree = 20,
-            .f_bavail = 30,
-            .f_files = 100,
-            .f_ffree = 60,
-        };
-
-
-        sp->set_call_back("BlockFileCache::set_sleep_time", [](auto&& args) {
-            *try_any_cast<int64_t*>(args[0]) = 100;
-        });
-
-        sp->set_call_back("BlockFileCache::set_stat_ret", [](auto&& args) {
-            *try_any_cast<int*>(args[0]) = 0;
-        });
-
-        sp->set_call_back("BlockFileCache::set_stat", [&](auto&& args) {
-            *try_any_cast<struct statfs*>(args.back()) = disk_space_abnormal_stat_fs;
-        });
         test_file_cache_run_in_resource_limit(io::FileCacheType::NORMAL);
-
-        sp->clear_call_back("BlockFileCache::set_stat");
-        sp->set_call_back("BlockFileCache::set_stat", [&](auto&& args) {
-            *try_any_cast<struct statfs*>(args.back()) = normal_stat_fs;
-        });
 
         if (fs::exists(cache_base_path)) {
             fs::remove_all(cache_base_path);

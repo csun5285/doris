@@ -875,7 +875,6 @@ bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, si
     if (!_lazy_open_done) {
         return try_reserve_for_lazy_load(size, cache_lock);
     }
-
     // use this strategy in scenarios where there is insufficient disk capacity or insufficient number of inodes remaining
     // directly eliminate 5 times the size of the space
     if (_disk_resource_limit_mode) {
@@ -1621,6 +1620,7 @@ void BlockFileCache::run_background_operation() {
     int64_t interval_time_seconds = 20;
     while (!_close) {
         TEST_SYNC_POINT_CALLBACK("BlockFileCache::set_sleep_time", &interval_time_seconds);
+        check_disk_resource_limit(_cache_base_path);
         {
             std::unique_lock close_lock(_close_mtx);
             if (_close) break;
@@ -1631,7 +1631,6 @@ void BlockFileCache::run_background_operation() {
 #endif
             if (_close) break;
         }
-        check_disk_resource_limit(_cache_base_path);
         // gc
         int64_t cur_time = UnixSeconds();
         std::lock_guard cache_lock(_mutex);
@@ -1807,7 +1806,7 @@ bool BlockFileCache::try_reserve_for_lazy_load(size_t size,
     std::vector<FileBlockCell*> to_evict;
     auto collect_eliminate_fragments = [&](LRUQueue& queue) {
         for (const auto& [entry_key, entry_offset, entry_size] : queue) {
-            if (removed_size >= size) {
+            if (!_disk_resource_limit_mode || removed_size >= size) {
                 break;
             }
             auto* cell = get_cell(entry_key, entry_offset, cache_lock);
@@ -1856,7 +1855,7 @@ bool BlockFileCache::try_reserve_for_lazy_load(size_t size,
     std::for_each(trash.begin(), trash.end(), remove_file_block_if);
     std::for_each(to_evict.begin(), to_evict.end(), remove_file_block_if);
 
-    return removed_size >= size;
+    return !_disk_resource_limit_mode || removed_size >= size;
 }
 
 } // namespace io
