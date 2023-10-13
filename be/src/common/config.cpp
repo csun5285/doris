@@ -1216,6 +1216,8 @@ DEFINE_mInt32(tablet_schema_cache_recycle_interval, "86400");
 
 DEFINE_Bool(exit_on_exception, "false")
 
+DEFINE_Bool(enable_check_max_min_key, "false");
+
 // clang-format off
 #ifdef BE_TEST
 // test s3

@@ -1240,6 +1240,9 @@ DECLARE_mInt32(tablet_schema_cache_recycle_interval);
 // Use `LOG(FATAL)` to replace `throw` when true
 DECLARE_mBool(exit_on_exception);
 
+// Use to check max min key when writing block
+DECLARE_mBool(enable_check_max_min_key);
+
 #ifdef BE_TEST
 // test s3
 DECLARE_String(test_s3_resource);
