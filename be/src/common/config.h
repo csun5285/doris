@@ -1150,8 +1150,6 @@ DECLARE_mInt32(s3_write_buffer_size);
 DECLARE_mInt32(s3_write_buffer_whole_size);
 DECLARE_mInt64(file_cache_max_file_reader_cache_size);
 // use for selectdb cloud read/write seperate mode
-DECLARE_Bool(enable_freeze_compaction);
-DECLARE_mInt64(base_compaction_freeze_interval_seconds);
 DECLARE_mInt64(cu_compaction_freeze_interval_seconds);
 DECLARE_mInt32(sync_load_for_tablets_thread);
 

@@ -502,6 +502,9 @@ void DeltaWriter::update_tablet_stats() {
     _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
     _tablet->fetch_add_approximate_cumu_num_rowsets(1);
     _tablet->fetch_add_approximate_cumu_num_deltas(_cur_rowset->num_segments());
+    using namespace std::chrono;
+    _tablet->last_load_time_ms =
+            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {

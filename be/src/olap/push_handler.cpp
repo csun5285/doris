@@ -35,9 +35,9 @@
 
 #include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
-#include "cloud/meta_mgr.h"
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "cloud/olap/storage_engine.h"
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
 #include "common/logging.h"
@@ -48,7 +48,6 @@
 #include "olap/rowset/rowset_writer.h"
 #include "olap/rowset/rowset_writer_context.h"
 #include "olap/schema.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_schema.h"
@@ -66,6 +65,14 @@
 namespace doris {
 using namespace ErrorCode;
 
+static void update_tablet_stats(Tablet* tablet) {
+    tablet->fetch_add_approximate_num_rowsets(1);
+    tablet->fetch_add_approximate_cumu_num_rowsets(1);
+    using namespace std::chrono;
+    tablet->last_load_time_ms =
+            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
 Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tablet,
                                                       const TPushReq& request, PushType push_type,
                                                       std::vector<TTabletInfo>* tablet_info_vec) {
@@ -78,7 +85,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
                 .tag("limit", config::max_tablet_version_num)
                 .tag("tablet_id", tablet->tablet_id());
         return Status::Error<TOO_MANY_VERSION>("too many versions, versions={} tablet={}",
-                config::max_tablet_version_num, tablet->tablet_id());
+                                               config::max_tablet_version_num, tablet->tablet_id());
     }
     // check delete condition if push for delete
     DeletePredicatePB del_pred;
@@ -112,6 +119,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     if (!st.ok() && !st.is<ALREADY_EXIST>()) {
         return st;
     }
+    update_tablet_stats(tablet.get());
 
     // TODO(liaoxin) delete operator don't send calculate delete bitmap task from fe,
     //  then we don't need to set_txn_related_delete_bitmap here.
