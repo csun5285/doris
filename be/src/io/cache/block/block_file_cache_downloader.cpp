@@ -311,8 +311,12 @@ void FileCacheSegmentS3Downloader::download_s3_file(S3FileMeta& meta) {
     if (!client) {
         return;
     }
-    if (file_size == 0) {
-        s3_file_system->file_size(meta.path, &file_size);
+    if (file_size == 0 || file_size == -1) {
+        Status st = s3_file_system->file_size(meta.path, &file_size);
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
+            return;
+        }
     }
     Key cache_key = BlockFileCache::hash(meta.path.filename().native());
     BlockFileCachePtr cache = FileCacheFactory::instance().get_by_path(cache_key);

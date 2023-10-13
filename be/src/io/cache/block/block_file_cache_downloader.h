@@ -21,7 +21,7 @@ namespace doris::io {
 
 struct S3FileMeta {
     Path path;
-    size_t file_size;
+    size_t file_size {0};
     io::FileSystemSPtr file_system;
     int64_t expiration_time {0};
     bool is_cold_data {false};
