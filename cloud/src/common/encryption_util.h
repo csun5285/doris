@@ -44,7 +44,7 @@ int decrypt_ak_sk(AkSkRef cipher_ak_sk, const std::string& encryption_method,
 extern std::map<int64_t, std::string> global_encryption_key_info_map;
 
 // Todo: Should we need to refresh it
-int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv);
+int init_global_encryption_key_info_map(TxnKv* txn_kv);
 
 /**
  * @brief Get the encryption key for ak sk by key_id

@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     }
 
     LOG_INFO("init global encryption key").tag("key", selectdb::config::encryption_key);
-    if (selectdb::init_global_encryption_key_info_map(txn_kv) != 0) {
+    if (selectdb::init_global_encryption_key_info_map(txn_kv.get()) != 0) {
         LOG_FATAL("init global encryption key info map");
     }
 

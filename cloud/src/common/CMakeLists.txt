@@ -12,6 +12,7 @@ set(COMMON_FILES
     bvars.cpp
     encryption_util.cpp
     metric.cpp
+    kms.cpp
 )
 
 if (USE_JEMALLOC)

@@ -17,9 +17,15 @@ message EncryptionInfoPB {
 }
 
 message EncryptionKeyInfoPB {
+    message KMSInfo {
+        optional string endpoint = 1;
+        optional string region = 2;
+        optional string cmk = 3;
+    }
     message Item {
         optional int64 key_id = 1;
         optional string key = 2;
+        optional KMSInfo kms_info = 3;
     }
     repeated Item items = 1;
 }

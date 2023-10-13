@@ -233,6 +233,15 @@ set_target_properties(aws-s2n PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib
 add_library(aws-c-sdkutils STATIC IMPORTED)
 set_target_properties(aws-c-sdkutils PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libaws-c-sdkutils.a)
 
+add_library(jsoncpp STATIC IMPORTED)
+set_target_properties(jsoncpp PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libjsoncpp.a)
+
+add_library(libuuid STATIC IMPORTED)
+set_target_properties(libuuid PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libuuid.a)
+
+add_library(ali-sdk STATIC IMPORTED)
+set_target_properties(ali-sdk PROPERTIES IMPORTED_LOCATION ${THIRDPARTY_DIR}/lib64/libalibabacloud-sdk-core.a)
+
 set(AWS_LIBS
     aws-sdk-s3
     aws-sdk-core
@@ -426,6 +435,9 @@ set(COMMON_THIRDPARTY
     curl
     ${AWS_LIBS}
     fmt
+    jsoncpp
+    libuuid
+    ali-sdk
 )
 
 set(DORIS_DEPENDENCIES
