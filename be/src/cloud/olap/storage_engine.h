@@ -435,10 +435,6 @@ private:
     std::unique_ptr<cloud::CloudTabletMgr> _tablet_mgr;
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
-
-public:
-    // CLOUD
-    static inline int64_t s_last_load_time = 0;
 };
 
 } // namespace doris

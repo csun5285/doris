@@ -3,10 +3,11 @@
 #include <algorithm>
 #include <tuple>
 
-#include "io/cache/block/block_file_cache_downloader.h"
 #include "cloud/utils.h"
 #include "common/logging.h"
+#include "io/cache/block/block_file_cache_downloader.h"
 #include "olap/rowset/beta_rowset.h"
+#include "olap/rowset/segment_v2/inverted_index_desc.h"
 #include "olap/tablet.h"
 #include "util/time.h"
 #include "util/wait_group.h"
@@ -60,15 +61,16 @@ void CloudWarmUpManager::handle_jobs() {
             auto tablet_meta = tablet->tablet_meta();
             auto rs_metas = tablet_meta->snapshot_rs_metas();
             for (auto& [_, rs] : rs_metas) {
+                auto inverted_indexes = rs->tablet_schema()->get_inverted_indexes();
                 for (int64_t seg_id = 0; seg_id < rs->num_segments(); seg_id++) {
                     io::S3FileMeta download_file_meta;
                     download_file_meta.file_size = rs->get_segment_file_size(seg_id);
                     download_file_meta.file_system = rs->fs();
-                    download_file_meta.path = io::Path(BetaRowset::remote_segment_path(
-                            rs->tablet_id(), rs->rowset_id(), seg_id));
+                    std::string seg_path = BetaRowset::remote_segment_path(rs->tablet_id(),
+                                                                           rs->rowset_id(), seg_id);
+                    download_file_meta.path = seg_path;
                     download_file_meta.expiration_time =
-                            tablet_meta->is_persistent() ? INT64_MAX
-                            : tablet_meta->ttl_seconds() == 0
+                            tablet_meta->ttl_seconds() == 0
                                     ? 0
                                     : rs->newest_write_timestamp() + tablet_meta->ttl_seconds();
                     if (download_file_meta.expiration_time <= UnixSeconds()) {
@@ -78,6 +80,16 @@ void CloudWarmUpManager::handle_jobs() {
                     wait->add();
                     io::FileCacheSegmentDownloader::instance()->submit_download_task(
                             std::move(download_file_meta));
+                    for (auto index_meta : inverted_indexes) {
+                        io::S3FileMeta download_file_meta;
+                        download_file_meta.file_system = rs->fs();
+                        download_file_meta.path = InvertedIndexDescriptor::get_index_file_name(
+                                seg_path, index_meta->index_id());
+                        download_file_meta.download_callback = callback;
+                        wait->add();
+                        io::FileCacheSegmentDownloader::instance()->submit_download_task(
+                                std::move(download_file_meta));
+                    }
                 }
             }
             // TODO(liuchangliang): flow control

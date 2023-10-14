@@ -1101,18 +1101,6 @@ DEFINE_String(file_cache_path, "");
 DEFINE_Bool(clear_file_cache, "false");
 DEFINE_Bool(enable_file_cache_query_limit, "false");
 
-DEFINE_Int64(file_cache_max_file_segment_size, "4194304"); // 4MB
-// 4KB <= file_cache_max_file_segment_size <= 256MB
-DEFINE_Validator(file_cache_max_file_segment_size, [](const int64_t config) -> bool {
-    return config >= 4096 && config <= 268435456;
-});
-DEFINE_Int64(file_cache_min_file_segment_size, "1048576"); // 1MB
-// 4KB <= file_cache_min_file_segment_size <= 256MB
-DEFINE_Validator(file_cache_min_file_segment_size, [](const int64_t config) -> bool {
-    return config >= 4096 && config <= 268435456 &&
-           config <= config::file_cache_max_file_segment_size;
-});
-
 DEFINE_mInt32(file_cache_wait_sec_after_fail, "0"); // // zero for no waiting and retrying
 
 // write as cache
@@ -1140,9 +1128,7 @@ DEFINE_mInt32(meta_service_rpc_retry_times, "200");
 DEFINE_mInt64(file_cache_max_file_reader_cache_size, "1000000");
 
 // use for selectdb cloud read/write seperate mode
-DEFINE_Bool(enable_freeze_compaction, "false");
-DEFINE_mInt64(base_compaction_freeze_interval_seconds, "43200");
-DEFINE_mInt64(cu_compaction_freeze_interval_seconds, "3600");
+DEFINE_mInt64(cu_compaction_freeze_interval_seconds, "1200");
 DEFINE_mInt32(sync_load_for_tablets_thread, "32");
 
 // setMaxBufferedDocs for lucene
@@ -1227,6 +1213,8 @@ DEFINE_mInt32(scan_thread_nice_value, "0");
 DEFINE_mInt32(tablet_schema_cache_recycle_interval, "86400");
 
 DEFINE_Bool(exit_on_exception, "false")
+
+DEFINE_Bool(enable_check_max_min_key, "false");
 
 // clang-format off
 #ifdef BE_TEST

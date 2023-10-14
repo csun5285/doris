@@ -218,7 +218,7 @@ std::vector<std::string_view> split_string(const std::string_view& str, int n) {
 
 bool ValueBuf::to_pb(google::protobuf::Message* pb) const {
     butil::IOBuf merge;
-    for (auto&& it : iters_) {
+    for (auto&& it : iters) {
         it->reset();
         while (it->has_next()) {
             auto [k, v] = it->next();
@@ -226,15 +226,11 @@ bool ValueBuf::to_pb(google::protobuf::Message* pb) const {
         }
     }
     butil::IOBufAsZeroCopyInputStream merge_stream(merge);
-    bool ret = pb->ParseFromZeroCopyStream(&merge_stream);
-    if (!ret) [[unlikely]] {
-        LOG_WARNING("failed to parse to pb");
-    }
-    return ret;
+    return pb->ParseFromZeroCopyStream(&merge_stream);
 }
 
 void ValueBuf::remove(Transaction* txn) const {
-    for (auto&& it : iters_) {
+    for (auto&& it : iters) {
         it->reset();
         while (it->has_next()) {
             txn->remove(it->next().first);
@@ -243,8 +239,8 @@ void ValueBuf::remove(Transaction* txn) const {
 }
 
 int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
-    iters_.clear();
-    ver_ = -1;
+    iters.clear();
+    ver = -1;
 
     std::string begin_key {key};
     std::string end_key {key};
@@ -261,7 +257,7 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
     if (k.size() == key.size()) { // Old version KV
         DCHECK(k == key) << hex(k) << ' ' << hex(key);
         DCHECK_EQ(it->size(), 1) << hex(k) << ' ' << hex(key);
-        ver_ = 0;
+        ver = 0;
     } else {
         k.remove_prefix(key.size());
         int64_t suffix;
@@ -269,15 +265,15 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
             LOG_WARNING("failed to decode key").tag("key", hex(k));
             return -2;
         }
-        ver_ = suffix >> 56 & 0xff;
+        ver = suffix >> 56 & 0xff;
     }
     bool more = it->more();
     if (!more) {
-        iters_.push_back(std::move(it));
+        iters.push_back(std::move(it));
         return 0;
     }
     begin_key = it->next_begin_key();
-    iters_.push_back(std::move(it));
+    iters.push_back(std::move(it));
     do {
         if (txn->get(begin_key, end_key, &it, snapshot) != 0) {
             return -1;
@@ -286,7 +282,7 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
         if (more) {
             begin_key = it->next_begin_key();
         }
-        iters_.push_back(std::move(it));
+        iters.push_back(std::move(it));
     } while (more);
     return 0;
 }
@@ -310,6 +306,11 @@ void put(Transaction* txn, std::string_view key, const google::protobuf::Message
     std::string value;
     bool ret = pb.SerializeToString(&value); // Always success
     DCHECK(ret) << hex(key) << ' ' << pb.ShortDebugString();
+    put(txn, key, value, ver, split_size);
+}
+
+void put(Transaction* txn, std::string_view key, std::string_view value, uint8_t ver,
+         size_t split_size) {
     auto split_vec = split_string(value, split_size);
     int64_t suffix_base = ver;
     suffix_base <<= 56;

@@ -124,4 +124,19 @@ CONF_Int64(reserved_buffer_days, "3");
 // For recycler to do periodically log to detect alive
 CONF_Int32(periodically_log_ms, "5000");
 
+
+// For kms
+CONF_Bool(enable_kms, "false");
+CONF_String(kms_info_encryption_key, ""); // encryption_key to encrypt kms sk
+CONF_String(kms_info_encryption_method, "AES_256_ECB");
+// kms ak does not need to be encrypted yet, so use plaintext
+CONF_String(kms_ak, "");
+// kms sk uses base64-encoded ciphertext
+// the plaintext must be encrypted with kms_info_encryption_key and kms_info_encryption_method
+CONF_String(kms_sk, "");
+CONF_String(kms_endpoint, "");
+CONF_String(kms_region, "");
+CONF_String(kms_provider, "ali"); // ali/tx/aws/hw, only support ali now
+CONF_String(kms_cmk, "");
+
 } // namespace selectdb::config

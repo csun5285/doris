@@ -58,7 +58,7 @@ suite("test_recycler_with_many_partitions") {
     """
 
     for (int i = 0; i < 10000; i = i + 500) {
-        sql """ insert into ${tbName} values ${makeInsertStmt(i, i + 500)};"""
+        sql """ insert into ${tableName} values ${makeInsertStmt(i, i + 500)};"""
     }
 
     String[][] tabletInfoList1 = sql """ show tablets from ${tableName}; """
@@ -88,7 +88,9 @@ suite("test_recycler_with_many_partitions") {
     } while (retry--)
     assertTrue(success)
 
-    sql """ insert into ${tableName} values ${makeInsertStmt(0, 10000)};"""
+    for (int i = 0; i < 10000; i = i + 500) {
+        sql """ insert into ${tableName} values ${makeInsertStmt(i, i + 500)};"""
+    }
     qt_sql """ select c1,c10 from ${tableName} order by c1 ASC;"""
 
     String[][] tabletInfoList2 = sql """ show tablets from ${tableName}; """

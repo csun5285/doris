@@ -125,7 +125,7 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
     }
 
     public synchronized boolean recycleDatabase(Database db, Set<String> tableNames, Set<Long> tableIds,
-                                                boolean isReplay, long replayRecycleTime) {
+                                                boolean isReplay, boolean isForceDrop, long replayRecycleTime) {
         long recycleTime = 0;
         if (idToDatabase.containsKey(db.getId())) {
             LOG.error("db[{}] already in recycle bin.", db.getId());
@@ -138,17 +138,21 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
         // recycle db
         RecycleDatabaseInfo databaseInfo = new RecycleDatabaseInfo(db, tableNames, tableIds);
         idToDatabase.put(db.getId(), databaseInfo);
-        if (!isReplay || replayRecycleTime == 0) {
+        if (isForceDrop) {
+            // The 'force drop' database should be recycle immediately.
+            recycleTime = 0;
+        } else if (!isReplay || replayRecycleTime == 0) {
             recycleTime = System.currentTimeMillis();
         } else {
             recycleTime = replayRecycleTime;
         }
         idToRecycleTime.put(db.getId(), recycleTime);
-        LOG.info("recycle db[{}-{}]", db.getId(), db.getFullName());
+        LOG.info("recycle db[{}-{}], is force drop: {}", db.getId(), db.getFullName(), isForceDrop);
         return true;
     }
 
-    public synchronized boolean recycleTable(long dbId, Table table, boolean isReplay, long replayRecycleTime) {
+    public synchronized boolean recycleTable(long dbId, Table table, boolean isReplay,
+                                             boolean isForceDrop, long replayRecycleTime) {
         long recycleTime = 0;
         if (idToTable.containsKey(table.getId())) {
             LOG.error("table[{}] already in recycle bin.", table.getId());
@@ -157,14 +161,17 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
 
         // recycle table
         RecycleTableInfo tableInfo = new RecycleTableInfo(dbId, table);
-        if (!isReplay || replayRecycleTime == 0) {
+        if (isForceDrop) {
+            // The 'force drop' table should be recycle immediately.
+            recycleTime = 0;
+        } else if (!isReplay || replayRecycleTime == 0) {
             recycleTime = System.currentTimeMillis();
         } else {
             recycleTime = replayRecycleTime;
         }
         idToRecycleTime.put(table.getId(), recycleTime);
         idToTable.put(table.getId(), tableInfo);
-        LOG.info("recycle table[{}-{}]", table.getId(), table.getName());
+        LOG.info("recycle table[{}-{}], is force drop: {}", table.getId(), table.getName(), isForceDrop);
         return true;
     }
 
@@ -529,7 +536,9 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
 
     public synchronized Database recoverDatabase(String dbName, long dbId) throws DdlException {
         RecycleDatabaseInfo dbInfo = null;
-        long recycleTime = -1;
+        // The recycle time of the force dropped tables and databases will be set to zero, use 1 here to
+        // skip these databases and tables.
+        long recycleTime = 1;
         Iterator<Map.Entry<Long, RecycleDatabaseInfo>> iterator = idToDatabase.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Long, RecycleDatabaseInfo> entry = iterator.next();
@@ -608,7 +617,9 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
                                              String newTableName) throws DdlException {
         // make sure to get db lock
         Table table = null;
-        long recycleTime = -1;
+        // The recycle time of the force dropped tables and databases will be set to zero, use 1 here to
+        // skip these databases and tables.
+        long recycleTime = 1;
         long dbId = db.getId();
         Iterator<Map.Entry<Long, RecycleTableInfo>> iterator = idToTable.entrySet().iterator();
         while (iterator.hasNext()) {

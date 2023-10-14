@@ -533,7 +533,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         }
 
         if (!ok || !countDownLatch.getStatus().ok()) {
-            String errMsg = "Failed to calculate delete bimap.";
+            String errMsg = "Failed to calculate delete bitmap.";
             // clear tasks
             AgentTaskQueue.removeBatchTask(batchTask, TTaskType.CALCULATE_DELETE_BITMAP);
 

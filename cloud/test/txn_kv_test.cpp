@@ -220,7 +220,7 @@ TEST(TxnKvTest, CompatibleGetTest) {
     ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
-    EXPECT_EQ(val_buf.version(), 0);
+    EXPECT_EQ(val_buf.ver, 0);
     doris::TabletSchemaPB saved_schema;
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
     ASSERT_EQ(saved_schema.column_size(), schema.column_size());
@@ -283,8 +283,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     ASSERT_EQ(ret, 0);
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
-    std::cout << "num iterators=" << val_buf.iters_.size() << std::endl;
-    EXPECT_EQ(val_buf.version(), 1);
+    std::cout << "num iterators=" << val_buf.iters.size() << std::endl;
+    EXPECT_EQ(val_buf.ver, 1);
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
     ASSERT_EQ(saved_schema.column_size(), schema.column_size());
     for (size_t i = 0; i < saved_schema.column_size(); ++i) {
@@ -296,8 +296,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     sp->set_call_back("memkv::Transaction::get", [](void* limit) { *((int*)limit) = 100; });
     ret = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(ret, 0);
-    std::cout << "num iterators=" << val_buf.iters_.size() << std::endl;
-    EXPECT_EQ(val_buf.version(), 1);
+    std::cout << "num iterators=" << val_buf.iters.size() << std::endl;
+    EXPECT_EQ(val_buf.ver, 1);
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
     ASSERT_EQ(saved_schema.column_size(), schema.column_size());
     for (size_t i = 0; i < saved_schema.column_size(); ++i) {
@@ -306,7 +306,7 @@ TEST(TxnKvTest, PutLargeValueTest) {
         EXPECT_EQ(saved_col.name(), col.name());
     }
     // Check keys
-    auto& iters = val_buf.iters_;
+    auto& iters = val_buf.iters;
     size_t i = 0;
     std::vector<std::tuple<std::variant<int64_t, std::string>, int, int>> fields;
     for (auto&& it : iters) {

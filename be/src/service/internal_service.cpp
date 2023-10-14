@@ -275,11 +275,6 @@ void PInternalServiceImpl::tablet_writer_open(google::protobuf::RpcController* c
             LOG(WARNING) << "load channel open failed, message=" << st << ", id=" << request->id()
                          << ", index_id=" << request->index_id()
                          << ", txn_id=" << request->txn_id();
-        } else {
-            StorageEngine::s_last_load_time =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch())
-                            .count();
         }
         st.to_protobuf(response->mutable_status());
     });

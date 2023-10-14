@@ -218,6 +218,13 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     _read_options.io_ctx.reader_type = read_context->reader_type;
     _read_options.runtime_state = read_context->runtime_state;
     _read_options.output_columns = read_context->output_columns;
+    _read_options.io_ctx.expiration_time =
+            read_context->ttl_seconds == 0
+                    ? 0
+                    : _rowset->rowset_meta()->newest_write_timestamp() + read_context->ttl_seconds;
+    if (_read_options.io_ctx.expiration_time <= UnixSeconds()) {
+        _read_options.io_ctx.expiration_time = 0;
+    }
     // FIXME(Xiaocc)
     //_read_options.no_need_to_read_index = read_context->no_need_to_read_index;
     //_read_options.ctx = read_context->ctx;
@@ -229,8 +236,8 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
 
     // load segments
     bool should_use_cache = use_cache || read_context->reader_type == ReaderType::READER_QUERY;
-    RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(_rowset, &_segment_cache_handle,
-                                                             should_use_cache, _read_options.is_lazy_open));
+    RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(
+            _rowset, &_segment_cache_handle, should_use_cache, _read_options.is_lazy_open));
 
     // create iterator for each segment
     auto& segments = _segment_cache_handle.get_segments();

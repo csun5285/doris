@@ -25,6 +25,9 @@
 // 0x01 "meta" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id}  -> TabletMetaPB
 // 0x01 "meta" ${instance_id} "tablet_index" ${tablet_id}                                    -> TabletIndexPB
 // 0x01 "meta" ${instance_id} "schema" ${index_id} ${schema_version}                         -> TabletSchemaPB
+// 0x01 "meta" ${instance_id} "delete_bitmap_lock" ${table_id} ${partition_id}               -> DeleteBitmapUpdateLockPB
+// 0x01 "meta" ${instance_id} "delete_bitmap_pending" ${table_id}                            -> PendingDeleteBitmapPB 
+// 0x01 "meta" ${instance_id} "delete_bitmap" ${tablet_id} ${rowset_id} ${version} ${segment_id} -> roaringbitmap
 //
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} -> TabletStatsPB
 // 0x01 "stats" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id} "data_size"   -> int64
@@ -35,7 +38,7 @@
 // 0x01 "recycle" ${instance_id} "index" ${index_id}                                         -> RecycleIndexPB
 // 0x01 "recycle" ${instance_id} "partition" ${partition_id}                                 -> RecyclePartitionPB
 // 0x01 "recycle" ${instance_id} "rowset" ${tablet_id} ${rowset_id}                          -> RecycleRowsetPB
-// 0x01 "recycle" ${instance_id} "txn" ${db_id} ${txn_id}                                    -> RecycleTxnKeyInfo
+// 0x01 "recycle" ${instance_id} "txn" ${db_id} ${txn_id}                                    -> RecycleTxnPB
 // 0x01 "recycle" ${instance_id} "stage" ${stage_id}                                         -> RecycleStagePB
 //
 // 0x01 "job" ${instance_id} "tablet" ${table_id} ${index_id} ${partition_id} ${tablet_id}   -> TabletJobInfoPB

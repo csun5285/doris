@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace google::protobuf {
@@ -57,8 +58,7 @@ std::string proto_to_json(const ::google::protobuf::Message& msg, bool add_white
  *    |-------------|-------------|-------------|
  *    |version      |dummy        |sequence     |
  */
-class ValueBuf {
-public:
+struct ValueBuf {
     // TODO(plat1ko): Support decompression
     [[nodiscard]] bool to_pb(google::protobuf::Message* pb) const;
     // TODO: More bool to_xxx(Xxx* xxx) const;
@@ -70,12 +70,8 @@ public:
     // Return 0 for success get a key, 1 for key not found, -1 for kv error, -2 for decode key error
     [[nodiscard]] int get(Transaction* txn, std::string_view key, bool snapshot = false);
 
-    // User may depend on `ver_` to decide how to parse the value
-    int8_t version() const { return ver_; }
-
-private:
-    std::vector<std::unique_ptr<RangeGetIterator>> iters_;
-    int8_t ver_ {-1};
+    std::vector<std::unique_ptr<RangeGetIterator>> iters;
+    int8_t ver {-1};
 };
 
 /**
@@ -107,6 +103,17 @@ private:
  * @param split_size how many byte sized fragments are the value split into
  */
 void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,
+         size_t split_size = 90 * 1000);
+
+/**
+ * Put a KV, it's value may be bigger than 100k
+ * @param txn fdb txn handler
+ * @param key encode key
+ * @param value value to save
+ * @param ver value version
+ * @param split_size how many byte sized fragments are the value split into
+ */
+void put(Transaction* txn, std::string_view key, std::string_view value, uint8_t ver,
          size_t split_size = 90 * 1000);
 
 } // namespace selectdb

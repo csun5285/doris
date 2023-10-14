@@ -171,7 +171,7 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
             value->tablet = tablet;
             value->tablet_map = _tablet_map;
             // MUST sync stats to let compaction scheduler work correctly
-            st = meta_mgr()->sync_tablet_rowsets(tablet.get(), warmup_data); 
+            st = meta_mgr()->sync_tablet_rowsets(tablet.get(), warmup_data);
             if (!st.ok()) {
                 LOG(WARNING) << "failed to sync tablet " << tablet_id << ": " << st;
                 return nullptr;
@@ -322,7 +322,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         // If tablet has too many rowsets but not be compacted for a long time, compaction should be performed
         // regardless of whether there is a load job recently.
         return now - t->last_cumu_no_suitable_version_ms() < config::min_compaction_failure_interval_ms ||
-               (now - StorageEngine::s_last_load_time > config::cu_compaction_freeze_interval_seconds * 1000
+               (now - t->last_load_time_ms > config::cu_compaction_freeze_interval_seconds * 1000
                && now - t->last_cumu_compaction_success_time() < config::cumu_compaction_interval_seconds * 1000);
     };
     // We don't schedule tablets that are disabled for compaction

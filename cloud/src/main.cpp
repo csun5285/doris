@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
     }
     LOG(INFO) << "successfully init txn kv";
 
-    if (init_global_encryption_key_info_map(txn_kv) != 0) {
+    if (init_global_encryption_key_info_map(txn_kv.get()) != 0) {
         LOG(WARNING) << "failed to init global encryption key map";
         return -1;
     }

@@ -39,7 +39,7 @@ private:
     int64_t get_last_commited_version();
     int64_t get_last_read_version();
 
-    int gen_version_timestamp(int64_t ver, int16_t seq, std::string* str);
+    static int gen_version_timestamp(int64_t ver, int16_t seq, std::string* str);
 
 private:
     struct LogItem {

@@ -50,6 +50,7 @@ import java.net.HttpURLConnection;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -518,6 +519,12 @@ public class LoadStmt extends DdlStmt {
                     String endpoint = brokerDescProperties.get(AWS_ENDPOINT);
                     endpoint = endpoint.replaceFirst("^http://", "");
                     endpoint = endpoint.replaceFirst("^https://", "");
+                    List<String> whiteList = new ArrayList<>(Arrays.asList(Config.s3_load_endpoint_white_list));
+                    whiteList.removeIf(String::isEmpty);
+                    if (!whiteList.isEmpty() && !whiteList.contains(endpoint)) {
+                        throw new Exception("endpoint: " + endpoint
+                            + " is not in s3 load endpoint white list: " + String.join(",", whiteList));
+                    }
                     brokerDescProperties.put(AWS_ENDPOINT, endpoint);
                     tryConnect(endpoint);
                     String provider = "";

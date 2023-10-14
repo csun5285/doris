@@ -25,6 +25,11 @@ void begin_rpc(std::string_view func_name, brpc::Controller* ctrl, const Request
     } else if constexpr (std::is_same_v<Request, GetTabletStatsRequest>) {
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
                   << " tablet size: " << req->tablet_idx().size();
+    } else if constexpr (std::is_same_v<Request, UpdateDeleteBitmapRequest>) {
+        LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
+                  << " tablet id: " << req->tablet_id() << " lock id: " << req->lock_id()
+                  << " initiator: " << req->initiator()
+                  << " delete bitmap size: " << req->segment_delete_bitmaps_size();
     } else {
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
                   << " request=" << req->ShortDebugString();
@@ -63,6 +68,9 @@ void finish_rpc(std::string_view func_name, brpc::Controller* ctrl, Response* re
         LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
                   << " status=" << res->status().ShortDebugString()
                   << " tablet size: " << res->tablet_stats().size();
+    } else if constexpr (std::is_same_v<Response, GetDeleteBitmapResponse>) {
+        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
+                  << " status=" << res->status().ShortDebugString();
     } else {
         LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
                   << " response=" << res->ShortDebugString();

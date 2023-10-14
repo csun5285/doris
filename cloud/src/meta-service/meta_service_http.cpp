@@ -12,10 +12,10 @@
 #include <rapidjson/error/en.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
-#include <vector>
 
 #include <optional>
 #include <type_traits>
+#include <vector>
 
 #include "common/config.h"
 #include "common/logging.h"
@@ -48,8 +48,8 @@ static google::protobuf::util::Status parse_json_message(const std::string& unre
     static_assert(std::is_base_of_v<google::protobuf::Message, Message>);
     auto st = google::protobuf::util::JsonStringToMessage(body, req);
     if (!st.ok()) {
-        std::string msg = "failed to strictly parse http request for '"
-                          + unresolved_path + "' error: " + st.ToString();
+        std::string msg = "failed to strictly parse http request for '" + unresolved_path +
+                          "' error: " + st.ToString();
         LOG_WARNING(msg).tag("body", body);
 
         // ignore unknown fields
@@ -226,19 +226,19 @@ static HttpResponse process_create_instance(MetaServiceImpl* service, brpc::Cont
 }
 
 static HttpResponse process_alter_instance(MetaServiceImpl* service, brpc::Controller* ctrl) {
-    static std::unordered_map<std::string_view, std::vector<AlterInstanceRequest::Operation>> operations {
-            {"rename_instance", {AlterInstanceRequest::RENAME}},
-            {"enable_instance_sse", {AlterInstanceRequest::ENABLE_SSE}},
-            {"disable_instance_sse", {AlterInstanceRequest::DISABLE_SSE}},
-            {"drop_instance", {AlterInstanceRequest::DROP}},
-            {"set_instance_status", {AlterInstanceRequest::SET_NORMAL, AlterInstanceRequest::SET_OVERDUE}}
-    };
+    static std::unordered_map<std::string_view, std::vector<AlterInstanceRequest::Operation>>
+            operations {{"rename_instance", {AlterInstanceRequest::RENAME}},
+                        {"enable_instance_sse", {AlterInstanceRequest::ENABLE_SSE}},
+                        {"disable_instance_sse", {AlterInstanceRequest::DISABLE_SSE}},
+                        {"drop_instance", {AlterInstanceRequest::DROP}},
+                        {"set_instance_status",
+                         {AlterInstanceRequest::SET_NORMAL, AlterInstanceRequest::SET_OVERDUE}}};
 
     auto& path = ctrl->http_request().unresolved_path();
     auto it = operations.find(remove_version_prefix(path));
     if (it == operations.end()) {
         std::string msg = "not supportted alter instance operation: '" + path +
-                        "', remove version prefix=" + std::string(remove_version_prefix(path));
+                          "', remove version prefix=" + std::string(remove_version_prefix(path));
         return http_json_reply(MetaServiceCode::INVALID_ARGUMENT, msg);
     }
 
@@ -302,8 +302,12 @@ static HttpResponse process_decode_key(MetaServiceImpl*, brpc::Controller* ctrl)
     return http_text_reply(MetaServiceCode::OK, "", body);
 }
 
-inline static HttpResponse process_encode_key(MetaServiceImpl*, brpc::Controller* ctrl) {
+static HttpResponse process_encode_key(MetaServiceImpl*, brpc::Controller* ctrl) {
     return process_http_encode_key(ctrl->http_request().uri());
+}
+
+static HttpResponse process_get_value(MetaServiceImpl* service, brpc::Controller* ctrl) {
+    return process_http_get_value(service->txn_kv().get(), ctrl->http_request().uri());
 }
 
 static HttpResponse process_get_instance_info(MetaServiceImpl* service, brpc::Controller* ctrl) {
@@ -372,6 +376,7 @@ static HttpResponse process_get_cluster_status(MetaServiceImpl* service, brpc::C
 }
 
 static HttpResponse process_unknown(MetaServiceImpl*, brpc::Controller*) {
+    // ATTN: To be compatible with cloud manager versions higher than this MS
     return http_json_reply(MetaServiceCode::OK, "");
 }
 
@@ -423,8 +428,10 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             // for tools
             {"decode_key", process_decode_key},
             {"encode_key", process_encode_key},
+            {"get_value", process_get_value},
             {"v1/decode_key", process_decode_key},
             {"v1/encode_key", process_encode_key},
+            {"v1/get_value", process_get_value},
             // for get
             {"get_instance", process_get_instance_info},
             {"get_obj_store_info", process_get_obj_store_info},

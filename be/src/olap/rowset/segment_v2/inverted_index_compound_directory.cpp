@@ -20,8 +20,10 @@
 #include "CLucene/SharedHeader.h"
 #include "common/status.h"
 #include "io/fs/file_reader.h"
+#include "io/fs/file_reader_options.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/path.h"
+#include "io/io_common.h"
 #include "util/slice.h"
 
 #ifdef _CL_HAVE_IO_H
@@ -261,8 +263,10 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
         buffer_size = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
     }
     SharedHandle* h = _CLNEW SharedHandle(path);
-
-    if (!fs->open_file(path, &h->_reader).ok()) {
+    io::FileBlockCachePathPolicy cache_policy;
+    auto type = config::enable_file_cache ? config::file_cache_type : "";
+    io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
+    if (!fs->open_file(path, &h->_reader, &reader_options).ok()) {
         error.set(CL_ERR_IO, "open file error");
     }
 
@@ -366,7 +370,9 @@ void DorisCompoundDirectory::FSIndexInput::readInternal(uint8_t* b, const int32_
 
     Slice result {b, (size_t)len};
     size_t bytes_read = 0;
-    if (!_handle->_reader->read_at(_pos, result, &bytes_read).ok()) {
+    io::IOContext io_ctx;
+    io_ctx.reader_type = ReaderType::READER_QUERY;
+    if (!_handle->_reader->read_at(_pos, result, &bytes_read, &io_ctx).ok()) {
         _CLTHROWA(CL_ERR_IO, "read past EOF");
     }
     bufferLength = len;

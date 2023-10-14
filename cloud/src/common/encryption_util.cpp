@@ -1,5 +1,6 @@
 #include "common/encryption_util.h"
 
+#include <glog/logging.h>
 #include <math.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -8,11 +9,14 @@
 
 #include <cstring>
 #include <memory>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
 
+#include "common/config.h"
+#include "common/kms.h"
 #include "common/logging.h"
 #include "common/sync_point.h"
 #include "common/util.h"
@@ -400,21 +404,22 @@ static inline int encrypt_to_base64_impl(std::string_view source, EncryptionMode
      * algorithm and mode.
      */
     int cipher_len = source.length() + 16;
-    std::unique_ptr<unsigned char[]> cipher_text(new unsigned char[cipher_len]);
+    std::string cipher_text(cipher_len, '0');
     int cipher_text_len = EncryptionUtil::encrypt(
             mode, (unsigned char*)source.data(), source.length(), (unsigned char*)key.c_str(),
-            key.length(), nullptr, 0, true, cipher_text.get());
+            key.length(), nullptr, 0, true, (unsigned char*)cipher_text.data());
     if (cipher_text_len < 0) {
         return -1;
     }
 
     int encoded_len = (size_t)(4.0 * ceil(cipher_text_len / 3.0));
-    std::unique_ptr<unsigned char[]> encoded_text(new unsigned char[encoded_len]);
-    int encoded_text_len = base64_encode(cipher_text.get(), cipher_text_len, encoded_text.get());
+    std::string encoded_text(encoded_len, '0');
+    int encoded_text_len = base64_encode((unsigned char*)cipher_text.data(), cipher_text_len,
+                                         (unsigned char*)encoded_text.data());
     if (encoded_text_len < 0) {
         return -1;
     }
-    encrypt->assign((char*)encoded_text.get(), encoded_text_len);
+    encrypt->assign((char*)encoded_text.data(), encoded_text_len);
     return 0;
 }
 
@@ -490,9 +495,6 @@ int decrypt_ak_sk(AkSkRef cipher_ak_sk, const std::string& encryption_method,
     return 0;
 }
 
-// Does not need to be locked, only generated when the process is initialized
-std::map<int64_t, std::string> global_encryption_key_info_map; // key_id->encryption_key
-
 int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
                          const EncryptionInfoPB& encryption_info, AkSkPair* plain_ak_sk_pair) {
     std::string key;
@@ -514,81 +516,281 @@ int decrypt_ak_sk_helper(std::string_view cipher_ak, std::string_view cipher_sk,
     return 0;
 }
 
-int init_global_encryption_key_info_map(std::shared_ptr<TxnKv> txn_kv) {
+/**
+ * @brief Generates a random root key. If a root key already exists, returns immediately. 
+ * 
+ * @param txn_kv 
+ * @param kms_client 
+ * @param plaintext store the plaintext of the root key
+ * @param encoded_ciphertext store the base64-encoded ciphertext of the root key.
+ * @return int 0 for success to generate, 1 for not need to generate, -1 for failure.
+ */
+static int generate_random_root_key(TxnKv* txn_kv, KmsClient* kms_client, std::string* plaintext,
+                                    std::string* encoded_ciphertext) {
+    /**
+    * 1. If KMS is enabled, use KMS to generate a new key.
+    * 2. If KMS is not enabled, try using the encryption_key from the configuration, which must be in Base64 format.
+    * 3. If no key is found in the configuration, generate a random key in memory.
+    */
+    std::string key = system_meta_service_encryption_key_info_key();
+    std::string val;
+    std::unique_ptr<Transaction> txn;
+    int ret = txn_kv->create_txn(&txn);
+    if (ret != 0) {
+        LOG_WARNING("failed to create txn").tag("ret", ret);
+        return -1;
+    }
+    ret = txn->get(key, &val);
+    if (ret != 0 && ret != 1) {
+        LOG_WARNING("failed to get key of encryption_key_info").tag("ret", ret);
+        return -1;
+    }
+
+    if (ret == 0) {
+        LOG(INFO) << "not need to generate root key";
+        return 1;
+    }
+
+    // 1. use kms to generate a new key
+    if (config::enable_kms) {
+        if (kms_client == nullptr) {
+            LOG_WARNING("no kms client");
+            return -1;
+        }
+        std::string encoded_root_key_ciphertext;
+        std::string encoded_root_key_plaintext;
+        if (kms_client->generate_data_key(&encoded_root_key_ciphertext,
+                                          &encoded_root_key_plaintext) != 0) {
+            LOG_WARNING("failed to generate data key");
+            return -1;
+        }
+        if (encoded_root_key_ciphertext.empty() || encoded_root_key_plaintext.empty()) {
+            LOG_WARNING("empty data key generated");
+            return -1;
+        }
+
+        // decode plaintext
+        std::string root_key_plaintext(encoded_root_key_plaintext.length(), '0');
+        int decoded_len =
+                base64_decode(encoded_root_key_plaintext.c_str(),
+                              encoded_root_key_plaintext.length(), root_key_plaintext.data());
+        if (decoded_len < 0) {
+            LOG_WARNING("failed to decode plaintext of kms");
+            return -1;
+        }
+        root_key_plaintext.assign(root_key_plaintext.data(), decoded_len);
+
+        *plaintext = std::move(root_key_plaintext);
+        *encoded_ciphertext = std::move(encoded_root_key_ciphertext);
+        return 0;
+    }
+
+    // 2. try using the encryption_key from the configuration
+    if (!selectdb::config::encryption_key.empty()) {
+        std::string decoded_string(selectdb::config::encryption_key.length(), '0');
+        int decoded_text_len =
+                base64_decode(selectdb::config::encryption_key.c_str(),
+                              selectdb::config::encryption_key.length(), decoded_string.data());
+        if (decoded_text_len < 0) {
+            LOG_WARNING("fail to decode encryption_key in config");
+            return -1;
+        }
+        decoded_string.assign(decoded_string.data(), decoded_text_len);
+        *plaintext = std::move(decoded_string);
+        *encoded_ciphertext = selectdb::config::encryption_key;
+        return 0;
+    }
+
+    // 3. otherwise, generate a random data key in memory
+    std::mt19937 rnd(time(nullptr));
+    std::uniform_int_distribution<char> dist(std::numeric_limits<char>::min(),
+                                             std::numeric_limits<char>::max());
+    std::string root_key_plaintext(32, '0');
+    for (size_t i = 0; i < root_key_plaintext.size(); ++i) {
+        root_key_plaintext[i] = (char)dist(rnd);
+    }
+
+    // encode in base64
+    int key_len = root_key_plaintext.length();
+    int encoded_len = (size_t)(4.0 * ceil(key_len / 3.0));
+    std::string encoded_text(encoded_len, '0');
+    int encoded_text_len = base64_encode((unsigned char*)root_key_plaintext.data(), key_len,
+                                         (unsigned char*)encoded_text.data());
+    if (encoded_text_len < 0) {
+        LOG_WARNING("failed to encode encryption_key");
+        return -1;
+    }
+    std::string encoded_root_key_ciphertext;
+    encoded_root_key_ciphertext.assign(encoded_text.data(), encoded_text_len);
+
+    *plaintext = std::move(root_key_plaintext);
+    *encoded_ciphertext = std::move(encoded_root_key_ciphertext);
+    return 0;
+}
+
+// Todo: Does not need to be locked now, only generated when the process is initialized
+std::map<int64_t, std::string> global_encryption_key_info_map; // key_id->encryption_key
+
+static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* keys) {
+    std::unique_ptr<KmsClient> kms_client;
+    if (config::enable_kms) {
+        if (config::kms_info_encryption_key.empty() || config::kms_info_encryption_method.empty() ||
+            config::kms_ak.empty() || config::kms_sk.empty()) {
+            LOG_WARNING("incorrect kms conf")
+                    .tag("encryption_key", config::kms_info_encryption_key)
+                    .tag("encryption_method", config::kms_info_encryption_method)
+                    .tag("ak", config::kms_ak)
+                    .tag("sk", config::kms_sk);
+            return -1;
+        }
+        std::string decoded_encryption_key(config::kms_info_encryption_key.length(), '0');
+        int decoded_key_len = selectdb::base64_decode(config::kms_info_encryption_key.c_str(),
+                                                      config::kms_info_encryption_key.length(),
+                                                      decoded_encryption_key.data());
+        decoded_encryption_key.assign(decoded_encryption_key.data(), decoded_key_len);
+        AkSkPair out;
+        if (decrypt_ak_sk({config::kms_ak, config::kms_sk}, config::kms_info_encryption_method,
+                          decoded_encryption_key, &out) != 0) {
+            LOG_WARNING("failed to decrypt kms info");
+            return -1;
+        }
+
+        KmsConf conf {out.first,          out.second,      config::kms_endpoint,
+                      config::kms_region, config::kms_cmk, config::kms_provider};
+
+        auto ret = create_kms_client(std::move(conf), &kms_client);
+        if (ret != 0) {
+            LOG_WARNING("failed to create kms client").tag("ret", ret);
+            return -1;
+        }
+        ret = kms_client->init();
+        if (ret != 0) {
+            LOG_WARNING("failed to init kms client").tag("ret", ret);
+            return -1;
+        }
+    }
+
+    // To avoid transaction timeouts, it is necessary to first generate a root key
+    std::string root_key_plaintext;
+    std::string encoded_root_key_ciphertext;
+    int ret = generate_random_root_key(txn_kv, kms_client.get(), &root_key_plaintext,
+                                       &encoded_root_key_ciphertext);
+    if (ret == -1) {
+        LOG_WARNING("failed to generate random root key");
+        return -1;
+    }
+
     while (true) {
         std::string key = system_meta_service_encryption_key_info_key();
         std::string val;
         std::unique_ptr<Transaction> txn;
         int ret = txn_kv->create_txn(&txn);
-        if (ret != 0) return -1;
+        if (ret != 0) {
+            LOG_WARNING("failed to create txn").tag("ret", ret);
+            return -1;
+        }
         ret = txn->get(key, &val);
-        if (ret != 0 && ret != 1) return -1;
-        if (ret == 1 && selectdb::config::encryption_key.empty()) {
-            LOG_WARNING("the server encryption_key is not found and the config is not set");
+        if (ret != 0 && ret != 1) {
+            LOG_WARNING("failed to get key of encryption_key_info").tag("ret", ret);
             return -1;
         }
 
-        EncryptionKeyInfoPB key_info;
-        if (ret != 1) {
+        if (ret == 0) {
+            EncryptionKeyInfoPB key_info;
             if (!key_info.ParseFromString(val)) {
-                LOG_WARNING("fail to parse encryption_key");
+                LOG_WARNING("failed to parse encryption_root_key");
                 return -1;
             }
 
-            LOG_INFO("get server encryption_key")
-                .tag("key_info", proto_to_json(key_info));
+            LOG_INFO("get server encryption_root_key").tag("key_info", proto_to_json(key_info));
+
+            for (auto& item : key_info.items()) {
+                std::string encoded_root_key_plaintext;
+                if (item.has_kms_info()) {
+                    // use kms to decrypt
+                    if (kms_client == nullptr) {
+                        LOG_WARNING("no kms client");
+                        return -1;
+                    }
+                    if (item.kms_info().endpoint() != kms_client->conf().endpoint ||
+                        item.kms_info().region() != kms_client->conf().region) {
+                        LOG_WARNING("kms info is not match")
+                                .tag("kms endpoint", kms_client->conf().endpoint)
+                                .tag("kms region", kms_client->conf().region)
+                                .tag("saved endpoint", item.kms_info().endpoint())
+                                .tag("saved region", item.kms_info().region());
+                        return -1;
+                    }
+
+                    auto ret = kms_client->decrypt(item.key(), &encoded_root_key_plaintext);
+                    if (ret != 0) {
+                        LOG_WARNING("failed to decrypt encryption_root_key");
+                        return -1;
+                    }
+                } else {
+                    encoded_root_key_plaintext = item.key(); // Todo: do not copy
+                }
+
+                std::string root_key_plaintext(encoded_root_key_plaintext.length(), '0');
+                int decoded_text_len = base64_decode(encoded_root_key_plaintext.c_str(),
+                                                     encoded_root_key_plaintext.length(),
+                                                     root_key_plaintext.data());
+                if (decoded_text_len < 0) {
+                    LOG_WARNING("failed to decode encryption_root_key");
+                    return -1;
+                }
+                root_key_plaintext.assign(root_key_plaintext.data(), decoded_text_len);
+                keys->insert({item.key_id(), std::move(root_key_plaintext)});
+            }
+            return 0;
         }
 
-        bool add_new_encryption_key = !selectdb::config::encryption_key.empty();
-        for (auto& item : key_info.items()) {
-            if (!selectdb::config::encryption_key.empty() &&
-                selectdb::config::encryption_key == item.key()) {
-                add_new_encryption_key = false;
-            }
-            std::string decoded_string(item.key().length(), '0');
-            int decoded_text_len =
-                    base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
-            if (decoded_text_len < 0) {
-                LOG_WARNING("fail to decode encryption_key");
-                return -1;
-            }
-            decoded_string.assign(decoded_string.data(), decoded_text_len);
-            global_encryption_key_info_map.insert({item.key_id(), decoded_string});
+        // encryption_root_key not found, need to save a new root key into fdb
+        if (root_key_plaintext.empty() || encoded_root_key_ciphertext.empty()) {
+            LOG_WARNING("empty new root key");
+            return -1;
         }
-        if (add_new_encryption_key) {
-            std::string decoded_string(selectdb::config::encryption_key.length(), '0');
-            int decoded_text_len =
-                    base64_decode(selectdb::config::encryption_key.c_str(),
-                                  selectdb::config::encryption_key.length(), decoded_string.data());
-            if (decoded_text_len < 0) {
-                LOG_WARNING("fail to decode config encryption_key");
-                return -1;
-            }
-            decoded_string.assign(decoded_string.data(), decoded_text_len);
+        EncryptionKeyInfoPB key_info;
+        int32_t new_key_id = key_info.items().size() + 1;
+        auto item = key_info.add_items();
+        item->set_key_id(new_key_id);
+        item->set_key(encoded_root_key_ciphertext);
+        if (config::enable_kms) {
+            item->mutable_kms_info()->set_endpoint(config::kms_endpoint);
+            item->mutable_kms_info()->set_region(config::kms_region);
+            item->mutable_kms_info()->set_cmk(config::kms_cmk);
+        }
 
-            int32_t new_key_id = key_info.items().size() + 1;
-            auto item = key_info.add_items();
-            item->set_key_id(new_key_id);
-            item->set_key(selectdb::config::encryption_key);
-            val = key_info.SerializeAsString();
-            if (val.empty()) return -1;
-            txn->put(key, val);
-            LOG_INFO("put server encryption_key")
-                .tag("encryption_key", selectdb::config::encryption_key)
+        val = key_info.SerializeAsString();
+        if (val.empty()) {
+            LOG_WARNING("failed to serialize");
+            return -1;
+        }
+        txn->put(key, val);
+        LOG_INFO("put server encryption_key")
+                .tag("encryption_key", encoded_root_key_ciphertext)
                 .tag("key_id", new_key_id);
-            ret = txn->commit();
-            if (ret == -1) {
-                LOG_WARNING("commit encryption_key is conflicted, retry it later");
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
-            } else if (ret != 0) {
-                LOG_WARNING("failed to commit encryption_key");
-                return -1;
-            }
-            global_encryption_key_info_map.insert({new_key_id, decoded_string});
+        ret = txn->commit();
+        if (ret == -1) {
+            LOG_WARNING("commit encryption_key is conflicted, retry it later");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        } else if (ret != 0) {
+            LOG_WARNING("failed to commit encryption_key");
+            return -1;
         }
+        keys->insert({new_key_id, std::move(root_key_plaintext)});
         return 0;
     }
+    return 0;
+}
+
+int init_global_encryption_key_info_map(TxnKv* txn_kv) {
+    if (get_current_root_keys(txn_kv, &global_encryption_key_info_map) != 0) {
+        return -1;
+    }
+    DCHECK(!global_encryption_key_info_map.empty());
+    return 0;
 }
 
 } // namespace selectdb

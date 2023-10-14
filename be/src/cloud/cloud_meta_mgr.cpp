@@ -201,7 +201,8 @@ static Status retry_rpc(std::string_view op_name, const Req& req, Res& res, RpcF
         }
         break;
     } while (++retry_times <= config::meta_service_rpc_retry_times);
-    return Status::InternalError("failed to {}: {}", op_name, res.status().msg());
+    return Status::Error<ErrorCode::INTERNAL_ERROR, false>("failed to {}: {}", op_name,
+                                                           res.status().msg());
 }
 
 CloudMetaMgr::CloudMetaMgr() = default;

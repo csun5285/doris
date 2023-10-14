@@ -242,16 +242,16 @@ TEST(CloudCompactionTest, schedule) {
 
     config::cumulative_compaction_min_deltas = 2;
     config::enable_parallel_cumu_compaction = true;
-    // To meet the condition of not skipping in `get_topn_tablets_to_compact`
-    StorageEngine::s_last_load_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                              std::chrono::system_clock::now().time_since_epoch())
-                                              .count();
-
     TabletSharedPtr tablet;
-    cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+    auto st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+    ASSERT_TRUE(st.ok()) << st;
+    // To meet the condition of not skipping in `get_topn_tablets_to_compact`
+    tablet->last_load_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::system_clock::now().time_since_epoch())
+                                        .count();
     // Submit cumu compaction on `tablet`
     tablet->set_tablet_state(TabletState::TABLET_NOTREADY);
-    auto st = storage_engine.submit_compaction_task(tablet, CompactionType::CUMULATIVE_COMPACTION);
+    st = storage_engine.submit_compaction_task(tablet, CompactionType::CUMULATIVE_COMPACTION);
     ASSERT_TRUE(st.is<ErrorCode::INTERNAL_ERROR>()); // Can only do compaction on RUNNING tablet
     tablet->set_tablet_state(TabletState::TABLET_RUNNING);
     st = storage_engine.submit_compaction_task(tablet, CompactionType::CUMULATIVE_COMPACTION);

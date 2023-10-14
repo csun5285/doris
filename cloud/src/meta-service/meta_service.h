@@ -15,6 +15,8 @@ public:
                     std::shared_ptr<RateLimiter> rate_controller);
     ~MetaServiceImpl() override;
 
+    [[nodiscard]] const std::shared_ptr<TxnKv>& txn_kv() const { return txn_kv_; }
+
     void begin_txn(::google::protobuf::RpcController* controller,
                    const ::selectdb::BeginTxnRequest* request,
                    ::selectdb::BeginTxnResponse* response,

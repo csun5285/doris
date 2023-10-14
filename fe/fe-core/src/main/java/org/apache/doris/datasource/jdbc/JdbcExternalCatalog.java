@@ -19,6 +19,7 @@ package org.apache.doris.datasource.jdbc;
 
 import org.apache.doris.catalog.JdbcResource;
 import org.apache.doris.catalog.external.JdbcExternalDatabase;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.datasource.CatalogProperty;
 import org.apache.doris.datasource.ExternalCatalog;
@@ -33,6 +34,8 @@ import com.google.common.collect.Maps;
 import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -83,7 +86,14 @@ public class JdbcExternalCatalog extends ExternalCatalog {
             jdbcUrl = JdbcResource.handleJdbcUrl(jdbcUrl);
             properties.put(JdbcResource.JDBC_URL, jdbcUrl);
         }
-
+        if (properties.containsKey(JdbcResource.DRIVER_URL)) {
+            List<String> whiteList = new ArrayList<>(Arrays.asList(Config.jdbc_driver_url_white_list));
+            whiteList.removeIf(String::isEmpty);
+            if (!whiteList.isEmpty() && !whiteList.contains(properties.get(JdbcResource.DRIVER_URL))) {
+                throw new DdlException("driver url: " + properties.get(JdbcResource.DRIVER_URL)
+                        + " is not in jdbc driver url white list: " + String.join(",", whiteList));
+            }
+        }
         if (properties.containsKey(JdbcResource.DRIVER_URL) && !properties.containsKey(JdbcResource.CHECK_SUM)) {
             properties.put(JdbcResource.CHECK_SUM,
                     JdbcResource.computeObjectChecksum(properties.get(JdbcResource.DRIVER_URL)));

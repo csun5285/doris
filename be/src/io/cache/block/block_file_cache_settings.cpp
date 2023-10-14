@@ -7,7 +7,7 @@ namespace doris::io {
 FileCacheSettings calc_settings(size_t total_size, size_t max_query_cache_size) {
     io::FileCacheSettings settings;
     settings.total_size = total_size;
-    settings.max_file_block_size = config::file_cache_max_file_segment_size;
+    settings.max_file_block_size = FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     settings.max_query_cache_size = max_query_cache_size;
     size_t per_size = settings.total_size / io::percentage[3];
     settings.disposable_queue_size = per_size * io::percentage[1];

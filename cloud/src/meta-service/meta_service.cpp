@@ -10,6 +10,7 @@
 #include "common/sync_point.h"
 #include "common/string_util.h"
 #include "common/util.h"
+#include "meta-service/codec.h"
 #include "meta-service/doris_txn.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_helper.h"
@@ -1746,7 +1747,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
             return;
         }
         for (auto& delete_bitmap_key : pending_info.delete_bitmap_keys()) {
-            txn->remove(delete_bitmap_key);
+            // FIXME: Don't expose the implementation details of splitting large value
+            // remove large value (>90*1000)
+            std::string end_key = delete_bitmap_key;
+            encode_int64(INT64_MAX, &end_key);
+            txn->remove(delete_bitmap_key, end_key);
             LOG(INFO) << "xxx remove pending delete bitmap, delete_bitmap_key="
                       << hex(delete_bitmap_key) << " lock_id=" << request->lock_id();
         }
@@ -1780,7 +1785,8 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         MetaDeleteBitmapInfo key_info {instance_id, tablet_id, rowset_id, ver, seg_id};
         std::string key;
         meta_delete_bitmap_key(key_info, &key);
-        txn->put(key, val);
+        // splitting large values (>90*1000) into multiple KVs
+        selectdb::put(txn.get(), key, val, 0);
         if (is_load_op) {
             new_pending_info.add_delete_bitmap_keys(key);
         }
@@ -1851,18 +1857,23 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
             msg = "failed to init txn";
             return;
         }
-        MetaDeleteBitmapInfo key_info0 {instance_id, tablet_id, rowset_ids[i], begin_versions[i],
+        MetaDeleteBitmapInfo start_key_info {instance_id, tablet_id, rowset_ids[i], begin_versions[i],
                                         0};
-        MetaDeleteBitmapInfo key_info1 {instance_id, tablet_id, rowset_ids[i], end_versions[i],
+        MetaDeleteBitmapInfo end_key_info {instance_id, tablet_id, rowset_ids[i], end_versions[i],
                                         INT64_MAX};
-        std::string key0;
-        std::string key1;
-        meta_delete_bitmap_key(key_info0, &key0);
-        meta_delete_bitmap_key(key_info1, &key1);
+        std::string start_key;
+        std::string end_key;
+        meta_delete_bitmap_key(start_key_info, &start_key);
+        meta_delete_bitmap_key(end_key_info, &end_key);
+
+        // in order to get splitted large value
+        encode_int64(INT64_MAX, &end_key);
 
         std::unique_ptr<RangeGetIterator> it;
+        int64_t last_ver = -1;
+        int64_t last_seg_id = -1;
         do {
-            ret = txn->get(key0, key1, &it);
+            ret = txn->get(start_key, end_key, &it);
             if (ret != 0) {
                 code = MetaServiceCode::KV_TXN_GET_ERR;
                 ss << "internal error, failed to get delete bitmap, ret=" << ret;
@@ -1880,15 +1891,21 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
                 // ${rowset_id0} ${version1} ${segment_id0} -> DeleteBitmapPB
                 auto ver = std::get<int64_t>(std::get<0>(out[5]));
                 auto seg_id = std::get<int64_t>(std::get<0>(out[6]));
-                response->add_rowset_ids(rowset_ids[i]);
-                response->add_segment_ids(seg_id);
-                response->add_versions(ver);
-                response->add_segment_delete_bitmaps(std::string(v));
-                if (!it->has_next()) {
-                    key0 = k;
+
+                // FIXME: Don't expose the implementation details of splitting large value.
+                // merge splitted large values (>90*1000)
+                if (ver != last_ver || seg_id != last_seg_id) {
+                    response->add_rowset_ids(rowset_ids[i]);
+                    response->add_segment_ids(seg_id);
+                    response->add_versions(ver);
+                    response->add_segment_delete_bitmaps(std::string(v));
+                    last_ver = ver;
+                    last_seg_id = seg_id;
+                } else {
+                    response->mutable_segment_delete_bitmaps()->rbegin()->append(v);
                 }
             }
-            key0.push_back('\x00'); // Update to next smallest key for iteration
+            start_key = it->next_begin_key(); // Update to next smallest key for iteration
         } while (it->more());
     }
 }

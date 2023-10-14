@@ -137,6 +137,8 @@ MAKE_PROGRAM="$(which "${BUILD_SYSTEM}")"
 echo "-- Make program: ${MAKE_PROGRAM}"
 
 cd ${CMAKE_BUILD_DIR}
+find . -name "*.gcda" -exec rm {} \;
+
 ${CMAKE_CMD} -G "${GENERATOR}" \
     -DCMAKE_MAKE_PROGRAM="${MAKE_PROGRAM}" \
     -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
