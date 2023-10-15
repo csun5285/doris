@@ -36,7 +36,7 @@ namespace io {
 enum class BufferType { DOWNLOAD, UPLOAD };
 
 struct OperationState {
-    OperationState(std::function<void(Status)> sync_after_complete_task,
+    OperationState(std::function<bool(Status)> sync_after_complete_task,
                    std::function<bool()> is_cancelled)
             : _sync_after_complete_task(std::move(sync_after_complete_task)),
               _is_cancelled(std::move(is_cancelled)) {}
@@ -51,7 +51,7 @@ struct OperationState {
             return;
         }
         if (nullptr != _sync_after_complete_task) {
-            _sync_after_complete_task(s);
+            _fail_after_sync = _sync_after_complete_task(s);
         }
         _value_set = true;
     }
@@ -63,12 +63,16 @@ struct OperationState {
     */
     [[nodiscard]] bool is_cancelled() const {
         DCHECK(nullptr != _is_cancelled);
-        return _is_cancelled();
+        // If _fail_after_sync is true then it means the sync task already returns
+        // that the task failed and if the outside file writer might already be
+        // destructed
+        return _fail_after_sync ? true : _is_cancelled();
     }
 
-    std::function<void(Status)> _sync_after_complete_task;
+    std::function<bool(Status)> _sync_after_complete_task;
     std::function<bool()> _is_cancelled;
     bool _value_set = false;
+    bool _fail_after_sync = false;
 };
 
 struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
@@ -199,7 +203,6 @@ struct UploadFileBuffer final : public FileBuffer {
             upload_to_local_file_cache(is_cancelled());
             _state.set_val();
         }
-        on_finish();
     }
     /**
     *
@@ -259,7 +262,7 @@ struct FileBufferBuilder {
     *
     * @param cb 
     */
-    FileBufferBuilder& set_sync_after_complete_task(std::function<void(Status)> cb);
+    FileBufferBuilder& set_sync_after_complete_task(std::function<bool(Status)> cb);
     /**
     * set the callback which detect whether the task is done
     *
@@ -317,7 +320,7 @@ struct FileBufferBuilder {
 
     BufferType _type;
     std::function<void(UploadFileBuffer& buf)> _upload_cb = nullptr;
-    std::function<void(Status)> _sync_after_complete_task = nullptr;
+    std::function<bool(Status)> _sync_after_complete_task = nullptr;
     std::function<FileBlocksHolderPtr()> _alloc_holder_cb = nullptr;
     std::function<bool()> _is_cancelled = nullptr;
     std::function<void(FileBlocksHolderPtr, Slice)> _write_to_local_file_cache;

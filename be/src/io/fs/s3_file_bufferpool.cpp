@@ -19,6 +19,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_segment.h"
 #include "io/fs/s3_common.h"
 #include "runtime/exec_env.h"
@@ -173,7 +174,7 @@ FileBufferBuilder& FileBufferBuilder::set_upload_callback(
     return *this;
 }
 // set callback to do task sync for the caller
-FileBufferBuilder& FileBufferBuilder::set_sync_after_complete_task(std::function<void(Status)> cb) {
+FileBufferBuilder& FileBufferBuilder::set_sync_after_complete_task(std::function<bool(Status)> cb) {
     _sync_after_complete_task = std::move(cb);
     return *this;
 }
@@ -218,6 +219,7 @@ void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write
 
 Slice S3FileBufferPool::allocate(bool reserve) {
     Slice buf;
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_bufferpool::allocate", Slice());
     // if need reserve or no cache then we must ensure return buf with memory preserved
     if (reserve || !config::enable_file_cache) {
         {

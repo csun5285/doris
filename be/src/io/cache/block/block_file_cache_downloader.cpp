@@ -96,7 +96,7 @@ struct DownloadTaskExecutor {
                 if (download_callback) {
                     download_callback(st);
                 }
-                return;
+                return true;
             }
             _succ++;
             if (_succ == task_num) {
@@ -104,6 +104,7 @@ struct DownloadTaskExecutor {
                     download_callback(st);
                 }
             }
+            return false;
         };
         _countdown_event.add_count(task_num);
         for (size_t i = 0; i < task_num; i++) {

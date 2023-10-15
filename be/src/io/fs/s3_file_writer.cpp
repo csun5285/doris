@@ -45,6 +45,7 @@
 
 #include "common/config.h"
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_writer.h"
@@ -140,6 +141,7 @@ Status S3FileWriter::_open() {
 
     auto outcome = _client->CreateMultipartUpload(create_request);
     s3_bvar::s3_multi_part_upload_total << 1;
+    SYNC_POINT_CALLBACK("s3_file_writer::_open", &outcome);
 
     if (outcome.IsSuccess()) {
         _upload_id = outcome.GetResult().GetUploadId();
@@ -209,6 +211,7 @@ Status S3FileWriter::close() {
         _pending_buf->submit();
         _pending_buf = nullptr;
     }
+    SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::close", Status());
     RETURN_IF_ERROR(_complete());
 
     return Status::OK();
@@ -217,6 +220,7 @@ Status S3FileWriter::close() {
 Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     DCHECK(!_closed);
     size_t buffer_size = config::s3_write_buffer_size;
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::appenv", Status());
     for (size_t i = 0; i < data_cnt; i++) {
         size_t data_size = data[i].get_size();
         for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
@@ -233,14 +237,20 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                         .set_file_offset(_bytes_appended)
                         .set_index_offset(_index_offset)
                         .set_sync_after_complete_task([this, part_num = _cur_part_num](Status s) {
+                            bool ret = false;
                             if (!s.ok()) [[unlikely]] {
                                 VLOG_NOTICE << "failed at key: " << _key << ", load part "
                                             << part_num << ", st " << s;
                                 std::unique_lock<std::mutex> _lck {_completed_lock};
                                 _failed = true;
+                                ret = true;
                                 this->_st = std::move(s);
                             }
+                            // After the signal, there is a scenario where the previous invocation of _wait_until_finish
+                            // returns to the caller, and subsequently, the S3 file writer is destructed.
+                            // This means that accessing _failed afterwards would result in a heap use after free vulnerability.
                             _countdown_event.signal();
+                            return ret;
                         })
                         .set_is_cancelled([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
@@ -310,6 +320,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     s3_bvar::s3_multi_part_upload_total << 1;
 
     UploadPartOutcome upload_part_outcome = upload_part_callable.get();
+    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
         auto s = Status::IOError(
                 "failed to upload part (bucket={}, key={}, part_num={}, upload_id={}, "
@@ -350,16 +361,34 @@ Status S3FileWriter::_complete() {
     complete_request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
 
     _wait_until_finish("Complete");
+    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:1", std::make_pair(&_failed, &_completed_parts));
+    if (_failed || _completed_parts.size() != _cur_part_num) {
+        auto st = Status::IOError("error status {}, complete parts {}, cur part num {}", _st,
+                                  _completed_parts.size(), _cur_part_num);
+        LOG(WARNING) << st;
+        _st = st;
+        return st;
+    }
     // make sure _completed_parts are ascending order
     std::sort(_completed_parts.begin(), _completed_parts.end(),
               [](auto& p1, auto& p2) { return p1->GetPartNumber() < p2->GetPartNumber(); });
+    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:2", &_completed_parts);
     CompletedMultipartUpload completed_upload;
-    for (auto& part : _completed_parts) {
-        completed_upload.AddParts(*part);
+    for (size_t i = 0; i < _completed_parts.size(); i++) {
+        if (_completed_parts[i]->GetPartNumber() != i + 1) [[unlikely]] {
+            auto st = Status::IOError(
+                    "error status {}, part num not continous, expected num {}, actual num {}", _st,
+                    i + 1, _completed_parts[i]->GetPartNumber());
+            LOG(WARNING) << st;
+            _st = st;
+            return st;
+        }
+        completed_upload.AddParts(*_completed_parts[i]);
     }
 
     complete_request.WithMultipartUpload(completed_upload);
 
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("S3FileWriter::_complete:3", Status(), this);
     auto compute_outcome = _client->CompleteMultipartUpload(complete_request);
     s3_bvar::s3_multi_part_upload_total << 1;
 
@@ -370,7 +399,8 @@ Status S3FileWriter::_complete() {
                 _bucket, _path.native(), _upload_id, compute_outcome.GetError().GetExceptionName(),
                 compute_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
-        return s;
+        _st = std::move(s);
+        return _st;
     }
     s3_file_created_total << 1;
     return Status::OK();
@@ -378,6 +408,7 @@ Status S3FileWriter::_complete() {
 
 Status S3FileWriter::finalize() {
     DCHECK(!_closed);
+    SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::finalize", Status());
     // submit pending buf if it's not nullptr
     // it's the last buf, we can submit it right now
     if (_pending_buf != nullptr) {
@@ -391,12 +422,14 @@ Status S3FileWriter::finalize() {
         _pending_buf->submit();
         _pending_buf = nullptr;
     }
-    _wait_until_finish("finalize");
-    return _st;
+    return Status::OK();
 }
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed) << "closed " << _closed;
+    if (_failed) {
+        return;
+    }
     LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     // the task might already be aborted
     if (_failed) [[unlikely]] {
@@ -409,6 +442,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetBody(buf.get_stream());
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
+    TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
     auto response = _client->PutObject(request);
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
@@ -416,8 +450,8 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
                 "failed to put object (bucket={}, key={}, upload_id={}, exception={}): {}", _bucket,
                 _path.native(), _upload_id, response.GetError().GetExceptionName(),
                 response.GetError().GetMessage());
-        buf.set_val(_st);
         LOG(WARNING) << _st;
+        buf.set_val(_st);
         return;
     }
     _bytes_written += buf.get_size();
