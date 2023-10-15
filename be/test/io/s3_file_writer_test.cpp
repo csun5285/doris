@@ -27,12 +27,14 @@
 #include <thread>
 
 #include "common/sync_point.h"
+#include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/s3_file_bufferpool.h"
 #include "io/fs/s3_file_system.h"
+#include "io/fs/s3_file_writer.h"
 #include "io/io_common.h"
 #include "runtime/exec_env.h"
 #include "util/slice.h"
@@ -64,8 +66,8 @@ public:
         ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool = std::move(_pool);
         doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
         s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
-                            doris::config::s3_write_buffer_size,
-                            ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool.get());
+                             doris::config::s3_write_buffer_size,
+                             ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool.get());
     }
 
     static void TearDownTestSuite() {}
@@ -120,7 +122,7 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
         // so the result of close should be not ok
         ASSERT_TRUE(!s3_file_writer->close().ok());
         bool exits = false;
-        auto s= s3_fs->exists("multi_part_io_error", &exits);
+        auto s = s3_fs->exists("multi_part_io_error", &exits);
         LOG(INFO) << "status is " << s;
         ASSERT_TRUE(!exits);
     }
@@ -137,11 +139,16 @@ TEST_F(S3FileWriterTest, put_object_io_error) {
             // handle io error
             LOG(INFO) << "set put object to error";
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            auto ptr = try_any_cast<
-                    Aws::Utils::Outcome<Aws::S3::Model::PutObjectResult, Aws::S3::S3Error>*>(
-                    outcome.back());
-            *ptr = Aws::Utils::Outcome<Aws::S3::Model::PutObjectResult, Aws::S3::S3Error>(
-                    Aws::Client::AWSError<Aws::S3::S3Errors>());
+            io::S3FileWriter* writer = try_any_cast<io::S3FileWriter*>(outcome.at(0));
+            io::UploadFileBuffer* buf = try_any_cast<io::UploadFileBuffer*>(outcome.at(1));
+            writer->_st = Status::IOError(
+                    "failed to put object (bucket={}, key={}, upload_id={}, exception=inject "
+                    "error): "
+                    "inject error",
+                    writer->_bucket, writer->_path.native(), writer->_upload_id);
+            buf->set_val(writer->_st);
+            bool* pred = try_any_cast<bool*>(outcome.back());
+            *pred = true;
         });
         auto client = s3_fs->get_client();
         io::FileReaderSPtr local_file_reader;
@@ -243,7 +250,8 @@ TEST_F(S3FileWriterTest, multi_part_open_error) {
         Defer defer {[&]() { sp->clear_all_call_backs(); }};
 
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("multi_part_open_error", &s3_file_writer, &state));
+        ASSERT_EQ(Status::OK(),
+                  s3_fs->create_file("multi_part_open_error", &s3_file_writer, &state));
 
         auto buf = std::make_unique<char[]>(buf_size);
         Slice slice(buf.get(), buf_size);
@@ -261,7 +269,8 @@ TEST_F(S3FileWriterTest, multi_part_open_error) {
 }
 
 TEST_F(S3FileWriterTest, write_into_cache_io_error) {
-    std::filesystem::path caches_dir = std::filesystem::current_path() / "s3_file_writer_cache_test";
+    std::filesystem::path caches_dir =
+            std::filesystem::current_path() / "s3_file_writer_cache_test";
     std::string cache_base_path = caches_dir / "cache1" / "";
     Defer fs_clear {[&]() {
         if (std::filesystem::exists(cache_base_path)) {
@@ -274,7 +283,18 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
     settings.total_size = 10 * 1024 * 1024;
     settings.max_file_block_size = 1 * 1024 * 1024;
     settings.max_query_cache_size = 30;
-    doris::io::FileCacheFactory::instance().create_file_cache(cache_base_path, settings);
+    io::FileCacheFactory::instance()._caches.clear();
+    io::FileCacheFactory::instance()._path_to_cache.clear();
+    io::FileCacheFactory::instance()._total_cache_size = 0;
+    auto cache = std::make_unique<io::BlockFileCache>(cache_base_path, settings);
+    ASSERT_TRUE(cache->initialize());
+    while (true) {
+        if (cache->get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    io::FileCacheFactory::instance()._caches.emplace_back(std::move(cache));
     doris::io::FileWriterOptions state;
     auto fs = io::global_local_filesystem();
     {
@@ -285,27 +305,24 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
                         .ok());
 
         constexpr int buf_size = 8192;
-        int empty_slice_times = 2;
         auto sp = SyncPoint::get_instance();
         config::enable_file_cache = true;
-        // Make the s3 file buffer pool return empty slice for the first two part
-        // to let the first two part be written into file cache first
-        sp->set_call_back("s3_file_bufferpool::allocate", [&empty_slice_times](auto&& values) {
-            LOG(INFO) << "file buffer pool allocate";
-            empty_slice_times--;
-            if (empty_slice_times >= 0) {
-                std::pair<Slice, bool>* pairs =
-                        try_any_cast<std::pair<Slice, bool>*>(values.back());
-                pairs->second = true;
-                LOG(INFO) << "return empty slice";
-            }
-        });
         // Make append to cache return one error to test if it would exit
         sp->set_call_back("file_block::append", [](auto&& values) {
             LOG(INFO) << "file segment append";
             std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
             pairs->second = true;
             pairs->first = Status::IOError("failed to append to cache file segments");
+        });
+        sp->set_call_back("S3FileWriter::_complete:3", [](auto&& values) {
+            LOG(INFO) << "don't send s3 complete request";
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        sp->set_call_back("UploadFileBuffer::upload_to_local_file_cache", [](auto&& values) {
+            LOG(INFO) << "Check if upload failed due to injected error";
+            bool ret = *try_any_cast<bool*>(values.back());
+            ASSERT_FALSE(ret);
         });
         Defer defer {[&]() {
             sp->clear_all_call_backs();
@@ -322,85 +339,13 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
         size_t bytes_read = 0;
         auto file_size = local_file_reader->size();
         LOG(INFO) << "file size is " << file_size;
-        ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
-        auto st = s3_file_writer->append(Slice(buf, bytes_read));
-        // Failed to write into file cache
-        ASSERT_TRUE(!st.ok());
+        while (offset < file_size) {
+            ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
+            ASSERT_EQ(Status::OK(), s3_file_writer->append(Slice(buf, bytes_read)));
+            offset += bytes_read;
+        }
         bool exits = false;
         s3_fs->exists("write_into_cache_io_error", &exits);
-        ASSERT_TRUE(!exits);
-    }
-}
-
-TEST_F(S3FileWriterTest, read_from_cache_io_error) {
-    std::filesystem::path caches_dir = std::filesystem::current_path() / "s3_file_writer_cache_test";
-    std::string cache_base_path = caches_dir / "cache2" / "";
-    Defer fs_clear {[&]() {
-        if (std::filesystem::exists(cache_base_path)) {
-            std::filesystem::remove_all(cache_base_path);
-        }
-    }};
-    io::FileCacheSettings settings;
-    settings.query_queue_size = 10 * 1024 * 1024;
-    settings.query_queue_elements = 100;
-    settings.total_size = 10 * 1024 * 1024;
-    settings.max_file_block_size = 1 * 1024 * 1024;
-    settings.max_query_cache_size = 30;
-    doris::io::FileCacheFactory::instance().create_file_cache(cache_base_path, settings);
-    doris::io::FileWriterOptions state;
-    auto fs = io::global_local_filesystem();
-    {
-        io::FileReaderSPtr local_file_reader;
-
-        ASSERT_TRUE(
-                fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader)
-                        .ok());
-
-        constexpr int buf_size = 5 * 1024 * 1024;
-        std::atomic_int empty_slice_times = 1;
-        auto sp = SyncPoint::get_instance();
-        config::enable_file_cache = true;
-        // Make the s3 file buffer pool return empty slice for the first two part
-        // to let the first two part be written into file cache first
-        sp->set_call_back("s3_file_bufferpool::allocate", [&empty_slice_times](auto&& values) {
-            LOG(INFO) << "file buffer pool allocate";
-            empty_slice_times--;
-            if (empty_slice_times >= 0) {
-                std::pair<Slice, bool>* pairs =
-                        try_any_cast<std::pair<Slice, bool>*>(values.back());
-                pairs->second = true;
-                LOG(INFO) << "return empty slice";
-            }
-        });
-        // Make append to cache return one error to test if it would exit
-        sp->set_call_back("file_block::read_at", [](auto&& values) {
-            LOG(INFO) << "file segment read at";
-            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
-            pairs->second = true;
-            pairs->first = Status::IOError("failed to read from local cache file segments");
-        });
-        Defer defer {[&]() {
-            sp->clear_all_call_backs();
-            config::enable_file_cache = false;
-        }};
-
-        io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(),
-                  s3_fs->create_file("read_from_cache_local_io_error", &s3_file_writer, &state));
-
-        auto append_buf = std::make_unique<char[]>(buf_size);
-        char* buf = append_buf.get();
-        Slice slice(buf, buf_size);
-        size_t offset = 0;
-        size_t bytes_read = 0;
-        ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
-        auto st = s3_file_writer->append(Slice(buf, bytes_read));
-        ASSERT_EQ(Status::OK(), st);
-        offset += bytes_read;
-        ASSERT_TRUE(s3_file_writer->finalize().ok());
-        ASSERT_TRUE(!s3_file_writer->close().ok());
-        bool exits = false;
-        s3_fs->exists("read_from_cache_local_io_error", &exits);
         ASSERT_TRUE(!exits);
     }
 }
@@ -479,19 +424,18 @@ TEST_F(S3FileWriterTest, close_error) {
         io::FileReaderSPtr local_file_reader;
 
         ASSERT_TRUE(fs->open_file("./be/test/olap/test_data/all_types_1000.txt", &local_file_reader)
-                            .ok());        
+                            .ok());
 
         auto sp = SyncPoint::get_instance();
         sp->set_call_back("s3_file_writer::close", [](auto&& values) {
-            std::pair<Status, bool>* pairs =
-                        try_any_cast<std::pair<Status, bool>*>(values.back());
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
             pairs->second = true;
             pairs->first = Status::InternalError("failed to close s3 file writer");
             LOG(INFO) << "return error when closing s3 file writer";
         });
         io::FileWriterPtr s3_file_writer;
         ASSERT_TRUE(s3_fs->create_file("close_error", &s3_file_writer, &state).ok());
-        Defer defer {[&](){ sp->clear_all_call_backs(); }};
+        Defer defer {[&]() { sp->clear_all_call_backs(); }};
         ASSERT_TRUE(!s3_file_writer->close().ok());
         bool exits = false;
         s3_fs->exists("close_error", &exits);
@@ -513,13 +457,12 @@ TEST_F(S3FileWriterTest, finalize_error) {
 
         auto sp = SyncPoint::get_instance();
         sp->set_call_back("s3_file_writer::finalize", [](auto&& values) {
-            std::pair<Status, bool>* pairs =
-                        try_any_cast<std::pair<Status, bool>*>(values.back());
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
             pairs->second = true;
             pairs->first = Status::InternalError("failed to finalize s3 file writer");
             LOG(INFO) << "return error when finalizing s3 file writer";
         });
-        Defer defer {[&](){ sp->clear_all_call_backs(); }};
+        Defer defer {[&]() { sp->clear_all_call_backs(); }};
 
         constexpr int buf_size = 8192;
 
@@ -645,11 +588,14 @@ TEST_F(S3FileWriterTest, multi_part_complete_error_3) {
         auto sp = SyncPoint::get_instance();
         Defer defer {[&]() { sp->clear_all_call_backs(); }};
         sp->set_call_back("S3FileWriter::_complete:3", [](auto&& outcome) {
-            auto complete_outcome =
-                    try_any_cast<Aws::S3::Model::CompleteMultipartUploadOutcome*>(outcome.back());
-            *complete_outcome = Aws::Utils::Outcome<Aws::S3::Model::CompleteMultipartUploadResult,
-                                                    Aws::S3::S3Error>(
-                    Aws::Client::AWSError<Aws::S3::S3Errors>());
+            std::pair<Status, bool>* pair = try_any_cast<std::pair<Status, bool>*>(outcome.back());
+            io::S3FileWriter* writer = try_any_cast<io::S3FileWriter*>(outcome.at(0));
+            pair->second = true;
+            pair->first = Status::IOError("inject error");
+            writer->_st = Status::IOError(
+                    "failed to complete multi part upload (bucket={}, key={}, upload_id={}, "
+                    "exception=inject_error): inject_error",
+                    writer->_bucket, writer->_path.native(), writer->_upload_id);
         });
         auto client = s3_fs->get_client();
         io::FileReaderSPtr local_file_reader;

@@ -155,6 +155,10 @@ void UploadFileBuffer::upload_to_local_file_cache(bool is_cancelled) {
                     st = segment->finalize_write();
                 }
                 if (!st.ok()) {
+                    {
+                        [[maybe_unused]] bool ret = false;
+                        TEST_SYNC_POINT_CALLBACK("UploadFileBuffer::upload_to_local_file_cache", &ret);
+                    }
                     LOG_WARNING("failed to append data to file cache").error(st);
                 }
             }

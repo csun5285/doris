@@ -171,11 +171,6 @@ struct UploadFileBuffer final : public FileBuffer {
     void set_index_offset(size_t offset);
     Status append_data(const Slice& s) override;
     /**
-    * read the content from local file cache
-    * because previously lack of  memory buffer
-    */
-    void read_from_cache();
-    /**
     * write the content inside memory buffer into 
     * local file cache
     */
@@ -221,10 +216,8 @@ private:
     std::function<void(UploadFileBuffer&)> _upload_to_remote = nullptr;
     std::shared_ptr<std::iostream> _stream_ptr; // point to _buffer.get_data()
 
-    bool _is_cache_allocated {false};
     FileBlocksHolderPtr _holder;
     decltype(_holder->file_segments.begin()) _cur_file_segment;
-    size_t _append_offset {0};
     size_t _index_offset {0};
 };
 

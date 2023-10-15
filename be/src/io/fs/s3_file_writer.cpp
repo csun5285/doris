@@ -388,8 +388,8 @@ Status S3FileWriter::_complete() {
 
     complete_request.WithMultipartUpload(completed_upload);
 
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("S3FileWriter::_complete:3", Status(), this);
     auto compute_outcome = _client->CompleteMultipartUpload(complete_request);
-    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:3", &compute_outcome);
     s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
@@ -399,7 +399,8 @@ Status S3FileWriter::_complete() {
                 _bucket, _path.native(), _upload_id, compute_outcome.GetError().GetExceptionName(),
                 compute_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
-        return s;
+        _st = std::move(s);
+        return _st;
     }
     s3_file_created_total << 1;
     return Status::OK();
@@ -441,8 +442,8 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetBody(buf.get_stream());
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
+    TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
     auto response = _client->PutObject(request);
-    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_put_object", &response);
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::IOError(
