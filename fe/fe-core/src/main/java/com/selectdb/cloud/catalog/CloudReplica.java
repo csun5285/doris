@@ -154,10 +154,10 @@ public class CloudReplica extends Replica {
             }
         }
 
-        return hashReplicaToBe(clusterId);
+        return hashReplicaToBe(clusterId, false);
     }
 
-    public long hashReplicaToBe(String clusterId) {
+    public long hashReplicaToBe(String clusterId, boolean isBackGround) {
         // TODO(luwei) list shoule be sorted
         List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterId(clusterId);
         // use alive be to exec sql
@@ -172,7 +172,9 @@ public class CloudReplica extends Replica {
             }
         }
         if (availableBes == null || availableBes.size() == 0) {
-            LOG.warn("failed to get available be, clusterId: {}", clusterId);
+            if (!isBackGround) {
+                LOG.warn("failed to get available be, clusterId: {}", clusterId);
+            }
             return -1;
         }
         LOG.debug("availableBes={}", availableBes);

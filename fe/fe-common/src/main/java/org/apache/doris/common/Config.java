@@ -2302,7 +2302,13 @@ public class Config extends ConfigBase {
     public static boolean forbid_insecurity_stmt = true;
 
     @ConfField(mutable = true)
-    public static boolean enable_table_level_balance = true;
+    public static boolean enable_partition_balance = true;
+
+    @ConfField(mutable = true)
+    public static boolean enable_table_balance = true;
+
+    @ConfField(mutable = true)
+    public static boolean enable_global_balance = true;
 
     // the white list for the s3 load endpoint, if it is empty, no white list will be set
     // for example: s3_load_endpoint_white_list=a,b,c
