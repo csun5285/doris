@@ -416,6 +416,11 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
         LOG.info("before replay erase table[{}]", tableId);
         RecycleTableInfo tableInfo = idToTable.remove(tableId);
         idToRecycleTime.remove(tableId);
+        if (table == null) {
+            // FIXME(walter): Sometimes `eraseTable` in 'DROP DB ... FORCE' may be executed earlier than
+            // finish drop db, especially in the case of drop db with many tables.
+            return;
+        }
         Table table = tableInfo.getTable();
         if (table.getType() == TableType.OLAP && !Env.isCheckpointThread()) {
             Env.getCurrentEnv().onEraseOlapTable((OlapTable) table, true);
