@@ -281,6 +281,7 @@ E(KEY_NOT_FOUND, -6009);
 E(KEY_ALREADY_EXISTS, -6010);
 E(ENTRY_NOT_FOUND, -6011);
 E(INVALID_TABLET_STATE, -7211);
+E(ROWSETS_EXPIRED, -7311);
 #undef E
 } // namespace ErrorCode
 
@@ -327,6 +328,7 @@ constexpr bool capture_stacktrace(int code) {
         && code != ErrorCode::PIP_WAIT_FOR_RF
         && code != ErrorCode::PIP_WAIT_FOR_SC
         && code != ErrorCode::INVALID_TABLET_STATE
+        && code != ErrorCode::ROWSETS_EXPIRED
         && code != ErrorCode::INVALID_DATA_FORMAT;
 }
 // clang-format on
