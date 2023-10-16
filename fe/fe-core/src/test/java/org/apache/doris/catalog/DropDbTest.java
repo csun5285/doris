@@ -127,9 +127,11 @@ public class DropDbTest {
         long tabletId = partition.getBaseIndex().getTablets().get(0).getId();
         dropDb(dropDbSql);
         db = Env.getCurrentInternalCatalog().getDbNullable("default_cluster:test2");
-        List<Replica> replicaList = Env.getCurrentEnv().getTabletInvertedIndex().getReplicasByTabletId(tabletId);
         Assert.assertNull(db);
-        Assert.assertTrue(replicaList.isEmpty());
+        // After unify force and non-force drop db, the replicas will be recycled eventually.
+        //
+        // List<Replica> replicaList = Env.getCurrentEnv().getTabletInvertedIndex().getReplicasByTabletId(tabletId);
+        // Assert.assertTrue(replicaList.isEmpty());
         String recoverDbSql = "recover database test2";
         RecoverDbStmt recoverDbStmt = (RecoverDbStmt) UtFrameUtils.parseAndAnalyzeStmt(recoverDbSql, connectContext);
         ExceptionChecker.expectThrowsWithMsg(DdlException.class,
