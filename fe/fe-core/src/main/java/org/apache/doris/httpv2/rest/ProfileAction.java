@@ -17,6 +17,7 @@
 
 package org.apache.doris.httpv2.rest;
 
+import org.apache.doris.common.Config;
 import org.apache.doris.common.util.ProfileManager;
 import org.apache.doris.httpv2.entity.ResponseEntityBuilder;
 import org.apache.doris.mysql.privilege.PrivPredicate;
@@ -44,9 +45,10 @@ public class ProfileAction extends RestBaseController {
 
     @RequestMapping(path = "/api/profile", method = RequestMethod.GET)
     protected Object profile(HttpServletRequest request, HttpServletResponse response) {
-        executeCheckPassword(request, response);
-        checkGlobalAuth(ConnectContext.get().getCurrentUserIdentity(), PrivPredicate.ADMIN);
-
+        if (Config.isNotCloudMode()) {
+            executeCheckPassword(request, response);
+            checkGlobalAuth(ConnectContext.get().getCurrentUserIdentity(), PrivPredicate.ADMIN);
+        }
         String queryId = request.getParameter("query_id");
         if (Strings.isNullOrEmpty(queryId)) {
             return ResponseEntityBuilder.badRequest("Missing query_id");
