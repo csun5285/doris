@@ -213,6 +213,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     }
 
     // 3. Convert historical data
+    bool already_exist_any_version = false;
     for (auto& rs_reader : sc_params.ref_rowset_readers) {
         VLOG_TRACE << "Begin to convert a history rowset. version=" << rs_reader->version();
 
@@ -244,6 +245,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
                 RowsetFactory::create_rowset(nullptr, sc_params.new_tablet->tablet_path(),
                                              std::move(existed_rs_meta), &rowset);
                 _output_rowsets.push_back(std::move(rowset));
+                already_exist_any_version = true;
                 continue;
             } else {
                 return st;
@@ -306,7 +308,12 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
     if (new_tablet->enable_unique_key_merge_on_write()) {
         int64_t initiator = boost::uuids::hash_value(UUIDGenerator::instance()->next_uuid()) &
                             std::numeric_limits<int64_t>::max();
-        RETURN_IF_ERROR(_process_delete_bitmap(new_tablet, sc_job->alter_version(), initiator));
+        // If there are historical versions of rowsets, we need to recalculate their delete
+        // bitmaps, otherwise we will miss the delete bitmaps of incremental rowsets
+        int64_t start_calc_delete_bitmap_version =
+                already_exist_any_version ? 0 : sc_job->alter_version() + 1;
+        RETURN_IF_ERROR(_process_delete_bitmap(new_tablet, sc_job->alter_version(),
+                                               start_calc_delete_bitmap_version, initiator));
         sc_job->set_delete_bitmap_lock_initiator(initiator);
     }
 
@@ -343,25 +350,28 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
 }
 
 Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int64_t alter_version,
+                                                 int64_t start_calc_delete_bitmap_version,
                                                  int64_t initiator) {
-    LOG(INFO) << "process mow table, "
-              << " new_table_id: " << new_tablet->tablet_id()
-              << " out rowset size: " << _output_rowsets.size();
+    LOG_INFO("process mow table")
+            .tag("new_tablet_id", new_tablet->tablet_id())
+            .tag("out_rowset_size", _output_rowsets.size())
+            .tag("start_calc_delete_bitmap_version", start_calc_delete_bitmap_version)
+            .tag("alter_version", alter_version);
     TabletMetaSharedPtr tmp_meta = std::make_shared<TabletMeta>(*new_tablet->tablet_meta());
+    tmp_meta->delete_bitmap().delete_bitmap.clear();
     TabletSharedPtr tmp_tablet = std::make_shared<Tablet>(tmp_meta, nullptr);
-    tmp_tablet->cloud_add_rowsets(_output_rowsets, false);
+    tmp_tablet->cloud_add_rowsets(_output_rowsets, true);
 
     // step 1, process incremental rowset without delete bitmap update lock
     std::vector<RowsetSharedPtr> incremental_rowsets;
-    RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(new_tablet.get()));
-    int64_t max_version = std::max(alter_version, new_tablet->max_version().second);
-    if (max_version > alter_version) {
-        RETURN_IF_ERROR(new_tablet->capture_consistent_rowsets({alter_version + 1, max_version},
-                                                               &incremental_rowsets));
-        LOG(INFO) << "alter table for mow table, calculate delete bitmap of "
-                  << "incremental rowsets without lock, version: " << alter_version + 1 << "-"
-                  << max_version << " new_table_id: " << new_tablet->tablet_id();
-        tmp_tablet->cloud_add_rowsets(incremental_rowsets, false);
+    RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(tmp_tablet.get()));
+    int64_t max_version = tmp_tablet->max_version().second;
+    LOG(INFO) << "alter table for mow table, calculate delete bitmap of "
+              << "incremental rowsets without lock, version: " << start_calc_delete_bitmap_version
+              << "-" << max_version << " new_table_id: " << new_tablet->tablet_id();
+    if (max_version >= start_calc_delete_bitmap_version) {
+        RETURN_IF_ERROR(tmp_tablet->capture_consistent_rowsets(
+                {start_calc_delete_bitmap_version, max_version}, &incremental_rowsets));
         for (auto rowset : incremental_rowsets) {
             tmp_tablet->update_delete_bitmap_without_lock(rowset);
         }
@@ -369,15 +379,15 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
 
     // step 2, process incremental rowset with delete bitmap update lock
     RETURN_IF_ERROR(cloud::meta_mgr()->get_delete_bitmap_update_lock(
-            new_tablet.get(), SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID, initiator));
-    RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(new_tablet.get()));
-    int64_t new_max_version = new_tablet->max_version().second;
+            tmp_tablet.get(), SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID, initiator));
+    RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(tmp_tablet.get()));
+    int64_t new_max_version = tmp_tablet->max_version().second;
     LOG(INFO) << "alter table for mow table, calculate delete bitmap of "
               << "incremental rowsets with lock, version: " << max_version + 1 << "-"
               << new_max_version << " new_tablet_id: " << new_tablet->tablet_id();
     std::vector<RowsetSharedPtr> new_incremental_rowsets;
     if (new_max_version > max_version) {
-        RETURN_IF_ERROR(new_tablet->capture_consistent_rowsets({max_version + 1, new_max_version},
+        RETURN_IF_ERROR(tmp_tablet->capture_consistent_rowsets({max_version + 1, new_max_version},
                                                                &new_incremental_rowsets));
         tmp_tablet->cloud_add_rowsets(new_incremental_rowsets, false);
         for (auto rowset : new_incremental_rowsets) {
@@ -388,7 +398,7 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
     auto& delete_bitmap = tmp_tablet->tablet_meta()->delete_bitmap();
 
     // step4, store delete bitmap
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(new_tablet.get(),
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(tmp_tablet.get(),
                                                             SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID,
                                                             initiator, &delete_bitmap));
 

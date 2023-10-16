@@ -547,8 +547,22 @@ static int generate_random_root_key(TxnKv* txn_kv, KmsClient* kms_client, std::s
     }
 
     if (ret == 0) {
-        LOG(INFO) << "not need to generate root key";
-        return 1;
+        if (config::enable_kms && config::focus_add_kms_data_key) {
+            EncryptionKeyInfoPB key_info;
+            if (!key_info.ParseFromString(val)) {
+                LOG_WARNING("failed to parse encryption_root_key");
+                return -1;
+            }
+            for (auto& item : key_info.items()) {
+                if (item.has_kms_info()) {
+                    return 1;
+                }
+            }
+            LOG(INFO) << "focus to create kms data key";
+        } else {
+            LOG(INFO) << "not need to generate root key";
+            return 1;
+        }
     }
 
     // 1. use kms to generate a new key
@@ -695,8 +709,9 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
             return -1;
         }
 
+        bool need_to_focus_add_kms_data_key = true;
+        EncryptionKeyInfoPB key_info;
         if (ret == 0) {
-            EncryptionKeyInfoPB key_info;
             if (!key_info.ParseFromString(val)) {
                 LOG_WARNING("failed to parse encryption_root_key");
                 return -1;
@@ -707,6 +722,7 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
             for (auto& item : key_info.items()) {
                 std::string encoded_root_key_plaintext;
                 if (item.has_kms_info()) {
+                    need_to_focus_add_kms_data_key = false;
                     // use kms to decrypt
                     if (kms_client == nullptr) {
                         LOG_WARNING("no kms client");
@@ -742,7 +758,12 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
                 root_key_plaintext.assign(root_key_plaintext.data(), decoded_text_len);
                 keys->insert({item.key_id(), std::move(root_key_plaintext)});
             }
-            return 0;
+            if (config::enable_kms && config::focus_add_kms_data_key && need_to_focus_add_kms_data_key) {
+                // Todo: need to restart other ms to update global_encryption_key_info_map now
+                LOG(INFO) << "focus to add kms data key";
+            } else {
+                return 0;
+            }
         }
 
         // encryption_root_key not found, need to save a new root key into fdb
@@ -750,7 +771,7 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
             LOG_WARNING("empty new root key");
             return -1;
         }
-        EncryptionKeyInfoPB key_info;
+
         int32_t new_key_id = key_info.items().size() + 1;
         auto item = key_info.add_items();
         item->set_key_id(new_key_id);

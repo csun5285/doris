@@ -1133,6 +1133,7 @@ enum MetaServiceCode {
     // delete bitmap 
     LOCK_EXPIRED = 8001;
     LOCK_CONFLICT = 8002;
+    ROWSETS_EXPIRED = 8003;
 
     UNDEFINED_ERR = 1000000;
 }
@@ -1162,6 +1163,10 @@ message GetDeleteBitmapRequest {
     repeated string rowset_ids = 3;
     repeated int64 begin_versions = 4;
     repeated int64 end_versions = 5;
+    optional TabletIndexPB idx = 6;
+    optional int64 base_compaction_cnt = 7;
+    optional int64 cumulative_compaction_cnt = 8;
+    optional int64 cumulative_point = 9;
 }
 
 message GetDeleteBitmapResponse {

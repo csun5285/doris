@@ -1836,6 +1836,33 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
         return;
     }
     RPC_RATE_LIMIT(get_delete_bitmap)
+    std::unique_ptr<Transaction> txn;
+    if (txn_kv_->create_txn(&txn) != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to init txn";
+        return;
+    }
+
+    if (request->has_idx()) {
+        auto& idx = const_cast<TabletIndexPB&>(request->idx());
+        TabletStatsPB tablet_stat;
+        internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, idx, tablet_stat,
+                                  true /*snapshot_read*/);
+        if (code != MetaServiceCode::OK) {
+            return;
+        }
+        // The requested compaction state and the actual compaction state are different, which indicates that
+        // the requested rowsets are expired and their delete bitmap may have been deleted.
+        if (request->base_compaction_cnt() != tablet_stat.base_compaction_cnt() ||
+            request->cumulative_compaction_cnt() != tablet_stat.cumulative_compaction_cnt() ||
+            request->cumulative_point() != tablet_stat.cumulative_point()) {
+            code = MetaServiceCode::ROWSETS_EXPIRED;
+            msg = "rowsets are expired";
+            return;
+        }
+    }
+
+
     auto tablet_id = request->tablet_id();
     auto& rowset_ids = request->rowset_ids();
     auto& begin_versions = request->begin_versions();
@@ -1851,12 +1878,6 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 
     for (size_t i = 0; i < rowset_ids.size(); i++) {
-        std::unique_ptr<Transaction> txn;
-        if (txn_kv_->create_txn(&txn) != 0) {
-            code = MetaServiceCode::KV_TXN_CREATE_ERR;
-            msg = "failed to init txn";
-            return;
-        }
         MetaDeleteBitmapInfo start_key_info {instance_id, tablet_id, rowset_ids[i], begin_versions[i],
                                         0};
         MetaDeleteBitmapInfo end_key_info {instance_id, tablet_id, rowset_ids[i], end_versions[i],

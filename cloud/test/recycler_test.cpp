@@ -22,6 +22,7 @@
 #include "rate-limiter/rate_limiter.h"
 #include "recycler/checker.h"
 #include "recycler/s3_accessor.h"
+#include "recycler/util.h"
 #include "recycler/white_black_list.h"
 
 static const std::string instance_id = "instance_id_recycle_test";
@@ -64,12 +65,6 @@ TEST(RecyclerTest, WhiteBlackList) {
     EXPECT_FALSE(filter.filter_out("instance1"));
     EXPECT_TRUE(filter.filter_out("instance2"));
 }
-
-extern std::string segment_path(int64_t tablet_id, const std::string& rowset_id,
-                                int64_t segment_id);
-extern std::string inverted_index_path(int64_t tablet_id, const std::string& rowset_id,
-                                       int64_t segment_id, int64_t index_id);
-extern std::string tablet_path_prefix(int64_t tablet_id);
 
 static std::string next_rowset_id() {
     static int64_t cnt = 0;

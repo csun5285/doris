@@ -338,8 +338,19 @@ TRY_AGAIN:
     if (tablet->enable_unique_key_merge_on_write()) {
         DeleteBitmap delete_bitmap(tablet_id);
         int64_t old_max_version = req.start_version() - 1;
-        RETURN_IF_ERROR(sync_tablet_delete_bitmap(tablet, old_max_version, resp.rowset_meta(),
-                                                  &delete_bitmap));
+        auto st = sync_tablet_delete_bitmap(tablet, old_max_version, resp.rowset_meta(),
+                                                  resp.stats(), req.idx(), &delete_bitmap);
+        if (st.is<ErrorCode::ROWSETS_EXPIRED>() && tried++ < retry_times) {
+            LOG_WARNING("rowset meta is expired, need to retry")
+                    .tag("tablet", tablet->tablet_id())
+                    .tag("tried", tried)
+                    .error(st);
+            goto TRY_AGAIN;
+        }
+        if (!st.ok()) {
+            LOG_WARNING("faild to get delete bimtap").tag("tablet", tablet->tablet_id()).error(st);
+            return st;
+        }
         tablet->tablet_meta()->delete_bitmap().merge(delete_bitmap);
     }
 
@@ -419,6 +430,8 @@ TRY_AGAIN:
 Status CloudMetaMgr::sync_tablet_delete_bitmap(
         const Tablet* tablet, int64_t old_max_version,
         const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
+        const selectdb::TabletStatsPB& stats,
+        const selectdb::TabletIndexPB& idx,
         DeleteBitmap* delete_bitmap) {
     if (rs_metas.empty()) {
         return Status::OK();
@@ -434,6 +447,10 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
     selectdb::GetDeleteBitmapResponse res;
     req.set_cloud_unique_id(config::cloud_unique_id);
     req.set_tablet_id(tablet->tablet_id());
+    req.set_base_compaction_cnt(stats.base_compaction_cnt());
+    req.set_cumulative_compaction_cnt(stats.cumulative_compaction_cnt());
+    req.set_cumulative_point(stats.cumulative_point());
+    *(req.mutable_idx()) = idx;
     // New rowset sync all versions of delete bitmap
     for (auto& rs_meta : rs_metas) {
         req.add_rowset_ids(rs_meta.rowset_id_v2());
@@ -450,6 +467,8 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
             req.add_end_versions(new_max_version);
         }
     }
+
+    VLOG_DEBUG << "send GetDeleteBimapRequest: " << req.ShortDebugString();
     stub->get_delete_bitmap(&cntl, &req, &res, nullptr);
     if (cntl.Failed()) {
         return Status::RpcError("failed to get delete bitmap: {}", cntl.ErrorText());
@@ -457,8 +476,33 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
     if (res.status().code() == selectdb::MetaServiceCode::TABLET_NOT_FOUND) {
         return Status::NotFound("failed to get delete bitmap: {}", res.status().msg());
     }
+    // The delete bitmap of stale rowsets will be removed when commit compaction job,
+    // then delete bitmap of stale rowsets cannot be obtained. But the rowsets obtained
+    // by sync_tablet_rowsets may include these stale rowsets. When this case happend, the 
+    // error code of ROWSETS_EXPIRED will be returned, we need to retry sync rowsets again.
+    //
+    // Be query thread             meta-service          Be compaction thread
+    //      |                            |                         |
+    //      |        get rowset          |                         |
+    //      |--------------------------->|                         |
+    //      |    return get rowset       |                         |
+    //      |<---------------------------|                         |
+    //      |                            |        commit job       |
+    //      |                            |<------------------------|
+    //      |                            |    return commit job    |
+    //      |                            |------------------------>|
+    //      |      get delete bitmap     |                         |
+    //      |--------------------------->|                         |
+    //      |  return get delete bitmap  |                         |
+    //      |<---------------------------|                         |
+    //      |                            |                         |
+    if (res.status().code() == selectdb::MetaServiceCode::ROWSETS_EXPIRED) {
+        return Status::Error<ErrorCode::ROWSETS_EXPIRED, false>("failed to get delete bitmap: {}",
+                                                                res.status().msg());
+    }
     if (res.status().code() != selectdb::MetaServiceCode::OK) {
-        return Status::InternalError("failed to get delete bitmap: {}", res.status().msg());
+        return Status::Error<ErrorCode::INTERNAL_ERROR, false>("failed to get delete bitmap: {}",
+                                                               res.status().msg());
     }
     auto& rowset_ids = res.rowset_ids();
     auto& segment_ids = res.segment_ids();

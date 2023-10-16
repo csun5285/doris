@@ -18,7 +18,7 @@ public:
 private:
     Status _convert_historical_rowsets(const SchemaChangeParams& sc_params);
     Status _process_delete_bitmap(TabletSharedPtr new_tablet, int64_t alter_version,
-                                  int64_t initiator);
+                                  int64_t start_calc_delete_bitmap_version, int64_t initiator);
     Status _do_process_alter_inverted_index(TabletSharedPtr tablet, const TAlterInvertedIndexReq& request);
     Status _add_inverted_index(
             std::vector<RowsetReaderSharedPtr> rs_readers, 

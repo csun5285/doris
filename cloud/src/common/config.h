@@ -138,5 +138,6 @@ CONF_String(kms_endpoint, "");
 CONF_String(kms_region, "");
 CONF_String(kms_provider, "ali"); // ali/tx/aws/hw, only support ali now
 CONF_String(kms_cmk, "");
-
+// When starting up, add kms data key if is missing, all MS need to be restarted simultaneously.
+CONF_Bool(focus_add_kms_data_key, "false");
 } // namespace selectdb::config

@@ -8,6 +8,7 @@
 #include "common/util.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
+#include "meta-service/txn_kv.h"
 
 int main(int argc, char** argv) {
     auto conf_file = "selectdb_cloud.conf";
@@ -250,4 +251,97 @@ TEST(EncryptionTest, RootKeyTestWithKms2) {
         ASSERT_EQ(global_encryption_key_info_map.size(), 1);
         ASSERT_EQ(global_encryption_key_info_map.at(1), plaintext);
     }
+}
+
+TEST(EncryptionTest, RootKeyTestWithKms3) {
+    // test focus to add kms data key
+    using namespace selectdb;
+    config::enable_kms = false;
+
+    config::enable_kms = false;
+    // generate new root key without kms
+    global_encryption_key_info_map.clear();
+    auto mem_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(mem_kv->init(), 0);
+    auto ret = init_global_encryption_key_info_map(mem_kv.get());
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(global_encryption_key_info_map.size(), 1);
+    
+    // enable kms but not focus to add kms data key
+    config::enable_kms = true;
+    config::focus_add_kms_data_key = false;
+    config::kms_ak = "DRdlYbJmyEPJ9q1KggTCjBErv/9GzyjTFKXBgGR7X4I=";
+    config::kms_sk = "DRdlYbJmyEPJ9q1KggTCjBErv/9GzyjTFKXBgGR7X4I=";
+    config::kms_cmk = "2";
+    config::kms_endpoint = "3";
+    config::kms_region = "4";
+    config::kms_provider = "ali";
+    config::kms_info_encryption_key = "uwPXjGTuFJXyDZJBuYG52kdMxrWB24952HkXSa2v3Vw="; 
+    global_encryption_key_info_map.clear();
+    ret = init_global_encryption_key_info_map(mem_kv.get());
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(global_encryption_key_info_map.size(), 1);
+
+    // enable kms and focus to add kms data key
+    config::focus_add_kms_data_key = true;
+    std::string plaintext = "test123456test";
+    std::string mock_encoded_plaintext = "dGVzdDEyMzQ1NnRlc3Q=";
+    std::string mock_encoded_ciphertext = mock_encoded_plaintext;
+    // mock succ to generate key
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("alikms::generate_data_key::plaintext",
+                        [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
+    sp->set_call_back("alikms::generate_data_key::ciphertext",
+                        [&](void* p) { *((std::string*)p) = mock_encoded_ciphertext; });
+    sp->set_call_back("alikms::generate_data_key::ret::pred",
+                        [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
+    sp->set_call_back("alikms::generate_data_key::ret", [](void* p) { *((int*)p) = 0; });
+
+    sp->set_call_back("alikms::decrypt::output",
+                          [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
+    sp->set_call_back("alikms::decrypt::ret::pred",
+                        [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
+    sp->set_call_back("alikms::decrypt::ret", [](void* p) { *((int*)p) = 0; }); 
+    sp->enable_processing(); 
+
+    global_encryption_key_info_map.clear();
+    ret = init_global_encryption_key_info_map(mem_kv.get());
+    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(global_encryption_key_info_map.size(), 2);
+
+    // get again
+    global_encryption_key_info_map.clear();
+    ret = init_global_encryption_key_info_map(mem_kv.get()); 
+    ASSERT_EQ(global_encryption_key_info_map.size(), 2);
+
+    // finally check kv
+    std::string key = system_meta_service_encryption_key_info_key();
+    std::string val;
+    std::unique_ptr<Transaction> txn;
+    ret = mem_kv->create_txn(&txn);
+    ret = txn->get(key, &val);
+    ASSERT_EQ(ret, 0);
+    EncryptionKeyInfoPB key_info;
+    key_info.ParseFromString(val);
+    ASSERT_EQ(key_info.items_size(), 2);
+    std::cout << proto_to_json(key_info) << std::endl;
+    const auto& item = key_info.items().at(0);
+    ASSERT_EQ(item.key_id(), 1);
+    std::string decoded_string(item.key().length(), '0');
+    int decoded_text_len =
+            base64_decode(item.key().c_str(), item.key().length(), decoded_string.data());
+    decoded_string.assign(decoded_string.data(), decoded_text_len);
+    ASSERT_EQ(decoded_string, "selectdbselectdbselectdbselectdb"); // from config
+    ASSERT_EQ(global_encryption_key_info_map.at(item.key_id()), decoded_string);
+
+    const auto& item2 = key_info.items().at(1);
+    ASSERT_EQ(item2.key_id(), 2);
+    std::string decoded_string2(item.key().length(), '0');
+    int decoded_text_len2 =
+            base64_decode(item2.key().c_str(), item2.key().length(), decoded_string2.data());
+    decoded_string2.assign(decoded_string2.data(), decoded_text_len2);
+    ASSERT_EQ(decoded_string2, plaintext);
+    ASSERT_EQ(global_encryption_key_info_map.at(item2.key_id()), decoded_string2); 
 }
