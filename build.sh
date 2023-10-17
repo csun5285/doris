@@ -611,6 +611,56 @@ if [ "${BUILD_DOCS}" = "ON" ] ; then
     cd "${DORIS_HOME}"
 fi
 
+function md5sum_func() {
+    local FILENAME="$1"
+    local MD5SUM="$2"
+    local md5
+
+    md5="$(md5sum "${FILENAME}")"
+    if [[ "${md5}" != "${MD5SUM}  ${FILENAME}" ]]; then
+        echo "${FILENAME} md5sum check failed!"
+        echo -e "except-md5 ${MD5SUM} \nactual-md5 ${md5}"
+        exit 1
+    fi
+    return 0
+}
+
+function build_jdbc_driver() {
+    echo "Build jdbc driver"
+    # download jdbc rivers
+    JDBC_DRIVER_URL=${JDBC_DRIVER_URL:-"https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver"}
+
+    JDBC_DRIVERS_DIR="${DORIS_THIRDPARTY}/src/jdbc_drivers/"
+    mkdir -p ${JDBC_DRIVERS_DIR}
+    rm -rf ${DORIS_THIRDPARTY}/src/jdbc_drivers/*
+
+    CK_DRIVER_MD5=9be22a93267dc4b066e0a3aefc2dd024
+    MSSQL_DRIVER_MD5=b204274eb02a848ac405961e6f43e7bd
+    MYSQL_DRIVER_MD5=fdf55dcef04b09f2eaf42b75e61ccc9a
+    OJBC6_DRIVER_MD5=621a393d7be9ff0f2fec6fbba2c8f9b6
+    PG_DRIVER_MD5=20c8228267b6c9ce620fddb39467d3eb
+
+    wget ${JDBC_DRIVER_URL}/clickhouse-jdbc-0.3.2-patch11-all.jar -P "${JDBC_DRIVERS_DIR}/"
+    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/clickhouse-jdbc-0.3.2-patch11-all.jar ${CK_DRIVER_MD5}
+
+    wget ${JDBC_DRIVER_URL}/mssql-jdbc-11.2.0.jre8.jar -P "${JDBC_DRIVERS_DIR}/"
+    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/mssql-jdbc-11.2.0.jre8.jar ${MSSQL_DRIVER_MD5}
+
+    wget ${JDBC_DRIVER_URL}/mysql-connector-java-8.0.25.jar -P "${JDBC_DRIVERS_DIR}/"
+    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/mysql-connector-java-8.0.25.jar ${MYSQL_DRIVER_MD5}
+
+    wget ${JDBC_DRIVER_URL}/ojdbc6.jar -P "${JDBC_DRIVERS_DIR}/"
+    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/ojdbc6.jar ${OJBC6_DRIVER_MD5}
+
+    wget ${JDBC_DRIVER_URL}/postgresql-42.5.0.jar -P "${JDBC_DRIVERS_DIR}/"
+    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/postgresql-42.5.0.jar ${PG_DRIVER_MD5}
+}
+
+BUILD_JDBC_DRIVER=${BUILD_JDBC_DRIVER:-"ON"}
+if [[ "x${BUILD_JDBC_DRIVER}" = "xON" ]]; then
+    build_jdbc_driver
+fi
+
 function build_ui() {
     NPM='npm'
     if ! ${NPM} --version; then
@@ -687,6 +737,11 @@ if [[ "${BUILD_FE}" -eq 1 ]]; then
     mkdir -p "${DORIS_OUTPUT}/fe/log"
     mkdir -p "${DORIS_OUTPUT}/fe/doris-meta"
     mkdir -p "${DORIS_OUTPUT}/fe/conf/ssl"
+
+    rm -rf "${DORIS_OUTPUT}/fe/jdbc_drivers"
+    if [[ "x${BUILD_JDBC_DRIVER}" = "xON" ]]; then
+        cp -rf "${DORIS_THIRDPARTY}/src/jdbc_drivers" "${DORIS_OUTPUT}/fe"/
+    fi
 fi
 
 if [[ "${BUILD_SPARK_DPP}" -eq 1 ]]; then
@@ -781,6 +836,11 @@ EOF
     copy_common_files "${DORIS_OUTPUT}/be/"
     mkdir -p "${DORIS_OUTPUT}/be/log"
     mkdir -p "${DORIS_OUTPUT}/be/storage"
+
+    rm -rf "${DORIS_OUTPUT}/be/jdbc_drivers"
+    if [[ "x${BUILD_JDBC_DRIVER}" = "xON" ]]; then
+        cp -rf "${DORIS_THIRDPARTY}/src/jdbc_drivers" "${DORIS_OUTPUT}/be"/
+    fi
 fi
 
 if [[ "${BUILD_BROKER}" -eq 1 ]]; then
