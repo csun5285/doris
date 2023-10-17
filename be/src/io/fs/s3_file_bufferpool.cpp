@@ -17,6 +17,8 @@
 
 #include "s3_file_bufferpool.h"
 
+#include <chrono>
+
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/sync_point.h"
@@ -37,6 +39,10 @@ void FileBuffer::on_finish() {
     if (_buffer.empty()) {
         return;
     }
+    auto cur_time = time(nullptr);
+    CHECK(cur_time - get_allocation_time() < 300)
+            << "the buffer is hanged too long, cur " << cur_time << " allocation time "
+            << get_allocation_time();
     S3FileBufferPool::GetInstance()->reclaim(Slice {_buffer.get_data(), _capacity});
     _buffer.clear();
 }
@@ -51,13 +57,20 @@ void FileBuffer::swap_buffer(Slice& other) {
 }
 
 FileBuffer::FileBuffer(std::function<FileBlocksHolderPtr()> alloc_holder, size_t offset,
-                       OperationState state, bool reserve)
+                       OperationState state, bool reserve, void* resource_owner)
         : _alloc_holder(std::move(alloc_holder)),
           _buffer(S3FileBufferPool::GetInstance()->allocate(reserve)),
           _offset(offset),
           _size(0),
           _state(std::move(state)),
-          _capacity(_buffer.get_size()) {}
+          _capacity(_buffer.get_size()),
+          _resource_owner(resource_owner),
+          _allocation_time(0) {
+    if (!_buffer.empty()) {
+        _allocation_time = time(nullptr);
+        LOG_INFO("allocate slice for {}", _resource_owner);
+    }
+}
 
 /**
  * 0. check if file cache holder allocated
@@ -81,7 +94,13 @@ Status UploadFileBuffer::append_data(const Slice& data) {
         }
         // wait allocate buffer pool
         auto tmp = S3FileBufferPool::GetInstance()->allocate(true);
+        if (tmp.empty()) {
+            LOG_WARNING("no free buffer for 5 minutes");
+            return Status::InternalError("no free buffer for 5 minutes");
+        }
         swap_buffer(tmp);
+        set_allocation_time(time(nullptr));
+        LOG_INFO("allocate slice for {}", _resource_owner);
     }
     return Status::OK();
 }
@@ -155,6 +174,11 @@ void UploadFileBuffer::upload_to_local_file_cache(bool is_cancelled) {
                     st = segment->finalize_write();
                 }
                 if (!st.ok()) {
+                    {
+                        [[maybe_unused]] bool ret = false;
+                        TEST_SYNC_POINT_CALLBACK("UploadFileBuffer::upload_to_local_file_cache",
+                                                 &ret);
+                    }
                     LOG_WARNING("failed to append data to file cache").error(st);
                 }
             }
@@ -189,7 +213,8 @@ std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
     OperationState state(_sync_after_complete_task, _is_cancelled);
     if (_type == BufferType::UPLOAD) {
         return std::make_shared<UploadFileBuffer>(std::move(_upload_cb), std::move(state), _offset,
-                                                  std::move(_alloc_holder_cb), _index_offset);
+                                                  std::move(_alloc_holder_cb), _index_offset,
+                                                  _resource_owner);
     }
     if (_type == BufferType::DOWNLOAD) {
         return std::make_shared<DownloadFileBuffer>(
@@ -224,9 +249,12 @@ Slice S3FileBufferPool::allocate(bool reserve) {
     if (reserve || !config::enable_file_cache) {
         {
             std::unique_lock<std::mutex> lck {_lock};
-            _cv.wait(lck, [this]() { return !_free_raw_buffers.empty(); });
-            buf = _free_raw_buffers.front();
-            _free_raw_buffers.pop_front();
+            _cv.wait_for(lck, std::chrono::seconds(300),
+                         [this]() { return !_free_raw_buffers.empty(); });
+            if (!_free_raw_buffers.empty()) {
+                buf = _free_raw_buffers.front();
+                _free_raw_buffers.pop_front();
+            }
         }
         return buf;
     }

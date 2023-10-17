@@ -77,7 +77,7 @@ struct OperationState {
 
 struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     FileBuffer(std::function<FileBlocksHolderPtr()> alloc_holder, size_t offset,
-               OperationState state, bool reserve = false);
+               OperationState state, bool reserve = false, void* resource_owner = nullptr);
     virtual ~FileBuffer() { on_finish(); }
     /**
     * submit the correspoding task to async executor
@@ -124,12 +124,19 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     */
     bool is_cancelled() const { return _state.is_cancelled(); }
 
+    void set_allocation_time(time_t time) { _allocation_time = time; }
+
+    time_t get_allocation_time() const { return _allocation_time; }
+
     std::function<FileBlocksHolderPtr()> _alloc_holder;
     Slice _buffer;
     size_t _offset;
     size_t _size;
     OperationState _state;
     size_t _capacity;
+    // For debug
+    void* _resource_owner;
+    time_t _allocation_time;
 };
 
 struct DownloadFileBuffer final : public FileBuffer {
@@ -157,11 +164,11 @@ struct DownloadFileBuffer final : public FileBuffer {
 struct UploadFileBuffer final : public FileBuffer {
     UploadFileBuffer(std::function<void(UploadFileBuffer&)> upload_cb, OperationState state,
                      size_t offset, std::function<FileBlocksHolderPtr()> alloc_holder,
-                     size_t index_offset)
-            : FileBuffer(alloc_holder, offset, state),
+                     size_t index_offset, void* resource_owner)
+            : FileBuffer(alloc_holder, offset, state, false, resource_owner),
               _upload_to_remote(std::move(upload_cb)),
               _index_offset(index_offset) {}
-    ~UploadFileBuffer() override = default;
+    ~UploadFileBuffer() override { LOG_INFO("return slice of {}", _resource_owner); }
     void submit() override;
     /**
     * set the index offset
@@ -318,6 +325,11 @@ struct FileBufferBuilder {
         return *this;
     }
 
+    FileBufferBuilder& set_resource_owner(void* resource_owner) {
+        _resource_owner = resource_owner;
+        return *this;
+    }
+
     BufferType _type;
     std::function<void(UploadFileBuffer& buf)> _upload_cb = nullptr;
     std::function<bool(Status)> _sync_after_complete_task = nullptr;
@@ -328,6 +340,7 @@ struct FileBufferBuilder {
     std::function<void(Slice, size_t)> _write_to_use_buffer;
     size_t _offset;
     size_t _index_offset;
+    void* _resource_owner;
 };
 
 class S3FileBufferPool {
