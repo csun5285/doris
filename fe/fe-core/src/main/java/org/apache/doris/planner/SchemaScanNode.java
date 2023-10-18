@@ -39,6 +39,8 @@ import com.google.common.collect.Lists;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -46,6 +48,7 @@ import java.util.List;
  */
 public class SchemaScanNode extends ScanNode {
     private static final Logger LOG = LogManager.getLogger(SchemaTable.class);
+    private static final List<String> forbiddenTables = new ArrayList<String>(Arrays.asList("backends", "rowsets"));
 
     private final String tableName;
     private String schemaDb;
@@ -63,6 +66,15 @@ public class SchemaScanNode extends ScanNode {
     public SchemaScanNode(PlanNodeId id, TupleDescriptor desc) {
         super(id, desc, "SCAN SCHEMA", StatisticalType.SCHEMA_SCAN_NODE);
         this.tableName = desc.getTable().getName();
+
+        if (Config.isCloudMode()) {
+            // Forbidden tables: backends, rowsets
+            for (String forbiddenTable : forbiddenTables) {
+                if (tableName.equalsIgnoreCase(forbiddenTable)) {
+                    throw new RuntimeException("Unsupported operation");
+                }
+            }
+        }
     }
 
     @Override
