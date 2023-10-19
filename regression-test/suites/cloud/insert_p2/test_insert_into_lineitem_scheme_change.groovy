@@ -393,8 +393,11 @@ PROPERTIES (
     }
 
     try {
-        file_array = getFiles(dir)
-        process(insert_table)
+        File file = new File(dir)
+        if (file.exists() && file.isDirectory()) {
+            file_array = getFiles(dir)
+            process(insert_table)
+        }
     } finally {
 
     }

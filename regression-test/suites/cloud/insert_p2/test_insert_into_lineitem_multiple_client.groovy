@@ -94,25 +94,18 @@ PROPERTIES (
         }
 
 
-        while (true) {
-            try {
-                qt_sql """ select count(*) from ${stream_load_table}; """
-                break
-            } catch (Exception e) {
-                Thread.sleep(1000)
-                log.info("exception:", e)
-            }
+        try {
+            qt_sql """ select count(*) from ${stream_load_table}; """
+        } catch (Exception e) {
+            log.info("exception:", e)
         }
 
-        while (true) {
-            try {
-                qt_sql """ select l_orderkey from ${stream_load_table} where l_orderkey >=0 and l_orderkey <=6000000 order by l_shipdate asc; """
-                break
-            } catch (Exception e) {
-                Thread.sleep(1000)
-                log.info("exception:", e)
-            }
+        try {
+            qt_sql """ select l_orderkey from ${stream_load_table} where l_orderkey >=0 and l_orderkey <=6000000 order by l_orderkey asc; """
+        } catch (Exception e) {
+            log.info("exception:", e)
         }
+
     }
 
     def create_insert_table = {
@@ -158,6 +151,7 @@ PROPERTIES (
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
+        sql """ set enable_insert_group_commit = true; """
 
         String s = null;
         StringBuilder sb = null;
@@ -247,33 +241,28 @@ PROPERTIES (
 
         getRowCount(total, insert_table)
 
-        while (true) {
-            try {
-                qt_sql """ select count(*) from ${insert_table}; """
-                break
-            } catch (Exception e) {
-                Thread.sleep(1000)
-                log.info("exception:", e)
-            }
+        try {
+            qt_sql """ select count(*) from ${insert_table}; """
+        } catch (Exception e) {
+            log.info("exception:", e)
         }
 
-        while (true) {
-            try {
-                qt_sql """ select l_orderkey from ${insert_table} where l_orderkey >=0 and l_orderkey <=6000000 order by l_shipdate asc; """
-                break
-            } catch (Exception e) {
-                Thread.sleep(1000)
-                log.info("exception:", e)
-            }
+        try {
+            qt_sql """ select l_orderkey from ${insert_table} where l_orderkey >=0 and l_orderkey <=6000000 order by l_orderkey asc; """
+        } catch (Exception e) {
+            log.info("exception:", e)
         }
     }
 
     try {
-        file_array = getFiles(dir)
-        if (!context.outputFile.exists()) {
-            do_stream_load()
-        } else {
-            do_insert_into()
+        File file = new File(dir)
+        if (file.exists() && file.isDirectory()) {
+            file_array = getFiles(dir)
+            if (!context.outputFile.exists()) {
+                do_stream_load()
+            } else {
+                do_insert_into()
+            }
         }
     } finally {
 
