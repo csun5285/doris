@@ -68,6 +68,8 @@ import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.CheckTxnConflictRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.CheckTxnConflictResponse;
+import com.selectdb.cloud.proto.SelectdbCloud.CleanTxnLabelRequest;
+import com.selectdb.cloud.proto.SelectdbCloud.CleanTxnLabelResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.CommitTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.CommitTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.GetCurrentMaxTxnRequest;
@@ -1027,5 +1029,46 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         } catch (InterruptedException e) {
             LOG.info("InterruptedException: ", e);
         }
+    }
+
+    public void cleanLabel(long dbId, String label) throws UserException {
+        LOG.info("try to cleanLabel dbId: {}, label:{}", dbId, label);
+        CleanTxnLabelRequest.Builder builder = CleanTxnLabelRequest.newBuilder();
+        builder.setDbId(dbId)
+                .addLabels(label)
+                .setCloudUniqueId(Config.cloud_unique_id);
+
+        final CleanTxnLabelRequest cleanTxnLabelRequest = builder.build();
+        CleanTxnLabelResponse cleanTxnLabelResponse = null;
+        int retryTime = 0;
+
+        try {
+            while (retryTime < Config.meta_service_rpc_retry_times) {
+                LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelRequest);
+                cleanTxnLabelResponse = MetaServiceProxy.getInstance().cleanTxnLabel(cleanTxnLabelRequest);
+                LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelResponse);
+                if (cleanTxnLabelResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+                // sleep random [20, 200] ms, avoid txn conflict
+                LOG.info("cleanTxnLabel KV_TXN_CONFLICT, dbId:{}, label:{}, retryTime:{}", dbId, label, retryTime);
+                backoff();
+                retryTime++;
+                continue;
+            }
+
+            Preconditions.checkNotNull(cleanTxnLabelResponse);
+            Preconditions.checkNotNull(cleanTxnLabelResponse.getStatus());
+        } catch (Exception e) {
+            LOG.warn("cleanTxnLabel failed, dbId:{}, exception:", dbId, e);
+            throw new UserException("cleanTxnLabel failed, errMsg:" + e.getMessage());
+        }
+
+        if (cleanTxnLabelResponse.getStatus().getCode() != MetaServiceCode.OK) {
+            LOG.warn("cleanTxnLabel failed, dbId:{} label:{} retryTime:{} cleanTxnLabelResponse:{}",
+                    dbId, label, retryTime, cleanTxnLabelResponse);
+            throw new UserException("cleanTxnLabel failed, errMsg:" + cleanTxnLabelResponse.getStatus().getMsg());
+        }
+        return;
     }
 }

@@ -54,6 +54,11 @@ public:
                             ::selectdb::CheckTxnConflictResponse* response,
                             ::google::protobuf::Closure* done) override;
 
+    void clean_txn_label(::google::protobuf::RpcController* controller,
+                         const ::selectdb::CleanTxnLabelRequest* request,
+                         ::selectdb::CleanTxnLabelResponse* response,
+                         ::google::protobuf::Closure* done) override;
+
     void get_version(::google::protobuf::RpcController* controller,
                      const ::selectdb::GetVersionRequest* request,
                      ::selectdb::GetVersionResponse* response,

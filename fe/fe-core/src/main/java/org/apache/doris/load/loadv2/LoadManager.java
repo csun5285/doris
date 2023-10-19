@@ -883,11 +883,15 @@ public class LoadManager implements Writable {
         }
     }
 
-    public void cleanLabel(CleanLabelStmt stmt) throws DdlException {
+    public void cleanLabel(CleanLabelStmt stmt) throws UserException {
         String dbName = stmt.getDb();
         String label = stmt.getLabel();
         Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
-        cleanLabelInternal(db.getId(), label, false);
+        if (Config.isCloudMode()) {
+            cleanLabelInternalInCloudMode(db.getId(), label);
+        } else {
+            cleanLabelInternal(db.getId(), label, false);
+        }
     }
 
     public void replayCleanLabel(CleanLabelOperationLog log) {
@@ -958,17 +962,12 @@ public class LoadManager implements Writable {
 
         // 2. Remove from DatabaseTransactionMgr
         try {
-            if (Config.isCloudMode()) {
-                // FIXME(zhanglei): process CloudGloabalTransactionManager
-                LOG.error("not supported in cloud mode yet");
-                throw new AnalysisException("not supported in cloud mode yet");
-            }
             DatabaseTransactionMgr dbTxnMgr = ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr())
                     .getDatabaseTransactionMgr(dbId);
             dbTxnMgr.cleanLabel(label);
         } catch (AnalysisException e) {
             // just ignore, because we don't want to throw any exception here.
-            LOG.warn("{}", e.getMessage());
+            LOG.warn("ignore exception:", e);
         }
 
         // 3. Log
@@ -1115,5 +1114,43 @@ public class LoadManager implements Writable {
         // It guarantee that load job has not been changed before edit log.
         loadJobScheduler.submitJob(loadJob);
         return loadJob.getId();
+    }
+
+    private void cleanLabelInternalInCloudMode(long dbId, String label) throws UserException {
+        if (Strings.isNullOrEmpty(label)) {
+            throw new UserException("label is empty in cloud mode");
+        }
+        int counter = 0;
+        writeLock();
+        try {
+            if (dbIdToLabelToLoadJobs.containsKey(dbId)) {
+                Map<String, List<LoadJob>> labelToJob = dbIdToLabelToLoadJobs.get(dbId);
+                List<LoadJob> jobs = labelToJob.get(label);
+                if (jobs == null) {
+                    // no job for this label, just return
+                    return;
+                }
+
+                Iterator<LoadJob> iter = jobs.iterator();
+                while (iter.hasNext()) {
+                    LoadJob job = iter.next();
+                    if (!job.isCompleted()) {
+                        continue;
+                    }
+                    iter.remove();
+                    idToLoadJob.remove(job.getId());
+                    ++counter;
+                }
+                if (jobs.isEmpty()) {
+                    labelToJob.remove(label);
+                }
+            }
+        } finally {
+            writeUnlock();
+        }
+        LOG.info("clean {} labels on db {} with label '{}' in load mgr.", counter, dbId, label);
+
+        Env.getCurrentGlobalTransactionMgr().cleanLabel(dbId, label);
+        LOG.info("finished to clean label on db {} with label {}.", dbId, label);
     }
 }

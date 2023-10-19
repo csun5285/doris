@@ -786,4 +786,13 @@ public class GlobalTransactionMgr implements GlobalTransactionMgrInterface {
         }
         transactionState.addTableIndexes(table);
     }
+
+    @Override
+    public void cleanLabel(long dbId, String label) throws UserException {
+        DatabaseTransactionMgr dbTransactionMgr = dbIdToDatabaseTransactionMgrs.get(dbId);
+        if (dbTransactionMgr == null) {
+            throw new UserException("databaseTransactionMgr[" + dbId + "] does not exist");
+        }
+        dbTransactionMgr.cleanLabel(label);
+    }
 }
