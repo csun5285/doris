@@ -562,8 +562,9 @@ Status DeltaWriter::cloud_set_txn_related_delete_bitmap() {
                 return st;
             }
         }
-        _storage_engine->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
-                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset);
+        _storage_engine->delete_bitmap_txn_manager()->set_tablet_txn_info(
+                _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset,
+                _req.txn_expiration);
     }
     return Status::OK();
 }

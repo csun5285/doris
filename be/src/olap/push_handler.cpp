@@ -126,8 +126,9 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     if (tablet->enable_unique_key_merge_on_write()) {
         DeleteBitmapPtr delete_bitmap = std::make_shared<DeleteBitmap>(tablet->tablet_id());
         RowsetIdUnorderedSet rowset_ids;
-        StorageEngine::instance()->delete_bitmap_txn_manager()->set_txn_related_delete_bitmap(
-                request.transaction_id, tablet->tablet_id(), delete_bitmap, rowset_ids, rowset);
+        StorageEngine::instance()->delete_bitmap_txn_manager()->set_tablet_txn_info(
+                request.transaction_id, tablet->tablet_id(), delete_bitmap, rowset_ids, rowset,
+                request.timeout);
     }
 
     TTabletInfo tablet_info;

@@ -798,7 +798,7 @@ DEFINE_mInt32(segment_compression_threshold_kb, "256");
 DEFINE_mInt32(external_table_connect_timeout_sec, "30");
 
 // Global bitmap cache capacity for aggregation cache, size in bytes
-DEFINE_Int64(delete_bitmap_agg_cache_capacity, "104857600");
+DEFINE_Int64(delete_bitmap_agg_cache_capacity, "419430400");
 
 // s3 config
 DEFINE_mInt32(max_remote_storage_count, "10");

@@ -24,6 +24,7 @@ set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/src/cloud")
 set(OLAP_FILES
     olap/storage_engine.cpp
     olap/olap_server.cpp
+    olap/delete_bitmap_txn_manager.cpp
 )
 
 add_library(Cloud STATIC
