@@ -183,6 +183,11 @@ public class CreateFunctionStmt extends DdlStmt {
     public void analyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
 
+        if (Config.forbid_function_stmt) {
+            LOG.info("stmt={}, not supported in cloud mode", this.toString());
+            throw new UserException("Unsupported operation");
+        }
+
         // https://github.com/apache/doris/issues/17810
         // this error report in P0 test, so we suspect that it is related to concurrency
         // add this change to test it.
