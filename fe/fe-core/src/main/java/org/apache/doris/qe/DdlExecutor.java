@@ -155,16 +155,8 @@ public class DdlExecutor {
         } else if (ddlStmt instanceof DropDbStmt) {
             env.dropDb((DropDbStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateFunctionStmt) {
-            if (Config.forbid_function_stmt) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.createFunction((CreateFunctionStmt) ddlStmt);
         } else if (ddlStmt instanceof DropFunctionStmt) {
-            if (Config.forbid_function_stmt) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.dropFunction((DropFunctionStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateEncryptKeyStmt) {
             EncryptKeyHelper.createEncryptKey((CreateEncryptKeyStmt) ddlStmt);
@@ -306,16 +298,8 @@ public class DdlExecutor {
             }
             env.setConfig((AdminSetConfigStmt) ddlStmt);
         } else if (ddlStmt instanceof CreateFileStmt) {
-            if (Config.forbid_insecurity_stmt) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getSmallFileMgr().createFile((CreateFileStmt) ddlStmt);
         } else if (ddlStmt instanceof DropFileStmt) {
-            if (Config.forbid_insecurity_stmt) {
-                LOG.info("stmt={}, not supported in cloud mode", ddlStmt.toString());
-                throw new DdlException("Unsupported operation");
-            }
             env.getSmallFileMgr().dropFile((DropFileStmt) ddlStmt);
         } else if (ddlStmt instanceof InstallPluginStmt) {
             env.installPlugin((InstallPluginStmt) ddlStmt);
