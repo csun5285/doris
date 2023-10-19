@@ -2431,4 +2431,7 @@ public class Config extends ConfigBase {
             "min buckets of auto bucket"
     })
     public static int autobucket_min_buckets = 1;
+
+    @ConfField(mutable = true)
+    public static boolean enable_profile_when_analyze = false;
 }
