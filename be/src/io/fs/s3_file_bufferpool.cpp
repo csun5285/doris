@@ -39,10 +39,6 @@ void FileBuffer::on_finish() {
     if (_buffer.empty()) {
         return;
     }
-    auto cur_time = time(nullptr);
-    CHECK(cur_time - get_allocation_time() < 300)
-            << "the buffer is hanged too long, cur " << cur_time << " allocation time "
-            << get_allocation_time();
     S3FileBufferPool::GetInstance()->reclaim(Slice {_buffer.get_data(), _capacity});
     _buffer.clear();
 }
@@ -57,20 +53,13 @@ void FileBuffer::swap_buffer(Slice& other) {
 }
 
 FileBuffer::FileBuffer(std::function<FileBlocksHolderPtr()> alloc_holder, size_t offset,
-                       OperationState state, bool reserve, void* resource_owner)
+                       OperationState state, bool reserve)
         : _alloc_holder(std::move(alloc_holder)),
           _buffer(S3FileBufferPool::GetInstance()->allocate(reserve)),
           _offset(offset),
           _size(0),
           _state(std::move(state)),
-          _capacity(_buffer.get_size()),
-          _resource_owner(resource_owner),
-          _allocation_time(0) {
-    if (!_buffer.empty()) {
-        _allocation_time = time(nullptr);
-        LOG_INFO("allocate slice for {}", _resource_owner);
-    }
-}
+          _capacity(_buffer.get_size()) {}
 
 /**
  * 0. check if file cache holder allocated
@@ -99,8 +88,6 @@ Status UploadFileBuffer::append_data(const Slice& data) {
             return Status::InternalError("no free buffer for 5 minutes");
         }
         swap_buffer(tmp);
-        set_allocation_time(time(nullptr));
-        LOG_INFO("allocate slice for {}", _resource_owner);
     }
     return Status::OK();
 }
@@ -213,8 +200,7 @@ std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
     OperationState state(_sync_after_complete_task, _is_cancelled);
     if (_type == BufferType::UPLOAD) {
         return std::make_shared<UploadFileBuffer>(std::move(_upload_cb), std::move(state), _offset,
-                                                  std::move(_alloc_holder_cb), _index_offset,
-                                                  _resource_owner);
+                                                  std::move(_alloc_holder_cb), _index_offset);
     }
     if (_type == BufferType::DOWNLOAD) {
         return std::make_shared<DownloadFileBuffer>(

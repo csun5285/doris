@@ -252,7 +252,6 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                             _countdown_event.signal();
                             return ret;
                         })
-                        .set_resource_owner(this)
                         .set_is_cancelled([this]() { return _failed.load(); });
                 if (!_disable_file_cache) {
                     // We would load the data into file cache asynchronously which indicates
