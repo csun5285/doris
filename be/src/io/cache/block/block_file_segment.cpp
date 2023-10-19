@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_writer.h"
@@ -167,7 +168,7 @@ Status FileBlock::append(Slice data) {
 
     std::lock_guard download_lock(_download_mutex);
 
-    _downloaded_size += data.size;
+    _downloaded_size = data.size;
     return st;
 }
 
@@ -296,24 +297,25 @@ Status FileBlock::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock 
     if (_cache_writer) {
         status = _cache_writer->close();
         _cache_writer.reset();
-        if (!status.ok()) {
-            return status;
+    }
+    
+    if (status.ok()) {
+        std::error_code ec;
+        std::filesystem::rename(get_path_in_local_cache(true), get_path_in_local_cache(), ec);
+        if (ec) {
+            LOG(ERROR) << fmt::format("failed to rename {} to {} : {}", get_path_in_local_cache(true),
+                                    get_path_in_local_cache(), ec.message());
+            status = Status::IOError(ec.message());
         }
     }
+    TEST_SYNC_POINT_CALLBACK("FileBlock::rename_error", &status);
 
-    std::error_code ec;
-    std::filesystem::rename(get_path_in_local_cache(true), get_path_in_local_cache(), ec);
-    if (ec) {
-        LOG(ERROR) << fmt::format("failed to rename {} to {} : {}", get_path_in_local_cache(true),
-                                  get_path_in_local_cache(), ec.message());
-        status = Status::IOError(ec.message());
-    }
-
-    if (status) [[likely]] {
+    if (status.ok()) [[likely]] {
         _is_downloaded = true;
         _download_state = State::DOWNLOADED;
     } else {
         _download_state = State::EMPTY;
+        _downloaded_size = 0;
     }
     _downloader_id = 0;
     return status;

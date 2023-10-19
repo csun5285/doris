@@ -1758,7 +1758,7 @@ void BlockFileCache::set_read_only(bool read_only) {
 std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
         const AccessKeyAndOffset& key, std::shared_ptr<FileReader> file_reader) {
     std::weak_ptr<FileReader> wp;
-    if (!s_read_only) [[likely]] {
+    if (!s_read_only && config::file_cache_max_file_reader_cache_size != 0) [[likely]] {
         std::lock_guard lock(s_file_reader_cache_mtx);
         if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
             s_file_name_to_reader.erase(s_file_reader_cache.back().first);

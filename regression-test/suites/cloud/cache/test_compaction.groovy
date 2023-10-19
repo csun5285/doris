@@ -119,7 +119,8 @@ suite("test_compaction") {
             assertEquals("success", compactJson.status.toLowerCase())
         }
     }
-
+    def retry_time = 120
+    def i = 0
     // wait for all compactions done
     for (String[] tablet in tablets) {
         boolean running = true
@@ -146,7 +147,7 @@ suite("test_compaction") {
             def compactionStatus = parseJson(out.trim())
             assertEquals("success", compactionStatus.status.toLowerCase())
             running = compactionStatus.run_status
-        } while (running)
+        } while (running && i++ < retry_time)
     }
 
     // compaction之后再次查询 时间应该相差不大

@@ -24,6 +24,8 @@
 #include <stddef.h>
 
 // IWYU pragma: no_include <bits/chrono.h>
+#include <sys/statfs.h>
+
 #include <chrono> // IWYU pragma: keep
 #include <condition_variable>
 #include <filesystem>
@@ -34,22 +36,21 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <sys/statfs.h>
 
 #include "common/config.h"
+#include "common/sync_point.h"
 #include "gtest/gtest_pred_impl.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/cache/block/block_file_segment.h"
 #include "io/fs/path.h"
 #include "olap/options.h"
-#include "common/sync_point.h"
 #include "util/slice.h"
-#include "common/sync_point.h"
+#include "util/time.h"
 
 namespace doris::io {
 
-extern int disk_used_percentage(const std::string &path, std::pair<int, int> *percent);
+extern int disk_used_percentage(const std::string& path, std::pair<int, int>* percent);
 
 namespace fs = std::filesystem;
 
@@ -86,8 +87,10 @@ void download(io::FileBlockSPtr file_block, size_t size = 0) {
 
     auto key_str = key.to_string();
     auto subdir = io::BlockFileCache::USE_CACHE_VERSION2
-                          ? fs::path(cache_base_path) / key_str.substr(0, 3) / (key_str + "_" + std::to_string(file_block->expiration_time())) 
-                          : fs::path(cache_base_path) / (key_str + "_" + std::to_string(file_block->expiration_time()));
+                          ? fs::path(cache_base_path) / key_str.substr(0, 3) /
+                                    (key_str + "_" + std::to_string(file_block->expiration_time()))
+                          : fs::path(cache_base_path) /
+                                    (key_str + "_" + std::to_string(file_block->expiration_time()));
     ASSERT_TRUE(fs::exists(subdir));
 
     std::string data(size, '0');
@@ -193,8 +196,8 @@ void test_file_cache(io::FileCacheType cache_type) {
     {
         io::BlockFileCache cache(cache_base_path, settings);
         ASSERT_TRUE(cache.initialize());
-        while(true) {
-            if (cache.get_lazy_open_success()){
+        while (true) {
+            if (cache.get_lazy_open_success()) {
                 break;
             };
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -204,8 +207,7 @@ void test_file_cache(io::FileCacheType cache_type) {
             auto segments = fromHolder(holder);
             /// Range was not present in cache. It should be added in cache as one while file segment.
             ASSERT_EQ(segments.size(), 1);
-            assert_range(1, segments[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::EMPTY);
+            assert_range(1, segments[0], io::FileBlock::Range(0, 9), io::FileBlock::State::EMPTY);
             ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
             assert_range(2, segments[0], io::FileBlock::Range(0, 9),
                          io::FileBlock::State::DOWNLOADING);
@@ -226,8 +228,7 @@ void test_file_cache(io::FileCacheType cache_type) {
 
             assert_range(4, segments[0], io::FileBlock::Range(0, 9),
                          io::FileBlock::State::DOWNLOADED);
-            assert_range(5, segments[1], io::FileBlock::Range(10, 14),
-                         io::FileBlock::State::EMPTY);
+            assert_range(5, segments[1], io::FileBlock::Range(10, 14), io::FileBlock::State::EMPTY);
 
             ASSERT_TRUE(segments[1]->get_or_set_downloader() == io::FileBlock::get_caller_id());
             download(segments[1]);
@@ -367,8 +368,7 @@ void test_file_cache(io::FileCacheType cache_type) {
             auto holder5 = cache.get_or_set(key, 2, 3, context); /// Get [2, 4]
             auto s5 = fromHolder(holder5);
             ASSERT_EQ(s5.size(), 1);
-            assert_range(25, s5[0], io::FileBlock::Range(0, 9),
-                         io::FileBlock::State::DOWNLOADED);
+            assert_range(25, s5[0], io::FileBlock::Range(0, 9), io::FileBlock::State::DOWNLOADED);
 
             auto holder1 = cache.get_or_set(key, 30, 2, context); /// Get [30, 31]
             auto s1 = fromHolder(holder1);
@@ -399,10 +399,8 @@ void test_file_cache(io::FileCacheType cache_type) {
             auto f = fromHolder(holder6);
             ASSERT_EQ(f.size(), 12);
 
-            assert_range(29, f[9], io::FileBlock::Range(28, 29),
-                         io::FileBlock::State::SKIP_CACHE);
-            assert_range(30, f[11], io::FileBlock::Range(32, 39),
-                         io::FileBlock::State::SKIP_CACHE);
+            assert_range(29, f[9], io::FileBlock::Range(28, 29), io::FileBlock::State::SKIP_CACHE);
+            assert_range(30, f[11], io::FileBlock::Range(32, 39), io::FileBlock::State::SKIP_CACHE);
         }
         {
             auto holder = cache.get_or_set(key, 2, 3, context); /// Get [2, 4]
@@ -447,8 +445,7 @@ void test_file_cache(io::FileCacheType cache_type) {
                 assert_range(37, segments_2[2], io::FileBlock::Range(28, 29),
                              io::FileBlock::State::DOWNLOADING);
 
-                ASSERT_TRUE(segments[2]->get_or_set_downloader() !=
-                            io::FileBlock::get_caller_id());
+                ASSERT_TRUE(segments[2]->get_or_set_downloader() != io::FileBlock::get_caller_id());
                 ASSERT_TRUE(segments[2]->state() == io::FileBlock::State::DOWNLOADING);
 
                 {
@@ -596,10 +593,8 @@ void test_file_cache(io::FileCacheType cache_type) {
 
         ASSERT_EQ(segments1.size(), 3);
         assert_range(48, segments1[0], io::FileBlock::Range(0, 9), io::FileBlock::State::EMPTY);
-        assert_range(49, segments1[1], io::FileBlock::Range(10, 19),
-                     io::FileBlock::State::EMPTY);
-        assert_range(50, segments1[2], io::FileBlock::Range(20, 24),
-                     io::FileBlock::State::EMPTY);
+        assert_range(49, segments1[1], io::FileBlock::Range(10, 19), io::FileBlock::State::EMPTY);
+        assert_range(50, segments1[2], io::FileBlock::Range(20, 24), io::FileBlock::State::EMPTY);
     }
 }
 
@@ -645,8 +640,8 @@ TEST(BlockFileCache, resize) {
     settings.max_file_block_size = 100;
     io::BlockFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
-    while(true) {
-        if (cache.get_lazy_open_success()){
+    while (true) {
+        if (cache.get_lazy_open_success()) {
             break;
         };
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -674,8 +669,8 @@ TEST(BlockFileCache, query_limit_heap_use_after_free) {
     settings.total_size = 15;
     io::BlockFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
-    while(true) {
-        if (cache.get_lazy_open_success()){
+    while (true) {
+        if (cache.get_lazy_open_success()) {
             break;
         };
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -712,8 +707,7 @@ TEST(BlockFileCache, query_limit_heap_use_after_free) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(3, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(4, blocks[0], io::FileBlock::Range(10, 14),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(4, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     {
@@ -728,16 +722,14 @@ TEST(BlockFileCache, query_limit_heap_use_after_free) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(6, blocks[0], io::FileBlock::Range(15, 15), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(7, blocks[0], io::FileBlock::Range(15, 15),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(7, blocks[0], io::FileBlock::Range(15, 15), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     {
         auto holder = cache.get_or_set(key, 16, 9, context); /// Add range [16, 24]
         auto blocks = fromHolder(holder);
         ASSERT_GE(blocks.size(), 1);
-        assert_range(8, blocks[0], io::FileBlock::Range(16, 24),
-                     io::FileBlock::State::SKIP_CACHE);
+        assert_range(8, blocks[0], io::FileBlock::Range(16, 24), io::FileBlock::State::SKIP_CACHE);
     }
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
@@ -762,8 +754,8 @@ TEST(BlockFileCache, query_limit_dcheck) {
     settings.total_size = 15;
     io::BlockFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
-    while(true) {
-        if (cache.get_lazy_open_success()){
+    while (true) {
+        if (cache.get_lazy_open_success()) {
             break;
         };
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -800,8 +792,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(3, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(4, blocks[0], io::FileBlock::Range(10, 14),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(4, blocks[0], io::FileBlock::Range(10, 14), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     {
@@ -816,8 +807,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(6, blocks[0], io::FileBlock::Range(15, 15), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(7, blocks[0], io::FileBlock::Range(15, 15),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(7, blocks[0], io::FileBlock::Range(15, 15), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     // double add
@@ -836,8 +826,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(1, blocks[0], io::FileBlock::Range(30, 34), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(2, blocks[0], io::FileBlock::Range(30, 34),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(2, blocks[0], io::FileBlock::Range(30, 34), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     {
@@ -846,8 +835,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(1, blocks[0], io::FileBlock::Range(40, 44), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(2, blocks[0], io::FileBlock::Range(40, 44),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(2, blocks[0], io::FileBlock::Range(40, 44), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     {
@@ -856,8 +844,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
         ASSERT_GE(blocks.size(), 1);
         assert_range(1, blocks[0], io::FileBlock::Range(50, 54), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
-        assert_range(2, blocks[0], io::FileBlock::Range(50, 54),
-                     io::FileBlock::State::DOWNLOADING);
+        assert_range(2, blocks[0], io::FileBlock::Range(50, 54), io::FileBlock::State::DOWNLOADING);
         download(blocks[0]);
     }
     if (fs::exists(cache_base_path)) {
@@ -1143,7 +1130,7 @@ int get_disk_info(const char* const (&argv)[N], int* percent) {
         char buffer[PATH_MAX];
         ssize_t nbytes;
         while ((nbytes = read(pipefds[0], buffer, PATH_MAX)) > 0) {
-            buffer[nbytes-1] = '\0';
+            buffer[nbytes - 1] = '\0';
             rets.push_back(buffer);
         }
         ::close(pipefds[0]);
@@ -1291,9 +1278,7 @@ TEST(BlockFileCache, fix_tmp_file) {
     fs::create_directories(cache_base_path);
     test_file_cache(io::FileCacheType::NORMAL);
     auto sp = SyncPoint::get_instance();
-    Defer defer {[sp] {
-        sp->clear_call_back("CloudFileCache::TmpFile");
-    }};
+    Defer defer {[sp] { sp->clear_all_call_backs(); }};
     sp->enable_processing();
     TUniqueId query_id;
     query_id.hi = 1;
@@ -1308,13 +1293,12 @@ TEST(BlockFileCache, fix_tmp_file) {
     context.cache_type = other_context.cache_type = io::FileCacheType::NORMAL;
     context.query_id = query_id;
     auto key = io::BlockFileCache::hash("key1");
-    std::atomic_bool flag1  {false}, flag2 {false};
+    std::atomic_bool flag1 {false}, flag2 {false};
     sp->set_call_back("CloudFileCache::TmpFile1", [&](auto&&) {
-        while (!flag1) {}
+        while (!flag1) {
+        }
     });
-    sp->set_call_back("CloudFileCache::TmpFile2", [&](auto&&) {
-        flag2 = true;
-    });
+    sp->set_call_back("CloudFileCache::TmpFile2", [&](auto&&) { flag2 = true; });
     io::BlockFileCache cache(cache_base_path, settings);
     ASSERT_TRUE(cache.initialize());
     auto holder = cache.get_or_set(key, 100, 1, context); /// Add range [9, 9]
@@ -1332,11 +1316,504 @@ TEST(BlockFileCache, fix_tmp_file) {
     Slice result(data.data(), size);
     ASSERT_TRUE(segments[0]->append(result));
     flag1 = true;
-    while (!flag2) {}
+    while (!flag2) {
+    }
     ASSERT_TRUE(segments[0]->finalize_write());
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
 }
 
+TEST(BlockFileCache, test_lazy_load) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] { sp->clear_all_call_backs(); }};
+    sp->enable_processing();
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context, other_context;
+    context.cache_type = other_context.cache_type = io::FileCacheType::NORMAL;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    std::atomic_bool flag1 {false};
+    sp->set_call_back("CloudFileCache::TmpFile2", [&](auto&&) {  while (!flag1) {
+        } });
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    std::this_thread::sleep_for(std::chrono::milliseconds(10)); // wait to load disk
+    auto holder = cache.get_or_set(key, 100, 1, context); /// Add range [9, 9]
+    auto segments = fromHolder(holder);
+    ASSERT_EQ(segments.size(), 1);
+    assert_range(1, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::EMPTY);
+    ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+    assert_range(2, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::DOWNLOADING);
+    auto key_str = key.to_string();
+    auto subdir = fs::path(cache_base_path) /
+                  (key_str + "_" + std::to_string(segments[0]->expiration_time()));
+    ASSERT_TRUE(fs::exists(subdir));
+    size_t size = segments[0]->range().size();
+    std::string data(size, '0');
+    Slice result(data.data(), size);
+    ASSERT_TRUE(segments[0]->append(result));
+    ASSERT_TRUE(segments[0]->finalize_write());
+    flag1 = true;
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(cache.get_file_blocks_num(io::FileCacheType::NORMAL), 6);
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, test_lazy_load_with_limit) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] { sp->clear_all_call_backs(); }};
+    sp->enable_processing();
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context, other_context;
+    context.cache_type = other_context.cache_type = io::FileCacheType::NORMAL;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    std::atomic_bool flag1 {false};
+    sp->set_call_back("CloudFileCache::TmpFile2", [&](auto&&) {  while (!flag1) {
+        } });
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    std::this_thread::sleep_for(std::chrono::milliseconds(10)); // wait to load disk
+    cache._disk_resource_limit_mode = true;
+    auto holder = cache.get_or_set(key, 100, 1, context); /// Add range [9, 9]
+    auto segments = fromHolder(holder);
+    ASSERT_EQ(segments.size(), 1);
+    assert_range(1, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::EMPTY);
+    ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+    assert_range(2, segments[0], io::FileBlock::Range(100, 100), io::FileBlock::State::DOWNLOADING);
+    auto key_str = key.to_string();
+    auto subdir = fs::path(cache_base_path) /
+                  (key_str + "_" + std::to_string(segments[0]->expiration_time()));
+    ASSERT_TRUE(fs::exists(subdir));
+    size_t size = segments[0]->range().size();
+    std::string data(size, '0');
+    Slice result(data.data(), size);
+    ASSERT_TRUE(segments[0]->append(result));
+    ASSERT_TRUE(segments[0]->finalize_write());
+    flag1 = true;
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(cache.get_file_blocks_num(io::FileCacheType::NORMAL), 5);
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, ttl_normal) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] { sp->clear_call_back("BlockFileCache::set_sleep_time"); }};
+    sp->set_call_back("BlockFileCache::set_sleep_time",
+                      [](auto&& args) { *try_any_cast<int64_t*>(args[0]) = 1; });
+    sp->enable_processing();
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = io::FileCacheType::TTL;
+    context.query_id = query_id;
+    int64_t cur_time = UnixSeconds();
+    context.expiration_time = cur_time + 120;
+    int64_t modify_time = cur_time + 5;
+    auto key2 = io::BlockFileCache::hash("key2");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::TTL);
+    }
+    {
+        cache.modify_expiration_time(key2, modify_time);
+        context.expiration_time = modify_time;
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        EXPECT_EQ(segments[0]->expiration_time(), modify_time);
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    {
+        context.cache_type = io::FileCacheType::INDEX;
+        context.expiration_time = 0;
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::NORMAL);
+        EXPECT_EQ(segments[0]->expiration_time(), 0);
+        std::string buffer(10, '1');
+        EXPECT_TRUE(segments[0]->read_at(Slice(buffer.data(), 10), 0).ok());
+        EXPECT_EQ(buffer, std::string(10, '0'));
+    }
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, ttl_change_to_normal) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = io::FileCacheType::TTL;
+    context.query_id = query_id;
+    int64_t cur_time = UnixSeconds();
+    context.expiration_time = cur_time + 180;
+    auto key2 = io::BlockFileCache::hash("key2");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::TTL);
+    }
+    {
+        context.cache_type = io::FileCacheType::NORMAL;
+        context.expiration_time = 0;
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        EXPECT_TRUE(fs::exists(cache.get_path_in_local_cache(key2, 0, 50, io::FileCacheType::NORMAL)));
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::NORMAL);
+        EXPECT_EQ(segments[0]->expiration_time(), 0);
+        std::string buffer(10, '1');
+        EXPECT_TRUE(segments[0]->read_at(Slice(buffer.data(), 10), 0).ok());
+        EXPECT_EQ(buffer, std::string(10, '0'));
+    }
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, ttl_change_expiration_time) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = io::FileCacheType::TTL;
+    context.query_id = query_id;
+    int64_t cur_time = UnixSeconds();
+    context.expiration_time = cur_time + 180;
+    int64_t change_time = cur_time + 120;
+    auto key2 = io::BlockFileCache::hash("key2");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::TTL);
+    }
+    {
+        context.cache_type = io::FileCacheType::TTL;
+        context.expiration_time = change_time;
+        auto holder = cache.get_or_set(key2, 50, 10, context); /// Add range [50, 59]
+        EXPECT_TRUE(fs::exists(cache.get_path_in_local_cache(key2, change_time, 50, io::FileCacheType::TTL)));
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+        EXPECT_EQ(segments[0]->cache_type(), io::FileCacheType::TTL);
+        EXPECT_EQ(segments[0]->expiration_time(), change_time);
+        std::string buffer(10, '1');
+        EXPECT_TRUE(segments[0]->read_at(Slice(buffer.data(), 10), 0).ok());
+        EXPECT_EQ(buffer, std::string(10, '0'));
+    }
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, ttl_reverse) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 5;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = io::FileCacheType::TTL;
+    context.query_id = query_id;
+    int64_t cur_time = UnixSeconds();
+    context.expiration_time = cur_time + 180;
+    auto key2 = io::BlockFileCache::hash("key2");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        auto holder = cache.get_or_set(key2, 0, 30, context); /// Add range [0, 29]
+        auto segments = fromHolder(holder);
+        for (auto& block : segments) {
+            ASSERT_TRUE(block->get_or_set_downloader() == io::FileBlock::get_caller_id());
+            download(block);
+        }
+        EXPECT_EQ(segments.size() , 6);
+    }
+    {
+        auto holder = cache.get_or_set(key2, 50, 5, context); /// Add range [50, 54]
+        auto segments = fromHolder(holder);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 54), io::FileBlock::State::SKIP_CACHE);
+    }
+    {
+        context.cache_type = io::FileCacheType::NORMAL;
+        auto holder = cache.get_or_set(key2, 50, 5, context); /// Add range [50, 54]
+        auto segments = fromHolder(holder);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 54), io::FileBlock::State::SKIP_CACHE);
+    }
+    
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST(BlockFileCache, io_error) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    config::file_cache_max_file_reader_cache_size = 0;
+    test_file_cache(io::FileCacheType::NORMAL);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context, other_context;
+    context.cache_type = other_context.cache_type = io::FileCacheType::NORMAL;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto sp = SyncPoint::get_instance();
+    sp->enable_processing();
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("LocalFileSystem::open_file_impl", [&](auto&& values) {
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 9), io::FileBlock::State::DOWNLOADED);
+        auto buffer = std::make_unique<char[]>(10);
+        EXPECT_FALSE(segments[0]->read_at(Slice(buffer.get(), 10), 0).ok());
+    }
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("LocalFileReader::read_at_impl", [&](auto&& values) {
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 9), io::FileBlock::State::DOWNLOADED);
+        auto buffer = std::make_unique<char[]>(10);
+        EXPECT_FALSE(segments[0]->read_at(Slice(buffer.get(), 10), 0).ok());
+    }
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("LocalFileSystem::create_file_impl", [&](auto&& values) {
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        auto holder = cache.get_or_set(key, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        std::string data(10, '0');
+        Slice result(data.data(), 10);
+        EXPECT_FALSE(segments[0]->append(result).ok());
+    }
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("LocalFileWriter::appendv", [&](auto&& values) {
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        auto holder = cache.get_or_set(key, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        std::string data(10, '0');
+        Slice result(data.data(), 10);
+        EXPECT_FALSE(segments[0]->append(result).ok());
+    }
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("LocalFileWriter::close", [&](auto&& values) {
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+        });
+        auto holder = cache.get_or_set(key, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        std::string data(10, '0');
+        Slice result(data.data(), 10);
+        EXPECT_TRUE(segments[0]->append(result).ok());
+        EXPECT_FALSE(segments[0]->finalize_write().ok());
+    }
+    {
+        Defer defer {[sp] { sp->clear_all_call_backs(); }};
+        sp->set_call_back("FileBlock::rename_error", [](auto&& args) {
+            *try_any_cast<Status*>(args[0]) = Status::IOError("inject io error");
+        });
+        auto holder = cache.get_or_set(key, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        std::string data(10, '0');
+        Slice result(data.data(), 10);
+        EXPECT_TRUE(segments[0]->append(result).ok());
+        EXPECT_FALSE(segments[0]->finalize_write().ok());
+    }
+    {
+        auto holder = cache.get_or_set(key, 50, 10, context); /// Add range [50, 59]
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(50, 59),
+                     io::FileBlock::State::DOWNLOADED);
+    }
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
 } // namespace doris::io

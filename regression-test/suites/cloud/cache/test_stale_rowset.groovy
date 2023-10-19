@@ -84,7 +84,7 @@ suite("test_stale_rowset") {
     def getCurCacheSize = {
         backendIdToCacheSize = [:]
         for (String[] backend in backends) {
-            if (backend[9].equals("true")) {
+            if (backend[8].equals("true")) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("curl http://")
                 sb.append(backendId_to_backendIP.get(backend[0]))
