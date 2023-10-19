@@ -405,7 +405,7 @@ TEST(MetaServiceTest, AlterClusterTest) {
         req.mutable_cluster()->set_cluster_status(ClusterStatus::SUSPENDED);
         req.set_op(AlterClusterRequest::SET_CLUSTER_STATUS);
         AlterClusterResponse res;
-        meta_service->alter_cluster(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+        meta_service->alter_cluster(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
@@ -2759,8 +2759,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-            std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+            std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 0);
@@ -2789,8 +2788,7 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-            std::string lock_key =
-                    meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+            std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
             ASSERT_EQ(ret, 1);
@@ -2891,8 +2889,7 @@ TEST(MetaServiceTest, BatchGetVersion) {
         req.set_table_id(-1);
         req.set_partition_id(-1);
         req.set_batch_mode(true);
-        for (size_t i = 0; i < table_ids.size(); ++i)
-            req.add_db_ids(1);
+        for (size_t i = 0; i < table_ids.size(); ++i) req.add_db_ids(1);
         std::copy(table_ids.begin(), table_ids.end(),
                   google::protobuf::RepeatedFieldBackInserter(req.mutable_table_ids()));
         std::copy(partition_ids.begin(), partition_ids.end(),
@@ -2951,6 +2948,526 @@ TEST(MetaServiceTest, BatchGetVersionFallback) {
             << ", code=" << resp.status().code();
 
     ASSERT_EQ(resp.versions_size(), N);
+}
+
+extern bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t index_id,
+                              int64_t partition_id);
+
+TEST(MetaServiceTest, IsDroppedTablet) {
+    auto meta_service = get_meta_service();
+    std::string instance_id = "IsDroppedTablet";
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    auto& txn_kv = meta_service->txn_kv_;
+    auto reset_txn_kv = [&txn_kv] {
+        txn_kv = std::make_shared<MemTxnKv>();
+        txn_kv->init();
+    };
+
+    constexpr int64_t index_id = 10002;
+    constexpr int64_t partition_id = 10003;
+
+    std::unique_ptr<Transaction> txn;
+    RecycleIndexPB index_pb;
+    auto index_key = recycle_index_key({instance_id, index_id});
+    RecyclePartitionPB partition_pb;
+    auto partition_key = recycle_partition_key({instance_id, partition_id});
+    std::string val;
+    // No recycle index and partition kv
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    // Tablet in PREPARED index
+    index_pb.set_state(RecycleIndexPB::PREPARED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    // Tablet in DROPPED/RECYCLING index
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::DROPPED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::RECYCLING);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    // Tablet in PREPARED partition
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::PREPARED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    // Tablet in DROPPED/RECYCLING partition
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::DROPPED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::RECYCLING);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
+}
+
+TEST(MetaServiceTest, IndexRequest) {
+    auto meta_service = get_meta_service();
+    std::string instance_id = "IndexRequest";
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    auto& txn_kv = meta_service->txn_kv_;
+    auto reset_txn_kv = [&txn_kv] {
+        txn_kv = std::make_shared<MemTxnKv>();
+        txn_kv->init();
+    };
+    constexpr int64_t table_id = 10001;
+    constexpr int64_t index_id = 10002;
+    constexpr int64_t partition_id = 10003;
+    constexpr int64_t tablet_id = 10004;
+
+    std::unique_ptr<Transaction> txn;
+    doris::TabletMetaPB tablet_pb;
+    tablet_pb.set_table_id(table_id);
+    tablet_pb.set_index_id(index_id);
+    tablet_pb.set_partition_id(partition_id);
+    tablet_pb.set_tablet_id(tablet_id);
+    auto tablet_key = meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    auto tablet_val = tablet_pb.SerializeAsString();
+    RecycleIndexPB index_pb;
+    auto index_key = recycle_index_key({instance_id, index_id});
+    std::string val;
+
+    // ------------Test prepare index------------
+    brpc::Controller ctrl;
+    IndexRequest req;
+    IndexResponse res;
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::PREPARED);
+    // Last state PREPARED
+    res.Clear();
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::PREPARED);
+    // Last state DROPPED
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::DROPPED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::RECYCLING);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
+    // Last state UNKNOWN but tablet meta existed
+    reset_txn_kv();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->remove(index_key);
+    txn->put(tablet_key, tablet_val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 1);
+    // ------------Test commit index------------
+    reset_txn_kv();
+    req.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 1);
+    // Last state PREPARED
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::PREPARED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 1);
+    // Last state DROPPED
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::DROPPED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::RECYCLING);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
+    // Last state UNKNOWN but tablet meta existed
+    reset_txn_kv();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(tablet_key, tablet_val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 1);
+    // ------------Test drop index------------
+    reset_txn_kv();
+    req.Clear();
+    meta_service->drop_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->drop_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
+    // Last state PREPARED
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::PREPARED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
+    // Last state DROPPED
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::DROPPED);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    index_pb.set_state(RecycleIndexPB::RECYCLING);
+    val = index_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(index_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_index(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_TRUE(index_pb.ParseFromString(val));
+    ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
+}
+
+TEST(MetaServiceTest, PartitionRequest) {
+    auto meta_service = get_meta_service();
+    std::string instance_id = "PartitionRequest";
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    auto& txn_kv = meta_service->txn_kv_;
+    auto reset_txn_kv = [&txn_kv] {
+        txn_kv = std::make_shared<MemTxnKv>();
+        txn_kv->init();
+    };
+    constexpr int64_t table_id = 10001;
+    constexpr int64_t index_id = 10002;
+    constexpr int64_t partition_id = 10003;
+    constexpr int64_t tablet_id = 10004;
+
+    std::unique_ptr<Transaction> txn;
+    doris::TabletMetaPB tablet_pb;
+    tablet_pb.set_table_id(table_id);
+    tablet_pb.set_index_id(index_id);
+    tablet_pb.set_partition_id(partition_id);
+    tablet_pb.set_tablet_id(tablet_id);
+    auto tablet_key = meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    auto tablet_val = tablet_pb.SerializeAsString();
+    RecyclePartitionPB partition_pb;
+    auto partition_key = recycle_partition_key({instance_id, partition_id});
+    std::string val;
+    // ------------Test prepare partition------------
+    brpc::Controller ctrl;
+    PartitionRequest req;
+    PartitionResponse res;
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    req.add_partition_ids(partition_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::PREPARED);
+    // Last state PREPARED
+    res.Clear();
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::PREPARED);
+    // Last state DROPPED
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::DROPPED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::RECYCLING);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
+    // Last state UNKNOWN but tablet meta existed
+    reset_txn_kv();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->remove(partition_key);
+    txn->put(tablet_key, tablet_val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    // ------------Test commit partition------------
+    reset_txn_kv();
+    req.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    req.add_partition_ids(partition_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    // Last state PREPARED
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::PREPARED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    // Last state DROPPED
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::DROPPED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::RECYCLING);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
+    // Last state UNKNOWN but tablet meta existed
+    reset_txn_kv();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(tablet_key, tablet_val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    // ------------Test drop partition------------
+    reset_txn_kv();
+    req.Clear();
+    meta_service->drop_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    req.set_table_id(table_id);
+    req.add_index_ids(index_id);
+    req.add_partition_ids(partition_id);
+    // Last state UNKNOWN
+    res.Clear();
+    meta_service->drop_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
+    // Last state PREPARED
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::PREPARED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
+    // Last state DROPPED
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::DROPPED);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
+    // Last state RECYCLING
+    reset_txn_kv();
+    partition_pb.set_state(RecyclePartitionPB::RECYCLING);
+    val = partition_pb.SerializeAsString();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(partition_key, val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    meta_service->drop_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_TRUE(partition_pb.ParseFromString(val));
+    ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
 }
 
 } // namespace selectdb

@@ -245,8 +245,7 @@ static int create_tablet(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int6
 }
 
 static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t partition_id,
-                                   const std::vector<int64_t>& index_ids,
-                                   RecyclePartitionPB::Type type) {
+                                   const std::vector<int64_t>& index_ids) {
     std::string key;
     std::string val;
 
@@ -260,7 +259,7 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t part
         partition_pb.add_index_id(index_id);
     }
     partition_pb.set_creation_time(current_time);
-    partition_pb.set_type(type);
+    partition_pb.set_state(RecyclePartitionPB::DROPPED);
     partition_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
@@ -306,8 +305,7 @@ static int create_txn_label_kv(TxnKv* txn_kv, std::string label, int64_t db_id) 
     return 0;
 }
 
-static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_id,
-                                RecycleIndexPB::Type type) {
+static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_id) {
     std::string key;
     std::string val;
 
@@ -318,7 +316,7 @@ static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_i
 
     index_pb.set_table_id(table_id);
     index_pb.set_creation_time(current_time);
-    index_pb.set_type(type);
+    index_pb.set_state(RecycleIndexPB::DROPPED);
     index_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
@@ -934,7 +932,7 @@ TEST(RecyclerTest, recycle_indexes) {
             create_committed_rowset(txn_kv.get(), accessor.get(), "recycle_indexes", tablet_id, j);
         }
     }
-    create_recycle_index(txn_kv.get(), table_id, index_id, RecycleIndexPB::DROP);
+    create_recycle_index(txn_kv.get(), table_id, index_id);
     ASSERT_EQ(recycler.recycle_indexes(), 0);
 
     // check rowset does not exist on s3
@@ -1045,8 +1043,7 @@ TEST(RecyclerTest, recycle_partitions) {
             }
         }
     }
-    create_recycle_partiton(txn_kv.get(), table_id, partition_id, index_ids,
-                            RecyclePartitionPB::DROP);
+    create_recycle_partiton(txn_kv.get(), table_id, partition_id, index_ids);
     ASSERT_EQ(recycler.recycle_partitions(), 0);
 
     // check rowset does not exist on s3
@@ -1114,8 +1111,7 @@ TEST(RecyclerTest, recycle_versions) {
     }
     // Drop partitions
     for (int i = 0; i < 5; ++i) {
-        create_recycle_partiton(txn_kv.get(), table_id, partition_ids[i], index_ids,
-                                RecyclePartitionPB::DROP);
+        create_recycle_partiton(txn_kv.get(), table_id, partition_ids[i], index_ids);
     }
 
     InstanceInfoPB instance;
@@ -1138,7 +1134,7 @@ TEST(RecyclerTest, recycle_versions) {
 
     // Drop indexes
     for (auto index_id : index_ids) {
-        create_recycle_index(txn_kv.get(), table_id, index_id, RecycleIndexPB::DROP);
+        create_recycle_index(txn_kv.get(), table_id, index_id);
     }
     // Recycle all indexes of the table, that is, the table has been dropped
     ASSERT_EQ(recycler.recycle_indexes(), 0);

@@ -548,7 +548,38 @@ int InstanceRecycler::recycle_indexes() {
         auto index_id = std::get<int64_t>(std::get<0>(out[3]));
         LOG(INFO) << "begin to recycle index, instance_id=" << instance_id_
                   << " table_id=" << index_pb.table_id() << " index_id=" << index_id
-                  << " type=" << RecycleIndexPB_Type_Name(index_pb.type());
+                  << " state=" << RecycleIndexPB::State_Name(index_pb.state());
+        // Change state to RECYCLING
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            LOG_WARNING("failed to create txn");
+            return -1;
+        }
+        std::string val;
+        ret = txn->get(k, &val);
+        if (ret == 1) { // UNKNOWN, maybe recycled or committed, skip it
+            LOG_INFO("index {} has been recycled or committed", index_id);
+            return 0;
+        }
+        if (ret != 0) {
+            LOG_WARNING("failed to get kv").tag("key", hex(k)).tag("ret", ret);
+            return -1;
+        }
+        index_pb.Clear();
+        if (!index_pb.ParseFromString(val)) {
+            LOG_WARNING("malformed recycle index value").tag("key", hex(k));
+            return -1;
+        }
+        if (index_pb.state() != RecycleIndexPB::RECYCLING) {
+            index_pb.set_state(RecycleIndexPB::RECYCLING);
+            txn->put(k, index_pb.SerializeAsString());
+            ret = txn->commit();
+            if (ret != 0) {
+                LOG_WARNING("failed to commit txn").tag("ret", ret);
+                return -1;
+            }
+        }
         if (recycle_tablets(index_pb.table_id(), index_id) != 0) {
             LOG_WARNING("failed to recycle tablets under index")
                     .tag("table_id", index_pb.table_id())
@@ -629,8 +660,38 @@ int InstanceRecycler::recycle_partitions() {
         auto partition_id = std::get<int64_t>(std::get<0>(out[3]));
         LOG(INFO) << "begin to recycle partition, instance_id=" << instance_id_
                   << " table_id=" << part_pb.table_id() << " partition_id=" << partition_id
-                  << " type=" << RecyclePartitionPB_Type_Name(part_pb.type());
-        int ret = 0;
+                  << " state=" << RecyclePartitionPB::State_Name(part_pb.state());
+        // Change state to RECYCLING
+        std::unique_ptr<Transaction> txn;
+        int ret = txn_kv_->create_txn(&txn);
+        if (ret != 0) {
+            LOG_WARNING("failed to create txn");
+            return -1;
+        }
+        std::string val;
+        ret = txn->get(k, &val);
+        if (ret == 1) { // UNKNOWN, maybe recycled or committed, skip it
+            LOG_INFO("partition {} has been recycled or committed", partition_id);
+            return 0;
+        }
+        if (ret != 0) {
+            LOG_WARNING("failed to get kv");
+            return -1;
+        }
+        part_pb.Clear();
+        if (!part_pb.ParseFromString(val)) {
+            LOG_WARNING("malformed recycle partition value").tag("key", hex(k));
+            return -1;
+        }
+        if (part_pb.state() != RecyclePartitionPB::RECYCLING) {
+            part_pb.set_state(RecyclePartitionPB::RECYCLING);
+            txn->put(k, part_pb.SerializeAsString());
+            ret = txn->commit();
+            if (ret != 0) {
+                LOG_WARNING("failed to commit txn: {}", ret);
+                return -1;
+            }
+        }
         for (int64_t index_id : part_pb.index_id()) {
             if (recycle_tablets(part_pb.table_id(), index_id, partition_id) != 0) {
                 LOG_WARNING("failed to recycle tablets under partition")

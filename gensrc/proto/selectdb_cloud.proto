@@ -340,28 +340,30 @@ message RecycleTxnPB {
 }
 
 message RecycleIndexPB {
-    enum Type {
+    enum State {
         UNKNOWN = 0;
-        PREPARE = 1;
-        DROP = 2;
+        PREPARED = 1;
+        DROPPED = 2;
+        RECYCLING = 3;
     }
     optional int64 table_id = 1;
     optional int64 creation_time = 2;
     optional int64 expiration = 3; // expiration timestamp
-    optional Type type = 4;
+    optional State state = 4;
 }
 
 message RecyclePartitionPB {
-    enum Type {
+    enum State {
         UNKNOWN = 0;
-        PREPARE = 1;
-        DROP = 2;
+        PREPARED = 1;
+        DROPPED = 2;
+        RECYCLING = 3;
     }
     optional int64 table_id = 1;
     repeated int64 index_id = 2;
     optional int64 creation_time = 3;
     optional int64 expiration = 4; // expiration timestamp
-    optional Type type = 5;
+    optional State state = 5;
     optional int64 db_id = 6; // For version recycling
 }
 
