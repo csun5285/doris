@@ -168,15 +168,6 @@ public final class MetricRepo {
     public static ConcurrentHashMap<String, GaugeMetricImpl<Double>>
                     CLOUD_CLUSTER_GAUGE_QUERY_ERR_RATE = new ConcurrentHashMap<>();
 
-    public static ConcurrentHashMap<String, GaugeMetricImpl<Long>>
-                    CLOUD_DB_TABLE_DATA_SIZE = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<String, GaugeMetricImpl<Long>>
-                    CLOUD_DB_TABLE_ROW_COUNT = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<String, GaugeMetricImpl<Long>>
-                    CLOUD_DB_TABLE_SEGMENT_COUNT = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<String, GaugeMetricImpl<Long>>
-                    CLOUD_DB_TABLE_ROWSET_COUNT = new ConcurrentHashMap<>();
-
     public static ConcurrentHashMap<String, Histogram>
                     CLOUD_CLUSTER_HISTO_QUERY_LATENCY = new ConcurrentHashMap<>();
 
@@ -862,6 +853,11 @@ public final class MetricRepo {
 
         // node info
         visitor.getNodeInfo();
+
+        // cloud table stats
+        if (Config.isCloudMode()) {
+            visitor.getCloudTableStats();
+        }
 
         return visitor.finish();
     }

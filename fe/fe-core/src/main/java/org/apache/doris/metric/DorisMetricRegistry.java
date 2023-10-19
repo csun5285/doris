@@ -91,17 +91,6 @@ public class DorisMetricRegistry {
         }
     }
 
-    public void removeMetricsByNameAndLabels(String name, List<MetricLabel> labels) {
-        // Same reason as comment in addMetrics()
-        if (!Env.isCheckpointThread()) {
-            MetricList metricList = metrics.get(name);
-            if (metricList != null) {
-                String labelId = computeLabelId(labels);
-                metricList.removeByLabelId(labelId);
-            }
-        }
-    }
-
     private static String computeLabelId(List<MetricLabel> labels) {
         TreeMap<String, String> labelMap = new TreeMap<>();
         for (MetricLabel label : labels) {

@@ -6399,4 +6399,8 @@ public class Env {
     public ColumnIdFlushDaemon getColumnIdFlusher() {
         return columnIdFlusher;
     }
+
+    public CloudTabletStatMgr getCloudTabletStatMgr() {
+        return this.cloudTabletStatMgr;
+    }
 }

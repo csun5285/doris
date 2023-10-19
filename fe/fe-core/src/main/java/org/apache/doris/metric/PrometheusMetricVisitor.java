@@ -274,4 +274,74 @@ public class PrometheusMetricVisitor extends MetricVisitor {
         }
         return;
     }
+
+    @Override
+    public void getCloudTableStats() {
+        if (Env.getCurrentEnv().getCloudTabletStatMgr() == null) {
+            return;
+        }
+
+        StringBuilder dataSizeBuilder = new StringBuilder();
+        StringBuilder rowsetCountBuilder = new StringBuilder();
+        StringBuilder segmentCountBuilder = new StringBuilder();
+        StringBuilder tableRowCountBuilder = new StringBuilder();
+        Env.getCurrentEnv().getCloudTabletStatMgr().getCloudTableStatsMap().values().forEach(stats -> {
+            dataSizeBuilder.append("doris_fe_table_data_size{db_name=\"");
+            dataSizeBuilder.append(stats.getDbName());
+            dataSizeBuilder.append("\", table_name=\"");
+            dataSizeBuilder.append(stats.getTableName());
+            dataSizeBuilder.append("\"} ");
+            dataSizeBuilder.append(stats.getTableDataSize());
+            dataSizeBuilder.append("\n");
+
+            rowsetCountBuilder.append("doris_fe_table_rowset_count{db_name=\"");
+            rowsetCountBuilder.append(stats.getDbName());
+            rowsetCountBuilder.append("\", table_name=\"");
+            rowsetCountBuilder.append(stats.getTableName());
+            rowsetCountBuilder.append("\"} ");
+            rowsetCountBuilder.append(stats.getTableRowsetCount());
+            rowsetCountBuilder.append("\n");
+
+            segmentCountBuilder.append("doris_fe_table_segment_count{db_name=\"");
+            segmentCountBuilder.append(stats.getDbName());
+            segmentCountBuilder.append("\", table_name=\"");
+            segmentCountBuilder.append(stats.getTableName());
+            segmentCountBuilder.append("\"} ");
+            segmentCountBuilder.append(stats.getTableSegmentCount());
+            segmentCountBuilder.append("\n");
+
+            tableRowCountBuilder.append("doris_fe_table_row_count{db_name=\"");
+            tableRowCountBuilder.append(stats.getDbName());
+            tableRowCountBuilder.append("\", table_name=\"");
+            tableRowCountBuilder.append(stats.getTableName());
+            tableRowCountBuilder.append("\"} ");
+            tableRowCountBuilder.append(stats.getTableRowCount());
+            tableRowCountBuilder.append("\n");
+        });
+
+        if (dataSizeBuilder.length() > 0) {
+            sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_data_size", "table data size\n"));
+            sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_data_size", "gauge\n"));
+            sb.append(dataSizeBuilder.toString());
+        }
+
+        if (segmentCountBuilder.length() > 0) {
+            sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_rowset_count", "table rowset count\n"));
+            sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_rowset_count", "gauge\n"));
+            sb.append(rowsetCountBuilder.toString());
+        }
+
+        if (segmentCountBuilder.length() > 0) {
+            sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_segment_count", "table segment count\n"));
+            sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_segment_count", "gauge\n"));
+            sb.append(segmentCountBuilder.toString());
+        }
+
+        if (tableRowCountBuilder.length() > 0) {
+            sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_row_count", "table row count\n"));
+            sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_row_count", "gauge\n"));
+            sb.append(tableRowCountBuilder.toString());
+        }
+        return;
+    }
 }
