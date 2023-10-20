@@ -521,10 +521,19 @@ int InstanceRecycler::recycle_indexes() {
                 .tag("num_recycled", num_recycled);
     });
 
+    auto calc_expiration = [](const RecycleIndexPB& index) {
+        int64_t expiration = index.expiration() > 0 ? index.expiration() : index.creation_time();
+        int64_t retention_seconds = config::retention_seconds;
+        if (index.state() == RecycleIndexPB::DROPPED) {
+            retention_seconds =
+                    std::min(config::dropped_index_retention_seconds, retention_seconds);
+        }
+        return expiration + retention_seconds;
+    };
+
     // Elements in `index_keys` has the same lifetime as `it` in `scan_and_recycle`
     std::vector<std::string_view> index_keys;
-    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, &index_keys, this](
-                                std::string_view k, std::string_view v) -> int {
+    auto recycle_func = [&, this](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
         RecycleIndexPB index_pb;
         if (!index_pb.ParseFromArray(v.data(), v.size())) {
@@ -532,10 +541,7 @@ int InstanceRecycler::recycle_indexes() {
             return -1;
         }
         int64_t current_time = ::time(nullptr);
-        int64_t expiration =
-                index_pb.expiration() > 0 ? index_pb.expiration() : index_pb.creation_time();
-        if (current_time < expiration + config::retention_seconds) {
-            // not expired
+        if (current_time < calc_expiration(index_pb)) { // not expired
             return 0;
         }
         ++num_expired;
@@ -632,11 +638,21 @@ int InstanceRecycler::recycle_partitions() {
                 .tag("num_recycled", num_recycled);
     });
 
+    auto calc_expiration = [](const RecyclePartitionPB& partition) {
+        int64_t expiration =
+                partition.expiration() > 0 ? partition.expiration() : partition.creation_time();
+        int64_t retention_seconds = config::retention_seconds;
+        if (partition.state() == RecyclePartitionPB::DROPPED) {
+            retention_seconds =
+                    std::min(config::dropped_partition_retention_seconds, retention_seconds);
+        }
+        return expiration + retention_seconds;
+    };
+
     // Elements in `partition_keys` has the same lifetime as `it` in `scan_and_recycle`
     std::vector<std::string_view> partition_keys;
     std::vector<std::string> version_keys;
-    auto recycle_func = [&num_scanned, &num_expired, &num_recycled, &partition_keys, &version_keys,
-                         this](std::string_view k, std::string_view v) -> int {
+    auto recycle_func = [&, this](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
         RecyclePartitionPB part_pb;
         if (!part_pb.ParseFromArray(v.data(), v.size())) {
@@ -644,10 +660,7 @@ int InstanceRecycler::recycle_partitions() {
             return -1;
         }
         int64_t current_time = ::time(nullptr);
-        int64_t expiration =
-                part_pb.expiration() > 0 ? part_pb.expiration() : part_pb.creation_time();
-        if (current_time < expiration + config::retention_seconds) {
-            // not expired
+        if (current_time < calc_expiration(part_pb)) { // not expired
             return 0;
         }
         ++num_expired;
@@ -1205,6 +1218,17 @@ int InstanceRecycler::recycle_rowsets() {
         return 0;
     };
 
+    auto calc_expiration = [](const RecycleRowsetPB& rs) {
+        // RecycleRowsetPB created by compacted or dropped rowset has no expiration time, and will be recycled when exceed retention time
+        int64_t expiration = rs.expiration() > 0 ? rs.expiration() : rs.creation_time();
+        int64_t retention_seconds = config::retention_seconds;
+        if (rs.type() == RecycleRowsetPB::COMPACT || rs.type() == RecycleRowsetPB::DROP) {
+            retention_seconds =
+                    std::min(config::compacted_rowset_retention_seconds, retention_seconds);
+        }
+        return expiration + retention_seconds;
+    };
+
     auto handle_rowset_kv = [&](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
         total_rowset_size += v.size();
@@ -1214,10 +1238,7 @@ int InstanceRecycler::recycle_rowsets() {
             return -1;
         }
         int64_t current_time = ::time(nullptr);
-        // RecycleRowsetPB created by merged rowset has no expiration time, and will be recycled when exceed retention time
-        int64_t expiration = rowset.expiration() > 0 ? rowset.expiration() : rowset.creation_time();
-        if (current_time < expiration + config::retention_seconds) {
-            // not expired
+        if (current_time < calc_expiration(rowset)) { // not expired
             return 0;
         }
         ++num_expired;
