@@ -254,6 +254,7 @@ import com.google.common.collect.Queues;
 import com.selectdb.cloud.catalog.CacheHotspotManager;
 import com.selectdb.cloud.catalog.CloudClusterChecker;
 import com.selectdb.cloud.catalog.CloudInstanceStatusChecker;
+import com.selectdb.cloud.catalog.CloudPartition;
 import com.selectdb.cloud.catalog.CloudReplica;
 import com.selectdb.cloud.catalog.CloudTabletRebalancer;
 import com.selectdb.cloud.catalog.CloudUpgradeMgr;
@@ -6212,7 +6213,7 @@ public class Env {
         Env.getCurrentColocateIndex().removeTable(olapTable.getId());
     }
 
-    public void dropPartition(Partition partition) {
+    public void dropCloudPartition(CloudPartition partition) {
         long tableId = -1;
         List<Long> partitionIds = new ArrayList<Long>();
         List<Long> indexIds = new ArrayList<Long>();
@@ -6232,7 +6233,8 @@ public class Env {
                 break;
             }
             try {
-                Env.getCurrentInternalCatalog().dropCloudPartition(tableId, partitionIds, indexIds);
+                Env.getCurrentInternalCatalog()
+                        .dropCloudPartition(partition.getDbId(), tableId, partitionIds, indexIds);
             } catch (Exception e) {
                 LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
                         partitionIds, tableId, tryCnt, e);
@@ -6257,7 +6259,7 @@ public class Env {
         }
 
         if (Config.isCloudMode() && Env.getCurrentEnv().isMaster()) {
-            dropPartition(partition);
+            dropCloudPartition((CloudPartition) partition);
         }
     }
 

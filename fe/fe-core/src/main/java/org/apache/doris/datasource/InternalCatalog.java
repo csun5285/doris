@@ -1661,7 +1661,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
                 List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(olapTable.getId(), partitionIds, indexIds, 0);
+                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -3084,7 +3084,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
             if (Config.isCloudMode()) {
                 List<Long> indexIds = copiedTbl.getIndexIdToMeta().keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(copiedTbl.getId(), newPartitionIds, indexIds, 0);
+                prepareCloudPartition(db.getId(), copiedTbl.getId(), newPartitionIds, indexIds, 0);
             }
 
             for (Map.Entry<String, Long> entry : origPartitions.entrySet()) {
@@ -3232,7 +3232,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     break;
                 }
                 try {
-                    Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
+                    Env.getCurrentInternalCatalog().dropCloudPartition(db.getId(), olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
@@ -3327,7 +3327,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     break;
                 }
                 try {
-                    Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
+                    Env.getCurrentInternalCatalog().dropCloudPartition(db.getId(), olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
@@ -3831,7 +3831,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     // if `expiration` = 0, recycler will delete uncommitted partitions in `retention_seconds`
-    public void prepareCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds,
+    public void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
                                       long expiration) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -3840,6 +3840,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
         partitionRequestBuilder.setExpiration(expiration);
+        if (dbId > 0) {
+            partitionRequestBuilder.setDbId(dbId);
+        }
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
@@ -3896,7 +3899,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void dropCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds)
+    public void dropCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds)
             throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -3904,6 +3907,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         partitionRequestBuilder.setTableId(tableId);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
+        if (dbId > 0) {
+            partitionRequestBuilder.setDbId(dbId);
+        }
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
