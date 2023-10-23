@@ -97,6 +97,7 @@ TEST(CloudTabletMgrTest, concurrent) {
         auto tablet_meta_p = try_any_cast<TabletMetaSharedPtr*>(args[1]);
         auto tablet_meta = std::make_shared<TabletMeta>();
         tablet_meta->_tablet_id = tablet_id;
+        tablet_meta->_index_id = 10002;
         *tablet_meta_p = std::move(tablet_meta);
         auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
         pair->second = true;

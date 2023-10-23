@@ -31,8 +31,6 @@ static RowsetMetaPB create_rowset_pb(Version version) {
     rowset.set_num_rows(100);
     rowset.set_total_disk_size(10000);
     rowset.set_rowset_type(BETA_ROWSET);
-    rowset.set_index_id(10002);   // DCHECK
-    rowset.set_schema_version(0); // DCHECK
     return rowset;
 }
 
@@ -136,6 +134,8 @@ public:
         auto tablet = response->mutable_tablet_meta();
         tablet->set_tablet_id(request->tablet_id());
         tablet->set_tablet_state(TabletStatePB::PB_RUNNING);
+        tablet->set_index_id(10002);
+        tablet->set_schema_version(0);
     }
 
     void get_rowset(google::protobuf::RpcController* controller,

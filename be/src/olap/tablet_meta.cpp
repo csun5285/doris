@@ -539,7 +539,12 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
     _is_persistent = tablet_meta_pb.is_persistent();
 
     // init _schema
+#ifdef BE_TEST
+    _schema = std::make_shared<TabletSchema>();
+    _schema->init_from_pb(tablet_meta_pb.schema());
+#else
     _schema = TabletSchemaCache::instance()->insert(_index_id, tablet_meta_pb.schema());
+#endif
 
     if (tablet_meta_pb.has_enable_unique_key_merge_on_write()) {
         _enable_unique_key_merge_on_write = tablet_meta_pb.enable_unique_key_merge_on_write();

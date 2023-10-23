@@ -54,9 +54,10 @@ public:
         s3_conf.region = config::test_s3_region;
         s3_conf.bucket = config::test_s3_bucket;
         s3_conf.prefix = "s3_file_writer_test";
-        s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
         std::cout << "s3 conf: " << s3_conf.to_string() << std::endl;
-        ASSERT_EQ(Status::OK(), s3_fs->connect());
+        s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
+        auto st = s3_fs->connect();
+        ASSERT_TRUE(st.ok()) << st;
 
         std::unique_ptr<ThreadPool> _pool;
         ThreadPoolBuilder("s3_upload_file_thread_pool")
@@ -97,14 +98,14 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
         auto client = s3_fs->get_client();
         io::FileReaderSPtr local_file_reader;
 
-        ASSERT_TRUE(
-                fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader)
-                        .ok());
+        auto st  = fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader);
+        ASSERT_TRUE(st.ok()) << st;
 
         constexpr int buf_size = 8192;
 
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("multi_part_io_error", &s3_file_writer, &state));
+        st = s3_fs->create_file("multi_part_io_error", &s3_file_writer, &state);
+        ASSERT_TRUE(st.ok()) << st;
 
         char buf[buf_size];
         doris::Slice slice(buf, buf_size);
@@ -112,19 +113,23 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
         size_t bytes_read = 0;
         auto file_size = local_file_reader->size();
         while (offset < file_size) {
-            ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
-            ASSERT_EQ(Status::OK(), s3_file_writer->append(Slice(buf, bytes_read)));
+            st = local_file_reader->read_at(offset, slice, &bytes_read);
+            ASSERT_TRUE(st.ok()) << st;
+            st = s3_file_writer->append(Slice(buf, bytes_read));
+            ASSERT_TRUE(st.ok()) << st;
             offset += bytes_read;
         }
         ASSERT_EQ(s3_file_writer->bytes_appended(), file_size);
-        ASSERT_TRUE(s3_file_writer->finalize().ok());
+        st = s3_file_writer->finalize();
+        ASSERT_TRUE(st.ok()) << st;
         // The second part would fail uploading itself to s3
         // so the result of close should be not ok
-        ASSERT_TRUE(!s3_file_writer->close().ok());
-        bool exits = false;
-        auto s = s3_fs->exists("multi_part_io_error", &exits);
-        LOG(INFO) << "status is " << s;
-        ASSERT_TRUE(!exits);
+        st = s3_file_writer->close();
+        ASSERT_FALSE(st.ok()) << st;
+        bool exists = false;
+        st = s3_fs->exists("multi_part_io_error", &exists);
+        ASSERT_TRUE(st.ok()) << st;
+        ASSERT_FALSE(exists);
     }
 }
 
