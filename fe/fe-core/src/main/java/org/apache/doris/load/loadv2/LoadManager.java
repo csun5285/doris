@@ -194,6 +194,7 @@ public class LoadManager implements Writable {
                     stmt.getObjectInfo(), stmt.isForce(), stmt.getUserName());
             loadJob.setJobProperties(stmt.getProperties());
             loadJob.checkAndSetDataSourceInfo(database, stmt.getDataDescriptions());
+            loadJob.setTimeout(ConnectContext.get().getExecTimeout());
             createLoadJob(loadJob);
         } catch (MetaNotFoundException e) {
             throw new DdlException(e.getMessage());
