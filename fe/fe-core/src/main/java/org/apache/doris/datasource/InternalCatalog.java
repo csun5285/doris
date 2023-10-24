@@ -1671,7 +1671,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                     olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
                     olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
-                commitCloudPartition(olapTable.getId(), partitionIds);
+                commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
             }
             // check again
             olapTable = db.getOlapTableOrDdlException(tableName);
@@ -3135,7 +3135,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             }
 
             if (Config.isCloudMode()) {
-                commitCloudPartition(copiedTbl.getId(), newPartitionIds);
+                List<Long> indexIds = copiedTbl.getIndexIdToMeta().keySet().stream().collect(Collectors.toList());
+                commitCloudPartition(copiedTbl.getId(), newPartitionIds, indexIds);
             }
         } catch (DdlException e) {
             // create partition failed, remove all newly created tablets
@@ -3868,11 +3869,12 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void commitCloudPartition(long tableId, List<Long> partitionIds) throws DdlException {
+    public void commitCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
+        partitionRequestBuilder.addAllIndexIds(indexIds);
         partitionRequestBuilder.setTableId(tableId);
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
