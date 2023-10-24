@@ -1386,7 +1386,15 @@ void MetaServiceImpl::get_current_max_txn_id(::google::protobuf::RpcController* 
         msg = ss.str();
         return;
     }
-    int64_t read_version = txn->get_read_version();
+    int64_t read_version = 0;
+    ret = txn->get_read_version(&read_version);
+    if (ret < 0) {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        std::stringstream ss;
+        ss << "get read version failed, ret=" << ret;
+        msg = ss.str();
+        return;
+    }
     int64_t current_max_txn_id = read_version << 10;
     VLOG_DEBUG << "read_version=" << read_version << " current_max_txn_id=" << current_max_txn_id;
     response->set_current_max_txn_id(current_max_txn_id);

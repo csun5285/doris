@@ -142,4 +142,9 @@ CONF_String(kms_provider, "ali"); // ali/tx/aws/hw, only support ali now
 CONF_String(kms_cmk, "");
 // When starting up, add kms data key if is missing, all MS need to be restarted simultaneously.
 CONF_Bool(focus_add_kms_data_key, "false");
+
+// Whether to retry the retryable errors that returns by the underlying txn store.
+CONF_Bool(enable_txn_store_retry, "false");
+CONF_Int32(txn_store_retry_times, "20");
+
 } // namespace selectdb::config

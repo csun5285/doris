@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "meta-service/txn_kv_error.h"
 #include "txn_kv.h"
 namespace selectdb {
 
@@ -25,14 +26,14 @@ public:
     MemTxnKv() = default;
     ~MemTxnKv() override = default;
 
-    int create_txn(std::unique_ptr<Transaction>* txn) override;
+    TxnErrorCode create_txn(std::unique_ptr<Transaction>* txn) override;
 
     int init() override;
 
 private:
     using OpTuple = std::tuple<memkv::ModifyOpType, std::string, std::string>;
-    int update(const std::set<std::string>& read_set, const std::vector<OpTuple>& op_list,
-               int64_t read_version, int64_t* committed_version);
+    TxnErrorCode update(const std::set<std::string>& read_set, const std::vector<OpTuple>& op_list,
+                        int64_t read_version, int64_t* committed_version);
 
     int get_kv(std::map<std::string, std::string>* kv, int64_t* version);
 
@@ -41,7 +42,6 @@ private:
 
     static int gen_version_timestamp(int64_t ver, int16_t seq, std::string* str);
 
-private:
     struct LogItem {
         memkv::ModifyOpType op_;
         int64_t commit_version_;
@@ -56,7 +56,6 @@ private:
         std::string value;
     };
 
-private:
     std::map<std::string, std::string> mem_kv_;
     std::map<std::string, std::list<LogItem>> log_kv_;
     std::mutex lock_;
@@ -69,7 +68,7 @@ namespace memkv {
 enum class ModifyOpType {
     PUT,
     ATOMIC_SET_VER_KEY,
-    ATOMTC_SET_VER_VAL,
+    ATOMIC_SET_VER_VAL,
     ATOMIC_ADD,
     REMOVE,
     REMOVE_RANGE
@@ -81,9 +80,7 @@ public:
         kv_->get_kv(&inner_kv_, &read_version_);
     }
 
-    ~Transaction() override {
-        //
-    }
+    ~Transaction() override = default;
 
     /**
      *
@@ -91,25 +88,23 @@ public:
      */
     int init();
 
-    int begin() override;
-
     void put(std::string_view key, std::string_view val) override;
 
     using selectdb::Transaction::get;
     /**
      * @param snapshot if true, `key` will not be included in txn conflict detection this time
-     * @return 0 for success get a key, 1 for key not found, negative for error
+     * @return TXN_OK for success get a key, TXN_KEY_NOT_FOUND for key not found, otherwise for error
      */
-    int get(std::string_view key, std::string* val, bool snapshot = false) override;
+    TxnErrorCode get(std::string_view key, std::string* val, bool snapshot = false) override;
     /**
      * Closed-open range
      * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
-     * @return 0 for success, negative for error
+     * @return TXN_OK for success, otherwise for error
      */
-    int get(std::string_view begin, std::string_view end,
-            std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
-            int limit = 10000) override;
+    TxnErrorCode get(std::string_view begin, std::string_view end,
+                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
+                     int limit = 10000) override;
 
     /**
      * Put a key-value pair in which key will in the form of
@@ -134,7 +129,6 @@ public:
     /**
      * Adds a value to database
      * @param to_add positive for addition, negative for substraction
-     * @return 0 for success otherwise error
      */
     void atomic_add(std::string_view key, int64_t to_add) override;
     // TODO: min max or and xor cmp_and_clear set_ver_value
@@ -148,22 +142,22 @@ public:
 
     /**
      *
-     *@return 0 for success otehrwise error
+     *@return TXN_OK for success otherwise error
      */
-    int commit() override;
+    TxnErrorCode commit() override;
 
-    int64_t get_read_version() override;
-    int64_t get_committed_version() override;
+    TxnErrorCode get_read_version(int64_t* version) override;
+    TxnErrorCode get_committed_version(int64_t* version) override;
 
-    int abort() override;
-
-private:
-    int inner_get(const std::string& key, std::string* val, bool snapshot);
-
-    int inner_get(const std::string& begin, const std::string& end,
-                  std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit);
+    TxnErrorCode abort() override;
 
 private:
+    TxnErrorCode inner_get(const std::string& key, std::string* val, bool snapshot);
+
+    TxnErrorCode inner_get(const std::string& begin, const std::string& end,
+                           std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot,
+                           int limit);
+
     std::shared_ptr<MemTxnKv> kv_ {nullptr};
     bool commited_ = false;
     bool aborted_ = false;
@@ -182,7 +176,7 @@ public:
     RangeGetIterator(std::vector<std::pair<std::string, std::string>> kvs, bool more)
             : kvs_(std::move(kvs)), kvs_size_(kvs_.size()), idx_(0), more_(more) {}
 
-    ~RangeGetIterator() override {}
+    ~RangeGetIterator() override = default;
 
     bool has_next() override { return idx_ < kvs_size_; }
 
@@ -197,10 +191,7 @@ public:
     bool more() override { return more_; }
 
     int size() override { return kvs_size_; }
-    int reset() override {
-        idx_ = 0;
-        return 0;
-    }
+    void reset() override { idx_ = 0; }
 
     std::string next_begin_key() override {
         std::string k;

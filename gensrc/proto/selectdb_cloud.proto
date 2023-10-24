@@ -1105,6 +1105,11 @@ enum MetaServiceCode {
     KV_TXN_CONFLICT = 1005;
     PROTOBUF_PARSE_ERR = 1006;
     PROTOBUF_SERIALIZE_ERR = 1007;
+    // A code indicates that the underlying store returns an error that
+    // needs to be retried. This code is not sent back to the client.
+    // See `selectdb::MetaServiceProxy` for details.
+    KV_TXN_STORE_GET_RETRYABLE = 1008;
+    KV_TXN_STORE_COMMIT_RETRYABLE = 1009;
 
     //Doris error
     TXN_GEN_ID_ERR = 2001;

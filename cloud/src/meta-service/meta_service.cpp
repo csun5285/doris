@@ -228,6 +228,7 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
             return;
         }
         response->set_version(version_pb.version());
+        { TEST_SYNC_POINT_CALLBACK("get_version_code", &code); }
         return;
     } else if (ret == 1) {
         msg = "not found";
@@ -305,7 +306,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
             } else if (ret == 1) {
                 // return -1 if the target version is not exists.
                 response->add_versions(-1);
-            } else if (ret == -2) {
+            } else if (ret == TxnErrorCode::TXN_TOO_OLD) {
                 // txn too old, fallback to non-snapshot versions.
                 LOG(WARNING) << "batch_get_version execution time exceeds the txn mvcc window, "
                                 "fallback to acquire non-snapshot versions, partition_ids_size="

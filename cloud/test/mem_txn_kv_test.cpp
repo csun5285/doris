@@ -42,13 +42,15 @@ static void put_and_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(ret, 0);
         txn->put(key, val);
         ASSERT_EQ(txn->commit(), 0) << txn_kv_class;
-        int64_t ver1 = txn->get_committed_version();
+        int64_t ver1;
+        ASSERT_EQ(txn->get_committed_version(&ver1), 0);
 
         // get
         std::string get_val;
         txn_kv->create_txn(&txn);
         ASSERT_EQ(txn->get(key, &get_val), 0) << txn_kv_class;
-        int64_t ver2 = txn->get_read_version();
+        int64_t ver2 = 0;
+        ASSERT_EQ(txn->get_read_version(&ver2), 0);
         ASSERT_GE(ver2, ver1) << txn_kv_class;
         ASSERT_EQ(val, get_val) << txn_kv_class;
         std::cout << "val:" << get_val << std::endl;
@@ -245,14 +247,16 @@ static void atomic_set_ver_value_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         key.append(" GetVersionTest ");
         txn->atomic_set_ver_value(key, "");
         ret = txn->commit();
-        int64_t ver0 = txn->get_committed_version();
+        int64_t ver0 = 0;
+        ASSERT_EQ(txn->get_committed_version(&ver0), 0);
         ASSERT_GT(ver0, 0) << txn_kv_class;
 
         ret = txn_kv->create_txn(&txn);
         ASSERT_EQ(ret, 0);
         ret = txn->get(key, &val);
         ASSERT_EQ(ret, 0) << txn_kv_class;
-        int64_t ver1 = txn->get_read_version();
+        int64_t ver1 = 0;
+        ASSERT_EQ(txn->get_read_version(&ver1), 0);
         ASSERT_GE(ver1, ver0) << txn_kv_class;
 
         int64_t ver2;

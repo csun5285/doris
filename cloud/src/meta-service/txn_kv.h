@@ -12,6 +12,8 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include "txn_kv_error.h"
 // clang-format on
 
 // =============================================================================
@@ -33,9 +35,9 @@ public:
      * TODO: add options to create the txn
      *
      * @param txn output param
-     * @return 0 for success
+     * @return TXN_OK for success
      */
-    virtual int create_txn(std::unique_ptr<Transaction>* txn) = 0;
+    virtual TxnErrorCode create_txn(std::unique_ptr<Transaction>* txn) = 0;
 
     virtual int init() = 0;
 };
@@ -45,25 +47,23 @@ public:
     Transaction() = default;
     virtual ~Transaction() = default;
 
-    virtual int begin() = 0;
-
     virtual void put(std::string_view key, std::string_view val) = 0;
 
     /**
      * @param snapshot if true, `key` will not be included in txn conflict detection this time
-     * @return 0 for success get a key, 1 for key not found, -2 for txn too old, other negative values for error
+     * @return TXN_OK for success get a key, TXN_KEY_NOT_FOUND for key not found, otherwise for error
      */
-    virtual int get(std::string_view key, std::string* val, bool snapshot = false) = 0;
+    virtual TxnErrorCode get(std::string_view key, std::string* val, bool snapshot = false) = 0;
 
     /**
      * Closed-open range
      * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
-     * @return 0 for success, negative for error
+     * @return TXN_OK for success, otherwise for error
      */
-    virtual int get(std::string_view begin, std::string_view end,
-                    std::unique_ptr<RangeGetIterator>* iter, bool snapshot = false,
-                    int limit = 10000) = 0;
+    virtual TxnErrorCode get(std::string_view begin, std::string_view end,
+                             std::unique_ptr<RangeGetIterator>* iter, bool snapshot = false,
+                             int limit = 10000) = 0;
 
     /**
      * Put a key-value pair in which key will in the form of
@@ -102,34 +102,34 @@ public:
 
     /**
      *
-     *@return 0 for success otherwise error
+     *@return TXN_OK for success otherwise error
      */
-    virtual int commit() = 0;
+    virtual TxnErrorCode commit() = 0;
 
     /**
      * Gets the read version used by the txn.
      * Note that it does not make any sense we call this function before
      * any `Transaction::get()` is called.
      *
-     *@return positive number for success otherwise error
+     *@return TXN_OK for success otherwise error
      */
-    virtual int64_t get_read_version() = 0;
+    virtual TxnErrorCode get_read_version(int64_t* version) = 0;
 
     /**
      * Gets the commited version used by the txn.
      * Note that it does not make any sense we call this function before
      * a successful call to `Transaction::commit()`.
      *
-     *@return positive number for success otherwise error
+     *@return TXN_OK for success, TXN_CONFLICT for conflict, otherwise error
      */
-    virtual int64_t get_committed_version() = 0;
+    virtual TxnErrorCode get_committed_version(int64_t* version) = 0;
 
     /**
      * Aborts this transaction
      *
-     * @returns 0 for success, otherwise non-zero
+     * @return TXN_OK for success otherwise error
      */
-    virtual int abort() = 0;
+    virtual TxnErrorCode abort() = 0;
 };
 
 class RangeGetIterator {
@@ -173,10 +173,8 @@ public:
 
     /**
      * Resets to initial state, some kinds of iterators may not support this function.
-     *
-     * @returns 0 for success otherwise failure
      */
-    virtual int reset() = 0;
+    virtual void reset() = 0;
 
     /**
      * Get the begin key of the next iterator if `more()` is true, otherwise returns empty string.
@@ -202,7 +200,7 @@ public:
     FdbTxnKv() = default;
     ~FdbTxnKv() override = default;
 
-    int create_txn(std::unique_ptr<Transaction>* txn) override;
+    TxnErrorCode create_txn(std::unique_ptr<Transaction>* txn) override;
 
     int init() override;
 
@@ -274,20 +272,6 @@ public:
     RangeGetIterator(FDBFuture* fut, bool owns = true)
             : fut_(fut), owns_fut_(owns), kvs_(nullptr), kvs_size_(-1), more_(false), idx_(-1) {}
 
-    int init() {
-        if (fut_ == nullptr) return -1;
-        idx_ = 0;
-        kvs_size_ = 0;
-        more_ = false;
-        kvs_ = nullptr;
-        auto err = fdb_future_get_keyvalue_array(fut_, &kvs_, &kvs_size_, &more_);
-        if (err) {
-            std::cerr << fdb_get_error(err) << std::endl;
-            return -1;
-        }
-        return 0;
-    }
-
     RangeGetIterator(RangeGetIterator&& o) {
         if (fut_ && owns_fut_) fdb_future_destroy(fut_);
         fut_ = o.fut_;
@@ -309,6 +293,8 @@ public:
         if (fut_ && owns_fut_) fdb_future_destroy(fut_);
     }
 
+    TxnErrorCode init();
+
     std::pair<std::string_view, std::string_view> next() override {
         if (idx_ < 0 || idx_ >= kvs_size_) return {};
         auto& kv = kvs_[idx_++];
@@ -327,10 +313,7 @@ public:
 
     int size() override { return kvs_size_; }
 
-    int reset() override {
-        idx_ = 0;
-        return 0;
-    }
+    void reset() override { idx_ = 0; }
 
     std::string next_begin_key() override {
         std::string k;
@@ -365,29 +348,27 @@ public:
 
     /**
      *
-     * @return 0 for success otherwise false
+     * @return TxnErrorCode for success otherwise false
      */
-    int init();
-
-    int begin() override;
+    TxnErrorCode init();
 
     void put(std::string_view key, std::string_view val) override;
 
     using selectdb::Transaction::get;
     /**
      * @param snapshot if true, `key` will not be included in txn conflict detection this time
-     * @return 0 for success get a key, 1 for key not found, negative for error
+     * @return TXN_OK for success get a key, TXN_KEY_NOT_FOUND for key not found, otherwise for error
      */
-    int get(std::string_view key, std::string* val, bool snapshot = false) override;
+    TxnErrorCode get(std::string_view key, std::string* val, bool snapshot = false) override;
     /**
      * Closed-open range
      * @param snapshot if true, key range will not be included in txn conflict detection this time
      * @param limit if non-zero, indicates the maximum number of key-value pairs to return
-     * @return 0 for success, negative for error
+     * @return TXN_OK for success, otherwise for error
      */
-    int get(std::string_view begin, std::string_view end,
-            std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
-            int limit = 10000) override;
+    TxnErrorCode get(std::string_view begin, std::string_view end,
+                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot = false,
+                     int limit = 10000) override;
 
     /**
      * Put a key-value pair in which key will in the form of
@@ -412,7 +393,6 @@ public:
     /**
      * Adds a value to database
      * @param to_add positive for addition, negative for substraction
-     * @return 0 for success otherwise error
      */
     void atomic_add(std::string_view key, int64_t to_add) override;
     // TODO: min max or and xor cmp_and_clear set_ver_value
@@ -426,14 +406,14 @@ public:
 
     /**
      *
-     *@return 0 for success, -1 for conflict, -2 for otherwise error
+     *@return TXN_OK for success, TXN_CONFLICT for conflict, otherwise for error
      */
-    int commit() override;
+    TxnErrorCode commit() override;
 
-    int64_t get_read_version() override;
-    int64_t get_committed_version() override;
+    TxnErrorCode get_read_version(int64_t* version) override;
+    TxnErrorCode get_committed_version(int64_t* version) override;
 
-    int abort() override;
+    TxnErrorCode abort() override;
 
 private:
     std::shared_ptr<Database> db_ {nullptr};
@@ -446,4 +426,5 @@ private:
 } // namespace fdb
 
 } // namespace selectdb
+
 // vim: et tw=100 ts=4 sw=4 cc=80:
