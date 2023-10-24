@@ -304,7 +304,7 @@ Status CsvReader::init_reader(bool is_load) {
         RETURN_IF_ERROR(io::DelegateReader::create_file_reader(
                 _profile, _system_properties, _file_description, reader_options, &_file_system,
                 &_file_reader, io::DelegateReader::AccessMode::SEQUENTIAL, _io_ctx,
-                io::PrefetchRange(_range.start_offset, _range.size)));
+                io::PrefetchRange(_range.start_offset, _range.start_offset + _range.size)));
     }
     if (_file_reader->size() == 0 && _params.file_type != TFileType::FILE_STREAM &&
         _params.file_type != TFileType::FILE_BROKER) {
@@ -727,12 +727,12 @@ Status CsvReader::_line_split_to_values(const Slice& line, bool* success) {
         // if actual column number in csv file is not equal to _file_slot_descs.size()
         // then filter this line.
         bool ignore_col = false;
-        ignore_col = _params.__isset.file_attributes
-                     && _params.file_attributes.__isset.ignore_csv_redundant_col
-                     && _params.file_attributes.ignore_csv_redundant_col;
+        ignore_col = _params.__isset.file_attributes &&
+                     _params.file_attributes.__isset.ignore_csv_redundant_col &&
+                     _params.file_attributes.ignore_csv_redundant_col;
 
-        if ((!ignore_col && _split_values.size() != _file_slot_descs.size())
-                || (ignore_col && _split_values.size() < _file_slot_descs.size())) {
+        if ((!ignore_col && _split_values.size() != _file_slot_descs.size()) ||
+            (ignore_col && _split_values.size() < _file_slot_descs.size())) {
             std::string cmp_str =
                     _split_values.size() > _file_slot_descs.size() ? "more than" : "less than";
             RETURN_IF_ERROR(_state->append_error_msg_to_file(
