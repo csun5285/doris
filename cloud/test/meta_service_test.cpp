@@ -3775,6 +3775,18 @@ TEST(MetaServiceTest, PartitionRequest) {
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     ASSERT_EQ(txn_kv->create_txn(&txn), 0);
     ASSERT_EQ(txn->get(partition_key, &val), 1);
+    // Last state UNKNOWN and tablet meta existed, but request has no index ids
+    reset_txn_kv();
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    txn->put(tablet_key, tablet_val);
+    ASSERT_EQ(txn->commit(), 0);
+    res.Clear();
+    req.clear_index_ids();
+    meta_service->commit_partition(&ctrl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    req.add_index_ids(index_id);
     // ------------Test drop partition------------
     reset_txn_kv();
     req.Clear();

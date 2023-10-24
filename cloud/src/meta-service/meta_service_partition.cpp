@@ -30,7 +30,7 @@ namespace selectdb {
 //      +----------+
 //                 |
 //                 v
-//              UNKNOWN 
+//              UNKNOWN
 
 // Return 0 if exists, 1 if not exists, otherwise error
 static int index_exists(Transaction* txn, const std::string& instance_id,
@@ -419,8 +419,7 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
     }
     RPC_RATE_LIMIT(commit_partition)
 
-    if (request->partition_ids().empty() || request->index_ids().empty() ||
-        !request->has_table_id()) {
+    if (request->partition_ids().empty() || !request->has_table_id()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "empty partition_ids or index_ids or table_id";
         return;
@@ -439,15 +438,18 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
         std::string val;
         ret = txn->get(key, &val);
         if (ret == 1) { // UNKNOWN
-            ret = partition_exists(txn.get(), instance_id, request);
-            // If partition has existed, this might be a deplicate request
-            if (ret == 0) {
-                return; // Partition committed, OK
-            }
-            if (ret != 1) {
-                code = MetaServiceCode::UNDEFINED_ERR;
-                msg = "failed to check partition existence";
-                return;
+            // Compatible with requests without `index_ids`
+            if (!request->index_ids().empty()) {
+                ret = partition_exists(txn.get(), instance_id, request);
+                // If partition has existed, this might be a deplicate request
+                if (ret == 0) {
+                    return; // Partition committed, OK
+                }
+                if (ret != 1) {
+                    code = MetaServiceCode::UNDEFINED_ERR;
+                    msg = "failed to check partition existence";
+                    return;
+                }
             }
             // Index recycled
             code = MetaServiceCode::INVALID_ARGUMENT;
