@@ -220,7 +220,7 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     VersionPB version_pb;
     // 0 for success get a key, 1 for key not found, negative for error
     ret = txn->get(ver_key, &ver_val);
-    LOG(INFO) << "xxx get version_key=" << hex(ver_key);
+    VLOG_DEBUG << "xxx get version_key=" << hex(ver_key);
     if (ret == 0) {
         if (!version_pb.ParseFromString(ver_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -294,7 +294,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
             std::string ver_val;
             ret = txn->get(ver_key, &ver_val, true);
             TEST_SYNC_POINT_CALLBACK("batch_get_version_ret", &ret);
-            LOG(INFO) << "xxx get version_key=" << hex(ver_key);
+            VLOG_DEBUG << "xxx get version_key=" << hex(ver_key);
             if (ret == 0) {
                 VersionPB version_pb;
                 if (!version_pb.ParseFromString(ver_val)) {
