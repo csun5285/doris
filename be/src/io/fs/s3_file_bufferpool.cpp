@@ -21,6 +21,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_segment.h"
 #include "io/fs/s3_common.h"
@@ -269,6 +270,11 @@ Slice S3FileBufferPool::allocate(bool reserve) {
  * 3. write the downloaded content into user buffer if necessary
  */
 void DownloadFileBuffer::on_download() {
+    if (_buffer.empty()) {
+        LOG_WARNING("no free buffer for 5 minutes");
+        _state.set_val(Status::InternalError("no free buffer for 5 minutes"));
+        return;
+    }
     FileBlocksHolderPtr holder = nullptr;
     bool need_to_download_into_cache = false;
     auto s = Status::OK();
