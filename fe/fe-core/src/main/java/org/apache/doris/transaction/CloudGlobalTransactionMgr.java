@@ -211,11 +211,6 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 case TXN_DUPLICATED_REQ:
                     throw new DuplicatedRequestException(DebugUtil.printId(requestId),
                             beginTxnResponse.getDupTxnId(), beginTxnResponse.getStatus().getMsg());
-                case TXN_LABEL_ALREADY_USED:
-                    if (MetricRepo.isInit) {
-                        MetricRepo.COUNTER_TXN_REJECT.increase(1L);
-                    }
-                    throw new LabelAlreadyUsedException(beginTxnResponse.getStatus().getMsg());
                 default:
                     if (MetricRepo.isInit) {
                         MetricRepo.COUNTER_TXN_REJECT.increase(1L);

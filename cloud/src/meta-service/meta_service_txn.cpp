@@ -190,8 +190,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
                 // clang-format on
             }
             code = MetaServiceCode::TXN_LABEL_ALREADY_USED;
-            ss << "db_id=" << db_id << " label=" << label
-               << " already used by txn_id=" << cur_txn_info.txn_id();
+            ss << "Label [" << label << "] has already been used, relate to txn [" << cur_txn_info.txn_id() << "]";
             msg = ss.str();
             return;
         }
@@ -592,6 +591,12 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     if (txn_info.status() == TxnStatusPB::TXN_STATUS_VISIBLE) {
         code = MetaServiceCode::TXN_ALREADY_VISIBLE;
+        if (request->has_is_2pc() && request->is_2pc()) {
+            ss << "transaction [" << txn_id << "] is already visible, not pre-committed.";
+            msg = ss.str();
+            response->mutable_txn_info()->CopyFrom(txn_info);
+            return;
+        }
         ss << "transaction is already visible: db_id=" << db_id << " txn_id=" << txn_id;
         msg = ss.str();
         response->mutable_txn_info()->CopyFrom(txn_info);
