@@ -1180,6 +1180,8 @@ DECLARE_mBool(enable_flush_file_cache_async);
 
 DECLARE_mBool(enable_check_segment_footer);
 
+DECLARE_mBool(enable_file_cache_as_load_buffer);
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================

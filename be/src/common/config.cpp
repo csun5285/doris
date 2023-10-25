@@ -1167,6 +1167,8 @@ DEFINE_mBool(enable_flush_file_cache_async, "true");
 
 DEFINE_mBool(enable_check_segment_footer, "true");
 
+DEFINE_mBool(enable_file_cache_as_load_buffer, "true");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================

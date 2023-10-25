@@ -151,6 +151,7 @@ bool FileBlock::is_downloader_impl(std::lock_guard<doris::Mutex>& /* segment_loc
 Status FileBlock::append(Slice data) {
     DCHECK(data.size != 0) << "Writing zero size is not allowed";
     Status st = Status::OK();
+    SYNC_POINT_RETURN_WITH_VALUE("file_block::append", st);
     if (!_cache_writer) {
         auto download_path = get_path_in_local_cache(true);
         st = global_local_filesystem()->create_file(download_path, &_cache_writer);

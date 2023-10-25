@@ -189,7 +189,9 @@ struct UploadFileBuffer final : public FileBuffer {
     * 5. reclaim self
     */
     void on_upload() {
-        DCHECK(!_buffer.empty());
+        if (_buffer.empty()) {
+            read_from_cache();
+        }
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
             // If we call is_cancelled() after _state.set_val() then there might one situation where
