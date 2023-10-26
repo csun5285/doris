@@ -4025,7 +4025,9 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
             LOG(WARNING) << err_msg;
         }
     }
-    RETURN_IF_ERROR(check_rowid_conversion(output_rowset, location_map));
+    if (config::enable_rowid_conversion_correctness_check) {
+        RETURN_IF_ERROR(check_rowid_conversion(output_rowset, location_map));
+    }
     location_map.clear();
 
     // 2. calc delete bimap for incremental data
@@ -4037,7 +4039,9 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
                                                 UINT64_MAX, &missed_rows, &location_map,
                                                 tablet_meta()->delete_bitmap(),
                                                 output_rowset_delete_bitmap.get());
-    RETURN_IF_ERROR(check_rowid_conversion(output_rowset, location_map));
+    if (config::enable_rowid_conversion_correctness_check) {
+        RETURN_IF_ERROR(check_rowid_conversion(output_rowset, location_map));
+    }
     if (compaction_type == ReaderType::READER_CUMULATIVE_COMPACTION) {
         DCHECK_EQ(missed_rows.size(), missed_rows_size);
         if (missed_rows.size() != missed_rows_size) {
