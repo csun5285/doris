@@ -889,14 +889,19 @@ public class LoadManager implements Writable {
         String label = stmt.getLabel();
         Database db = Env.getCurrentInternalCatalog().getDbOrDdlException(dbName);
         if (Config.isCloudMode()) {
-            cleanLabelInternalInCloudMode(db.getId(), label);
+            Env.getCurrentGlobalTransactionMgr().cleanLabel(db.getId(), label);
+            cleanLabelInternalInCloud(db.getId(), label, false);
         } else {
             cleanLabelInternal(db.getId(), label, false);
         }
     }
 
     public void replayCleanLabel(CleanLabelOperationLog log) {
-        cleanLabelInternal(log.getDbId(), log.getLabel(), true);
+        if (Config.isCloudMode()) {
+            cleanLabelInternalInCloud(log.getDbId(), log.getLabel(), true);
+        } else {
+            cleanLabelInternal(log.getDbId(), log.getLabel(), true);
+        }
     }
 
     /**
@@ -1117,41 +1122,63 @@ public class LoadManager implements Writable {
         return loadJob.getId();
     }
 
-    private void cleanLabelInternalInCloudMode(long dbId, String label) throws UserException {
-        if (Strings.isNullOrEmpty(label)) {
-            throw new UserException("label is empty in cloud mode");
-        }
+    private void cleanLabelInternalInCloud(long dbId, String label, boolean isReplay) {
+        // 1. Remove from LoadManager
         int counter = 0;
         writeLock();
         try {
             if (dbIdToLabelToLoadJobs.containsKey(dbId)) {
                 Map<String, List<LoadJob>> labelToJob = dbIdToLabelToLoadJobs.get(dbId);
-                List<LoadJob> jobs = labelToJob.get(label);
-                if (jobs == null) {
-                    // no job for this label, just return
-                    return;
-                }
-
-                Iterator<LoadJob> iter = jobs.iterator();
-                while (iter.hasNext()) {
-                    LoadJob job = iter.next();
-                    if (!job.isCompleted()) {
-                        continue;
+                if (Strings.isNullOrEmpty(label)) {
+                    // clean all labels in this db
+                    Iterator<Map.Entry<String, List<LoadJob>>> iter = labelToJob.entrySet().iterator();
+                    while (iter.hasNext()) {
+                        List<LoadJob> jobs = iter.next().getValue();
+                        Iterator<LoadJob> innerIter = jobs.iterator();
+                        while (innerIter.hasNext()) {
+                            LoadJob job = innerIter.next();
+                            if (!job.isCompleted()) {
+                                continue;
+                            }
+                            innerIter.remove();
+                            idToLoadJob.remove(job.getId());
+                            ++counter;
+                        }
+                        if (jobs.isEmpty()) {
+                            iter.remove();
+                        }
                     }
-                    iter.remove();
-                    idToLoadJob.remove(job.getId());
-                    ++counter;
-                }
-                if (jobs.isEmpty()) {
-                    labelToJob.remove(label);
+                } else {
+                    List<LoadJob> jobs = labelToJob.get(label);
+                    if (jobs == null) {
+                        // no job for this label, just return
+                        return;
+                    }
+                    Iterator<LoadJob> iter = jobs.iterator();
+                    while (iter.hasNext()) {
+                        LoadJob job = iter.next();
+                        if (!job.isCompleted()) {
+                            continue;
+                        }
+                        iter.remove();
+                        idToLoadJob.remove(job.getId());
+                        ++counter;
+                    }
+                    if (jobs.isEmpty()) {
+                        labelToJob.remove(label);
+                    }
                 }
             }
         } finally {
             writeUnlock();
         }
-        LOG.info("clean {} labels on db {} with label '{}' in load mgr.", counter, dbId, label);
 
-        Env.getCurrentGlobalTransactionMgr().cleanLabel(dbId, label);
-        LOG.info("finished to clean label on db {} with label {}.", dbId, label);
+        LOG.info("clean {} labels on db {} with label '{}' in load mgr. isReplay {}",
+                counter, dbId, label, isReplay);
+        // 3. Log
+        if (!isReplay) {
+            CleanLabelOperationLog log = new CleanLabelOperationLog(dbId, label);
+            Env.getCurrentEnv().getEditLog().logCleanLabel(log);
+        }
     }
 }

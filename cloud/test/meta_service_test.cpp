@@ -1577,10 +1577,24 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
     auto rl = std::make_shared<RateLimiter>();
     auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
+    // clean txn label by db_id and label
     {
         int64_t txn_id = -1;
         int64_t db_id = 1987211;
         const std::string& label = "test_clean_label";
+
+        {
+            brpc::Controller cntl;
+            CleanTxnLabelRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(db_id);
+            req.add_labels(label);
+            CleanTxnLabelResponse res;
+            meta_service->clean_txn_label(
+                    reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                    nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        }
 
         // begin txn
         {
@@ -1675,7 +1689,6 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
             brpc::Controller cntl;
             CleanTxnLabelRequest req;
             req.set_cloud_unique_id("test_cloud_unique_id");
-            req.set_db_id(db_id);
             CleanTxnLabelResponse res;
             meta_service->clean_txn_label(
                     reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
@@ -1726,11 +1739,276 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
             meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &res, nullptr);
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            txn_id = res.txn_id();
+        }
+
+        // abort txn
+        {
+            brpc::Controller cntl;
+            AbortTxnRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            ASSERT_GT(txn_id, 0);
+            req.set_txn_id(txn_id);
+            req.set_reason("test");
+            AbortTxnResponse res;
+            meta_service->abort_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(res.txn_info().status(), TxnStatusPB::TXN_STATUS_ABORTED);
+        }
+
+        {
+            brpc::Controller cntl;
+            BeginTxnRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            TxnInfoPB txn_info_pb;
+            txn_info_pb.set_db_id(db_id);
+            txn_info_pb.set_label(label);
+            txn_info_pb.add_table_ids(1234);
+            txn_info_pb.set_timeout_ms(36000);
+            req.mutable_txn_info()->CopyFrom(txn_info_pb);
+            BeginTxnResponse res;
+            meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            txn_id = res.txn_id();
+        }
+
+        // clean txn label
+        {
+            brpc::Controller cntl;
+            CleanTxnLabelRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(db_id);
+            req.add_labels(label);
+            CleanTxnLabelResponse res;
+            meta_service->clean_txn_label(
+                    reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                    nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        }
+
+        // abort txn
+        {
+            brpc::Controller cntl;
+            AbortTxnRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            ASSERT_GT(txn_id, 0);
+            req.set_txn_id(txn_id);
+            req.set_reason("test");
+            AbortTxnResponse res;
+            meta_service->abort_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(res.txn_info().status(), TxnStatusPB::TXN_STATUS_ABORTED);
+        }
+
+        // clean txn label
+        {
+            brpc::Controller cntl;
+            CleanTxnLabelRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(db_id);
+            req.add_labels(label);
+            CleanTxnLabelResponse res;
+            meta_service->clean_txn_label(
+                    reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                    nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        }
+
+        {
+            const std::string info_key = txn_info_key({mock_instance, db_id, txn_id});
+            std::string info_val;
+
+            const std::string label_key = txn_label_key({mock_instance, db_id, label});
+            std::string label_val;
+
+            const std::string index_key = txn_index_key({mock_instance, txn_id});
+            std::string index_val;
+
+            const std::string running_key = txn_running_key({mock_instance, db_id, txn_id});
+            std::string running_val;
+
+            const std::string recycle_key = recycle_txn_key({mock_instance, db_id, txn_id});
+            std::string recycle_val;
+
+            std::unique_ptr<Transaction> txn;
+            txn_kv->create_txn(&txn);
+            ret = txn->get(info_key, &info_val);
+            ASSERT_EQ(ret, 1);
+            ret = txn->get(label_key, &label_val);
+            ASSERT_EQ(ret, 1);
+            ret = txn->get(index_key, &index_val);
+            ASSERT_EQ(ret, 1);
+            ret = txn->get(running_key, &running_val);
+            ASSERT_EQ(ret, 1);
+            ret = txn->get(recycle_key, &recycle_val);
+            ASSERT_EQ(ret, 1);
+        }
+    }
+    // clean txn label only by db_id
+    {
+        int64_t db_id = 1987211123;
+        const std::string& label = "test_clean_label";
+
+        TxnInfoPB txn_info_pb;
+        txn_info_pb.set_db_id(db_id);
+        txn_info_pb.add_table_ids(1234);
+        txn_info_pb.set_timeout_ms(36000);
+        BeginTxnRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+
+        //clean not exist label
+        {
+            brpc::Controller cntl;
+            CleanTxnLabelRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(db_id);
+            CleanTxnLabelResponse res;
+            meta_service->clean_txn_label(
+                    reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                    nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        }
+
+        // inject internal_clean_label ret -1
+        {
+            auto sp = selectdb::SyncPoint::get_instance();
+            sp->set_call_back("internal_clean_label:ret", [&](void* args) {
+                int* ret = reinterpret_cast<int*>(args);
+                *ret = -1;
+            });
+            sp->enable_processing();
+            int64_t txn_id = -1;
+            for (int i = 100; i < 101; i++) {
+                {
+                    std::stringstream label_ss;
+                    label_ss << label << i;
+                    brpc::Controller cntl;
+                    txn_info_pb.set_label(label_ss.str());
+                    req.mutable_txn_info()->CopyFrom(txn_info_pb);
+                    BeginTxnResponse res;
+                    meta_service->begin_txn(
+                            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                            nullptr);
+                    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                    txn_id = res.txn_id();
+                }
+
+                {
+                    // mock rowset and tablet
+                    int64_t tablet_id_base = 110313131;
+                    for (int i = 0; i < 1; ++i) {
+                        create_tablet(meta_service.get(), 1234, 1235, 1236, tablet_id_base + i);
+                        auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+                        CreateRowsetResponse res;
+                        commit_rowset(meta_service.get(), tmp_rowset, res);
+                        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                    }
+                }
+
+                // commit txn
+                {
+                    brpc::Controller cntl;
+                    CommitTxnRequest req;
+                    req.set_cloud_unique_id("test_cloud_unique_id");
+                    req.set_db_id(db_id);
+                    req.set_txn_id(txn_id);
+                    CommitTxnResponse res;
+                    meta_service->commit_txn(
+                            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                            nullptr);
+                    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                }
+            }
+
+            {
+                brpc::Controller cntl;
+                CleanTxnLabelRequest req;
+                req.set_cloud_unique_id("test_cloud_unique_id");
+                req.set_db_id(db_id);
+                CleanTxnLabelResponse res;
+                meta_service->clean_txn_label(
+                        reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                        nullptr);
+                ASSERT_EQ(res.status().code(), MetaServiceCode::KV_TXN_CONFLICT);
+            }
+            sp->clear_all_call_backs();
+            sp->clear_trace();
+            sp->disable_processing();
+        }
+
+        // create 12 committed txns and clean label by id
+        {
+            auto sp = selectdb::SyncPoint::get_instance();
+            sp->set_call_back("clean_txn_label:limit", [&](void* args) {
+                int* limit = reinterpret_cast<int*>(args);
+                *limit = 5;
+            });
+            sp->enable_processing();
+
+            int64_t txn_id = -1;
+            for (int i = 0; i < 12; i++) {
+                {
+                    std::stringstream label_ss;
+                    label_ss << label << i;
+                    brpc::Controller cntl;
+                    txn_info_pb.set_label(label_ss.str());
+                    req.mutable_txn_info()->CopyFrom(txn_info_pb);
+                    BeginTxnResponse res;
+                    meta_service->begin_txn(
+                            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                            nullptr);
+                    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                    txn_id = res.txn_id();
+                }
+
+                {
+                    // mock rowset and tablet
+                    int64_t tablet_id_base = 110313131;
+                    for (int i = 0; i < 1; ++i) {
+                        create_tablet(meta_service.get(), 1234, 1235, 1236, tablet_id_base + i);
+                        auto tmp_rowset = create_rowset(txn_id, tablet_id_base + i);
+                        CreateRowsetResponse res;
+                        commit_rowset(meta_service.get(), tmp_rowset, res);
+                        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                    }
+                }
+
+                // commit txn
+                {
+                    brpc::Controller cntl;
+                    CommitTxnRequest req;
+                    req.set_cloud_unique_id("test_cloud_unique_id");
+                    req.set_db_id(db_id);
+                    req.set_txn_id(txn_id);
+                    CommitTxnResponse res;
+                    meta_service->commit_txn(
+                            reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                            nullptr);
+                    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+                }
+            }
+
+            {
+                brpc::Controller cntl;
+                CleanTxnLabelRequest req;
+                req.set_cloud_unique_id("test_cloud_unique_id");
+                req.set_db_id(db_id);
+                CleanTxnLabelResponse res;
+                meta_service->clean_txn_label(
+                        reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res,
+                        nullptr);
+                ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            }
+            sp->clear_all_call_backs();
+            sp->clear_trace();
+            sp->disable_processing();
         }
     }
 }
 
-//
 TEST(MetaServiceTest, GetTxnTest) {
     int ret = 0;
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());

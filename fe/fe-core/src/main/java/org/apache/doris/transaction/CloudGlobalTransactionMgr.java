@@ -59,6 +59,7 @@ import org.apache.doris.transaction.TransactionState.TxnCoordinator;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -1029,16 +1030,19 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     public void cleanLabel(long dbId, String label) throws UserException {
         LOG.info("try to cleanLabel dbId: {}, label:{}", dbId, label);
         CleanTxnLabelRequest.Builder builder = CleanTxnLabelRequest.newBuilder();
-        builder.setDbId(dbId)
-                .addLabels(label)
-                .setCloudUniqueId(Config.cloud_unique_id);
+        builder.setDbId(dbId).setCloudUniqueId(Config.cloud_unique_id);
+
+        if (!Strings.isNullOrEmpty(label)) {
+            builder.addLabels(label);
+        }
 
         final CleanTxnLabelRequest cleanTxnLabelRequest = builder.build();
         CleanTxnLabelResponse cleanTxnLabelResponse = null;
         int retryTime = 0;
 
         try {
-            while (retryTime < Config.meta_service_rpc_retry_times) {
+            // 5 times retry is enough for clean label
+            while (retryTime < 5) {
                 LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelRequest);
                 cleanTxnLabelResponse = MetaServiceProxy.getInstance().cleanTxnLabel(cleanTxnLabelRequest);
                 LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelResponse);

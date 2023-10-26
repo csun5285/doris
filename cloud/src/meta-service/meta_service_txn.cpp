@@ -1510,105 +1510,103 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
     response->set_finished(true);
 }
 
-void MetaServiceImpl::clean_txn_label(::google::protobuf::RpcController* controller,
-                                      const ::selectdb::CleanTxnLabelRequest* request,
-                                      ::selectdb::CleanTxnLabelResponse* response,
-                                      ::google::protobuf::Closure* done) {
-    RPC_PREPROCESS(clean_txn_label);
-    if (!request->has_db_id() || request->labels().empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "invalid db id or label";
-        LOG(INFO) << msg;
-        return;
-    }
-
-    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
-    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-    if (instance_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        ss << "cannot find instance_id with cloud_unique_id="
-           << (cloud_unique_id.empty() ? "(empty)" : cloud_unique_id);
-        msg = ss.str();
-        LOG(INFO) << msg;
-        return;
-    }
-    RPC_RATE_LIMIT(clean_txn_label)
-
-    const int64_t db_id = request->db_id();
-    // now only support clean one label
-    const std::string& label = request->labels(0);
+/**
+ * @brief 
+ * 
+ * @param txn_kv 
+ * @param instance_id 
+ * @param db_id 
+ * @param label_key 
+ * @return int 0 means success, -1 means txn conflict, -2 means other txn error
+ */
+int internal_clean_label(std::shared_ptr<TxnKv> txn_kv, const std::string_view instance_id,
+                         int64_t db_id, const std::string_view label_key) {
+    std::string label_val;
     TxnLabelPB label_pb;
 
     int64_t key_size = 0;
+    int64_t val_size = 0;
+    std::vector<int64_t> survival_txn_ids;
     std::vector<int64_t> clean_txn_ids;
 
-    const std::string label_key = txn_label_key({instance_id, db_id, label});
-    std::string label_val;
-
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
+    int ret = txn_kv->create_txn(&txn);
     if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
-        ss << "txn_kv_->create_txn() failed, ret=" << ret << " db_id=" << db_id
-           << " label=" << label;
-        msg = ss.str();
-        LOG(INFO) << msg;
-        return;
+        LOG(WARNING) << "failed to create txn. ret=" << ret << " db_id=" << db_id
+                     << " label_key=" << hex(label_key);
+        return -2;
     }
 
     ret = txn->get(label_key, &label_val);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "txn->get() failed, db_id=" << db_id << " label=" << label << " ret=" << ret;
-        msg = ss.str();
-        LOG(INFO) << msg;
-        return;
+    if (ret < 0) {
+        LOG(WARNING) << "failed to txn get ret=" << ret << " db_id=" << db_id
+                     << " label_key=" << hex(label_key);
+        return -2;
+    }
+    if (1 == ret) {
+        LOG(INFO) << "txn get ret=" << ret << " db_id=" << db_id << " label_key=" << hex(label_key);
+        return 0;
     }
 
     if (label_val.size() <= VERSION_STAMP_LEN) {
-        code = MetaServiceCode::OK;
-        LOG(INFO) << "label_val size is " << label_val.size()
-                  << ", there is no finished label to clear";
-        return;
+        LOG(INFO) << "label_val.size()=" << label_val.size() << " db_id=" << db_id
+                  << " label_key=" << hex(label_key);
+        return 0;
     }
 
     if (!label_pb.ParseFromArray(label_val.data(), label_val.size() - VERSION_STAMP_LEN)) {
-        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-        ss << "failed to parse txn label " << label;
-        msg = ss.str();
-        LOG_WARNING("failed to parse txn label")
-                .tag("key", hex(label_key))
-                .tag("db_id", db_id)
-                .tag("label", label);
-        return;
+        LOG(WARNING) << "failed to parse txn label"
+                     << " db_id=" << db_id << " label_key=" << hex(label_key)
+                     << " label_val.size()=" << label_val.size();
+        return -2;
     }
 
     for (auto txn_id : label_pb.txn_ids()) {
         const std::string recycle_key = recycle_txn_key({instance_id, db_id, txn_id});
-        std::string recycle_val;
-        ret = txn->get(recycle_key, &recycle_val);
-        if (ret < 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            ss << "txn->get() failed, db_id=" << db_id << " label=" << label << " ret=" << ret;
-            msg = ss.str();
-            LOG_WARNING("recycle_key get failed")
-                    .tag("key", hex(label_key))
+        const std::string index_key = txn_index_key({instance_id, txn_id});
+        const std::string info_key = txn_info_key({instance_id, db_id, txn_id});
+
+        std::string info_val;
+        ret = txn->get(info_key, &info_val);
+        if (ret != 0) {
+            LOG_WARNING("info_key get failed")
+                    .tag("info_key", hex(info_key))
+                    .tag("label_key", hex(label_key))
                     .tag("db_id", db_id)
-                    .tag("label", label)
                     .tag("txn_id", txn_id)
                     .tag("ret", ret);
-            return;
+            return -2;
         }
-        if (1 == ret) {
-            LOG(INFO) << "txn is not final state, label=" << label << " txn_id=" << txn_id;
+
+        TxnInfoPB txn_info;
+        if (!txn_info.ParseFromString(info_val)) {
+            LOG_WARNING("info_val parse failed")
+                    .tag("info_key", hex(info_key))
+                    .tag("label_key", hex(label_key))
+                    .tag("db_id", db_id)
+                    .tag("txn_id", txn_id)
+                    .tag("size", info_val.size());
+            return -2;
+        }
+
+        std::string recycle_val;
+        if ((txn_info.status() != TxnStatusPB::TXN_STATUS_ABORTED) &&
+            (txn_info.status() != TxnStatusPB::TXN_STATUS_VISIBLE)) {
+            // txn status is not final status
+            LOG(INFO) << "txn not final state, label_key=" << hex(label_key)
+                      << " txn_id=" << txn_id;
+            survival_txn_ids.push_back(txn_id);
+            DCHECK_EQ(txn->get(recycle_key, &recycle_val), 1);
             continue;
         }
 
-        const std::string index_key = txn_index_key({instance_id, txn_id});
+        DCHECK_EQ(txn->get(recycle_key, &recycle_val), 0);
+        DCHECK((txn_info.status() == TxnStatusPB::TXN_STATUS_ABORTED) ||
+               (txn_info.status() == TxnStatusPB::TXN_STATUS_VISIBLE));
+
         txn->remove(index_key);
         key_size += index_key.size();
 
-        const std::string info_key = txn_info_key({instance_id, db_id, txn_id});
         txn->remove(info_key);
         key_size += info_key.size();
 
@@ -1622,16 +1620,127 @@ void MetaServiceImpl::clean_txn_label(::google::protobuf::RpcController* control
         txn->remove(label_key);
         key_size += label_key.size();
         LOG(INFO) << "remove label_key=" << hex(label_key);
+    } else {
+        label_pb.clear_txn_ids();
+        for (auto txn_id : survival_txn_ids) {
+            label_pb.add_txn_ids(txn_id);
+        }
+        LOG(INFO) << "rewrite label_pb=" << label_pb.ShortDebugString();
+        label_val.clear();
+        if (!label_pb.SerializeToString(&label_val)) {
+            LOG(INFO) << "failed to serialize label_pb=" << label_pb.ShortDebugString()
+                      << " label_key=" << hex(label_key);
+            return -2;
+        }
+        txn->atomic_set_ver_value(label_key, label_val);
+        key_size += label_key.size();
+        val_size += label_val.size();
     }
 
     ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        LOG_WARNING("failed to clean txn label").tag("ret", ret).tag("label", label);
+    TEST_SYNC_POINT_CALLBACK("internal_clean_label:ret", &ret);
+    if (0 == ret) {
+        LOG(INFO) << fmt::format(
+                "label_key={} key_size={} val_size={} label_pb={} clean_txn_ids={}", hex(label_key),
+                key_size, val_size, label_pb.ShortDebugString(), fmt::join(clean_txn_ids, " "));
+    }
+    // 0 means success
+    // -1 means txn conflict
+    // -2 means other txn error
+    return ret;
+}
+
+void MetaServiceImpl::clean_txn_label(::google::protobuf::RpcController* controller,
+                                      const ::selectdb::CleanTxnLabelRequest* request,
+                                      ::selectdb::CleanTxnLabelResponse* response,
+                                      ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(clean_txn_label);
+    if (!request->has_db_id()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "missing db id";
+        LOG(WARNING) << msg;
         return;
     }
 
-    LOG(INFO) << fmt::format("label={} key_size={} label_pb={} clean_txn_ids={}", label, key_size,
-                             label_pb.ShortDebugString(), fmt::join(clean_txn_ids, " "));
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        ss << "cannot find instance_id with cloud_unique_id="
+           << (cloud_unique_id.empty() ? "(empty)" : cloud_unique_id);
+        msg = ss.str();
+        LOG(WARNING) << msg;
+        return;
+    }
+    RPC_RATE_LIMIT(clean_txn_label)
+    const int64_t db_id = request->db_id();
+
+    // clean label only by db_id
+    if (request->labels().empty()) {
+        std::string begin_label_key = txn_label_key({instance_id, db_id, ""});
+        const std::string end_label_key = txn_label_key({instance_id, db_id + 1, ""});
+
+        std::unique_ptr<RangeGetIterator> it;
+        bool snapshot = true;
+        int limit = 1000;
+        TEST_SYNC_POINT_CALLBACK("clean_txn_label:limit", &limit);
+        do {
+            std::unique_ptr<Transaction> txn;
+            ret = txn_kv_->create_txn(&txn);
+            if (ret != 0) {
+                msg = "failed to create txn";
+                code = MetaServiceCode::KV_TXN_CREATE_ERR;
+                LOG(INFO) << msg << " ret=" << ret << " begin=" << hex(begin_label_key)
+                          << " end=" << hex(end_label_key);
+                return;
+            }
+
+            ret = txn->get(begin_label_key, end_label_key, &it, snapshot, limit);
+            if (ret != 0) {
+                msg = "failed to txn range get";
+                code = MetaServiceCode::KV_TXN_GET_ERR;
+                LOG(WARNING) << msg << " ret=" << ret << " begin=" << hex(begin_label_key)
+                             << " end=" << hex(end_label_key);
+                return;
+            }
+
+            if (!it->has_next()) {
+                LOG(INFO) << "no keys in the range. begin=" << hex(begin_label_key)
+                          << " end=" << hex(end_label_key);
+                break;
+            }
+            while (it->has_next()) {
+                auto [k, v] = it->next();
+                if (!it->has_next()) {
+                    begin_label_key = k;
+                    LOG(INFO) << "iterator has no more kvs. key=" << hex(k);
+                }
+                ret = internal_clean_label(txn_kv_, instance_id, db_id, k);
+                if (ret != 0) {
+                    code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT
+                                     : MetaServiceCode::KV_TXN_COMMIT_ERR;
+                    msg = "failed to clean txn label.";
+                    LOG(WARNING) << msg << " ret=" << ret << " db_id=" << db_id;
+                    return;
+                }
+            }
+            begin_label_key.push_back('\x00');
+        } while (it->more());
+    } else {
+        const std::string& label = request->labels(0);
+        const std::string label_key = txn_label_key({instance_id, db_id, label});
+        ret = internal_clean_label(txn_kv_, instance_id, db_id, label_key);
+        if (ret != 0) {
+            code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT
+                             : MetaServiceCode::KV_TXN_COMMIT_ERR;
+            msg = "failed to clean txn label.";
+            LOG(WARNING) << msg << " ret=" << ret << " db_id=" << db_id
+                         << " label_key=" << hex(label_key);
+            return;
+        }
+    }
+
+    code = MetaServiceCode::OK;
+    return;
 }
 } // namespace selectdb
