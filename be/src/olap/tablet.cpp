@@ -746,7 +746,7 @@ Status Tablet::cloud_sync_meta() {
     auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
     if (!st.ok()) {
         if (st.is<NOT_FOUND>()) {
-            cloud::tablet_mgr()->erase_tablet(tablet_id());
+            recycle_resources_by_self();
         }
         return st;
     }
@@ -813,7 +813,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
         auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
         if (!st.ok()) {
             if (st.is<NOT_FOUND>()) {
-                cloud::tablet_mgr()->erase_tablet(tablet_id());
+                recycle_resources_by_self();
             }
             return st;
         }
@@ -834,7 +834,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
         }
         st = cloud::meta_mgr()->sync_tablet_rowsets(this);
         if (st.is<NOT_FOUND>()) {
-            cloud::tablet_mgr()->erase_tablet(tablet_id());
+            recycle_resources_by_self();
         }
         return st;
     } while (false);
@@ -855,7 +855,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
     }
     auto st = cloud::meta_mgr()->sync_tablet_rowsets(this, warmup_delta_data);
     if (st.is<NOT_FOUND>()) {
-        cloud::tablet_mgr()->erase_tablet(tablet_id());
+        recycle_resources_by_self();
     }
     return st;
 }
@@ -1031,8 +1031,13 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
         }
         _reconstruct_version_tracker_if_necessary();
     }
+    recycle_file_cache(expired_rowsets);
+    return expired_rowsets.size();
+}
+
+void Tablet::recycle_file_cache(const std::vector<RowsetSharedPtr>& rowsets) {
     if (config::enable_file_cache) {
-        for (auto& rs : expired_rowsets) {
+        for (auto& rs : rowsets) {
             auto inverted_indexes = rs->tablet_schema()->get_inverted_indexes();
             for (int seg_id = 0; seg_id < rs->num_segments(); ++seg_id) {
                 auto seg_path = rs->segment_file_path(seg_id);
@@ -1050,7 +1055,6 @@ int Tablet::cloud_delete_expired_stale_rowsets() {
             }
         }
     }
-    return expired_rowsets.size();
 }
 
 void Tablet::_delete_stale_rowset_by_version(const Version& version) {
@@ -4102,11 +4106,15 @@ int64_t Tablet::get_cloud_cumu_compaction_score() {
 }
 
 // FIXME(plat1ko): Use traverse_rowsets
-std::vector<RowsetSharedPtr> Tablet::get_snapshot_rowset() const {
+std::vector<RowsetSharedPtr> Tablet::get_snapshot_rowset(bool include_stale_rowset) const {
     std::shared_lock rdlock(_meta_lock);
     std::vector<RowsetSharedPtr> rowsets;
     std::transform(_rs_version_map.cbegin(), _rs_version_map.cend(), std::back_inserter(rowsets),
                    [](auto& kv) { return kv.second; });
+    if (include_stale_rowset) {
+        std::transform(_stale_rs_version_map.cbegin(), _stale_rs_version_map.cend(), std::back_inserter(rowsets),
+                   [](auto& kv) { return kv.second; });
+    }
     return rowsets;
 }
 
@@ -4387,4 +4395,10 @@ Status Tablet::check_delete_bitmap_correctness(DeleteBitmapPtr delete_bitmap, in
     }
     return Status::OK();
 }
+
+void Tablet::recycle_resources_by_self() {
+    Tablet::recycle_file_cache(get_snapshot_rowset(true));
+    cloud::tablet_mgr()->erase_tablet(tablet_id());
+}
+
 } // namespace doris
