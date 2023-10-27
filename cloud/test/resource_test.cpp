@@ -35,18 +35,20 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    if (!selectdb::init_glog("meta_service_test")) {
+    if (!selectdb::init_glog("resource_test")) {
         std::cerr << "failed to init glog" << std::endl;
         return -1;
     }
+
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
 
 namespace selectdb {
-std::unique_ptr<MetaServiceImpl> get_meta_service() {
-    int ret = 0;
+
+static std::shared_ptr<TxnKv> create_txn_kv() {
     // MemKv
+    int ret = 0;
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     if (txn_kv != nullptr) {
         ret = txn_kv->init();
@@ -58,6 +60,13 @@ std::unique_ptr<MetaServiceImpl> get_meta_service() {
     txn_kv->create_txn(&txn);
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
     txn->commit();
+    return txn_kv;
+}
+
+std::unique_ptr<MetaServiceImpl> get_meta_service(std::shared_ptr<TxnKv> txn_kv = {}) {
+    if (!txn_kv) {
+        txn_kv = create_txn_kv();
+    }
 
     auto rs = std::make_shared<ResourceManager>(txn_kv);
     auto rl = std::make_shared<RateLimiter>();
@@ -124,8 +133,9 @@ static void create_args_to_del(std::vector<NodeInfo>* to_add, std::vector<NodeIn
     to_del->push_back(ni_1);
 }
 
-static void get_instance_info(MetaServiceImpl* ms, InstanceInfoPB* instance) {
-    InstanceKeyInfo key_info {"test-resource-instance"};
+static void get_instance_info(MetaServiceImpl* ms,
+        InstanceInfoPB* instance, std::string_view instance_id = "test-resource-instance") {
+    InstanceKeyInfo key_info {instance_id};
     std::string key;
     std::string val;
     instance_key(key_info, &key);
@@ -133,6 +143,65 @@ static void get_instance_info(MetaServiceImpl* ms, InstanceInfoPB* instance) {
     ms->txn_kv_->create_txn(&txn);
     txn->get(key, &val);
     instance->ParseFromString(val);
+}
+
+static void create_instance(MetaServiceImpl* ms, const std::string& instance_id) {
+    brpc::Controller ctrl;
+    CreateInstanceRequest req;
+    req.set_instance_id(instance_id);
+    req.set_user_id("test_user");
+    req.set_name(instance_id + "name");
+    ObjectStoreInfoPB obj;
+    obj.set_ak("123");
+    obj.set_sk("321");
+    obj.set_bucket("456");
+    obj.set_prefix("654");
+    obj.set_endpoint("789");
+    obj.set_region("987");
+    obj.set_external_endpoint("888");
+    obj.set_provider(ObjectStoreInfoPB::BOS);
+    req.mutable_obj_info()->CopyFrom(obj);
+    CreateInstanceResponse resp;
+    ms->create_instance(&ctrl, &req, &resp, brpc::DoNothing());
+    ASSERT_FALSE(ctrl.Failed());
+    ASSERT_EQ(resp.status().code(), MetaServiceCode::OK);
+}
+
+static void create_cluster(MetaServiceImpl *ms, const std::string& instance_id,
+        const std::string& cluster_id, const std::string& cluster_name, ClusterPB_Type type) {
+    brpc::Controller cntl;
+    AlterClusterRequest req;
+    req.set_instance_id(instance_id);
+    req.mutable_cluster()->set_cluster_id(cluster_id);
+    req.mutable_cluster()->set_cluster_name(cluster_name);
+    req.mutable_cluster()->set_type(type);
+    if (type == ClusterPB::SQL) {
+        auto* node = req.mutable_cluster()->add_nodes();
+        node->set_node_type(NodeInfoPB::FE_MASTER);
+        node->set_ip("127.0.0.1");
+        node->set_edit_log_port(10000);
+        node->set_name("sql_node");
+    } else {
+        auto* node = req.mutable_cluster()->add_nodes();
+        node->set_ip("127.0.0.1");
+        node->set_heartbeat_port(10000);
+        node->set_name("sql_node");
+    }
+    req.set_op(AlterClusterRequest::ADD_CLUSTER);
+    AlterClusterResponse res;
+    ms->alter_cluster(&cntl, &req, &res, brpc::DoNothing());
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+}
+
+static void drop_cluster(MetaServiceImpl* ms, const std::string& instance_id, const std::string& cluster_id) {
+    brpc::Controller cntl;
+    AlterClusterRequest req;
+    req.set_instance_id(instance_id);
+    req.mutable_cluster()->set_cluster_id(cluster_id);
+    req.set_op(AlterClusterRequest::DROP_CLUSTER);
+    AlterClusterResponse res;
+    ms->alter_cluster(&cntl, &req, &res, brpc::DoNothing());
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 }
 
 // test cluster's node addr use ip
@@ -259,4 +328,83 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     sp->clear_trace();
     sp->disable_processing();
 }
+
+// test restart meta service
+TEST(ResourceTest, RestartResourceManager) {
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->enable_processing();
+
+    auto txn_kv = create_txn_kv();
+
+    {
+        auto meta_service = get_meta_service(txn_kv);
+        create_instance(meta_service.get(), "test_instance_id");
+        create_instance(meta_service.get(), "test_instance_id_2");
+        create_cluster(meta_service.get(), "test_instance_id", "cluster_id", "cluster_name", ClusterPB::SQL);
+    }
+
+    {
+        auto meta_service = get_meta_service(txn_kv);
+        {
+            InstanceInfoPB info;
+            auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id", &info);
+            ASSERT_EQ(code, MetaServiceCode::OK) << msg;
+            ASSERT_EQ(info.name(), "test_instance_idname");
+        }
+        {
+            InstanceInfoPB info;
+            auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id_2", &info);
+            ASSERT_EQ(code, MetaServiceCode::OK) << msg;
+            ASSERT_EQ(info.name(), "test_instance_id_2name");
+        }
+    }
+    sp->disable_processing();
+    sp->clear_all_call_backs();
+}
+
+// test add/drop cluster
+TEST(ResourceTest, AddDropCluster) {
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->enable_processing();
+
+    auto meta_service = get_meta_service();
+    create_instance(meta_service.get(), "test_instance_id");
+    create_cluster(meta_service.get(), "test_instance_id", "sql_id", "sql_cluster", ClusterPB::SQL);
+    create_cluster(meta_service.get(), "test_instance_id", "compute_id", "compute_cluster", ClusterPB::COMPUTE);
+
+    InstanceInfoPB info;
+    get_instance_info(meta_service.get(), &info, "test_instance_id");
+    ASSERT_EQ(info.clusters_size(), 2);
+
+    drop_cluster(meta_service.get(), "test_instance_id", "sql_id");
+
+    get_instance_info(meta_service.get(), &info, "test_instance_id");
+    ASSERT_EQ(info.clusters_size(), 1);
+    ASSERT_EQ(info.clusters(0).cluster_name(), "compute_cluster");
+    ASSERT_EQ(info.clusters(0).cluster_id(), "compute_id");
+
+    sp->disable_processing();
+    sp->clear_all_call_backs();
+}
+
 }

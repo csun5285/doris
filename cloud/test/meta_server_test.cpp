@@ -132,3 +132,37 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
     server.Stop(1);
     server.Join();
 }
+
+TEST(MetaServerTest, StartAndStop) {
+    std::shared_ptr<selectdb::TxnKv> txn_kv = std::make_shared<selectdb::MemTxnKv>();
+    auto server = std::make_unique<MetaServer>(txn_kv);
+    auto resource_mgr = std::make_shared<MockResourceManager>(txn_kv);
+    auto rate_limiter = std::make_shared<selectdb::RateLimiter>();
+
+    brpc::ServerOptions options;
+    options.num_threads = 1;
+    brpc::Server brpc_server;
+    ASSERT_EQ(server->start(&brpc_server), 0);
+    ASSERT_EQ(brpc_server.Start(0, &options), 0);
+    auto addr = brpc_server.listen_address();
+
+    config::hostname = butil::my_hostname();
+    config::brpc_listen_port = addr.port;
+    config::meta_server_register_interval_ms = 1;
+
+    while (true) {
+        std::unique_ptr<selectdb::Transaction> txn;
+        txn_kv->create_txn(&txn);
+        auto system_key = selectdb::system_meta_service_registry_key();
+        std::string value;
+        if (txn->get(system_key, &value) == 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    server->stop();
+    brpc_server.Stop(1);
+    brpc_server.Join();
+}
+
