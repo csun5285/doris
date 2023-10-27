@@ -181,6 +181,25 @@ Status BetaRowset::create_reader(RowsetReaderSharedPtr* result) {
     return Status::OK();
 }
 
+#ifdef CLOUD_MODE
+Status BetaRowset::remove() {
+    // If the rowset was removed, it need to remove the fds in segment cache directly
+    SegmentLoader::instance()->erase_segments(SegmentCache::CacheKey(rowset_id()));
+    Status st;
+    for (int i = 0; i < num_segments(); ++i) {
+        auto seg_path = segment_file_path(i);
+        for (auto& column : _schema->columns()) {
+            const TabletIndex* index_meta = _schema->get_inverted_index(column.unique_id());
+            if (index_meta) {
+                std::string inverted_index_file = InvertedIndexDescriptor::get_index_file_name(
+                        seg_path, index_meta->index_id());
+                segment_v2::InvertedIndexSearcherCache::instance()->erase(inverted_index_file);
+            }
+        }
+    }
+    return Status::OK();
+}
+#else
 Status BetaRowset::remove() {
     // TODO should we close and remove all segment reader first?
     VLOG_NOTICE << "begin to remove files in rowset " << unique_id()
@@ -223,6 +242,7 @@ Status BetaRowset::remove() {
     }
     return Status::OK();
 }
+#endif
 
 void BetaRowset::do_close() {
     // do nothing.
