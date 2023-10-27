@@ -501,7 +501,7 @@ Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, i
     if (ctx != nullptr && ctx->generate_delete_bitmap) {
         // mow table need to read the segment when memtable flush,
         // so we do close file_writer here.
-        file_writer->close();
+        RETURN_IF_ERROR(file_writer->close());
         RETURN_IF_ERROR(ctx->generate_delete_bitmap(segment_id));
     }
     RETURN_IF_ERROR(_segcompaction_if_necessary());
@@ -594,7 +594,11 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
 
         if (_segcompaction_worker.get_file_writer()) {
-            _segcompaction_worker.get_file_writer()->close();
+            auto s = _segcompaction_worker.get_file_writer()->close();
+            if (!s.ok()) [[unlikely]] {
+                LOG_WARNING("segcompaction file writer close failed due to {}", s.to_string());
+                return nullptr;
+            }
         }
     }
     // When building a rowset, we must ensure that the current _segment_writer has been
@@ -776,7 +780,7 @@ Status BetaRowsetWriter::_do_create_segment_writer(
                 _context.data_dir, _context.max_rows_per_segment, writer_options,
                 _context.mow_context));
         if (_segcompaction_worker.get_file_writer() != nullptr) {
-            _segcompaction_worker.get_file_writer()->close();
+            RETURN_IF_ERROR(_segcompaction_worker.get_file_writer()->close());
         }
         _segcompaction_worker.get_file_writer().reset(file_writer.release());
     } else {
