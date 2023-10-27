@@ -111,11 +111,10 @@ Status UploadFileBuffer::append_data(const Slice& data) {
                     segment->change_cache_type_self(FileCacheType::INDEX);
                 }
             }
-            // if cache_is_not_enough, cannot use it !
-            _cur_file_segment = _holder->file_segments.begin();
-            _append_offset = (*_cur_file_segment)->range().left;
             _holder = cache_is_not_enough ? nullptr : std::move(_holder);
             if (_holder) {
+                _cur_file_segment = _holder->file_segments.begin();
+                _append_offset = (*_cur_file_segment)->range().left;
                 (*_cur_file_segment)->get_or_set_downloader();
             }
             _is_cache_allocated = true;
@@ -181,8 +180,12 @@ void UploadFileBuffer::read_from_cache() {
         if (pos == _size) {
             break;
         }
-        if (auto s = segment->finalize_write(); !s.ok()) [[unlikely]] {
-            set_val(std::move(s));
+        if (segment->state() != FileBlock::State::DOWNLOADED) {
+            DCHECK(false);
+            LOG_WARNING("File Block State is not Downloaded")
+                .tag("key", segment->key().to_string())
+                .tag("range", segment->range().to_string());
+            set_val(Status::InternalError("File Block State is not Downloaded"));
             return;
         }
         size_t segment_size = segment->range().size();

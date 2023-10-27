@@ -164,12 +164,13 @@ Status FileBlock::append(Slice data) {
     st = _cache_writer->append(data);
     if (!st.ok()) {
         _cache_writer.reset();
+        _downloaded_size = 0;
         return st;
     }
 
     std::lock_guard download_lock(_download_mutex);
 
-    _downloaded_size = data.size;
+    _downloaded_size += data.size;
     return st;
 }
 
