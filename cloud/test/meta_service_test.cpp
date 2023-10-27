@@ -3319,6 +3319,65 @@ TEST(MetaServiceTest, UpdateDeleteBitmap) {
     ASSERT_EQ(get_delete_bitmap_res1.segment_delete_bitmaps(3), "bbb2");
 }
 
+TEST(MetaServiceTest, GetDeleteBitmapWithIdx) {
+    auto meta_service = get_meta_service();
+    extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
+                                       const std::string& cloud_unique_id);
+    auto instance_id = get_instance_id(meta_service->resource_mgr_, "test_cloud_unique_id");
+    int64_t db_id = 1;
+    int64_t table_id = 1;
+    int64_t index_id = 1;
+    int64_t partition_id = 1;
+    int64_t tablet_id = 123;
+
+    brpc::Controller cntl;
+    GetDeleteBitmapRequest req;
+    GetDeleteBitmapResponse res;
+    req.set_cloud_unique_id("test_cloud_unique_id");
+    req.set_tablet_id(tablet_id);
+    TabletIndexPB idx;
+    idx.set_tablet_id(tablet_id);
+    idx.set_index_id(index_id);
+    idx.set_db_id(db_id);
+    idx.set_partition_id(partition_id);
+    idx.set_table_id(table_id);
+    *(req.mutable_idx()) = idx;
+    req.set_base_compaction_cnt(9);
+    req.set_cumulative_compaction_cnt(19);
+    req.set_cumulative_point(21);
+
+    meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl), &req,
+                                    &res, nullptr);
+    EXPECT_EQ(res.status().code(), MetaServiceCode::TABLET_NOT_FOUND);
+
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    std::string stats_key =
+            stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    TabletStatsPB stats;
+    stats.set_base_compaction_cnt(9);
+    stats.set_cumulative_compaction_cnt(19);
+    stats.set_cumulative_point(20);
+    txn->put(stats_key, stats.SerializeAsString());
+    ASSERT_EQ(txn->commit(), 0);
+    meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl), &req,
+                                    &res, nullptr);
+    EXPECT_EQ(res.status().code(), MetaServiceCode::ROWSETS_EXPIRED);
+
+    req.set_cumulative_point(20);
+    meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl), &req,
+                                    &res, nullptr);
+    EXPECT_EQ(res.status().code(), MetaServiceCode::OK);
+
+    req.add_rowset_ids("1234");
+    req.add_begin_versions(1);
+    req.add_end_versions(2);
+    req.add_end_versions(3);
+    meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl), &req,
+                                    &res, nullptr);
+    EXPECT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+}
+
 TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
     auto meta_service = get_meta_service();
     extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
