@@ -443,6 +443,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
             if (cell.file_block->change_cache_type(FileCacheType::TTL)) {
                 auto& queue = get_queue(cell.cache_type);
                 queue.remove(cell.queue_iterator.value(), cache_lock);
+                cell.queue_iterator.reset();
                 cell.cache_type = FileCacheType::TTL;
                 cell.file_block->update_expiration_time(context.expiration_time);
             }
