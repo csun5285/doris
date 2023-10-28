@@ -356,12 +356,7 @@ public:
     *
     * @param the buf which is used by file buffer
     */
-    void reclaim(Slice buf) {
-        std::unique_lock<std::mutex> lck {_lock};
-        _free_raw_buffers.emplace_back(buf);
-        // only works when not set file cache
-        _cv.notify_all();
-    }
+    void reclaim(Slice buf);
 
     /**
     *

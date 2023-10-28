@@ -33,6 +33,9 @@
 namespace doris {
 namespace io {
 
+bvar::Adder<uint64_t> s3_file_buffer_allocated("s3_file_buffer_allocated");
+bvar::Adder<uint64_t> s3_file_buffer_allocating("s3_file_buffer_allocating");
+
 /**
  * 0. check if the inner memory buffer is empty or not
  * 1. relcaim the memory buffer if it's mot empty
@@ -351,6 +354,13 @@ void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write
 Slice S3FileBufferPool::allocate(bool reserve) {
     Slice buf;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_bufferpool::allocate", buf);
+    Defer defer {[&]() {
+        if (!buf.empty()) {
+            s3_file_buffer_allocated << 1;
+        }
+        s3_file_buffer_allocating << -1;
+    }};
+    s3_file_buffer_allocating << 1;
     // if need reserve or no cache then we must ensure return buf with memory preserved
     if (reserve || !config::enable_file_cache) {
         {
@@ -380,6 +390,16 @@ Slice S3FileBufferPool::allocate(bool reserve) {
     // if the buf has no memory reserved, it would try to write the data to file cache first
     // or it would try to rob buffer from other S3FileBuffer
     return buf;
+}
+
+void S3FileBufferPool::reclaim(Slice buf) {
+    {
+        std::unique_lock<std::mutex> lck {_lock};
+        _free_raw_buffers.emplace_back(buf);
+        // only works when not set file cache
+        _cv.notify_all();
+    }
+    s3_file_buffer_allocated << -1;
 }
 
 /**
