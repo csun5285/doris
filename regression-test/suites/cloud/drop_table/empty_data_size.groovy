@@ -21,7 +21,7 @@ import groovy.json.JsonSlurper
 *   @Params url is "/xxx", data is request body
 *   @Return response body
 */
-def http_post(url, data = null) {
+def http_get(url, data = null) {
     def dst = "http://"+ context.config.feHttpAddress
     def conn = new URL(dst + url).openConnection()
     conn.setRequestMethod("POST")
@@ -39,59 +39,95 @@ def http_post(url, data = null) {
     return conn.content.text
 }
 
-def SUCCESS_MSG = "success"
-def SUCCESS_CODE = 0
-
-class Stmt {
-    String stmt
-}
 suite("empty_data_size") {
     def url= "/metrics/"
 
-    def tableName = "table_emtpy_data"
+    def dbName = "regression_test_cloud_drop_table"
+    def oldTblName = "table_emtpy_data"
+    def newTblName = "new_table_empty_data"
 
-    sql """ DROP TABLE IF EXISTS ${tableName} """
+    sql """ DROP TABLE IF EXISTS ${oldTblName} FORCE"""
+    sql """ DROP TABLE IF EXISTS ${newTblName} FORCE"""
 
-    sql """
-    CREATE TABLE IF NOT EXISTS ${tableName} (
-      `test_varchar` varchar(150) NULL,
-      `test_datetime` datetime NULL,
-      `test_default_timestamp` datetime DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=OLAP
-    UNIQUE KEY(`test_varchar`)
-    DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
-    """
-
-    sql """ INSERT INTO ${tableName}(test_varchar, test_datetime) VALUES ('test1','2022-04-27 16:00:33'),('test2','2022-04-27 16:00:54') """
-
-    def dataSizeMetricsStr = 'doris_fe_table_data_size{db_name="regression_test_cloud_drop_table", table_name="table_emtpy_data"'
-
+    def oldMetricsStr = """doris_fe_table_data_size{db_name="${dbName}", table_name="${oldTblName}"}"""
+    def newMetricsStr = """doris_fe_table_data_size{db_name="${dbName}", table_name="${newTblName}"}"""
     // data size metrics of the new table should present
     def long start = System.currentTimeMillis()
-    def boolean containsTestedTable = false
+    def boolean containsOldTable = true
+    def boolean containsNewTable = true
     def long current = -1
-    while (!containsTestedTable && current - start < 600000) {
-        def resJson = http_post(url)
-        // def res = new JsonSlurper().parseText(resJson)
-        containsTestedTable = resJson.contains(dataSizeMetricsStr)
-        current = System.currentTimeMillis()
-        sleep(1000)
-    }
-    assertTrue(containsTestedTable)
 
-    sql """ DROP TABLE ${tableName} """
+    while (containsOldTable && current - start < 600000) {
+        def resJson = http_get(url)
+        containsOldTable = resJson.contains(oldMetricsStr)
+        containsNewTable = resJson.contains(newMetricsStr)
+        current = System.currentTimeMillis()
+        sleep(10000)
+    }
+    assertTrue(current > 0)
+    assertFalse(containsOldTable)
+    assertFalse(containsNewTable)
+
+    sql """
+        CREATE TABLE IF NOT EXISTS ${oldTblName} (
+        `test_varchar` varchar(150) NULL,
+        `test_datetime` datetime NULL,
+        `test_default_timestamp` datetime DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=OLAP
+        UNIQUE KEY(`test_varchar`)
+        DISTRIBUTED BY HASH(`test_varchar`) BUCKETS 3
+    """
+
+    sql """ INSERT INTO ${oldTblName}(test_varchar, test_datetime) VALUES ('test1','2022-04-27 16:00:33'),('test2','2022-04-27 16:00:54') """
+
+    start = System.currentTimeMillis()
+    containsOldTable = false
+    current = -1
+    while (!containsOldTable && current - start < 600000) {
+        def resJson = http_get(url)
+        containsOldTable = resJson.contains(oldMetricsStr)
+        current = System.currentTimeMillis()
+        sleep(10000)
+    }
+    assertTrue(current > 0)
+    assertTrue(containsOldTable)
+
+    sql """ alter table ${oldTblName} rename ${newTblName} """
+    start = System.currentTimeMillis()
+    containsOldTable = true
+    containsNewTable = false
+    current = -1
+
+    while (containsOldTable && current - start < 600000) {
+        def resJson = http_get(url)
+        // def res = new JsonSlurper().parseText(resJson)
+        containsOldTable = resJson.contains(oldMetricsStr)
+        containsNewTable = resJson.contains(newMetricsStr)
+        current = System.currentTimeMillis()
+        sleep(10000)
+    }
+    assertTrue(current > 0)
+    assertFalse(containsOldTable)
+    assertTrue(containsNewTable)
+
+    sql """ DROP TABLE ${newTblName} FORCE"""
 
     // data size metrics of the new table should disappear 
     start = System.currentTimeMillis()
-    containsTestedTable = true
+    containsOldTable = true
+    containsNewTable = true
     current = -1
-    while (containsTestedTable && current - start < 600000) {
-        def resJson = http_post(url)
-        containsTestedTable = resJson.contains(dataSizeMetricsStr)
+    while (containsNewTable && current - start < 600000) {
+        def resJson = http_get(url)
+        containsOldTable = resJson.contains(oldMetricsStr)
+        containsNewTable = resJson.contains(newMetricsStr)
         current = System.currentTimeMillis()
-        sleep(1000)
+        sleep(10000)
     }
-    assertFalse(containsTestedTable)
+    assertTrue(current > 0)
+    assertFalse(containsOldTable)
+    assertFalse(containsNewTable)
 
-    sql """ DROP TABLE IF EXISTS ${tableName} FORCE """
+    sql """ DROP TABLE IF EXISTS ${oldTblName} FORCE """
+    sql """ DROP TABLE IF EXISTS ${newTblName} FORCE """
 }

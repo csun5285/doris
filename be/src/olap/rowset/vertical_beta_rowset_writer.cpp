@@ -29,7 +29,6 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/logging.h"
-#include "gutil/strings/substitute.h"
 #include "io/fs/file_reader_writer_fwd.h"
 #include "io/fs/file_system.h"
 #include "io/fs/file_writer.h"
@@ -45,10 +44,13 @@ using namespace ErrorCode;
 
 VerticalBetaRowsetWriter::~VerticalBetaRowsetWriter() {
     if (!_already_built) {
-        auto fs = _rowset_meta->fs();
-        if (!fs) {
+        const auto& fs = _rowset_meta->fs();
+        if (!fs || !_rowset_meta->is_local()) { // Remote fs will delete them asynchronously
             return;
         }
+        // One segment writer would occupy one file writer, which means at most one s3 buffer
+        // might be occupied along with the writer. Earlier the segment writer is destructed,
+        // earlier the s3 buffer is reclaimed.
         for (auto& segment_writer : _segment_writers) {
             segment_writer.reset();
         }
@@ -57,8 +59,7 @@ VerticalBetaRowsetWriter::~VerticalBetaRowsetWriter() {
             // Even if an error is encountered, these files that have not been cleaned up
             // will be cleaned up by the GC background. So here we only print the error
             // message when we encounter an error.
-            WARN_IF_ERROR(fs->delete_file(path),
-                          strings::Substitute("Failed to delete file=$0", path));
+            WARN_IF_ERROR(fs->delete_file(path), fmt::format("Failed to delete file={}", path));
         }
     }
 }
@@ -178,8 +179,7 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
     // and _num_segment means num of flushed segments.
     int segment_id = _num_segment.fetch_add(1);
     allocate_segment_id();
-    auto path =
-            BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, segment_id);
+    auto path = BetaRowset::segment_file_path(_context.rowset_dir, _context.rowset_id, segment_id);
     auto fs = _rowset_meta->fs();
     if (!fs) {
         return Status::Error<INIT_FAILED>("get fs failed");

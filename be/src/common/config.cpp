@@ -351,8 +351,6 @@ DEFINE_mInt32(vertical_compaction_num_columns_per_group, "5");
 DEFINE_Int32(vertical_compaction_max_row_source_memory_mb, "200");
 // In vertical compaction, max dest segment file size
 DEFINE_mInt64(vertical_compaction_max_segment_size, "268435456");
-// In vertical compaction, max dest segment file size
-DEFINE_mInt64(max_segment_size_in_vertical_compaction, "268435456");
 
 // In ordered data compaction, min segment size for input rowset
 DEFINE_mInt32(ordered_data_compaction_min_segment_size, "10485760");
@@ -798,7 +796,7 @@ DEFINE_mInt32(segment_compression_threshold_kb, "256");
 DEFINE_mInt32(external_table_connect_timeout_sec, "30");
 
 // Global bitmap cache capacity for aggregation cache, size in bytes
-DEFINE_Int64(delete_bitmap_agg_cache_capacity, "104857600");
+DEFINE_Int64(delete_bitmap_agg_cache_capacity, "419430400");
 
 // s3 config
 DEFINE_mInt32(max_remote_storage_count, "10");
@@ -1169,6 +1167,8 @@ DEFINE_mBool(enable_flush_file_cache_async, "true");
 
 DEFINE_mBool(enable_check_segment_footer, "true");
 
+DEFINE_mBool(enable_file_cache_as_load_buffer, "false");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================
@@ -1194,6 +1194,8 @@ DEFINE_Int32(hdfs_hedged_read_thread_num, "128");
 DEFINE_Int32(hdfs_hedged_read_threshold_time, "500");
 
 DEFINE_mBool(enable_merge_on_write_correctness_check, "true");
+// rowid conversion correctness check when compaction for mow table
+DEFINE_mBool(enable_rowid_conversion_correctness_check, "false");
 
 // The secure path with user files, used in the `local` table function.
 DEFINE_mString(user_files_secure_path, "${DORIS_HOME}");
@@ -1208,6 +1210,7 @@ DEFINE_Int32(group_commit_sync_wal_batch, "10");
 
 // the count of thread to group commit insert
 DEFINE_Int32(group_commit_insert_threads, "10");
+DEFINE_mInt32(group_commit_interval_ms, "10000");
 
 DEFINE_mInt32(scan_thread_nice_value, "0");
 DEFINE_mInt32(tablet_schema_cache_recycle_interval, "86400");

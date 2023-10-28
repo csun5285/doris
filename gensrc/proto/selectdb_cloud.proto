@@ -340,28 +340,30 @@ message RecycleTxnPB {
 }
 
 message RecycleIndexPB {
-    enum Type {
+    enum State {
         UNKNOWN = 0;
-        PREPARE = 1;
-        DROP = 2;
+        PREPARED = 1;
+        DROPPED = 2;
+        RECYCLING = 3;
     }
     optional int64 table_id = 1;
     optional int64 creation_time = 2;
     optional int64 expiration = 3; // expiration timestamp
-    optional Type type = 4;
+    optional State state = 4;
 }
 
 message RecyclePartitionPB {
-    enum Type {
+    enum State {
         UNKNOWN = 0;
-        PREPARE = 1;
-        DROP = 2;
+        PREPARED = 1;
+        DROPPED = 2;
+        RECYCLING = 3;
     }
     optional int64 table_id = 1;
     repeated int64 index_id = 2;
     optional int64 creation_time = 3;
     optional int64 expiration = 4; // expiration timestamp
-    optional Type type = 5;
+    optional State state = 5;
     optional int64 db_id = 6; // For version recycling
 }
 
@@ -631,6 +633,16 @@ message CheckTxnConflictRequest {
 message CheckTxnConflictResponse {
     optional MetaServiceResponseStatus status = 1;
     optional bool finished = 2;
+}
+
+message CleanTxnLabelRequest {
+    optional string cloud_unique_id = 1; // For auth
+    optional int64 db_id = 2;
+    repeated string labels = 3;
+}
+
+message CleanTxnLabelResponse {
+    optional MetaServiceResponseStatus status = 1;
 }
 
 message GetVersionRequest {
@@ -1093,6 +1105,11 @@ enum MetaServiceCode {
     KV_TXN_CONFLICT = 1005;
     PROTOBUF_PARSE_ERR = 1006;
     PROTOBUF_SERIALIZE_ERR = 1007;
+    // A code indicates that the underlying store returns an error that
+    // needs to be retried. This code is not sent back to the client.
+    // See `selectdb::MetaServiceProxy` for details.
+    KV_TXN_STORE_GET_RETRYABLE = 1008;
+    KV_TXN_STORE_COMMIT_RETRYABLE = 1009;
 
     //Doris error
     TXN_GEN_ID_ERR = 2001;
@@ -1209,6 +1226,7 @@ service MetaService {
     rpc get_txn(GetTxnRequest) returns (GetTxnResponse);
     rpc get_current_max_txn_id(GetCurrentMaxTxnRequest) returns (GetCurrentMaxTxnResponse);
     rpc check_txn_conflict(CheckTxnConflictRequest) returns (CheckTxnConflictResponse);
+    rpc clean_txn_label(CleanTxnLabelRequest) returns (CleanTxnLabelResponse);
 
     rpc get_version(GetVersionRequest) returns (GetVersionResponse);
     rpc create_tablets(CreateTabletsRequest) returns (CreateTabletsResponse);

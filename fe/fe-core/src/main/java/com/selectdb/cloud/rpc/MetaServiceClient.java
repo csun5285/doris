@@ -182,6 +182,11 @@ public class MetaServiceClient {
         return blockingStub.checkTxnConflict(request);
     }
 
+    public SelectdbCloud.CleanTxnLabelResponse
+            cleanTxnLabel(SelectdbCloud.CleanTxnLabelRequest request) {
+        return blockingStub.cleanTxnLabel(request);
+    }
+
     public SelectdbCloud.GetClusterResponse getCluster(SelectdbCloud.GetClusterRequest request) {
         if (!request.hasCloudUniqueId()) {
             SelectdbCloud.GetClusterRequest.Builder builder =

@@ -26,7 +26,8 @@ namespace selectdb::config {
 
 CONF_Int32(brpc_listen_port, "5000");
 CONF_Int32(brpc_num_threads, "-1");
-CONF_Int32(brpc_idle_timeout_sec, "-1");
+// Set -1 to disable it.
+CONF_Int32(brpc_idle_timeout_sec, "30");
 CONF_String(hostname, "");
 CONF_String(fdb_cluster, "xxx:yyy@127.0.0.1:4500");
 CONF_String(fdb_cluster_file_path, "./conf/fdb.cluster");
@@ -55,6 +56,9 @@ CONF_mInt64(recycle_interval_seconds, "3600");
 CONF_mInt64(retention_seconds, "259200"); // 72h
 CONF_Int32(recycle_concurrency, "16");
 CONF_Int32(recycle_job_lease_expired_ms, "60000");
+CONF_mInt64(compacted_rowset_retention_seconds, "10800");  // 3h
+CONF_mInt64(dropped_index_retention_seconds, "10800");     // 3h
+CONF_mInt64(dropped_partition_retention_seconds, "10800"); // 3h
 // Which instance should be recycled. If empty, recycle all instances.
 CONF_Strings(recycle_whitelist, ""); // Comma seprated list
 // These instances will not be recycled, only effective when whitelist is empty.
@@ -66,7 +70,7 @@ CONF_Bool(enable_inverted_check, "false");
 // interval for scanning instances to do checks and inspections
 CONF_mInt32(scan_instances_interval_seconds, "60"); // 1min
 // interval for check object
-CONF_mInt32(check_object_interval_seconds, "43200")  // 12hours
+CONF_mInt32(check_object_interval_seconds, "43200"); // 12hours
 
 CONF_String(test_s3_ak, "ak");
 CONF_String(test_s3_sk, "sk");
@@ -124,7 +128,6 @@ CONF_Int64(reserved_buffer_days, "3");
 // For recycler to do periodically log to detect alive
 CONF_Int32(periodically_log_ms, "5000");
 
-
 // For kms
 CONF_Bool(enable_kms, "false");
 CONF_String(kms_info_encryption_key, ""); // encryption_key to encrypt kms sk
@@ -140,4 +143,9 @@ CONF_String(kms_provider, "ali"); // ali/tx/aws/hw, only support ali now
 CONF_String(kms_cmk, "");
 // When starting up, add kms data key if is missing, all MS need to be restarted simultaneously.
 CONF_Bool(focus_add_kms_data_key, "false");
+
+// Whether to retry the retryable errors that returns by the underlying txn store.
+CONF_Bool(enable_txn_store_retry, "false");
+CONF_Int32(txn_store_retry_times, "20");
+
 } // namespace selectdb::config

@@ -158,7 +158,7 @@ struct UploadFileBuffer final : public FileBuffer {
     UploadFileBuffer(std::function<void(UploadFileBuffer&)> upload_cb, OperationState state,
                      size_t offset, std::function<FileBlocksHolderPtr()> alloc_holder,
                      size_t index_offset)
-            : FileBuffer(alloc_holder, offset, state),
+            : FileBuffer(alloc_holder, offset, state, false),
               _upload_to_remote(std::move(upload_cb)),
               _index_offset(index_offset) {}
     ~UploadFileBuffer() override = default;
@@ -170,6 +170,11 @@ struct UploadFileBuffer final : public FileBuffer {
     */
     void set_index_offset(size_t offset);
     Status append_data(const Slice& s) override;
+    /**
+    * read the content from local file cache
+    * because previously lack of  memory buffer
+    */
+    void read_from_cache();
     /**
     * write the content inside memory buffer into 
     * local file cache
@@ -184,7 +189,10 @@ struct UploadFileBuffer final : public FileBuffer {
     * 5. reclaim self
     */
     void on_upload() {
-        DCHECK(!_buffer.empty());
+        if (config::enable_file_cache_as_load_buffer && _buffer.empty()) {
+            read_from_cache();
+        }
+        CHECK(!_buffer.empty());
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
             // If we call is_cancelled() after _state.set_val() then there might one situation where
@@ -216,8 +224,10 @@ private:
     std::function<void(UploadFileBuffer&)> _upload_to_remote = nullptr;
     std::shared_ptr<std::iostream> _stream_ptr; // point to _buffer.get_data()
 
+    bool _is_cache_allocated {false};
     FileBlocksHolderPtr _holder;
     decltype(_holder->file_segments.begin()) _cur_file_segment;
+    size_t _append_offset {0};
     size_t _index_offset {0};
 };
 
@@ -346,12 +356,7 @@ public:
     *
     * @param the buf which is used by file buffer
     */
-    void reclaim(Slice buf) {
-        std::unique_lock<std::mutex> lck {_lock};
-        _free_raw_buffers.emplace_back(buf);
-        // only works when not set file cache
-        _cv.notify_all();
-    }
+    void reclaim(Slice buf);
 
     /**
     *

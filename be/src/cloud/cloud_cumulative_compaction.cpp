@@ -104,7 +104,7 @@ TRY_AGAIN:
             _tablet->set_last_sync_time(0);
         } else if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
             // tablet not found
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         } else if (resp.status().code() == selectdb::JOB_TABLET_BUSY) {
             if (config::enable_parallel_cumu_compaction && resp.version_in_compaction_size() > 0 &&
                 ++tried <= 2) {
@@ -226,7 +226,7 @@ Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merge
     auto st = cloud::meta_mgr()->commit_tablet_job(job, &resp);
     if (!st.ok()) {
         if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         }
         return st;
     }
@@ -367,7 +367,7 @@ void CloudCumulativeCompaction::update_cumulative_point() {
             _tablet->set_last_sync_time(0);
         } else if (start_resp.status().code() == selectdb::TABLET_NOT_FOUND) {
             // tablet not found
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         }
         LOG_WARNING("failed to update cumulative point to meta srv")
                 .tag("job_id", _uuid)
@@ -383,7 +383,7 @@ void CloudCumulativeCompaction::update_cumulative_point() {
     st = cloud::meta_mgr()->commit_tablet_job(job, &finish_resp);
     if (!st.ok()) {
         if (finish_resp.status().code() == selectdb::TABLET_NOT_FOUND) {
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         }
         LOG_WARNING("failed to update cumulative point to meta srv")
                 .tag("job_id", _uuid)

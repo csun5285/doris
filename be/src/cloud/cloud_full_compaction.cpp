@@ -77,7 +77,7 @@ Status CloudFullCompaction::prepare_compact() {
             _tablet->set_last_sync_time(0);
         } else if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
             // tablet not found
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         }
         return st;
     }
@@ -191,7 +191,7 @@ Status CloudFullCompaction::modify_rowsets(const Merger::Statistics* merger_stat
     auto st = cloud::meta_mgr()->commit_tablet_job(job, &resp);
     if (!st.ok()) {
         if (resp.status().code() == selectdb::TABLET_NOT_FOUND) {
-            cloud::tablet_mgr()->erase_tablet(_tablet->tablet_id());
+            _tablet->recycle_resources_by_self();
         }
         return st;
     }

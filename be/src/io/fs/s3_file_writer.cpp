@@ -361,7 +361,8 @@ Status S3FileWriter::_complete() {
     complete_request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
 
     _wait_until_finish("Complete");
-    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:1", std::make_pair(&_failed, &_completed_parts));
+    TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:1",
+                             std::make_pair(&_failed, &_completed_parts));
     if (_failed || _completed_parts.size() != _cur_part_num) {
         auto st = Status::IOError("error status {}, complete parts {}, cur part num {}", _st,
                                   _completed_parts.size(), _cur_part_num);

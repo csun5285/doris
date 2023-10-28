@@ -59,6 +59,7 @@ import org.apache.doris.transaction.TransactionState.TxnCoordinator;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -68,6 +69,8 @@ import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.CheckTxnConflictRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.CheckTxnConflictResponse;
+import com.selectdb.cloud.proto.SelectdbCloud.CleanTxnLabelRequest;
+import com.selectdb.cloud.proto.SelectdbCloud.CleanTxnLabelResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.CommitTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.CommitTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.GetCurrentMaxTxnRequest;
@@ -209,11 +212,6 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 case TXN_DUPLICATED_REQ:
                     throw new DuplicatedRequestException(DebugUtil.printId(requestId),
                             beginTxnResponse.getDupTxnId(), beginTxnResponse.getStatus().getMsg());
-                case TXN_LABEL_ALREADY_USED:
-                    if (MetricRepo.isInit) {
-                        MetricRepo.COUNTER_TXN_REJECT.increase(1L);
-                    }
-                    throw new LabelAlreadyUsedException(beginTxnResponse.getStatus().getMsg());
                 default:
                     if (MetricRepo.isInit) {
                         MetricRepo.COUNTER_TXN_REJECT.increase(1L);
@@ -1027,5 +1025,49 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         } catch (InterruptedException e) {
             LOG.info("InterruptedException: ", e);
         }
+    }
+
+    public void cleanLabel(long dbId, String label) throws UserException {
+        LOG.info("try to cleanLabel dbId: {}, label:{}", dbId, label);
+        CleanTxnLabelRequest.Builder builder = CleanTxnLabelRequest.newBuilder();
+        builder.setDbId(dbId).setCloudUniqueId(Config.cloud_unique_id);
+
+        if (!Strings.isNullOrEmpty(label)) {
+            builder.addLabels(label);
+        }
+
+        final CleanTxnLabelRequest cleanTxnLabelRequest = builder.build();
+        CleanTxnLabelResponse cleanTxnLabelResponse = null;
+        int retryTime = 0;
+
+        try {
+            // 5 times retry is enough for clean label
+            while (retryTime < 5) {
+                LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelRequest);
+                cleanTxnLabelResponse = MetaServiceProxy.getInstance().cleanTxnLabel(cleanTxnLabelRequest);
+                LOG.debug("retryTime:{}, cleanTxnLabel:{}", retryTime, cleanTxnLabelResponse);
+                if (cleanTxnLabelResponse.getStatus().getCode() != MetaServiceCode.KV_TXN_CONFLICT) {
+                    break;
+                }
+                // sleep random [20, 200] ms, avoid txn conflict
+                LOG.info("cleanTxnLabel KV_TXN_CONFLICT, dbId:{}, label:{}, retryTime:{}", dbId, label, retryTime);
+                backoff();
+                retryTime++;
+                continue;
+            }
+
+            Preconditions.checkNotNull(cleanTxnLabelResponse);
+            Preconditions.checkNotNull(cleanTxnLabelResponse.getStatus());
+        } catch (Exception e) {
+            LOG.warn("cleanTxnLabel failed, dbId:{}, exception:", dbId, e);
+            throw new UserException("cleanTxnLabel failed, errMsg:" + e.getMessage());
+        }
+
+        if (cleanTxnLabelResponse.getStatus().getCode() != MetaServiceCode.OK) {
+            LOG.warn("cleanTxnLabel failed, dbId:{} label:{} retryTime:{} cleanTxnLabelResponse:{}",
+                    dbId, label, retryTime, cleanTxnLabelResponse);
+            throw new UserException("cleanTxnLabel failed, errMsg:" + cleanTxnLabelResponse.getStatus().getMsg());
+        }
+        return;
     }
 }

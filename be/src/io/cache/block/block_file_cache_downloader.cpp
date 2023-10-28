@@ -64,10 +64,10 @@ static void _append_data_to_file_cache(FileBlocksHolderPtr holder, Slice data) {
                           Status st;
                           st = file_segment->append(append_data);
                           if (st.ok()) {
-                            st = file_segment->finalize_write();
+                              st = file_segment->finalize_write();
                           }
                           if (!st.ok()) {
-                            LOG_WARNING("failed to append data to file cache").error(st);
+                              LOG_WARNING("failed to append data to file cache").error(st);
                           }
                       }
                       offset += file_segment->range().size();
@@ -265,7 +265,11 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
                 }
             }
         };
-        cloud::tablet_mgr()->get_tablet(meta.tablet_id(), &tablet);
+        if (auto st = cloud::tablet_mgr()->get_tablet(meta.tablet_id(), &tablet); !st.ok())
+                [[unlikely]] {
+            LOG_WARNING("Failed to find tablet {} due to {}", meta.tablet_id(), st);
+            return;
+        }
         auto id_to_rowset_meta_map = tablet->tablet_meta()->snapshot_rs_metas();
         if (auto iter = id_to_rowset_meta_map.find(meta.rowset_id());
             iter != id_to_rowset_meta_map.end()) {

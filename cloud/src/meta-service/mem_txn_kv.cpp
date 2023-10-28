@@ -1,16 +1,17 @@
-#include "common/sync_point.h"
 #include "mem_txn_kv.h"
-#include "txn_kv.h"
 
 #include <glog/logging.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
-#include <cstring>
 #include <ostream>
 #include <string>
 
+#include "common/sync_point.h"
+#include "meta-service/txn_kv_error.h"
+#include "txn_kv.h"
 
 namespace selectdb {
 
@@ -18,25 +19,26 @@ int MemTxnKv::init() {
     return 0;
 }
 
-int MemTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
+TxnErrorCode MemTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
     auto t = new memkv::Transaction(this->shared_from_this());
     txn->reset(t);
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int MemTxnKv::update(const std::set<std::string>& read_set,
-            const std::vector<OpTuple> &op_list, int64_t read_version, int64_t* committed_version) {
+TxnErrorCode MemTxnKv::update(const std::set<std::string>& read_set,
+                              const std::vector<OpTuple>& op_list, int64_t read_version,
+                              int64_t* committed_version) {
     std::lock_guard<std::mutex> l(lock_);
 
-    // check_confict
-    for (const auto& k: read_set) {
+    // check_conflict
+    for (const auto& k : read_set) {
         auto iter = log_kv_.find(k);
         if (iter != log_kv_.end()) {
             auto log_item = iter->second;
             if (log_item.front().commit_version_ > read_version) {
-                LOG(WARNING) << "commit confict";
+                LOG(WARNING) << "commit conflict";
                 //keep the same behaviour with fdb.
-                return 1002;
+                return TxnErrorCode::TXN_CONFLICT;
             }
         }
     }
@@ -45,7 +47,7 @@ int MemTxnKv::update(const std::set<std::string>& read_set,
     int16_t seq = 0;
     for (const auto& vec: op_list) {
         auto& [op_type, k, v] = vec;
-        LogItem log_item{op_type, committed_version_, k, v};
+        LogItem log_item {op_type, committed_version_, k, v};
         log_kv_[k].push_front(log_item);
         switch (op_type) {
             case memkv::ModifyOpType::PUT: {
@@ -58,7 +60,7 @@ int MemTxnKv::update(const std::set<std::string>& read_set,
                 mem_kv_[ver_key] = v;
                 break;
             }
-            case memkv::ModifyOpType::ATOMTC_SET_VER_VAL: {
+            case memkv::ModifyOpType::ATOMIC_SET_VER_VAL: {
                 std::string ver_val(v);
                 gen_version_timestamp(committed_version_, seq, &ver_val);
                 mem_kv_[k] = ver_val;
@@ -90,7 +92,7 @@ int MemTxnKv::update(const std::set<std::string>& read_set,
     }
 
     *committed_version = committed_version_;
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
 int MemTxnKv::get_kv(std::map<std::string, std::string> *kv, int64_t* version) {
@@ -140,14 +142,10 @@ int64_t MemTxnKv::get_last_read_version() {
 namespace selectdb::memkv {
 
 // =============================================================================
-// Impl of Trasaction
+// Impl of Transaction
 // =============================================================================
 
 int Transaction::init() {
-    return 0;
-}
-
-int Transaction::begin() {
     return 0;
 }
 
@@ -159,7 +157,7 @@ void Transaction::put(std::string_view key, std::string_view val) {
     op_list_.emplace_back(ModifyOpType::PUT, k, v);
 }
 
-int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
+TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
 
@@ -168,12 +166,12 @@ int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     if (unreadable_keys_.count(k) != 0) {
         aborted_ = true;
         LOG(WARNING) << "read unreadable key, abort";
-        return -2;
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
     }
     return inner_get(k, val, snapshot);
 }
 
-int Transaction::get(std::string_view begin, std::string_view end,
+TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
                      std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
     TEST_SYNC_POINT_CALLBACK("memkv::Transaction::get", &limit);
     std::lock_guard<std::mutex> l(lock_);
@@ -183,32 +181,36 @@ int Transaction::get(std::string_view begin, std::string_view end,
     if (unreadable_keys_.count(begin_k) != 0) {
         aborted_ = true;
         LOG(WARNING) << "read unreadable key, abort";
-        return -2;
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
     }
     return inner_get(begin_k, end_k, iter, snapshot, limit);
 }
 
-
-int Transaction::inner_get(const std::string& key, std::string* val, bool snapshot) {
+TxnErrorCode Transaction::inner_get(const std::string& key, std::string* val, bool snapshot) {
     auto iter = inner_kv_.find(key);
     if (!snapshot) read_set_.emplace(key);
-    if (iter == inner_kv_.end()) { return 1;}
+    if (iter == inner_kv_.end()) {
+        return TxnErrorCode::TXN_KEY_NOT_FOUND;
+    }
     *val = iter->second;
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int Transaction::inner_get(const std::string& begin, const std::string& end, 
-                        std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
+TxnErrorCode Transaction::inner_get(const std::string& begin, const std::string& end,
+                                    std::unique_ptr<selectdb::RangeGetIterator>* iter,
+                                    bool snapshot, int limit) {
     std::vector<std::pair<std::string, std::string>> kv_list;
     if (begin >= end) {
         std::unique_ptr<RangeGetIterator> ret(new memkv::RangeGetIterator(kv_list, false));
         *(iter) = std::move(ret);
-        return 0;
+        return TxnErrorCode::TXN_OK;
     }
 
     bool use_limit = true;
 
-    if (limit < 0) { return -1;}
+    if (limit < 0) {
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+    }
     if (limit == 0) { use_limit = false;}
 
     bool more = false;
@@ -227,7 +229,7 @@ int Transaction::inner_get(const std::string& begin, const std::string& end,
     }
     std::unique_ptr<RangeGetIterator> ret(new memkv::RangeGetIterator(kv_list, more));
     *(iter) = std::move(ret);
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
 void Transaction::atomic_set_ver_key(std::string_view key_prefix, std::string_view val) {
@@ -243,7 +245,7 @@ void Transaction::atomic_set_ver_value(std::string_view key, std::string_view va
     std::string k(key.data(), key.size());
     std::string v(value.data(), value.size());
     unreadable_keys_.insert(k);
-    op_list_.emplace_back(ModifyOpType::ATOMTC_SET_VER_VAL, k, v);
+    op_list_.emplace_back(ModifyOpType::ATOMIC_SET_VER_VAL, k, v);
 }
 
 void Transaction::atomic_add(std::string_view key, int64_t to_add) {
@@ -275,34 +277,36 @@ void Transaction::remove(std::string_view begin, std::string_view end) {
     }
 }
 
-int Transaction::commit() {
+TxnErrorCode Transaction::commit() {
     std::lock_guard<std::mutex> l(lock_);
     if (aborted_) {
-        return -2;
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
     }
-    int ret = kv_->update(read_set_, op_list_, read_version_, &committed_version_);
-    if (ret != 0) {
-        return ret == 1002? -1 : -2;
+    auto code = kv_->update(read_set_, op_list_, read_version_, &committed_version_);
+    if (code != TxnErrorCode::TXN_OK) {
+        return code;
     }
     commited_ = true;
     op_list_.clear();
     inner_kv_.clear();
     read_set_.clear();
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int64_t Transaction::get_read_version() {
+TxnErrorCode Transaction::get_read_version(int64_t* version) {
     std::lock_guard<std::mutex> l(lock_);
-    return read_version_;
+    *version = read_version_;
+    return TxnErrorCode::TXN_OK;
 }
 
-int64_t Transaction::get_committed_version() {
+TxnErrorCode Transaction::get_committed_version(int64_t* version) {
     std::lock_guard<std::mutex> l(lock_);
-    return committed_version_;
+    *version = committed_version_;
+    return TxnErrorCode::TXN_OK;
 }
 
-int Transaction::abort() {
-    return 0;
+TxnErrorCode Transaction::abort() {
+    return TxnErrorCode::TXN_OK;
 }
 
 } // namespace selectdb::memkv

@@ -135,8 +135,6 @@ import org.apache.doris.datasource.property.constants.HMSProperties;
 import org.apache.doris.external.elasticsearch.EsRepository;
 import org.apache.doris.external.iceberg.IcebergCatalogMgr;
 import org.apache.doris.external.iceberg.IcebergTableCreationRecordMgr;
-import org.apache.doris.metric.GaugeMetricImpl;
-import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.mtmv.MTMVJobFactory;
 import org.apache.doris.mtmv.metadata.MTMVJob;
 import org.apache.doris.persist.AlterDatabasePropertyInfo;
@@ -967,31 +965,6 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
 
         db.dropTable(table.getName());
-
-        // empty data size recoreded in DORIS_METRIC_REGISTER
-        if (table.getType() == TableType.OLAP) {
-            OlapTable olapTable = (OlapTable) table;
-            String dbName = olapTable.getDBName();
-            String tableName = olapTable.getName();
-            String metricKey = dbName + "." + tableName;
-            LOG.info("empty_table_size: drop table {}", metricKey);
-            GaugeMetricImpl<Long> metric = MetricRepo.CLOUD_DB_TABLE_DATA_SIZE.remove(metricKey);
-            if (metric != null) {
-                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
-            }
-            metric = MetricRepo.CLOUD_DB_TABLE_ROWSET_COUNT.remove(metricKey);
-            if (metric != null) {
-                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
-            }
-            metric = MetricRepo.CLOUD_DB_TABLE_ROW_COUNT.remove(metricKey);
-            if (metric != null) {
-                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
-            }
-            metric = MetricRepo.CLOUD_DB_TABLE_SEGMENT_COUNT.remove(metricKey);
-            if (metric != null) {
-                MetricRepo.DORIS_METRIC_REGISTER.removeMetricsByNameAndLabels(metric.getName(), metric.getLabels());
-            }
-        }
         Env.getCurrentRecycleBin().recycleTable(db.getId(), table, isReplay, isForceDrop, recycleTime);
         if (table instanceof MaterializedView) {
             List<Long> dropIds = Env.getCurrentEnv().getMTMVJobManager().showJobs(db.getFullName(), table.getName())
@@ -1688,7 +1661,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
                 List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(olapTable.getId(), partitionIds, indexIds, 0);
+                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -1698,7 +1671,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                     olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
                     olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
-                commitCloudPartition(olapTable.getId(), partitionIds);
+                commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
             }
             // check again
             olapTable = db.getOlapTableOrDdlException(tableName);
@@ -3111,7 +3084,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
             if (Config.isCloudMode()) {
                 List<Long> indexIds = copiedTbl.getIndexIdToMeta().keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(copiedTbl.getId(), newPartitionIds, indexIds, 0);
+                prepareCloudPartition(db.getId(), copiedTbl.getId(), newPartitionIds, indexIds, 0);
             }
 
             for (Map.Entry<String, Long> entry : origPartitions.entrySet()) {
@@ -3162,7 +3135,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             }
 
             if (Config.isCloudMode()) {
-                commitCloudPartition(copiedTbl.getId(), newPartitionIds);
+                List<Long> indexIds = copiedTbl.getIndexIdToMeta().keySet().stream().collect(Collectors.toList());
+                commitCloudPartition(copiedTbl.getId(), newPartitionIds, indexIds);
             }
         } catch (DdlException e) {
             // create partition failed, remove all newly created tablets
@@ -3259,7 +3233,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     break;
                 }
                 try {
-                    Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
+                    Env.getCurrentInternalCatalog().dropCloudPartition(db.getId(), olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
@@ -3354,7 +3328,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     break;
                 }
                 try {
-                    Env.getCurrentInternalCatalog().dropCloudPartition(olapTable.getId(),
+                    Env.getCurrentInternalCatalog().dropCloudPartition(db.getId(), olapTable.getId(),
                             oldPartitionsIds, oldPartitionIndexIds);
                 } catch (Exception e) {
                     LOG.warn("failed to drop partition {} of table {}, try cnt {}, execption {}",
@@ -3858,7 +3832,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     // if `expiration` = 0, recycler will delete uncommitted partitions in `retention_seconds`
-    public void prepareCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds,
+    public void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
                                       long expiration) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -3867,6 +3841,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
         partitionRequestBuilder.setExpiration(expiration);
+        if (dbId > 0) {
+            partitionRequestBuilder.setDbId(dbId);
+        }
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;
@@ -3892,11 +3869,12 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void commitCloudPartition(long tableId, List<Long> partitionIds) throws DdlException {
+    public void commitCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
+        partitionRequestBuilder.addAllIndexIds(indexIds);
         partitionRequestBuilder.setTableId(tableId);
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
@@ -3923,7 +3901,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void dropCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds)
+    public void dropCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds)
             throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -3931,6 +3909,9 @@ public class InternalCatalog implements CatalogIf<Database> {
         partitionRequestBuilder.setTableId(tableId);
         partitionRequestBuilder.addAllPartitionIds(partitionIds);
         partitionRequestBuilder.addAllIndexIds(indexIds);
+        if (dbId > 0) {
+            partitionRequestBuilder.setDbId(dbId);
+        }
         final SelectdbCloud.PartitionRequest partitionRequest = partitionRequestBuilder.build();
 
         SelectdbCloud.PartitionResponse response = null;

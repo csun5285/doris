@@ -61,13 +61,16 @@ public:
     }
 
     virtual bool init_from_pb(const RowsetMetaPB& rowset_meta_pb) {
-#ifndef BE_TEST
-        // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
-        DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
-#endif // BE_TEST
         if (rowset_meta_pb.has_tablet_schema()) {
+#ifdef BE_TEST
+            _schema = std::make_shared<TabletSchema>();
+            _schema->init_from_pb(rowset_meta_pb.tablet_schema());
+#else
+            // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
+            DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
             _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
                                                             rowset_meta_pb.tablet_schema());
+#endif // BE_TEST
         }
         // Release ownership of TabletSchemaPB from `rowset_meta_pb` and then set it back to `rowset_meta_pb`,
         // this won't break const semantics of `rowset_meta_pb`, because `rowset_meta_pb` is not changed
@@ -385,7 +388,11 @@ public:
     int64_t newest_write_timestamp() const { return _rowset_meta_pb.newest_write_timestamp(); }
 
     void set_tablet_schema(const TabletSchemaSPtr& tablet_schema) {
+#ifdef BE_TEST
+        _schema = tablet_schema;
+#else
         _schema = TabletSchemaCache::instance()->insert(index_id(), tablet_schema);
+#endif
     }
 
     const TabletSchemaSPtr& tablet_schema() { return _schema; }
@@ -444,13 +451,16 @@ private:
         if (!rowset_meta_pb.ParseFromString(value)) {
             return false;
         }
-#ifndef BE_TEST
-        // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
-        DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
-#endif // BE_TEST
         if (rowset_meta_pb.has_tablet_schema()) {
+#ifdef BE_TEST
+            _schema = std::make_shared<TabletSchema>();
+            _schema->init_from_pb(rowset_meta_pb.tablet_schema());
+#else
+            // since cloud-2.3, RowsetMetaPB MUST have `index_id` and `schema_version`
+            DCHECK(rowset_meta_pb.has_index_id() && rowset_meta_pb.has_schema_version());
             _schema = TabletSchemaCache::instance()->insert(rowset_meta_pb.index_id(),
                                                             rowset_meta_pb.tablet_schema());
+#endif // BE_TEST
             rowset_meta_pb.clear_tablet_schema();
         }
         _rowset_meta_pb = rowset_meta_pb;

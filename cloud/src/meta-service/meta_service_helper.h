@@ -22,14 +22,22 @@ void begin_rpc(std::string_view func_name, brpc::Controller* ctrl, const Request
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side();
     } else if constexpr (std::is_same_v<Request, CreateTabletsRequest>) {
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side();
-    } else if constexpr (std::is_same_v<Request, GetTabletStatsRequest>) {
-        LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
-                  << " tablet size: " << req->tablet_idx().size();
     } else if constexpr (std::is_same_v<Request, UpdateDeleteBitmapRequest>) {
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
-                  << " tablet id: " << req->tablet_id() << " lock id: " << req->lock_id()
-                  << " initiator: " << req->initiator()
-                  << " delete bitmap size: " << req->segment_delete_bitmaps_size();
+                  << " tablet_id=" << req->tablet_id() << " lock_id=" << req->lock_id()
+                  << " initiator=" << req->initiator()
+                  << " delete_bitmap_size=" << req->segment_delete_bitmaps_size();
+    } else if constexpr (std::is_same_v<Request, GetDeleteBitmapRequest>) {
+        LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
+                  << " tablet_id=" << req->tablet_id() << " rowset_size=" << req->rowset_ids_size();
+    } else if constexpr (std::is_same_v<Request, GetTabletStatsRequest>) {
+        VLOG_DEBUG << "begin " << func_name << " from " << ctrl->remote_side()
+                   << " tablet size: " << req->tablet_idx().size();
+    } else if constexpr (std::is_same_v<Request, GetVersionRequest> ||
+            std::is_same_v<Request, GetRowsetRequest> ||
+            std::is_same_v<Request, GetTabletRequest>) {
+        VLOG_DEBUG << "begin " << func_name << " from " << ctrl->remote_side()
+                   << " request=" << req->ShortDebugString();
     } else {
         LOG(INFO) << "begin " << func_name << " from " << ctrl->remote_side()
                   << " request=" << req->ShortDebugString();
@@ -38,25 +46,7 @@ void begin_rpc(std::string_view func_name, brpc::Controller* ctrl, const Request
 
 template <class Response>
 void finish_rpc(std::string_view func_name, brpc::Controller* ctrl, Response* res) {
-    if constexpr (std::is_same_v<Response, GetTabletResponse>) {
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
-    } else if constexpr (std::is_same_v<Response, GetRowsetResponse>) {
-        if (res->status().code() != MetaServiceCode::OK) {
-            res->clear_rowset_meta();
-        }
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
-    } else if constexpr (std::is_same_v<Response, GetCopyFilesResponse>) {
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
-    } else if constexpr (std::is_same_v<Response, GetClusterResponse>) {
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
-    } else if constexpr (std::is_same_v<Response, GetObjStoreInfoResponse>) {
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
-    } else if constexpr (std::is_same_v<Response, CommitTxnResponse>) {
+    if constexpr (std::is_same_v<Response, CommitTxnResponse>) {
         if (res->status().code() != MetaServiceCode::OK) {
             res->clear_table_ids();
             res->clear_partition_ids();
@@ -64,13 +54,25 @@ void finish_rpc(std::string_view func_name, brpc::Controller* ctrl, Response* re
         }
         LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
                   << " response=" << res->ShortDebugString();
+    } else if constexpr (std::is_same_v<Response, GetRowsetResponse>) {
+        if (res->status().code() != MetaServiceCode::OK) {
+            res->clear_rowset_meta();
+        }
+        VLOG_DEBUG << "finish " << func_name << " from " << ctrl->remote_side()
+                   << " status=" << res->status().ShortDebugString();
     } else if constexpr (std::is_same_v<Response, GetTabletStatsResponse>) {
-        LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString()
-                  << " tablet size: " << res->tablet_stats().size();
+        VLOG_DEBUG << "finish " << func_name << " from " << ctrl->remote_side()
+                   << " status=" << res->status().ShortDebugString()
+                   << " tablet size: " << res->tablet_stats().size();
+    } else if constexpr (std::is_same_v<Response, GetVersionResponse> ||
+            std::is_same_v<Response, GetTabletResponse>) {
+        VLOG_DEBUG << "finish " << func_name << " from " << ctrl->remote_side()
+                   << " response=" << res->ShortDebugString();
     } else if constexpr (std::is_same_v<Response, GetDeleteBitmapResponse>) {
         LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
-                  << " status=" << res->status().ShortDebugString();
+                  << " status=" << res->status().ShortDebugString()
+                  << " delete_bitmap_size=" << res->segment_delete_bitmaps_size();
+
     } else {
         LOG(INFO) << "finish " << func_name << " from " << ctrl->remote_side()
                   << " response=" << res->ShortDebugString();

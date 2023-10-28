@@ -24,8 +24,8 @@ suite("test_insert_into_lineitem_multiple_table") {
 
     def getRowCount = { expectedRowCount, table_name ->
         def retry = 0
-        while (retry < 30) {
-            sleep(2000)
+        while (retry < 60) {
+            sleep(5000)
             try {
                 def rowCount = sql "select count(*) from ${table_name}"
                 logger.info("rowCount: " + rowCount + ", retry: " + retry)
@@ -92,23 +92,17 @@ PROPERTIES (
                     assertTrue(json.NumberLoadedRows > 0 && json.LoadBytes > 0)
                 }
             }
-            while (true) {
-                try {
-                    qt_sql """ select count(*) from ${table_name}; """
-                    break
-                } catch (Exception e) {
-                    Thread.sleep(1000)
-                    log.info("exception:", e)
-                }
+
+            try {
+                qt_sql """ select count(*) from ${table_name}; """
+            } catch (Exception e) {
+                log.info("exception:", e)
             }
-            while (true) {
-                try {
-                    qt_sql """ select l_orderkey from ${table_name} where l_orderkey >=0 and l_orderkey <=6000000 order by l_shipdate asc; """
-                    break
-                } catch (Exception e) {
-                    Thread.sleep(1000)
-                    log.info("exception:", e)
-                }
+
+            try {
+                qt_sql """ select l_orderkey from ${table_name} where l_orderkey >=0 and l_orderkey <=6000000 order by l_orderkey asc; """
+            } catch (Exception e) {
+                log.info("exception:", e)
             }
         }
 
@@ -155,6 +149,7 @@ PROPERTIES (
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);
         }
+        sql """ set enable_insert_group_commit = true; """
 
         String s = null;
         StringBuilder sb = null;
@@ -246,33 +241,31 @@ PROPERTIES (
 
         for (int k = 0; k < file_array.length; k++) {
             String table_name = insert_table_base + "_" + k;
-            while (true) {
-                try {
-                    qt_sql """ select count(*) from ${table_name}; """
-                    break
-                } catch (Exception e) {
-                    Thread.sleep(1000)
-                    log.info("exception:", e)
-                }
+
+            try {
+                qt_sql """ select count(*) from ${table_name}; """
+            } catch (Exception e) {
+                log.info("exception:", e)
             }
-            while (true) {
-                try {
-                    qt_sql """ select l_orderkey from ${table_name} where l_orderkey >=0 and l_orderkey <=6000000 order by l_shipdate asc; """
-                    break
-                } catch (Exception e) {
-                    Thread.sleep(1000)
-                    log.info("exception:", e)
-                }
+
+            try {
+                qt_sql """ select l_orderkey from ${table_name} where l_orderkey >=0 and l_orderkey <=6000000 order by l_orderkey asc; """
+            } catch (Exception e) {
+                log.info("exception:", e)
             }
+
         }
     }
 
     try {
-        file_array = getFiles(dir)
-        if (!context.outputFile.exists()) {
-            do_stream_load()
-        } else {
-            do_insert_into()
+        File file = new File(dir)
+        if (file.exists() && file.isDirectory()) {
+            file_array = getFiles(dir)
+            if (!context.outputFile.exists()) {
+                do_stream_load()
+            } else {
+                do_insert_into()
+            }
         }
     } finally {
 

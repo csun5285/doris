@@ -69,6 +69,7 @@ set(CLOUD_TEST_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/cloud/fork_and_join_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_tablet_hotspot_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cloud/cloud_warm_up_job_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cloud/olap/delete_bitmap_txn_manager.cpp
 )
 
 if (CLOUD_MODE)

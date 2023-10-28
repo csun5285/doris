@@ -35,8 +35,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "cloud/utils.h"
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
@@ -174,8 +174,12 @@ Status SnapshotManager::convert_rowset_ids(const std::string& clone_dir, int64_t
     new_tablet_meta_pb.set_replica_id(replica_id);
     new_tablet_meta_pb.set_schema_hash(schema_hash);
     TabletSchemaSPtr tablet_schema;
+#ifdef BE_TEST
+    tablet_schema->init_from_pb(new_tablet_meta_pb.schema());
+#else
     tablet_schema = TabletSchemaCache::instance()->insert(new_tablet_meta_pb.index_id(),
                                                           new_tablet_meta_pb.schema());
+#endif
 
     std::unordered_map<Version, RowsetMetaPB*, HashOfVersion> rs_version_map;
     std::unordered_map<RowsetId, RowsetId, HashOfRowsetId> rowset_id_mapping;

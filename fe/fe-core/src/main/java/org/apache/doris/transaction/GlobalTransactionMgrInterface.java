@@ -168,5 +168,7 @@ public interface GlobalTransactionMgrInterface extends Writable {
 
     public boolean isPreviousTransactionsFinished(long endTransactionId, long dbId, long tableId, long partitionId)
             throws AnalysisException;
+
+    public void cleanLabel(long dbId, String label) throws UserException;
 }
 

@@ -54,9 +54,10 @@ public:
         s3_conf.region = config::test_s3_region;
         s3_conf.bucket = config::test_s3_bucket;
         s3_conf.prefix = "s3_file_writer_test";
-        s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
         std::cout << "s3 conf: " << s3_conf.to_string() << std::endl;
-        ASSERT_EQ(Status::OK(), s3_fs->connect());
+        s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
+        auto st = s3_fs->connect();
+        ASSERT_TRUE(st.ok()) << st;
 
         std::unique_ptr<ThreadPool> _pool;
         ThreadPoolBuilder("s3_upload_file_thread_pool")
@@ -68,9 +69,13 @@ public:
         s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
                              doris::config::s3_write_buffer_size,
                              ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool.get());
+        SyncPoint::get_instance()->enable_processing();
+        config::file_cache_enter_disk_resource_limit_mode_percent = 99;
     }
 
-    static void TearDownTestSuite() {}
+    static void TearDownTestSuite() {
+        SyncPoint::get_instance()->disable_processing();
+    }
 };
 
 TEST_F(S3FileWriterTest, multi_part_io_error) {
@@ -97,14 +102,14 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
         auto client = s3_fs->get_client();
         io::FileReaderSPtr local_file_reader;
 
-        ASSERT_TRUE(
-                fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader)
-                        .ok());
+        auto st  = fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader);
+        ASSERT_TRUE(st.ok()) << st;
 
         constexpr int buf_size = 8192;
 
         io::FileWriterPtr s3_file_writer;
-        ASSERT_EQ(Status::OK(), s3_fs->create_file("multi_part_io_error", &s3_file_writer, &state));
+        st = s3_fs->create_file("multi_part_io_error", &s3_file_writer, &state);
+        ASSERT_TRUE(st.ok()) << st;
 
         char buf[buf_size];
         doris::Slice slice(buf, buf_size);
@@ -112,19 +117,23 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
         size_t bytes_read = 0;
         auto file_size = local_file_reader->size();
         while (offset < file_size) {
-            ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
-            ASSERT_EQ(Status::OK(), s3_file_writer->append(Slice(buf, bytes_read)));
+            st = local_file_reader->read_at(offset, slice, &bytes_read);
+            ASSERT_TRUE(st.ok()) << st;
+            st = s3_file_writer->append(Slice(buf, bytes_read));
+            ASSERT_TRUE(st.ok()) << st;
             offset += bytes_read;
         }
         ASSERT_EQ(s3_file_writer->bytes_appended(), file_size);
-        ASSERT_TRUE(s3_file_writer->finalize().ok());
+        st = s3_file_writer->finalize();
+        ASSERT_TRUE(st.ok()) << st;
         // The second part would fail uploading itself to s3
         // so the result of close should be not ok
-        ASSERT_TRUE(!s3_file_writer->close().ok());
-        bool exits = false;
-        auto s = s3_fs->exists("multi_part_io_error", &exits);
-        LOG(INFO) << "status is " << s;
-        ASSERT_TRUE(!exits);
+        st = s3_file_writer->close();
+        ASSERT_FALSE(st.ok()) << st;
+        bool exists = false;
+        st = s3_fs->exists("multi_part_io_error", &exists);
+        ASSERT_TRUE(st.ok()) << st;
+        ASSERT_FALSE(exists);
     }
 }
 
@@ -330,6 +339,7 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
         }};
 
         io::FileWriterPtr s3_file_writer;
+        config::enable_flush_file_cache_async = false;
         ASSERT_EQ(Status::OK(),
                   s3_fs->create_file("write_into_cache_io_error", &s3_file_writer, &state));
 
@@ -344,8 +354,105 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
             ASSERT_EQ(Status::OK(), s3_file_writer->append(Slice(buf, bytes_read)));
             offset += bytes_read;
         }
+        auto st = s3_file_writer->finalize();
+        ASSERT_TRUE(st.ok()) << st;
+        st = s3_file_writer->close();
+        ASSERT_TRUE(st.ok()) << st;
+        config::enable_flush_file_cache_async = true;
         bool exits = false;
         s3_fs->exists("write_into_cache_io_error", &exits);
+        ASSERT_TRUE(!exits);
+    }
+}
+
+TEST_F(S3FileWriterTest, read_from_cache_io_error) {
+    std::filesystem::path caches_dir =
+            std::filesystem::current_path() / "s3_file_writer_cache_test";
+    std::string cache_base_path = caches_dir / "cache2" / "";
+    Defer fs_clear {[&]() {
+        if (std::filesystem::exists(cache_base_path)) {
+            std::filesystem::remove_all(cache_base_path);
+        }
+    }};
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 10 * 1024 * 1024;
+    settings.query_queue_elements = 100;
+    settings.total_size = 10 * 1024 * 1024;
+    settings.max_file_block_size = 1 * 1024 * 1024;
+    settings.max_query_cache_size = 30;
+    io::FileCacheFactory::instance()._caches.clear();
+    io::FileCacheFactory::instance()._path_to_cache.clear();
+    io::FileCacheFactory::instance()._total_cache_size = 0;
+    auto cache = std::make_unique<io::BlockFileCache>(cache_base_path, settings);
+    ASSERT_TRUE(cache->initialize());
+    while (true) {
+        if (cache->get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    io::FileCacheFactory::instance()._caches.emplace_back(std::move(cache));
+    doris::io::FileWriterOptions state;
+    auto fs = io::global_local_filesystem();
+    {
+        io::FileReaderSPtr local_file_reader;
+
+        ASSERT_TRUE(
+                fs->open_file("./be/test/olap/test_data/all_types_100000.txt", &local_file_reader)
+                        .ok());
+
+        constexpr int buf_size = 8192;
+        std::atomic_int empty_slice_times = 2;
+        auto sp = SyncPoint::get_instance();
+        config::enable_file_cache = true;
+        // Make the s3 file buffer pool return empty slice for the first two part
+        // to let the first two part be written into file cache first
+        sp->set_call_back("s3_file_bufferpool::allocate", [&empty_slice_times](auto&& values) {
+            LOG(INFO) << "file buffer pool allocate";
+            empty_slice_times--;
+            if (empty_slice_times >= 0) {
+                std::pair<Slice, bool>* pairs =
+                        try_any_cast<std::pair<Slice, bool>*>(values.back());
+                pairs->second = true;
+                LOG(INFO) << "return empty slice";
+            }
+        });
+        // Make append to cache return one error to test if it would exit
+        sp->set_call_back("file_segment::read_at", [](auto&& values) {
+            LOG(INFO) << "file segment read at";
+            std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+            pairs->second = true;
+            pairs->first = Status::IOError("failed to read from local cache file segments");
+        });
+        // Let read from cache some time for the next buffer to get one empty slice
+        sp->set_call_back("upload_file_buffer::read_from_cache", [](auto&& /*values*/) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        });
+        Defer defer {[&]() {
+            sp->clear_all_call_backs();
+            config::enable_file_cache = false;
+        }};
+
+        io::FileWriterPtr s3_file_writer;
+        ASSERT_EQ(Status::OK(),
+                  s3_fs->create_file("read_from_cache_local_io_error", &s3_file_writer, &state));
+
+        char buf[buf_size];
+        Slice slice(buf, buf_size);
+        size_t offset = 0;
+        size_t bytes_read = 0;
+        auto file_size = local_file_reader->size();
+        LOG(INFO) << "file size is " << file_size;
+        while (offset < file_size) {
+            ASSERT_TRUE(local_file_reader->read_at(offset, slice, &bytes_read).ok());
+            auto st = s3_file_writer->append(Slice(buf, bytes_read));
+            ASSERT_EQ(Status::OK(), st);
+            offset += bytes_read;
+        }
+        ASSERT_TRUE(s3_file_writer->finalize().ok());
+        ASSERT_TRUE(!s3_file_writer->close().ok());
+        bool exits = false;
+        s3_fs->exists("read_from_cache_local_io_error", &exits);
         ASSERT_TRUE(!exits);
     }
 }

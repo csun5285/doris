@@ -62,30 +62,31 @@ Status LoadBlockQueue::get_block(vectorized::Block* block, bool* find_block, boo
     *eos = false;
     std::unique_lock l(*_mutex);
     if (!need_commit) {
-        auto left_seconds = 10 - std::chrono::duration_cast<std::chrono::seconds>(
+        auto left_milliseconds = config::group_commit_interval_ms -
+                                 std::chrono::duration_cast<std::chrono::milliseconds>(
                                          std::chrono::steady_clock::now() - _start_time)
                                          .count();
-        if (left_seconds <= 0) {
+        if (left_milliseconds <= 0) {
             need_commit = true;
         }
     }
     while (_status.ok() && _block_queue.empty() &&
            (!need_commit || (need_commit && !_load_ids.empty()))) {
-        // TODO make 10s as a config
-        auto left_seconds = 10;
+        auto left_milliseconds = config::group_commit_interval_ms;
         if (!need_commit) {
-            left_seconds = 10 - std::chrono::duration_cast<std::chrono::seconds>(
+            left_milliseconds = config::group_commit_interval_ms -
+                                std::chrono::duration_cast<std::chrono::milliseconds>(
                                         std::chrono::steady_clock::now() - _start_time)
                                         .count();
-            if (left_seconds <= 0) {
+            if (left_milliseconds <= 0) {
                 need_commit = true;
                 break;
             }
         }
 #if !defined(USE_BTHREAD_SCANNER)
-        _cv->wait_for(l, std::chrono::seconds(left_seconds));
+        _cv->wait_for(l, std::chrono::milliseconds(left_milliseconds));
 #else
-        _cv->wait_for(l, left_seconds * 1000000);
+        _cv->wait_for(l, left_milliseconds * 1000);
 #endif
     }
     if (!_block_queue.empty()) {
@@ -446,10 +447,10 @@ Status GroupCommitMgr::group_commit_insert(int64_t table_id, const TPlan& plan,
                 response->set_txn_id(load_block_queue->txn_id);
             }
             // TODO what to do if add one block error
-            RETURN_IF_ERROR(load_block_queue->add_block(future_block));
             if (future_block->rows() > 0) {
                 future_blocks.emplace_back(future_block);
             }
+            RETURN_IF_ERROR(load_block_queue->add_block(future_block));
             first = false;
         }
         if (!runtime_state->get_error_log_file_path().empty()) {

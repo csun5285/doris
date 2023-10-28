@@ -136,8 +136,7 @@ StorageEngine::StorageEngine(const EngineOptions& options)
           _segcompaction_mem_tracker(std::make_shared<MemTracker>("SegCompaction")),
           _segment_meta_mem_tracker(std::make_shared<MemTracker>("SegmentMeta")),
           _stop_background_threads_latch(1),
-          _delete_bitmap_txn_manager(
-                  new DeleteBitmapTxnManager(config::delete_bitmap_agg_cache_capacity)),
+          _delete_bitmap_txn_manager(nullptr),
           _rowset_id_generator(new UniqueRowsetIdGenerator(options.backend_uid)),
           _memtable_flush_executor(nullptr),
           _calc_delete_bitmap_executor(nullptr),
@@ -223,6 +222,10 @@ Status StorageEngine::_open() {
         put_storage_resource(std::atol(id.c_str()), {s3_fs, 0});
     }
     set_latest_fs(get_filesystem(std::get<0>(s3_infos.back())));
+
+    _delete_bitmap_txn_manager.reset(
+            new DeleteBitmapTxnManager(config::delete_bitmap_agg_cache_capacity));
+    RETURN_IF_ERROR(_delete_bitmap_txn_manager->init());
 #else
     load_data_dirs(dirs);
 #endif

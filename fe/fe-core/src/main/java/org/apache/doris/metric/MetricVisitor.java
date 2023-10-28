@@ -44,6 +44,8 @@ public abstract class MetricVisitor {
 
     public abstract void getNodeInfo();
 
+    public abstract void getCloudTableStats();
+
     public String finish() {
         return sb.toString();
     }

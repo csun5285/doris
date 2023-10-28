@@ -57,14 +57,16 @@ TEST(TxnKvTest, GetVersionTest) {
         key.append(" GetVersionTest ");
         txn->atomic_set_ver_value(key, "");
         ret = txn->commit();
-        int64_t ver0 = txn->get_committed_version();
+        int64_t ver0 = 0;
+        ASSERT_EQ(txn->get_committed_version(&ver0), 0);
         ASSERT_GT(ver0, 0);
 
         ret = txn_kv->create_txn(&txn);
         ASSERT_EQ(ret, 0);
         ret = txn->get(key, &val);
         ASSERT_EQ(ret, 0);
-        int64_t ver1 = txn->get_read_version();
+        int64_t ver1 = 0;
+        ASSERT_EQ(txn->get_read_version(&ver1), 0);
         ASSERT_GE(ver1, ver0);
 
         int64_t ver2;
@@ -433,7 +435,6 @@ TEST(TxnKvTest, AbortTxn) {
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), 0);
 
-    ASSERT_EQ(txn->begin(), 0);
     txn->atomic_set_ver_key("prefix", "value");
     ASSERT_EQ(txn->abort(), 0);
 }

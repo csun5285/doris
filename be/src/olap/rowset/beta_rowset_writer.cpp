@@ -36,7 +36,6 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "gutil/integral_types.h"
-#include "gutil/strings/substitute.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_reader_options.h"
 #include "io/fs/file_system.h"
@@ -88,9 +87,9 @@ BetaRowsetWriter::~BetaRowsetWriter() {
 
     // TODO(lingbin): Should wrapper exception logic, no need to know file ops directly.
     if (!_already_built) {       // abnormal exit, remove all files generated
-        _segment_writer.reset(); // ensure all files are closed
-        auto fs = _rowset_meta->fs();
-        if (!fs) {
+        _segment_writer.reset(); // ensure all files are closed and all resource are releaseed
+        const auto& fs = _rowset_meta->fs();
+        if (!fs || !_rowset_meta->is_local()) { // Remote fs will delete them asynchronously
             return;
         }
         auto max_segment_id = std::max(_num_segment.load(), _next_segment_id.load());
@@ -101,7 +100,7 @@ BetaRowsetWriter::~BetaRowsetWriter() {
             // will be cleaned up by the GC background. So here we only print the error
             // message when we encounter an error.
             WARN_IF_ERROR(fs->delete_file(seg_path),
-                          strings::Substitute("Failed to delete file=$0", seg_path));
+                          fmt::format("Failed to delete file={}", seg_path));
         }
     }
 }
@@ -502,7 +501,7 @@ Status BetaRowsetWriter::flush_single_memtable(const vectorized::Block* block, i
     if (ctx != nullptr && ctx->generate_delete_bitmap) {
         // mow table need to read the segment when memtable flush,
         // so we do close file_writer here.
-        file_writer->close();
+        RETURN_IF_ERROR(file_writer->close());
         RETURN_IF_ERROR(ctx->generate_delete_bitmap(segment_id));
     }
     RETURN_IF_ERROR(_segcompaction_if_necessary());
@@ -595,7 +594,11 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
 
         if (_segcompaction_worker.get_file_writer()) {
-            _segcompaction_worker.get_file_writer()->close();
+            auto s = _segcompaction_worker.get_file_writer()->close();
+            if (!s.ok()) [[unlikely]] {
+                LOG_WARNING("segcompaction file writer close failed due to {}", s.to_string());
+                return nullptr;
+            }
         }
     }
     // When building a rowset, we must ensure that the current _segment_writer has been
@@ -777,7 +780,7 @@ Status BetaRowsetWriter::_do_create_segment_writer(
                 _context.data_dir, _context.max_rows_per_segment, writer_options,
                 _context.mow_context));
         if (_segcompaction_worker.get_file_writer() != nullptr) {
-            _segcompaction_worker.get_file_writer()->close();
+            RETURN_IF_ERROR(_segcompaction_worker.get_file_writer()->close());
         }
         _segcompaction_worker.get_file_writer().reset(file_writer.release());
     } else {

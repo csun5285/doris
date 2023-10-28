@@ -19,6 +19,7 @@ package org.apache.doris.statistics;
 
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.FeConstants;
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.qe.AutoCloseConnectContext;
 import org.apache.doris.qe.QueryState;
 import org.apache.doris.qe.QueryState.MysqlStateType;
@@ -106,6 +107,7 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
             return;
         }
         long startTime = System.currentTimeMillis();
+        String queryId = "";
         LOG.info("ANALYZE SQL : " + sql + " start at " + startTime);
         try (AutoCloseConnectContext r = StatisticsUtil.buildConnectContext()) {
             r.connectContext.getSessionVariable().disableNereidsPlannerOnce();
@@ -117,8 +119,10 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
                 throw new RuntimeException(String.format("Failed to analyze %s.%s.%s, error: %s sql: %s",
                         info.catalogName, info.dbName, info.colName, sql, queryState.getErrorMessage()));
             }
+            queryId = DebugUtil.printId(r.connectContext.queryId());
         } finally {
-            LOG.info("Analyze SQL: " + sql + " cost time: " + (System.currentTimeMillis() - startTime) + "ms");
+            LOG.info("Analyze SQL: " + sql + " cost time: " + (System.currentTimeMillis() - startTime) + "ms"
+                    + " QueryId: " + queryId);
         }
     }
 

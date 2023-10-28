@@ -9,6 +9,7 @@
 #include "common/logging.h"
 #include "common/stopwatch.h"
 #include "common/util.h"
+#include "meta-service/txn_kv_error.h"
 
 #include <atomic>
 #include <iomanip>
@@ -21,6 +22,12 @@
 // =============================================================================
 //  FoundationDB implementation of TxnKv
 // =============================================================================
+
+#define RETURN_IF_ERROR(op)                            \
+    do {                                               \
+        TxnErrorCode code = op;                        \
+        if (code != TxnErrorCode::TXN_OK) return code; \
+    } while (false)
 
 namespace selectdb {
 
@@ -41,20 +48,62 @@ int FdbTxnKv::init() {
     return 0;
 }
 
-int FdbTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
+TxnErrorCode FdbTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
     auto t = new fdb::Transaction(database_);
     txn->reset(t);
-    int ret = t->init();
-    if (ret != 0) {
+    auto ret = t->init();
+    if (ret != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to init txn, ret=" << ret;
-        return ret;
     }
-    return 0;
+    return ret;
 }
 
 } // namespace selectdb
 
 namespace selectdb::fdb {
+
+// Ref https://apple.github.io/foundationdb/api-error-codes.html#developer-guide-error-codes.
+constexpr fdb_error_t FDB_ERROR_CODE_TIMED_OUT = 1004;
+constexpr fdb_error_t FDB_ERROR_CODE_TXN_TOO_OLD = 1007;
+constexpr fdb_error_t FDB_ERROR_CODE_TXN_CONFLICT = 1020;
+constexpr fdb_error_t FDB_ERROR_CODE_TXN_TIMED_OUT = 1031;
+constexpr fdb_error_t FDB_ERROR_CODE_INVALID_OPTION_VALUE = 2006;
+constexpr fdb_error_t FDB_ERROR_CODE_INVALID_OPTION = 2007;
+constexpr fdb_error_t FDB_ERROR_CODE_VERSION_INVALID = 2011;
+constexpr fdb_error_t FDB_ERROR_CODE_RANGE_LIMITS_INVALID = 2012;
+constexpr fdb_error_t FDB_ERROR_CODE_CONNECTION_STRING_INVALID = 2104;
+
+static bool fdb_error_is_txn_conflict(fdb_error_t err) {
+    return err == FDB_ERROR_CODE_TXN_CONFLICT;
+}
+
+static TxnErrorCode cast_as_txn_code(fdb_error_t err) {
+    switch (err) {
+    case 0:
+        return TxnErrorCode::TXN_OK;
+    case FDB_ERROR_CODE_INVALID_OPTION:
+    case FDB_ERROR_CODE_INVALID_OPTION_VALUE:
+    case FDB_ERROR_CODE_VERSION_INVALID:
+    case FDB_ERROR_CODE_RANGE_LIMITS_INVALID:
+    case FDB_ERROR_CODE_CONNECTION_STRING_INVALID:
+        return TxnErrorCode::TXN_INVALID_ARGUMENT;
+    case FDB_ERROR_CODE_TIMED_OUT:
+    case FDB_ERROR_CODE_TXN_TIMED_OUT:
+        return TxnErrorCode::TXN_TIMEOUT;
+    case FDB_ERROR_CODE_TXN_TOO_OLD:
+        return TxnErrorCode::TXN_TOO_OLD;
+    case FDB_ERROR_CODE_TXN_CONFLICT:
+        return TxnErrorCode::TXN_CONFLICT;
+    }
+
+    if (fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, err)) {
+        return TxnErrorCode::TXN_MAYBE_COMMITTED;
+    }
+    if (fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err)) {
+        return TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED;
+    }
+    return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+}
 
 // =============================================================================
 // Impl of Network
@@ -62,7 +111,7 @@ namespace selectdb::fdb {
 decltype(Network::working) Network::working {false};
 
 int Network::init() {
-    // Globaly once
+    // Globally once
     bool expected = false;
     if (!Network::working.compare_exchange_strong(expected, true)) return 1;
 
@@ -135,16 +184,16 @@ int Database::init() {
 }
 
 // =============================================================================
-// Impl of Trasaction
+// Impl of Transaction
 // =============================================================================
 
-int Transaction::init() {
+TxnErrorCode Transaction::init() {
     // TODO: process opt
     fdb_error_t err = fdb_database_create_transaction(db_->db(), &txn_);
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " fdb_database_create_transaction error:" << fdb_get_error(err);
-        return -1;
+        return cast_as_txn_code(err);
     }
 
     // FDB txn callback only guaranteed *at most once*, because the future might be set to `Never`
@@ -162,14 +211,10 @@ int Transaction::init() {
         LOG_WARNING("fdb_transaction_set_option error: ")
                 .tag("code", err)
                 .tag("msg", fdb_get_error(err));
-        return -1;
+        return cast_as_txn_code(err);
     }
 
-    return 0;
-}
-
-int Transaction::begin() {
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
 void Transaction::put(std::string_view key, std::string_view val) {
@@ -179,37 +224,37 @@ void Transaction::put(std::string_view key, std::string_view val) {
 }
 
 // return 0 for success otherwise error
-static int bthread_fdb_future_block_until_ready(FDBFuture* fut) {
+static TxnErrorCode bthread_fdb_future_block_until_ready(FDBFuture* fut) {
     bthread::CountdownEvent event;
-    static auto callback = [](FDBFuture* fut, void* event) {
+    static auto callback = [](FDBFuture*, void* event) {
         ((bthread::CountdownEvent*)event)->signal();
     };
     auto err = fdb_future_set_callback(fut, callback, &event);
     if (err) [[unlikely]] {
         LOG(WARNING) << "fdb_future_set_callback failed, err=" << fdb_get_error(err);
-        return -1;
+        return cast_as_txn_code(err);
     }
     if (int ec = event.wait(); ec != 0) [[unlikely]] {
         LOG(WARNING) << "CountdownEvent wait failed, err=" << std::strerror(ec);
-        return -1;
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
     }
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-// return 0 for success otherwise error
-static int await_future(FDBFuture* fut) {
+// return TXN_OK for success otherwise error
+static TxnErrorCode await_future(FDBFuture* fut) {
     if (bthread_self() != 0) {
         return bthread_fdb_future_block_until_ready(fut);
     }
     auto err = fdb_future_block_until_ready(fut);
     if (err) [[unlikely]] {
         LOG(WARNING) << "fdb_future_block_until_ready failed: " << fdb_get_error(err);
-        return -1;
+        return cast_as_txn_code(err);
     }
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
+TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     StopWatch sw;
     auto fut = fdb_transaction_get(txn_, (uint8_t*)key.data(), key.size(), snapshot);
 
@@ -218,17 +263,13 @@ int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
         g_bvar_txn_kv_get << sw.elapsed_us();
     };
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
-    if (await_future(fut) != 0) {
-        LOG(WARNING) << "failed to await future";
-        return -1;
-    }
+    RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_error err=" << fdb_get_error(err)
                      << " key=" << hex(key);
-        // txn too old == 1007
-        return err == 1007 ? -2 : -3;
+        return cast_as_txn_code(err);
     }
 
     fdb_bool_t found;
@@ -240,16 +281,17 @@ int Transaction::get(std::string_view key, std::string* val, bool snapshot) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_value err=" << fdb_get_error(err)
                      << " key=" << hex(key);
-        return -1;
+        return cast_as_txn_code(err);
     }
 
-    if (!found) return 1;
+    if (!found) return TxnErrorCode::TXN_KEY_NOT_FOUND;
     *val = std::string((char*)ret, len);
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int Transaction::get(std::string_view begin, std::string_view end,
-                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
+TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
+                              std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot,
+                              int limit) {
     StopWatch sw;
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [&sw](int*) { g_bvar_txn_kv_range_get << sw.elapsed_us(); });
@@ -261,25 +303,19 @@ int Transaction::get(std::string_view begin, std::string_view end,
             //       FDBStreamingMode::FDB_STREAMING_MODE_ITERATOR,
             0 /*iteration*/, snapshot, false /*reverse*/);
 
-    if (await_future(fut) != 0) {
-        LOG(WARNING) << "failed to await future";
-        return -1;
-    }
+    RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << fdb_get_error(err);
-        return -2;
+        return cast_as_txn_code(err);
     }
 
     std::unique_ptr<RangeGetIterator> ret(new RangeGetIterator(fut));
-    if (ret->init() != 0) {
-        LOG(WARNING) << "failed to fdb_future_get_keyvalue_array";
-        return -2;
-    }
+    RETURN_IF_ERROR(ret->init());
 
     *(iter) = std::move(ret);
 
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
 void Transaction::atomic_set_ver_key(std::string_view key_prefix, std::string_view val) {
@@ -340,7 +376,7 @@ void Transaction::remove(std::string_view begin, std::string_view end) {
     g_bvar_txn_kv_range_remove << sw.elapsed_us();
 }
 
-int Transaction::commit() {
+TxnErrorCode Transaction::commit() {
     StopWatch sw;
     auto fut = fdb_transaction_commit(txn_);
     auto release_fut = [fut, &sw](int*) {
@@ -348,60 +384,66 @@ int Transaction::commit() {
         g_bvar_txn_kv_commit << sw.elapsed_us();
     };
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
-    if (await_future(fut) != 0) {
-        LOG(WARNING) << "failed to await future";
-        return -1;
-    }
+    RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
     if (err) {
         LOG(WARNING) << "fdb commit error, code=" << err << " msg=" << fdb_get_error(err);
-        err == 1020 ? g_bvar_txn_kv_commit_conflict_counter << 1
-                    : g_bvar_txn_kv_commit_error_counter << 1;
-        return err == 1020 ? -1 : -2;
+        fdb_error_is_txn_conflict(err) ? g_bvar_txn_kv_commit_conflict_counter << 1
+                                       : g_bvar_txn_kv_commit_error_counter << 1;
+        return cast_as_txn_code(err);
     }
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int64_t Transaction::get_read_version() {
+TxnErrorCode Transaction::get_read_version(int64_t* version) {
     StopWatch sw;
     auto fut = fdb_transaction_get_read_version(txn_);
     std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [fut, &sw](...) {
         fdb_future_destroy(fut);
         g_bvar_txn_kv_get_read_version << sw.elapsed_us();
     });
-    if (await_future(fut) != 0) {
-        LOG(WARNING) << "failed to await future";
-        return -1;
-    }
+    RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
     if (err) {
-        LOG(WARNING) << " " << fdb_get_error(err);
-        return -2;
+        LOG(WARNING) << "get read version: " << fdb_get_error(err);
+        return cast_as_txn_code(err);
     }
-    int64_t ver;
-    err = fdb_future_get_int64(fut, &ver);
+    err = fdb_future_get_int64(fut, version);
     if (err) {
-        LOG(WARNING) << " " << fdb_get_error(err);
-        return -3;
+        LOG(WARNING) << "get read version: " << fdb_get_error(err);
+        return cast_as_txn_code(err);
     }
-    return ver;
+    return TxnErrorCode::TXN_OK;
 }
 
-int64_t Transaction::get_committed_version() {
+TxnErrorCode Transaction::get_committed_version(int64_t* version) {
     StopWatch sw;
-    int64_t ver;
-    auto err = fdb_transaction_get_committed_version(txn_, &ver);
+    auto err = fdb_transaction_get_committed_version(txn_, version);
     if (err) {
-        LOG(WARNING) << " " << fdb_get_error(err);
+        LOG(WARNING) << "get committed version " << fdb_get_error(err);
         g_bvar_txn_kv_get_committed_version << sw.elapsed_us();
-        return -1;
+        return cast_as_txn_code(err);
     }
     g_bvar_txn_kv_get_committed_version << sw.elapsed_us();
-    return ver;
+    return TxnErrorCode::TXN_OK;
 }
 
-int Transaction::abort() {
-    return 0;
+TxnErrorCode Transaction::abort() {
+    return TxnErrorCode::TXN_OK;
+}
+
+TxnErrorCode RangeGetIterator::init() {
+    if (fut_ == nullptr) return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+    idx_ = 0;
+    kvs_size_ = 0;
+    more_ = false;
+    kvs_ = nullptr;
+    auto err = fdb_future_get_keyvalue_array(fut_, &kvs_, &kvs_size_, &more_);
+    if (err) {
+        LOG(WARNING) << "fdb_future_get_keyvalue_array failed, err=" << fdb_get_error(err);
+        return cast_as_txn_code(err);
+    }
+    return TxnErrorCode::TXN_OK;
 }
 
 } // namespace selectdb::fdb

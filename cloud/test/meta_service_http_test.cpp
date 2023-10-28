@@ -115,9 +115,14 @@ public:
         EXPECT_EQ(channel.Init(endpoint, &options), 0) << "Fail to initialize channel";
 
         brpc::Controller ctrl;
-        ctrl.http_request().uri() =
-                fmt::format("0.0.0.0:{}/MetaService/http/{}?token={}&{}", endpoint.port, resource,
-                            config::http_token, params);
+        if (params.find("token=") != std::string_view::npos) {
+            ctrl.http_request().uri() =
+                    fmt::format("0.0.0.0:{}/MetaService/http/{}?{}", endpoint.port, resource, params);
+        } else {
+            ctrl.http_request().uri() =
+                    fmt::format("0.0.0.0:{}/MetaService/http/{}?token={}&{}", endpoint.port, resource,
+                                config::http_token, params);
+        }
         if (body.has_value()) {
             ctrl.http_request().set_method(brpc::HTTP_METHOD_POST);
             ctrl.request_attachment().append(body->data(), body->size());
@@ -629,6 +634,18 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
+
+    // alter cluster status
+    {
+        AlterClusterRequest req;
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->set_cluster_status(ClusterStatus::SUSPENDED);
+        req.set_op(AlterClusterRequest::SET_CLUSTER_STATUS);
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("set_cluster_status", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
 }
 
 TEST(MetaServiceHttpTest, GetClusterTest) {
@@ -810,6 +827,17 @@ TEST(MetaServiceHttpTest, AlterIamTest) {
             ctx.forward<MetaServiceResponseStatus>("alter_ram_user", alter_ram_user_request);
     ASSERT_EQ(status_code, 200);
     ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+    // alter iam
+    {
+        AlterIamRequest alter_iam_request;
+        alter_iam_request.set_ak("new_ak");
+        alter_iam_request.set_sk("new_sk");
+        alter_iam_request.set_account_id("account_id");
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("alter_iam", alter_iam_request);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
 
     // get iam and ram user
     ctx.meta_service_->get_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
@@ -1111,6 +1139,85 @@ TEST(MetaServiceHttpTest, UnknownFields) {
     std::string body = "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\", \"cloud_unique_id\": \"1:test_instance:1\"}";
     auto [status_code, content] = ctx.query<std::string>("get_tablet_stats", "", body);
     ASSERT_EQ(status_code, 200);
+}
+
+TEST(MetaServiceHttpTest, EncodeAndDecodeKey) {
+    HttpContext ctx;
+    {
+        auto [status_code, content] = ctx.query<std::string>(
+                "encode_key", "key_type=InstanceKey&instance_id=test", "");
+        ASSERT_EQ(status_code, 200);
+        const char* encode_key_output = R"(
+┌───────────────────────── 0. key space: 1
+│ ┌─────────────────────── 1. instance
+│ │                     ┌─ 2. test
+│ │                     │ 
+▼ ▼                     ▼ 
+0110696e7374616e6365000110746573740001
+\x01\x10\x69\x6e\x73\x74\x61\x6e\x63\x65\x00\x01\x10\x74\x65\x73\x74\x00\x01
+
+)";
+        content.insert(0, 1, '\n');
+        ASSERT_EQ(content, encode_key_output);
+    }
+
+    {
+        auto [status_code, content] = ctx.query<std::string>(
+                "decode_key", "key=0110696e7374616e6365000110746573740001", "");
+        ASSERT_EQ(status_code, 200);
+        const char* decode_key_output = R"(
+┌───────────────────────── 0. key space: 1
+│ ┌─────────────────────── 1. instance
+│ │                     ┌─ 2. test
+│ │                     │ 
+▼ ▼                     ▼ 
+0110696e7374616e6365000110746573740001
+
+)";
+        content.insert(0, 1, '\n');
+        ASSERT_EQ(content, decode_key_output);
+    }
+}
+
+TEST(MetaServiceHttpTest, GetValue) {
+    HttpContext ctx(true);
+
+    // Prepare instance info.
+    {
+        CreateInstanceRequest req;
+        req.set_instance_id("get_value_instance_id");
+        req.set_user_id("test_user");
+        req.set_name("test_name");
+        ObjectStoreInfoPB obj;
+        obj.set_ak("123");
+        obj.set_sk("321");
+        obj.set_bucket("456");
+        obj.set_prefix("654");
+        obj.set_endpoint("789");
+        obj.set_region("987");
+        obj.set_external_endpoint("888");
+        obj.set_provider(ObjectStoreInfoPB::BOS);
+        req.mutable_obj_info()->CopyFrom(obj);
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("create_instance", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
+
+    auto param = "key_type=InstanceKey&instance_id=get_value_instance_id";
+    auto [status_code, content] = ctx.query<std::string>("get_value", param, "");
+    ASSERT_EQ(status_code, 200);
+    auto instance_info = ctx.get_instance_info("get_value_instance_id");
+    auto get_value_output = proto_to_json(instance_info);
+    get_value_output.push_back('\n');
+    ASSERT_EQ(content, get_value_output);
+}
+
+TEST(MetaServiceHttpTest, InvalidToken) {
+    HttpContext ctx(true);
+    auto [status_code, content] = ctx.query<std::string>("get_value", "token=invalid_token", "");
+    ASSERT_EQ(status_code, 403);
+    const char* invalid_token_output = "incorrect token, token=invalid_token\n";
+    ASSERT_EQ(content, invalid_token_output);
 }
 
 } // namespace selectdb

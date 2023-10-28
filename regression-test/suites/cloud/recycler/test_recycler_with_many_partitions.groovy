@@ -80,7 +80,7 @@ suite("test_recycler_with_many_partitions") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 20s
+        Thread.sleep(60000) // 60s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet1)) {
             success = true
             break
@@ -109,7 +109,7 @@ suite("test_recycler_with_many_partitions") {
     // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 20s
+        Thread.sleep(60000) // 60s
         if (checkRecycleTable(token, instanceId, cloudUniqueId, tableName, tabletIdSet2)) {
             success = true
             break

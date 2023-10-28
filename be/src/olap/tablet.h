@@ -586,7 +586,7 @@ public:
     bool is_in_memory() const { return _tablet_meta->is_in_memory(); }
     bool is_persistent() const { return _tablet_meta->is_persistent(); }
 
-    std::vector<RowsetSharedPtr> get_snapshot_rowset() const;
+    std::vector<RowsetSharedPtr> get_snapshot_rowset(bool include_stale_rowset = false) const;
 
     RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
     void sort_block(vectorized::Block& in_block, vectorized::Block& output_block);
@@ -650,6 +650,13 @@ public:
     Status check_delete_bitmap_correctness(DeleteBitmapPtr delete_bitmap, int64_t max_version,
                                            int64_t txn_id, const RowsetIdUnorderedSet& rowset_ids,
                                            std::vector<RowsetSharedPtr>* rowsets = nullptr);
+    
+    static void recycle_file_cache(const std::vector<RowsetSharedPtr>& rowsets);
+    
+    // When the tablet is droped, we need to recycle some resoures.
+    // 1. The data in file cache
+    // 2. The memory in tablet cache
+    void recycle_resources_by_self();
 
 private:
     Status _init_once_action();

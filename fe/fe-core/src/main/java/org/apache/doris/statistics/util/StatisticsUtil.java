@@ -178,7 +178,7 @@ public class StatisticsUtil {
         sessionVariable.parallelExecInstanceNum = Config.statistics_sql_parallel_exec_instance_num;
         sessionVariable.parallelPipelineTaskNum = Config.statistics_sql_parallel_exec_instance_num;
         sessionVariable.setEnableNereidsPlanner(false);
-        sessionVariable.enableProfile = false;
+        sessionVariable.enableProfile = Config.enable_profile_when_analyze;
         sessionVariable.queryTimeoutS = Config.analyze_task_timeout_in_hours * 60 * 60;
         sessionVariable.insertTimeoutS = Config.analyze_task_timeout_in_hours * 60 * 60;
         sessionVariable.enableFileCache = false;

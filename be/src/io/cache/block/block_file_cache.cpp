@@ -443,6 +443,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
             if (cell.file_block->change_cache_type(FileCacheType::TTL)) {
                 auto& queue = get_queue(cell.cache_type);
                 queue.remove(cell.queue_iterator.value(), cache_lock);
+                cell.queue_iterator.reset();
                 cell.cache_type = FileCacheType::TTL;
                 cell.file_block->update_expiration_time(context.expiration_time);
             }
@@ -1758,7 +1759,7 @@ void BlockFileCache::set_read_only(bool read_only) {
 std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
         const AccessKeyAndOffset& key, std::shared_ptr<FileReader> file_reader) {
     std::weak_ptr<FileReader> wp;
-    if (!s_read_only) [[likely]] {
+    if (!s_read_only && config::file_cache_max_file_reader_cache_size != 0) [[likely]] {
         std::lock_guard lock(s_file_reader_cache_mtx);
         if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
             s_file_name_to_reader.erase(s_file_reader_cache.back().first);
