@@ -42,7 +42,7 @@ suite("sql_force_drop") {
             "light_schema_change"="true",
             "compression"="zstd"
         );
-    """"
+    """
     sql """
         CREATE TABLE IF NOT EXISTS test_force_drop_database.table2 (
             `actorid` varchar(128),
@@ -63,7 +63,7 @@ suite("sql_force_drop") {
             "light_schema_change"="true",
             "compression"="zstd"
         );
-    """"
+    """
 
     sql " drop table test_force_drop_database.table2 "
     sql " recover table test_force_drop_database.table2 "
