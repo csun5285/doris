@@ -333,8 +333,6 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
         return;
     }
 
-    s3_bytes_written_total << buf.get_size();
-
     std::unique_ptr<CompletedPart> completed_part = std::make_unique<CompletedPart>();
 
     completed_part->SetPartNumber(part_num);

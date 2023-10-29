@@ -107,6 +107,7 @@ void complete(const io::FileBlocksHolder& holder) {
 }
 
 TEST(BlockFileCache, init) {
+    config::file_cache_enter_disk_resource_limit_mode_percent = 99;
     std::string string = std::string(R"(
         [
         {
