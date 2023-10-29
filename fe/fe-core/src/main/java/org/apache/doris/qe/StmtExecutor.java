@@ -318,8 +318,10 @@ public class StmtExecutor {
         builder.profileId(DebugUtil.printId(context.queryId()));
         if (Version.DORIS_BUILD_VERSION_MAJOR == 0) {
             builder.dorisVersion(Version.DORIS_BUILD_SHORT_HASH);
+            builder.selectdbVersion(Version.DORIS_BUILD_SHORT_HASH);
         } else {
-            builder.dorisVersion(Version.DORIS_BUILD_VERSION + "-" + Version.DORIS_BUILD_SHORT_HASH);
+            builder.dorisVersion(Version.BASE_BUILD_VERSION);
+            builder.selectdbVersion(Version.DORIS_BUILD_VERSION + "-" + Version.DORIS_BUILD_SHORT_HASH);
         }
         builder.taskType(profileType.name());
         builder.startTime(TimeUtils.longToTimeString(context.getStartTime()));

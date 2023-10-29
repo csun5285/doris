@@ -34,6 +34,7 @@ import java.util.Map;
 public class SummaryProfile {
     // Summary
     public static final String DORIS_VERSION = "Doris Version";
+    public static final String SELECTDB_VERSION = "SelectDB Version";
     public static final String PROFILE_ID = "Profile ID";
     public static final String TASK_TYPE = "Task Type";
     public static final String START_TIME = "Start Time";
@@ -82,8 +83,9 @@ public class SummaryProfile {
             INIT_SCAN_NODE_TIME, FINALIZE_SCAN_NODE_TIME, GET_SPLITS_TIME, GET_PARTITIONS_TIME,
             GET_PARTITION_FILES_TIME, CREATE_SCAN_RANGE_TIME, GET_PARTITION_VERSION_TIME,
             GET_PARTITION_VERSION_BY_HAS_DATA_COUNT, GET_PARTITION_VERSION_COUNT, SCHEDULE_TIME,
-            FETCH_RESULT_TIME, WRITE_RESULT_TIME, WAIT_FETCH_RESULT_TIME, DORIS_VERSION, IS_NEREIDS, IS_PIPELINE,
-            IS_CACHED, TOTAL_INSTANCES_NUM, INSTANCES_NUM_PER_BE, PARALLEL_FRAGMENT_EXEC_INSTANCE, TRACE_ID);
+            FETCH_RESULT_TIME, WRITE_RESULT_TIME, WAIT_FETCH_RESULT_TIME, DORIS_VERSION, SELECTDB_VERSION,
+            IS_NEREIDS, IS_PIPELINE, IS_CACHED, TOTAL_INSTANCES_NUM, INSTANCES_NUM_PER_BE,
+            PARALLEL_FRAGMENT_EXEC_INSTANCE, TRACE_ID);
 
     // Ident of each item. Default is 0, which doesn't need to present in this Map.
     // Please set this map for new profile items if they need ident.
@@ -302,6 +304,11 @@ public class SummaryProfile {
 
         public SummaryBuilder dorisVersion(String val) {
             map.put(DORIS_VERSION, val);
+            return this;
+        }
+
+        public SummaryBuilder selectdbVersion(String val) {
+            map.put(SELECTDB_VERSION, val);
             return this;
         }
 
