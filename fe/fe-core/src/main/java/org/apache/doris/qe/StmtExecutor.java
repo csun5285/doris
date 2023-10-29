@@ -321,7 +321,7 @@ public class StmtExecutor {
             builder.selectdbVersion(Version.DORIS_BUILD_SHORT_HASH);
         } else {
             builder.dorisVersion(Version.BASE_BUILD_VERSION);
-            builder.selectdbVersion(Version.DORIS_BUILD_VERSION + "-" + Version.DORIS_BUILD_SHORT_HASH);
+            builder.selectdbVersion(Version.DORIS_BUILD_VERSION);
         }
         builder.taskType(profileType.name());
         builder.startTime(TimeUtils.longToTimeString(context.getStartTime()));
