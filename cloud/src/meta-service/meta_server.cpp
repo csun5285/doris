@@ -6,6 +6,7 @@
 #include "common/config.h"
 #include "common/metric.h"
 #include "common/util.h"
+#include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service.h"
@@ -31,6 +32,7 @@ int MetaServer::start(brpc::Server* server) {
     DCHECK(server);
     auto rc_mgr = std::make_shared<ResourceManager>(txn_kv_);
     int ret = rc_mgr->init();
+    TEST_SYNC_POINT_CALLBACK("MetaServer::start:1", &ret);
     if (ret != 0) {
         LOG(WARNING) << "failed to init resrouce manager, ret=" << ret;
         return 1;
@@ -38,14 +40,19 @@ int MetaServer::start(brpc::Server* server) {
 
     // Add server register
     server_register_.reset(new MetaServerRegister(txn_kv_));
-    if (server_register_->start() != 0) {
+    ret = server_register_->start();
+    TEST_SYNC_POINT_CALLBACK("MetaServer::start:2", &ret);
+    if (ret != 0) {
         LOG(WARNING) << "failed to start server register";
         return -1;
     }
 
     fdb_metric_exporter_.reset(new FdbMetricExporter(txn_kv_));
-    if (fdb_metric_exporter_->start() != 0) {
+    ret = fdb_metric_exporter_->start();
+    TEST_SYNC_POINT_CALLBACK("MetaServer::start:3", &ret);
+    if (ret != 0) {
         LOG(WARNING) << "failed to start fdb metric exporter";
+        return -2;
     }
 
     auto rate_limiter = std::make_shared<RateLimiter>();

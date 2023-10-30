@@ -8,6 +8,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
@@ -142,6 +143,35 @@ TEST(MetaServerTest, StartAndStop) {
     brpc::ServerOptions options;
     options.num_threads = 1;
     brpc::Server brpc_server;
+
+    auto sp = selectdb::SyncPoint::get_instance();
+
+    std::array<std::string, 3> sps{"MetaServer::start:1", "MetaServer::start:2", "MetaServer::start:3"};
+    // use structured binding for point alias (avoid multi lines of declaration)
+    auto [meta_server_start_1, meta_server_start_2, meta_server_start_3] = sps;
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&](...) {
+        for (auto& i : sps) { sp->clear_call_back(i); } // redundant
+        sp->disable_processing();
+    });
+
+    auto foo = [](void* ret) { *((int*)ret) = 1; };
+
+    // failed to init resource mgr
+    sp->set_call_back(meta_server_start_1, foo);
+    ASSERT_EQ(server->start(&brpc_server), 1);
+    sp->clear_call_back(meta_server_start_1);
+
+    // failed to start registry
+    sp->set_call_back(meta_server_start_2, foo);
+    ASSERT_EQ(server->start(&brpc_server), -1);
+    sp->clear_call_back(meta_server_start_2);
+
+    // failed to start fdb metrics exporter
+    sp->set_call_back(meta_server_start_3, foo);
+    ASSERT_EQ(server->start(&brpc_server), -2);
+    sp->clear_call_back(meta_server_start_3);
+
     ASSERT_EQ(server->start(&brpc_server), 0);
     ASSERT_EQ(brpc_server.Start(0, &options), 0);
     auto addr = brpc_server.listen_address();
