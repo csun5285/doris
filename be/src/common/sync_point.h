@@ -11,6 +11,12 @@
 
 namespace doris {
 
+#define SYNC_POINT_HOOK_RETURN_VALUE(expr, point_name, ...)                              \
+    [&]() mutable {                                                                      \
+        TEST_SYNC_POINT_RETURN_WITH_VALUE(point_name, decltype((expr)) {}, __VA_ARGS__); \
+        return (expr);                                                                   \
+    }()
+
 // This class provides facility to reproduce race conditions deterministically
 // in unit tests.
 // Developer could specify sync points in the codebase via TEST_SYNC_POINT.
@@ -115,6 +121,11 @@ T try_any_cast(const std::any& a) {
     std::cerr << e.what() << " expected=" << typeid(T).name() << " actual=" << a.type().name() << std::endl;
     throw e;
   }
+}
+
+template <typename T>
+auto try_any_cast_ret(std::vector<std::any>& any) {
+    return try_any_cast<std::pair<T, bool>*>(any.back());
 }
 
 } // namespace doris

@@ -180,6 +180,7 @@ std::string FileBlock::get_path_in_local_cache(bool is_tmp) const {
 
 Status FileBlock::read_at(Slice buffer, size_t read_offset) {
     Status st = Status::OK();
+    SYNC_POINT_RETURN_WITH_VALUE("file_block::read_at", st);
     std::shared_ptr<FileReader> reader;
     if (!(reader = _cache_reader.lock())) {
         std::lock_guard lock(_mutex);

@@ -34,6 +34,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "s3_uri.h"
 
 namespace doris {
@@ -137,6 +138,7 @@ bool S3ClientFactory::is_s3_conf_valid(const S3Conf& s3_conf) {
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_client_factory::create", std::make_shared<Aws::S3::S3Client>());
     if (!is_s3_conf_valid(s3_conf)) {
         return nullptr;
     }
