@@ -1678,6 +1678,9 @@ public class Env {
             cloudTabletStatMgr.start();
             cloudInstanceStatusChecker.start();
         }
+        // start load manager thread, for MySQL load only: cannot forward to master
+        loadManager.start();
+
         // load and export job label cleaner thread
         labelCleaner.start();
         // es repository
