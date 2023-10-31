@@ -115,6 +115,11 @@ public class LoadManager implements Writable {
         this.cleanCopyJobScheduler = cleanCopyJobScheduler;
     }
 
+    public void start() {
+        tokenManager.start();
+        mysqlLoadManager.start();
+    }
+
     /**
      * This method will be invoked by the broker load(v2) now.
      */
