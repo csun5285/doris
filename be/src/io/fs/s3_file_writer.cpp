@@ -77,10 +77,16 @@ namespace doris {
 namespace io {
 using namespace Aws::S3::Model;
 
-bvar::Adder<uint64_t> s3_file_writer_total("s3_file_writer", "total_num");
-bvar::Adder<uint64_t> s3_bytes_written_total("s3_file_writer", "bytes_written");
-bvar::Adder<uint64_t> s3_file_created_total("s3_file_writer", "file_created");
-bvar::Adder<uint64_t> s3_file_being_written("s3_file_writer", "file_being_written");
+// Whole s3 file writer ever created by the process
+bvar::Adder<uint64_t> s3_file_writer_total("s3_file_writer_total_num");
+// Whole bytes persistent on S3
+bvar::Adder<uint64_t> s3_bytes_written_total("s3_file_writer_bytes_written");
+// Whole files created on S3
+bvar::Adder<uint64_t> s3_file_created_total("s3_file_writer_file_created");
+// S3 file writer currently exists in process
+bvar::Adder<uint64_t> s3_file_being_written("s3_file_writer_file_being_written");
+// Whole bytes sent to S3(doesn't mean it would be persistent)
+bvar::Adder<uint64_t> s3_bytes_uploaded_total("s3_bytes_uploaded_total");
 
 S3FileWriter::S3FileWriter(std::string key, std::shared_ptr<S3FileSystem> fs,
                            const FileWriterOptions* opts)
@@ -115,18 +121,19 @@ S3FileWriter::~S3FileWriter() {
 }
 
 void S3FileWriter::_wait_until_finish(std::string_view task_name) {
-    auto msg =
-            fmt::format("{} multipart upload already takes 5 min, bucket={}, key={}, upload_id={}",
-                        task_name, _bucket, _path.native(), _upload_id);
+    auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
+    auto msg = fmt::format(
+            "{} multipart upload already takes {} seconds, bucket={}, key={}, upload_id={}",
+            task_name, timeout_duration, _bucket, _path.native(), _upload_id);
     timespec current_time;
     // We don't need high accuracy here, so we use time(nullptr)
     // since it's the fastest way to get current time(second)
     auto current_time_second = time(nullptr);
-    current_time.tv_sec = current_time_second + 300;
+    current_time.tv_sec = current_time_second + timeout_duration;
     current_time.tv_nsec = 0;
     // bthread::countdown_event::timed_wait() should use absolute time
     while (0 != _countdown_event.timed_wait(current_time)) {
-        current_time.tv_sec += 300;
+        current_time.tv_sec += timeout_duration;
         LOG(WARNING) << msg;
     }
 }
@@ -347,6 +354,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
     _bytes_written += buf.get_size();
+    s3_bytes_uploaded_total << buf.get_size();
 }
 
 Status S3FileWriter::_complete() {
@@ -461,6 +469,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
         return;
     }
     _bytes_written += buf.get_size();
+    s3_bytes_uploaded_total << buf.get_size();
     s3_file_created_total << 1;
 }
 

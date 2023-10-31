@@ -141,16 +141,18 @@ struct DownloadTaskExecutor {
             auto buffer = builder.build();
             buffer->submit();
         }
+        auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
         timespec current_time;
         // We don't need high accuracy here, so we use time(nullptr)
         // since it's the fastest way to get current time(second)
         auto current_time_second = time(nullptr);
-        current_time.tv_sec = current_time_second + 300;
+        current_time.tv_sec = current_time_second + timeout_duration;
         current_time.tv_nsec = 0;
         // bthread::countdown_event::timed_wait() should use absolute time
         while (0 != _countdown_event.timed_wait(current_time)) {
-            current_time.tv_sec += 300;
-            LOG_WARNING("Downloading {} {} {} {} is too long", bucket, key_name, offset, size);
+            current_time.tv_sec += timeout_duration;
+            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds", bucket, key_name,
+                        offset, size, timeout_duration);
         }
     }
 

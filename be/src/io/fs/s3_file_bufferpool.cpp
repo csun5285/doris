@@ -152,8 +152,8 @@ Status UploadFileBuffer::append_data(const Slice& data) {
             // wait allocate buffer pool
             auto tmp = S3FileBufferPool::GetInstance()->allocate(true);
             if (tmp.empty()) {
-                LOG_WARNING("no free buffer for 5 minutes");
-                return Status::InternalError("no free buffer for 5 minutes");
+                return Status::InternalError("no free buffer for {} seconds",
+                                             config::s3_writer_buffer_allocation_timeout);
             }
             swap_buffer(tmp);
         }
@@ -170,8 +170,10 @@ void UploadFileBuffer::read_from_cache() {
     TEST_SYNC_POINT_CALLBACK("upload_file_buffer::read_from_cache");
     auto tmp = S3FileBufferPool::GetInstance()->allocate(true);
     if (tmp.empty()) {
-        LOG_WARNING("no free buffer for 5 minutes");
-        set_val(Status::InternalError("no free buffer for 5 minutes"));
+        auto err_msg = fmt::format("no free buffer for {} seconds",
+                                   config::s3_writer_buffer_allocation_timeout);
+        LOG_WARNING(err_msg);
+        set_val(Status::InternalError(err_msg));
         return;
     }
     swap_buffer(tmp);
@@ -186,8 +188,8 @@ void UploadFileBuffer::read_from_cache() {
         if (segment->state() != FileBlock::State::DOWNLOADED) {
             DCHECK(false);
             LOG_WARNING("File Block State is not Downloaded")
-                .tag("key", segment->key().to_string())
-                .tag("range", segment->range().to_string());
+                    .tag("key", segment->key().to_string())
+                    .tag("range", segment->range().to_string());
             set_val(Status::InternalError("File Block State is not Downloaded"));
             return;
         }
@@ -365,7 +367,7 @@ Slice S3FileBufferPool::allocate(bool reserve) {
     if (reserve || !config::enable_file_cache) {
         {
             std::unique_lock<std::mutex> lck {_lock};
-            _cv.wait_for(lck, std::chrono::seconds(300),
+            _cv.wait_for(lck, std::chrono::seconds(config::s3_writer_buffer_allocation_timeout),
                          [this]() { return !_free_raw_buffers.empty(); });
             if (!_free_raw_buffers.empty()) {
                 buf = _free_raw_buffers.front();
@@ -410,8 +412,10 @@ void S3FileBufferPool::reclaim(Slice buf) {
  */
 void DownloadFileBuffer::on_download() {
     if (_buffer.empty()) {
-        LOG_WARNING("no free buffer for 5 minutes");
-        _state.set_val(Status::InternalError("no free buffer for 5 minutes"));
+        auto err_msg = fmt::format("no free buffer for {} seconds",
+                                   config::s3_writer_buffer_allocation_timeout);
+        LOG_WARNING(err_msg);
+        set_val(Status::InternalError(err_msg));
         return;
     }
     FileBlocksHolderPtr holder = nullptr;

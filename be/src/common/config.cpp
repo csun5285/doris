@@ -1057,6 +1057,8 @@ DEFINE_mInt32(s3_write_buffer_size, "5242880");
 // can at most buffer 50MB data. And the num of multi part upload task is
 // s3_write_buffer_whole_size / s3_write_buffer_size
 DEFINE_mInt32(s3_write_buffer_whole_size, "524288000");
+// The timeout config for S3 buffer allocation
+DEFINE_mInt32(s3_writer_buffer_allocation_timeout, "60");
 
 //disable shrink memory by default
 DEFINE_Bool(enable_shrink_memory, "false");
