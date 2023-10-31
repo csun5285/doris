@@ -89,7 +89,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     //2. Get txn id from version stamp
     txn.reset();
 
-    txn_kv_->create_txn(&txn);
+    ret = txn_kv_->create_txn(&txn);
     if (ret != 0) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         ss << "failed to create txn when get txn id, label=" << label << " ret=" << ret;
@@ -1741,6 +1741,6 @@ void MetaServiceImpl::clean_txn_label(::google::protobuf::RpcController* control
     }
 
     code = MetaServiceCode::OK;
-    return;
 }
+
 } // namespace selectdb

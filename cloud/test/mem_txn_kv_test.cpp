@@ -16,8 +16,8 @@ std::shared_ptr<selectdb::TxnKv> fdb_txn_kv;
 int main(int argc, char** argv) {
     selectdb::config::init(nullptr, true);
     selectdb::config::fdb_cluster_file_path = "fdb.cluster";
-    fdb_txn_kv = std::dynamic_pointer_cast<selectdb::TxnKv>(std::make_shared<selectdb::FdbTxnKv>()); 
-    if (fdb_txn_kv.get() == nullptr) {
+    fdb_txn_kv = std::dynamic_pointer_cast<selectdb::TxnKv>(std::make_shared<selectdb::FdbTxnKv>());
+    if (!fdb_txn_kv.get()) {
         std::cout << "exit get FdbTxnKv error" << std::endl;
         return -1;
     }
@@ -47,7 +47,7 @@ static void put_and_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
 
         // get
         std::string get_val;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ASSERT_EQ(txn->get(key, &get_val), 0) << txn_kv_class;
         int64_t ver2 = 0;
         ASSERT_EQ(txn->get_read_version(&ver2), 0);
@@ -56,7 +56,7 @@ static void put_and_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         std::cout << "val:" << get_val << std::endl;
 
         // get not exist key
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ASSERT_EQ(txn->get("NotExistKey", &get_val), 1) << txn_kv_class;
     }
 }
@@ -142,11 +142,11 @@ static void range_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
 
     // range get with begin key larger than end key
     {
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         std::unique_ptr<RangeGetIterator> iter;
-        txn->get("key4", "key1", &iter);
+        ASSERT_EQ(txn->get("key4", "key1", &iter), 0);
         ASSERT_EQ(iter->size(), 0) << txn_kv_class;
-        txn->get("key1", "key1", &iter);
+        ASSERT_EQ(txn->get("key1", "key1", &iter), 0);
         ASSERT_EQ(iter->size(), 0) << txn_kv_class;
     }
 }
@@ -201,7 +201,7 @@ static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ret = txn->commit();
         ASSERT_NE(ret, 0);
 
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         std::unique_ptr<RangeGetIterator> iter;
         ret = txn->get("key2", "key6", &iter);
         ASSERT_EQ(iter->size(), 4) << txn_kv_class;
@@ -214,10 +214,10 @@ static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(ret, 0);
 
         txn->remove("key2", "key6");
-        txn->commit();
+        ret = txn->commit();
         ASSERT_EQ(ret, 0);
 
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         std::unique_ptr<RangeGetIterator> iter;
         ret = txn->get("key2", "key6", &iter);
         ASSERT_EQ(iter->size(), 0) << txn_kv_class;
@@ -299,7 +299,7 @@ static void atomic_add_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     ret = txn_kv->create_txn(&txn);
     ASSERT_EQ(ret, 0);
     std::string val;
-    txn->get("counter", &val);
+    ASSERT_EQ(txn->get("counter", &val), 0);
     ASSERT_EQ(ret, 0);
     int64_t val_int = *reinterpret_cast<const int64_t*>(val.data());
     ASSERT_EQ(val_int, 123) << txn_kv_class;
@@ -364,7 +364,7 @@ static void modify_identical_key_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn->commit(), 0);
 
         std::string get_val;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ASSERT_EQ(txn->get("test", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(get_val, "2") << txn_kv_class;
     }
@@ -378,7 +378,7 @@ static void modify_identical_key_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn->commit(), 0);
 
         std::string get_val;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ASSERT_EQ(txn->get("test", &get_val), 1) << txn_kv_class;
     }
 
@@ -407,12 +407,12 @@ static void modify_snapshot_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_1->commit(), 0);
 
         // txn_2: get the snapshot of database, will see <test, version1>
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("test", &get_val), 0);
         ASSERT_EQ(get_val, "version1") << txn_kv_class;
 
         // txn_1: modify <test, version1> to <test, version2> and commit
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("test", "version2");
         ASSERT_EQ(txn_1->commit(), 0);
 
@@ -432,15 +432,15 @@ static void modify_snapshot_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_2->get("test", &get_val), 1) << txn_kv_class;
 
         // txn_1: will still see <test, version2>
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         ASSERT_EQ(txn_1->get("test", &get_val), 0);
         ASSERT_EQ(get_val, "version2") << txn_kv_class;
 
         // txn_2: commit all changes, should conflict
         ASSERT_NE(txn_2->commit(), 0) << txn_kv_class;
 
-        // txn_1: should not get <test, verison2>
-        txn_kv->create_txn(&txn_1);
+        // txn_1: should not get <test, version2>
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         ASSERT_EQ(txn_1->get("test", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(get_val, "version2") << txn_kv_class;
     }
@@ -455,7 +455,7 @@ static void modify_snapshot_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_1->commit(), 0);
 
         // txn_2: read the key set by atomic_set_xxx before commit
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         txn_2->atomic_set_ver_value("test", "");
         ret = txn_2->get("test", &get_val);
         // can not read the unreadable key
@@ -463,8 +463,8 @@ static void modify_snapshot_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         // after read the unreadable key, can not commit
         ASSERT_NE(txn_2->commit(), 0);
 
-        // txn_1: still see the <test verison1>
-        txn_kv->create_txn(&txn_1);
+        // txn_1: still see the <test version1>
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         ASSERT_EQ(txn_1->get("test", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(get_val, "version1") << txn_kv_class;
     }
@@ -492,15 +492,15 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn_1);
         ASSERT_EQ(ret, 0);
         txn_1->put("key", "txn1_1");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
         ASSERT_EQ(get_val, "txn1_1");
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key", "txn1_2");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->put("key", "txn2_1");
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
@@ -516,14 +516,14 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn_1);
         ASSERT_EQ(ret, 0);
         txn_1->remove("key");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 1) << txn_kv_class;
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key", "txn1_1");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->put("key2", "txn2_1");
 
@@ -538,15 +538,15 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn_1);
         ASSERT_EQ(ret, 0);
         txn_1->put("key", "txn1_1");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
         ASSERT_EQ(get_val, "txn1_1");
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key", "txn1_2");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->put("key2", "txn2_2");
         ASSERT_EQ(txn_2->get("key2", &get_val), 0) << txn_kv_class;
@@ -562,15 +562,15 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         int ret = txn_kv->create_txn(&txn_1);
         ASSERT_EQ(ret, 0);
         txn_1->put("key", "txn1_1");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
         ASSERT_EQ(get_val, "txn1_1");
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key", "txn1_2");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->atomic_set_ver_value("key", "txn2_2");
 
@@ -589,14 +589,14 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->put("key4", "v4");
         ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         std::unique_ptr<RangeGetIterator> iter;
         ret = txn_2->get("key1", "key5", &iter);
         ASSERT_EQ(iter->size(), 4) << txn_kv_class;
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key1", "v11");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->put("key2", "v22");
         ASSERT_EQ(txn_2->get("key2", &get_val), 0) << txn_kv_class;
@@ -617,14 +617,14 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->put("key4", "v4");
         ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         std::unique_ptr<RangeGetIterator> iter;
         ret = txn_2->get("key1", "key5", &iter, false, 1);
         ASSERT_EQ(iter->size(), 1) << txn_kv_class;
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->put("key3", "v33");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         txn_2->put("key4", "v44");
         ASSERT_EQ(txn_2->get("key4", &get_val), 0) << txn_kv_class;
@@ -645,13 +645,13 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->put("key4", "v4");
         ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key1", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(get_val, "v1") << txn_kv_class;
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->remove("key1");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         ASSERT_EQ(txn_2->get("key1", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(get_val, "v1") << txn_kv_class;
@@ -675,13 +675,13 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->put("key4", "v4");
         ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key1", &get_val), 0);
         ASSERT_EQ(get_val, "v1");
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->remove("key1", "key4");
-        txn_1->commit();
+        ASSERT_EQ(txn_1->commit(), 0);
 
         ASSERT_EQ(txn_2->get("key1", &get_val), 0);
         ASSERT_EQ(get_val, "v1");
@@ -760,7 +760,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     std::unique_ptr<Transaction> txn_2;
     // av: atomic_set_ver_value
     // ak: atomic_set_ver_key
-    // ad: atmoic_add
+    // ad: atomic_add
     // c : commit
 
     // txn_1: --- put<key, v1> -- av<key, v1> --------------- c
@@ -772,7 +772,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->put("key", "v1");
         txn_1->atomic_set_ver_value("key", "v1");
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         txn_2->atomic_add("key", 1);
 
         ASSERT_EQ(txn_1->commit(), 0);
@@ -781,7 +781,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_2->commit(), 0);
 
         std::string get_val;
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
         ASSERT_EQ(get_val, "v2");
     }
@@ -795,7 +795,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->atomic_add("key", 1);
         txn_1->atomic_set_ver_value("key", "v1");
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         txn_2->atomic_set_ver_value("key", "v2");
 
         ASSERT_EQ(txn_2->commit(), 0);
@@ -803,7 +803,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_1->commit(), 0);
 
         std::string get_val;
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("key", &get_val), 0);
         std::cout << get_val << std::endl;
     }
@@ -824,7 +824,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     // result: commit success
     {
         std::string get_val;
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->atomic_add("key", 1);
         ASSERT_EQ(txn_1->get("key", &get_val), 0) << txn_kv_class;
         ASSERT_EQ(txn_1->commit(), 0) << txn_kv_class;
@@ -836,7 +836,7 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         std::string get_val;
         int ret = txn_kv->create_txn(&txn_1);
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         txn_1->atomic_set_ver_value("key", "1");
         ret = txn_1->get("key", &get_val);
         // can not read the unreadable key
@@ -854,13 +854,13 @@ static void txn_behavior_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         txn_1->remove("keyNotExit");
         ASSERT_EQ(txn_1->commit(), 0);
 
-        txn_kv->create_txn(&txn_1);
+        ASSERT_EQ(txn_kv->create_txn(&txn_1), 0);
         ASSERT_EQ(txn_1->get("keyNotExit", &get_val), 1);
         txn_1->put("keyNotExit", "1");
         ASSERT_EQ(txn_1->get("keyNotExit", &get_val), 0);
         ASSERT_EQ(get_val, "1");
 
-        txn_kv->create_txn(&txn_2);
+        ASSERT_EQ(txn_kv->create_txn(&txn_2), 0);
         ASSERT_EQ(txn_2->get("keyNotExit", &get_val), 1);
         txn_2->put("keyNotExit", "1");
         ASSERT_EQ(txn_2->get("keyNotExit", &get_val), 0);

@@ -2,7 +2,7 @@
 
 namespace selectdb {
 
-enum TxnErrorCode : int {
+enum [[nodiscard]] TxnErrorCode : int {
     TXN_OK = 0,
     TXN_KEY_NOT_FOUND = 1,
     TXN_CONFLICT = -1,

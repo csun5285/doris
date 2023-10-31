@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "common/bvars.h"
+#include "common/logging.h"
 #include "common/stopwatch.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"

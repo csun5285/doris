@@ -200,8 +200,8 @@ public:
         std::string val;
         instance_key(key_info, &key);
         std::unique_ptr<Transaction> txn;
-        meta_service_->txn_kv_->create_txn(&txn);
-        txn->get(key, &val);
+        EXPECT_EQ(meta_service_->txn_kv_->create_txn(&txn), 0);
+        EXPECT_EQ(txn->get(key, &val), 0);
         InstanceInfoPB instance;
         instance.ParseFromString(val);
         return instance;

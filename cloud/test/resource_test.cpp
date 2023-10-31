@@ -57,9 +57,9 @@ static std::shared_ptr<TxnKv> create_txn_kv() {
     [&] { ASSERT_NE(txn_kv.get(), nullptr); }();
 
     std::unique_ptr<Transaction> txn;
-    txn_kv->create_txn(&txn);
+    EXPECT_EQ(txn_kv->create_txn(&txn), 0);
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-    txn->commit();
+    EXPECT_EQ(txn->commit(), 0);
     return txn_kv;
 }
 
@@ -140,8 +140,8 @@ static void get_instance_info(MetaServiceImpl* ms,
     std::string val;
     instance_key(key_info, &key);
     std::unique_ptr<Transaction> txn;
-    ms->txn_kv_->create_txn(&txn);
-    txn->get(key, &val);
+    EXPECT_EQ(ms->txn_kv_->create_txn(&txn), 0);
+    EXPECT_EQ(txn->get(key, &val), 0);
     instance->ParseFromString(val);
 }
 

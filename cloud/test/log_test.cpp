@@ -10,7 +10,6 @@
 // clang-format on
 
 using selectdb::AnnotateTag;
-using selectdb::TaggableLogger;
 
 int main(int argc, char** argv) {
     if (!selectdb::init_glog("log_test")) {

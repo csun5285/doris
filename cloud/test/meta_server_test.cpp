@@ -104,7 +104,7 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
         if (txn->get(system_key, &value) == 0) {
@@ -182,7 +182,7 @@ TEST(MetaServerTest, StartAndStop) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
         if (txn->get(system_key, &value) == 0) {

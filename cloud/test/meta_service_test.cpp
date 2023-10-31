@@ -65,9 +65,9 @@ std::unique_ptr<MetaServiceImpl> get_meta_service(bool mock_resource_mgr) {
     //     }
 
     std::unique_ptr<Transaction> txn;
-    txn_kv->create_txn(&txn);
+    EXPECT_EQ(txn_kv->create_txn(&txn), 0);
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-    txn->commit();
+    EXPECT_EQ(txn->commit(), 0);
 
     auto rs = mock_resource_mgr ? std::make_shared<MockResourceManager>(txn_kv)
                                 : std::make_shared<ResourceManager>(txn_kv);
@@ -297,8 +297,8 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         std::string val;
         instance_key(key_info, &key);
         std::unique_ptr<Transaction> txn;
-        meta_service->txn_kv_->create_txn(&txn);
-        txn->get(key, &val);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(txn->get(key, &val), 0);
         InstanceInfoPB instance;
         instance.ParseFromString(val);
         ASSERT_EQ(instance.status(), InstanceInfoPB::DELETED);
@@ -1284,7 +1284,7 @@ TEST(MetaServiceTest, AbortTxnTest) {
             RecycleTxnKeyInfo recycle_txn_key_info {mock_instance, db_id, txn_id};
             recycle_txn_key(recycle_txn_key_info, &recycle_txn_key_);
             std::unique_ptr<Transaction> txn;
-            meta_service->txn_kv_->create_txn(&txn);
+            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
             int ret = txn->get(recycle_txn_key_, &recycle_txn_val);
             ASSERT_NE(txn_id, -1);
             ASSERT_EQ(ret, 0);
@@ -1471,9 +1471,9 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        txn->commit();
+        ASSERT_EQ(txn->commit(), 0);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -1526,7 +1526,7 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
     txn_running_key({mock_instance, db_id, txn_id}, &running_key);
     {
         std::unique_ptr<Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ret = txn->get(running_key, &running_val);
         ASSERT_EQ(ret, 0);
     }
@@ -1551,7 +1551,7 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         ret = txn->get(running_key, &running_val);
         ASSERT_EQ(ret, 1);
     }
@@ -1568,9 +1568,9 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        txn->commit();
+        ASSERT_EQ(txn->commit(), 0);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -1631,7 +1631,7 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
         {
             std::unique_ptr<Transaction> txn;
-            txn_kv->create_txn(&txn);
+            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
             ret = txn->get(info_key, &info_val);
             ASSERT_EQ(ret, 0);
             ret = txn->get(label_key, &label_val);
@@ -1712,7 +1712,7 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
         {
             std::unique_ptr<Transaction> txn;
-            txn_kv->create_txn(&txn);
+            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
             ret = txn->get(info_key, &info_val);
             ASSERT_EQ(ret, 1);
             ret = txn->get(label_key, &label_val);
@@ -1834,7 +1834,7 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
             std::string recycle_val;
 
             std::unique_ptr<Transaction> txn;
-            txn_kv->create_txn(&txn);
+            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
             ret = txn->get(info_key, &info_val);
             ASSERT_EQ(ret, 1);
             ret = txn->get(label_key, &label_val);
@@ -2020,9 +2020,9 @@ TEST(MetaServiceTest, GetTxnTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        txn->commit();
+        ASSERT_EQ(txn->commit(), 0);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
