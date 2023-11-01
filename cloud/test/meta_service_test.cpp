@@ -2,6 +2,7 @@
 // clang-format off
 #include "meta-service/meta_service.h"
 #include <bvar/window.h>
+#include <fmt/core.h>
 #include <google/protobuf/repeated_field.h>
 
 #include "common/config.h"
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 #include <thread>
 // clang-format on
 
@@ -505,11 +507,12 @@ TEST(MetaServiceTest, BeginTxnTest) {
     {
         brpc::Controller cntl;
         BeginTxnRequest req;
+        auto label_already_in_use = "test_label_already_in_use";
 
         req.set_cloud_unique_id("test_cloud_unique_id");
         TxnInfoPB txn_info;
         txn_info.set_db_id(888);
-        txn_info.set_label("test_label_already_in_use");
+        txn_info.set_label(label_already_in_use);
         txn_info.add_table_ids(456);
         txn_info.set_timeout_ms(36000);
         req.mutable_txn_info()->CopyFrom(txn_info);
@@ -521,6 +524,9 @@ TEST(MetaServiceTest, BeginTxnTest) {
         meta_service->begin_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
                                 &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_LABEL_ALREADY_USED);
+        auto found = res.status().msg().find(fmt::format(
+                "Label [{}] has already been used, relate to txn", label_already_in_use));
+        ASSERT_NE(found, std::string::npos);
     }
 
     // case: dup begin txn request
@@ -1120,6 +1126,40 @@ TEST(MetaServiceTest, CommitTxnTest) {
             meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                      &req, &res, nullptr);
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        }
+
+        // doubly commit txn
+        {
+            brpc::Controller cntl;
+            CommitTxnRequest req;
+            auto db_id = 666;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(db_id);
+            req.set_txn_id(txn_id);
+            CommitTxnResponse res;
+            meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                     &req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_ALREADY_VISIBLE);
+            auto found = res.status().msg().find(
+                    fmt::format("transaction is already visible: db_id={} txn_id={}", db_id, txn_id));
+            ASSERT_TRUE(found != std::string::npos);
+        }
+
+        // doubly commit txn(2pc)
+        {
+            brpc::Controller cntl;
+            CommitTxnRequest req;
+            req.set_cloud_unique_id("test_cloud_unique_id");
+            req.set_db_id(666);
+            req.set_txn_id(txn_id);
+            req.set_is_2pc(true);
+            CommitTxnResponse res;
+            meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                     &req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_ALREADY_VISIBLE);
+            auto found = res.status().msg().find(
+                    fmt::format("transaction [{}] is already visible, not pre-committed.", txn_id));
+            ASSERT_TRUE(found != std::string::npos);
         }
     }
 }
