@@ -57,6 +57,7 @@ public class CreateFunctionTest {
 
     @BeforeClass
     public static void setup() throws Exception {
+        Config.forbid_function_stmt = false;
         UtFrameUtils.createDorisCluster(runningDir);
         FeConstants.runningUnitTest = true;
         // create connect context
