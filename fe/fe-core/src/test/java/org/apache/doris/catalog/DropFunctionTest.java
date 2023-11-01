@@ -20,6 +20,7 @@ package org.apache.doris.catalog;
 import org.apache.doris.analysis.CreateDbStmt;
 import org.apache.doris.analysis.CreateFunctionStmt;
 import org.apache.doris.analysis.DropFunctionStmt;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.utframe.DorisAssert;
@@ -45,6 +46,7 @@ public class DropFunctionTest {
     public static void setup() throws Exception {
         UtFrameUtils.createDorisCluster(runningDir);
         FeConstants.runningUnitTest = true;
+        Config.forbid_function_stmt = false;
         // create connect context
         connectContext = UtFrameUtils.createDefaultCtx();
     }

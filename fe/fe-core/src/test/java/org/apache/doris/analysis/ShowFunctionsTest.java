@@ -17,6 +17,7 @@
 
 package org.apache.doris.analysis;
 
+import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.qe.ShowResultSet;
 import org.apache.doris.utframe.TestWithFeService;
@@ -30,6 +31,7 @@ public class ShowFunctionsTest extends TestWithFeService {
     @Override
     protected void runBeforeAll() throws Exception {
         FeConstants.runningUnitTest = true;
+        Config.forbid_function_stmt = false;
         createDatabase(dbName);
         useDatabase(dbName);
         createFunction(
