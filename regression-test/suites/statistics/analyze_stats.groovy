@@ -914,6 +914,10 @@ PARTITION `p599` VALUES IN (599)
     """
 
     sql """
+        DROP TABLE IF EXISTS a_partitioned_table_for_analyze_test
+    """
+
+    sql """
         CREATE TABLE a_partitioned_table_for_analyze_test (
             id BIGINT,
             val BIGINT,
