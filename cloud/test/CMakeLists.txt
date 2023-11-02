@@ -69,6 +69,10 @@ add_executable(http_encode_key_test
     http_encode_key_test.cpp
 )
 
+add_executable(fdb_injection_test
+    fdb_injection_test.cpp
+)
+
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -136,6 +140,10 @@ target_link_libraries(recycler_test
     ${FDB_LINKER_FLAGS}
     ${TEST_LINK_LIBS}
 )
+
+target_link_libraries(fdb_injection_test
+    ${FDB_LINKER_FLAGS}
+    ${TEST_LINK_LIBS})
 
 install(FILES
     ${BASE_DIR}/script/run_all_tests.sh

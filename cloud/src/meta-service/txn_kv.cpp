@@ -8,6 +8,7 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/stopwatch.h"
+#include "common/sync_point.h"
 #include "common/util.h"
 #include "meta-service/txn_kv_error.h"
 
@@ -116,6 +117,11 @@ int Network::init() {
     if (!Network::working.compare_exchange_strong(expected, true)) return 1;
 
     fdb_error_t err = fdb_select_api_version(fdb_get_max_api_version());
+    if (err) {
+        LOG(WARNING) << "failed to select api version, max api version: "
+                     << fdb_get_max_api_version() << ", err: " << fdb_get_error(err);
+        return 1;
+    }
 
     // Setup network thread
     // Optional setting
@@ -190,6 +196,7 @@ int Database::init() {
 TxnErrorCode Transaction::init() {
     // TODO: process opt
     fdb_error_t err = fdb_database_create_transaction(db_->db(), &txn_);
+    TEST_SYNC_POINT_CALLBACK("transaction:init:create_transaction_err", &err);
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " fdb_database_create_transaction error:" << fdb_get_error(err);
@@ -247,6 +254,7 @@ static TxnErrorCode await_future(FDBFuture* fut) {
         return bthread_fdb_future_block_until_ready(fut);
     }
     auto err = fdb_future_block_until_ready(fut);
+    TEST_SYNC_POINT_CALLBACK("fdb_future_block_until_ready_err", &err);
     if (err) [[unlikely]] {
         LOG(WARNING) << "fdb_future_block_until_ready failed: " << fdb_get_error(err);
         return cast_as_txn_code(err);
@@ -265,6 +273,7 @@ TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snaps
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
     RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
+    TEST_SYNC_POINT_CALLBACK("transaction:get:get_err", &err);
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_error err=" << fdb_get_error(err)
@@ -305,6 +314,7 @@ TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
 
     RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
+    TEST_SYNC_POINT_CALLBACK("transaction:get_range:get_err", &err);
     if (err) {
         LOG(WARNING) << fdb_get_error(err);
         return cast_as_txn_code(err);
@@ -386,6 +396,7 @@ TxnErrorCode Transaction::commit() {
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
     RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
+    TEST_SYNC_POINT_CALLBACK("transaction:commit:get_err", &err);
     if (err) {
         LOG(WARNING) << "fdb commit error, code=" << err << " msg=" << fdb_get_error(err);
         fdb_error_is_txn_conflict(err) ? g_bvar_txn_kv_commit_conflict_counter << 1
@@ -404,6 +415,7 @@ TxnErrorCode Transaction::get_read_version(int64_t* version) {
     });
     RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
+    TEST_SYNC_POINT_CALLBACK("transaction:get_read_version:get_err", &err);
     if (err) {
         LOG(WARNING) << "get read version: " << fdb_get_error(err);
         return cast_as_txn_code(err);
@@ -439,6 +451,7 @@ TxnErrorCode RangeGetIterator::init() {
     more_ = false;
     kvs_ = nullptr;
     auto err = fdb_future_get_keyvalue_array(fut_, &kvs_, &kvs_size_, &more_);
+    TEST_SYNC_POINT_CALLBACK("range_get_iterator:init:get_keyvalue_array_err", &err);
     if (err) {
         LOG(WARNING) << "fdb_future_get_keyvalue_array failed, err=" << fdb_get_error(err);
         return cast_as_txn_code(err);

@@ -405,7 +405,7 @@ public:
                        const ::selectdb::CreateRowsetRequest* request,
                        ::selectdb::CreateRowsetResponse* response,
                        ::google::protobuf::Closure* done) override {
-        call_impl(&selectdb::MetaService::prepare_rowset, controller, request, response, done);
+        call_impl(&selectdb::MetaService::commit_rowset, controller, request, response, done);
     }
 
     void get_rowset(::google::protobuf::RpcController* controller,
@@ -652,6 +652,10 @@ private:
                    ::google::protobuf::Closure* done) {
         static_assert(std::is_base_of_v<::google::protobuf::Message, Request>);
         static_assert(std::is_base_of_v<::google::protobuf::Message, Response>);
+        if (!config::enable_txn_store_retry) {
+            (impl_.get()->*method)(ctrl, req, resp, done);
+            return;
+        }
 
         brpc::ClosureGuard done_guard(done);
 
