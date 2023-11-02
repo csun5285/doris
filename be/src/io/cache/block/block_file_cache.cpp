@@ -71,7 +71,8 @@ BlockFileCache::BlockFileCache(const std::string& cache_base_path,
                              24 * 60 * 60);
 
     LOG(INFO) << fmt::format(
-            "file cache path={}, disposable queue size={} elements={}, index queue size={} "
+            "File Cache Config: file cache path={}, disposable queue size={} elements={}, index "
+            "queue size={} "
             "elements={}, query queue "
             "size={} elements={}",
             cache_base_path, cache_settings.disposable_queue_size,
@@ -210,58 +211,43 @@ Status BlockFileCache::initialize() {
 }
 
 Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
-    if (!_is_initialized) {
-        std::error_code ec;
-        if (bool is_exist = std::filesystem::exists(_cache_base_path, ec); is_exist && !ec) {
-            _cache_background_load_thread = std::thread([&]() {
-                _lazy_open_done = false;
-                Status st = load_cache_info_into_memory();
-                if (!st) [[unlikely]] {
-                    LOG(ERROR) << st;
-                }
-                _lazy_open_done = true;
-            });
-        } else if (ec) [[unlikely]] {
-            LOG(WARNING) << "fail to dir exists=" << std::strerror(ec.value());
-            return Status::IOError("filesystem exists {}: {}", _cache_base_path,
-                                   std::strerror(ec.value()));
-        } else {
-            std::filesystem::create_directories(_cache_base_path, ec);
-            if (ec) {
-                LOG(WARNING) << "fail to create_directories=" << std::strerror(ec.value());
-                return Status::IOError("cannot create {}: {}", _cache_base_path,
-                                       std::strerror(ec.value()));
+    std::error_code ec;
+    if (bool is_exist = std::filesystem::exists(_cache_base_path, ec); is_exist && !ec) {
+        _cache_background_load_thread = std::thread([&]() {
+            _lazy_open_done = false;
+            Status st = load_cache_info_into_memory();
+            if (!st) [[unlikely]] {
+                LOG(ERROR) << st;
             }
             _lazy_open_done = true;
+            std::lock_guard cache_lock(_mutex);
+            LOG(INFO) << fmt::format(
+                    "Cur File Cache: file cache path={}, disposable queue size={} elements={}, "
+                    "index queue size={} "
+                    "elements={}, query queue "
+                    "size={} elements={}",
+                    _cache_base_path, _disposable_queue.get_total_cache_size(cache_lock),
+                    _disposable_queue.get_elements_num(cache_lock),
+                    _index_queue.get_total_cache_size(cache_lock),
+                    _index_queue.get_elements_num(cache_lock),
+                    _normal_queue.get_total_cache_size(cache_lock),
+                    _normal_queue.get_elements_num(cache_lock));
+        });
+    } else if (ec) [[unlikely]] {
+        LOG(WARNING) << "fail to dir exists=" << std::strerror(ec.value());
+        return Status::IOError("filesystem exists {}: {}", _cache_base_path,
+                               std::strerror(ec.value()));
+    } else {
+        std::filesystem::create_directories(_cache_base_path, ec);
+        if (ec) {
+            LOG(WARNING) << "fail to create_directories=" << std::strerror(ec.value());
+            return Status::IOError("cannot create {}: {}", _cache_base_path,
+                                   std::strerror(ec.value()));
         }
+        _lazy_open_done = true;
     }
-    _is_initialized = true;
     _cache_background_thread = std::thread(&BlockFileCache::run_background_operation, this);
-    LOG(INFO) << fmt::format(
-            "q file cache path={}, disposable queue size={} elements={}, index queue size={} "
-            "elements={}, query queue "
-            "size={} elements={}",
-            _cache_base_path, _disposable_queue.get_total_cache_size(cache_lock),
-            _disposable_queue.get_elements_num(cache_lock),
-            _index_queue.get_total_cache_size(cache_lock),
-            _index_queue.get_elements_num(cache_lock),
-            _normal_queue.get_total_cache_size(cache_lock),
-            _normal_queue.get_elements_num(cache_lock));
-
     return Status::OK();
-}
-
-Status BlockFileCache::reinitialize() {
-    std::lock_guard cache_lock(_mutex);
-    _is_initialized = false;
-    _files.clear();
-    _time_to_key.clear();
-    _key_to_time.clear();
-    _normal_queue.remove_all(cache_lock);
-    _index_queue.remove_all(cache_lock);
-    _disposable_queue.remove_all(cache_lock);
-
-    return initialize_unlocked(cache_lock);
 }
 
 void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, bool move_iter_flag,
@@ -284,10 +270,94 @@ void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, boo
         }
     }
     cell.update_atime();
+    cell.is_deleted = false;
 }
 
-BlockFileCache::FileBlockCell* BlockFileCache::get_cell(
-        const Key& key, size_t offset, std::lock_guard<doris::Mutex>& /* cache_lock */) {
+void BlockFileCache::clear_file_cache_async() {
+    {
+        std::lock_guard cache_lock(_mutex);
+        if (!_async_clear_file_cache) {
+            for (auto& [_, offset_to_cell] : _files) {
+                for (auto& [_, cell] : offset_to_cell) {
+                    if (cell.releasable()) {
+                        cell.is_deleted = true;
+                    }
+                }
+            }
+            _async_clear_file_cache = true;
+        }
+    }
+    TEST_SYNC_POINT_CALLBACK("BlockFileCache::recycle_deleted_blocks");
+}
+
+void BlockFileCache::recycle_deleted_blocks() {
+    std::unique_lock cache_lock(_mutex);
+    if (_async_clear_file_cache) {
+        auto remove_file_block = [&cache_lock, this](FileBlockCell* cell) {
+            std::lock_guard segment_lock(cell->file_block->_mutex);
+            remove(cell->file_block, cache_lock, segment_lock);
+        };
+        static int remove_batch = 100;
+        TEST_SYNC_POINT_CALLBACK("BlockFileCache::set_remove_batch", &remove_batch);
+        int i = 0;
+        std::condition_variable cond;
+        auto iter_queue = [&](LRUQueue& queue) {
+            bool end = false;
+            while (queue.get_total_cache_size(cache_lock) != 0 && !end) {
+                std::vector<FileBlockCell*> cells;
+                for (const auto& [entry_key, entry_offset, _] : queue) {
+                    if (i == remove_batch) {
+                        i = 0;
+                        break;
+                    }
+                    auto* cell = get_cell(entry_key, entry_offset, cache_lock);
+                    if (!cell->is_deleted) {
+                        end = true;
+                        break;
+                    }
+                    i++;
+                    cells.push_back(cell);
+                }
+                std::for_each(cells.begin(), cells.end(), remove_file_block);
+                // just for sleep
+                cond.wait_for(cache_lock, std::chrono::microseconds(100));
+            }
+        };
+        iter_queue(get_queue(FileCacheType::DISPOSABLE));
+        iter_queue(get_queue(FileCacheType::NORMAL));
+        iter_queue(get_queue(FileCacheType::INDEX));
+        std::vector<Key> ttl_keys;
+        ttl_keys.reserve(_key_to_time.size());
+        for (auto& [key, _] : _key_to_time) {
+            ttl_keys.push_back(key);
+        }
+        for (Key& key : ttl_keys) {
+            if (i >= remove_batch) {
+                // just for sleep
+                cond.wait_for(cache_lock, std::chrono::microseconds(100));
+                i = 0;
+            }
+            if (auto iter = _files.find(key); iter != _files.end()) {
+                std::vector<FileBlockCell*> cells;
+                cells.reserve(iter->second.size());
+                for (auto& [_, cell] : iter->second) {
+                    if (!cell.is_deleted) {
+                        continue;
+                    }
+                    cells.emplace_back(&cell);
+                    i++;
+                }
+                std::for_each(cells.begin(), cells.end(), remove_file_block);
+            }
+        }
+        _async_clear_file_cache = false;
+    }
+}
+
+template <class T>
+    requires IsXLock<T>
+BlockFileCache::FileBlockCell* BlockFileCache::get_cell(const Key& key, size_t offset,
+                                                        T& /* cache_lock */) {
     auto it = _files.find(key);
     if (it == _files.end()) {
         return nullptr;
@@ -1234,8 +1304,9 @@ bool BlockFileCache::try_reserve_for_lru(const Key& key, QueryFileCacheContextPt
     return true;
 }
 
-void BlockFileCache::remove(FileBlockSPtr file_block, std::lock_guard<doris::Mutex>& cache_lock,
-                            std::lock_guard<doris::Mutex>& segment_lock) {
+template <class T, class U>
+    requires IsXLock<T> && IsXLock<U>
+void BlockFileCache::remove(FileBlockSPtr file_block, T& cache_lock, U& segment_lock) {
     auto key = file_block->key();
     auto offset = file_block->offset();
     auto type = file_block->cache_type();
@@ -1478,8 +1549,9 @@ BlockFileCache::LRUQueue::Iterator BlockFileCache::LRUQueue::add(
     return iter;
 }
 
-void BlockFileCache::LRUQueue::remove(Iterator queue_it,
-                                      std::lock_guard<doris::Mutex>& /* cache_lock */) {
+template <class T>
+    requires IsXLock<T>
+void BlockFileCache::LRUQueue::remove(Iterator queue_it, T& /* cache_lock */) {
     cache_size -= queue_it->size;
     map.erase(std::make_pair(queue_it->key, queue_it->offset));
     queue.erase(queue_it);
@@ -1632,6 +1704,7 @@ void BlockFileCache::run_background_operation() {
 #endif
             if (_close) break;
         }
+        recycle_deleted_blocks();
         // gc
         int64_t cur_time = UnixSeconds();
         std::lock_guard cache_lock(_mutex);
@@ -1747,19 +1820,10 @@ BlockFileCache::get_hot_segments_meta(const Key& key) const {
     return segments_meta;
 }
 
-void BlockFileCache::set_read_only(bool read_only) {
-    s_read_only = read_only;
-    if (read_only) {
-        std::lock_guard lock(s_file_reader_cache_mtx);
-        s_file_reader_cache.clear();
-        s_file_name_to_reader.clear();
-    }
-}
-
 std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
         const AccessKeyAndOffset& key, std::shared_ptr<FileReader> file_reader) {
     std::weak_ptr<FileReader> wp;
-    if (!s_read_only && config::file_cache_max_file_reader_cache_size != 0) [[likely]] {
+    if (config::file_cache_max_file_reader_cache_size != 0) [[likely]] {
         std::lock_guard lock(s_file_reader_cache_mtx);
         if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
             s_file_name_to_reader.erase(s_file_reader_cache.back().first);

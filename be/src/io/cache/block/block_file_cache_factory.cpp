@@ -31,6 +31,7 @@
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/fs/local_file_system.h"
+#include "vec/common/hash_table/hash_table.h"
 
 namespace doris {
 class TUniqueId;
@@ -122,16 +123,10 @@ FileCacheFactory::get_query_context_holders(const TUniqueId& query_id) {
     return holders;
 }
 
-Status FileCacheFactory::reload_file_cache() {
-    for (auto& cache : _caches) {
-        RETURN_IF_ERROR(cache->reinitialize());
+void FileCacheFactory::clear_file_caches() {
+    for (const auto& cache : _caches) {
+        cache->clear_file_cache_async();
     }
-    BlockFileCache::set_read_only(false);
-    return Status::OK();
-}
-
-void FileCacheFactory::set_read_only() {
-    BlockFileCache::set_read_only(true);
 }
 
 } // namespace io

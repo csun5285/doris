@@ -15,18 +15,19 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
+#include "http/action/clear_file_cache_async_action.h"
 
-#include "http/http_handler.h"
+#include <fmt/core.h>
+
+#include "io/cache/block/block_file_cache_factory.h"
+#include "http/http_channel.h"
+#include "http/http_request.h"
 
 namespace doris {
-class ExecEnv;
-class ChangeFileCacheStateAction : public HttpHandler {
-public:
-    ChangeFileCacheStateAction() = default;
 
-    ~ChangeFileCacheStateAction() override = default;
+void ClearFileCacheAsyncAction::handle(HttpRequest* req) {
+    io::FileCacheFactory::instance().clear_file_caches();
+    HttpChannel::send_reply(req, HttpStatus::OK, Status::OK().to_json());
+}
 
-    void handle(HttpRequest* req) override;
-};
 } // namespace doris

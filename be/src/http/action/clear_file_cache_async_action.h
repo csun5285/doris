@@ -15,28 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "http/action/change_file_cache_state_action.h"
+#pragma once
 
-#include <fmt/core.h>
-
-#include "io/cache/block/block_file_cache_factory.h"
-#include "http/http_channel.h"
-#include "http/http_request.h"
+#include "http/http_handler.h"
 
 namespace doris {
-const std::string FILE_CACHE_STATE = "state";
+class ExecEnv;
+class ClearFileCacheAsyncAction : public HttpHandler {
+public:
+    ClearFileCacheAsyncAction() = default;
 
-void ChangeFileCacheStateAction::handle(HttpRequest* req) {
-    std::string state = req->param(FILE_CACHE_STATE);
-    Status st = Status::OK();
-    if (state == "close") {
-        io::FileCacheFactory::instance().set_read_only();
-    } else if (state == "open") {
-        st = io::FileCacheFactory::instance().reload_file_cache();
-    } else {
-        st = Status::InvalidArgument("invalid argument {}={}", FILE_CACHE_STATE, state);
-    }
-    HttpChannel::send_reply(req, HttpStatus::OK, st.to_json());
-}
+    ~ClearFileCacheAsyncAction() override = default;
 
+    void handle(HttpRequest* req) override;
+};
 } // namespace doris
