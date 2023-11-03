@@ -17,8 +17,8 @@
 
 #include "olap/task/engine_calc_delete_bitmap_task.h"
 
-#include "cloud/utils.h"
 #include "cloud/meta_mgr.h"
+#include "cloud/utils.h"
 #include "common/status.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset.h"
@@ -139,8 +139,11 @@ void TabletCalcDeleteBitmapTask::handle() {
     RowsetSharedPtr rowset;
     DeleteBitmapPtr delete_bitmap;
     RowsetIdUnorderedSet rowset_ids;
+    std::shared_ptr<PartialUpdateInfo> partial_update_info;
+    int64_t txn_expiration;
     Status status = StorageEngine::instance()->delete_bitmap_txn_manager()->get_tablet_txn_info(
-            _transaction_id, _tablet->tablet_id(), &rowset, &delete_bitmap, &rowset_ids);
+            _transaction_id, _tablet->tablet_id(), &rowset, &delete_bitmap, &rowset_ids,
+            &txn_expiration, &partial_update_info);
     if (status != Status::OK()) {
         LOG(WARNING) << "failed to get tablet txn info. tablet_id=" << _tablet->tablet_id()
                      << ", txn_id=" << _transaction_id << ", status=" << status;
@@ -148,11 +151,13 @@ void TabletCalcDeleteBitmapTask::handle() {
         return;
     }
 
-    rowset->make_visible(Version(_version, _version));
+    rowset->set_version(Version(_version, _version));
     std::unique_ptr<RowsetWriter> rowset_writer;
-    _tablet->create_transient_rowset_writer(rowset, &rowset_writer);
+    _tablet->create_transient_rowset_writer(rowset, &rowset_writer, partial_update_info,
+                                            txn_expiration);
     status = _tablet->update_delete_bitmap(rowset, rowset_ids, delete_bitmap, _transaction_id,
                                            rowset_writer.get());
+
     if (status != Status::OK()) {
         LOG(WARNING) << "failed to calculate delete bitmap. rowset_id=" << rowset->rowset_id()
                      << ", tablet_id=" << _tablet->tablet_id() << ", txn_id=" << _transaction_id
@@ -160,6 +165,26 @@ void TabletCalcDeleteBitmapTask::handle() {
         _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
         return;
     }
+
+    if (partial_update_info && partial_update_info->is_partial_update &&
+        rowset_writer->num_rows() > 0) {
+        // build rowset writer and merge transient rowset
+        rowset_writer->flush();
+        RowsetSharedPtr transient_rowset = rowset_writer->build();
+        rowset->merge_rowset_meta(transient_rowset->rowset_meta());
+        const auto& rowset_meta = rowset->rowset_meta();
+        status = cloud::meta_mgr()->update_tmp_rowset(*rowset_meta);
+        if (!status.ok()) {
+            LOG(WARNING) << "failed to update the committed rowset. rowset_id="
+                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
+                         << ", txn_id=" << _transaction_id << ", status=" << status;
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
+            return;
+        }
+        // erase segment cache cause we will add a segment to rowset
+        SegmentLoader::instance()->erase_segments(rowset->rowset_id());
+    }
+
     _engine_calc_delete_bitmap_task->add_succ_tablet_id(_tablet->tablet_id());
     LOG(INFO) << "calculate delete bitmap successfully on tablet"
               << ", table_id=" << _tablet->table_id() << ", tablet=" << _tablet->full_name()

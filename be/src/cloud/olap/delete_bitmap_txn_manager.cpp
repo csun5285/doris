@@ -47,10 +47,10 @@ Status DeleteBitmapTxnManager::init() {
     return st;
 }
 
-Status DeleteBitmapTxnManager::get_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
-                                                   RowsetSharedPtr* rowset,
-                                                   DeleteBitmapPtr* delete_bitmap,
-                                                   RowsetIdUnorderedSet* rowset_ids) {
+Status DeleteBitmapTxnManager::get_tablet_txn_info(
+        TTransactionId transaction_id, int64_t tablet_id, RowsetSharedPtr* rowset,
+        DeleteBitmapPtr* delete_bitmap, RowsetIdUnorderedSet* rowset_ids, int64_t* txn_expiration,
+        std::shared_ptr<PartialUpdateInfo>* partial_update_info) {
     {
         std::shared_lock<std::shared_mutex> rlock(_rwlock);
         TxnKey key(transaction_id, tablet_id);
@@ -60,6 +60,8 @@ Status DeleteBitmapTxnManager::get_tablet_txn_info(TTransactionId transaction_id
                                     tablet_id, transaction_id);
         }
         *rowset = iter->second.rowset;
+        *txn_expiration = iter->second.txn_expiration;
+        *partial_update_info = iter->second.partial_update_info;
     }
     std::string key_str = fmt::format("{}/{}", transaction_id, tablet_id);
     CacheKey key(key_str);
@@ -88,7 +90,8 @@ Status DeleteBitmapTxnManager::get_tablet_txn_info(TTransactionId transaction_id
 
 void DeleteBitmapTxnManager::set_tablet_txn_info(
         TTransactionId transaction_id, int64_t tablet_id, DeleteBitmapPtr delete_bitmap,
-        const RowsetIdUnorderedSet& rowset_ids, RowsetSharedPtr rowset, int64_t txn_expiration) {
+        const RowsetIdUnorderedSet& rowset_ids, RowsetSharedPtr rowset, int64_t txn_expiration,
+        std::shared_ptr<PartialUpdateInfo> partial_update_info) {
     if (txn_expiration <= 0) {
         txn_expiration = duration_cast<std::chrono::seconds>(
                                  std::chrono::system_clock::now().time_since_epoch())
@@ -98,7 +101,7 @@ void DeleteBitmapTxnManager::set_tablet_txn_info(
     {
         std::unique_lock<std::shared_mutex> wlock(_rwlock);
         TxnKey txn_key(transaction_id, tablet_id);
-        _txn_map[txn_key] = TxnVal(rowset, txn_expiration);
+        _txn_map[txn_key] = TxnVal(rowset, txn_expiration, std::move(partial_update_info));
         _expiration_txn.emplace(txn_expiration, txn_key);
     }
     std::string key_str = fmt::format("{}/{}", transaction_id, tablet_id);
@@ -122,7 +125,6 @@ void DeleteBitmapTxnManager::set_tablet_txn_info(
             .tag("tablt_id", tablet_id)
             .tag("delete_bitmap_size", charge);
 }
-
 
 void DeleteBitmapTxnManager::remove_expired_tablet_txn_info() {
     std::unique_lock<std::shared_mutex> wlock(_rwlock);

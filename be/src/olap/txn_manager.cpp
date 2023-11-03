@@ -31,6 +31,7 @@
 #include <set>
 #include <string>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "olap/data_dir.h"
@@ -39,7 +40,6 @@
 #include "olap/rowset/rowset_meta_manager.h"
 #include "olap/schema_change.h"
 #include "olap/segment_loader.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
 #include "olap/tablet_meta_manager.h"
@@ -363,7 +363,8 @@ Status TxnManager::publish_txn(OlapMeta* meta, TPartitionId partition_id,
     // update delete_bitmap
     if (tablet_txn_info.unique_key_merge_on_write) {
         std::unique_ptr<RowsetWriter> rowset_writer;
-        tablet->create_transient_rowset_writer(rowset, &rowset_writer);
+        tablet->create_transient_rowset_writer(rowset, &rowset_writer,
+                                               tablet_txn_info.partial_update_info);
 
         int64_t t2 = MonotonicMicros();
         RETURN_IF_ERROR(tablet->update_delete_bitmap(rowset, tablet_txn_info.rowset_ids,
@@ -371,7 +372,8 @@ Status TxnManager::publish_txn(OlapMeta* meta, TPartitionId partition_id,
                                                      rowset_writer.get()));
         int64_t t3 = MonotonicMicros();
         stats->calc_delete_bitmap_time_us = t3 - t2;
-        if (rowset->tablet_schema()->is_partial_update()) {
+        if (tablet_txn_info.partial_update_info &&
+            tablet_txn_info.partial_update_info->is_partial_update) {
             // build rowset writer and merge transient rowset
             RETURN_IF_ERROR(rowset_writer->flush());
             RowsetSharedPtr transient_rowset = rowset_writer->build();

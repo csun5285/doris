@@ -1152,6 +1152,9 @@ enum MetaServiceCode {
     LOCK_CONFLICT = 8002;
     ROWSETS_EXPIRED = 8003;
 
+    // partial update
+    ROWSET_META_NOT_FOUND = 9001;
+
     UNDEFINED_ERR = 1000000;
 }
 
@@ -1236,6 +1239,7 @@ service MetaService {
     rpc get_tablet(GetTabletRequest) returns (GetTabletResponse);
     rpc prepare_rowset(CreateRowsetRequest) returns (CreateRowsetResponse);
     rpc commit_rowset(CreateRowsetRequest) returns (CreateRowsetResponse);
+    rpc update_tmp_rowset(CreateRowsetRequest) returns (CreateRowsetResponse);
     rpc get_rowset(GetRowsetRequest) returns (GetRowsetResponse);
     rpc prepare_index(IndexRequest) returns (IndexResponse);
     rpc commit_index(IndexRequest) returns (IndexResponse);

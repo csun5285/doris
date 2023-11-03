@@ -292,6 +292,7 @@ Status DeltaWriter::init() {
     context.write_type = DataWriteType::TYPE_DIRECT;
     context.mow_context = std::make_shared<MowContext>(_cur_max_version, _req.txn_id, _rowset_ids,
                                                        _delete_bitmap);
+    context.partial_update_info = _partial_update_info;
     RETURN_IF_ERROR(_tablet->create_rowset_writer(context, &_rowset_writer));
 
     _schema.reset(new Schema(_tablet_schema));
@@ -442,7 +443,8 @@ void DeltaWriter::_reset_mem_table() {
                                                     _delete_bitmap);
     _mem_table.reset(new MemTable(_tablet, _schema.get(), _tablet_schema.get(), _req.slots,
                                   _req.tuple_desc, _rowset_writer.get(), mow_context,
-                                  mem_table_insert_tracker, mem_table_flush_tracker));
+                                  _partial_update_info.get(), mem_table_insert_tracker,
+                                  mem_table_flush_tracker));
 
     COUNTER_UPDATE(_segment_num, 1);
     _mem_table->set_callback([this](MemTableStat& stat) {
@@ -564,7 +566,7 @@ Status DeltaWriter::cloud_set_txn_related_delete_bitmap() {
         }
         _storage_engine->delete_bitmap_txn_manager()->set_tablet_txn_info(
                 _req.txn_id, _tablet->tablet_id(), _delete_bitmap, _rowset_ids, _cur_rowset,
-                _req.txn_expiration);
+                _req.txn_expiration, _partial_update_info);
     }
     return Status::OK();
 }
@@ -631,7 +633,7 @@ Status DeltaWriter::submit_calc_delete_bitmap_task() {
     // For partial update, we need to fill in the entire row of data, during the calculation
     // of the delete bitmap. This operation is resource-intensive, and we need to minimize
     // the number of times it occurs. Therefore, we skip this operation here.
-    if (_cur_rowset->tablet_schema()->is_partial_update()) {
+    if (_partial_update_info->is_partial_update) {
         return Status::OK();
     }
 
@@ -643,8 +645,7 @@ Status DeltaWriter::submit_calc_delete_bitmap_task() {
 }
 
 Status DeltaWriter::wait_calc_delete_bitmap() {
-    if (!_tablet->enable_unique_key_merge_on_write() ||
-        _cur_rowset->tablet_schema()->is_partial_update()) {
+    if (!_tablet->enable_unique_key_merge_on_write() || _partial_update_info->is_partial_update) {
         return Status::OK();
     }
     std::lock_guard<std::mutex> l(_lock);
@@ -832,9 +833,10 @@ void DeltaWriter::_build_current_tablet_schema(int64_t index_id,
 
     _tablet_schema->set_table_id(table_schema_param->table_id());
     // set partial update columns info
-    _tablet_schema->set_partial_update_info(table_schema_param->is_partial_update(),
-                                            table_schema_param->partial_update_input_columns());
-    _tablet_schema->set_is_strict_mode(table_schema_param->is_strict_mode());
+    _partial_update_info = std::make_shared<PartialUpdateInfo>();
+    _partial_update_info->init(*_tablet_schema, table_schema_param->is_partial_update(),
+                               table_schema_param->partial_update_input_columns(),
+                               table_schema_param->is_strict_mode());
 }
 
 void DeltaWriter::_request_slave_tablet_pull_rowset(PNodeInfo node_info) {

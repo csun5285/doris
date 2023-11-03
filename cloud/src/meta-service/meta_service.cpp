@@ -1014,6 +1014,96 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     }
 }
 
+void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* controller,
+                                              const ::selectdb::CreateRowsetRequest* request,
+                                              ::selectdb::CreateRowsetResponse* response,
+                                              ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(update_tmp_rowset);
+    if (!request->has_rowset_meta()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "no rowset meta";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
+        return;
+    }
+    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "rowset_meta must have either schema or schema_version";
+        return;
+    }
+    RPC_RATE_LIMIT(update_tmp_rowset)
+    int64_t tablet_id = rowset_meta.tablet_id();
+
+    std::string update_key;
+    std::string update_val;
+
+    int64_t txn_id = rowset_meta.txn_id();
+    MetaRowsetTmpKeyInfo key_info {instance_id, txn_id, tablet_id};
+    meta_rowset_tmp_key(key_info, &update_key);
+
+    std::unique_ptr<Transaction> txn;
+    ret = txn_kv_->create_txn(&txn);
+    if (ret != 0) {
+        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        msg = "failed to create txn";
+        return;
+    }
+
+    // Check if commit key already exists.
+    std::string existed_commit_val;
+    ret = txn->get(update_key, &existed_commit_val);
+    if (ret == 0) {
+        auto existed_rowset_meta = response->mutable_existed_rowset_meta();
+        if (!existed_rowset_meta->ParseFromString(existed_commit_val)) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = fmt::format("malformed rowset meta value. key={}", hex(update_key));
+            return;
+        }
+    } else if (ret == 1) {
+        code = MetaServiceCode::ROWSET_META_NOT_FOUND;
+        LOG_WARNING(
+                "fail to find the rowset meta with key={}, instance_id={}, txn_id={}, "
+                "tablet_id={}, rowset_id={}",
+                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                rowset_meta.rowset_id_v2());
+        msg = "can't find the rowset";
+        return;
+    } else {
+        code = MetaServiceCode::KV_TXN_GET_ERR;
+        LOG_WARNING(
+                "internal error, fail to find the rowset meta with key={}, instance_id={}, "
+                "txn_id={}, tablet_id={}, rowset_id={}",
+                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                rowset_meta.rowset_id_v2());
+        msg = "failed to check whether rowset exists";
+        return;
+    }
+
+    DCHECK_GT(rowset_meta.txn_expiration(), 0);
+    if (!rowset_meta.SerializeToString(&update_val)) {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "failed to serialize rowset meta";
+        return;
+    }
+
+    txn->put(update_key, update_val);
+    LOG(INFO) << "xxx put "
+              << "update_rowset_key " << hex(update_key) << " value_size " << update_val.size();
+    ret = txn->commit();
+    if (ret != 0) {
+        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
+        ss << "failed to update rowset meta, ret=" << ret;
+        msg = ss.str();
+        return;
+    }
+}
+
 void internal_get_rowset(Transaction* txn, int64_t start, int64_t end,
                          const std::string& instance_id, int64_t tablet_id, int& ret,
                          MetaServiceCode& code, std::string& msg,

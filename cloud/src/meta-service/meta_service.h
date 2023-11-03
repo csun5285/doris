@@ -111,6 +111,11 @@ public:
                        ::selectdb::CreateRowsetResponse* response,
                        ::google::protobuf::Closure* done) override;
 
+    void update_tmp_rowset(::google::protobuf::RpcController* controller,
+                                 const ::selectdb::CreateRowsetRequest* request,
+                                 ::selectdb::CreateRowsetResponse* response,
+                                 ::google::protobuf::Closure* done) override;
+
     void get_rowset(::google::protobuf::RpcController* controller,
                     const ::selectdb::GetRowsetRequest* request,
                     ::selectdb::GetRowsetResponse* response,
@@ -187,12 +192,12 @@ public:
                         const ::selectdb::AlterInstanceRequest* request,
                         ::selectdb::AlterInstanceResponse* response,
                         ::google::protobuf::Closure* done) override;
-    
+
     void get_instance(google::protobuf::RpcController* controller,
                       const ::selectdb::GetInstanceRequest* request,
                       ::selectdb::GetInstanceResponse* response,
                       ::google::protobuf::Closure* done) override;
- 
+
     void alter_cluster(google::protobuf::RpcController* controller,
                        const ::selectdb::AlterClusterRequest* request,
                        ::selectdb::AlterClusterResponse* response,

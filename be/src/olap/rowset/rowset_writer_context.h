@@ -31,6 +31,7 @@ class RowsetWriterContextBuilder;
 using RowsetWriterContextBuilderSharedPtr = std::shared_ptr<RowsetWriterContextBuilder>;
 class DataDir;
 class Tablet;
+struct PartialUpdateInfo;
 namespace vectorized::schema_util {
 class LocalSchemaChangeRecorder;
 }
@@ -109,6 +110,10 @@ struct RowsetWriterContext {
 
     // segcompaction for this RowsetWriter, disable it for some transient writers
     bool enable_segcompaction = false;
+
+    std::shared_ptr<PartialUpdateInfo> partial_update_info;
+
+    bool is_transient_rowset_writer {false};
 };
 
 } // namespace doris

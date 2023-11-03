@@ -50,6 +50,7 @@ class TupleDescriptor;
 class SlotDescriptor;
 class OlapTableSchemaParam;
 class RowsetWriter;
+struct PartialUpdateInfo;
 
 namespace vectorized {
 class Block;
@@ -231,6 +232,8 @@ private:
     MonotonicStopWatch _lock_watch;
 
     MemTableStat _memtable_stat;
+
+    std::shared_ptr<PartialUpdateInfo> _partial_update_info;
 };
 
 } // namespace doris
