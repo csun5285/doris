@@ -646,6 +646,86 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
+
+    // update cluster mysql user name
+    {
+        AlterClusterRequest req;
+        req.mutable_cluster()->add_mysql_user_name("test_user");
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("update_cluster_mysql_user_name", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
+
+    // decommission_node
+    {
+        AlterClusterRequest req;
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_name(mock_cluster_name);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->set_type(ClusterPB::COMPUTE);
+        auto node = req.mutable_cluster()->add_nodes();
+        node->set_ip("127.0.0.1");
+        node->set_heartbeat_port(9999);
+        node->set_cloud_unique_id("cloud_unique_id");
+        auto& meta_service = ctx.meta_service_;
+        NodeInfoPB npb;
+        npb.set_heartbeat_port(9999);
+        npb.set_ip("127.0.0.1");
+        npb.set_cloud_unique_id("cloud_unique_id");
+        meta_service->resource_mgr_->node_info_.insert({"cloud_unique_id",  NodeInfo{
+            Role::COMPUTE_NODE,
+            mock_instance,
+            "rename_cluster_name",
+            mock_cluster_id,
+            npb
+        }});
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("decommission_node", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
+
+    // notify_decommissioned
+    {
+        AlterClusterRequest req;
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_name(mock_cluster_name);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->set_type(ClusterPB::COMPUTE);
+        auto node = req.mutable_cluster()->add_nodes();
+        node->set_ip("127.0.0.1");
+        node->set_heartbeat_port(9999);
+        node->set_cloud_unique_id("cloud_unique_id");
+        auto& meta_service = ctx.meta_service_;
+        NodeInfoPB npb;
+        npb.set_heartbeat_port(9999);
+        npb.set_ip("127.0.0.1");
+        npb.set_cloud_unique_id("cloud_unique_id");
+        meta_service->resource_mgr_->node_info_.insert({"cloud_unique_id",  NodeInfo{
+            Role::COMPUTE_NODE,
+            mock_instance,
+            "rename_cluster_name",
+            mock_cluster_id,
+            npb
+        }});
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("notify_decommissioned", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
+
+    // update_cluster_endpoint
+    {
+        AlterClusterRequest req;
+        req.mutable_cluster()->add_mysql_user_name("test_user");
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->set_public_endpoint("127.0.0.2");
+        req.mutable_cluster()->set_private_endpoint("127.0.0.3");
+        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("update_cluster_endpoint", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+    }
 }
 
 TEST(MetaServiceHttpTest, GetClusterTest) {

@@ -411,6 +411,20 @@ TEST(MetaServiceTest, AlterClusterTest) {
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
+
+    // set UPDATE_CLUSTER_MYSQL_USER_NAME
+    {
+        brpc::Controller cntl;
+        AlterClusterRequest req;
+        req.set_instance_id(mock_instance);
+        req.mutable_cluster()->set_cluster_id(mock_cluster_id);
+        req.mutable_cluster()->add_mysql_user_name("test_user");
+        req.set_op(AlterClusterRequest::UPDATE_CLUSTER_MYSQL_USER_NAME);
+        AlterClusterResponse res;
+        meta_service->alter_cluster(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
 }
 
 TEST(MetaServiceTest, GetClusterTest) {
@@ -2639,12 +2653,22 @@ TEST(MetaServiceTest, StageTest) {
     obj.set_external_endpoint("888");
     obj.set_provider(ObjectStoreInfoPB::BOS);
 
+    RamUserPB ram_user;
+    ram_user.set_user_id("test_user_id");
+    ram_user.set_ak("test_ak");
+    ram_user.set_sk("test_sk");
+    EncryptionInfoPB encry_info;
+    encry_info.set_encryption_method("encry_method_test");
+    encry_info.set_key_id(1111);
+    ram_user.mutable_encryption_info()->CopyFrom(encry_info);
+
     // create instance
     {
         CreateInstanceRequest req;
         req.set_instance_id(instance_id);
         req.set_user_id("test_user");
         req.set_name("test_name");
+        req.mutable_ram_user()->CopyFrom(ram_user);
         req.mutable_obj_info()->CopyFrom(obj);
 
         CreateInstanceResponse res;
@@ -2657,11 +2681,39 @@ TEST(MetaServiceTest, StageTest) {
     {
         // get a non-existent internal stage
         GetStageRequest get_stage_req;
-        get_stage_req.set_cloud_unique_id(cloud_unique_id);
-        get_stage_req.set_type(StagePB::INTERNAL);
-        get_stage_req.set_mysql_user_name("root");
-        get_stage_req.set_mysql_user_id("root_id");
         GetStageResponse res;
+        // no cloud_unique_id
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+
+        get_stage_req.set_cloud_unique_id(cloud_unique_id);
+        // no instance_id
+        sp->clear_call_back("get_instance_id");
+        sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = ""; });
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        sp->clear_call_back("get_instance_id");
+        sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+
+        // no stage type
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        get_stage_req.set_type(StagePB::INTERNAL);
+
+        // no internal stage user name
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        get_stage_req.set_mysql_user_name("root");
+
+        // no internal stage user id
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        get_stage_req.set_mysql_user_id("root_id");
         meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                 &get_stage_req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::STAGE_NOT_FOUND);
@@ -2686,6 +2738,14 @@ TEST(MetaServiceTest, StageTest) {
                                 &get_stage_req, &res2, nullptr);
         ASSERT_EQ(res2.status().code(), MetaServiceCode::OK);
         ASSERT_EQ(1, res2.stage().size());
+
+        // can't find user id's stage
+        GetStageResponse res3;
+        get_stage_req.set_mysql_user_id("not_root_id_exist");
+        meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                &get_stage_req, &res3, nullptr);
+        ASSERT_EQ(res3.status().code(), MetaServiceCode::STATE_ALREADY_EXISTED_FOR_USER);
+        ASSERT_EQ(1, res3.stage().size());
 
         // drop internal stage
         DropStageRequest drop_stage_request;
@@ -2754,12 +2814,17 @@ TEST(MetaServiceTest, StageTest) {
             ASSERT_EQ(res.status().code(), MetaServiceCode::STAGE_NOT_FOUND);
         }
 
-        // create 2 stages
-        for (auto i = 0; i < 2; ++i) {
+        // create 4 stages
+        for (auto i = 0; i < 4; ++i) {
             StagePB stage;
             stage.set_type(StagePB::EXTERNAL);
             stage.set_stage_id("ex_id_" + std::to_string(i));
             stage.set_name("ex_name_" + std::to_string(i));
+            if (i == 2) {
+                stage.set_access_type(StagePB::BUCKET_ACL);
+            } else if (i == 3) {
+                stage.set_access_type(StagePB::IAM);
+            }
             stage.mutable_obj_info()->CopyFrom(obj);
 
             CreateStageRequest create_stage_req;
@@ -2772,6 +2837,24 @@ TEST(MetaServiceTest, StageTest) {
             ASSERT_EQ(create_stage_res.status().code(), MetaServiceCode::OK);
         }
 
+        // stages number bigger than config
+        {
+            config::max_num_stages = 4;
+            StagePB stage;
+            stage.set_type(StagePB::INTERNAL);
+            stage.add_mysql_user_name("root1");
+            stage.add_mysql_user_id("root_id1");
+            stage.set_stage_id("internal_stage_id1");
+            CreateStageRequest create_stage_req;
+            create_stage_req.set_cloud_unique_id(cloud_unique_id);
+            create_stage_req.mutable_stage()->CopyFrom(stage);
+
+            CreateStageResponse create_stage_res;
+            meta_service->create_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                       &create_stage_req, &create_stage_res, nullptr);
+            ASSERT_EQ(create_stage_res.status().code(), MetaServiceCode::UNDEFINED_ERR);
+        }
+
         // get an external stage with name
         {
             GetStageResponse res;
@@ -2780,6 +2863,43 @@ TEST(MetaServiceTest, StageTest) {
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
             ASSERT_EQ(1, res.stage().size());
             ASSERT_EQ("ex_id_1", res.stage().at(0).stage_id());
+        }
+
+
+        // get an external stage with name, type StagePB::BUCKET_ACL
+        {
+            get_stage_req.set_stage_name("ex_name_2");
+            GetStageResponse res;
+            meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &get_stage_req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(1, res.stage().size());
+            ASSERT_EQ("ex_id_2", res.stage().at(0).stage_id());
+        }
+
+        // get an external stage with name, type StagePB::IAM
+        {
+            GetStageResponse res;
+            get_stage_req.set_stage_name("ex_name_3");
+            meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &get_stage_req, &res, nullptr);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(1, res.stage().size());
+            ASSERT_EQ("ex_id_3", res.stage().at(0).stage_id());
+
+            GetStageResponse res1;
+            std::unique_ptr<Transaction> txn;
+            auto ret = meta_service->txn_kv_->create_txn(&txn);
+            RamUserPB iam_user;
+            txn->put(system_meta_service_arn_info_key(), iam_user.SerializeAsString());
+            ret = txn->commit();
+            ASSERT_EQ(ret, 0);
+            LOG_INFO("ret=", ret);
+            meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                    &get_stage_req, &res1, nullptr);
+            ASSERT_EQ(res1.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(1, res1.stage().size());
+            ASSERT_EQ("ex_id_3", res1.stage().at(0).stage_id());
         }
 
         GetStageRequest req;
@@ -2791,7 +2911,7 @@ TEST(MetaServiceTest, StageTest) {
             meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &res, nullptr);
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-            ASSERT_EQ(2, res.stage().size());
+            ASSERT_EQ(4, res.stage().size());
             ASSERT_EQ("ex_id_0", res.stage().at(0).stage_id());
             ASSERT_EQ("ex_id_1", res.stage().at(1).stage_id());
         }
@@ -2817,7 +2937,7 @@ TEST(MetaServiceTest, StageTest) {
             meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &get_stage_res, nullptr);
             ASSERT_EQ(get_stage_res.status().code(), MetaServiceCode::OK);
-            ASSERT_EQ(1, get_stage_res.stage().size());
+            ASSERT_EQ(3, get_stage_res.stage().size());
             ASSERT_EQ("ex_name_0", get_stage_res.stage().at(0).name());
         }
     }
@@ -4291,6 +4411,73 @@ TEST(MetaServiceTxnStoreRetryableTest, DoNotReturnRetryableCode) {
     SyncPoint::get_instance()->clear_all_call_backs();
     config::enable_txn_store_retry = false;
     config::txn_store_retry_times = retry_times;
+}
+
+TEST(MetaServiceTest, GetClusterStatusTest) {
+    auto meta_service = get_meta_service();
+
+    // add cluster first
+    InstanceKeyInfo key_info {mock_instance};
+    std::string key;
+    std::string val;
+    instance_key(key_info, &key);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(mock_instance);
+    ClusterPB c1;
+    c1.set_type(ClusterPB::COMPUTE);
+    c1.set_cluster_name(mock_cluster_name);
+    c1.set_cluster_id(mock_cluster_id);
+    c1.add_mysql_user_name()->append("m1");
+    c1.set_cluster_status(ClusterStatus::NORMAL);
+    ClusterPB c2;
+    c2.set_type(ClusterPB::COMPUTE);
+    c2.set_cluster_name(mock_cluster_name+"2");
+    c2.set_cluster_id(mock_cluster_id+"2");
+    c2.add_mysql_user_name()->append("m2");
+    c2.set_cluster_status(ClusterStatus::SUSPENDED);
+    ClusterPB c3;
+    c3.set_type(ClusterPB::COMPUTE);
+    c3.set_cluster_name(mock_cluster_name+"3");
+    c3.set_cluster_id(mock_cluster_id+"3");
+    c3.add_mysql_user_name()->append("m3");
+    c3.set_cluster_status(ClusterStatus::TO_RESUME);
+    instance.add_clusters()->CopyFrom(c1);
+    instance.add_clusters()->CopyFrom(c2);
+    instance.add_clusters()->CopyFrom(c3);
+    val = instance.SerializeAsString();
+
+    std::unique_ptr<Transaction> txn;
+    std::string get_val;
+    int ret = meta_service->txn_kv_->create_txn(&txn);
+    ASSERT_EQ(ret, 0);
+    txn->put(key, val);
+    ASSERT_EQ(txn->commit(), 0);
+
+    // case: get all cluster
+    {
+        brpc::Controller cntl;
+        GetClusterStatusRequest req;
+        req.add_instance_ids(mock_instance);
+        GetClusterStatusResponse res;
+        meta_service->get_cluster_status(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
+                                  &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.details().at(0).clusters().size(), 3);
+    }
+
+    // get normal cluster
+    {
+        brpc::Controller cntl;
+        GetClusterStatusRequest req;
+        req.add_instance_ids(mock_instance);
+        req.set_status(NORMAL);
+        GetClusterStatusResponse res;
+        meta_service->get_cluster_status(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
+                                         &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        ASSERT_EQ(res.details().at(0).clusters().size(), 1);
+    }
 }
 
 } // namespace selectdb

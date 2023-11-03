@@ -159,6 +159,7 @@ static HttpResponse process_alter_cluster(MetaServiceImpl* service, brpc::Contro
             {"drop_node", AlterClusterRequest::DROP_NODE},
             {"decommission_node", AlterClusterRequest::DECOMMISSION_NODE},
             {"set_cluster_status", AlterClusterRequest::SET_CLUSTER_STATUS},
+            {"notify_decommissioned", AlterClusterRequest::NOTIFY_DECOMMISSIONED},
     };
 
     auto& path = ctrl->http_request().unresolved_path();
@@ -396,6 +397,7 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"drop_node", process_alter_cluster},
             {"decommission_node", process_alter_cluster},
             {"set_cluster_status", process_alter_cluster},
+            {"notify_decommissioned", process_alter_cluster},
             {"v1/add_cluster", process_alter_cluster},
             {"v1/drop_cluster", process_alter_cluster},
             {"v1/rename_cluster", process_alter_cluster},
