@@ -87,13 +87,9 @@ public:
 
         Range(size_t left, size_t right) : left(left), right(right) {}
 
-        bool operator==(const Range& other) const {
-            return left == other.left && right == other.right;
-        }
+        [[nodiscard]] size_t size() const { return right - left + 1; }
 
-        size_t size() const { return right - left + 1; }
-
-        std::string to_string() const {
+        [[nodiscard]] std::string to_string() const {
             return fmt::format("[{}, {}]", std::to_string(left), std::to_string(right));
         }
     };
@@ -130,10 +126,6 @@ public:
 
     static uint64_t get_caller_id();
 
-    size_t get_download_offset() const;
-
-    size_t get_downloaded_size() const;
-
     std::string get_info_for_log() const;
 
     std::string get_path_in_local_cache(bool is_tmp = false) const;
@@ -154,7 +146,6 @@ public:
 private:
     size_t get_downloaded_size(std::lock_guard<doris::Mutex>& segment_lock) const;
     std::string get_info_for_log_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
-    bool has_finalized_state() const;
 
     [[nodiscard]] Status set_downloaded(std::lock_guard<doris::Mutex>& segment_lock);
     bool is_downloader_impl(std::lock_guard<doris::Mutex>& segment_lock) const;
@@ -210,8 +201,6 @@ struct FileBlocksHolder {
     ~FileBlocksHolder();
 
     FileBlocks file_segments {};
-
-    std::string to_string();
 };
 
 using FileBlocksHolderPtr = std::unique_ptr<FileBlocksHolder>;

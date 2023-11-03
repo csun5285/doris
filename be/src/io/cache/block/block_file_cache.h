@@ -74,6 +74,13 @@ struct CacheContext {
         query_id = io_context->query_id ? *io_context->query_id : TUniqueId();
     }
     CacheContext() = default;
+
+    bool operator==(const CacheContext& rhs) const {
+        return query_id == rhs.query_id && cache_type == rhs.cache_type 
+                && expiration_time == rhs.expiration_time
+                && is_cold_data == rhs.is_cold_data;
+    }
+
     TUniqueId query_id;
     FileCacheType cache_type;
     int64_t expiration_time {0};
@@ -122,14 +129,10 @@ public:
 
     static Key hash(const std::string& path);
 
-    size_t try_release();
-
     std::string get_path_in_local_cache(const Key& key, int64_t expiration_time, size_t offset,
                                         FileCacheType type, bool is_tmp = false) const;
 
     std::string get_path_in_local_cache(const Key& key, int64_t expiration_time) const;
-
-    std::string get_version_path() const;
 
     const std::string& get_base_path() const { return _cache_base_path; }
 
@@ -255,8 +258,6 @@ protected:
         Iterator begin() { return queue.begin(); }
 
         Iterator end() { return queue.end(); }
-
-        void remove_all(std::lock_guard<doris::Mutex>& cache_lock);
 
         Iterator get(const Key& key, size_t offset,
                      std::lock_guard<doris::Mutex>& /* cache_lock */) const;
@@ -431,8 +432,6 @@ private:
     bool try_reserve_from_other_queue(FileCacheType cur_cache_type, size_t offset, int64_t cur_time,
                                       std::lock_guard<doris::Mutex>& cache_lock);
 
-    size_t get_available_cache_size(FileCacheType cache_type) const;
-
     [[nodiscard]] Status load_cache_info_into_memory();
 
     bool try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
@@ -452,9 +451,6 @@ private:
                                         std::lock_guard<doris::Mutex>& cache_lock) const;
 
     void check_disk_resource_limit(const std::string& path);
-
-    size_t get_available_cache_size_unlocked(FileCacheType type,
-                                             std::lock_guard<doris::Mutex>& cache_lock) const;
 
     size_t get_file_blocks_num_unlocked(FileCacheType type,
                                         std::lock_guard<doris::Mutex>& cache_lock) const;

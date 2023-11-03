@@ -70,16 +70,6 @@ FileBlock::State FileBlock::state() const {
     return _download_state;
 }
 
-size_t FileBlock::get_download_offset() const {
-    std::lock_guard segment_lock(_mutex);
-    return range().left + get_downloaded_size(segment_lock);
-}
-
-size_t FileBlock::get_downloaded_size() const {
-    std::lock_guard segment_lock(_mutex);
-    return get_downloaded_size(segment_lock);
-}
-
 size_t FileBlock::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segment_lock */) const {
     if (_download_state == State::DOWNLOADED) {
         return _downloaded_size;
@@ -367,10 +357,6 @@ std::string FileBlock::state_to_string(FileBlock::State state) {
     }
 }
 
-bool FileBlock::has_finalized_state() const {
-    return _download_state == State::DOWNLOADED;
-}
-
 FileBlocksHolder::~FileBlocksHolder() {
     /// In CacheableReadBufferFromRemoteFS file segment's downloader removes file segments from
     /// FileSegmentsHolder right after calling file_segment->complete(), so on destruction here
@@ -401,17 +387,6 @@ FileBlocksHolder::~FileBlocksHolder() {
 
         file_segment_it = file_segments.erase(current_file_segment_it);
     }
-}
-
-std::string FileBlocksHolder::to_string() {
-    std::string ranges;
-    for (const auto& file_segment : file_segments) {
-        if (!ranges.empty()) {
-            ranges += ", ";
-        }
-        ranges += file_segment->range().to_string();
-    }
-    return ranges;
 }
 
 } // namespace io

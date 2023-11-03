@@ -43,22 +43,6 @@ FileCacheFactory& FileCacheFactory::instance() {
     return ret;
 }
 
-size_t FileCacheFactory::try_release() {
-    int elements = 0;
-    for (auto& cache : _caches) {
-        elements += cache->try_release();
-    }
-    return elements;
-}
-
-size_t FileCacheFactory::try_release(const std::string& base_path) {
-    auto iter = _path_to_cache.find(base_path);
-    if (iter != _path_to_cache.end()) {
-        return iter->second->try_release();
-    }
-    return 0;
-}
-
 Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
                                            FileCacheSettings file_cache_settings) {
     if (config::clear_file_cache) {
@@ -93,6 +77,7 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
     }
     auto cache = std::make_unique<BlockFileCache>(cache_base_path, file_cache_settings);
     RETURN_IF_ERROR(cache->initialize());
+    _path_to_cache.emplace(cache_base_path, cache.get());
     _caches.push_back(std::move(cache));
 
     LOG(INFO) << "[FileCache] path: " << cache_base_path

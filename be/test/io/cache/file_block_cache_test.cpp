@@ -41,13 +41,15 @@
 #include "common/sync_point.h"
 #include "gtest/gtest_pred_impl.h"
 #include "io/cache/block/block_file_cache.h"
+#include "io/cache/block/block_file_cache_factory.h"
+#include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/cache/block/block_file_segment.h"
 #include "io/fs/path.h"
+#include "io/io_common.h"
 #include "olap/options.h"
 #include "util/slice.h"
 #include "util/time.h"
-
 namespace doris::io {
 
 extern int disk_used_percentage(const std::string& path, std::pair<int, int>* percent);
@@ -106,8 +108,17 @@ void complete(const io::FileBlocksHolder& holder) {
     }
 }
 
-TEST(BlockFileCache, init) {
-    config::file_cache_enter_disk_resource_limit_mode_percent = 99;
+class BlockFileCacheTest : public testing::Test {
+public:
+    static void SetUpTestSuite() {
+        config::file_cache_enter_disk_resource_limit_mode_percent = 99;
+    }
+    static void TearDownTestSuite() { 
+        config::file_cache_enter_disk_resource_limit_mode_percent = 90; 
+    }
+};
+
+TEST_F(BlockFileCacheTest, init) {
     std::string string = std::string(R"(
         [
         {
@@ -599,12 +610,7 @@ void test_file_cache(io::FileCacheType cache_type) {
     }
 }
 
-TEST(BlockFileCache, normal) {
-    if (fs::exists(cache_base_path)) {
-        fs::remove_all(cache_base_path);
-    }
-    fs::create_directories(cache_base_path);
-    test_file_cache(io::FileCacheType::DISPOSABLE);
+TEST_F(BlockFileCacheTest, normal) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -622,7 +628,7 @@ TEST(BlockFileCache, normal) {
     }
 }
 
-TEST(BlockFileCache, resize) {
+TEST_F(BlockFileCacheTest, resize) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -652,7 +658,7 @@ TEST(BlockFileCache, resize) {
     }
 }
 
-TEST(BlockFileCache, query_limit_heap_use_after_free) {
+TEST_F(BlockFileCacheTest, query_limit_heap_use_after_free) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -737,7 +743,7 @@ TEST(BlockFileCache, query_limit_heap_use_after_free) {
     }
 }
 
-TEST(BlockFileCache, query_limit_dcheck) {
+TEST_F(BlockFileCacheTest, query_limit_dcheck) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -853,7 +859,7 @@ TEST(BlockFileCache, query_limit_dcheck) {
     }
 }
 
-TEST(BlockFileCache, reset_range) {
+TEST_F(BlockFileCacheTest, reset_range) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -870,6 +876,7 @@ TEST(BlockFileCache, reset_range) {
     settings.max_query_cache_size = 15;
     settings.total_size = 15;
     io::BlockFileCache cache(cache_base_path, settings);
+    EXPECT_EQ(cache.capacity(), 15);
     ASSERT_TRUE(cache.initialize());
     while (true) {
         if (cache.get_lazy_open_success()) {
@@ -886,6 +893,7 @@ TEST(BlockFileCache, reset_range) {
         ASSERT_EQ(blocks.size(), 1);
         assert_range(1, blocks[0], io::FileBlock::Range(0, 8), io::FileBlock::State::EMPTY);
         ASSERT_TRUE(blocks[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        ASSERT_TRUE(blocks[0]->is_downloader());
         assert_range(2, blocks[0], io::FileBlock::Range(0, 8), io::FileBlock::State::DOWNLOADING);
         download(blocks[0], 6);
     }
@@ -896,12 +904,13 @@ TEST(BlockFileCache, reset_range) {
         assert_range(1, blocks[0], io::FileBlock::Range(0, 5), io::FileBlock::State::DOWNLOADED);
         assert_range(2, blocks[1], io::FileBlock::Range(6, 8), io::FileBlock::State::EMPTY);
     }
+    std::cout << cache.dump_structure(key) << std::endl;
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
 }
 
-TEST(BlockFileCache, change_cache_type) {
+TEST_F(BlockFileCacheTest, change_cache_type) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -951,7 +960,7 @@ TEST(BlockFileCache, change_cache_type) {
     }
 }
 
-TEST(BlockFileCache, fd_cache_remove) {
+TEST_F(BlockFileCacheTest, fd_cache_remove) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1033,7 +1042,7 @@ TEST(BlockFileCache, fd_cache_remove) {
     }
 }
 
-TEST(BlockFileCache, fd_cache_evict) {
+TEST_F(BlockFileCacheTest, fd_cache_evict) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1146,7 +1155,7 @@ int get_disk_info(const char* const (&argv)[N], int* percent) {
     return 0;
 }
 
-TEST(BlockFileCache, disk_used_percentage_test) {
+TEST_F(BlockFileCacheTest, disk_used_percentage_test) {
     std::string dir = "/dev";
     std::pair<int, int> percent;
     disk_used_percentage(dir, &percent);
@@ -1256,7 +1265,7 @@ void test_file_cache_run_in_resource_limit(io::FileCacheType cache_type) {
 }
 
 // run in disk space or disk inode not enough mode
-TEST(BlockFileCache, run_in_resource_limit_mode) {
+TEST_F(BlockFileCacheTest, run_in_resource_limit_mode) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1272,7 +1281,7 @@ TEST(BlockFileCache, run_in_resource_limit_mode) {
     }
 }
 
-TEST(BlockFileCache, fix_tmp_file) {
+TEST_F(BlockFileCacheTest, fix_tmp_file) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1325,7 +1334,7 @@ TEST(BlockFileCache, fix_tmp_file) {
     }
 }
 
-TEST(BlockFileCache, test_lazy_load) {
+TEST_F(BlockFileCacheTest, test_lazy_load) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1381,7 +1390,7 @@ TEST(BlockFileCache, test_lazy_load) {
     }
 }
 
-TEST(BlockFileCache, test_lazy_load_with_limit) {
+TEST_F(BlockFileCacheTest, test_lazy_load_with_limit) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1438,7 +1447,7 @@ TEST(BlockFileCache, test_lazy_load_with_limit) {
     }
 }
 
-TEST(BlockFileCache, ttl_normal) {
+TEST_F(BlockFileCacheTest, ttl_normal) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1511,7 +1520,7 @@ TEST(BlockFileCache, ttl_normal) {
     }
 }
 
-TEST(BlockFileCache, ttl_change_to_normal) {
+TEST_F(BlockFileCacheTest, ttl_change_to_normal) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1571,7 +1580,7 @@ TEST(BlockFileCache, ttl_change_to_normal) {
     }
 }
 
-TEST(BlockFileCache, ttl_change_expiration_time) {
+TEST_F(BlockFileCacheTest, ttl_change_expiration_time) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1632,7 +1641,7 @@ TEST(BlockFileCache, ttl_change_expiration_time) {
     }
 }
 
-TEST(BlockFileCache, ttl_reverse) {
+TEST_F(BlockFileCacheTest, ttl_reverse) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1687,7 +1696,7 @@ TEST(BlockFileCache, ttl_reverse) {
     }
 }
 
-TEST(BlockFileCache, io_error) {
+TEST_F(BlockFileCacheTest, io_error) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1818,7 +1827,7 @@ TEST(BlockFileCache, io_error) {
     }
 }
 
-TEST(BlockFileCache, remove_directly_when_normal_change_to_ttl) {
+TEST_F(BlockFileCacheTest, remove_directly_when_normal_change_to_ttl) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1878,7 +1887,7 @@ TEST(BlockFileCache, remove_directly_when_normal_change_to_ttl) {
     }
 }
 
-TEST(BlockFileCache, recyle_cache_async) {
+TEST_F(BlockFileCacheTest, recyle_cache_async) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -1941,7 +1950,7 @@ TEST(BlockFileCache, recyle_cache_async) {
     }
 }
 
-TEST(BlockFileCache, recyle_cache_async_ttl) {
+TEST_F(BlockFileCacheTest, recyle_cache_async_ttl) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
@@ -2004,6 +2013,215 @@ TEST(BlockFileCache, recyle_cache_async_ttl) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
+}
+
+TEST_F(BlockFileCacheTest, remove_directly) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.index_queue_size = 30;
+    settings.index_queue_elements = 5;
+    settings.disposable_queue_size = 30;
+    settings.disposable_queue_elements = 5;
+    settings.total_size = 90;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.query_id = query_id;
+    auto key1 = io::BlockFileCache::hash("key1");
+    auto key2 = io::BlockFileCache::hash("key2");
+    io::BlockFileCache cache(cache_base_path, settings);
+    context.cache_type = io::FileCacheType::TTL;
+    context.expiration_time = UnixSeconds() + 3600;
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        auto holder = cache.get_or_set(key1, 0, 5, context);
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 4), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 4),
+                        io::FileBlock::State::DOWNLOADED);
+    }
+
+    context.expiration_time = 0;
+    context.cache_type = io::FileCacheType::NORMAL;
+    {
+        auto holder = cache.get_or_set(key2, 0, 5, context);
+        auto segments = fromHolder(holder);
+        ASSERT_EQ(segments.size(), 1);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 4), io::FileBlock::State::EMPTY);
+        ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+        download(segments[0]);
+        assert_range(1, segments[0], io::FileBlock::Range(0, 4),
+                        io::FileBlock::State::DOWNLOADED);
+    }
+    cache.remove_if_cached(key1);
+    cache.remove_if_cached(key2);
+
+    EXPECT_EQ(cache._cur_cache_size, 0);
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+TEST_F(BlockFileCacheTest, test_factory) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    std::string cache_path2 = caches_dir / "cache2" / "";
+    if (fs::exists(cache_path2)) {
+        fs::remove_all(cache_path2);
+    }
+    fs::create_directories(cache_path2);
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.index_queue_size = 30;
+    settings.index_queue_elements = 5;
+    settings.disposable_queue_size = 30;
+    settings.disposable_queue_elements = 5;
+    settings.total_size = 90;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
+    ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_path2, settings).ok());
+    EXPECT_EQ(FileCacheFactory::instance().get_cache_instance_size(), 2);
+    EXPECT_EQ(FileCacheFactory::instance().get_total_cache_size(), 180);
+    EXPECT_EQ(FileCacheFactory::instance().get_by_path(cache_path2)->get_base_path(), cache_path2);
+    auto key1 = io::BlockFileCache::hash("key1");
+    EXPECT_EQ(FileCacheFactory::instance().get_by_path(key1)->get_base_path(), cache_base_path);
+}
+
+TEST_F(BlockFileCacheTest, test_hash_key) {
+    auto key1 = io::BlockFileCache::hash("key1");
+    EXPECT_EQ(key1.to_string(), "f36131fb4ba563c17e727cd0cdd63689");
+}
+
+TEST_F(BlockFileCacheTest, test_cache_context) {
+    {
+        io::IOContext io_ctx;
+        io_ctx.read_segment_index = true;
+        CacheContext cache_context;
+        cache_context.cache_type = FileCacheType::INDEX;
+        EXPECT_EQ(CacheContext(&io_ctx), cache_context);
+    }
+    {
+        TUniqueId query_id;
+        query_id.hi = 1;
+        query_id.lo = 2;
+        io::IOContext io_ctx;
+        io_ctx.query_id = &query_id;
+        CacheContext cache_context;
+        cache_context.query_id = query_id;
+        cache_context.cache_type = FileCacheType::NORMAL;
+        EXPECT_EQ(CacheContext(&io_ctx), cache_context);
+    }
+    {
+        io::IOContext io_ctx;
+        io_ctx.is_disposable = true;
+        CacheContext cache_context;
+        cache_context.cache_type = FileCacheType::DISPOSABLE;
+        EXPECT_EQ(CacheContext(&io_ctx), cache_context);
+    }
+    {
+        io::IOContext io_ctx;
+        int64_t expiration_time = UnixSeconds() + 120;
+        io_ctx.expiration_time = expiration_time;
+        CacheContext cache_context;
+        cache_context.cache_type = FileCacheType::TTL;
+        cache_context.expiration_time = expiration_time;
+        EXPECT_EQ(CacheContext(&io_ctx), cache_context);
+    }
+}
+
+TEST_F(BlockFileCacheTest, test_disposable) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = FileCacheType::DISPOSABLE;
+    auto key = io::BlockFileCache::hash("key1");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    std::string queue_str;
+    {
+        std::lock_guard lock(cache._mutex);
+        queue_str = cache._normal_queue.to_string(lock);
+    }
+    cache.get_or_set(key, 28, 1, context);
+    {
+        std::lock_guard lock(cache._mutex);
+        EXPECT_EQ(queue_str, cache._normal_queue.to_string(lock));
+    }
+
+}
+
+TEST_F(BlockFileCacheTest, test_hot_data) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+
+    fs::create_directories(cache_base_path);
+    test_file_cache(io::FileCacheType::NORMAL);
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.total_size = 30;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.cache_type = FileCacheType::DISPOSABLE;
+    auto key = io::BlockFileCache::hash("key1");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    std::string queue_str;
+    {
+        std::lock_guard lock(cache._mutex);
+        queue_str = cache._normal_queue.to_string(lock);
+    }
+    cache.get_or_set(key, 28, 1, context);
+    {
+        std::lock_guard lock(cache._mutex);
+        EXPECT_EQ(queue_str, cache._normal_queue.to_string(lock));
+    }
+
 }
 
 } // namespace doris::io

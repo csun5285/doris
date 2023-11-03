@@ -42,10 +42,6 @@ public:
     Status create_file_cache(const std::string& cache_base_path,
                              FileCacheSettings file_cache_settings);
 
-    size_t try_release();
-
-    size_t try_release(const std::string& base_path);
-
     size_t get_total_cache_size() const { return _total_cache_size; }
 
     size_t get_cache_instance_size() const { return _caches.size(); }

@@ -137,10 +137,6 @@ std::string BlockFileCache::get_path_in_local_cache(const Key& key, int64_t expi
     }
 }
 
-std::string BlockFileCache::get_version_path() const {
-    return fs::path(_cache_base_path) / "version";
-}
-
 BlockFileCache::QueryFileCacheContextHolderPtr BlockFileCache::get_query_context_holder(
         const TUniqueId& query_id) {
     std::lock_guard cache_lock(_mutex);
@@ -373,9 +369,7 @@ BlockFileCache::FileBlockCell* BlockFileCache::get_cell(const Key& key, size_t o
 }
 
 bool BlockFileCache::need_to_move(FileCacheType cell_type, FileCacheType query_type) const {
-    return query_type != FileCacheType::DISPOSABLE || cell_type == FileCacheType::DISPOSABLE
-                   ? true
-                   : false;
+    return query_type != FileCacheType::DISPOSABLE && cell_type != FileCacheType::DISPOSABLE;
 }
 
 FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
@@ -802,25 +796,6 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
                      << ", offset: " << offset << ", size: " << size;
 
     return &(it->second);
-}
-
-size_t BlockFileCache::try_release() {
-    std::lock_guard l(_mutex);
-    std::vector<FileBlockCell*> trash;
-    for (auto& [key, segments] : _files) {
-        for (auto& [offset, cell] : segments) {
-            if (cell.releasable()) {
-                trash.emplace_back(&cell);
-            }
-        }
-    }
-    for (auto& cell : trash) {
-        FileBlockSPtr file_block = cell->file_block;
-        std::lock_guard lc(cell->file_block->_mutex);
-        remove(file_block, l, lc);
-    }
-    LOG(INFO) << "Released " << trash.size() << " segments in file cache " << _cache_base_path;
-    return trash.size();
 }
 
 BlockFileCache::LRUQueue& BlockFileCache::get_queue(FileCacheType type) {
@@ -1498,17 +1473,6 @@ size_t BlockFileCache::get_used_cache_size_unlocked(
     return get_queue(cache_type).get_total_cache_size(cache_lock);
 }
 
-size_t BlockFileCache::get_available_cache_size(FileCacheType cache_type) const {
-    std::lock_guard cache_lock(_mutex);
-    return get_available_cache_size_unlocked(cache_type, cache_lock);
-}
-
-size_t BlockFileCache::get_available_cache_size_unlocked(
-        FileCacheType cache_type, std::lock_guard<doris::Mutex>& cache_lock) const {
-    return get_queue(cache_type).get_max_element_size() -
-           get_used_cache_size_unlocked(cache_type, cache_lock);
-}
-
 size_t BlockFileCache::get_file_blocks_num(FileCacheType cache_type) const {
     std::lock_guard cache_lock(_mutex);
     return get_file_blocks_num_unlocked(cache_type, cache_lock);
@@ -1555,12 +1519,6 @@ void BlockFileCache::LRUQueue::remove(Iterator queue_it, T& /* cache_lock */) {
     cache_size -= queue_it->size;
     map.erase(std::make_pair(queue_it->key, queue_it->offset));
     queue.erase(queue_it);
-}
-
-void BlockFileCache::LRUQueue::remove_all(std::lock_guard<doris::Mutex>& /* cache_lock */) {
-    queue.clear();
-    map.clear();
-    cache_size = 0;
 }
 
 void BlockFileCache::LRUQueue::move_to_end(Iterator queue_it,
