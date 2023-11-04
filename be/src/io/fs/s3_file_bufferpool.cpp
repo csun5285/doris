@@ -91,7 +91,10 @@ void UploadFileBuffer::set_index_offset(size_t offset) {
  * 1. write to file cache otherwise, then we'll wait for free buffer and to rob it
  */
 Status UploadFileBuffer::append_data(const Slice& data) {
-    Defer defer {[&] { _size += data.get_size(); }};
+    Defer defer {[&] { 
+        _size += data.get_size();
+        _crc_value = crc32c::Extend(_crc_value, data.get_data(), data.get_size());
+    }};
     while (true) {
         // if buf is not empty, it means there is memory preserved for this buf
         if (!_buffer.empty()) {
@@ -201,7 +204,11 @@ void UploadFileBuffer::read_from_cache() {
         }
         pos += segment_size;
     }
-
+    if (pos != _size) {
+        DCHECK(false);            
+        set_val(Status::InternalError("The cache data size {} is not match append data size {}", pos, _size));
+        return;
+    }
     // the real lenght should be the buf.get_size() in this situation(consider it's the last part,
     // size of it could be less than 5MB)
     _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);

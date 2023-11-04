@@ -30,6 +30,7 @@
 #include "io/cache/block/block_file_segment.h"
 #include "util/slice.h"
 #include "util/threadpool.h"
+#include "util/crc32c.h"
 
 namespace doris {
 namespace io {
@@ -193,6 +194,11 @@ struct UploadFileBuffer final : public FileBuffer {
             read_from_cache();
         }
         CHECK(!_buffer.empty());
+        if (_crc_value != crc32c::Value(_buffer.get_data(), _size)) {
+            DCHECK(false);
+            set_val(Status::IOError("Buffer checksum not match"));
+            return;
+        }
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
             // If we call is_cancelled() after _state.set_val() then there might one situation where
@@ -229,6 +235,7 @@ private:
     decltype(_holder->file_segments.begin()) _cur_file_segment;
     size_t _append_offset {0};
     size_t _index_offset {0};
+    uint32_t _crc_value = 0;
 };
 
 struct FileBufferBuilder {
