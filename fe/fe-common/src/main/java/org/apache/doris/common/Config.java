@@ -2319,6 +2319,10 @@ public class Config extends ConfigBase {
     // for example: jdbc_driver_url_white_list=a,b,c
     @ConfField(mutable = true)
     public static String[] jdbc_driver_url_white_list = {};
+
+    // the white list for ShowProcStmt
+    @ConfField(mutable = true)
+    public static String[] cloud_show_proc_white_list = {"/current_query_stmts"};
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

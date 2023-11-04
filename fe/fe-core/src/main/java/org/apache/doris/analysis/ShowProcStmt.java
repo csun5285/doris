@@ -31,6 +31,8 @@ import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ShowResultSetMetaData;
 
+import java.util.Arrays;
+
 // SHOW PROC statement. Used to show proc information, only admin can use.
 public class ShowProcStmt extends ShowStmt {
     private String path;
@@ -48,13 +50,16 @@ public class ShowProcStmt extends ShowStmt {
     public void analyze(Analyzer analyzer) throws AnalysisException {
         // ATTN: root has admin and operator Privileges
         if (Config.isCloudMode()
+                && !Arrays.stream(Config.cloud_show_proc_white_list).anyMatch(path::contains)
                 && !Env.getCurrentEnv().getAccessManager()
-                .checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
+                    .checkGlobalPriv(ConnectContext.get(), PrivPredicate.OPERATOR)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_UNSUPPORTED_OPERATION_ERROR);
         }
+
         if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN");
         }
+
         node = ProcService.getInstance().open(path);
     }
 

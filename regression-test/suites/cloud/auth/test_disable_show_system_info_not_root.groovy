@@ -22,6 +22,15 @@ suite("test_disable_show_system_info_not_root", "cloud_auth") {
     // failed: ERROR 1227 (42000): errCode = 2, detailMessage = Access denied; you need (at least one of) the OPERATOR privilege(s) for this operation
     assertEquals(result1, null)
 
+    try {
+        result1 = connect(user=user, password='Cloud123456', url=context.config.jdbcUrl) {
+            sql """show proc '/current_query_stmts';"""
+        }
+    } catch (Exception e) {
+        // assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
+        assertTrue(false);
+    }
+
     sql """DROP USER ${user}"""
     sql """DROP DATABASE ${dbName}"""
 }
