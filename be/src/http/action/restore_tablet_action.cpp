@@ -182,7 +182,7 @@ Status RestoreTabletAction::_restore(const std::string& key, int64_t tablet_id,
     Status s = _create_hard_link_recursive(latest_tablet_path, restore_schema_hash_path);
     if (!s.ok()) {
         // do not check the status of delete_directory, return status of link operation
-        io::global_local_filesystem()->delete_directory(restore_schema_hash_path);
+        static_cast<void>(io::global_local_filesystem()->delete_directory(restore_schema_hash_path));
         return s;
     }
     std::string restore_shard_path = store->get_absolute_shard_path(tablet_meta.shard_id());

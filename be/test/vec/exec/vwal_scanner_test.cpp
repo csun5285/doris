@@ -191,8 +191,9 @@ void VWalScannerTest::init_desc_table() {
 
 void VWalScannerTest::init() {
     init_desc_table();
-    io::global_local_filesystem()->create_directory(wal_dir + "/" + std::to_string(db_id) + "/" +
+    auto st = io::global_local_filesystem()->create_directory(wal_dir + "/" + std::to_string(db_id) + "/" +
                                                     std::to_string(tb_id));
+    ASSERT_TRUE(st.ok()) << st;
     std::string src = "./be/test/exec/test_data/wal_scanner/wal";
     std::string dst = wal_dir + "/" + std::to_string(db_id) + "/" + std::to_string(tb_id) + "/" +
                       std::to_string(txn_id) + "_" + label;

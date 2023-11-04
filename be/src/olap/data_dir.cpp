@@ -906,7 +906,7 @@ Status DataDir::move_to_trash(const std::string& tablet_path) {
     if (sub_files.empty()) {
         LOG(INFO) << "remove empty dir " << source_parent_dir;
         // no need to exam return status
-        io::global_local_filesystem()->delete_directory(source_parent_dir);
+        static_cast<void>(io::global_local_filesystem()->delete_directory(source_parent_dir));
     }
 
     return Status::OK();

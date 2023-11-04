@@ -42,7 +42,7 @@ public:
 
     /// If io_ctx is not null,
     /// the caller must ensure that the IOContext exists during the left cycle of read_at()
-    Status read_at(size_t offset, Slice result, size_t* bytes_read,
+    [[nodiscard]] Status read_at(size_t offset, Slice result, size_t* bytes_read,
                    const IOContext* io_ctx = nullptr);
 
     virtual Status close() = 0;

@@ -35,13 +35,12 @@ public:
     ~LocalFileWriter() override;
 
     Status close() override;
-    Status abort() override;
     Status appendv(const Slice* data, size_t data_cnt) override;
-    Status write_at(size_t offset, const Slice& data) override;
     Status finalize() override;
 
 private:
     Status _close(bool sync);
+    void _abort();
 
 private:
     int _fd; // owned

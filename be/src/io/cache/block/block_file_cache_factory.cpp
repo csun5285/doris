@@ -45,24 +45,14 @@ FileCacheFactory& FileCacheFactory::instance() {
 
 Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
                                            FileCacheSettings file_cache_settings) {
-    if (config::clear_file_cache) {
-        auto fs = global_local_filesystem();
-        bool res = false;
-        fs->exists(cache_base_path, &res);
-        if (res) {
-            fs->delete_directory(cache_base_path);
-            fs->create_directory(cache_base_path);
-        }
-    }
-
     auto fs = global_local_filesystem();
-    bool res = false;
-    RETURN_IF_ERROR(fs->exists(cache_base_path, &res));
-    if (!res) {
-        fs->create_directory(cache_base_path);
+    bool exists = false;
+    RETURN_IF_ERROR(fs->exists(cache_base_path, &exists));
+    if (!exists) {
+        RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     } else if (config::clear_file_cache) {
-        fs->delete_directory(cache_base_path);
-        fs->create_directory(cache_base_path);
+        RETURN_IF_ERROR(fs->delete_directory(cache_base_path));
+        RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     }
 
     struct statfs stat;

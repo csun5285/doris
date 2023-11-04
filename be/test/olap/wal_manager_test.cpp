@@ -75,7 +75,10 @@ public:
         SAFE_DELETE(_env->_master_info);
     }
 
-    void prepare() { io::global_local_filesystem()->create_directory(wal_dir); }
+    void prepare() {
+        auto st = io::global_local_filesystem()->create_directory(wal_dir);
+        ASSERT_TRUE(st.ok()) << st;
+    }
 
     void createWal(const std::string& wal_path) {
         auto wal_writer = WalWriter(wal_path);

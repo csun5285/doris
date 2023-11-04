@@ -113,7 +113,7 @@ S3FileWriter::~S3FileWriter() {
     if (!_closed || _failed) {
         // if we don't abort multi part upload, the uploaded part in object
         // store will not automatically reclaim itself, it would cost more money
-        abort();
+        _abort();
         _bytes_written = 0;
     }
     s3_bytes_written_total << _bytes_written;
@@ -162,7 +162,7 @@ Status S3FileWriter::_open() {
             outcome.GetError().GetMessage());
 }
 
-Status S3FileWriter::abort() {
+Status S3FileWriter::_abort() {
     _failed = true;
     _closed = true;
     if (_aborted) {

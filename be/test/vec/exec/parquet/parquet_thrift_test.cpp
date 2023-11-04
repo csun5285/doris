@@ -431,7 +431,8 @@ static void read_parquet_data_and_check(const std::string& parquet_file,
     result_buf[result->size()] = '\0';
     size_t bytes_read;
     Slice res(result_buf, result->size());
-    result->read_at(0, res, &bytes_read);
+    st = result->read_at(0, res, &bytes_read);
+    ASSERT_TRUE(st.ok()) << st;
     ASSERT_STREQ(block->dump_data(0, rows).c_str(), reinterpret_cast<char*>(result_buf));
     delete metadata;
 }
@@ -553,7 +554,8 @@ TEST_F(ParquetThriftReaderTest, group_reader) {
     result_buf[result->size()] = '\0';
     size_t bytes_read;
     Slice res(result_buf, result->size());
-    result->read_at(0, res, &bytes_read);
+    st = result->read_at(0, res, &bytes_read);
+    ASSERT_TRUE(st.ok()) << st;
     ASSERT_STREQ(block.dump_data(0, 10).c_str(), reinterpret_cast<char*>(result_buf));
     delete meta_data;
 }

@@ -345,10 +345,10 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
     // so the result of close should be not ok
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
-    bool exits = false;
-    auto s = s3_fs->exists("multi_part_io_error", &exits);
-    LOG(INFO) << "status is " << s;
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("multi_part_io_error", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, put_object_io_error) {
@@ -451,9 +451,10 @@ TEST_F(S3FileWriterTest, appendv_random_quit) {
         }
         offset += bytes_read;
     }
-    bool exits = false;
-    s3_fs->exists("appendv_random_quit", &exits);
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("appendv_random_quit", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, multi_part_open_error) {
@@ -491,9 +492,10 @@ TEST_F(S3FileWriterTest, multi_part_open_error) {
     // and it would be rejectd one error
     st = s3_file_writer->append(Slice(buf.get(), bytes_read));
     ASSERT_FALSE(st.ok()) << st;
-    bool exits = false;
-    s3_fs->exists("multi_part_open_error", &exits);
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("multi_part_open_error", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, write_into_cache_io_error) {
@@ -581,9 +583,6 @@ TEST_F(S3FileWriterTest, write_into_cache_io_error) {
     ASSERT_TRUE(st.ok()) << st;
     st = s3_file_writer->close();
     ASSERT_TRUE(st.ok()) << st;
-    bool exits = false;
-    s3_fs->exists("write_into_cache_io_error", &exits);
-    ASSERT_TRUE(!exits);
 }
 
 TEST_F(S3FileWriterTest, DISABLED_read_from_cache_io_error) {
@@ -675,9 +674,10 @@ TEST_F(S3FileWriterTest, DISABLED_read_from_cache_io_error) {
     ASSERT_TRUE(st.ok()) << st;
     st = s3_file_writer->close();
     ASSERT_FALSE(!st.ok()) << st;
-    bool exits = false;
-    s3_fs->exists("read_from_cache_local_io_error", &exits);
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("read_from_cache_local_io_error", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, normal) {
@@ -781,9 +781,10 @@ TEST_F(S3FileWriterTest, close_error) {
     Defer defer {[&]() { sp->clear_call_back("s3_file_writer::close"); }};
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
-    bool exits = false;
-    s3_fs->exists("close_error", &exits);
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("close_error", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, finalize_error) {
@@ -826,9 +827,10 @@ TEST_F(S3FileWriterTest, finalize_error) {
     ASSERT_EQ(s3_file_writer->bytes_appended(), file_size);
     st = s3_file_writer->finalize();
     ASSERT_FALSE(st.ok()) << st;
-    bool exits = false;
-    s3_fs->exists("finalize_error", &exits);
-    ASSERT_TRUE(!exits);
+    bool exists = false;
+    st = s3_fs->exists("finalize_error", &exists);
+    ASSERT_TRUE(st.ok()) << st;
+    ASSERT_FALSE(exists);
 }
 
 TEST_F(S3FileWriterTest, multi_part_complete_error_2) {
@@ -878,7 +880,6 @@ TEST_F(S3FileWriterTest, multi_part_complete_error_2) {
     // so the result of close should be not ok
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
-    std::cout << st << std::endl;
 }
 
 TEST_F(S3FileWriterTest, multi_part_complete_error_1) {
@@ -931,7 +932,6 @@ TEST_F(S3FileWriterTest, multi_part_complete_error_1) {
     // so the result of close should be not ok
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
-    std::cout << st << std::endl;
 }
 
 TEST_F(S3FileWriterTest, multi_part_complete_error_3) {
@@ -982,7 +982,6 @@ TEST_F(S3FileWriterTest, multi_part_complete_error_3) {
     // so the result of close should be not ok
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
-    std::cout << st << std::endl;
 }
 
 } // namespace doris
