@@ -12,6 +12,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/txn_kv.h"
 #include "rate-limiter/rate_limiter.h"
@@ -662,6 +663,8 @@ private:
             return;
         }
 
+        TEST_SYNC_POINT("MetaServiceProxy::call_impl:1");
+
         brpc::ClosureGuard done_guard(done);
 
         int32_t retry_times = config::txn_store_retry_times;
@@ -677,6 +680,8 @@ private:
                 code != MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE) {
                 return;
             }
+
+            TEST_SYNC_POINT("MetaServiceProxy::call_impl:2");
 
             if (!config::enable_txn_store_retry) {
                 DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE)

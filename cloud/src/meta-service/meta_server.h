@@ -68,8 +68,8 @@ private:
     /**
      * Prepares registry with given existing registry. If the server already
      * exists in the registry list, update mtime and lease, otherwise create a
-     * new item for the server in the rgistry list.
-     * 
+     * new item for the server in the registry list.
+     *
      * @param reg input and output param
      */
     void prepare_registry(ServiceRegistryPB* reg);

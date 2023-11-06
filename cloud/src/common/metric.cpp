@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "common/bvars.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 
@@ -18,15 +19,15 @@ static const std::string FDB_STATUS_KEY = "\xff\xff/status/json";
 
 static std::string get_fdb_status(TxnKv* txn_kv) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to create_txn, ret=" << ret;
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to create_txn, err=" << err;
         return "";
     }
     std::string status_val;
-    ret = txn->get(FDB_STATUS_KEY, &status_val);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to get FDB_STATUS_KEY, ret=" << ret;
+    err = txn->get(FDB_STATUS_KEY, &status_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to get FDB_STATUS_KEY, err=" << err;
         return "";
     }
     return status_val;

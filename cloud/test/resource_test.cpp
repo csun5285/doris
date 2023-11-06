@@ -14,6 +14,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 
@@ -57,9 +58,9 @@ static std::shared_ptr<TxnKv> create_txn_kv() {
     [&] { ASSERT_NE(txn_kv.get(), nullptr); }();
 
     std::unique_ptr<Transaction> txn;
-    EXPECT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-    EXPECT_EQ(txn->commit(), 0);
+    EXPECT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     return txn_kv;
 }
 
@@ -140,8 +141,8 @@ static void get_instance_info(MetaServiceImpl* ms,
     std::string val;
     instance_key(key_info, &key);
     std::unique_ptr<Transaction> txn;
-    EXPECT_EQ(ms->txn_kv_->create_txn(&txn), 0);
-    EXPECT_EQ(txn->get(key, &val), 0);
+    EXPECT_EQ(ms->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    EXPECT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
     instance->ParseFromString(val);
 }
 
@@ -213,7 +214,7 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     create_args_to_add(&to_add, &to_del);
     auto sp = SyncPoint::get_instance();
     sp->set_call_back("modify_nodes:get_instance",
-                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+                      [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
                       [&](void* p) {
         ins.set_instance_id("test-resource-instance");
@@ -244,7 +245,7 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     sp->disable_processing();
 
     sp->set_call_back("modify_nodes:get_instance",
-                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+                      [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
                       [&](void* p) {
                           *reinterpret_cast<InstanceInfoPB*>(p) = instance;
@@ -276,7 +277,7 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     create_args_to_add(&to_add, &to_del, true);
     auto sp = SyncPoint::get_instance();
     sp->set_call_back("modify_nodes:get_instance",
-                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+                      [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
                       [&](void* p) {
                           ins.set_instance_id("test-resource-instance");
@@ -307,7 +308,7 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     sp->disable_processing();
 
     sp->set_call_back("modify_nodes:get_instance",
-                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+                      [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
                       [&](void* p) {
                           *reinterpret_cast<InstanceInfoPB*>(p) = instance;
@@ -358,13 +359,13 @@ TEST(ResourceTest, RestartResourceManager) {
         {
             InstanceInfoPB info;
             auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id", &info);
-            ASSERT_EQ(code, MetaServiceCode::OK) << msg;
+            ASSERT_EQ(code, TxnErrorCode::TXN_OK) << msg;
             ASSERT_EQ(info.name(), "test_instance_idname");
         }
         {
             InstanceInfoPB info;
             auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id_2", &info);
-            ASSERT_EQ(code, MetaServiceCode::OK) << msg;
+            ASSERT_EQ(code, TxnErrorCode::TXN_OK) << msg;
             ASSERT_EQ(info.name(), "test_instance_id_2name");
         }
     }

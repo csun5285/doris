@@ -1,8 +1,10 @@
 #pragma once
 
+#include <ostream>
+
 namespace selectdb {
 
-enum [[nodiscard]] TxnErrorCode : int {
+enum class [[nodiscard]] TxnErrorCode : int {
     TXN_OK = 0,
     TXN_KEY_NOT_FOUND = 1,
     TXN_CONFLICT = -1,
@@ -15,5 +17,22 @@ enum [[nodiscard]] TxnErrorCode : int {
     TXN_UNIDENTIFIED_ERROR = -7,
 };
 
-} // namespace selectdb
+inline std::ostream& operator<<(std::ostream& out, selectdb::TxnErrorCode code) {
+    // clang-format off
+    using selectdb::TxnErrorCode;
+    switch (code) {
+    case TxnErrorCode::TXN_OK: out << "Ok"; break;
+    case TxnErrorCode::TXN_KEY_NOT_FOUND: out << "KeyNotFound"; break;
+    case TxnErrorCode::TXN_CONFLICT: out << "Conflict"; break;
+    case TxnErrorCode::TXN_TOO_OLD: out << "TxnTooOld"; break;
+    case TxnErrorCode::TXN_MAYBE_COMMITTED: out << "MaybeCommitted"; break;
+    case TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED: out << "RetryableNotCommitted"; break;
+    case TxnErrorCode::TXN_TIMEOUT: out << "Timeout"; break;
+    case TxnErrorCode::TXN_INVALID_ARGUMENT: out << "InvalidArgument"; break;
+    case TxnErrorCode::TXN_UNIDENTIFIED_ERROR: out << "Unknown"; break;
+    }
+    return out;
+    // clang-format on
+}
 
+} // namespace selectdb

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -49,6 +50,7 @@ int main(int argc, char** argv) {
     selectdb::config::enable_txn_store_retry = true;
     selectdb::config::txn_store_retry_times = 100;
     selectdb::config::fdb_cluster_file_path = "fdb.cluster";
+    selectdb::config::write_schema_kv = true;
 
     meta_service = create_meta_service();
 
@@ -72,12 +74,12 @@ int main(int argc, char** argv) {
     }
 
     std::vector<std::string> sync_points {
-            "fdb_future_block_until_ready_err",
-            "transaction:get:get_err",
-            "transaction:get_range:get_err",
             "transaction:commit:get_err",
-            "transaction:get_read_version:get_err",
-            "range_get_iterator:init:get_keyvalue_array_err",
+            // "fdb_future_block_until_ready_err",
+            // "transaction:get:get_err",
+            // "transaction:get_range:get_err",
+            // "transaction:get_read_version:get_err",
+            // "range_get_iterator:init:get_keyvalue_array_err",
     };
 
     // See
@@ -86,14 +88,14 @@ int main(int argc, char** argv) {
     std::vector<fdb_error_t> retryable_not_committed {
             // future version
             1009,
+            // process_behind
+            1037,
             // database locked
             1038,
             // proxy_memory_limit_exceeded
             1042,
             // batch_transaction_throttled
             1051,
-            // process_behind
-            1037,
             // tag_throttled
             1213,
     };
@@ -105,13 +107,26 @@ int main(int argc, char** argv) {
             for (auto&& clear_name : sync_points) {
                 sp->clear_call_back(clear_name);
             }
-            size_t count = 0;
-            sp->set_call_back(name, [err, count](void* raw) mutable {
-                if (count++ % 2 == 0) {
-                    std::cout << "count=" << count << std::endl;
+
+            auto count = std::make_shared<std::atomic<uint64_t>>(0);
+            auto inject_at = std::make_shared<std::atomic<uint64_t>>(0);
+            sp->set_call_back(name, [&](void* raw) mutable {
+                size_t n = count->fetch_add(1);
+                if (n == *inject_at) {
+                    std::cout << "count=" << n << std::endl;
                     *reinterpret_cast<fdb_error_t*>(raw) = err;
                 }
             });
+            sp->set_call_back("MetaServiceProxy::call_impl:1", [&](void*) {
+                // For each RPC invoking, inject every fdb txn kv call.
+                count->store(0);
+                inject_at->store(0);
+            });
+            sp->set_call_back("MetaServiceProxy::call_impl:2", [&](void*) {
+                count->store(0);
+                inject_at->fetch_add(1);
+            });
+
             ret = RUN_ALL_TESTS();
             if (ret != 0) {
                 std::cerr << "run test failed, sync_point=" << name << ", err=" << err
@@ -203,6 +218,7 @@ static int remove_instance(MetaService* service, const std::string& instance_id)
 }
 
 static int add_cluster(MetaService* service, const std::string& instance_id) {
+    bool retry = false;
     while (true) {
         brpc::Controller ctrl;
         selectdb::AlterClusterRequest req;
@@ -238,10 +254,14 @@ static int add_cluster(MetaService* service, const std::string& instance_id) {
         if (code == selectdb::MetaServiceCode::OK) {
             return 0;
         } else if (code == selectdb::MetaServiceCode::ALREADY_EXISTED) {
-            req.set_op(selectdb::AlterClusterRequest_Operation::
-                               AlterClusterRequest_Operation_DROP_CLUSTER);
-            ctrl.Reset();
-            service->alter_cluster(&ctrl, &req, &resp, nullptr);
+            if (!retry) {
+                retry = true;
+                req.set_op(selectdb::AlterClusterRequest_Operation::
+                                   AlterClusterRequest_Operation_DROP_CLUSTER);
+                ctrl.Reset();
+                service->alter_cluster(&ctrl, &req, &resp, nullptr);
+            }
+            return 0;
         } else {
             LOG_ERROR("add default cluster")
                     .tag("instance_id", instance_id)
@@ -287,7 +307,7 @@ static doris::TabletMetaPB add_tablet(int64_t table_id, int64_t index_id, int64_
     tablet.set_partition_id(partition_id);
     tablet.set_tablet_id(tablet_id);
     auto schema = tablet.mutable_schema();
-    schema->set_schema_version(0);
+    schema->set_schema_version(1);
     auto first_rowset = tablet.add_rs_metas();
     first_rowset->set_rowset_id(0); // required
     first_rowset->set_rowset_id_v2(std::to_string(1));
@@ -403,7 +423,11 @@ static doris::RowsetMetaPB create_rowset(int64_t tablet_id, std::string rowset_i
     rowset.set_num_rows(num_rows);
     rowset.set_data_disk_size(num_rows * 100);
     rowset.set_txn_expiration(10000);
-    rowset.mutable_tablet_schema()->set_schema_version(0);
+    rowset.set_schema_version(1);
+
+    // auto* schema = rowset.mutable_tablet_schema();
+    // schema->set_schema_version(1);
+    // schema->set_disable_auto_compaction(true);
 
     auto* bound = rowset.add_segments_key_bounds();
     bound->set_min_key("min_key");

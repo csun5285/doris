@@ -3,6 +3,7 @@
 #include "common/logging.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_helper.h"
+#include "meta-service/txn_kv_error.h"
 #include "meta_service.h"
 
 namespace selectdb {
@@ -32,20 +33,20 @@ namespace selectdb {
 //                 v
 //              UNKNOWN
 
-// Return 0 if exists, 1 if not exists, otherwise error
-static int index_exists(Transaction* txn, const std::string& instance_id,
-                        const ::selectdb::IndexRequest* req) {
+// Return TXN_OK if exists, TXN_KEY_NOT_FOUND if not exists, otherwise error
+static TxnErrorCode index_exists(Transaction* txn, const std::string& instance_id,
+                                 const ::selectdb::IndexRequest* req) {
     auto tablet_key = meta_tablet_key({instance_id, req->table_id(), req->index_ids(0), 0, 0});
     auto tablet_key_end =
             meta_tablet_key({instance_id, req->table_id(), req->index_ids(0), INT64_MAX, 0});
     std::unique_ptr<RangeGetIterator> it;
 
-    int ret = txn->get(tablet_key, tablet_key_end, &it, false, 1);
-    if (ret != 0) {
+    TxnErrorCode err = txn->get(tablet_key, tablet_key_end, &it, false, 1);
+    if (err != TxnErrorCode::TXN_OK) {
         LOG_WARNING("failed to get kv");
-        return ret;
+        return err;
     }
-    return it->has_next() ? 0 : 1;
+    return it->has_next() ? TxnErrorCode::TXN_OK : TxnErrorCode::TXN_KEY_NOT_FOUND;
 }
 
 void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controller,
@@ -70,21 +71,21 @@ void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controlle
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to create txn";
         return;
     }
-    ret = index_exists(txn.get(), instance_id, request);
+    err = index_exists(txn.get(), instance_id, request);
     // If index has existed, this might be a stale request
-    if (ret == 0) {
+    if (err == TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::ALREADY_EXISTED;
         msg = "index already existed";
         return;
     }
-    if (ret != 1) {
-        code = MetaServiceCode::UNDEFINED_ERR;
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to check index existence";
         return;
     }
@@ -101,14 +102,14 @@ void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controlle
     for (auto index_id : request->index_ids()) {
         auto key = recycle_index_key({instance_id, index_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
             LOG_INFO("put recycle index").tag("key", hex(key));
             txn->put(key, to_save_val);
             continue;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
             LOG_WARNING(msg);
             return;
@@ -128,10 +129,10 @@ void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controlle
         }
         // else, duplicate request, OK
     }
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }
@@ -156,9 +157,9 @@ void MetaServiceImpl::commit_index(::google::protobuf::RpcController* controller
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
@@ -166,15 +167,15 @@ void MetaServiceImpl::commit_index(::google::protobuf::RpcController* controller
     for (auto index_id : request->index_ids()) {
         auto key = recycle_index_key({instance_id, index_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
-            ret = index_exists(txn.get(), instance_id, request);
-            // If index has existed, this might be a deplicate request
-            if (ret == 0) {
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
+            err = index_exists(txn.get(), instance_id, request);
+            // If index has existed, this might be a duplicate request
+            if (err == TxnErrorCode::TXN_OK) {
                 return; // Index committed, OK
             }
-            if (ret != 1) {
-                code = MetaServiceCode::UNDEFINED_ERR;
+            if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+                code = cast_as<ErrCategory::READ>(err);
                 msg = "failed to check index existence";
                 return;
             }
@@ -183,8 +184,8 @@ void MetaServiceImpl::commit_index(::google::protobuf::RpcController* controller
             msg = "index has been recycled";
             return;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
             LOG_WARNING(msg);
             return;
@@ -205,10 +206,10 @@ void MetaServiceImpl::commit_index(::google::protobuf::RpcController* controller
         LOG_INFO("remove recycle index").tag("key", hex(key));
         txn->remove(key);
     }
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }
@@ -233,9 +234,9 @@ void MetaServiceImpl::drop_index(::google::protobuf::RpcController* controller,
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
@@ -253,15 +254,15 @@ void MetaServiceImpl::drop_index(::google::protobuf::RpcController* controller,
     for (auto index_id : request->index_ids()) {
         auto key = recycle_index_key({instance_id, index_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
             LOG_INFO("put recycle index").tag("key", hex(key));
             txn->put(key, to_save_val);
             need_commit = true;
             continue;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
             LOG_WARNING(msg);
             return;
@@ -290,29 +291,29 @@ void MetaServiceImpl::drop_index(::google::protobuf::RpcController* controller,
         }
     }
     if (!need_commit) return;
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }
 
-// Return 0 if exists, 1 if not exists, otherwise error
-static int partition_exists(Transaction* txn, const std::string& instance_id,
-                            const ::selectdb::PartitionRequest* req) {
+// Return TXN_OK if exists, TXN_KEY_NOT_FOUND if not exists, otherwise error
+static TxnErrorCode partition_exists(Transaction* txn, const std::string& instance_id,
+                                     const ::selectdb::PartitionRequest* req) {
     auto tablet_key = meta_tablet_key(
             {instance_id, req->table_id(), req->index_ids(0), req->partition_ids(0), 0});
     auto tablet_key_end = meta_tablet_key(
             {instance_id, req->table_id(), req->index_ids(0), req->partition_ids(0), INT64_MAX});
     std::unique_ptr<RangeGetIterator> it;
 
-    int ret = txn->get(tablet_key, tablet_key_end, &it, false, 1);
-    if (ret != 0) {
-        LOG_WARNING("failed to get kv");
-        return ret;
+    TxnErrorCode err = txn->get(tablet_key, tablet_key_end, &it, false, 1);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG_WARNING("failed to get kv").tag("err", err);
+        return err;
     }
-    return it->has_next() ? 0 : 1;
+    return it->has_next() ? TxnErrorCode::TXN_OK : TxnErrorCode::TXN_KEY_NOT_FOUND;
 }
 
 void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* controller,
@@ -338,21 +339,21 @@ void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* contr
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
-    ret = partition_exists(txn.get(), instance_id, request);
+    err = partition_exists(txn.get(), instance_id, request);
     // If index has existed, this might be a stale request
-    if (ret == 0) {
+    if (err == TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::ALREADY_EXISTED;
         msg = "index already existed";
         return;
     }
-    if (ret != 1) {
-        code = MetaServiceCode::UNDEFINED_ERR;
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to check index existence";
         return;
     }
@@ -371,16 +372,16 @@ void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* contr
     for (auto part_id : request->partition_ids()) {
         auto key = recycle_partition_key({instance_id, part_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
             LOG_INFO("put recycle partition").tag("key", hex(key));
             txn->put(key, to_save_val);
             continue;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
-            LOG_WARNING(msg);
+            LOG_WARNING(msg).tag("err", err);
             return;
         }
         RecyclePartitionPB pb;
@@ -398,10 +399,10 @@ void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* contr
         }
         // else, duplicate request, OK
     }
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }
@@ -426,9 +427,9 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
@@ -436,17 +437,17 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
     for (auto part_id : request->partition_ids()) {
         auto key = recycle_partition_key({instance_id, part_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
             // Compatible with requests without `index_ids`
             if (!request->index_ids().empty()) {
-                ret = partition_exists(txn.get(), instance_id, request);
-                // If partition has existed, this might be a deplicate request
-                if (ret == 0) {
+                err = partition_exists(txn.get(), instance_id, request);
+                // If partition has existed, this might be a duplicate request
+                if (err == TxnErrorCode::TXN_OK) {
                     return; // Partition committed, OK
                 }
-                if (ret != 1) {
-                    code = MetaServiceCode::UNDEFINED_ERR;
+                if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+                    code = cast_as<ErrCategory::READ>(err);
                     msg = "failed to check partition existence";
                     return;
                 }
@@ -456,10 +457,10 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
             msg = "partition has been recycled";
             return;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
-            LOG_WARNING(msg);
+            LOG_WARNING(msg).tag("err", err);
             return;
         }
         RecyclePartitionPB pb;
@@ -478,10 +479,10 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
         LOG_INFO("remove recycle partition").tag("key", hex(key));
         txn->remove(key);
     }
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }
@@ -507,9 +508,9 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to create txn";
         return;
     }
@@ -528,17 +529,17 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
     for (auto part_id : request->partition_ids()) {
         auto key = recycle_partition_key({instance_id, part_id});
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret == 1) { // UNKNOWN
+        err = txn->get(key, &val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN
             LOG_INFO("put recycle partition").tag("key", hex(key));
             txn->put(key, to_save_val);
             need_commit = true;
             continue;
         }
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get kv";
-            LOG_WARNING(msg);
+            LOG_WARNING(msg).tag("err", err);
             return;
         }
         RecyclePartitionPB pb;
@@ -565,10 +566,10 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
         }
     }
     if (!need_commit) return;
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit txn: {}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit txn: {}", err);
         return;
     }
 }

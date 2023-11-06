@@ -13,6 +13,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 #include "mock_resource_manager.h"
@@ -67,9 +68,9 @@ std::unique_ptr<MetaServiceImpl> get_meta_service(bool mock_resource_mgr) {
     //     }
 
     std::unique_ptr<Transaction> txn;
-    EXPECT_EQ(txn_kv->create_txn(&txn), 0);
+    EXPECT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-    EXPECT_EQ(txn->commit(), 0);
+    EXPECT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     auto rs = mock_resource_mgr ? std::make_shared<MockResourceManager>(txn_kv)
                                 : std::make_shared<ResourceManager>(txn_kv);
@@ -299,8 +300,8 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         std::string val;
         instance_key(key_info, &key);
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-        ASSERT_EQ(txn->get(key, &val), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
         InstanceInfoPB instance;
         instance.ParseFromString(val);
         ASSERT_EQ(instance.status(), InstanceInfoPB::DELETED);
@@ -447,10 +448,9 @@ TEST(MetaServiceTest, GetClusterTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    int ret = meta_service->txn_kv_->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // case: normal get
     {
@@ -945,12 +945,12 @@ TEST(MetaServiceTest, PrecommitTest1) {
 
     {
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
 
         const std::string info_key = txn_info_key({mock_instance, db_id, txn_id});
         std::string info_val;
-        ASSERT_EQ(txn->get(info_key, &info_val), 0);
+        ASSERT_EQ(txn->get(info_key, &info_val), TxnErrorCode::TXN_OK);
         TxnInfoPB txn_info;
         txn_info.ParseFromString(info_val);
         ASSERT_EQ(txn_info.status(), TxnStatusPB::TXN_STATUS_PREPARED);
@@ -965,9 +965,9 @@ TEST(MetaServiceTest, PrecommitTest1) {
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
-        ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
-        ASSERT_EQ(txn->get(info_key, &info_val), 0);
+        err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(info_key, &info_val), TxnErrorCode::TXN_OK);
         txn_info.ParseFromString(info_val);
         ASSERT_EQ(txn_info.status(), TxnStatusPB::TXN_STATUS_PRECOMMITTED);
     }
@@ -1001,12 +1001,12 @@ TEST(MetaServiceTest, PrecommitTxnTest2) {
     // case: txn's status should be TXN_STATUS_PRECOMMITTED
     {
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
 
         const std::string info_key = txn_info_key({mock_instance, db_id, txn_id});
         std::string info_val;
-        ASSERT_EQ(txn->get(info_key, &info_val), 0);
+        ASSERT_EQ(txn->get(info_key, &info_val), TxnErrorCode::TXN_OK);
         TxnInfoPB txn_info;
         txn_info.ParseFromString(info_val);
         // before call precommit_txn, txn's status is TXN_STATUS_PREPARED
@@ -1023,9 +1023,9 @@ TEST(MetaServiceTest, PrecommitTxnTest2) {
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
-        ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
-        ASSERT_EQ(txn->get(info_key, &info_val), 0);
+        err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(info_key, &info_val), TxnErrorCode::TXN_OK);
         txn_info.ParseFromString(info_val);
         // after call precommit_txn, txn's status is TXN_STATUS_PRECOMMITTED
         ASSERT_EQ(txn_info.status(), TxnStatusPB::TXN_STATUS_PRECOMMITTED);
@@ -1035,19 +1035,19 @@ TEST(MetaServiceTest, PrecommitTxnTest2) {
     {
         // TXN_STATUS_ABORTED
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
 
         const std::string info_key = txn_info_key({mock_instance, db_id, txn_id});
         std::string info_val;
-        ASSERT_EQ(txn->get(info_key, &info_val), 0);
+        ASSERT_EQ(txn->get(info_key, &info_val), TxnErrorCode::TXN_OK);
         TxnInfoPB txn_info;
         txn_info.ParseFromString(info_val);
         txn_info.set_status(TxnStatusPB::TXN_STATUS_ABORTED);
         info_val.clear();
         txn_info.SerializeToString(&info_val);
         txn->put(info_key, info_val);
-        ASSERT_EQ(ret = txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         brpc::Controller cntl;
         PrecommitTxnRequest req;
@@ -1065,7 +1065,7 @@ TEST(MetaServiceTest, PrecommitTxnTest2) {
         info_val.clear();
         txn_info.SerializeToString(&info_val);
         txn->put(info_key, info_val);
-        ASSERT_EQ(ret = txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         meta_service->precommit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_ALREADY_VISIBLE);
@@ -1075,7 +1075,7 @@ TEST(MetaServiceTest, PrecommitTxnTest2) {
         info_val.clear();
         txn_info.SerializeToString(&info_val);
         txn->put(info_key, info_val);
-        ASSERT_EQ(ret = txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         meta_service->precommit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_ALREADY_PRECOMMITED);
@@ -1338,10 +1338,9 @@ TEST(MetaServiceTest, AbortTxnTest) {
             RecycleTxnKeyInfo recycle_txn_key_info {mock_instance, db_id, txn_id};
             recycle_txn_key(recycle_txn_key_info, &recycle_txn_key_);
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-            int ret = txn->get(recycle_txn_key_, &recycle_txn_val);
+            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+            ASSERT_EQ(txn->get(recycle_txn_key_, &recycle_txn_val), TxnErrorCode::TXN_OK);
             ASSERT_NE(txn_id, -1);
-            ASSERT_EQ(ret, 0);
         }
     }
 }
@@ -1459,10 +1458,9 @@ TEST(MetaServiceTest, CheckTxnConflictTest) {
         std::string running_key = txn_running_key({mock_instance, db_id, txn_id});
         std::string running_value;
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
-        ret = txn->get(running_key, &running_value);
-        ASSERT_EQ(ret, 1);
+        TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(running_key, &running_value), TxnErrorCode::TXN_KEY_NOT_FOUND);
     }
 }
 
@@ -1525,9 +1523,9 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -1580,9 +1578,8 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
     txn_running_key({mock_instance, db_id, txn_id}, &running_key);
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-        ret = txn->get(running_key, &running_val);
-        ASSERT_EQ(ret, 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(running_key, &running_val), TxnErrorCode::TXN_OK);
     }
 
     brpc::Controller abort_txn_cntl;
@@ -1605,9 +1602,8 @@ TEST(MetaServiceTest, CheckTxnConflictWithAbortLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-        ret = txn->get(running_key, &running_val);
-        ASSERT_EQ(ret, 1);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(running_key, &running_val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     }
 }
 
@@ -1622,9 +1618,9 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -1685,17 +1681,17 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
         {
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-            ret = txn->get(info_key, &info_val);
-            ASSERT_EQ(ret, 0);
-            ret = txn->get(label_key, &label_val);
-            ASSERT_EQ(ret, 0);
-            ret = txn->get(index_key, &index_val);
-            ASSERT_EQ(ret, 0);
-            ret = txn->get(running_key, &running_val);
-            ASSERT_EQ(ret, 0);
-            ret = txn->get(recycle_key, &recycle_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+            TxnErrorCode err = txn->get(info_key, &info_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            err = txn->get(label_key, &label_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            err = txn->get(index_key, &index_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            err = txn->get(running_key, &running_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            err = txn->get(recycle_key, &recycle_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
         }
 
         // mock rowset and tablet
@@ -1766,17 +1762,17 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
 
         {
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-            ret = txn->get(info_key, &info_val);
-            ASSERT_EQ(ret, 1);
-            ret = txn->get(label_key, &label_val);
-            ASSERT_EQ(ret, 1);
-            ret = txn->get(index_key, &index_val);
-            ASSERT_EQ(ret, 1);
-            ret = txn->get(running_key, &running_val);
-            ASSERT_EQ(ret, 1);
-            ret = txn->get(recycle_key, &recycle_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+            TxnErrorCode err = txn->get(info_key, &info_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
+            err = txn->get(label_key, &label_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
+            err = txn->get(index_key, &index_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
+            err = txn->get(running_key, &running_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
+            err = txn->get(recycle_key, &recycle_val);
+            ASSERT_EQ(err, TxnErrorCode::TXN_KEY_NOT_FOUND);
         }
 
         {
@@ -1888,17 +1884,17 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
             std::string recycle_val;
 
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-            ret = txn->get(info_key, &info_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+            TxnErrorCode ret = txn->get(info_key, &info_val);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
             ret = txn->get(label_key, &label_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
             ret = txn->get(index_key, &index_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
             ret = txn->get(running_key, &running_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
             ret = txn->get(recycle_key, &recycle_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
         }
     }
     // clean txn label only by db_id
@@ -1926,12 +1922,11 @@ TEST(MetaServiceTest, CleanTxnLabelTest) {
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
 
-        // inject internal_clean_label ret -1
+        // inject internal_clean_label err = TXN_CONFLICT
         {
             auto sp = selectdb::SyncPoint::get_instance();
-            sp->set_call_back("internal_clean_label:ret", [&](void* args) {
-                int* ret = reinterpret_cast<int*>(args);
-                *ret = -1;
+            sp->set_call_back("internal_clean_label:err", [&](void* args) {
+                *reinterpret_cast<TxnErrorCode*>(args) = TxnErrorCode::TXN_CONFLICT;
             });
             sp->enable_processing();
             int64_t txn_id = -1;
@@ -2074,9 +2069,9 @@ TEST(MetaServiceTest, GetTxnTest) {
 
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->remove("\x00", "\xfe"); // This is dangerous if the fdb is not correctly set
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     }
 
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
@@ -2317,8 +2312,7 @@ TEST(MetaServiceTest, CopyJobTest) {
     {
         std::unique_ptr<Transaction> txn;
         std::string get_val;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // 20 copy files
         {
             CopyFileKeyInfo key_info0 {instance_id, stage_id, table_id, "", ""};
@@ -2328,12 +2322,10 @@ TEST(MetaServiceTest, CopyJobTest) {
             copy_file_key(key_info0, &key0);
             copy_file_key(key_info1, &key1);
             std::unique_ptr<RangeGetIterator> it;
-            ret = txn->get(key0, key1, &it);
-            ASSERT_EQ(ret, 0);
+            ASSERT_EQ(txn->get(key0, key1, &it), TxnErrorCode::TXN_OK);
             int file_cnt = 0;
             do {
-                ret = txn->get(key0, key1, &it);
-                ASSERT_EQ(ret, 0);
+                ASSERT_EQ(txn->get(key0, key1, &it), TxnErrorCode::TXN_OK);
                 while (it->has_next()) {
                     auto [k, v] = it->next();
                     CopyFilePB copy_file;
@@ -2359,8 +2351,7 @@ TEST(MetaServiceTest, CopyJobTest) {
             std::unique_ptr<RangeGetIterator> it;
             int job_cnt = 0;
             do {
-                ret = txn->get(key0, key1, &it);
-                ASSERT_EQ(ret, 0);
+                ASSERT_EQ(txn->get(key0, key1, &it), TxnErrorCode::TXN_OK);
                 while (it->has_next()) {
                     auto [k, v] = it->next();
                     CopyJobPB copy_job;
@@ -2424,8 +2415,7 @@ TEST(MetaServiceTest, FilterCopyFilesTest) {
     // some files are loaded
     {
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         for (int i = 0; i < 4; ++i) {
             CopyFileKeyInfo key_info {instance_id, stage_id, table_id, "file" + std::to_string(i),
                                       "etag" + std::to_string(i)};
@@ -2437,7 +2427,7 @@ TEST(MetaServiceTest, FilterCopyFilesTest) {
             copy_file.SerializeToString(&val);
             txn->put(key, val);
         }
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         FilterCopyFilesResponse res;
         meta_service->filter_copy_files(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                         &request, &res, nullptr);
@@ -2449,8 +2439,7 @@ TEST(MetaServiceTest, FilterCopyFilesTest) {
     // all files are loaded
     {
         std::unique_ptr<Transaction> txn;
-        int ret = meta_service->txn_kv_->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         for (int i = 4; i < 10; ++i) {
             CopyFileKeyInfo key_info {instance_id, stage_id, table_id, "file" + std::to_string(i),
                                       "etag" + std::to_string(i)};
@@ -2462,7 +2451,7 @@ TEST(MetaServiceTest, FilterCopyFilesTest) {
             copy_file.SerializeToString(&val);
             txn->put(key, val);
         }
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         FilterCopyFilesResponse res;
         meta_service->filter_copy_files(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                         &request, &res, nullptr);
@@ -2767,14 +2756,12 @@ TEST(MetaServiceTest, StageTest) {
             recycle_stage_key(key_info1, &key1);
             std::unique_ptr<Transaction> txn;
             std::string get_val;
-            int ret = meta_service->txn_kv_->create_txn(&txn);
+            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
             std::unique_ptr<RangeGetIterator> it;
-            ret = txn->get(key0, key1, &it);
-            ASSERT_EQ(ret, 0);
+            ASSERT_EQ(txn->get(key0, key1, &it), TxnErrorCode::TXN_OK);
             int stage_cnt = 0;
             do {
-                ret = txn->get(key0, key1, &it);
-                ASSERT_EQ(ret, 0);
+                ASSERT_EQ(txn->get(key0, key1, &it), TxnErrorCode::TXN_OK);
                 while (it->has_next()) {
                     auto [k, v] = it->next();
                     ++stage_cnt;
@@ -2889,12 +2876,14 @@ TEST(MetaServiceTest, StageTest) {
 
             GetStageResponse res1;
             std::unique_ptr<Transaction> txn;
-            auto ret = meta_service->txn_kv_->create_txn(&txn);
+            TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+
             RamUserPB iam_user;
             txn->put(system_meta_service_arn_info_key(), iam_user.SerializeAsString());
-            ret = txn->commit();
-            ASSERT_EQ(ret, 0);
-            LOG_INFO("ret=", ret);
+            err = txn->commit();
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            LOG_INFO("err=", err);
             meta_service->get_stage(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                     &get_stage_req, &res1, nullptr);
             ASSERT_EQ(res1.status().code(), MetaServiceCode::OK);
@@ -3202,26 +3191,26 @@ TEST(MetaServiceTest, GetTabletStatsTest) {
             insert_rowset(meta_service.get(), 10000, "label4", table_id, partition_id, tablet_id));
     // Check tablet stats kv
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string data_size_key, data_size_val;
     stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                                &data_size_key);
-    ASSERT_EQ(txn->get(data_size_key, &data_size_val), 0);
+    ASSERT_EQ(txn->get(data_size_key, &data_size_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)data_size_val.data(), 20000);
     std::string num_rows_key, num_rows_val;
     stats_tablet_num_rows_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                               &num_rows_key);
-    ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), 0);
+    ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_rows_val.data(), 200);
     std::string num_rowsets_key, num_rowsets_val;
     stats_tablet_num_rowsets_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                                  &num_rowsets_key);
-    ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), 0);
+    ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_rowsets_val.data(), 2);
     std::string num_segs_key, num_segs_val;
     stats_tablet_num_segs_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                               &num_segs_key);
-    ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), 0);
+    ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_segs_val.data(), 2);
     // Get tablet stats
     res.Clear();
@@ -3511,7 +3500,7 @@ TEST(MetaServiceTest, GetDeleteBitmapWithIdx) {
     EXPECT_EQ(res.status().code(), MetaServiceCode::TABLET_NOT_FOUND);
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string stats_key =
             stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     TabletStatsPB stats;
@@ -3519,7 +3508,7 @@ TEST(MetaServiceTest, GetDeleteBitmapWithIdx) {
     stats.set_cumulative_compaction_cnt(19);
     stats.set_cumulative_point(20);
     txn->put(stats_key, stats.SerializeAsString());
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     meta_service->get_delete_bitmap(reinterpret_cast<google::protobuf::RpcController*>(&cntl), &req,
                                     &res, nullptr);
     EXPECT_EQ(res.status().code(), MetaServiceCode::ROWSETS_EXPIRED);
@@ -3620,16 +3609,16 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         // check delete bitmap update lock and pending delete bitmap
         {
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
             std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
-            ASSERT_EQ(ret, 0);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
 
             std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id_base});
             std::string pending_val;
             ret = txn->get(pending_key, &pending_val);
-            ASSERT_EQ(ret, 0);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
         }
 
         // commit txn
@@ -3649,16 +3638,16 @@ TEST(MetaServiceTest, DeleteBimapCommitTxnTest) {
         // check delete bitmap update lock and pending delete bitmap
         {
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+            ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
             std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
             std::string lock_val;
             auto ret = txn->get(lock_key, &lock_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
 
             std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id_base});
             std::string pending_val;
             ret = txn->get(pending_key, &pending_val);
-            ASSERT_EQ(ret, 1);
+            ASSERT_EQ(ret, TxnErrorCode::TXN_KEY_NOT_FOUND);
         }
     }
 }
@@ -3775,9 +3764,9 @@ TEST(MetaServiceTest, BatchGetVersionFallback) {
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
-    sp->set_call_back("batch_get_version_ret", [&](void* args) {
+    sp->set_call_back("batch_get_version_err", [&](void* args) {
         if (i++ == N / 10) {
-            *reinterpret_cast<int*>(args) = -2;
+            *reinterpret_cast<TxnErrorCode*>(args) = TxnErrorCode::TXN_TOO_OLD;
         }
     });
 
@@ -3841,58 +3830,58 @@ TEST(MetaServiceTest, IsDroppedTablet) {
     auto partition_key = recycle_partition_key({instance_id, partition_id});
     std::string val;
     // No recycle index and partition kv
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     // Tablet in PREPARED index
     index_pb.set_state(RecycleIndexPB::PREPARED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     // Tablet in DROPPED/RECYCLING index
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::DROPPED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::RECYCLING);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     // Tablet in PREPARED partition
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::PREPARED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_FALSE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     // Tablet in DROPPED/RECYCLING partition
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::DROPPED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::RECYCLING);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_TRUE(is_dropped_tablet(txn.get(), instance_id, index_id, partition_id));
 }
 
@@ -3940,57 +3929,57 @@ TEST(MetaServiceTest, IndexRequest) {
     res.Clear();
     meta_service->prepare_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::PREPARED);
     // Last state PREPARED
     res.Clear();
     meta_service->prepare_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::PREPARED);
     // Last state DROPPED
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::DROPPED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::RECYCLING);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
     // Last state UNKNOWN but tablet meta existed
     reset_txn_kv();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->remove(index_key);
     txn->put(tablet_key, tablet_val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // ------------Test commit index------------
     reset_txn_kv();
     req.Clear();
@@ -4002,58 +3991,58 @@ TEST(MetaServiceTest, IndexRequest) {
     res.Clear();
     meta_service->commit_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // Last state PREPARED
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::PREPARED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // Last state DROPPED
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::DROPPED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::RECYCLING);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
     // Last state UNKNOWN but tablet meta existed
     reset_txn_kv();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(tablet_key, tablet_val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // ------------Test drop index------------
     reset_txn_kv();
     req.Clear();
@@ -4065,50 +4054,50 @@ TEST(MetaServiceTest, IndexRequest) {
     res.Clear();
     meta_service->drop_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
     // Last state PREPARED
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::PREPARED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
     // Last state DROPPED
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::DROPPED);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     index_pb.set_state(RecycleIndexPB::RECYCLING);
     val = index_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(index_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_index(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(index_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(index_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(index_pb.ParseFromString(val));
     ASSERT_EQ(index_pb.state(), RecycleIndexPB::RECYCLING);
 }
@@ -4157,57 +4146,57 @@ TEST(MetaServiceTest, PartitionRequest) {
     res.Clear();
     meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::PREPARED);
     // Last state PREPARED
     res.Clear();
     meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::PREPARED);
     // Last state DROPPED
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::DROPPED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::RECYCLING);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
     // Last state UNKNOWN but tablet meta existed
     reset_txn_kv();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->remove(partition_key);
     txn->put(tablet_key, tablet_val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->prepare_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::ALREADY_EXISTED);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // ------------Test commit partition------------
     reset_txn_kv();
     req.Clear();
@@ -4220,69 +4209,69 @@ TEST(MetaServiceTest, PartitionRequest) {
     res.Clear();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // Last state PREPARED
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::PREPARED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // Last state DROPPED
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::DROPPED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::RECYCLING);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
     // Last state UNKNOWN but tablet meta existed
     reset_txn_kv();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(tablet_key, tablet_val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     // Last state UNKNOWN and tablet meta existed, but request has no index ids
     reset_txn_kv();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(tablet_key, tablet_val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     req.clear_index_ids();
     meta_service->commit_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_KEY_NOT_FOUND);
     req.add_index_ids(index_id);
     // ------------Test drop partition------------
     reset_txn_kv();
@@ -4296,50 +4285,50 @@ TEST(MetaServiceTest, PartitionRequest) {
     res.Clear();
     meta_service->drop_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
     // Last state PREPARED
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::PREPARED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
     // Last state DROPPED
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::DROPPED);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::DROPPED);
     // Last state RECYCLING
     reset_txn_kv();
     partition_pb.set_state(RecyclePartitionPB::RECYCLING);
     val = partition_pb.SerializeAsString();
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(partition_key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     res.Clear();
     meta_service->drop_partition(&ctrl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(partition_key, &val), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(partition_key, &val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(partition_pb.ParseFromString(val));
     ASSERT_EQ(partition_pb.state(), RecyclePartitionPB::RECYCLING);
 }
@@ -4449,10 +4438,10 @@ TEST(MetaServiceTest, GetClusterStatusTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    int ret = meta_service->txn_kv_->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    TxnErrorCode err = meta_service->txn_kv_->create_txn(&txn);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // case: get all cluster
     {

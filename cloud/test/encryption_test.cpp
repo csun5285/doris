@@ -9,6 +9,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 int main(int argc, char** argv) {
     auto conf_file = "selectdb_cloud.conf";
@@ -71,9 +72,10 @@ TEST(EncryptionTest, RootKeyTestWithoutKms) {
     std::string key = system_meta_service_encryption_key_info_key();
     std::string val;
     std::unique_ptr<Transaction> txn;
-    ret = mem_kv->create_txn(&txn);
-    ret = txn->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    TxnErrorCode err = mem_kv->create_txn(&txn);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+    err = txn->get(key, &val);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     EncryptionKeyInfoPB key_info;
     key_info.ParseFromString(val);
     ASSERT_EQ(key_info.items_size(), 1);
@@ -202,8 +204,10 @@ TEST(EncryptionTest, RootKeyTestWithKms2) {
         std::string key = system_meta_service_encryption_key_info_key();
         std::string val;
         std::unique_ptr<Transaction> txn;
-        ret = mem_kv->create_txn(&txn);
-        ret = txn->get(key, &val);
+        TxnErrorCode err = mem_kv->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        err = txn->get(key, &val);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
         ASSERT_EQ(ret, 0);
         EncryptionKeyInfoPB key_info;
         key_info.ParseFromString(val);
@@ -320,9 +324,10 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
     std::string key = system_meta_service_encryption_key_info_key();
     std::string val;
     std::unique_ptr<Transaction> txn;
-    ret = mem_kv->create_txn(&txn);
-    ret = txn->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    TxnErrorCode err = mem_kv->create_txn(&txn);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+    err = txn->get(key, &val);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     EncryptionKeyInfoPB key_info;
     key_info.ParseFromString(val);
     ASSERT_EQ(key_info.items_size(), 2);

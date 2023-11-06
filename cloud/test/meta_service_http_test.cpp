@@ -24,6 +24,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv_error.h"
 #include "mock_resource_manager.h"
 
 namespace selectdb {
@@ -200,8 +201,8 @@ public:
         std::string val;
         instance_key(key_info, &key);
         std::unique_ptr<Transaction> txn;
-        EXPECT_EQ(meta_service_->txn_kv_->create_txn(&txn), 0);
-        EXPECT_EQ(txn->get(key, &val), 0);
+        EXPECT_EQ(meta_service_->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        EXPECT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
         InstanceInfoPB instance;
         instance.ParseFromString(val);
         return instance;
@@ -753,10 +754,9 @@ TEST(MetaServiceHttpTest, GetClusterTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    int ret = ctx.meta_service_->txn_kv_->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(ctx.meta_service_->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // case: normal get
     {
@@ -1162,26 +1162,26 @@ TEST(MetaServiceHttpTest, GetTabletStatsTest) {
             insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
     // Check tablet stats kv
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string data_size_key, data_size_val;
     stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                                &data_size_key);
-    ASSERT_EQ(txn->get(data_size_key, &data_size_val), 0);
+    ASSERT_EQ(txn->get(data_size_key, &data_size_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)data_size_val.data(), 20000);
     std::string num_rows_key, num_rows_val;
     stats_tablet_num_rows_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                               &num_rows_key);
-    ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), 0);
+    ASSERT_EQ(txn->get(num_rows_key, &num_rows_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_rows_val.data(), 200);
     std::string num_rowsets_key, num_rowsets_val;
     stats_tablet_num_rowsets_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                                  &num_rowsets_key);
-    ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), 0);
+    ASSERT_EQ(txn->get(num_rowsets_key, &num_rowsets_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_rowsets_val.data(), 2);
     std::string num_segs_key, num_segs_val;
     stats_tablet_num_segs_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                               &num_segs_key);
-    ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), 0);
+    ASSERT_EQ(txn->get(num_segs_key, &num_segs_val), TxnErrorCode::TXN_OK);
     EXPECT_EQ(*(int64_t*)num_segs_val.data(), 2);
     // Get tablet stats
     res.Clear();

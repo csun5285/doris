@@ -18,6 +18,7 @@
 #include "meta-service/meta_service_http.h"
 #include "meta-service/meta_service_schema.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 
@@ -185,19 +186,19 @@ HttpResponse process_http_get_value(TxnKv* txn_kv, const brpc::URI& uri) {
         }
     }
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) [[unlikely]] {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) [[unlikely]] {
         return http_json_reply(MetaServiceCode::KV_TXN_CREATE_ERR,
-                               fmt::format("failed to create txn, ret={}", ret));
+                               fmt::format("failed to create txn, err={}", err));
     }
     ValueBuf value;
-    ret = selectdb::get(txn.get(), key, &value, true);
-    if (ret == 1) {
+    err = selectdb::get(txn.get(), key, &value, true);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
         // FIXME: Key not found err
         return http_json_reply(MetaServiceCode::KV_TXN_GET_ERR,
                                fmt::format("kv not found, key={}", hex(key)));
     }
-    if (ret != 0) {
+    if (err != TxnErrorCode::TXN_OK) {
         return http_json_reply(MetaServiceCode::KV_TXN_GET_ERR,
                                fmt::format("failed to get kv, key={}", hex(key)));
     }

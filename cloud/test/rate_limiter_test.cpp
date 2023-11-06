@@ -1,3 +1,5 @@
+#include "rate-limiter/rate_limiter.h"
+
 #include <gtest/gtest.h>
 
 #include "common/config.h"
@@ -5,8 +7,8 @@
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv_error.h"
 #include "mock_resource_manager.h"
-#include "rate-limiter/rate_limiter.h"
 
 int main(int argc, char** argv) {
     selectdb::config::init(nullptr, true);
@@ -44,10 +46,9 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    int ret = meta_service->txn_kv_->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(key, val);
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     auto get_cluster = [&](MetaServiceCode code) {
         GetClusterRequest req;

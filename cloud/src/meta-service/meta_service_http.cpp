@@ -245,7 +245,7 @@ static HttpResponse process_alter_instance(MetaServiceImpl* service, brpc::Contr
 
     AlterInstanceRequest req;
     PARSE_MESSAGE_OR_RETURN(ctrl, req);
-    // for unresolve path whose corresponding operation is signal, we need set opreation by ourselves.
+    // for unresolved path whose corresponding operation is signal, we need set operation by ourselves.
     if ((it->second).size() == 1) {
         req.set_op((it->second)[0]);
     }

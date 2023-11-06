@@ -10,6 +10,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 
@@ -126,12 +127,12 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
             std::unique_ptr<Transaction> txn;
             int tried = 0;
             do {
-                int ret = txn_kv_->create_txn(&txn);
-                if (ret != 0) break;
-                ret = txn->get(key, &val);
-                if (ret != 0 && ret != 1) break;
+                TxnErrorCode err = txn_kv_->create_txn(&txn);
+                if (err != TxnErrorCode::TXN_OK) break;
+                err = txn->get(key, &val);
+                if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) break;
                 ServiceRegistryPB reg;
-                if (ret == 0 && !reg.ParseFromString(val)) break;
+                if (err == TxnErrorCode::TXN_OK && !reg.ParseFromString(val)) break;
                 LOG_EVERY_N(INFO, 100)
                         << "get server registry, key=" << hex(key) << " reg=" << proto_to_json(reg);
                 prepare_registry(&reg);
@@ -140,8 +141,8 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
                 txn->put(key, val);
                 LOG_EVERY_N(INFO, 100)
                         << "put server registry, key=" << hex(key) << " reg=" << proto_to_json(reg);
-                ret = txn->commit();
-                if (ret != 0) {
+                err = txn->commit();
+                if (err != TxnErrorCode::TXN_OK) {
                     LOG(WARNING) << "failed to commit registry, key=" << hex(key)
                                  << " val=" << proto_to_json(reg) << " retry times=" << ++tried;
                     std::this_thread::sleep_for(std::chrono::milliseconds(rd_len(gen)));

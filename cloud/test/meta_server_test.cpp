@@ -15,6 +15,7 @@
 #include "meta-service/meta_server.h"
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 #include "mock_resource_manager.h"
@@ -104,10 +105,10 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
-        if (txn->get(system_key, &value) == 0) {
+        if (txn->get(system_key, &value) == TxnErrorCode::TXN_OK) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -182,10 +183,10 @@ TEST(MetaServerTest, StartAndStop) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
-        if (txn->get(system_key, &value) == 0) {
+        if (txn->get(system_key, &value) == TxnErrorCode::TXN_OK) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

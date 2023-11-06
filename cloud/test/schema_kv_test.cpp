@@ -11,6 +11,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 static std::string instance_id = "schema_kv_test";
 
@@ -101,16 +102,16 @@ TEST(DetachSchemaKVTest, TabletTest) {
                                               tablet_id, next_rowset_id(), 1));
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string tablet_key, tablet_val;
         meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id}, &tablet_key);
-        ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+        ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB saved_tablet;
         ASSERT_TRUE(saved_tablet.ParseFromString(tablet_val));
         EXPECT_TRUE(saved_tablet.has_schema());
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 1}, &rowset_key);
-        ASSERT_EQ(txn->get(rowset_key, &rowset_val), 0);
+        ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
         doris::RowsetMetaPB saved_rowset;
         ASSERT_TRUE(saved_rowset.ParseFromString(rowset_val));
         EXPECT_TRUE(saved_rowset.has_tablet_schema());
@@ -120,7 +121,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
     {
         constexpr auto table_id = 10011, index_id = 10012, partition_id = 10013, tablet_id = 10014;
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB saved_tablet;
         saved_tablet.set_table_id(table_id);
         saved_tablet.set_index_id(index_id);
@@ -140,7 +141,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
         meta_tablet_idx_key({instance_id, tablet_id}, &tablet_idx_key);
         ASSERT_TRUE(saved_tablet_idx.SerializeToString(&tablet_idx_val));
         txn->put(tablet_idx_key, tablet_idx_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         // check get tablet response
         check_get_tablet(meta_service.get(), tablet_id, 1);
     }
@@ -150,7 +151,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
                                          int32_t schema_version) {
         std::string tablet_key, tablet_val;
         meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id}, &tablet_key);
-        ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+        ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB saved_tablet;
         ASSERT_TRUE(saved_tablet.ParseFromString(tablet_val));
         EXPECT_FALSE(saved_tablet.has_schema()) << tablet_id;
@@ -165,11 +166,11 @@ TEST(DetachSchemaKVTest, TabletTest) {
                                               tablet_id, next_rowset_id(), 1));
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         check_new_saved_tablet_val(txn.get(), table_id, index_id, partition_id, tablet_id, 1);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 1}, &rowset_key);
-        ASSERT_EQ(txn->get(rowset_key, &rowset_val), 0);
+        ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
         doris::RowsetMetaPB saved_rowset;
         ASSERT_TRUE(saved_rowset.ParseFromString(rowset_val));
         EXPECT_FALSE(saved_rowset.has_tablet_schema());
@@ -210,7 +211,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100031, 1);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100032, 2);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100033, 2);
@@ -339,10 +340,10 @@ TEST(DetachSchemaKVTest, RowsetTest) {
                 insert_rowset(meta_service.get(), db_id, "101", table_id, tablet_id, 2)); // [2-2]
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 2}, &rowset_key); // [2-2]
-        ASSERT_EQ(txn->get(rowset_key, &rowset_val), 0);
+        ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
         doris::RowsetMetaPB saved_rowset;
         ASSERT_TRUE(saved_rowset.ParseFromString(rowset_val));
         ASSERT_TRUE(saved_rowset.has_tablet_schema());
@@ -356,13 +357,13 @@ TEST(DetachSchemaKVTest, RowsetTest) {
         ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
                                               tablet_id, next_rowset_id(), 1));
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto saved_rowset = create_rowset(10015, tablet_id, next_rowset_id(), 2, 2);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 2}, &rowset_key); // version=[2-2]
         ASSERT_TRUE(saved_rowset.SerializeToString(&rowset_val));
         txn->put(rowset_key, rowset_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         // check get rowset response
         GetRowsetResponse get_rowset_res;
         get_rowset(meta_service.get(), table_id, index_id, partition_id, tablet_id, get_rowset_res);
@@ -389,10 +390,10 @@ TEST(DetachSchemaKVTest, RowsetTest) {
                 insert_rowset(meta_service.get(), db_id, "201", table_id, tablet_id, 2)); // [2-2]
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, 10024, 2}, &rowset_key); // [2-2]
-        ASSERT_EQ(txn->get(rowset_key, &rowset_val), 0);
+        ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
         doris::RowsetMetaPB saved_rowset;
         ASSERT_TRUE(saved_rowset.ParseFromString(rowset_val));
         EXPECT_FALSE(saved_rowset.has_tablet_schema());
@@ -490,14 +491,14 @@ TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
         ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
                                               tablet_id, next_rowset_id(), 1));
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto committed_rowset = create_rowset(10005, tablet_id, next_rowset_id(), 2, 2);
         std::string tmp_rowset_key, tmp_rowset_val;
         // 0:instance_id  1:txn_id  2:tablet_id
         meta_rowset_tmp_key({instance_id, 10005, tablet_id}, &tmp_rowset_key);
         ASSERT_TRUE(committed_rowset.SerializeToString(&tmp_rowset_val));
         txn->put(tmp_rowset_key, tmp_rowset_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         CreateRowsetResponse res;
         auto new_rowset = create_rowset(10005, tablet_id, next_rowset_id(), 2, 2);
         prepare_rowset(meta_service.get(), new_rowset, res);

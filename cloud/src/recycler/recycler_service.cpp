@@ -10,6 +10,7 @@
 #include "common/logging.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
+#include "meta-service/txn_kv_error.h"
 #include "recycler/checker.h"
 #include "recycler/recycler.h"
 
@@ -30,7 +31,6 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
     auto ctrl = static_cast<brpc::Controller*>(controller);
     LOG(INFO) << "rpc from " << ctrl->remote_side() << " request=" << request->ShortDebugString();
     brpc::ClosureGuard closure_guard(done);
-    int ret = 0;
     MetaServiceCode code = MetaServiceCode::OK;
     std::string msg = "OK";
     std::unique_ptr<int, std::function<void(int*)>> defer_status(
@@ -46,8 +46,8 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
     instances.reserve(request->instance_ids_size());
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         msg = "failed to create txn";
         return;
@@ -58,10 +58,10 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
         std::string key;
         instance_key(key_info, &key);
         std::string val;
-        ret = txn->get(key, &val);
-        if (ret != 0) {
+        err = txn->get(key, &val);
+        if (err != TxnErrorCode::TXN_OK) {
             code = MetaServiceCode::KV_TXN_GET_ERR;
-            msg = fmt::format("failed to get instance, instance_id={}", id);
+            msg = fmt::format("failed to get instance, instance_id={}, err={}", id, err);
             LOG_WARNING(msg);
             continue;
         }
@@ -91,8 +91,8 @@ void RecyclerServiceImpl::recycle_instance(::google::protobuf::RpcController* co
 void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaServiceCode& code,
                                          std::string& msg) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         msg = "failed to create txn";
         return;
@@ -100,10 +100,10 @@ void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaSer
     std::string key;
     instance_key({instance_id}, &key);
     std::string val;
-    ret = txn->get(key, &val);
-    if (ret != 0) {
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("failed to get instance, instance_id={}", instance_id);
+        msg = fmt::format("failed to get instance, instance_id={}, err={}", instance_id, err);
         return;
     }
     InstanceInfoPB instance;
@@ -130,8 +130,8 @@ void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaSer
 void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
                        MetaServiceCode& code, std::string& msg) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         msg = "failed to create txn";
         return;
@@ -139,10 +139,10 @@ void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& 
     std::string key;
     instance_key({instance_id}, &key);
     std::string val;
-    ret = txn->get(key, &val);
-    if (ret != 0) {
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("failed to get instance, instance_id={}", instance_id);
+        msg = fmt::format("failed to get instance, instance_id={}, err={}", instance_id, err);
         return;
     }
     InstanceInfoPB instance;
@@ -178,21 +178,21 @@ void recycle_copy_jobs(const std::shared_ptr<TxnKv>& txn_kv, const std::string& 
 void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
                       std::string_view key, MetaServiceCode& code, std::string& msg) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         code = MetaServiceCode::KV_TXN_CREATE_ERR;
         msg = "failed to create txn";
         return;
     }
     std::string val;
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     JobRecyclePB job_info;
-    if (ret != 0) {
-        if (ret == 1) { // Not found, check instance existence
+    if (err != TxnErrorCode::TXN_OK) {
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // Not found, check instance existence
             std::string key, val;
             instance_key({instance_id}, &key);
-            ret = txn->get(key, &val);
-            if (ret == 0) { // Never performed a recycle on this instance before
+            err = txn->get(key, &val);
+            if (err == TxnErrorCode::TXN_OK) { // Never performed a recycle on this instance before
                 job_info.set_status(JobRecyclePB::IDLE);
                 job_info.set_last_ctime_ms(0);
                 job_info.set_last_finish_time_ms(0);
@@ -202,7 +202,8 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
             }
         }
         code = MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("failed to get recycle job info, instance_id={}", instance_id);
+        msg = fmt::format("failed to get recycle job info, instance_id={}, err={}", instance_id,
+                          err);
         return;
     }
     if (!job_info.ParseFromString(val)) {

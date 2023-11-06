@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "meta-service/meta_service_schema.h"
+#include "meta-service/txn_kv_error.h"
 #include "recycler/checker.h"
 #include "recycler/s3_accessor.h"
 #ifdef UNIT_TEST
@@ -33,60 +34,95 @@ namespace selectdb {
 // return 0 for success get a key, 1 for key not found, negative for error
 [[maybe_unused]] static int txn_get(TxnKv* txn_kv, std::string_view key, std::string& val) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         return -1;
     }
-    return txn->get(key, &val, true);
+    switch (txn->get(key, &val, true)) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_KEY_NOT_FOUND:
+        return 1;
+    default:
+        return -1;
+    };
 }
 
 // 0 for success, negative for error
 static int txn_get(TxnKv* txn_kv, std::string_view begin, std::string_view end,
                    std::unique_ptr<RangeGetIterator>& it) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         return -1;
     }
-    return txn->get(begin, end, &it, true);
+    switch (txn->get(begin, end, &it, true)) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_KEY_NOT_FOUND:
+        return 1;
+    default:
+        return -1;
+    };
 }
 
 // return 0 for success otherwise error
 static int txn_remove(TxnKv* txn_kv, std::vector<std::string_view> keys) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         return -1;
     }
     for (auto k : keys) {
         txn->remove(k);
     }
-    return txn->commit();
+    switch (txn->commit()) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_CONFLICT:
+        return -1;
+    default:
+        return -1;
+    }
 }
 
 // return 0 for success otherwise error
 static int txn_remove(TxnKv* txn_kv, std::vector<std::string> keys) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         return -1;
     }
     for (auto& k : keys) {
         txn->remove(k);
     }
-    return txn->commit();
+    switch (txn->commit()) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_CONFLICT:
+        return -1;
+    default:
+        return -1;
+    }
 }
 
 // return 0 for success otherwise error
 [[maybe_unused]] static int txn_remove(TxnKv* txn_kv, std::string_view begin,
                                        std::string_view end) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->remove(begin, end);
-    return txn->commit();
+    switch (txn->commit()) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_CONFLICT:
+        return -1;
+    default:
+        return -1;
+    }
 }
 
 Recycler::Recycler(std::shared_ptr<TxnKv> txn_kv) : txn_kv_(std::move(txn_kv)) {
@@ -286,17 +322,17 @@ public:
         // Get schema from kv
         // TODO(plat1ko): Single flight
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to create txn";
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to create txn, err=" << err;
             return -1;
         }
         auto schema_key = meta_schema_key({instance_id_, index_id, schema_version});
         ValueBuf val_buf;
-        ret = selectdb::get(txn.get(), schema_key, &val_buf);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to get schema, ret=" << ret;
-            return ret;
+        err = selectdb::get(txn.get(), schema_key, &val_buf);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to get schema, err=" << err;
+            return static_cast<int>(err);
         }
         doris::TabletSchemaPB schema;
         if (!parse_schema_value(val_buf, &schema)) {
@@ -427,10 +463,11 @@ int InstanceRecycler::recycle_deleted_instance() {
     });
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to create txn";
-        return ret;
+        ret = -1;
+        return -1;
     }
     LOG(INFO) << "begin to delete all kv, instance_id=" << instance_id_;
     // delete kv before deleting objects to prevent the checker from misjudging data loss
@@ -458,9 +495,10 @@ int InstanceRecycler::recycle_deleted_instance() {
     std::string start_job_tablet_key = job_tablet_key({instance_id_, 0, 0, 0, 0});
     std::string end_job_tablet_key = job_tablet_key({instance_id_, INT64_MAX, 0, 0, 0});
     txn->remove(start_job_tablet_key, end_job_tablet_key);
-    ret = txn->commit();
-    if (ret != 0) {
-        LOG(WARNING) << "failed to delete all kv, instance_id=" << instance_id_;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to delete all kv, instance_id=" << instance_id_ << ", err=" << err;
+        ret = -1;
     }
 
     for (auto& [_, accessor] : accessor_map_) {
@@ -479,17 +517,20 @@ int InstanceRecycler::recycle_deleted_instance() {
     if (ret == 0) {
         // remove instance kv
         // ATTN: MUST ensure that cloud platform won't regenerate the same instance id
-        ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
+        err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to create txn";
+            ret = -1;
             return ret;
         }
         std::string key;
         instance_key({instance_id_}, &key);
         txn->remove(key);
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to delete instance kv, instance_id=" << instance_id_;
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to delete instance kv, instance_id=" << instance_id_
+                         << " err=" << err;
+            ret = -1;
         }
     }
     return ret;
@@ -557,19 +598,20 @@ int InstanceRecycler::recycle_indexes() {
                   << " state=" << RecycleIndexPB::State_Name(index_pb.state());
         // Change state to RECYCLING
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG_WARNING("failed to create txn");
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to create txn").tag("err", err);
             return -1;
         }
         std::string val;
-        ret = txn->get(k, &val);
-        if (ret == 1) { // UNKNOWN, maybe recycled or committed, skip it
+        err = txn->get(k, &val);
+        if (err ==
+            TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN, maybe recycled or committed, skip it
             LOG_INFO("index {} has been recycled or committed", index_id);
             return 0;
         }
-        if (ret != 0) {
-            LOG_WARNING("failed to get kv").tag("key", hex(k)).tag("ret", ret);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to get kv").tag("key", hex(k)).tag("err", err);
             return -1;
         }
         index_pb.Clear();
@@ -580,9 +622,9 @@ int InstanceRecycler::recycle_indexes() {
         if (index_pb.state() != RecycleIndexPB::RECYCLING) {
             index_pb.set_state(RecycleIndexPB::RECYCLING);
             txn->put(k, index_pb.SerializeAsString());
-            ret = txn->commit();
-            if (ret != 0) {
-                LOG_WARNING("failed to commit txn").tag("ret", ret);
+            err = txn->commit();
+            if (err != TxnErrorCode::TXN_OK) {
+                LOG_WARNING("failed to commit txn").tag("err", err);
                 return -1;
             }
         }
@@ -676,18 +718,19 @@ int InstanceRecycler::recycle_partitions() {
                   << " state=" << RecyclePartitionPB::State_Name(part_pb.state());
         // Change state to RECYCLING
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG_WARNING("failed to create txn");
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to create txn").tag("err", err);
             return -1;
         }
         std::string val;
-        ret = txn->get(k, &val);
-        if (ret == 1) { // UNKNOWN, maybe recycled or committed, skip it
+        err = txn->get(k, &val);
+        if (err ==
+            TxnErrorCode::TXN_KEY_NOT_FOUND) { // UNKNOWN, maybe recycled or committed, skip it
             LOG_INFO("partition {} has been recycled or committed", partition_id);
             return 0;
         }
-        if (ret != 0) {
+        if (err != TxnErrorCode::TXN_OK) {
             LOG_WARNING("failed to get kv");
             return -1;
         }
@@ -701,12 +744,13 @@ int InstanceRecycler::recycle_partitions() {
         if (part_pb.state() != RecyclePartitionPB::RECYCLING) {
             part_pb.set_state(RecyclePartitionPB::RECYCLING);
             txn->put(k, part_pb.SerializeAsString());
-            ret = txn->commit();
-            if (ret != 0) {
-                LOG_WARNING("failed to commit txn: {}", ret);
+            err = txn->commit();
+            if (err != TxnErrorCode::TXN_OK) {
+                LOG_WARNING("failed to commit txn: {}", err);
                 return -1;
             }
         }
+        int ret = 0;
         for (int64_t index_id : part_pb.index_id()) {
             if (recycle_tablets(part_pb.table_id(), index_id, partition_id, is_empty_tablet) != 0) {
                 LOG_WARNING("failed to recycle tablets under partition")
@@ -735,8 +779,8 @@ int InstanceRecycler::recycle_partitions() {
             version_keys.clear();
         });
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to delete recycle partition kv, instance_id=" << instance_id_;
             return -1;
         }
@@ -746,9 +790,10 @@ int InstanceRecycler::recycle_partitions() {
         for (auto& k : version_keys) {
             txn->remove(k);
         }
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to delete recycle partition kv, instance_id=" << instance_id_;
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to delete recycle partition kv, instance_id=" << instance_id_
+                         << " err=" << err;
             return -1;
         }
         return 0;
@@ -779,7 +824,7 @@ int InstanceRecycler::recycle_versions() {
     int64_t last_scanned_table_id = 0;
     bool is_recycled = false; // Is last scanned kv recycled
     auto recycle_func = [&num_scanned, &num_recycled, &last_scanned_table_id, &is_recycled, this](
-                                std::string_view k, std::string_view v) {
+                                std::string_view k, std::string_view) {
         ++num_scanned;
         auto k1 = k;
         k1.remove_prefix(1);
@@ -797,13 +842,13 @@ int InstanceRecycler::recycle_versions() {
         auto tablet_key_begin = stats_tablet_key({instance_id_, table_id, 0, 0, 0});
         auto tablet_key_end = stats_tablet_key({instance_id_, table_id, INT64_MAX, 0, 0});
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             return -1;
         }
         std::unique_ptr<RangeGetIterator> iter;
-        ret = txn->get(tablet_key_begin, tablet_key_end, &iter, false, 1);
-        if (ret != 0) {
+        err = txn->get(tablet_key_begin, tablet_key_end, &iter, false, 1);
+        if (err != TxnErrorCode::TXN_OK) {
             return -1;
         }
         if (iter->has_next()) { // Table is useful, should not recycle partiton versions
@@ -816,8 +861,8 @@ int InstanceRecycler::recycle_versions() {
         txn->remove(table_version_key_begin, table_version_key_end);
         LOG(WARNING) << "remove version kv, begin=" << hex(table_version_key_begin)
                      << " end=" << hex(table_version_key_end);
-        ret = txn->commit();
-        if (ret != 0) {
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
             return -1;
         }
         ++num_recycled;
@@ -902,15 +947,16 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
             init_rs_keys.push_back(meta_rowset_key({instance_id_, tablet_id, 1}));
             DCHECK([&]() {
                 std::unique_ptr<Transaction> txn;
-                if (int ret = txn_kv_->create_txn(&txn); ret != 0) {
-                    LOG_ERROR("failed to create txn").tag("ret", ret);
+                if (TxnErrorCode err = txn_kv_->create_txn(&txn); err != TxnErrorCode::TXN_OK) {
+                    LOG_ERROR("failed to create txn").tag("err", err);
                     return false;
                 }
                 auto rs_key_begin = meta_rowset_key({instance_id_, tablet_id, 2});
                 auto rs_key_end = meta_rowset_key({instance_id_, tablet_id, INT64_MAX});
                 std::unique_ptr<RangeGetIterator> iter;
-                if (int ret = txn->get(rs_key_begin, rs_key_end, &iter, true, 1); ret != 0) {
-                    LOG_ERROR("failed to get kv").tag("ret", ret);
+                if (TxnErrorCode err = txn->get(rs_key_begin, rs_key_end, &iter, true, 1);
+                    err != TxnErrorCode::TXN_OK) {
+                    LOG_ERROR("failed to get kv").tag("err", err);
                     return false;
                 }
                 if (iter->has_next()) {
@@ -934,7 +980,7 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
             use_range_remove = true;
         });
         std::unique_ptr<Transaction> txn;
-        if (txn_kv_->create_txn(&txn) != 0) {
+        if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to delete tablet meta kv, instance_id=" << instance_id_;
             return -1;
         }
@@ -955,8 +1001,9 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
         for (auto& k : init_rs_keys) {
             txn->remove(k);
         }
-        if (txn->commit() != 0) {
-            LOG(WARNING) << "failed to delete kvs related to tablets, instance_id=" << instance_id_;
+        if (TxnErrorCode err = txn->commit(); err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to delete kvs related to tablets, instance_id=" << instance_id_
+                         << ", err=" << err;
             return -1;
         }
         return 0;
@@ -967,7 +1014,7 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
 
     // directly remove tablet stats and tablet jobs of these dropped index or partition
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
+    if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to delete tablet job or stats key, instance_id=" << instance_id_;
         return -1;
     }
@@ -985,8 +1032,11 @@ int InstanceRecycler::recycle_tablets(int64_t table_id, int64_t index_id, int64_
         LOG(WARNING) << "remove schema kv, begin=" << hex(schema_key_begin)
                      << " end=" << hex(schema_key_end);
     }
-    if (txn->commit() != 0) {
-        LOG(WARNING) << "failed to delete tablet job or stats key, instance_id=" << instance_id_;
+
+    TxnErrorCode err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to delete tablet job or stats key, instance_id=" << instance_id_
+                     << " err=" << err;
         return -1;
     }
 
@@ -1140,7 +1190,7 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
 
     int ret = 0;
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
+    if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to delete rowset kv of tablet " << tablet_id;
         ret = -1;
     }
@@ -1154,8 +1204,9 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
     std::string delete_bitmap_end = meta_delete_bitmap_key({instance_id_, tablet_id + 1, "", 0, 0});
     txn->remove(delete_bitmap_start, delete_bitmap_end);
 
-    if (txn->commit() != 0) {
-        LOG(WARNING) << "failed to delete rowset kv of tablet " << tablet_id;
+    TxnErrorCode err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to delete rowset kv of tablet " << tablet_id << ", err=" << err;
         ret = -1;
     }
 
@@ -1554,9 +1605,9 @@ int InstanceRecycler::abort_timeout_txn() {
         ++num_timeout;
 
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG_ERROR("failed to create txn ret={}", ret).tag("key", hex(k));
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_ERROR("failed to create txn err={}", err).tag("key", hex(k));
             return -1;
         }
         std::string_view k1 = k;
@@ -1573,9 +1624,9 @@ int InstanceRecycler::abort_timeout_txn() {
         // Update txn_info
         std::string txn_inf_key, txn_inf_val;
         txn_info_key({instance_id_, db_id, txn_id}, &txn_inf_key);
-        ret = txn->get(txn_inf_key, &txn_inf_val);
-        if (ret != 0) {
-            LOG_WARNING("failed to get txn info ret={}", ret).tag("key", hex(txn_inf_key));
+        err = txn->get(txn_inf_key, &txn_inf_val);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to get txn info err={}", err).tag("key", hex(txn_inf_key));
             return -1;
         }
         TxnInfoPB txn_info;
@@ -1610,9 +1661,9 @@ int InstanceRecycler::abort_timeout_txn() {
         txn->put(recyc_txn_key, recyc_txn_val);
         // Remove txn running key
         txn->remove(k);
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG_WARNING("failed to commit txn ret={}", ret)
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to commit txn err={}", err)
                     .tag("key", hex(k))
                     .tag("db_id", db_id)
                     .tag("txn_id", txn_id);
@@ -1683,9 +1734,9 @@ int InstanceRecycler::recycle_expired_txn_label() {
         int64_t txn_id = std::get<int64_t>(std::get<0>(out[4]));
         VLOG_DEBUG << "instance_id=" << instance_id_ << " db_id=" << db_id << " txn_id=" << txn_id;
         std::unique_ptr<Transaction> txn;
-        ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG_ERROR("failed to create txn ret={}", ret).tag("key", hex(k));
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_ERROR("failed to create txn err={}", err).tag("key", hex(k));
             return -1;
         }
         // Remove txn index kv
@@ -1694,9 +1745,9 @@ int InstanceRecycler::recycle_expired_txn_label() {
         // Remove txn info kv
         std::string info_key, info_val;
         txn_info_key({instance_id_, db_id, txn_id}, &info_key);
-        ret = txn->get(info_key, &info_val);
-        if (ret != 0) {
-            LOG_WARNING("failed to get txn info ret={}", ret).tag("key", hex(info_key));
+        err = txn->get(info_key, &info_val);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG_WARNING("failed to get txn info err={}", err).tag("key", hex(info_key));
             return -1;
         }
         TxnInfoPB txn_info;
@@ -1708,9 +1759,10 @@ int InstanceRecycler::recycle_expired_txn_label() {
         // Update txn label
         std::string label_key, label_val;
         txn_label_key({instance_id_, db_id, txn_info.label()}, &label_key);
-        ret = txn->get(label_key, &label_val);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to get txn label, txn_id=" << txn_id << " key=" << label_key;
+        err = txn->get(label_key, &label_val);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to get txn label, txn_id=" << txn_id << " key=" << label_key
+                         << " err=" << err;
             return -1;
         }
         TxnLabelPB txn_label;
@@ -1733,9 +1785,9 @@ int InstanceRecycler::recycle_expired_txn_label() {
         }
         // Remove recycle txn kv
         txn->remove(k);
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to delete expired txn, ret=" << ret << " key=" << hex(k);
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to delete expired txn, err=" << err << " key=" << hex(k);
             return -1;
         }
         ++num_recycled;
@@ -1886,7 +1938,7 @@ int InstanceRecycler::recycle_copy_jobs() {
             copy_file_keys.push_back(std::move(file_key));
         }
         std::unique_ptr<Transaction> txn;
-        if (txn_kv_->create_txn(&txn) != 0) {
+        if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to create txn";
             return -1;
         }
@@ -1900,8 +1952,9 @@ int InstanceRecycler::recycle_copy_jobs() {
                       << ", query_id=" << copy_id;
         }
         txn->remove(k);
-        if (txn->commit() != 0) {
-            LOG(WARNING) << "failed to commit txn";
+        TxnErrorCode err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to commit txn, err=" << err;
             return -1;
         }
 

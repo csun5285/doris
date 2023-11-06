@@ -3,6 +3,7 @@
 #include "txn_kv.h"
 
 #include <bthread/countdown_event.h>
+#include <foundationdb/fdb_c_types.h>
 
 #include "common/bvars.h"
 #include "common/config.h"
@@ -388,6 +389,15 @@ void Transaction::remove(std::string_view begin, std::string_view end) {
 
 TxnErrorCode Transaction::commit() {
     StopWatch sw;
+
+    {
+        fdb_error_t err = 0;
+        TEST_SYNC_POINT_CALLBACK("transaction:commit:get_err", &err);
+        if (err) [[unlikely]] {
+            return cast_as_txn_code(err);
+        }
+    }
+
     auto fut = fdb_transaction_commit(txn_);
     auto release_fut = [fut, &sw](int*) {
         fdb_future_destroy(fut);
@@ -396,7 +406,6 @@ TxnErrorCode Transaction::commit() {
     std::unique_ptr<int, decltype(release_fut)> defer((int*)0x01, std::move(release_fut));
     RETURN_IF_ERROR(await_future(fut));
     auto err = fdb_future_get_error(fut);
-    TEST_SYNC_POINT_CALLBACK("transaction:commit:get_err", &err);
     if (err) {
         LOG(WARNING) << "fdb commit error, code=" << err << " msg=" << fdb_get_error(err);
         fdb_error_is_txn_conflict(err) ? g_bvar_txn_kv_commit_conflict_counter << 1

@@ -13,6 +13,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 extern std::unique_ptr<MetaServiceImpl> get_meta_service();
@@ -90,7 +91,7 @@ static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMeta
 static void insert_rowsets(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t partition_id,
                            int64_t tablet_id, const std::vector<doris::RowsetMetaPB>& rowsets) {
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0) << tablet_id;
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK) << tablet_id;
     std::deque<std::string> buffer;
     int data_size = 0, num_rows = 0, num_seg = 0;
     for (auto& rowset : rowsets) {
@@ -116,7 +117,7 @@ static void insert_rowsets(TxnKv* txn_kv, int64_t table_id, int64_t index_id, in
     std::string num_segs_key;
     stats_tablet_num_segs_key(info, &num_segs_key);
     txn->atomic_add(num_segs_key, num_seg);
-    ASSERT_EQ(txn->commit(), 0) << tablet_id;
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK) << tablet_id;
 }
 
 TEST(MetaServiceJobTest, CompactionJobTest) {
@@ -153,7 +154,7 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         idx_pb.set_tablet_id(tablet_id + 1); // error, tablet_id not match
         std::string idx_val = idx_pb.SerializeAsString();
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put(index_key, idx_val);
         std::string stats_key =
                 stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
@@ -161,24 +162,24 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         stats.set_base_compaction_cnt(9);
         stats.set_cumulative_compaction_cnt(19);
         txn->put(stats_key, stats.SerializeAsString());
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         start_compaction_job(meta_service.get(), tablet_id, job_id, "ip:port", 0, 0, type, res);
         ASSERT_NE(res.status().msg().find("internal error"), std::string::npos);
         idx_pb.set_tablet_id(tablet_id); // Correct tablet_id
         idx_val = idx_pb.SerializeAsString();
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put(index_key, idx_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         start_compaction_job(meta_service.get(), tablet_id, job_id, "ip:port", 9, 18, type, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::STALE_TABLET_CACHE);
         start_compaction_job(meta_service.get(), tablet_id, job_id, "ip:port", 9, 19, type, res);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto job_key = job_tablet_key({instance_id, idx_pb.table_id(), idx_pb.index_id(),
                                        idx_pb.partition_id(), idx_pb.tablet_id()});
         std::string job_val;
-        ASSERT_EQ(txn->get(job_key, &job_val), 0);
+        ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
         TabletJobInfoPB job_pb;
         ASSERT_TRUE(job_pb.ParseFromString(job_val));
         start_compaction_job(meta_service.get(), tablet_id, job_id, "ip:port", 9, 19, type, res);
@@ -218,7 +219,7 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         auto tablet_meta_key =
                 meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB tablet_meta_pb;
         tablet_meta_pb.set_table_id(table_id);
         tablet_meta_pb.set_index_id(index_id);
@@ -228,7 +229,7 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         std::string tablet_meta_val = tablet_meta_pb.SerializeAsString();
         ASSERT_FALSE(tablet_meta_val.empty());
         txn->put(tablet_meta_key, tablet_meta_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         meta_service->finish_tablet_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                         &req, &res, nullptr);
@@ -267,9 +268,9 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
 
         std::string tablet_stats_val = tablet_stats_pb.SerializeAsString();
         ASSERT_FALSE(tablet_stats_val.empty());
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put(tablet_stats_key, tablet_stats_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         // Input rowset not valid
         meta_service->finish_tablet_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
@@ -301,7 +302,7 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         ASSERT_NE(res.status().msg().find("too few input rowsets"), std::string::npos);
 
         // Provide input rowset KVs, boundary test, 5 input rowsets
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // clang-format off
         std::vector<std::string> input_rowset_keys = {
                 meta_rowset_key({instance_id, tablet_id, input_version_start - 1}),
@@ -321,7 +322,7 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
             input_rowset_vals.emplace_back(new std::string(rs_pb.SerializeAsString()));
             txn->put(i, *input_rowset_vals.back());
         }
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         // Check number input rowsets
         sp->set_call_back("process_compaction_job::loop_input_done", [](void* c) {
@@ -345,9 +346,9 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         doris::RowsetMetaPB tmp_rs_pb;
         tmp_rs_pb.set_rowset_id(0);
         auto tmp_rowset_val = tmp_rs_pb.SerializeAsString();
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put(tmp_rowset_key, tmp_rowset_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         meta_service->finish_tablet_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                         &req, &res, nullptr);
@@ -357,9 +358,9 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         // Provide txn_id in output rowset meta
         tmp_rs_pb.set_txn_id(10086);
         tmp_rowset_val = tmp_rs_pb.SerializeAsString();
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put(tmp_rowset_key, tmp_rowset_val);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         meta_service->finish_tablet_job(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                         &req, &res, nullptr);
@@ -368,9 +369,9 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         //=====================================================================
         // All branch tests done, we are done commit a compaction job
         //=====================================================================
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         tablet_stats_val.clear();
-        ASSERT_EQ(txn->get(tablet_stats_key, &tablet_stats_val), 0);
+        ASSERT_EQ(txn->get(tablet_stats_key, &tablet_stats_val), TxnErrorCode::TXN_OK);
         TabletStatsPB stats;
         ASSERT_TRUE(stats.ParseFromString(tablet_stats_val));
 
@@ -387,18 +388,19 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
         // Check job removed, tablet meta updated
         auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
         std::string job_val;
-        ASSERT_EQ(txn->get(job_key, &job_val), 0);
+        ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
         TabletJobInfoPB job_pb;
         ASSERT_TRUE(job_pb.ParseFromString(job_val));
         ASSERT_TRUE(job_pb.compaction().empty());
         tablet_meta_val.clear();
 
         // Check tmp rowset removed
-        ASSERT_EQ(txn->get(tmp_rowset_key, &tmp_rowset_val), 1);
+        ASSERT_EQ(txn->get(tmp_rowset_key, &tmp_rowset_val), TxnErrorCode::TXN_KEY_NOT_FOUND);
         // Check input rowsets removed, the largest version remains
         for (int i = 1; i < input_rowset_keys.size() - 2; ++i) {
             std::string val;
-            EXPECT_EQ(txn->get(input_rowset_keys[i], &val), 1) << hex(input_rowset_keys[i]);
+            EXPECT_EQ(txn->get(input_rowset_keys[i], &val), TxnErrorCode::TXN_KEY_NOT_FOUND)
+                    << hex(input_rowset_keys[i]);
         }
         // Check recycle rowsets added
         for (int i = 1; i < input_rowset_vals.size() - 1; ++i) {
@@ -406,12 +408,12 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
             ASSERT_TRUE(rs.ParseFromString(*input_rowset_vals[i]));
             auto key = recycle_rowset_key({instance_id, tablet_id, rs.rowset_id_v2()});
             std::string val;
-            EXPECT_EQ(txn->get(key, &val), 0) << hex(key);
+            EXPECT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK) << hex(key);
         }
         // Check output rowset added
         auto rowset_key = meta_rowset_key({instance_id, tablet_id, input_version_end});
         std::string rowset_val;
-        EXPECT_EQ(txn->get(rowset_key, &rowset_val), 0) << hex(rowset_key);
+        EXPECT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK) << hex(rowset_key);
     };
 
     auto test_abort_compaction_job = [&](int64_t table_id, int64_t index_id, int64_t partition_id,
@@ -429,10 +431,10 @@ TEST(MetaServiceJobTest, CompactionJobTest) {
                                         &req, &res, nullptr);
 
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
         std::string job_val;
-        ASSERT_EQ(txn->get(job_key, &job_val), 0);
+        ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
         TabletJobInfoPB job_pb;
         ASSERT_TRUE(job_pb.ParseFromString(job_val));
         ASSERT_TRUE(job_pb.compaction().empty());
@@ -489,10 +491,11 @@ static void start_schema_change_job(MetaServiceImpl* meta_service, int64_t table
     meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << job_id << ' ' << initiator;
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0) << job_id << ' ' << initiator;
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK)
+            << job_id << ' ' << initiator;
     auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     std::string job_val;
-    ASSERT_EQ(txn->get(job_key, &job_val), 0) << job_id << ' ' << initiator;
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK) << job_id << ' ' << initiator;
     TabletJobInfoPB job_pb;
     ASSERT_TRUE(job_pb.ParseFromString(job_val)) << job_id << ' ' << initiator;
     ASSERT_TRUE(job_pb.has_schema_change()) << job_id << ' ' << initiator;
@@ -610,12 +613,12 @@ TEST(MetaServiceJobTest, SchemaChangeJobTest) {
         EXPECT_EQ(tablet_stats.data_size(), 50000);
 
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // check tablet state
         auto tablet_key =
                 meta_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
         std::string tablet_val;
-        ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+        ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB tablet_pb;
         ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
         ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
@@ -623,7 +626,7 @@ TEST(MetaServiceJobTest, SchemaChangeJobTest) {
         std::unique_ptr<RangeGetIterator> it;
         auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
         auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+        ASSERT_EQ(txn->get(rs_start, rs_end, &it), TxnErrorCode::TXN_OK);
         ASSERT_EQ(it->size(), 6);
         auto [k, v] = it->next();
         doris::RowsetMetaPB saved_rowset;
@@ -683,12 +686,12 @@ TEST(MetaServiceJobTest, SchemaChangeJobTest) {
         EXPECT_EQ(tablet_stats.data_size(), 50000);
 
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // check tablet state
         auto tablet_key =
                 meta_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
         std::string tablet_val;
-        ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+        ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB tablet_pb;
         ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
         ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
@@ -697,7 +700,7 @@ TEST(MetaServiceJobTest, SchemaChangeJobTest) {
         std::unique_ptr<RangeGetIterator> it;
         auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
         auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+        ASSERT_EQ(txn->get(rs_start, rs_end, &it), TxnErrorCode::TXN_OK);
         // [0-1][2-8][9-12][13-13][14-14][15-15]
         EXPECT_EQ(it->size(), 6);
         auto [k, v] = it->next();
@@ -723,7 +726,7 @@ TEST(MetaServiceJobTest, SchemaChangeJobTest) {
         // check recycled rowsets
         auto recycl_rs_start = recycle_rowset_key({instance_id, new_tablet_id, ""});
         auto recycl_rs_end = recycle_rowset_key({instance_id, new_tablet_id, "\xff"});
-        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
+        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), TxnErrorCode::TXN_OK);
         // [11-11], [12-12], old[13-13]
         ASSERT_EQ(it->size(), 3);
         for (int i = 0; i < 3; ++i) {
@@ -841,12 +844,12 @@ TEST(MetaServiceJobTest, RetrySchemaChangeJobTest) {
     EXPECT_EQ(tablet_stats.data_size(), 50000);
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     // check tablet state
     auto tablet_key =
             meta_tablet_key({instance_id, table_id, index_id, partition_id, new_tablet_id});
     std::string tablet_val;
-    ASSERT_EQ(txn->get(tablet_key, &tablet_val), 0);
+    ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
     doris::TabletMetaPB tablet_pb;
     ASSERT_TRUE(tablet_pb.ParseFromString(tablet_val));
     ASSERT_EQ(tablet_pb.tablet_state(), doris::TabletStatePB::PB_RUNNING);
@@ -855,7 +858,7 @@ TEST(MetaServiceJobTest, RetrySchemaChangeJobTest) {
     std::unique_ptr<RangeGetIterator> it;
     auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 0});
     auto rs_end = meta_rowset_key({instance_id, new_tablet_id, 100});
-    ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+    ASSERT_EQ(txn->get(rs_start, rs_end, &it), TxnErrorCode::TXN_OK);
     EXPECT_EQ(it->size(), 6);
     auto [k, v] = it->next();
     doris::RowsetMetaPB saved_rowset;
@@ -880,7 +883,7 @@ TEST(MetaServiceJobTest, RetrySchemaChangeJobTest) {
     // check recycled rowsets
     auto recycl_rs_start = recycle_rowset_key({instance_id, new_tablet_id, ""});
     auto recycl_rs_end = recycle_rowset_key({instance_id, new_tablet_id, "\xff"});
-    ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
+    ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), TxnErrorCode::TXN_OK);
     // [11-11], [12-12], old[13-13]
     ASSERT_EQ(it->size(), 3);
     for (int i = 0; i < 3; ++i) {
@@ -946,12 +949,12 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
 
     // check job kv
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string job_key =
             job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     std::string job_val;
     TabletJobInfoPB job_pb;
-    ASSERT_EQ(txn->get(job_key, &job_val), 0);
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(job_pb.ParseFromString(job_val));
     ASSERT_EQ(job_pb.compaction_size(), 2);
     ASSERT_EQ(job_pb.compaction(0).id(), "job3");
@@ -991,8 +994,8 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
 
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(job_key, &job_val), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
     job_pb.Clear();
     ASSERT_TRUE(job_pb.ParseFromString(job_val));
     ASSERT_EQ(job_pb.compaction_size(), 1);
@@ -1005,8 +1008,8 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
                          TabletCompactionJobPB::CUMULATIVE, res);
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(job_key, &job_val), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(job_pb.ParseFromString(job_val));
     ASSERT_EQ(job_pb.compaction_size(), 2);
     ASSERT_EQ(job_pb.compaction(0).id(), "job4");
@@ -1068,16 +1071,16 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         EXPECT_EQ(tablet_stats.num_segments(), 5);
         EXPECT_EQ(tablet_stats.data_size(), 50000);
 
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // Check tmp rowsets
         std::string tmp_rs_key, tmp_rs_val;
         meta_rowset_tmp_key({instance_id, output_rowset.txn_id(), tablet_id}, &tmp_rs_val);
-        ASSERT_EQ(txn->get(tmp_rs_key, &tmp_rs_val), 1);
+        ASSERT_EQ(txn->get(tmp_rs_key, &tmp_rs_val), TxnErrorCode::TXN_KEY_NOT_FOUND);
         // Check visible rowsets
         std::unique_ptr<RangeGetIterator> it;
         auto rs_start = meta_rowset_key({instance_id, table_id, 0});
         auto rs_end = meta_rowset_key({instance_id, tablet_id, 100});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+        ASSERT_EQ(txn->get(rs_start, rs_end, &it), TxnErrorCode::TXN_OK);
         ASSERT_EQ(it->size(), 6);
         auto [k, v] = it->next(); // [0-1]
         doris::RowsetMetaPB visible_rowset;
@@ -1105,7 +1108,7 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         // Check recycle rowsets
         auto recycl_rs_start = recycle_rowset_key({instance_id, tablet_id, ""});
         auto recycl_rs_end = recycle_rowset_key({instance_id, tablet_id, "\xff"});
-        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
+        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), TxnErrorCode::TXN_OK);
         // [5][6][7][8][9][10]
         ASSERT_EQ(it->size(), 6);
         for (int i = 0; i < 6; ++i) {
@@ -1119,8 +1122,8 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         }
     }
 
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(job_key, &job_val), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(job_pb.ParseFromString(job_val));
     ASSERT_EQ(job_pb.compaction_size(), 1);
     ASSERT_EQ(job_pb.compaction(0).id(), "job4");
@@ -1172,16 +1175,16 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         EXPECT_EQ(tablet_stats.num_segments(), 3);
         EXPECT_EQ(tablet_stats.data_size(), 30000);
 
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
         // Check tmp rowsets
         std::string tmp_rs_key, tmp_rs_val;
         meta_rowset_tmp_key({instance_id, output_rowset.txn_id(), tablet_id}, &tmp_rs_val);
-        ASSERT_EQ(txn->get(tmp_rs_key, &tmp_rs_val), 1);
+        ASSERT_EQ(txn->get(tmp_rs_key, &tmp_rs_val), TxnErrorCode::TXN_KEY_NOT_FOUND);
         // Check visible rowsets
         std::unique_ptr<RangeGetIterator> it;
         auto rs_start = meta_rowset_key({instance_id, table_id, 0});
         auto rs_end = meta_rowset_key({instance_id, tablet_id, 100});
-        ASSERT_EQ(txn->get(rs_start, rs_end, &it), 0);
+        ASSERT_EQ(txn->get(rs_start, rs_end, &it), TxnErrorCode::TXN_OK);
         ASSERT_EQ(it->size(), 4);
         auto [k, v] = it->next();
         doris::RowsetMetaPB visible_rowset;
@@ -1206,7 +1209,7 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         // Check recycle rowsets
         auto recycl_rs_start = recycle_rowset_key({instance_id, tablet_id, ""});
         auto recycl_rs_end = recycle_rowset_key({instance_id, tablet_id, "\xff"});
-        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), 0);
+        ASSERT_EQ(txn->get(recycl_rs_start, recycl_rs_end, &it), TxnErrorCode::TXN_OK);
         // [2][3][4][5][6][7][8][9][10]
         ASSERT_EQ(it->size(), 9);
         for (int i = 0; i < 9; ++i) {
@@ -1220,8 +1223,8 @@ TEST(MetaServiceJobTest, ConcurrentCompactionTest) {
         }
     }
 
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(job_key, &job_val), 0);
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(job_key, &job_val), TxnErrorCode::TXN_OK);
     ASSERT_TRUE(job_pb.ParseFromString(job_val));
     ASSERT_EQ(job_pb.compaction_size(), 0);
 }

@@ -25,6 +25,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 
@@ -369,18 +370,18 @@ static bthread_t start_load_watcher(std::shared_ptr<LoadContext> ctx) {
 
 static void verify_instance(std::shared_ptr<selectdb::TxnKv> kv, uint64_t instance_id) {
     std::unique_ptr<selectdb::Transaction> txn;
-    CHECK_EQ(kv->create_txn(&txn), 0);
+    CHECK_EQ(kv->create_txn(&txn), selectdb::TxnErrorCode::TXN_OK);
     selectdb::InstanceKeyInfo instance_key({std::to_string(instance_id)});
     std::string key;
     std::string value;
     selectdb::instance_key(instance_key, &key);
-    int res = txn->get(key, &value, true);
-    if (res == 1) {
+    selectdb::TxnErrorCode err = txn->get(key, &value, true);
+    if (err == selectdb::TxnErrorCode::TXN_KEY_NOT_FOUND) {
         LOG_FATAL("instance key is not found")
                 .tag("instance_id", instance_id)
                 .tag("key", selectdb::hex(key));
-    } else if (res != 0) {
-        LOG_FATAL("read instance key").tag("res", res).tag("key", selectdb::hex(key));
+    } else if (err == selectdb::TxnErrorCode::TXN_OK) {
+        LOG_FATAL("read instance key").tag("err", err).tag("key", selectdb::hex(key));
     }
 
     LOG_INFO("read instance key")
@@ -392,23 +393,23 @@ static void verify_instance(std::shared_ptr<selectdb::TxnKv> kv, uint64_t instan
 static void verify_tablet(std::shared_ptr<selectdb::TxnKv> kv, uint64_t instance_id,
                           uint64_t tablet_id) {
     std::unique_ptr<selectdb::Transaction> txn;
-    CHECK_EQ(kv->create_txn(&txn), 0);
+    CHECK_EQ(kv->create_txn(&txn), selectdb::TxnErrorCode::TXN_OK);
 
     std::string key = selectdb::meta_tablet_key(
             {std::to_string(instance_id), tablet_id, tablet_id, tablet_id, tablet_id});
     std::string value;
-    int res = txn->get(key, &value, true);
-    if (res == 1) {
+    selectdb::TxnErrorCode err = txn->get(key, &value, true);
+    if (err == selectdb::TxnErrorCode::TXN_KEY_NOT_FOUND) {
         LOG_FATAL("tablet key is not found")
                 .tag("instance_id", instance_id)
                 .tag("tablet", tablet_id)
                 .tag("key", selectdb::hex(key));
-    } else if (res != 0) {
+    } else if (err == selectdb::TxnErrorCode::TXN_OK) {
         LOG_FATAL("read tablet key")
                 .tag("instance_id", instance_id)
                 .tag("tablet", tablet_id)
                 .tag("key", selectdb::hex(key))
-                .tag("res", res);
+                .tag("err", err);
     }
 
     LOG_INFO("read tablet key")
@@ -421,25 +422,25 @@ static void verify_tablet(std::shared_ptr<selectdb::TxnKv> kv, uint64_t instance
 static void verify_rowset(std::shared_ptr<selectdb::TxnKv> kv, uint64_t instance_id,
                           uint64_t tablet_id, uint64_t rowset_id) {
     std::unique_ptr<selectdb::Transaction> txn;
-    CHECK_EQ(kv->create_txn(&txn), 0);
+    CHECK_EQ(kv->create_txn(&txn), selectdb::TxnErrorCode::TXN_OK);
 
     std::string key =
             selectdb::meta_rowset_key({std::to_string(instance_id), tablet_id, rowset_id});
     std::string value;
-    int res = txn->get(key, &value, true);
-    if (res == 1) {
+    selectdb::TxnErrorCode err = txn->get(key, &value, true);
+    if (err == selectdb::TxnErrorCode::TXN_KEY_NOT_FOUND) {
         LOG_FATAL("rowset key is not found")
                 .tag("instance_id", instance_id)
                 .tag("tablet", tablet_id)
                 .tag("version", rowset_id)
                 .tag("key", selectdb::hex(key));
-    } else if (res != 0) {
+    } else if (err != selectdb::TxnErrorCode::TXN_OK) {
         LOG_FATAL("read rowset key")
                 .tag("instance_id", instance_id)
                 .tag("tablet", tablet_id)
                 .tag("version", rowset_id)
                 .tag("key", selectdb::hex(key))
-                .tag("res", res);
+                .tag("err", err);
     }
 
     LOG_INFO("read rowset key")

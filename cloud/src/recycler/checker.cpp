@@ -26,6 +26,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "recycler/s3_accessor.h"
 #ifdef UNIT_TEST
 #include "../test/mock_accessor.h"
@@ -218,14 +219,14 @@ void Checker::do_inspect(const InstanceInfoPB& instance) {
     std::string check_job_key = job_check_key({instance.instance_id()});
     std::unique_ptr<Transaction> txn;
     std::string val;
-    int ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         LOG_CHECK_INTERVAL_ALARM << "failed to create txn";
         return;
     }
-    ret = txn->get(check_job_key, &val);
-    if (ret < 0) {
-        LOG_CHECK_INTERVAL_ALARM << "failed to get kv, ret=" << ret
+    err = txn->get(check_job_key, &val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        LOG_CHECK_INTERVAL_ALARM << "failed to get kv, err=" << err
                                  << " key=" << hex(check_job_key);
         return;
     }
@@ -259,7 +260,7 @@ void Checker::do_inspect(const InstanceInfoPB& instance) {
     };
     using namespace std::chrono;
     auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-    if (ret == 1 || !has_last_ctime()) {
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND || !has_last_ctime()) {
         // Use instance's ctime for instances that do not have job's last ctime
         last_ctime_ms = instance.ctime();
     }
@@ -302,13 +303,20 @@ void Checker::inspect_instance_check_interval() {
 // return 0 for success get a key, 1 for key not found, negative for error
 int key_exist(TxnKv* txn_kv, std::string_view key) {
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to init txn, ret=" << ret;
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to init txn, err=" << err;
         return -1;
     }
     std::string val;
-    return txn->get(key, &val);
+    switch (txn->get(key, &val)) {
+    case TxnErrorCode::TXN_OK:
+        return 0;
+    case TxnErrorCode::TXN_KEY_NOT_FOUND:
+        return 1;
+    default:
+        return -1;
+    }
 }
 
 InstanceChecker::InstanceChecker(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id)
@@ -425,15 +433,15 @@ int InstanceChecker::do_check() {
     std::unique_ptr<RangeGetIterator> it;
     do {
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to init txn, ret=" << ret;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to init txn, err=" << err;
             return -1;
         }
 
-        ret = txn->get(start_key, end_key, &it);
-        if (ret != 0) {
-            LOG(WARNING) << "internal error, failed to get rowset meta, ret=" << ret;
+        err = txn->get(start_key, end_key, &it);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "internal error, failed to get rowset meta, err=" << err;
             return -1;
         }
         num_scanned += it->size();
@@ -518,8 +526,8 @@ int InstanceChecker::do_inverted_check() {
         tablet_rowsets_cache.tablet_id = tablet_id;
         tablet_rowsets_cache.rowset_ids.clear();
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to create txn";
             return -1;
         }
@@ -527,9 +535,9 @@ int InstanceChecker::do_inverted_check() {
         auto begin = meta_rowset_key({instance_id_, tablet_id, 0});
         auto end = meta_rowset_key({instance_id_, tablet_id, INT64_MAX});
         do {
-            ret = txn->get(begin, end, &it);
-            if (ret != 0) {
-                LOG(WARNING) << "failed to get rowset kv, ret=" << ret;
+            TxnErrorCode err = txn->get(begin, end, &it);
+            if (err != TxnErrorCode::TXN_OK) {
+                LOG(WARNING) << "failed to get rowset kv, err=" << err;
                 return -1;
             }
             if (!it->has_next()) {

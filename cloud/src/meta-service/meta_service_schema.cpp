@@ -6,6 +6,7 @@
 #include "common/util.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 namespace config {
@@ -23,9 +24,9 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                 return type;
             };
             ValueBuf buf;
-            ret = selectdb::get(txn, schema_key, &buf);
-            if (ret != 0) {
-                LOG(WARNING) << "failed to get schema";
+            auto err = selectdb::get(txn, schema_key, &buf);
+            if (err != TxnErrorCode::TXN_OK) {
+                LOG(WARNING) << "failed to get schema, err=" << err;
                 return false;
             }
             doris::TabletSchemaPB saved_schema;

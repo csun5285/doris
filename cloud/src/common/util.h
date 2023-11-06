@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "meta-service/txn_kv_error.h"
+
 namespace google::protobuf {
 class Message;
 }
@@ -67,8 +69,8 @@ struct ValueBuf {
     void remove(Transaction* txn) const;
 
     // Get a key, save raw splitted values of the key to `this`, value length may be bigger than 100k
-    // Return 0 for success get a key, 1 for key not found, -1 for kv error, -2 for decode key error
-    [[nodiscard]] int get(Transaction* txn, std::string_view key, bool snapshot = false);
+    // Return TXN_OK for success get a key, TXN_KEY_NOT_FOUND for key not found, otherwise for error.
+    TxnErrorCode get(Transaction* txn, std::string_view key, bool snapshot = false);
 
     std::vector<std::unique_ptr<RangeGetIterator>> iters;
     int8_t ver {-1};
@@ -80,9 +82,9 @@ struct ValueBuf {
  * @param key encode key
  * @param val return wrapped raw splitted values of the key
  * @param snapshot if true, `key` will not be included in txn conflict detection this time
- * @return 0 for success get a key, 1 for key not found, -1 for kv error, -2 for decode key error
+ * @return return TXN_OK for success get a key, TXN_KEY_NOT_FOUND for key not found, otherwise for error.
  */
-[[nodiscard]] int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot = false);
+TxnErrorCode get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot = false);
 
 /**
  * Test whether key exists

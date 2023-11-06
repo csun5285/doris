@@ -3,6 +3,9 @@
 #include <gen_cpp/selectdb_cloud.pb.h>
 #include <glog/logging.h>
 #include "common/stopwatch.h"
+#include "meta-service/meta_service_helper.h"
+#include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "meta_service.h"
 
 #include "meta-service/keys.h"
@@ -21,43 +24,6 @@
 #include <cstddef>
 // clang-format on
 
-#define RPC_PREPROCESS(func_name)                                                           \
-    StopWatch sw;                                                                           \
-    auto ctrl = static_cast<brpc::Controller*>(controller);                                 \
-    LOG(INFO) << "begin " #func_name " rpc from " << ctrl->remote_side()                    \
-              << " request=" << request->ShortDebugString();                                \
-    brpc::ClosureGuard closure_guard(done);                                                 \
-    [[maybe_unused]] int ret = 0;                                                           \
-    [[maybe_unused]] std::stringstream ss;                                                  \
-    [[maybe_unused]] MetaServiceCode code = MetaServiceCode::OK;                            \
-    [[maybe_unused]] std::string msg;                                                       \
-    [[maybe_unused]] std::string instance_id;                                               \
-    [[maybe_unused]] bool drop_request = false;                                             \
-    std::unique_ptr<int, std::function<void(int*)>> defer_status((int*)0x01, [&](int*) {    \
-        response->mutable_status()->set_code(code);                                         \
-        response->mutable_status()->set_msg(msg);                                           \
-        LOG(INFO) << "finish " #func_name " from " << ctrl->remote_side() << " ret=" << ret \
-                  << " response=" << response->ShortDebugString();                          \
-        closure_guard.reset(nullptr);                                                       \
-        if (config::use_detailed_metrics && !instance_id.empty() && !drop_request) {        \
-            g_bvar_ms_##func_name.put(instance_id, sw.elapsed_us());                        \
-        }                                                                                   \
-    });
-
-#define RPC_RATE_LIMIT(func_name)                                                            \
-    if (config::enable_rate_limit && config::use_detailed_metrics && !instance_id.empty()) { \
-        auto rate_limiter = rate_limiter_->get_rpc_rate_limiter(#func_name);                 \
-        assert(rate_limiter != nullptr);                                                     \
-        std::function<int()> get_bvar_qps = [&] {                                            \
-            return g_bvar_ms_##func_name.get(instance_id)->qps();                            \
-        };                                                                                   \
-        if (!rate_limiter->get_qps_token(instance_id, get_bvar_qps)) {                       \
-            drop_request = true;                                                             \
-            code = MetaServiceCode::MAX_QPS_LIMIT;                                           \
-            msg = "reach max qps limit";                                                     \
-            return;                                                                          \
-        }                                                                                    \
-    }
 // Empty string not is not processed
 template <typename T, size_t S>
 static inline constexpr size_t get_file_name_offset(const T (&s)[S], size_t i = S - 1) {
@@ -71,17 +37,7 @@ namespace selectdb {
 static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
 static constexpr int SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID = -2;
 
-extern std::string get_instance_id(const std::shared_ptr<ResourceManager>& rc_mgr,
-                                   const std::string& cloud_unique_id);
-
-extern void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
-                           const std::string& instance_id, int64_t tablet_id,
-                           TabletIndexPB& tablet_idx);
-
-extern bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t index_id,
-                              int64_t partition_id);
-
-void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss, int& ret,
+void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
                           std::unique_ptr<Transaction>& txn, const StartTabletJobRequest* request,
                           StartTabletJobResponse* response, std::string& instance_id,
                           bool& need_commit, ObjectPool& obj_pool) {
@@ -105,11 +61,13 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
     std::string stats_key =
             stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     std::string stats_val;
-    ret = txn->get(stats_key, &stats_val);
-    if (ret != 0) {
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
-        SS << (ret == 1 ? "not found" : "get kv error") << " when get tablet stats, "
-           << " tablet_id=" << tablet_id << " key=" << hex(stats_key) << " ret=" << ret;
+    TxnErrorCode err = txn->get(stats_key, &stats_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                                                      : cast_as<ErrCategory::READ>(err);
+        SS << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "get kv error")
+           << " when get tablet stats, tablet_id=" << tablet_id << " key=" << hex(stats_key)
+           << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -131,15 +89,15 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
             job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
     auto& job_val = *obj_pool.add(new std::string());
     TabletJobInfoPB job_pb;
-    ret = txn->get(job_key, &job_val);
-    if (ret < 0) {
+    err = txn->get(job_key, &job_val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         SS << "failed to get tablet job, instance_id=" << instance_id << " tablet_id=" << tablet_id
-           << " key=" << hex(job_key) << " ret=" << ret;
+           << " key=" << hex(job_key) << " err=" << err;
         msg = ss.str();
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         return;
     }
-    while (ret == 0) {
+    while (err == TxnErrorCode::TXN_OK) {
         job_pb.ParseFromString(job_val);
         if (job_pb.compaction().empty()) {
             break;
@@ -223,7 +181,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
 }
 
 void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
-                             int& ret, std::unique_ptr<Transaction>& txn,
+                             std::unique_ptr<Transaction>& txn,
                              const StartTabletJobRequest* request, std::string& instance_id,
                              bool& need_commit, ObjectPool& obj_pool) {
     auto& schema_change = request->job().schema_change();
@@ -257,7 +215,7 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
     auto& new_tablet_idx = const_cast<TabletIndexPB&>(schema_change.new_tablet_idx());
     if (!new_tablet_idx.has_table_id() || !new_tablet_idx.has_index_id() ||
         !new_tablet_idx.has_partition_id()) {
-        get_tablet_idx(code, msg, ret, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
+        get_tablet_idx(code, msg, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
         if (code != MetaServiceCode::OK) return;
     }
     MetaTabletKeyInfo new_tablet_key_info {instance_id, new_tablet_idx.table_id(),
@@ -267,13 +225,15 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
     std::string new_tablet_val;
     doris::TabletMetaPB new_tablet_meta;
     meta_tablet_key(new_tablet_key_info, &new_tablet_key);
-    ret = txn->get(new_tablet_key, &new_tablet_val);
-    if (ret != 0) {
-        SS << "failed to get new tablet meta" << (ret == 1 ? " (not found)" : "")
+    TxnErrorCode err = txn->get(new_tablet_key, &new_tablet_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        SS << "failed to get new tablet meta"
+           << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
            << " instance_id=" << instance_id << " tablet_id=" << new_tablet_id
-           << " key=" << hex(new_tablet_key) << " ret=" << ret;
+           << " key=" << hex(new_tablet_key) << " err=" << err;
         msg = ss.str();
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                                                      : cast_as<ErrCategory::READ>(err);
         return;
     }
     if (!new_tablet_meta.ParseFromString(new_tablet_val)) {
@@ -298,12 +258,12 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
             job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
     auto& job_val = *obj_pool.add(new std::string());
     TabletJobInfoPB job_pb;
-    ret = txn->get(job_key, &job_val);
-    if (ret < 0) {
+    err = txn->get(job_key, &job_val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         SS << "failed to get tablet job, instance_id=" << instance_id << " tablet_id=" << tablet_id
-           << " key=" << hex(job_key) << " ret=" << ret;
+           << " key=" << hex(job_key) << " err=" << err;
         msg = ss.str();
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         return;
     }
     job_pb.mutable_idx()->CopyFrom(request->job().idx());
@@ -344,9 +304,9 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
@@ -360,7 +320,7 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
     auto& tablet_idx = const_cast<TabletIndexPB&>(request->job().idx());
     if (!tablet_idx.has_table_id() || !tablet_idx.has_index_id() ||
         !tablet_idx.has_partition_id()) {
-        get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
+        get_tablet_idx(code, msg, txn.get(), instance_id, tablet_id, tablet_idx);
         if (code != MetaServiceCode::OK) return;
     }
     // Check if tablet has been dropped
@@ -374,33 +334,31 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
     ObjectPool obj_pool; // To save KVs that txn may use asynchronously
     bool need_commit = false;
     std::unique_ptr<int, std::function<void(int*)>> defer_commit(
-            (int*)0x01, [&ss, &ret, &txn, &code, &msg, &need_commit](int*) {
+            (int*)0x01, [&ss, &txn, &code, &msg, &need_commit](int*) {
                 if (!need_commit) return;
-                ret = txn->commit();
-                if (ret != 0) {
-                    code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT
-                                     : MetaServiceCode::KV_TXN_COMMIT_ERR;
-                    ss << "failed to commit job kv, ret=" << ret;
+                TxnErrorCode err = txn->commit();
+                if (err != TxnErrorCode::TXN_OK) {
+                    code = cast_as<ErrCategory::COMMIT>(err);
+                    ss << "failed to commit job kv, err=" << err;
                     msg = ss.str();
                     return;
                 }
             });
 
     if (!request->job().compaction().empty()) {
-        start_compaction_job(code, msg, ss, ret, txn, request, response, instance_id, need_commit,
+        start_compaction_job(code, msg, ss, txn, request, response, instance_id, need_commit,
                              obj_pool);
         return;
     }
 
     if (request->job().has_schema_change()) {
-        start_schema_change_job(code, msg, ss, ret, txn, request, instance_id, need_commit,
-                                obj_pool);
+        start_schema_change_job(code, msg, ss, txn, request, instance_id, need_commit, obj_pool);
         return;
     }
 }
 
 void process_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
-                            int& ret, std::unique_ptr<Transaction>& txn,
+                            std::unique_ptr<Transaction>& txn,
                             const ::selectdb::FinishTabletJobRequest* request,
                             ::selectdb::FinishTabletJobResponse* response,
                             TabletJobInfoPB& recorded_job, std::string& instance_id,
@@ -507,7 +465,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     // ATTN: The condition that snapshot read can be used to get tablet stats is: all other transactions that put tablet stats
     //  can make read write conflicts with this transaction on other keys. Currently, if all meta-service nodes are running
     //  with `config::split_tablet_stats = true` can meet the condition.
-    internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, request->job().idx(), *stats,
+    internal_get_tablet_stats(code, msg, txn.get(), instance_id, request->job().idx(), *stats,
                               detached_stats, config::snapshot_get_tablet_stats);
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         stats->set_cumulative_compaction_cnt(stats->cumulative_compaction_cnt() + 1);
@@ -590,14 +548,14 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         std::string lock_key =
                 meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
         std::string lock_val;
-        ret = txn->get(lock_key, &lock_val);
+        TxnErrorCode err = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
-                  << " key=" << hex(lock_key) << " ret=" << ret;
-        if (ret != 0) {
+                  << " partition_id=" << partition_id << " key=" << hex(lock_key) << " err=" << err;
+        if (err != TxnErrorCode::TXN_OK) {
             ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
-               << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+               << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;
             msg = ss.str();
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+            code = cast_as<ErrCategory::READ>(err);
             return;
         }
         DeleteBitmapUpdateLockPB lock_info;
@@ -671,10 +629,10 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
 
     auto rs_start1 = rs_start;
     do {
-        ret = txn->get(rs_start1, rs_end, &it);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            SS << "internal error, failed to get rowset range, ret=" << ret
+        TxnErrorCode err = txn->get(rs_start1, rs_end, &it);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            SS << "internal error, failed to get rowset range, err=" << err
                << " tablet_id=" << tablet_id << " range=[" << hex(rs_start1) << ", << "
                << hex(rs_end) << ")";
             msg = ss.str();
@@ -759,12 +717,14 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     auto& tmp_rowset_key =
             *obj_pool.add(new std::string(meta_rowset_tmp_key({instance_id, txn_id, tablet_id})));
     auto& tmp_rowset_val = *obj_pool.add(new std::string());
-    ret = txn->get(tmp_rowset_key, &tmp_rowset_val);
-    if (ret != 0) {
-        SS << "failed to get tmp rowset key" << (ret == 1 ? " (not found)" : "")
+    TxnErrorCode err = txn->get(tmp_rowset_key, &tmp_rowset_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        SS << "failed to get tmp rowset key"
+           << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
            << ", tablet_id=" << tablet_id << " tmp_rowset_key=" << hex(tmp_rowset_key);
         msg = ss.str();
-        code = ret == 1 ? MetaServiceCode::UNDEFINED_ERR : MetaServiceCode::KV_TXN_GET_ERR;
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
+                                                      : cast_as<ErrCategory::READ>(err);
         return;
     }
 
@@ -805,7 +765,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
 }
 
 void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
-                               int& ret, std::unique_ptr<Transaction>& txn,
+                               std::unique_ptr<Transaction>& txn,
                                const ::selectdb::FinishTabletJobRequest* request,
                                ::selectdb::FinishTabletJobResponse* response,
                                TabletJobInfoPB& recorded_job, std::string& instance_id,
@@ -829,7 +789,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     auto& new_tablet_idx = const_cast<TabletIndexPB&>(schema_change.new_tablet_idx());
     if (!new_tablet_idx.has_table_id() || !new_tablet_idx.has_index_id() ||
         !new_tablet_idx.has_partition_id()) {
-        get_tablet_idx(code, msg, ret, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
+        get_tablet_idx(code, msg, txn.get(), instance_id, new_tablet_id, new_tablet_idx);
         if (code != MetaServiceCode::OK) return;
     }
     int64_t new_table_id = new_tablet_idx.table_id();
@@ -842,13 +802,15 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     auto& new_tablet_val = *obj_pool.add(new std::string());
     doris::TabletMetaPB new_tablet_meta;
     meta_tablet_key(new_tablet_key_info, &new_tablet_key);
-    ret = txn->get(new_tablet_key, &new_tablet_val);
-    if (ret != 0) {
-        SS << "failed to get new tablet meta" << (ret == 1 ? " (not found)" : "")
+    TxnErrorCode err = txn->get(new_tablet_key, &new_tablet_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        SS << "failed to get new tablet meta"
+           << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
            << " instance_id=" << instance_id << " tablet_id=" << new_tablet_id
-           << " key=" << hex(new_tablet_key) << " ret=" << ret;
+           << " key=" << hex(new_tablet_key) << " err=" << err;
         msg = ss.str();
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                                                      : cast_as<ErrCategory::READ>(err);
         return;
     }
     if (!new_tablet_meta.ParseFromString(new_tablet_val)) {
@@ -960,10 +922,10 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     std::unique_ptr<RangeGetIterator> it;
     auto rs_start1 = rs_start;
     do {
-        ret = txn->get(rs_start1, rs_end, &it);
-        if (ret != 0) {
+        TxnErrorCode err = txn->get(rs_start1, rs_end, &it);
+        if (err != TxnErrorCode::TXN_OK) {
             code = MetaServiceCode::KV_TXN_GET_ERR;
-            SS << "internal error, failed to get rowset range, ret=" << ret
+            SS << "internal error, failed to get rowset range, err=" << err
                << " tablet_id=" << new_tablet_id << " range=[" << hex(rs_start1) << ", << "
                << hex(rs_end) << ")";
             msg = ss.str();
@@ -1013,7 +975,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     // ATTN: The condition that snapshot read can be used to get tablet stats is: all other transactions that put tablet stats
     //  can make read write conflicts with this transaction on other keys. Currently, if all meta-service nodes are running
     //  with `config::split_tablet_stats = true` can meet the condition.
-    internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, new_tablet_idx, *stats,
+    internal_get_tablet_stats(code, msg, txn.get(), instance_id, new_tablet_idx, *stats,
                               detached_stats, config::snapshot_get_tablet_stats);
     // clang-format off
     stats->set_cumulative_point(schema_change.output_cumulative_point());
@@ -1044,14 +1006,15 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
         std::string lock_key =
                 meta_delete_bitmap_update_lock_key({instance_id, new_table_id, -1});
         std::string lock_val;
-        ret = txn->get(lock_key, &lock_val);
+        TxnErrorCode err = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << new_table_id
-                  << " key=" << hex(lock_key) << " ret=" << ret;
-        if (ret != 0) {
+                  << " partition_id=" << new_partition_id << " key=" << hex(lock_key)
+                  << " err=" << err;
+        if (err != TxnErrorCode::TXN_OK) {
             ss << "failed to get delete bitmap update lock key, instance_id=" << instance_id
-               << " table_id=" << new_table_id << " key=" << hex(lock_key) << " ret=" << ret;
+               << " table_id=" << new_table_id << " key=" << hex(lock_key) << " err=" << err;
             msg = ss.str();
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+            code = cast_as<ErrCategory::READ>(err);
             return;
         }
         DeleteBitmapUpdateLockPB lock_info;
@@ -1099,12 +1062,14 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
                 meta_rowset_tmp_key({instance_id, schema_change.txn_ids().at(i), new_tablet_id})));
         auto& tmp_rowset_val = *obj_pool.add(new std::string());
         // FIXME: async get
-        ret = txn->get(tmp_rowset_key, &tmp_rowset_val);
-        if (ret != 0) {
-            SS << "failed to get tmp rowset key" << (ret == 1 ? " (not found)" : "")
+        TxnErrorCode err = txn->get(tmp_rowset_key, &tmp_rowset_val);
+        if (err != TxnErrorCode::TXN_OK) {
+            SS << "failed to get tmp rowset key"
+               << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
                << ", tablet_id=" << new_tablet_id << " tmp_rowset_key=" << hex(tmp_rowset_key);
             msg = ss.str();
-            code = ret == 1 ? MetaServiceCode::UNDEFINED_ERR : MetaServiceCode::KV_TXN_GET_ERR;
+            code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
+                                                          : cast_as<ErrCategory::READ>(err);
             return;
         }
         auto& rowset_key = *obj_pool.add(new std::string(meta_rowset_key(
@@ -1152,9 +1117,9 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     ObjectPool obj_pool; // To save KVs that txn may use asynchronously
     bool need_commit = false;
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
@@ -1168,7 +1133,7 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     auto& tablet_idx = const_cast<TabletIndexPB&>(request->job().idx());
     if (!tablet_idx.has_table_id() || !tablet_idx.has_index_id() ||
         !tablet_idx.has_partition_id()) {
-        get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, tablet_idx);
+        get_tablet_idx(code, msg, txn.get(), instance_id, tablet_id, tablet_idx);
         if (code != MetaServiceCode::OK) return;
     }
     // Check if tablet has been dropped
@@ -1184,12 +1149,14 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     std::string job_key = job_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
                                           tablet_idx.partition_id(), tablet_id});
     std::string job_val;
-    ret = txn->get(job_key, &job_val);
-    if (ret != 0) {
-        SS << (ret == 1 ? "job not found," : "internal error,") << " instance_id=" << instance_id
-           << " tablet_id=" << tablet_id << " job=" << proto_to_json(request->job());
+    err = txn->get(job_key, &job_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        SS << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "job not found," : "internal error,")
+           << " instance_id=" << instance_id << " tablet_id=" << tablet_id
+           << " job=" << proto_to_json(request->job());
         msg = ss.str();
-        code = ret == 1 ? MetaServiceCode::INVALID_ARGUMENT : MetaServiceCode::KV_TXN_GET_ERR;
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::INVALID_ARGUMENT
+                                                      : cast_as<ErrCategory::READ>(err);
         return;
     }
     TabletJobInfoPB recorded_job;
@@ -1198,13 +1165,12 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
                << " job=" << proto_to_json(recorded_job);
 
     std::unique_ptr<int, std::function<void(int*)>> defer_commit(
-            (int*)0x01, [&ss, &ret, &txn, &code, &msg, &need_commit](int*) {
+            (int*)0x01, [&ss, &txn, &code, &msg, &need_commit](int*) {
                 if (!need_commit) return;
-                ret = txn->commit();
-                if (ret != 0) {
-                    code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT
-                                     : MetaServiceCode::KV_TXN_COMMIT_ERR;
-                    ss << "failed to commit job kv, ret=" << ret;
+                TxnErrorCode err = txn->commit();
+                if (err != TxnErrorCode::TXN_OK) {
+                    code = cast_as<ErrCategory::COMMIT>(err);
+                    ss << "failed to commit job kv, err=" << err;
                     msg = ss.str();
                     return;
                 }
@@ -1212,15 +1178,15 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
 
     // Process compaction commit
     if (!request->job().compaction().empty()) {
-        process_compaction_job(code, msg, ss, ret, txn, request, response, recorded_job,
-                               instance_id, job_key, need_commit, obj_pool);
+        process_compaction_job(code, msg, ss, txn, request, response, recorded_job, instance_id,
+                               job_key, need_commit, obj_pool);
         return;
     }
 
     // Process schema change commit
     if (request->job().has_schema_change()) {
-        process_schema_change_job(code, msg, ss, ret, txn, request, response, recorded_job,
-                                  instance_id, job_key, need_commit, obj_pool);
+        process_schema_change_job(code, msg, ss, txn, request, response, recorded_job, instance_id,
+                                  job_key, need_commit, obj_pool);
         return;
     }
 }
