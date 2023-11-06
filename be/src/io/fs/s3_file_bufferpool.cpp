@@ -222,6 +222,7 @@ void DownloadFileBuffer::submit() {
     // so we just skip executing the download task when file cache is not enabled
     if (!config::enable_file_cache) [[unlikely]] {
         LOG(INFO) << "Skip download file task because file cache is not enabled";
+        set_val(Status::InternalError("Download failed because file cache not enabled"));
         return;
     }
     ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
@@ -355,7 +356,6 @@ void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write
     for (size_t i = 0; i < buf_num; i++) {
         Slice s {_whole_mem_buffer.get() + i * s3_write_buffer_size,
                  static_cast<size_t>(s3_write_buffer_size)};
-        // auto buf = std::make_shared<S3FileBuffer>(s);
         _free_raw_buffers.emplace_back(s);
     }
 }
@@ -428,10 +428,7 @@ void DownloadFileBuffer::on_download() {
     FileBlocksHolderPtr holder = nullptr;
     bool need_to_download_into_cache = false;
     auto s = Status::OK();
-    Defer def {[&]() {
-        _state.set_val(std::move(s));
-        on_finish();
-    }};
+    Defer def {[&]() { _state.set_val(std::move(s)); }};
     if (_alloc_holder != nullptr) {
         holder = _alloc_holder();
         std::for_each(holder->file_segments.begin(), holder->file_segments.end(),
@@ -462,12 +459,11 @@ void DownloadFileBuffer::on_download() {
             }
             _state.set_val(std::move(s));
         }
-        on_finish();
     } else {
         Slice tmp {_buffer.get_data(), _capacity};
         s = _download(tmp);
         _size = tmp.get_size();
-        if (_write_to_use_buffer != nullptr) {
+        if (s.ok() && _write_to_use_buffer != nullptr) {
             _write_to_use_buffer({_buffer.get_data(), get_size()}, get_file_offset());
         }
     }

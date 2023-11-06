@@ -250,13 +250,20 @@ static auto test_mock_callbacks = std::array {
 class S3FileWriterTest : public testing::Test {
 public:
     static void SetUpTestSuite() {
+        auto sp = SyncPoint::get_instance();
+        sp->enable_processing();
+        config::file_cache_enter_disk_resource_limit_mode_percent = 99;
+        std::for_each(test_mock_callbacks.begin(), test_mock_callbacks.end(),
+                      [sp](const MockCallback& mockcallback) {
+                          sp->set_call_back(mockcallback.point_name, mockcallback.callback);
+                      });
         std::string cur_path = std::filesystem::current_path();
         S3Conf s3_conf;
-        s3_conf.ak = config::test_s3_ak;
-        s3_conf.sk = config::test_s3_sk;
-        s3_conf.endpoint = config::test_s3_endpoint;
-        s3_conf.region = config::test_s3_region;
-        s3_conf.bucket = config::test_s3_bucket;
+        s3_conf.ak = "fake_ak";
+        s3_conf.sk = "fake_sk";
+        s3_conf.endpoint = "fake_s3_endpoint";
+        s3_conf.region = "fake_s3_region";
+        s3_conf.bucket = "fake_s3_bucket";
         s3_conf.prefix = "s3_file_writer_test";
         std::cout << "s3 conf: " << s3_conf.to_string() << std::endl;
         s3_fs = std::make_shared<io::S3FileSystem>(std::move(s3_conf), "s3_file_writer_test");
@@ -270,16 +277,12 @@ public:
                 .build(&_pool);
         ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool = std::move(_pool);
         doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
+        if (s3_buffer_pool->_whole_mem_buffer != nullptr) {
+            return;
+        }
         s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
                              doris::config::s3_write_buffer_size,
                              ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool.get());
-        auto sp = SyncPoint::get_instance();
-        sp->enable_processing();
-        config::file_cache_enter_disk_resource_limit_mode_percent = 99;
-        std::for_each(test_mock_callbacks.begin(), test_mock_callbacks.end(),
-                      [sp](const MockCallback& mockcallback) {
-                          sp->set_call_back(mockcallback.point_name, mockcallback.callback);
-                      });
     }
 
     static void TearDownTestSuite() {
