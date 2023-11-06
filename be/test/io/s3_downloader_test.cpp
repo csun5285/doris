@@ -54,7 +54,10 @@ public:
         auto key = req.GetKey();
         auto local_fs = io::global_local_filesystem();
         io::FileReaderSPtr reader;
-        local_fs->open_file(key, &reader);
+        if (auto st = local_fs->open_file(key, &reader); !st.ok()) {
+            return Aws::S3::Model::GetObjectOutcome(
+                    Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::UNKNOWN, false));
+        }
         auto range = req.GetRange();
         std::regex pattern(R"(bytes=(\d+)-(\d+))");
         std::smatch matches;
@@ -78,8 +81,7 @@ public:
         size_t bytes_read = 0;
         size_t len = end - start + 1;
         Slice slice(s->get_data(), len);
-        (*reader).read_at(start, slice, &bytes_read);
-        if (bytes_read != len) {
+        if (auto st = (*reader).read_at(start, slice, &bytes_read); !st.ok() || bytes_read != len) {
             return Aws::S3::Model::GetObjectOutcome(
                     Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::UNKNOWN, false));
         }
