@@ -91,9 +91,9 @@ TxnErrorCode get(Transaction* txn, std::string_view key, ValueBuf* val, bool sna
  * @param txn fdb txn handler
  * @param key encode key
  * @param snapshot if true, `key` will not be included in txn conflict detection this time
- * @return 0 for key existed, 1 for key not found, negative for kv error
+ * @return TXN_OK for key existed, TXN_KEY_NOT_FOUND for key not found, otherwise for kv error
  */
-[[nodiscard]] int key_exists(Transaction* txn, std::string_view key, bool snapshot = false);
+TxnErrorCode key_exists(Transaction* txn, std::string_view key, bool snapshot = false);
 
 /**
  * Put a KV, it's value may be bigger than 100k

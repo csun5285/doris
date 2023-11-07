@@ -64,7 +64,7 @@ static std::shared_ptr<TxnKv> create_txn_kv() {
     return txn_kv;
 }
 
-std::unique_ptr<MetaServiceImpl> get_meta_service(std::shared_ptr<TxnKv> txn_kv = {}) {
+std::unique_ptr<MetaServiceProxy> get_meta_service(std::shared_ptr<TxnKv> txn_kv = {}) {
     if (!txn_kv) {
         txn_kv = create_txn_kv();
     }
@@ -72,9 +72,8 @@ std::unique_ptr<MetaServiceImpl> get_meta_service(std::shared_ptr<TxnKv> txn_kv 
     auto rs = std::make_shared<ResourceManager>(txn_kv);
     auto rl = std::make_shared<RateLimiter>();
     auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
-    return meta_service;
+    return std::make_unique<MetaServiceProxy>(std::move(meta_service));
 }
-
 
 static void create_args_to_add(std::vector<NodeInfo>* to_add, std::vector<NodeInfo>* to_del, bool is_host = false) {
     to_add->clear();to_del->clear();
@@ -134,19 +133,19 @@ static void create_args_to_del(std::vector<NodeInfo>* to_add, std::vector<NodeIn
     to_del->push_back(ni_1);
 }
 
-static void get_instance_info(MetaServiceImpl* ms,
-        InstanceInfoPB* instance, std::string_view instance_id = "test-resource-instance") {
+static void get_instance_info(MetaServiceProxy* ms, InstanceInfoPB* instance,
+                              std::string_view instance_id = "test-resource-instance") {
     InstanceKeyInfo key_info {instance_id};
     std::string key;
     std::string val;
     instance_key(key_info, &key);
     std::unique_ptr<Transaction> txn;
-    EXPECT_EQ(ms->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    EXPECT_EQ(ms->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
     EXPECT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
     instance->ParseFromString(val);
 }
 
-static void create_instance(MetaServiceImpl* ms, const std::string& instance_id) {
+static void create_instance(MetaServiceProxy* ms, const std::string& instance_id) {
     brpc::Controller ctrl;
     CreateInstanceRequest req;
     req.set_instance_id(instance_id);
@@ -168,8 +167,9 @@ static void create_instance(MetaServiceImpl* ms, const std::string& instance_id)
     ASSERT_EQ(resp.status().code(), MetaServiceCode::OK);
 }
 
-static void create_cluster(MetaServiceImpl *ms, const std::string& instance_id,
-        const std::string& cluster_id, const std::string& cluster_name, ClusterPB_Type type) {
+static void create_cluster(MetaServiceProxy* ms, const std::string& instance_id,
+                           const std::string& cluster_id, const std::string& cluster_name,
+                           ClusterPB_Type type) {
     brpc::Controller cntl;
     AlterClusterRequest req;
     req.set_instance_id(instance_id);
@@ -194,7 +194,8 @@ static void create_cluster(MetaServiceImpl *ms, const std::string& instance_id,
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
 }
 
-static void drop_cluster(MetaServiceImpl* ms, const std::string& instance_id, const std::string& cluster_id) {
+static void drop_cluster(MetaServiceProxy* ms, const std::string& instance_id,
+                         const std::string& cluster_id) {
     brpc::Controller cntl;
     AlterClusterRequest req;
     req.set_instance_id(instance_id);
@@ -230,7 +231,7 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     sp->enable_processing();
 
     // test cluster add nodes
-    auto r = meta_service->resource_mgr_->modify_nodes("test-resource-instance", to_add, to_del);
+    auto r = meta_service->resource_mgr()->modify_nodes("test-resource-instance", to_add, to_del);
     ASSERT_EQ(r, "");
     InstanceInfoPB instance;
     get_instance_info(meta_service.get(), &instance);
@@ -253,7 +254,7 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     sp->enable_processing();
     create_args_to_del(&to_add, &to_del);
     // test cluster del node
-    r = meta_service->resource_mgr_->modify_nodes("test-resource-instance", to_add, to_del);
+    r = meta_service->resource_mgr()->modify_nodes("test-resource-instance", to_add, to_del);
     InstanceInfoPB instance1;
     get_instance_info(meta_service.get(), &instance1);
     ASSERT_EQ(r, "");
@@ -293,7 +294,7 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     sp->enable_processing();
 
     // test cluster add nodes
-    auto r = meta_service->resource_mgr_->modify_nodes("test-resource-instance", to_add, to_del);
+    auto r = meta_service->resource_mgr()->modify_nodes("test-resource-instance", to_add, to_del);
     ASSERT_EQ(r, "");
     InstanceInfoPB instance;
     get_instance_info(meta_service.get(), &instance);
@@ -315,7 +316,7 @@ TEST(ResourceTest, ModifyNodesHostTest) {
                       });
     sp->enable_processing();
     create_args_to_del(&to_add, &to_del, true);
-    r = meta_service->resource_mgr_->modify_nodes("test-resource-instance", to_add, to_del);
+    r = meta_service->resource_mgr()->modify_nodes("test-resource-instance", to_add, to_del);
     InstanceInfoPB instance1;
     get_instance_info(meta_service.get(), &instance1);
     ASSERT_EQ(r, "");
@@ -358,13 +359,15 @@ TEST(ResourceTest, RestartResourceManager) {
         auto meta_service = get_meta_service(txn_kv);
         {
             InstanceInfoPB info;
-            auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id", &info);
+            auto [code, msg] =
+                    meta_service->resource_mgr()->get_instance(nullptr, "test_instance_id", &info);
             ASSERT_EQ(code, TxnErrorCode::TXN_OK) << msg;
             ASSERT_EQ(info.name(), "test_instance_idname");
         }
         {
             InstanceInfoPB info;
-            auto [code, msg] = meta_service->resource_mgr_->get_instance(nullptr, "test_instance_id_2", &info);
+            auto [code, msg] = meta_service->resource_mgr()->get_instance(
+                    nullptr, "test_instance_id_2", &info);
             ASSERT_EQ(code, TxnErrorCode::TXN_OK) << msg;
             ASSERT_EQ(info.name(), "test_instance_id_2name");
         }

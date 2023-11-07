@@ -108,6 +108,8 @@ inline MetaServiceCode cast_as(TxnErrorCode code) {
     case TxnErrorCode::TXN_UNIDENTIFIED_ERROR:
         if constexpr (category == ErrCategory::READ) {
             return MetaServiceCode::KV_TXN_GET_ERR;
+        } else if constexpr (category == ErrCategory::CREATE) {
+            return MetaServiceCode::KV_TXN_CREATE_ERR;
         } else {
             return MetaServiceCode::KV_TXN_COMMIT_ERR;
         }

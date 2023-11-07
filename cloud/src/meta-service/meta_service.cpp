@@ -1,6 +1,7 @@
 
 // clang-format off
 #include "meta_service.h"
+#include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 
 #include "common/bvars.h"
@@ -332,9 +333,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
 }
 
 void internal_create_tablet(MetaServiceCode& code, std::string& msg,
-                            doris::TabletMetaPB& tablet_meta, std::shared_ptr<TxnKv> txn_kv,
+                            const doris::TabletMetaPB& meta, std::shared_ptr<TxnKv> txn_kv,
                             const std::string& instance_id,
                             std::set<std::pair<int64_t, int32_t>>& saved_schema) {
+    doris::TabletMetaPB tablet_meta(meta);
     bool has_first_rowset = tablet_meta.rs_metas_size() > 0;
 
     // TODO: validate tablet meta, check existence
@@ -485,8 +487,7 @@ void MetaServiceImpl::create_tablets(::google::protobuf::RpcController* controll
     // [index_id, schema_version]
     std::set<std::pair<int64_t, int32_t>> saved_schema;
     for (auto& tablet_meta : request->tablet_metas()) {
-        auto& meta = const_cast<doris::TabletMetaPB&>(tablet_meta);
-        internal_create_tablet(code, msg, meta, txn_kv_, instance_id, saved_schema);
+        internal_create_tablet(code, msg, tablet_meta, txn_kv_, instance_id, saved_schema);
         if (code != MetaServiceCode::OK) {
             return;
         }
@@ -777,7 +778,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
         LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
-    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
     if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "rowset_meta must have either schema or schema_version";
@@ -907,7 +908,7 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
-    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
     if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "rowset_meta must have either schema or schema_version";
@@ -1043,7 +1044,7 @@ void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* contr
         LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
-    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
     if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "rowset_meta must have either schema or schema_version";
@@ -1139,7 +1140,7 @@ void internal_get_rowset(Transaction* txn, int64_t start, int64_t end,
     do {
         TxnErrorCode err = txn->get(key0, key1, &it);
         if (err != TxnErrorCode::TXN_OK) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+            code = cast_as<ErrCategory::READ>(err);
             ss << "internal error, failed to get rowset, err=" << err;
             msg = ss.str();
             LOG(WARNING) << msg;
@@ -1273,7 +1274,7 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
         return;
     }
 
-    auto& idx = const_cast<TabletIndexPB&>(request->idx());
+    TabletIndexPB idx(request->idx());
     // Get tablet id index from kv
     if (!idx.has_table_id() || !idx.has_index_id() || !idx.has_partition_id()) {
         get_tablet_idx(code, msg, txn.get(), instance_id, tablet_id, idx);
@@ -1387,21 +1388,21 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
 
     std::unique_ptr<Transaction> txn;
     for (auto& i : request->tablet_idx()) {
+        TabletIndexPB idx(i);
         // FIXME(plat1ko): Get all tablet stats in one txn
         TxnErrorCode err = txn_kv_->create_txn(&txn);
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::CREATE>(err);
-            msg = fmt::format("failed to create txn, tablet_id={}", i.tablet_id());
+            msg = fmt::format("failed to create txn, tablet_id={}", idx.tablet_id());
             return;
         }
-        if (!(/* i.has_db_id() && */ i.has_table_id() && i.has_index_id() && i.has_partition_id() &&
-              i.has_tablet_id())) {
-            get_tablet_idx(code, msg, txn.get(), instance_id, i.tablet_id(),
-                           const_cast<TabletIndexPB&>(i));
+        if (!(/* idx.has_db_id() && */ idx.has_table_id() && idx.has_index_id() &&
+              idx.has_partition_id() && i.has_tablet_id())) {
+            get_tablet_idx(code, msg, txn.get(), instance_id, idx.tablet_id(), idx);
             if (code != MetaServiceCode::OK) return;
         }
         auto tablet_stats = response->add_tablet_stats();
-        internal_get_tablet_stats(code, msg, txn.get(), instance_id, i, *tablet_stats, true);
+        internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, *tablet_stats, true);
         if (code != MetaServiceCode::OK) {
             response->clear_tablet_stats();
             break;
@@ -1604,7 +1605,7 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 
     if (request->has_idx()) {
-        auto& idx = const_cast<TabletIndexPB&>(request->idx());
+        TabletIndexPB idx(request->idx());
         TabletStatsPB tablet_stat;
         internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, tablet_stat,
                                   true /*snapshot_read*/);

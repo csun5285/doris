@@ -85,7 +85,9 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
     std::shared_ptr<selectdb::TxnKv> txn_kv = std::make_shared<selectdb::MemTxnKv>();
     auto resource_mgr = std::make_shared<MockResourceManager>(txn_kv);
     auto rate_limiter = std::make_shared<selectdb::RateLimiter>();
-    MockMetaService meta_service(txn_kv, resource_mgr, rate_limiter);
+    auto mock_service = std::make_unique<MockMetaService>(txn_kv, resource_mgr, rate_limiter);
+    MockMetaService* mock_service_ptr = mock_service.get();
+    MetaServiceProxy meta_service(std::move(mock_service));
 
     brpc::ServerOptions options;
     options.num_threads = 1;
@@ -122,7 +124,7 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
 
     bool refreshed = false;
     for (size_t i = 0; i < 100; ++i) {
-        if (meta_service.is_instance_refreshed("fqdn_instance_id")) {
+        if (mock_service_ptr->is_instance_refreshed("fqdn_instance_id")) {
             refreshed = true;
             break;
         }

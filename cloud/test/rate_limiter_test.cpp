@@ -18,13 +18,13 @@ int main(int argc, char** argv) {
 
 using namespace selectdb;
 
-std::unique_ptr<MetaServiceImpl> get_meta_service() {
+std::unique_ptr<MetaServiceProxy> get_meta_service() {
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     [&] { ASSERT_NE(txn_kv.get(), nullptr); }();
     auto rs = std::make_shared<MockResourceManager>(txn_kv);
     auto rl = std::make_shared<RateLimiter>();
     auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
-    return meta_service;
+    return std::make_unique<MetaServiceProxy>(std::move(meta_service));
 }
 
 TEST(RateLimiterTest, RateLimitGetClusterTest) {
@@ -46,7 +46,7 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(key, val);
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
@@ -72,8 +72,10 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
     threads.clear();
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    meta_service->rate_limiter_->get_rpc_rate_limiter(
-                        "get_cluster")->qps_limiter_[mock_instance]->max_qps_limit_ = 1;
+    meta_service->rate_limiter()
+            ->get_rpc_rate_limiter("get_cluster")
+            ->qps_limiter_[mock_instance]
+            ->max_qps_limit_ = 1;
     threads.emplace_back(get_cluster, MetaServiceCode::MAX_QPS_LIMIT);
     for (auto& t: threads) {
         t.join();
@@ -81,8 +83,10 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
     threads.clear();
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    meta_service->rate_limiter_->get_rpc_rate_limiter(
-                        "get_cluster")->qps_limiter_[mock_instance]->max_qps_limit_ = 10000;
+    meta_service->rate_limiter()
+            ->get_rpc_rate_limiter("get_cluster")
+            ->qps_limiter_[mock_instance]
+            ->max_qps_limit_ = 10000;
     threads.emplace_back(get_cluster, MetaServiceCode::OK);
     for (auto& t: threads) {
         t.join();

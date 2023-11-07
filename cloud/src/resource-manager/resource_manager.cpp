@@ -339,15 +339,15 @@ std::pair<MetaServiceCode, std::string> ResourceManager::drop_cluster(
         return std::make_pair(MetaServiceCode::CLUSTER_NOT_FOUND, msg);
     }
 
-    auto& clusters = const_cast<std::decay_t<decltype(instance.clusters())>&>(instance.clusters());
-    clusters.DeleteSubrange(idx, 1); // Remove it
+    InstanceInfoPB new_instance(instance);
+    new_instance.mutable_clusters()->DeleteSubrange(idx, 1); // Remove it
 
     InstanceKeyInfo key_info {instance_id};
     std::string key;
     std::string val;
     instance_key(key_info, &key);
 
-    val = instance.SerializeAsString();
+    val = new_instance.SerializeAsString();
     if (val.empty()) {
         msg = "failed to serialize";
         LOG(WARNING) << msg;
@@ -355,11 +355,11 @@ std::pair<MetaServiceCode, std::string> ResourceManager::drop_cluster(
     }
 
     txn->put(key, val);
-    LOG(INFO) << "put instnace_key=" << hex(key);
-    TxnErrorCode err_code = txn->commit();
-    if (err_code != TxnErrorCode::TXN_OK) {
+    LOG(INFO) << "put instance_key=" << hex(key);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
         msg = "failed to commit kv txn";
-        LOG(WARNING) << msg << " err=" << err_code;
+        LOG(WARNING) << msg << " err=" << err;
         return std::make_pair(cast_as<ErrCategory::COMMIT>(err), msg);
     }
 

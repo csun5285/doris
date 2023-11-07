@@ -16,7 +16,7 @@
 static std::string instance_id = "schema_kv_test";
 
 namespace selectdb {
-extern std::unique_ptr<MetaServiceImpl> get_meta_service();
+extern std::unique_ptr<MetaServiceProxy> get_meta_service();
 
 static std::string next_rowset_id() {
     static int cnt = 0;
@@ -41,7 +41,7 @@ static void add_tablet(CreateTabletsRequest& req, int64_t table_id, int64_t inde
     first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
 }
 
-static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+static void create_tablet(MetaServiceProxy* meta_service, int64_t table_id, int64_t index_id,
                           int64_t partition_id, int64_t tablet_id, const std::string& rowset_id,
                           int32_t schema_version) {
     brpc::Controller cntl;
@@ -52,7 +52,7 @@ static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
 
-static void get_rowset(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+static void get_rowset(MetaServiceProxy* meta_service, int64_t table_id, int64_t index_id,
                        int64_t partition_id, int64_t tablet_id, GetRowsetResponse& res) {
     brpc::Controller cntl;
     GetRowsetRequest req;
@@ -70,7 +70,7 @@ static void get_rowset(MetaServiceImpl* meta_service, int64_t table_id, int64_t 
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
 
-static void check_get_tablet(MetaServiceImpl* meta_service, int64_t tablet_id,
+static void check_get_tablet(MetaServiceProxy* meta_service, int64_t tablet_id,
                              int32_t schema_version) {
     brpc::Controller cntl;
     GetTabletRequest req;
@@ -85,7 +85,7 @@ static void check_get_tablet(MetaServiceImpl* meta_service, int64_t tablet_id,
 
 TEST(DetachSchemaKVTest, TabletTest) {
     auto meta_service = get_meta_service();
-    meta_service->resource_mgr_.reset(); // Do not use resource manager
+    // meta_service->resource_mgr().reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -102,7 +102,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
                                               tablet_id, next_rowset_id(), 1));
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string tablet_key, tablet_val;
         meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id}, &tablet_key);
         ASSERT_EQ(txn->get(tablet_key, &tablet_val), TxnErrorCode::TXN_OK);
@@ -121,7 +121,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
     {
         constexpr auto table_id = 10011, index_id = 10012, partition_id = 10013, tablet_id = 10014;
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         doris::TabletMetaPB saved_tablet;
         saved_tablet.set_table_id(table_id);
         saved_tablet.set_index_id(index_id);
@@ -166,7 +166,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
                                               tablet_id, next_rowset_id(), 1));
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         check_new_saved_tablet_val(txn.get(), table_id, index_id, partition_id, tablet_id, 1);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 1}, &rowset_key);
@@ -211,7 +211,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100031, 1);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100032, 2);
         check_new_saved_tablet_val(txn.get(), 10031, 10032, 10033, 100033, 2);
@@ -234,7 +234,7 @@ TEST(DetachSchemaKVTest, TabletTest) {
     }
 }
 
-static void begin_txn(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+static void begin_txn(MetaServiceProxy* meta_service, int64_t db_id, const std::string& label,
                       int64_t table_id, int64_t& txn_id) {
     brpc::Controller cntl;
     BeginTxnRequest req;
@@ -250,7 +250,7 @@ static void begin_txn(MetaServiceImpl* meta_service, int64_t db_id, const std::s
     txn_id = res.txn_id();
 }
 
-static void commit_txn(MetaServiceImpl* meta_service, int64_t db_id, int64_t txn_id,
+static void commit_txn(MetaServiceProxy* meta_service, int64_t db_id, int64_t txn_id,
                        const std::string& label) {
     brpc::Controller cntl;
     CommitTxnRequest req;
@@ -281,7 +281,7 @@ static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id,
     return rowset;
 }
 
-static void prepare_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+static void prepare_rowset(MetaServiceProxy* meta_service, const doris::RowsetMetaPB& rowset,
                            CreateRowsetResponse& res) {
     brpc::Controller cntl;
     auto arena = res.GetArena();
@@ -292,7 +292,7 @@ static void prepare_rowset(MetaServiceImpl* meta_service, const doris::RowsetMet
     if (!arena) delete req;
 }
 
-static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+static void commit_rowset(MetaServiceProxy* meta_service, const doris::RowsetMetaPB& rowset,
                           CreateRowsetResponse& res) {
     brpc::Controller cntl;
     auto arena = res.GetArena();
@@ -303,7 +303,7 @@ static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMeta
     if (!arena) delete req;
 }
 
-static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+static void insert_rowset(MetaServiceProxy* meta_service, int64_t db_id, const std::string& label,
                           int64_t table_id, int64_t tablet_id, int32_t schema_version) {
     int64_t txn_id = 0;
     ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service, db_id, label, table_id, txn_id));
@@ -319,7 +319,7 @@ static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const st
 
 TEST(DetachSchemaKVTest, RowsetTest) {
     auto meta_service = get_meta_service();
-    meta_service->resource_mgr_.reset(); // Do not use resource manager
+    // meta_service->resource_mgr().reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -340,7 +340,7 @@ TEST(DetachSchemaKVTest, RowsetTest) {
                 insert_rowset(meta_service.get(), db_id, "101", table_id, tablet_id, 2)); // [2-2]
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 2}, &rowset_key); // [2-2]
         ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
@@ -357,7 +357,7 @@ TEST(DetachSchemaKVTest, RowsetTest) {
         ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
                                               tablet_id, next_rowset_id(), 1));
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto saved_rowset = create_rowset(10015, tablet_id, next_rowset_id(), 2, 2);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, tablet_id, 2}, &rowset_key); // version=[2-2]
@@ -390,7 +390,7 @@ TEST(DetachSchemaKVTest, RowsetTest) {
                 insert_rowset(meta_service.get(), db_id, "201", table_id, tablet_id, 2)); // [2-2]
         // check saved values in txn_kv
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string rowset_key, rowset_val;
         meta_rowset_key({instance_id, 10024, 2}, &rowset_key); // [2-2]
         ASSERT_EQ(txn->get(rowset_key, &rowset_val), TxnErrorCode::TXN_OK);
@@ -475,7 +475,7 @@ TEST(DetachSchemaKVTest, RowsetTest) {
 
 TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
     auto meta_service = get_meta_service();
-    meta_service->resource_mgr_.reset(); // Do not use resource manager
+    // meta_service->resource_mgr().reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -491,7 +491,7 @@ TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
         ASSERT_NO_FATAL_FAILURE(create_tablet(meta_service.get(), table_id, index_id, partition_id,
                                               tablet_id, next_rowset_id(), 1));
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto committed_rowset = create_rowset(10005, tablet_id, next_rowset_id(), 2, 2);
         std::string tmp_rowset_key, tmp_rowset_val;
         // 0:instance_id  1:txn_id  2:tablet_id
@@ -565,7 +565,7 @@ TEST(DetachSchemaKVTest, InsertExistedRowsetTest) {
 
 TEST(SchemaKVTest, InsertExistedRowsetTest) {
     auto meta_service = get_meta_service();
-    meta_service->resource_mgr_.reset(); // Do not use resource manager
+    // meta_service->resource_mgr().reset(); // Do not use resource manager
 
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(

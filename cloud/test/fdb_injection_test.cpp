@@ -18,7 +18,7 @@
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
 
-static std::unique_ptr<selectdb::MetaService> create_meta_service() {
+static std::unique_ptr<selectdb::MetaServiceProxy> create_meta_service() {
     std::shared_ptr<selectdb::TxnKv> txn_kv = std::make_unique<selectdb::FdbTxnKv>();
     [&]() { ASSERT_EQ(txn_kv->init(), 0); }();
 
@@ -26,12 +26,12 @@ static std::unique_ptr<selectdb::MetaService> create_meta_service() {
     auto rc_mgr = std::make_shared<selectdb::ResourceManager>(txn_kv);
     [&]() { ASSERT_EQ(rc_mgr->init(), 0); }();
 
-    std::unique_ptr<selectdb::MetaService> meta_service_impl =
+    auto meta_service_impl =
             std::make_unique<selectdb::MetaServiceImpl>(txn_kv, rc_mgr, rate_limiter);
     return std::make_unique<selectdb::MetaServiceProxy>(std::move(meta_service_impl));
 }
 
-static std::unique_ptr<selectdb::MetaService> meta_service;
+static std::unique_ptr<selectdb::MetaServiceProxy> meta_service;
 
 int main(int argc, char** argv) {
     const std::string conf_file = "selectdb_cloud.conf";
@@ -52,8 +52,6 @@ int main(int argc, char** argv) {
     selectdb::config::fdb_cluster_file_path = "fdb.cluster";
     selectdb::config::write_schema_kv = true;
 
-    meta_service = create_meta_service();
-
     auto sp = selectdb::SyncPoint::get_instance();
     sp->enable_processing();
     sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
@@ -66,6 +64,12 @@ int main(int argc, char** argv) {
                       [](void* p) { *reinterpret_cast<int*>(p) = 0; });
     sp->set_call_back("decrypt_ak_sk:get_encryption_key",
                       [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("MetaServiceProxy::call_impl_duration_ms",
+                      [](void* raw) { *reinterpret_cast<uint64_t*>(raw) = 0; });
+    sp->set_call_back("put_schema_kv:schema_key_exists_return::pred",
+                      [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
+
+    meta_service = create_meta_service();
 
     int ret = RUN_ALL_TESTS();
     if (ret != 0) {
@@ -74,35 +78,43 @@ int main(int argc, char** argv) {
     }
 
     std::vector<std::string> sync_points {
+            "transaction:init:create_transaction_err",
             "transaction:commit:get_err",
-            // "fdb_future_block_until_ready_err",
-            // "transaction:get:get_err",
-            // "transaction:get_range:get_err",
-            // "transaction:get_read_version:get_err",
-            // "range_get_iterator:init:get_keyvalue_array_err",
+            "transaction:get:get_err",
+            "transaction:get_range:get_err",
+            "transaction:get_read_version:get_err",
+            "range_get_iterator:init:get_keyvalue_array_err",
     };
 
     // See
     // 1. https://apple.github.io/foundationdb/api-error-codes.html#developer-guide-error-codes
-    // 2. FDB source code:
+    // 2. FDB source code: flow/include/flow/error_definitions.h
     std::vector<fdb_error_t> retryable_not_committed {
+            // too old
+            1007,
             // future version
             1009,
             // process_behind
             1037,
             // database locked
             1038,
-            // proxy_memory_limit_exceeded
+            // commit_proxy_memory_limit_exceeded
             1042,
             // batch_transaction_throttled
             1051,
+            // grv_proxy_memory_limit_exceeded
+            1078,
             // tag_throttled
             1213,
+            // proxy_tag_throttled
+            1223,
     };
 
     for (auto err : retryable_not_committed) {
-        EXPECT_TRUE(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err))
-                << "err=" << err << ", msg=" << fdb_get_error(err);
+        if (!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err)) {
+            LOG_WARNING("skip unknown err").tag("err", err).tag("msg", fdb_get_error(err));
+            continue;
+        }
         for (auto&& name : sync_points) {
             for (auto&& clear_name : sync_points) {
                 sp->clear_call_back(clear_name);
@@ -113,7 +125,6 @@ int main(int argc, char** argv) {
             sp->set_call_back(name, [&](void* raw) mutable {
                 size_t n = count->fetch_add(1);
                 if (n == *inject_at) {
-                    std::cout << "count=" << n << std::endl;
                     *reinterpret_cast<fdb_error_t*>(raw) = err;
                 }
             });
@@ -135,6 +146,8 @@ int main(int argc, char** argv) {
             }
         }
     }
+
+    meta_service.reset();
 
     return 0;
 }
@@ -565,6 +578,39 @@ static Status copy_into(MetaService* service, const std::string& instance_id, st
     return Status();
 }
 
+static Status get_read_version(MetaService* service, const std::string& instance_id,
+                               int64_t* version) {
+    brpc::Controller ctrl;
+    selectdb::GetCurrentMaxTxnRequest req;
+    selectdb::GetCurrentMaxTxnResponse resp;
+    req.set_cloud_unique_id(cloud_unique_id(instance_id));
+    service->get_current_max_txn_id(&ctrl, &req, &resp, nullptr);
+
+    if (ctrl.Failed()) {
+        LOG_ERROR("get read version")
+                .tag("instance_id", instance_id)
+                .tag("code", ctrl.ErrorCode())
+                .tag("msg", ctrl.ErrorText());
+        Status status;
+        status.set_code(MetaServiceCode::UNDEFINED_ERR);
+        status.set_msg(ctrl.ErrorText());
+        return status;
+    }
+
+    auto status = resp.status();
+    if (status.code() != selectdb::MetaServiceCode::OK) {
+        LOG_ERROR("get read version")
+                .tag("instance_id", instance_id)
+                .tag("code", status.code())
+                .tag("msg", status.msg());
+        return status;
+    }
+
+    *version = resp.current_max_txn_id();
+
+    return Status();
+}
+
 static Status get_version(MetaService* service, const std::string& instance_id, int64_t db_id,
                           int64_t partition_id, int64_t table_id, int64_t* version) {
     brpc::Controller ctrl;
@@ -715,7 +761,7 @@ static Status get_rowset_meta(MetaService* service, const std::string& instance_
     return Status();
 }
 
-TEST(FdbInjectionTest, DISABLED_AllInOne) {
+TEST(FdbInjectionTest, AllInOne) {
     auto now = std::chrono::high_resolution_clock::now();
     auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch());
     std::string instance_id = fmt::format("fdb_injection_test_{}", ns.count());
@@ -759,6 +805,11 @@ TEST(FdbInjectionTest, DISABLED_AllInOne) {
     // Get rowset metas.
     status = get_rowset_meta(meta_service.get(), instance_id, tablet_ids.back(), version, stats);
     ASSERT_EQ(status.code(), MetaServiceCode::OK) << status.msg();
+
+    int64_t max_txn_id = 0;
+    status = get_read_version(meta_service.get(), instance_id, &max_txn_id);
+    ASSERT_EQ(status.code(), MetaServiceCode::OK) << status.msg();
+    ASSERT_GE(max_txn_id, version);
 
     ret = drop_cluster(meta_service.get(), instance_id);
     ASSERT_EQ(ret, 0);

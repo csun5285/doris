@@ -59,8 +59,7 @@ int MetaServer::start(brpc::Server* server) {
     auto rate_limiter = std::make_shared<RateLimiter>();
 
     // Add service
-    std::unique_ptr<MetaService> meta_service =
-            std::make_unique<MetaServiceImpl>(txn_kv_, rc_mgr, rate_limiter);
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv_, rc_mgr, rate_limiter);
     auto meta_service_proxy = new MetaServiceProxy(std::move(meta_service));
     server->AddService(meta_service_proxy, brpc::SERVER_OWNS_SERVICE);
 

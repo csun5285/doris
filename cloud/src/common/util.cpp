@@ -294,14 +294,15 @@ TxnErrorCode get(Transaction* txn, std::string_view key, ValueBuf* val, bool sna
     return val->get(txn, key, snapshot);
 }
 
-int key_exists(Transaction* txn, std::string_view key, bool snapshot) {
+TxnErrorCode key_exists(Transaction* txn, std::string_view key, bool snapshot) {
     std::string end_key {key};
     encode_int64(INT64_MAX, &end_key);
     std::unique_ptr<RangeGetIterator> it;
-    if (txn->get(key, end_key, &it, snapshot, 1) != TxnErrorCode::TXN_OK) {
-        return -1;
+    TxnErrorCode err = txn->get(key, end_key, &it, snapshot, 1);
+    if (err != TxnErrorCode::TXN_OK) {
+        return err;
     }
-    return !it->has_next();
+    return it->has_next() ? TxnErrorCode::TXN_OK : TxnErrorCode::TXN_KEY_NOT_FOUND;
 }
 
 void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,

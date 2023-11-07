@@ -51,7 +51,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        code = cast_as<ErrCategory::CREATE>(err);
         ss << "txn_kv_->create_txn() failed, err=" << err << " label=" << label
            << " db_id=" << db_id;
         msg = ss.str();

@@ -24,17 +24,18 @@
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv.h"
 #include "meta-service/txn_kv_error.h"
 #include "mock_resource_manager.h"
+#include "resource-manager/resource_manager.h"
 
 namespace selectdb {
 
-extern std::unique_ptr<MetaServiceImpl> get_meta_service(bool mock_resource_mgr);
+extern std::unique_ptr<MetaServiceProxy> get_meta_service(bool mock_resource_mgr);
 
 template <typename Request, typename Response>
-using MetaServiceMethod = void (MetaServiceImpl::*)(google::protobuf::RpcController*,
-                                                    const Request*, Response*,
-                                                    google::protobuf::Closure*);
+using MetaServiceMethod = void (MetaService::*)(google::protobuf::RpcController*, const Request*,
+                                                Response*, google::protobuf::Closure*);
 
 template <typename Result>
 struct JsonTemplate {
@@ -201,7 +202,7 @@ public:
         std::string val;
         instance_key(key_info, &key);
         std::unique_ptr<Transaction> txn;
-        EXPECT_EQ(meta_service_->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        EXPECT_EQ(meta_service_->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         EXPECT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
         InstanceInfoPB instance;
         instance.ParseFromString(val);
@@ -209,7 +210,7 @@ public:
     }
 
 private:
-    std::unique_ptr<MetaServiceImpl> meta_service_;
+    std::unique_ptr<MetaServiceProxy> meta_service_;
     brpc::Server server;
 };
 
@@ -235,7 +236,7 @@ static void add_tablet(CreateTabletsRequest& req, int64_t table_id, int64_t inde
     first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
 }
 
-static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+static void create_tablet(MetaService* meta_service, int64_t table_id, int64_t index_id,
                           int64_t partition_id, int64_t tablet_id) {
     brpc::Controller cntl;
     CreateTabletsRequest req;
@@ -245,7 +246,7 @@ static void create_tablet(MetaServiceImpl* meta_service, int64_t table_id, int64
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
 
-static void get_tablet_stats(MetaServiceImpl* meta_service, int64_t table_id, int64_t index_id,
+static void get_tablet_stats(MetaService* meta_service, int64_t table_id, int64_t index_id,
                              int64_t partition_id, int64_t tablet_id, GetTabletStatsResponse& res) {
     brpc::Controller cntl;
     GetTabletStatsRequest req;
@@ -257,7 +258,7 @@ static void get_tablet_stats(MetaServiceImpl* meta_service, int64_t table_id, in
     meta_service->get_tablet_stats(&cntl, &req, &res, nullptr);
 }
 
-static void begin_txn(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+static void begin_txn(MetaService* meta_service, int64_t db_id, const std::string& label,
                       int64_t table_id, int64_t& txn_id) {
     brpc::Controller cntl;
     BeginTxnRequest req;
@@ -273,7 +274,7 @@ static void begin_txn(MetaServiceImpl* meta_service, int64_t db_id, const std::s
     txn_id = res.txn_id();
 }
 
-static void commit_txn(MetaServiceImpl* meta_service, int64_t db_id, int64_t txn_id,
+static void commit_txn(MetaService* meta_service, int64_t db_id, int64_t txn_id,
                        const std::string& label) {
     brpc::Controller cntl;
     CommitTxnRequest req;
@@ -303,7 +304,7 @@ static doris::RowsetMetaPB create_rowset(int64_t txn_id, int64_t tablet_id, int6
     return rowset;
 }
 
-static void prepare_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+static void prepare_rowset(MetaService* meta_service, const doris::RowsetMetaPB& rowset,
                            CreateRowsetResponse& res) {
     brpc::Controller cntl;
     auto arena = res.GetArena();
@@ -314,7 +315,7 @@ static void prepare_rowset(MetaServiceImpl* meta_service, const doris::RowsetMet
     if (!arena) delete req;
 }
 
-static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMetaPB& rowset,
+static void commit_rowset(MetaService* meta_service, const doris::RowsetMetaPB& rowset,
                           CreateRowsetResponse& res) {
     brpc::Controller cntl;
     auto arena = res.GetArena();
@@ -325,7 +326,7 @@ static void commit_rowset(MetaServiceImpl* meta_service, const doris::RowsetMeta
     if (!arena) delete req;
 }
 
-static void insert_rowset(MetaServiceImpl* meta_service, int64_t db_id, const std::string& label,
+static void insert_rowset(MetaService* meta_service, int64_t db_id, const std::string& label,
                           int64_t table_id, int64_t tablet_id) {
     int64_t txn_id = 0;
     ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service, db_id, label, table_id, txn_id));
@@ -675,13 +676,9 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         npb.set_heartbeat_port(9999);
         npb.set_ip("127.0.0.1");
         npb.set_cloud_unique_id("cloud_unique_id");
-        meta_service->resource_mgr_->node_info_.insert({"cloud_unique_id",  NodeInfo{
-            Role::COMPUTE_NODE,
-            mock_instance,
-            "rename_cluster_name",
-            mock_cluster_id,
-            npb
-        }});
+        meta_service->resource_mgr()->node_info_.insert(
+                {"cloud_unique_id", NodeInfo {Role::COMPUTE_NODE, mock_instance,
+                                              "rename_cluster_name", mock_cluster_id, npb}});
         auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("decommission_node", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
@@ -703,13 +700,9 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         npb.set_heartbeat_port(9999);
         npb.set_ip("127.0.0.1");
         npb.set_cloud_unique_id("cloud_unique_id");
-        meta_service->resource_mgr_->node_info_.insert({"cloud_unique_id",  NodeInfo{
-            Role::COMPUTE_NODE,
-            mock_instance,
-            "rename_cluster_name",
-            mock_cluster_id,
-            npb
-        }});
+        meta_service->resource_mgr()->node_info_.insert(
+                {"cloud_unique_id", NodeInfo {Role::COMPUTE_NODE, mock_instance,
+                                              "rename_cluster_name", mock_cluster_id, npb}});
         auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("notify_decommissioned", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
@@ -754,7 +747,7 @@ TEST(MetaServiceHttpTest, GetClusterTest) {
 
     std::unique_ptr<Transaction> txn;
     std::string get_val;
-    ASSERT_EQ(ctx.meta_service_->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(ctx.meta_service_->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put(key, val);
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
@@ -1162,7 +1155,7 @@ TEST(MetaServiceHttpTest, GetTabletStatsTest) {
             insert_rowset(meta_service.get(), 10000, "label4", table_id, tablet_id));
     // Check tablet stats kv
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(ctx.meta_service_->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string data_size_key, data_size_val;
     stats_tablet_data_size_key({mock_instance, table_id, index_id, partition_id, tablet_id},
                                &data_size_key);

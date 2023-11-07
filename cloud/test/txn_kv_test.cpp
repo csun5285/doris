@@ -181,7 +181,7 @@ TEST(TxnKvTest, CompatibleGetTest) {
 
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    ASSERT_EQ(selectdb::key_exists(txn.get(), key), 1);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
     ValueBuf val_buf;
     ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
     txn->put(key, val);
@@ -190,8 +190,8 @@ TEST(TxnKvTest, CompatibleGetTest) {
     // Check get
     TxnErrorCode err = txn_kv->create_txn(&txn);
     ASSERT_EQ(err, TxnErrorCode::TXN_OK);
-    int ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 0);
+    err = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     err = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     EXPECT_EQ(val_buf.ver, 0);
@@ -209,7 +209,7 @@ TEST(TxnKvTest, CompatibleGetTest) {
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     // Check remove
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    ASSERT_EQ(selectdb::key_exists(txn.get(), key), 1);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
     ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
 }
 
@@ -245,8 +245,7 @@ TEST(TxnKvTest, PutLargeValueTest) {
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     ValueBuf val_buf;
     doris::TabletSchemaPB saved_schema;
-    int ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_OK);
     TxnErrorCode err = selectdb::get(txn.get(), key, &val_buf);
     ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     std::cout << "num iterators=" << val_buf.iters.size() << std::endl;
@@ -294,7 +293,7 @@ TEST(TxnKvTest, PutLargeValueTest) {
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     // Check remove
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    ASSERT_EQ(selectdb::key_exists(txn.get(), key), 1);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
     ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
 }
 
