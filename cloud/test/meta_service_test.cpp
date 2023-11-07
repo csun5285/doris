@@ -13,6 +13,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
+#include "meta-service/meta_service_helper.h"
 #include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
@@ -1154,8 +1155,8 @@ TEST(MetaServiceTest, CommitTxnTest) {
             meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                      &req, &res, nullptr);
             ASSERT_EQ(res.status().code(), MetaServiceCode::TXN_ALREADY_VISIBLE);
-            auto found = res.status().msg().find(
-                    fmt::format("transaction is already visible: db_id={} txn_id={}", db_id, txn_id));
+            auto found = res.status().msg().find(fmt::format(
+                    "transaction is already visible: db_id={} txn_id={}", db_id, txn_id));
             ASSERT_TRUE(found != std::string::npos);
         }
 
@@ -2852,7 +2853,6 @@ TEST(MetaServiceTest, StageTest) {
             ASSERT_EQ("ex_id_1", res.stage().at(0).stage_id());
         }
 
-
         // get an external stage with name, type StagePB::BUCKET_ACL
         {
             get_stage_req.set_stage_name("ex_name_2");
@@ -4421,14 +4421,14 @@ TEST(MetaServiceTest, GetClusterStatusTest) {
     c1.set_cluster_status(ClusterStatus::NORMAL);
     ClusterPB c2;
     c2.set_type(ClusterPB::COMPUTE);
-    c2.set_cluster_name(mock_cluster_name+"2");
-    c2.set_cluster_id(mock_cluster_id+"2");
+    c2.set_cluster_name(mock_cluster_name + "2");
+    c2.set_cluster_id(mock_cluster_id + "2");
     c2.add_mysql_user_name()->append("m2");
     c2.set_cluster_status(ClusterStatus::SUSPENDED);
     ClusterPB c3;
     c3.set_type(ClusterPB::COMPUTE);
-    c3.set_cluster_name(mock_cluster_name+"3");
-    c3.set_cluster_id(mock_cluster_id+"3");
+    c3.set_cluster_name(mock_cluster_name + "3");
+    c3.set_cluster_id(mock_cluster_id + "3");
     c3.add_mysql_user_name()->append("m3");
     c3.set_cluster_status(ClusterStatus::TO_RESUME);
     instance.add_clusters()->CopyFrom(c1);
@@ -4449,8 +4449,8 @@ TEST(MetaServiceTest, GetClusterStatusTest) {
         GetClusterStatusRequest req;
         req.add_instance_ids(mock_instance);
         GetClusterStatusResponse res;
-        meta_service->get_cluster_status(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
-                                  &res, nullptr);
+        meta_service->get_cluster_status(
+                reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         ASSERT_EQ(res.details().at(0).clusters().size(), 3);
     }
@@ -4462,11 +4462,276 @@ TEST(MetaServiceTest, GetClusterStatusTest) {
         req.add_instance_ids(mock_instance);
         req.set_status(NORMAL);
         GetClusterStatusResponse res;
-        meta_service->get_cluster_status(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
-                                         &res, nullptr);
+        meta_service->get_cluster_status(
+                reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         ASSERT_EQ(res.details().at(0).clusters().size(), 1);
     }
+}
+
+TEST(MetaServiceTest, DecryptInfoTest) {
+    auto meta_service = get_meta_service();
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->enable_processing();
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key", [](void* p) {
+        *reinterpret_cast<std::string*>(p) = "selectdbselectdbselectdbselectdb";
+    });
+    InstanceInfoPB instance;
+
+    EncryptionInfoPB encryption_info;
+    encryption_info.set_encryption_method("AES_256_ECB");
+    encryption_info.set_key_id(1);
+
+    std::string cipher_sk = "JUkuTDctR+ckJtnPkLScWaQZRcOtWBhsLLpnCRxQLxr734qB8cs6gNLH6grE1FxO";
+    std::string plain_sk = "Hx60p12123af234541nsVsffdfsdfghsdfhsdf34t";
+    ObjectStoreInfoPB obj_info;
+    obj_info.mutable_encryption_info()->CopyFrom(encryption_info);
+    obj_info.set_ak("akak1");
+    obj_info.set_sk(cipher_sk);
+    instance.add_obj_info()->CopyFrom(obj_info);
+
+    RamUserPB ram_user;
+    ram_user.set_ak("akak2");
+    ram_user.set_sk(cipher_sk);
+    ram_user.mutable_encryption_info()->CopyFrom(encryption_info);
+    instance.mutable_ram_user()->CopyFrom(ram_user);
+
+    StagePB stage;
+    stage.mutable_obj_info()->CopyFrom(obj_info);
+    instance.add_stages()->CopyFrom(stage);
+
+    auto checkcheck = [&](const InstanceInfoPB& instance) {
+        ASSERT_EQ(instance.obj_info(0).ak(), "akak1");
+        ASSERT_EQ(instance.obj_info(0).sk(), plain_sk);
+
+        ASSERT_EQ(instance.ram_user().ak(), "akak2");
+        ASSERT_EQ(instance.ram_user().sk(), plain_sk);
+
+        ASSERT_EQ(instance.stages(0).obj_info().ak(), "akak1");
+        ASSERT_EQ(instance.stages(0).obj_info().sk(), plain_sk);
+    };
+
+    std::string instance_id = "i1";
+    MetaServiceCode code;
+    std::string msg;
+    // No system_meta_service_arn_info_key
+    {
+        std::unique_ptr<Transaction> txn0;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn0), TxnErrorCode::TXN_OK);
+        std::shared_ptr<Transaction> txn(txn0.release());
+        InstanceInfoPB decrypt_instance;
+        decrypt_instance.CopyFrom(instance);
+        int ret = decrypt_instance_info(decrypt_instance, instance_id, code, msg, txn);
+        ASSERT_EQ(ret, 0);
+        checkcheck(decrypt_instance);
+        ASSERT_EQ(decrypt_instance.iam_user().user_id(), config::arn_id);
+        ASSERT_EQ(decrypt_instance.iam_user().external_id(), instance_id);
+        ASSERT_EQ(decrypt_instance.iam_user().ak(), config::arn_ak);
+        ASSERT_EQ(decrypt_instance.iam_user().sk(), config::arn_sk);
+    }
+
+    // With system_meta_service_arn_info_key
+    {
+        std::string key = system_meta_service_arn_info_key();
+        std::string val;
+        std::unique_ptr<Transaction> txn2;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn2), TxnErrorCode::TXN_OK);
+        RamUserPB iam_user;
+        iam_user.set_user_id("1234");
+        iam_user.set_ak("aksk3");
+        iam_user.set_sk(cipher_sk);
+        iam_user.set_external_id(instance_id);
+        iam_user.mutable_encryption_info()->CopyFrom(encryption_info);
+        val = iam_user.SerializeAsString();
+        txn2->put(key, val);
+        ASSERT_EQ(txn2->commit(), TxnErrorCode::TXN_OK);
+        std::unique_ptr<Transaction> txn0;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn0), TxnErrorCode::TXN_OK);
+        std::shared_ptr<Transaction> txn(txn0.release());
+        InstanceInfoPB decrypt_instance;
+        decrypt_instance.CopyFrom(instance);
+        int ret = decrypt_instance_info(decrypt_instance, instance_id, code, msg, txn);
+        ASSERT_EQ(ret, 0);
+        checkcheck(decrypt_instance);
+        ASSERT_EQ(decrypt_instance.iam_user().user_id(), "1234");
+        ASSERT_EQ(decrypt_instance.iam_user().external_id(), instance_id);
+        ASSERT_EQ(decrypt_instance.iam_user().ak(), "aksk3");
+        ASSERT_EQ(decrypt_instance.iam_user().sk(), plain_sk);
+    }
+    SyncPoint::get_instance()->disable_processing();
+    SyncPoint::get_instance()->clear_all_call_backs();
+}
+
+TEST(MetaServiceTest, LegacyUpdateAkSkTest) {
+    auto meta_service = get_meta_service();
+
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->enable_processing();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) {
+        *reinterpret_cast<std::string*>(p) = "selectdbselectdbselectdbselectdb";
+    });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+
+    std::unique_ptr<Transaction> txn;
+    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    std::string key;
+    std::string val;
+    InstanceKeyInfo key_info {"test_instance"};
+    instance_key(key_info, &key);
+
+    ObjectStoreInfoPB obj_info;
+    obj_info.set_id("1");
+    obj_info.set_ak("ak");
+    obj_info.set_sk("sk");
+    InstanceInfoPB instance;
+    instance.add_obj_info()->CopyFrom(obj_info);
+    val = instance.SerializeAsString();
+    txn->put(key, val);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+    auto get_test_instance = [&](InstanceInfoPB& i) {
+        std::string key;
+        std::string val;
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        InstanceKeyInfo key_info {"test_instance"};
+        instance_key(key_info, &key);
+        ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
+        i.ParseFromString(val);
+    };
+
+    std::string cipher_sk = "JUkuTDctR+ckJtnPkLScWaQZRcOtWBhsLLpnCRxQLxr734qB8cs6gNLH6grE1FxO";
+    std::string plain_sk = "Hx60p12123af234541nsVsffdfsdfghsdfhsdf34t";
+
+    // update failed
+    {
+        AlterObjStoreInfoRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_op(AlterObjStoreInfoRequest::LEGACY_UPDATE_AK_SK);
+        req.mutable_obj()->set_id("2");
+        req.mutable_obj()->set_ak("new_ak");
+        req.mutable_obj()->set_sk(plain_sk);
+
+        brpc::Controller cntl;
+        AlterObjStoreInfoResponse res;
+        meta_service->alter_obj_store_info(
+                reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        InstanceInfoPB instance;
+        get_test_instance(instance);
+        ASSERT_EQ(instance.obj_info(0).id(), "1");
+        ASSERT_EQ(instance.obj_info(0).ak(), "ak");
+        ASSERT_EQ(instance.obj_info(0).sk(), "sk");
+    }
+
+    // update successful
+    {
+        AlterObjStoreInfoRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_op(AlterObjStoreInfoRequest::LEGACY_UPDATE_AK_SK);
+        req.mutable_obj()->set_id("1");
+        req.mutable_obj()->set_ak("new_ak");
+        req.mutable_obj()->set_sk(plain_sk);
+
+        brpc::Controller cntl;
+        AlterObjStoreInfoResponse res;
+        meta_service->alter_obj_store_info(
+                reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        InstanceInfoPB instance;
+        get_test_instance(instance);
+        ASSERT_EQ(instance.obj_info(0).id(), "1");
+        ASSERT_EQ(instance.obj_info(0).ak(), "new_ak");
+        ASSERT_EQ(instance.obj_info(0).sk(), cipher_sk);
+    }
+
+    SyncPoint::get_instance()->disable_processing();
+    SyncPoint::get_instance()->clear_all_call_backs();
+}
+
+TEST(MetaServiceTest, UpdateAkSkTest) {
+    auto meta_service = get_meta_service();
+
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->enable_processing();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) {
+        *reinterpret_cast<std::string*>(p) = "selectdbselectdbselectdbselectdb";
+    });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+
+    auto get_test_instance = [&](InstanceInfoPB& i) {
+        std::string key;
+        std::string val;
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        InstanceKeyInfo key_info {"test_instance"};
+        instance_key(key_info, &key);
+        ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
+        i.ParseFromString(val);
+    };
+
+    std::string cipher_sk = "JUkuTDctR+ckJtnPkLScWaQZRcOtWBhsLLpnCRxQLxr734qB8cs6gNLH6grE1FxO";
+    std::string plain_sk = "Hx60p12123af234541nsVsffdfsdfghsdfhsdf34t";
+
+    auto update = [&](bool with_user_id, bool with_wrong_user_id) {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string key;
+        std::string val;
+        InstanceKeyInfo key_info {"test_instance"};
+        instance_key(key_info, &key);
+
+        ObjectStoreInfoPB obj_info;
+        if (with_user_id) {
+            obj_info.set_user_id("111");
+        }
+        obj_info.set_ak("ak");
+        obj_info.set_sk("sk");
+        InstanceInfoPB instance;
+        instance.add_obj_info()->CopyFrom(obj_info);
+        val = instance.SerializeAsString();
+        txn->put(key, val);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        UpdateAkSkRequest req;
+        req.set_instance_id("test_instance");
+        RamUserPB ram_user;
+        if (with_wrong_user_id) {
+            ram_user.set_user_id("222");
+        } else {
+            ram_user.set_user_id("111");
+        }
+        ram_user.set_ak("new_ak");
+        ram_user.set_sk(plain_sk);
+        req.add_internal_bucket_user()->CopyFrom(ram_user);
+
+        brpc::Controller cntl;
+        UpdateAkSkResponse res;
+        meta_service->update_ak_sk(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
+                                   &req, &res, nullptr);
+        if (with_wrong_user_id) {
+            ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        } else {
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            InstanceInfoPB update_instance;
+            get_test_instance(update_instance);
+            ASSERT_EQ(update_instance.obj_info(0).user_id(), "111");
+            ASSERT_EQ(update_instance.obj_info(0).ak(), "new_ak");
+            ASSERT_EQ(update_instance.obj_info(0).sk(), cipher_sk);
+        }
+    };
+
+    update(false, false);
+    update(true, false);
+    update(true, true);
 }
 
 } // namespace selectdb
