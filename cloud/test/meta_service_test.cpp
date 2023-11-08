@@ -4509,7 +4509,7 @@ TEST(MetaServiceTest, DecryptInfoTest) {
     // No system_meta_service_arn_info_key
     {
         std::unique_ptr<Transaction> txn0;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn0), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn0), TxnErrorCode::TXN_OK);
         std::shared_ptr<Transaction> txn(txn0.release());
         InstanceInfoPB decrypt_instance;
         decrypt_instance.CopyFrom(instance);
@@ -4527,7 +4527,7 @@ TEST(MetaServiceTest, DecryptInfoTest) {
         std::string key = system_meta_service_arn_info_key();
         std::string val;
         std::unique_ptr<Transaction> txn2;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn2), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn2), TxnErrorCode::TXN_OK);
         RamUserPB iam_user;
         iam_user.set_user_id("1234");
         iam_user.set_ak("aksk3");
@@ -4538,7 +4538,7 @@ TEST(MetaServiceTest, DecryptInfoTest) {
         txn2->put(key, val);
         ASSERT_EQ(txn2->commit(), TxnErrorCode::TXN_OK);
         std::unique_ptr<Transaction> txn0;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn0), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn0), TxnErrorCode::TXN_OK);
         std::shared_ptr<Transaction> txn(txn0.release());
         InstanceInfoPB decrypt_instance;
         decrypt_instance.CopyFrom(instance);
@@ -4568,7 +4568,7 @@ TEST(MetaServiceTest, LegacyUpdateAkSkTest) {
                       [](void* p) { *reinterpret_cast<int*>(p) = 1; });
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string key;
     std::string val;
     InstanceKeyInfo key_info {"test_instance"};
@@ -4588,7 +4588,7 @@ TEST(MetaServiceTest, LegacyUpdateAkSkTest) {
         std::string key;
         std::string val;
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         InstanceKeyInfo key_info {"test_instance"};
         instance_key(key_info, &key);
         ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
@@ -4661,7 +4661,7 @@ TEST(MetaServiceTest, UpdateAkSkTest) {
         std::string key;
         std::string val;
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         InstanceKeyInfo key_info {"test_instance"};
         instance_key(key_info, &key);
         ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
@@ -4673,7 +4673,7 @@ TEST(MetaServiceTest, UpdateAkSkTest) {
 
     auto update = [&](bool with_user_id, bool with_wrong_user_id) {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(meta_service->txn_kv_->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::string key;
         std::string val;
         InstanceKeyInfo key_info {"test_instance"};

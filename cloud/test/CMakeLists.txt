@@ -73,6 +73,10 @@ add_executable(fdb_injection_test
     fdb_injection_test.cpp
 )
 
+add_executable(s3_accessor_test
+    s3_accessor_test.cpp
+)
+
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -115,6 +119,10 @@ target_link_libraries(resource_test
 )
 
 target_link_libraries(http_encode_key_test
+    ${TEST_LINK_LIBS}
+)
+
+target_link_libraries(s3_accessor_test
     ${TEST_LINK_LIBS}
 )
 
