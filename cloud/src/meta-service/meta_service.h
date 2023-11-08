@@ -117,9 +117,9 @@ public:
                        ::google::protobuf::Closure* done) override;
 
     void update_tmp_rowset(::google::protobuf::RpcController* controller,
-                                 const ::selectdb::CreateRowsetRequest* request,
-                                 ::selectdb::CreateRowsetResponse* response,
-                                 ::google::protobuf::Closure* done) override;
+                           const ::selectdb::CreateRowsetRequest* request,
+                           ::selectdb::CreateRowsetResponse* response,
+                           ::google::protobuf::Closure* done) override;
 
     void get_rowset(::google::protobuf::RpcController* controller,
                     const ::selectdb::GetRowsetRequest* request,
@@ -375,7 +375,6 @@ public:
         call_impl(&selectdb::MetaService::clean_txn_label, controller, request, response, done);
     }
 
-
     void get_version(::google::protobuf::RpcController* controller,
                      const ::selectdb::GetVersionRequest* request,
                      ::selectdb::GetVersionResponse* response,
@@ -424,6 +423,13 @@ public:
                        ::selectdb::CreateRowsetResponse* response,
                        ::google::protobuf::Closure* done) override {
         call_impl(&selectdb::MetaService::commit_rowset, controller, request, response, done);
+    }
+
+    void update_tmp_rowset(::google::protobuf::RpcController* controller,
+                           const ::selectdb::CreateRowsetRequest* request,
+                           ::selectdb::CreateRowsetResponse* response,
+                           ::google::protobuf::Closure* done) override {
+        call_impl(&selectdb::MetaService::update_tmp_rowset, controller, request, response, done);
     }
 
     void get_rowset(::google::protobuf::RpcController* controller,
@@ -527,6 +533,13 @@ public:
                          ::selectdb::CreateInstanceResponse* response,
                          ::google::protobuf::Closure* done) override {
         call_impl(&selectdb::MetaService::create_instance, controller, request, response, done);
+    }
+
+    void get_instance(google::protobuf::RpcController* controller,
+                      const ::selectdb::GetInstanceRequest* request,
+                      ::selectdb::GetInstanceResponse* response,
+                      ::google::protobuf::Closure* done) override {
+        call_impl(&selectdb::MetaService::get_instance, controller, request, response, done);
     }
 
     void alter_instance(google::protobuf::RpcController* controller,
@@ -726,4 +739,4 @@ private:
 };
 
 } // namespace selectdb
-// vim: et tw=120 ts=4 sw=4 cc=80:
+  // vim: et tw=120 ts=4 sw=4 cc=80:
