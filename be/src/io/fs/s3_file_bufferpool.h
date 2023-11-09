@@ -28,9 +28,9 @@
 
 #include "common/status.h"
 #include "io/cache/block/block_file_segment.h"
+#include "util/crc32c.h"
 #include "util/slice.h"
 #include "util/threadpool.h"
-#include "util/crc32c.h"
 
 namespace doris {
 namespace io {
@@ -192,8 +192,12 @@ struct UploadFileBuffer final : public FileBuffer {
     void on_upload() {
         if (config::enable_file_cache_as_load_buffer && _buffer.empty()) {
             read_from_cache();
+            // The cache allocation logic might fail due to no free buffer
+            // So we should skip doing the following logic in such situation
+            if (_buffer.empty()) [[unlikely]] {
+                return;
+            }
         }
-        CHECK(!_buffer.empty());
         if (_crc_value != crc32c::Value(_buffer.get_data(), _size)) {
             DCHECK(false);
             set_val(Status::IOError("Buffer checksum not match"));
