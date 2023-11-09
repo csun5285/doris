@@ -303,8 +303,19 @@ void ExchangeSinkBuffer::_construct_request(InstanceLoId id, PUniqueId finst_id)
 }
 
 void ExchangeSinkBuffer::_ended(InstanceLoId id) {
-    std::unique_lock<std::mutex> lock(*_instance_to_package_queue_mutex[id]);
-    _instance_to_sending_by_pipeline[id] = true;
+    if (!_instance_to_package_queue_mutex.contains(id)) {
+        std::stringstream ss;
+        ss << "failed find the instance id:" << id
+           << " now mutex map size:" << _instance_to_package_queue_mutex.size();
+        for (const auto& p : _instance_to_package_queue_mutex) {
+            ss << " key:" << p.first << " value:" << p.second << "\n";
+        }
+        LOG(INFO) << ss.str();
+        LOG(FATAL) << "not find the instance id";
+    } else {
+        std::unique_lock<std::mutex> lock(*_instance_to_package_queue_mutex[id]);
+        _instance_to_sending_by_pipeline[id] = true;
+    }
 }
 
 void ExchangeSinkBuffer::_failed(InstanceLoId id, const std::string& err) {
