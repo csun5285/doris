@@ -128,13 +128,9 @@ public class OlapTableSink extends DataSink {
                     "if load_to_single_tablet set to true," + " the olap table must be with random distribution");
         }
         tSink.setLoadToSingleTablet(loadToSingleTablet);
-<<<<<<< HEAD
         tSink.setTxnTimeoutS(txnTimeoutS);
         tDataSink = new TDataSink(getDataSinkType());
-=======
         this.loadToSingleTablet = loadToSingleTablet;
-        tDataSink = new TDataSink(TDataSinkType.OLAP_TABLE_SINK);
->>>>>>> 2.0.3-rc01
         tDataSink.setOlapTableSink(tSink);
 
         if (partitionIds == null) {

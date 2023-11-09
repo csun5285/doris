@@ -404,8 +404,6 @@ public:
     void set_clone_occurred(bool clone_occurred) { _is_clone_occurred = clone_occurred; }
     bool get_clone_occurred() { return _is_clone_occurred; }
 
-<<<<<<< HEAD
-=======
     void set_cumulative_compaction_policy(
             std::shared_ptr<CumulativeCompactionPolicy> cumulative_compaction_policy) {
         _cumulative_compaction_policy = cumulative_compaction_policy;
@@ -421,7 +419,6 @@ public:
 
     std::string get_last_base_compaction_status() { return _last_base_compaction_status; }
 
->>>>>>> 2.0.3-rc01
     inline bool all_beta() const {
         std::shared_lock rdlock(_meta_lock);
         return _tablet_meta->all_beta();
@@ -439,16 +436,11 @@ public:
     Status create_rowset_writer(RowsetWriterContext& context,
                                 std::unique_ptr<RowsetWriter>* rowset_writer);
 
-<<<<<<< HEAD
     Status create_transient_rowset_writer(
             RowsetSharedPtr rowset_ptr, std::unique_ptr<RowsetWriter>* rowset_writer,
             std::shared_ptr<PartialUpdateInfo> partial_update_info = nullptr,
             int64_t txn_expiration = 0);
-=======
-    Status create_transient_rowset_writer(RowsetSharedPtr rowset_ptr,
-                                          std::unique_ptr<RowsetWriter>* rowset_writer,
-                                          std::shared_ptr<PartialUpdateInfo> partial_update_info);
->>>>>>> 2.0.3-rc01
+
     Status create_transient_rowset_writer(RowsetWriterContext& context, const RowsetId& rowset_id,
                                           std::unique_ptr<RowsetWriter>* rowset_writer);
 
@@ -603,7 +595,7 @@ public:
             RowsetSharedPtr dst_rowset,
             const std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>&
                     location_map);
-<<<<<<< HEAD
+
     Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
                                 const RowsetIdUnorderedSet& pre_rowset_ids);
 
@@ -618,9 +610,9 @@ public:
     std::vector<RowsetSharedPtr> get_snapshot_rowset(bool include_stale_rowset = false) const;
 
     RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
-=======
+
     Status all_rs_id(int64_t max_version, RowsetIdUnorderedSet* rowset_ids) const;
->>>>>>> 2.0.3-rc01
+
     void sort_block(vectorized::Block& in_block, vectorized::Block& output_block);
 
     bool check_all_rowset_segment();

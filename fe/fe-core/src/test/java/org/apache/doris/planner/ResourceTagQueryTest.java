@@ -280,12 +280,10 @@ public class ResourceTagQueryTest {
         Assert.assertEquals(1000000, execMemLimit);
 
         List<List<String>> userProps = Env.getCurrentEnv().getAuth().getUserProperties(Auth.ROOT_USER);
-<<<<<<< HEAD
+
         // cloud add default_cloud_cluster
         // [[cpu_resource_limit, -1], [default_cloud_cluster, ], [default_load_cluster, ], [default_workload_group, normal], [exec_mem_limit, 1000000], [insert_timeout, -1], [max_query_instances, -1], [max_user_connections, 100], [query_timeout, -1], [resource_tags, {"location" : "zone1"}], [sql_block_rules, ]]
         Assert.assertEquals(11, userProps.size());
-=======
-        Assert.assertEquals(10, userProps.size());
 
         // now :
         // be1 be2 be3 ==>tag1;
@@ -383,7 +381,6 @@ public class ResourceTagQueryTest {
                 Assert.assertEquals(p2ExpectedAllocMap, allocMap);
             }
         }
->>>>>>> 2.0.3-rc01
     }
 
     private void checkTableReplicaAllocation(OlapTable tbl) throws InterruptedException {

@@ -1118,24 +1118,14 @@ public class DataDescription implements InsertStmt.DataDesc {
         // file format
         // note(tsy): for historical reason, file format here must be string type rather than TFileFormatType
         if (fileFormat != null) {
-<<<<<<< HEAD
-            if (!fileFormat.equalsIgnoreCase("parquet")
-                    && !fileFormat.equalsIgnoreCase(FeConstants.csv)
-                    && !fileFormat.equalsIgnoreCase("orc")
-                    && !fileFormat.equalsIgnoreCase("json")
-                    && !fileFormat.equalsIgnoreCase("wal")
-                    && !fileFormat.equalsIgnoreCase(FeConstants.csv_with_names)
-                    && !fileFormat.equalsIgnoreCase(FeConstants.csv_with_names_and_types)
-                    && !fileFormat.equalsIgnoreCase("hive_text")) {
-=======
             if (!fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_PARQUET)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_CSV)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_CSV_WITH_NAMES)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_CSV_WITH_NAMES_AND_TYPES)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_ORC)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_JSON)
+                    && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_WAL)
                     && !fileFormat.equalsIgnoreCase(FileFormatConstants.FORMAT_HIVE_TEXT)) {
->>>>>>> 2.0.3-rc01
                 throw new AnalysisException("File Format Type " + fileFormat + " is invalid.");
             }
         }

@@ -289,19 +289,8 @@ public class MysqlPassword {
         return passwd;
     }
 
-<<<<<<< HEAD
-    public static final String REG_NUMBER = ".*\\d+.*";
-    public static final String REG_UPPERCASE = ".*[A-Z]+.*";
-    public static final String REG_LOWERCASE = ".*[a-z]+.*";
-    public static final String REG_SYMBOL = ".*[~!@#$%^&*()_+|<>,.?/:;'\\[\\]{}\"]+.*";
-    public static final int MIN_PASSWORD_LEN = 8;
-
-    public static void validatePlainPassword(long validaPolicy, String text) throws AnalysisException  {
-        if (validaPolicy == GlobalVariable.VALIDATE_PASSWORD_POLICY_STRONG || Config.cloud_use_strong_password) {
-=======
     public static void validatePlainPassword(long validaPolicy, String text) throws AnalysisException {
-        if (validaPolicy == GlobalVariable.VALIDATE_PASSWORD_POLICY_STRONG) {
->>>>>>> 2.0.3-rc01
+        if (validaPolicy == GlobalVariable.VALIDATE_PASSWORD_POLICY_STRONG || Config.cloud_use_strong_password) {
             if (Strings.isNullOrEmpty(text) || text.length() < MIN_PASSWORD_LEN) {
                 throw new AnalysisException(
                         "Violate password validation policy: STRONG. The password must be at least 8 characters");

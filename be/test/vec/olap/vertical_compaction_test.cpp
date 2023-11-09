@@ -196,20 +196,6 @@ protected:
         RowsetWriterContext rowset_writer_context;
         RowsetId rowset_id;
         rowset_id.init(inc_id);
-<<<<<<< HEAD
-        rowset_writer_context->fs = io::global_local_filesystem();
-        rowset_writer_context->rowset_id = rowset_id;
-        rowset_writer_context->rowset_type = BETA_ROWSET;
-        rowset_writer_context->rowset_state = VISIBLE;
-        rowset_writer_context->tablet_schema = tablet_schema;
-        rowset_writer_context->rowset_dir = absolute_dir + "/tablet_path";
-        rowset_writer_context->version = Version(inc_id, inc_id);
-        rowset_writer_context->segments_overlap = overlap;
-        rowset_writer_context->max_rows_per_segment = max_rows_per_segment;
-        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
-        rowset_writer_context->newest_write_timestamp = 10086;
-
-=======
         rowset_writer_context.rowset_id = rowset_id;
         rowset_writer_context.rowset_type = BETA_ROWSET;
         rowset_writer_context.rowset_state = VISIBLE;
@@ -218,7 +204,8 @@ protected:
         rowset_writer_context.version = version;
         rowset_writer_context.segments_overlap = overlap;
         rowset_writer_context.max_rows_per_segment = max_rows_per_segment;
->>>>>>> 2.0.3-rc01
+        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
+        rowset_writer_context->newest_write_timestamp = 10086;
         inc_id++;
         return rowset_writer_context;
     }

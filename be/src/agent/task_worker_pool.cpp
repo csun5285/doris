@@ -1627,13 +1627,8 @@ void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
                         tablet->publised_count++;
                         if (tablet->publised_count % 10 == 0) {
                             StorageEngine::instance()->submit_compaction_task(
-<<<<<<< HEAD
-                                    tablet, CompactionType::CUMULATIVE_COMPACTION);
-                            LOG(INFO) << "trigger compaction succ, tabletid:" << succ_tablet_ids[i]
-=======
                                     tablet, CompactionType::CUMULATIVE_COMPACTION, true);
                             LOG(INFO) << "trigger compaction succ, tablet_id:" << tablet_id
->>>>>>> 2.0.3-rc01
                                       << ", publised:" << tablet->publised_count;
                         }
                     } else {

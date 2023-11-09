@@ -149,26 +149,6 @@ protected:
         return tablet_schema;
     }
 
-<<<<<<< HEAD
-    void create_rowset_writer_context(TabletSchemaSPtr tablet_schema,
-                                      const SegmentsOverlapPB& overlap,
-                                      uint32_t max_rows_per_segment,
-                                      RowsetWriterContext* rowset_writer_context) {
-        static int64_t inc_id = 0;
-        RowsetId rowset_id;
-        rowset_id.init(inc_id);
-        rowset_writer_context->rowset_id = rowset_id;
-        rowset_writer_context->rowset_type = BETA_ROWSET;
-        rowset_writer_context->rowset_state = VISIBLE;
-        rowset_writer_context->tablet_schema = tablet_schema;
-        rowset_writer_context->rowset_dir = absolute_dir + "/tablet_path";
-        rowset_writer_context->version = Version(inc_id, inc_id);
-        rowset_writer_context->segments_overlap = overlap;
-        rowset_writer_context->max_rows_per_segment = max_rows_per_segment;
-        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
-        rowset_writer_context->newest_write_timestamp = 10086;
-        inc_id++;
-=======
     RowsetWriterContext create_rowset_writer_context(TabletSchemaSPtr tablet_schema,
                                                      const SegmentsOverlapPB& overlap,
                                                      uint32_t max_rows_per_segment,
@@ -183,8 +163,8 @@ protected:
         rowset_writer_context.version = version;
         rowset_writer_context.segments_overlap = overlap;
         rowset_writer_context.max_rows_per_segment = max_rows_per_segment;
+        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
         return rowset_writer_context;
->>>>>>> 2.0.3-rc01
     }
 
     void create_and_init_rowset_reader(Rowset* rowset, RowsetReaderContext& context,

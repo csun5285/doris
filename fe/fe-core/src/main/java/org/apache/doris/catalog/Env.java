@@ -718,18 +718,10 @@ public class Env {
 
         LOG.info("env enableInternalSchemaDb {} runningCopyIntoTest {} isCheckpointCatalog {}",
                 FeConstants.enableInternalSchemaDb, FeConstants.runningCopyIntoTest, isCheckpointCatalog);
-        // Add `FeConstants.enableInternalSchemaDb` in condition for CopyIntoTest
-        if (FeConstants.enableInternalSchemaDb && !FeConstants.runningCopyIntoTest) {
-            this.statisticsCleaner = new StatisticsCleaner();
-            this.statisticsAutoAnalyzer = new StatisticsAutoAnalyzer();
-        }
 
         this.analysisManager = new AnalysisManager();
-<<<<<<< HEAD
-=======
         this.statisticsCleaner = new StatisticsCleaner();
         this.statisticsAutoCollector = new StatisticsAutoCollector();
->>>>>>> 2.0.3-rc01
         this.globalFunctionMgr = new GlobalFunctionMgr();
         this.workloadGroupMgr = new WorkloadGroupMgr();
         this.queryStats = new QueryStats();
@@ -6196,16 +6188,12 @@ public class Env {
             }
         }
 
-<<<<<<< HEAD
         if (Config.isCloudMode() && Env.getCurrentEnv().isMaster()) {
             dropTableByIndexs(olapTable);
             return;
         }
-
-        if (!isReplay) { // Cloud mode do not need to send request
-=======
+        // Cloud mode do not need to send request
         if (!isReplay && !Env.isCheckpointThread()) {
->>>>>>> 2.0.3-rc01
             // drop all replicas
             AgentBatchTask batchTask = new AgentBatchTask();
             for (Partition partition : olapTable.getAllPartitions()) {
@@ -6419,12 +6407,11 @@ public class Env {
         return columnIdFlusher;
     }
 
-<<<<<<< HEAD
     public CloudTabletStatMgr getCloudTabletStatMgr() {
         return this.cloudTabletStatMgr;
-=======
+    }
+
     public StatisticsAutoCollector getStatisticsAutoCollector() {
         return statisticsAutoCollector;
->>>>>>> 2.0.3-rc01
     }
 }

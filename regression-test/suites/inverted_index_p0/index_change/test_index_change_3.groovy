@@ -22,10 +22,7 @@ suite("test_index_change_3") {
     def delta_time = 1000
     def alter_res = "null"
     def useTime = 0
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.3-rc01
     def wait_for_latest_op_on_table_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
@@ -40,10 +37,7 @@ suite("test_index_change_3") {
         }
         assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
     }
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.3-rc01
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
@@ -122,10 +116,8 @@ suite("test_index_change_3") {
 
     // drop inverted index idx_user_id, idx_note
     sql """ DROP INDEX idx_city ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ DROP INDEX idx_note ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
-    // wait_for_build_index_on_partition_finish(tableName, timeout)
+    wait_for_build_index_on_partition_finish(tableName, timeout)
 
     def show_result = sql "show index from ${tableName}"
     logger.info("show index from " + tableName + " result: " + show_result)

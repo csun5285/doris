@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/*
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_index_change_with_compaction") {
@@ -233,4 +232,3 @@ suite("test_index_change_with_compaction") {
         // try_sql("DROP TABLE IF EXISTS ${tableName}")
     }
 }
-*/

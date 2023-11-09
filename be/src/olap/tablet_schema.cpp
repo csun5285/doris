@@ -1045,7 +1045,6 @@ vectorized::Block TabletSchema::create_block(bool ignore_dropped_col) const {
     return block;
 }
 
-<<<<<<< HEAD
 std::vector<const TabletIndex*> TabletSchema::get_inverted_indexes() const {
     std::vector<const TabletIndex*> inverted_indexes;
     for (size_t i = 0; i < _indexes.size(); i++) {
@@ -1057,8 +1056,6 @@ std::vector<const TabletIndex*> TabletSchema::get_inverted_indexes() const {
     return inverted_indexes;
 }
 
-=======
->>>>>>> 2.0.3-rc01
 vectorized::Block TabletSchema::create_block_by_cids(const std::vector<uint32_t>& cids) {
     vectorized::Block block;
     for (const auto& cid : cids) {

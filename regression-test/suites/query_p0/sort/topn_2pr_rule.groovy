@@ -19,7 +19,6 @@ suite("topn_2pr_rule") {
     // sql """set topn_opt_limit_threshold = 1024"""
     // sql """set enable_two_phase_read_opt= false"""
 
-<<<<<<< HEAD
     // def create_table = { table_name, key_type="DUPLICATE" ->
     //     sql "DROP TABLE IF EXISTS ${table_name}"
     //     value_type = "v string"
@@ -62,50 +61,6 @@ suite("topn_2pr_rule") {
     //         } 
     //     }
     // }
-=======
-    def create_table = { table_name, key_type="DUPLICATE" ->
-        sql "DROP TABLE IF EXISTS ${table_name}"
-        value_type = "v string"
-        if ("${key_type}" == "AGGREGATE") {
-            value_type = "v string REPLACE_IF_NOT_NULL NULL" 
-        }
-        sql """
-            CREATE TABLE IF NOT EXISTS ${table_name} (
-                k bigint,
-                ${value_type}
-            )
-            ${key_type} KEY(`k`)
-            DISTRIBUTED BY HASH(k) BUCKETS 1
-            properties("replication_num" = "1", "disable_auto_compaction" = "false");
-        """
-    }
-    def verify = { table_name, key_type->
-        if("${key_type}" == "DUPLICATE") {
-            explain {
-                sql("select * from ${table_name}  order by k limit 1;")
-                contains "OPT TWO PHASE"
-            } 
-            explain {
-                sql("select * from ${table_name}  where k > 1 order by k limit 1;")
-                contains "OPT TWO PHASE"
-            } 
-            explain {
-                sql("select * from ${table_name}  where k order by k + 1 limit 1;")
-                notContains "OPT TWO PHASE"
-            } 
-        } else if("${key_type}" == "UNIQUE") {
-             explain {
-                sql("select * from ${table_name}  order by k limit 1;")
-                notContains "OPT TWO PHASE"
-            } 
-        } else if("${key_type}" == "AGGREGATE") {
-             explain {
-                sql("select * from ${table_name}  order by k limit 1;")
-                notContains "OPT TWO PHASE"
-            } 
-        }
-    }
->>>>>>> 2.0.3-rc01
 
     // def key_types = ["DUPLICATE", "UNIQUE", "AGGREGATE"]
     // for (int i = 0; i < key_types.size(); i++) {

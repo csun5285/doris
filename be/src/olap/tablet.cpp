@@ -159,12 +159,8 @@ static bvar::Adder<uint64_t> g_tablet_pk_not_found("doris_pk", "lookup_not_found
 static bvar::PerSecond<bvar::Adder<uint64_t>> g_tablet_pk_not_found_per_second(
         "doris_pk", "lookup_not_found_per_second", &g_tablet_pk_not_found, 60);
 
-<<<<<<< HEAD
-constexpr std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 10s;
+constexpr std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 1s;
 static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
-=======
-const std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 1s;
->>>>>>> 2.0.3-rc01
 
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_bytes, MetricUnit::BYTES);
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_finish_count, MetricUnit::OPERATIONS);
@@ -1078,45 +1074,10 @@ void Tablet::_delete_stale_rowset_by_version(const Version& version) {
 }
 
 void Tablet::delete_expired_stale_rowset() {
-<<<<<<< HEAD
 #ifdef CLOUD_MODE
     LOG(FATAL) << "MUST NOT call delete_expired_stale_rowset";
-#else
-    std::lock_guard<std::shared_mutex> wrlock(_meta_lock);
-    SCOPED_SIMPLE_TRACE_IF_TIMEOUT(TRACE_TABLET_LOCK_THRESHOLD);
-    // Compute the end time to delete rowsets, when a expired rowset createtime less then this time, it will be deleted.
-
-    double expired_stale_sweep_endtime =
-            ::difftime(now, config::tablet_rowset_stale_sweep_time_sec);
-    if (config::tablet_rowset_stale_sweep_by_size) {
-        expired_stale_sweep_endtime = now;
-    }
-
-    std::vector<int64_t> path_id_vec;
-    // capture the path version to delete
-    _timestamped_version_tracker.capture_expired_paths(&path_id_vec);
-
-    if (path_id_vec.empty()) {
-        return;
-    }
-
-    const RowsetSharedPtr lastest_delta = rowset_with_max_version();
-    if (lastest_delta == nullptr) {
-        LOG(WARNING) << "lastest_delta is null " << tablet_id();
-        return;
-    }
-
-    // fetch missing version before delete
-    std::vector<Version> missed_versions;
-    calc_missed_versions_unlocked(lastest_delta->end_version(), &missed_versions);
-
-    if (!missed_versions.empty()) {
-        LOG(WARNING) << "tablet:" << full_name()
-                     << ", missed version for version:" << lastest_delta->end_version();
-        _print_missed_versions(missed_versions);
-        return;
-    }
-=======
+    return;
+#endif
     int64_t now = UnixSeconds();
     // hold write lock while processing stable rowset
     {
@@ -1128,7 +1089,6 @@ void Tablet::delete_expired_stale_rowset() {
         if (config::tablet_rowset_stale_sweep_by_size) {
             expired_stale_sweep_endtime = now;
         }
->>>>>>> 2.0.3-rc01
 
         std::vector<int64_t> path_id_vec;
         // capture the path version to delete
@@ -1228,36 +1188,6 @@ void Tablet::delete_expired_stale_rowset() {
                 }
                 return;
             }
-<<<<<<< HEAD
-            return;
-        }
-        path_id_iter++;
-    }
-
-    auto old_size = _stale_rs_version_map.size();
-    auto old_meta_size = _tablet_meta->all_stale_rs_metas().size();
-
-    // do delete operation
-    auto to_delete_iter = stale_version_path_map.begin();
-    while (to_delete_iter != stale_version_path_map.end()) {
-        std::vector<TimestampedVersionSharedPtr>& to_delete_version =
-                to_delete_iter->second->timestamped_versions();
-        for (auto& timestampedVersion : to_delete_version) {
-            auto it = _stale_rs_version_map.find(timestampedVersion->version());
-            if (it != _stale_rs_version_map.end()) {
-                // delete rowset
-                StorageEngine::instance()->add_unused_rowset(it->second);
-                _stale_rs_version_map.erase(it);
-                VLOG_NOTICE << "delete stale rowset tablet=" << full_name() << " version["
-                            << timestampedVersion->version().first << ","
-                            << timestampedVersion->version().second
-                            << "] move to unused_rowset success";
-            } else {
-                LOG(WARNING) << "delete stale rowset tablet=" << full_name() << " version["
-                             << timestampedVersion->version().first << ","
-                             << timestampedVersion->version().second
-                             << "] not find in stale rs version map";
-=======
             path_id_iter++;
         }
 
@@ -1287,20 +1217,11 @@ void Tablet::delete_expired_stale_rowset() {
                                  << "] not find in stale rs version map";
                 }
                 _delete_stale_rowset_by_version(timestampedVersion->version());
->>>>>>> 2.0.3-rc01
             }
             to_delete_iter++;
         }
 
-<<<<<<< HEAD
-    VLOG_NOTICE << "delete stale rowset _stale_rs_version_map tablet=" << full_name()
-                << " current_size=" << _stale_rs_version_map.size() << " old_size=" << old_size
-                << " current_meta_size=" << _tablet_meta->all_stale_rs_metas().size()
-                << " old_meta_size=" << old_meta_size << ", reconstructed=" << reconstructed;
-#endif
-=======
         bool reconstructed = _reconstruct_version_tracker_if_necessary();
->>>>>>> 2.0.3-rc01
 
         VLOG_NOTICE << "delete stale rowset _stale_rs_version_map tablet=" << full_name()
                     << " current_size=" << _stale_rs_version_map.size() << " old_size=" << old_size
@@ -2530,11 +2451,7 @@ Status Tablet::create_rowset_writer(RowsetWriterContext& context,
 // after writer, merge this transient rowset with original rowset
 Status Tablet::create_transient_rowset_writer(
         RowsetSharedPtr rowset_ptr, std::unique_ptr<RowsetWriter>* rowset_writer,
-<<<<<<< HEAD
         std::shared_ptr<PartialUpdateInfo> partial_update_info, int64_t txn_expiration) {
-=======
-        std::shared_ptr<PartialUpdateInfo> partial_update_info) {
->>>>>>> 2.0.3-rc01
     RowsetWriterContext context;
     context.rowset_state = PREPARED;
     context.segments_overlap = OVERLAPPING;
@@ -3517,8 +3434,7 @@ Status Tablet::calc_segment_delete_bitmap(RowsetSharedPtr rowset,
     Version dummy_version(end_version + 1, end_version + 1);
     auto rowset_schema = rowset->tablet_schema();
     bool is_partial_update = rowset_writer && rowset_writer->is_partial_update();
-<<<<<<< HEAD
-=======
+
     bool have_input_seq_column = false;
     if (is_partial_update && rowset_schema->has_sequence_col()) {
         std::vector<uint32_t> including_cids =
@@ -3528,7 +3444,7 @@ Status Tablet::calc_segment_delete_bitmap(RowsetSharedPtr rowset,
                 (std::find(including_cids.cbegin(), including_cids.cend(),
                            rowset_schema->sequence_col_idx()) != including_cids.cend());
     }
->>>>>>> 2.0.3-rc01
+
     // use for partial update
     PartialUpdateReadPlan read_plan_ori;
     PartialUpdateReadPlan read_plan_update;

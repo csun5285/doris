@@ -247,13 +247,10 @@ struct TQueryOptions {
   84: optional bool enable_profile = false;
 
   85: optional bool enable_page_cache = false;
-<<<<<<< HEAD
-=======
+
   86: optional i32 analyze_timeout = 43200;
 
   87: optional bool faster_float_convert = false;
-}
->>>>>>> 2.0.3-rc01
 
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false

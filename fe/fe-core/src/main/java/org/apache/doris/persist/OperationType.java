@@ -329,14 +329,12 @@ public class OperationType {
     // For backward compatible with 2.0.3
     public static final short OP_DELETE_TABLE_STATS = 457;
 
-<<<<<<< HEAD
+    public static final short OP_ALTER_CATALOG_COMMENT = 458;
+
     // cloud
     public static final short OP_UPDATE_CLOUD_REPLICA = 1000;
     public static final short OP_MODIFY_TTL_SECONDS = 1001;
     public static final short OP_MODIFY_CLOUD_WARM_UP_JOB = 1002;
-=======
-    public static final short OP_ALTER_CATALOG_COMMENT = 458;
->>>>>>> 2.0.3-rc01
 
     /**
      * Get opcode name by op code.

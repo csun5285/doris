@@ -20,11 +20,8 @@
 #include <assert.h>
 // IWYU pragma: no_include <bthread/errno.h>
 #include <errno.h> // IWYU pragma: keep
-<<<<<<< HEAD
 #include <gen_cpp/olap_file.pb.h>
-=======
 #include <fmt/format.h>
->>>>>>> 2.0.3-rc01
 #include <stdio.h>
 
 #include <ctime> // time
@@ -92,11 +89,7 @@ BetaRowsetWriter::~BetaRowsetWriter() {
 
     // TODO(lingbin): Should wrapper exception logic, no need to know file ops directly.
     if (!_already_built) {       // abnormal exit, remove all files generated
-<<<<<<< HEAD
         _segment_writer.reset(); // ensure all files are closed and all resource are releaseed
-=======
-        _segment_writer.reset(); // ensure all files are closed
->>>>>>> 2.0.3-rc01
         const auto& fs = _rowset_meta->fs();
         if (!fs || !_rowset_meta->is_local()) { // Remote fs will delete them asynchronously
             return;

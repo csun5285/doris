@@ -104,17 +104,15 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
 
     _read_options.block_row_max = read_context->batch_size;
     _read_options.stats = _stats;
-<<<<<<< HEAD
     _read_options.io_ctx.file_cache_stats = &_stats->file_cache_stats;
     _read_options.io_ctx.async_io_stats = &_stats->async_io_stats;
     _read_options.push_down_agg_type_opt = _context->push_down_agg_type_opt;
     _read_options.remaining_conjunct_roots = _context->remaining_conjunct_roots;
     _read_options.common_expr_ctxs_push_down = _context->common_expr_ctxs_push_down;
-=======
     _read_options.push_down_agg_type_opt = _read_context->push_down_agg_type_opt;
     _read_options.remaining_conjunct_roots = _read_context->remaining_conjunct_roots;
     _read_options.common_expr_ctxs_push_down = _read_context->common_expr_ctxs_push_down;
->>>>>>> 2.0.3-rc01
+
     _read_options.rowset_id = _rowset->rowset_id();
     _read_options.version = _rowset->version();
     _read_options.tablet_id = _rowset->rowset_meta()->tablet_id();
@@ -216,16 +214,17 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
             }
         }
     }
-<<<<<<< HEAD
-    _read_options.use_page_cache = read_context->use_page_cache;
-    _read_options.tablet_schema = read_context->tablet_schema;
-    _read_options.record_rowids = read_context->record_rowids;
-    _read_options.use_topn_opt = read_context->use_topn_opt;
-    _read_options.read_orderby_key_reverse = read_context->read_orderby_key_reverse;
-    _read_options.read_orderby_key_columns = read_context->read_orderby_key_columns;
+
     _read_options.io_ctx.reader_type = read_context->reader_type;
-    _read_options.runtime_state = read_context->runtime_state;
     _read_options.output_columns = read_context->output_columns;
+    _read_options.read_orderby_key_columns = read_context->read_orderby_key_columns;
+    _read_options.read_orderby_key_reverse = read_context->read_orderby_key_reverse;
+    _read_options.record_rowids = read_context->record_rowids;
+    _read_options.runtime_state = read_context->runtime_state;
+    _read_options.tablet_schema = read_context->tablet_schema;
+    _read_options.use_page_cache = read_context->use_page_cache;
+    _read_options.use_topn_opt = read_context->use_topn_opt;
+
     _read_options.io_ctx.expiration_time =
             read_context->ttl_seconds == 0
                     ? 0
@@ -246,23 +245,6 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     bool should_use_cache = use_cache || read_context->reader_type == ReaderType::READER_QUERY;
     RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(
             _rowset, &_segment_cache_handle, should_use_cache, _read_options.is_lazy_open));
-=======
-    _read_options.use_page_cache = _read_context->use_page_cache;
-    _read_options.tablet_schema = _read_context->tablet_schema;
-    _read_options.record_rowids = _read_context->record_rowids;
-    _read_options.use_topn_opt = _read_context->use_topn_opt;
-    _read_options.read_orderby_key_reverse = _read_context->read_orderby_key_reverse;
-    _read_options.read_orderby_key_columns = _read_context->read_orderby_key_columns;
-    _read_options.io_ctx.reader_type = _read_context->reader_type;
-    _read_options.io_ctx.file_cache_stats = &_stats->file_cache_stats;
-    _read_options.runtime_state = _read_context->runtime_state;
-    _read_options.output_columns = _read_context->output_columns;
-
-    // load segments
-    bool should_use_cache = use_cache || _read_context->reader_type == ReaderType::READER_QUERY;
-    RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(_rowset, &_segment_cache_handle,
-                                                             should_use_cache));
->>>>>>> 2.0.3-rc01
 
     // create iterator for each segment
     auto& segments = _segment_cache_handle.get_segments();

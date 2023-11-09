@@ -58,10 +58,7 @@ LocalFileSystem::~LocalFileSystem() = default;
 
 Status LocalFileSystem::create_file_impl(const Path& file, FileWriterPtr* writer,
                                          const FileWriterOptions* opts) {
-<<<<<<< HEAD
     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileSystem::create_file_impl", Status::IOError("inject io error"));
-=======
->>>>>>> 2.0.3-rc01
     int fd = ::open(file.c_str(), O_TRUNC | O_WRONLY | O_CREAT | O_CLOEXEC, 0666);
     if (-1 == fd) {
         return Status::IOError("failed to open {}: {}", file.native(), errno_to_str());

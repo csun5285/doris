@@ -180,11 +180,7 @@ suite("test_query_sys_tables", "query,p0") {
     sql("GRANT SELECT_PRIV ON *.*.* TO 'nereids_test_sys_tables'")
     sql("use information_schema")
     qt_user_privileges """
-<<<<<<< HEAD
-        select GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE from user_privileges where GRANTEE regexp '^\\'test_sys_tables'
-=======
         select GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE from user_privileges where GRANTEE regexp '^\\'nereids_test_sys_tables'
->>>>>>> 2.0.3-rc01
     """
     sql("DROP USER 'nereids_test_sys_tables'")
 

@@ -315,10 +315,7 @@ public:
         str += "]";
         return str;
     }
-<<<<<<< HEAD
 
-=======
->>>>>>> 2.0.3-rc01
     vectorized::Block create_block_by_cids(const std::vector<uint32_t>& cids);
 
 private:

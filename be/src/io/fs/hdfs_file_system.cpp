@@ -165,12 +165,8 @@ Status HdfsFileSystem::connect_impl() {
     return Status::OK();
 }
 
-<<<<<<< HEAD
-Status HdfsFileSystem::create_file_impl(const Path& file, FileWriterPtr* writer, const FileWriterOptions*) {
-=======
 Status HdfsFileSystem::create_file_impl(const Path& file, FileWriterPtr* writer,
                                         const FileWriterOptions* opts) {
->>>>>>> 2.0.3-rc01
     *writer = std::make_unique<HdfsFileWriter>(file, getSPtr());
     return Status::OK();
 }

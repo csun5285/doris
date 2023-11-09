@@ -75,13 +75,11 @@ brokerName = "broker_name"
 // broker load test config
 enableBrokerLoad=true
 
-<<<<<<< HEAD
 // cacheDataPath = "/data/regression/"
 s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
 s3Region = "ap-hongkong"
 
-=======
 // jdbc connector test config
 // To enable jdbc test, you need first start mysql/pg container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`
@@ -89,7 +87,7 @@ enableJdbcTest=false
 mysql_57_port=7111
 pg_14_port=7121
 mariadb_10_port=3326
->>>>>>> 2.0.3-rc01
+
 // hive catalog test config
 // To enable jdbc test, you need first start hive container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`

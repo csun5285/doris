@@ -767,14 +767,11 @@ public class ConnectContext {
             row.add("" + connectionId);
             row.add(ClusterNamespace.getNameFromFullName(qualifiedUser));
             row.add(getMysqlChannel().getRemoteHostPortString());
-<<<<<<< HEAD
             // row.add(clusterName);
             // http://jira.selectdb.com:8090/browse/CORE-995?filter=-1
             row.add(cloudCluster);
-=======
             row.add(TimeUtils.longToTimeString(loginTime));
             row.add(defaultCatalog);
->>>>>>> 2.0.3-rc01
             row.add(ClusterNamespace.getNameFromFullName(currentDb));
             row.add(command.toString());
             row.add("" + (nowMs - startTime) / 1000);

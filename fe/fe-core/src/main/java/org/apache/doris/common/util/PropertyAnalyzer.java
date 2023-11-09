@@ -931,7 +931,6 @@ public class PropertyAnalyzer {
         return tagMap;
     }
 
-<<<<<<< HEAD
     // SELECTDB_CODE_BEGIN
     public static void checkCloudTableProperty(Map<String, String> properties) throws AnalysisException {
         if (Config.ignore_unsupported_properties_in_cloud_mode
@@ -963,7 +962,7 @@ public class PropertyAnalyzer {
         }
     }
     // SELECTDB_CODE_END
-=======
+
     public static boolean hasBinlogConfig(Map<String, String> properties) {
         if (properties == null || properties.isEmpty()) {
             return false;
@@ -976,7 +975,6 @@ public class PropertyAnalyzer {
         }
         return false;
     }
->>>>>>> 2.0.3-rc01
 
     public static Map<String, String> analyzeBinlogConfig(Map<String, String> properties) throws AnalysisException {
         if (properties == null || properties.isEmpty()) {

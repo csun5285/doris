@@ -1250,13 +1250,11 @@ DECLARE_mInt32(tablet_schema_cache_recycle_interval);
 // Use `LOG(FATAL)` to replace `throw` when true
 DECLARE_mBool(exit_on_exception);
 
-<<<<<<< HEAD
 // Use to check max min key when writing block
 DECLARE_mBool(enable_check_max_min_key);
-=======
+
 // Remove predicate that is always true for a segment.
 DECLARE_Bool(ignore_always_true_predicate_for_segment);
->>>>>>> 2.0.3-rc01
 
 #ifdef BE_TEST
 // test s3

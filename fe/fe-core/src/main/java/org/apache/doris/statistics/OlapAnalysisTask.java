@@ -21,12 +21,9 @@ import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.FeConstants;
-<<<<<<< HEAD
-import org.apache.doris.common.util.DebugUtil;
-=======
 import org.apache.doris.common.Pair;
+import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.datasource.InternalCatalog;
->>>>>>> 2.0.3-rc01
 import org.apache.doris.qe.AutoCloseConnectContext;
 import org.apache.doris.qe.QueryState;
 import org.apache.doris.qe.QueryState.MysqlStateType;
@@ -290,25 +287,6 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
         } else {
             sampleRows = Math.max(tableSample.getSampleValue(), 1);
         }
-<<<<<<< HEAD
-        long startTime = System.currentTimeMillis();
-        String queryId = "";
-        LOG.info("ANALYZE SQL : " + sql + " start at " + startTime);
-        try (AutoCloseConnectContext r = StatisticsUtil.buildConnectContext()) {
-            r.connectContext.getSessionVariable().disableNereidsPlannerOnce();
-            stmtExecutor = new StmtExecutor(r.connectContext, sql);
-            r.connectContext.setExecutor(stmtExecutor);
-            stmtExecutor.execute();
-            QueryState queryState = r.connectContext.getState();
-            if (queryState.getStateType().equals(MysqlStateType.ERR)) {
-                throw new RuntimeException(String.format("Failed to analyze %s.%s.%s, error: %s sql: %s",
-                        info.catalogName, info.dbName, info.colName, sql, queryState.getErrorMessage()));
-            }
-            queryId = DebugUtil.printId(r.connectContext.queryId());
-        } finally {
-            LOG.info("Analyze SQL: " + sql + " cost time: " + (System.currentTimeMillis() - startTime) + "ms"
-                    + " QueryId: " + queryId);
-=======
 
         // calculate the number of tablets by each partition
         long avgRowsPerPartition = sampleRows / Math.max(olapTable.getPartitions().size(), 1);
@@ -343,7 +321,6 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
 
             totalRows += p.getBaseIndex().getRowCount();
             totalTablet += ids.size();
->>>>>>> 2.0.3-rc01
         }
 
         // all hit, direct full

@@ -182,7 +182,6 @@ extEsPort = 9200
 extEsUser = "*******"
 extEsPassword = "***********"
 
-<<<<<<< HEAD
 // used for cos and s3, which support external id.
 // this is policy arn for s3
 stageIamPolicy = "smoke_test_policy"
@@ -191,7 +190,7 @@ stageIamSk = ""
 
 // used for cos, which sdk does not return arn, so construct arn by user id.
 stageIamUserId = ""
-=======
+
 enableObjStorageTest=false
 enableMaxComputeTest=false
 aliYunAk="***********"
@@ -207,7 +206,6 @@ s3Region = "ap-hongkong"
 // iceberg rest catalog config
 iceberg_rest_uri_port=18181
 
->>>>>>> 2.0.3-rc01
 // If the failure suite num exceeds this config
 // all following suite will be skipped to fast quit the run.
 // <=0 means no limit.

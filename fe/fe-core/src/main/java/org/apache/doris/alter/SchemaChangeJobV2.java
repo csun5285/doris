@@ -753,12 +753,8 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
                 throw new AlterCancelException(msg);
             }
             for (AgentTask task : tasks) {
-<<<<<<< HEAD
                 LOG.debug("schema change task: {}, {}", task, task.getFailedTimes());
-                if (task.getFailedTimes() >= 3) {
-=======
                 if (task.getFailedTimes() > 0) {
->>>>>>> 2.0.3-rc01
                     task.setFinished(true);
                     AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.ALTER, task.getSignature());
                     LOG.warn("schema change task failed: " + task.getErrorMsg());

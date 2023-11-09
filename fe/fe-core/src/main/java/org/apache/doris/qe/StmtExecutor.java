@@ -155,13 +155,9 @@ import org.apache.doris.rpc.RpcException;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.statistics.ResultRow;
 import org.apache.doris.statistics.util.InternalQueryBuffer;
-<<<<<<< HEAD
-import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.BeSelectionPolicy;
 import org.apache.doris.system.SystemInfoService;
-=======
->>>>>>> 2.0.3-rc01
 import org.apache.doris.task.LoadEtlTask;
 import org.apache.doris.thrift.BackendService.Client;
 import org.apache.doris.thrift.TFileFormatType;
@@ -999,12 +995,8 @@ public class StmtExecutor {
             planner = preparedStmtCtx.planner;
             analyzer = preparedStmtCtx.analyzer;
             prepareStmt = preparedStmtCtx.stmt;
-<<<<<<< HEAD
             // Preconditions.checkState(parsedStmt.isAnalyzed());
             LOG.debug("already prepared stmt: {}, {}", preparedStmtCtx.stmtString, parsedStmt.toSql());
-=======
-            LOG.debug("already prepared stmt: {}", preparedStmtCtx.stmtString);
->>>>>>> 2.0.3-rc01
             isExecuteStmt = true;
             if (!preparedStmtCtx.stmt.needReAnalyze()) {
                 // Return directly to bypass analyze and plan

@@ -1615,7 +1615,6 @@ build_hadoop_libs() {
     cp -r ./hadoop-dist/target/hadoop-libhdfs-3.3.4/include/hdfs.h "${TP_INSTALL_DIR}/include/hadoop_hdfs/"
 }
 
-<<<<<<< HEAD
 build_poco() {
     check_if_source_exist "${POCO_SOURCE}"
     cd "${TP_SOURCE_DIR}/${POCO_SOURCE}"
@@ -1676,8 +1675,6 @@ build_ali_sdk() {
     make install
 }
 
-
-=======
 # dragonbox
 build_dragonbox() {
     check_if_source_exist "${DRAGONBOX_SOURCE}"
@@ -1693,7 +1690,6 @@ build_dragonbox() {
     "${BUILD_SYSTEM}" install
 }
 
->>>>>>> 2.0.3-rc01
 if [[ "${#packages[@]}" -eq 0 ]]; then
     packages=(
         libunixodbc
@@ -1756,11 +1752,8 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
         poco
         cos_sdk
         libunwind
-<<<<<<< HEAD
         ali_sdk
-=======
         dragonbox
->>>>>>> 2.0.3-rc01
     )
     if [[ "$(uname -s)" == 'Darwin' ]]; then
         read -r -a packages <<<"binutils gettext ${packages[*]}"

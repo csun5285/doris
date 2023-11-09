@@ -67,17 +67,10 @@ public class FeConstants {
     public static long tablet_checker_interval_ms = 20 * 1000L;
     public static long tablet_schedule_interval_ms = 1000L;
 
-<<<<<<< HEAD
-    public static String csv = "csv";
-    public static String csv_with_names = "csv_with_names";
-    public static String csv_with_names_and_types = "csv_with_names_and_types";
-
     public static String text = "hive_text";
 
     public static int cloud_cluster_check_interval_second = 10;
 
-=======
->>>>>>> 2.0.3-rc01
     public static String FS_PREFIX_S3 = "s3";
     public static String FS_PREFIX_S3A = "s3a";
     public static String FS_PREFIX_S3N = "s3n";

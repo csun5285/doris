@@ -1180,19 +1180,12 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (Strings.isNullOrEmpty(cluster)) {
             cluster = SystemInfoService.DEFAULT_CLUSTER;
         }
-<<<<<<< HEAD
 
         if (request.isSetAuthCode() || !Strings.isNullOrEmpty(request.getToken())) {
-            // TODO(cmy): find a way to check
-        } else {
-            checkPasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), request.getDb(), request.getTbl(),
-=======
-        if (request.isSetAuthCode()) {
             // TODO(cmy): find a way to check
         } else if (Strings.isNullOrEmpty(request.getToken())) {
             checkSingleTablePasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), request.getDb(),
                     request.getTbl(),
->>>>>>> 2.0.3-rc01
                     request.getUserIp(), PrivPredicate.LOAD);
         }
 
@@ -1248,10 +1241,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!Env.getCurrentEnv().isMaster()) {
             status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-<<<<<<< HEAD
-=======
             result.setMasterAddress(getMasterAddress());
->>>>>>> 2.0.3-rc01
             LOG.error("failed to get beginTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
         }
@@ -1636,10 +1626,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!Env.getCurrentEnv().isMaster()) {
             status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-<<<<<<< HEAD
-=======
             result.setMasterAddress(getMasterAddress());
->>>>>>> 2.0.3-rc01
             LOG.error("failed to get commitTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
         }
@@ -1827,10 +1814,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!Env.getCurrentEnv().isMaster()) {
             status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-<<<<<<< HEAD
-=======
             result.setMasterAddress(getMasterAddress());
->>>>>>> 2.0.3-rc01
             LOG.error("failed to get rollbackTxn: {}", NOT_MASTER_ERR_MSG);
             return result;
         }
@@ -2776,10 +2760,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!Env.getCurrentEnv().isMaster()) {
             status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-<<<<<<< HEAD
-=======
             result.setMasterAddress(getMasterAddress());
->>>>>>> 2.0.3-rc01
             LOG.error("failed to get getSnapshot: {}", NOT_MASTER_ERR_MSG);
             return result;
         }
@@ -2867,10 +2848,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (!Env.getCurrentEnv().isMaster()) {
             status.setStatusCode(TStatusCode.NOT_MASTER);
             status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-<<<<<<< HEAD
-=======
             result.setMasterAddress(getMasterAddress());
->>>>>>> 2.0.3-rc01
             LOG.error("failed to get restoreSnapshot: {}", NOT_MASTER_ERR_MSG);
             return result;
         }

@@ -146,16 +146,6 @@ public class SimplifyComparisonPredicate extends AbstractExpressionRewriteRule {
     }
 
     private Expression processDateLikeTypeCoercion(ComparisonPredicate cp, Expression left, Expression right) {
-<<<<<<< HEAD
-        if (left instanceof DateLiteral) {
-            cp = cp.commute();
-            Expression temp = left;
-            left = right;
-            right = temp;
-        }
-
-=======
->>>>>>> 2.0.3-rc01
         if (left instanceof Cast && right instanceof DateLiteral) {
             Cast cast = (Cast) left;
             if (cast.child().getDataType() instanceof DateTimeType) {

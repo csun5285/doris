@@ -138,8 +138,4 @@ CREATE TABLE doris_test.ts
     ts UInt64
 )
 ENGINE = MergeTree
-<<<<<<< HEAD
 ORDER BY id;
-=======
-ORDER BY id;
->>>>>>> 2.0.3-rc01

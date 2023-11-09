@@ -1933,8 +1933,6 @@ public class EditLog {
         return logId;
     }
 
-<<<<<<< HEAD
-=======
     public void logCreateTableStats(TableStatsMeta tableStats) {
         logEdit(OperationType.OP_UPDATE_TABLE_STATS, tableStats);
     }
@@ -1946,5 +1944,4 @@ public class EditLog {
     public void logDeleteTableStats(TableStatsDeletionLog log) {
         logEdit(OperationType.OP_DELETE_TABLE_STATS, log);
     }
->>>>>>> 2.0.3-rc01
 }

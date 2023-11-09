@@ -58,9 +58,6 @@ suite("test_es_query", "p0,external,es,external_docker,external_docker_es") {
         );
         """
 
-<<<<<<< HEAD
-        sql """drop table if exists test_v1;"""
-=======
         sql """create catalog if not exists es6_hide properties(
             "type"="es",
             "hosts"="http://${externalEnvIp}:$es_6_port",
@@ -78,7 +75,6 @@ suite("test_es_query", "p0,external,es,external_docker,external_docker_es") {
             "include_hidden_index"="true"
         );
         """
->>>>>>> 2.0.3-rc01
 
         // test external table for datetime
         sql """

@@ -388,13 +388,8 @@ Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_ra
             iter_opts.stats = _opts.stats;
             iter_opts.use_page_cache = _opts.use_page_cache;
             iter_opts.file_reader = _file_reader.get();
-<<<<<<< HEAD
             iter_opts.io_ctx = &_opts.io_ctx;
-            RETURN_IF_ERROR(_column_iterators[unique_id]->init(iter_opts));
-=======
-            iter_opts.io_ctx = _opts.io_ctx;
             RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
->>>>>>> 2.0.3-rc01
         }
     }
 

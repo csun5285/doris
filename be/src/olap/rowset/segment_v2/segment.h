@@ -134,11 +134,9 @@ public:
 
     int64_t meta_mem_usage() const { return _meta_mem_usage; }
 
-<<<<<<< HEAD
     bool disable_file_cache() const { return _disable_file_cache; }
-=======
+
     void remove_from_segment_cache() const;
->>>>>>> 2.0.3-rc01
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
@@ -186,14 +184,10 @@ private:
     std::unique_ptr<PrimaryKeyIndexReader> _pk_index_reader;
     // Segment may be destructed after StorageEngine, in order to exit gracefully.
     std::shared_ptr<MemTracker> _segment_meta_mem_tracker;
-<<<<<<< HEAD
 
     DorisCallOnce<Status> _lazy_open_once;
     std::atomic<bool> _is_lazy_open = false;
     bool _disable_file_cache = false;
-=======
-    std::mutex _open_lock;
->>>>>>> 2.0.3-rc01
 };
 
 } // namespace segment_v2

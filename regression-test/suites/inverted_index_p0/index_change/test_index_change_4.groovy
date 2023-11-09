@@ -37,10 +37,7 @@ suite("test_index_change_4") {
         }
         assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
     }
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.3-rc01
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
@@ -113,9 +110,7 @@ suite("test_index_change_4") {
 
     // drop inverted index idx_user_id, idx_note
     sql """ DROP INDEX idx_user_id ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ DROP INDEX idx_note ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
     // create inverted index idx_city
     sql """ CREATE INDEX idx_note ON ${tableName}(`note`) USING INVERTED PROPERTIES("parser"="english") """
     wait_for_latest_op_on_table_finish(tableName, timeout)

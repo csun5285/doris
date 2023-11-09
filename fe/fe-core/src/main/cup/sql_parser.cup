@@ -4335,7 +4335,6 @@ show_param ::=
     {:
         RESULT = new ShowBuildIndexStmt(db, parser.where, orderByClause, limitClause);
     :}
-<<<<<<< HEAD
     | KW_WARM KW_UP KW_JOB opt_wild_where
     {:
         RESULT = new ShowCloudWarmUpStmt(parser.where);
@@ -4345,10 +4344,7 @@ show_param ::=
     {:
         RESULT = new ShowClusterStmt();
     :}
-    | KW_CONVERT_LSC KW_FROM opt_db:db
-=======
     | KW_CONVERT_LSC opt_db:db
->>>>>>> 2.0.3-rc01
     {:
         RESULT = new ShowConvertLSCStmt(db);
     :}

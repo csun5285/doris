@@ -52,12 +52,8 @@
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_writer_context.h"
 #include "olap/rowset/segment_v2/inverted_index_compaction.h"
-<<<<<<< HEAD
 #include "olap/rowset/segment_v2/inverted_index_desc.h"
-=======
 #include "olap/rowset/segment_v2/inverted_index_compound_directory.h"
-#include "olap/storage_engine.h"
->>>>>>> 2.0.3-rc01
 #include "olap/storage_policy.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
@@ -378,20 +374,13 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     COUNTER_UPDATE(_merged_rows_counter, stats.merged_rows);
     COUNTER_UPDATE(_filtered_rows_counter, stats.filtered_rows);
 
-<<<<<<< HEAD
-    _output_rowset = _output_rs_writer->build();
-    if (_output_rowset == nullptr) {
-        return Status::Error<ROWSET_BUILDER_INIT>("rowset writer build failed. output_version: {}",
-                                                  _output_version.to_string());
-    }
-#ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get(), true));
-#endif
-=======
     RETURN_NOT_OK_STATUS_WITH_WARN(_output_rs_writer->build(_output_rowset),
                                    fmt::format("rowset writer build failed. output_version: {}",
                                                _output_version.to_string()));
->>>>>>> 2.0.3-rc01
+#ifdef CLOUD_MODE
+    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get(), true));
+#endif
+
     // Now we support delete in cumu compaction, to make all data in rowsets whose version
     // is below output_version to be delete in the future base compaction, we should carry
     // all delete predicate in the output rowset.

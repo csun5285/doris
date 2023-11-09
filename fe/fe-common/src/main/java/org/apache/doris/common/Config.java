@@ -2452,10 +2452,10 @@ public class Config extends ConfigBase {
     })
     public static int autobucket_min_buckets = 1;
 
-<<<<<<< HEAD
+
     @ConfField(mutable = true)
     public static boolean enable_profile_when_analyze = false;
-=======
+
     @ConfField
     public static int full_auto_analyze_simultaneously_running_task_num = 1;
 
@@ -2477,7 +2477,6 @@ public class Config extends ConfigBase {
             + "By default, any domain name is allowed cross-domain access"
     })
     public static String access_control_allowed_origin_domain = "*";
->>>>>>> 2.0.3-rc01
 
     @ConfField(description = {
             "是否忽略 Image 文件中未知的模块。如果为 true，不在 PersistMetaModules.MODULE_NAMES 中的元数据模块将被忽略并跳过。"
@@ -2491,8 +2490,5 @@ public class Config extends ConfigBase {
                     + "old version can be compatible with new version Image file."
     })
     public static boolean ignore_unknown_metadata_module = false;
-<<<<<<< HEAD
-=======
 
->>>>>>> 2.0.3-rc01
 }

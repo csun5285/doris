@@ -619,9 +619,8 @@ Status VSchemaChangeWithSorting::_internal_sorting(
     RETURN_IF_ERROR(merger.merge(blocks, rowset_writer.get(), &merged_rows));
 
     _add_merged_rows(merged_rows);
-<<<<<<< HEAD
-    auto rwb = rowset_writer->build();
-    if (!rwb) {
+    auto st = rowset_writer->build(*rowset)
+    if (!st.ok()) {
         LOG(WARNING) << "sc rowset_writer return with nullptr, rowset_id=" << rowset_writer->rowset_id().to_string()
         << " tablet_id=" << context.table_id << " newest_write_timestamp=" << context.newest_write_timestamp
         << " verison=" << context.version.to_string()
@@ -632,12 +631,8 @@ Status VSchemaChangeWithSorting::_internal_sorting(
         << " replica_id=" << new_tablet->replica_id()
         << " sehema_hash=" << new_tablet->schema_hash()
         << " shard_id=" << new_tablet->shard_id();
-        return Status::InternalError("sc rowset writer build err");
+        return st;
     }
-    *rowset = rwb;
-=======
-    RETURN_IF_ERROR(rowset_writer->build(*rowset));
->>>>>>> 2.0.3-rc01
     return Status::OK();
 }
 

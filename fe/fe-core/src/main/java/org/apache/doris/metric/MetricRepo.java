@@ -24,11 +24,8 @@ import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.ThreadPoolManager;
-<<<<<<< HEAD
 import org.apache.doris.common.Version;
-=======
 import org.apache.doris.common.util.NetUtils;
->>>>>>> 2.0.3-rc01
 import org.apache.doris.load.EtlJobType;
 import org.apache.doris.load.loadv2.JobState;
 import org.apache.doris.load.loadv2.LoadManager;

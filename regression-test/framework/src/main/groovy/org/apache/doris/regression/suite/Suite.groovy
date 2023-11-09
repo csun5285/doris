@@ -58,14 +58,11 @@ import java.util.stream.Collectors
 import java.util.stream.LongStream
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
-<<<<<<< HEAD
-=======
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSetMetaData
 import org.junit.Assert
 
->>>>>>> 2.0.3-rc01
 @Slf4j
 class Suite implements GroovyInterceptable {
     final SuiteContext context
