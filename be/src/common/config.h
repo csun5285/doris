@@ -169,9 +169,9 @@ DECLARE_mBool(enable_query_memory_overcommit);
 // default gc strategy is conservative, if you want to exclude the interference of gc, let it be true
 DECLARE_mBool(disable_memory_gc);
 
-// malloc or new large memory larger than large_memory_check_bytes and Doris Allocator is not used,
+// malloc or new large memory larger than large_memory_check_bytes, default 2G,
 // will print a warning containing the stacktrace, but not prevent memory alloc.
-// large memory alloc looking forward to using Allocator.
+// If is -1, disable large memory check.
 DECLARE_mInt64(large_memory_check_bytes);
 
 // The maximum time a thread waits for a full GC. Currently only query will wait for full gc.
@@ -348,6 +348,7 @@ DECLARE_mInt32(trash_file_expire_time_sec);
 // minimum file descriptor number
 // modify them upon necessity
 DECLARE_Int32(min_file_descriptor_number);
+DECLARE_mBool(disable_segment_cache);
 DECLARE_Int64(index_stream_cache_capacity);
 DECLARE_String(row_cache_mem_limit);
 
@@ -433,6 +434,12 @@ DECLARE_mDouble(compaction_promotion_ratio);
 // the smallest size of rowset promotion. When the rowset is less than this config, this
 // rowset will be not given to base compaction. The unit is m byte.
 DECLARE_mInt64(compaction_promotion_min_size_mbytes);
+
+// When output rowset of cumulative compaction total version count (end_version - start_version)
+// exceed this config count, the rowset will be moved to base compaction
+// NOTE: this config will work for unique key merge-on-write table only, to reduce version count
+// related cost on delete bitmap more effectively.
+DECLARE_mInt64(compaction_promotion_version_count);
 
 // The lower bound size to do cumulative compaction. When total disk size of candidate rowsets is less than
 // this size, size_based policy may not do to cumulative compaction. The unit is m byte.
@@ -1009,6 +1016,8 @@ DECLARE_Bool(enable_java_support);
 // Set config randomly to check more issues in github workflow
 DECLARE_Bool(enable_fuzzy_mode);
 
+DECLARE_Bool(enable_debug_points);
+
 DECLARE_Int32(pipeline_executor_size);
 DECLARE_mInt16(pipeline_short_query_timeout_s);
 
@@ -1191,6 +1200,12 @@ DECLARE_mBool(enable_file_cache_as_load_buffer);
 // Values include `none`, `glog`, `boost`, `glibc`, `libunwind`
 DECLARE_mString(get_stack_trace_tool);
 
+// DISABLED: Don't resolve location info.
+// FAST: Perform CU lookup using .debug_aranges (might be incomplete).
+// FULL: Scan all CU in .debug_info (slow!) on .debug_aranges lookup failure.
+// FULL_WITH_INLINE: Scan .debug_info (super slower, use with caution) for inline functions in addition to FULL.
+DECLARE_mString(dwarf_location_info_mode);
+
 // the ratio of _prefetch_size/_batch_size in AutoIncIDBuffer
 DECLARE_mInt64(auto_inc_prefetch_size_ratio);
 
@@ -1204,16 +1219,6 @@ DECLARE_mInt64(lookup_connection_cache_bytes_limit);
 
 // level of compression when using LZ4_HC, whose defalut value is LZ4HC_CLEVEL_DEFAULT
 DECLARE_mInt64(LZ4_HC_compression_level);
-
-// whether to enable hdfs hedged read.
-// If set to true, it will be enabled even if user not enable it when creating catalog
-DECLARE_Bool(enable_hdfs_hedged_read);
-// hdfs hedged read thread pool size, for "dfs.client.hedged.read.threadpool.size"
-// Maybe overwritten by the value specified when creating catalog
-DECLARE_Int32(hdfs_hedged_read_thread_num);
-// the threshold of doing hedged read, for "dfs.client.hedged.read.threshold.millis"
-// Maybe overwritten by the value specified when creating catalog
-DECLARE_Int32(hdfs_hedged_read_threshold_time);
 
 DECLARE_mBool(enable_merge_on_write_correctness_check);
 // rowid conversion correctness check when compaction for mow table
@@ -1245,8 +1250,13 @@ DECLARE_mInt32(tablet_schema_cache_recycle_interval);
 // Use `LOG(FATAL)` to replace `throw` when true
 DECLARE_mBool(exit_on_exception);
 
+<<<<<<< HEAD
 // Use to check max min key when writing block
 DECLARE_mBool(enable_check_max_min_key);
+=======
+// Remove predicate that is always true for a segment.
+DECLARE_Bool(ignore_always_true_predicate_for_segment);
+>>>>>>> 2.0.3-rc01
 
 #ifdef BE_TEST
 // test s3

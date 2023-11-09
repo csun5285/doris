@@ -1438,9 +1438,9 @@ build_jemalloc() {
 
 # libunwind
 build_libunwind() {
-    # https://github.com/libunwind/libunwind
-    # https://github.com/libunwind/libunwind/issues/189
-    # https://stackoverflow.com/questions/27842377/building-libunwind-for-mac
+    # There are two major variants of libunwind. libunwind on Linux
+    # (https://www.nongnu.org/libunwind/) provides unw_backtrace, and
+    # Apache/LLVM libunwind (notably used on Apple platforms) doesn't
     if [[ "${KERNEL}" != 'Darwin' ]]; then
         check_if_source_exist "${LIBUNWIND_SOURCE}"
         cd "${TP_SOURCE_DIR}/${LIBUNWIND_SOURCE}"
@@ -1615,6 +1615,7 @@ build_hadoop_libs() {
     cp -r ./hadoop-dist/target/hadoop-libhdfs-3.3.4/include/hdfs.h "${TP_INSTALL_DIR}/include/hadoop_hdfs/"
 }
 
+<<<<<<< HEAD
 build_poco() {
     check_if_source_exist "${POCO_SOURCE}"
     cd "${TP_SOURCE_DIR}/${POCO_SOURCE}"
@@ -1676,6 +1677,23 @@ build_ali_sdk() {
 }
 
 
+=======
+# dragonbox
+build_dragonbox() {
+    check_if_source_exist "${DRAGONBOX_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${DRAGONBOX_SOURCE}"
+
+    rm -rf "${BUILD_DIR}"
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
+
+    "${CMAKE_CMD}" -G "${GENERATOR}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" -DDRAGONBOX_INSTALL_TO_CHARS=ON ..
+
+    "${BUILD_SYSTEM}" -j "${PARALLEL}"
+    "${BUILD_SYSTEM}" install
+}
+
+>>>>>>> 2.0.3-rc01
 if [[ "${#packages[@]}" -eq 0 ]]; then
     packages=(
         libunixodbc
@@ -1738,7 +1756,11 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
         poco
         cos_sdk
         libunwind
+<<<<<<< HEAD
         ali_sdk
+=======
+        dragonbox
+>>>>>>> 2.0.3-rc01
     )
     if [[ "$(uname -s)" == 'Darwin' ]]; then
         read -r -a packages <<<"binutils gettext ${packages[*]}"

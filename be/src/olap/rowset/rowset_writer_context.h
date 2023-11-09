@@ -21,6 +21,7 @@
 
 #include "io/fs/file_system.h"
 #include "olap/olap_define.h"
+#include "olap/partial_update_info.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
 
@@ -109,11 +110,19 @@ struct RowsetWriterContext {
     bool disable_file_cache = false;
 
     // segcompaction for this RowsetWriter, disable it for some transient writers
+<<<<<<< HEAD
     bool enable_segcompaction = false;
 
     std::shared_ptr<PartialUpdateInfo> partial_update_info;
 
     bool is_transient_rowset_writer {false};
+=======
+    bool enable_segcompaction = true;
+
+    std::shared_ptr<PartialUpdateInfo> partial_update_info;
+
+    bool is_transient_rowset_writer = false;
+>>>>>>> 2.0.3-rc01
 };
 
 } // namespace doris

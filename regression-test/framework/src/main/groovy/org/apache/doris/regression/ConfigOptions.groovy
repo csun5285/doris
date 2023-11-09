@@ -54,6 +54,7 @@ class ConfigOptions {
     static Option enableCacheDataOpt
     static Option pluginOpt
     static Option sslCertificateOpt
+    static Option imageOpt
     static Option suiteOpt
     static Option excludeSuiteOpt
     static Option groupsOpt
@@ -197,6 +198,15 @@ class ConfigOptions {
                 .longOpt("sslCertificatePath")
                 .desc("the sslCertificate path")
                 .build() 
+
+        imageOpt = Option.builder("image")
+                .argName("image")
+                .required(false)
+                .hasArg(true)
+                .type(String.class)
+                .longOpt("image")
+                .desc("the docker image")
+                .build()
 
         suiteOpt = Option.builder("s")
                 .argName("suiteName")
@@ -555,6 +565,7 @@ class ConfigOptions {
                 .addOption(dataOpt)
                 .addOption(pluginOpt)
                 .addOption(sslCertificateOpt)
+                .addOption(imageOpt)
                 .addOption(confOpt)
                 .addOption(suiteOpt)
                 .addOption(excludeSuiteOpt)

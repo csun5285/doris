@@ -188,7 +188,8 @@ public:
                                        TTabletId tablet_id, SchemaHash schema_hash,
                                        TabletUid tablet_uid, bool unique_key_merge_on_write,
                                        DeleteBitmapPtr delete_bitmap,
-                                       const RowsetIdUnorderedSet& rowset_ids);
+                                       const RowsetIdUnorderedSet& rowset_ids,
+                                       std::shared_ptr<PartialUpdateInfo> partial_update_info);
     void get_all_commit_tablet_txn_info_by_tablet(
             const TabletSharedPtr& tablet, CommitTabletTxnInfoVec* commit_tablet_txn_info_vec);
 

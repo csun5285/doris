@@ -470,9 +470,15 @@ public class TableRef implements ParseNode, Writable {
     }
 
     protected void analyzeSample() throws AnalysisException {
-        if ((sampleTabletIds != null || tableSample != null) && desc.getTable().getType() != TableIf.TableType.OLAP) {
+        if ((sampleTabletIds != null || tableSample != null)
+                && desc.getTable().getType() != TableIf.TableType.OLAP
+                && desc.getTable().getType() != TableIf.TableType.HMS_EXTERNAL_TABLE) {
             throw new AnalysisException("Sample table " + desc.getTable().getName()
+<<<<<<< HEAD
                     + " type " + desc.getTable().getType() + " is not OLAP");
+=======
+                + " type " + desc.getTable().getType() + " is not supported");
+>>>>>>> 2.0.3-rc01
         }
     }
 

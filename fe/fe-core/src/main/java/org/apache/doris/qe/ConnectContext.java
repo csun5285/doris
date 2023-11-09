@@ -28,6 +28,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.telemetry.Telemetry;
 import org.apache.doris.common.util.DebugUtil;
+import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.datasource.CatalogIf;
 import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.datasource.SessionContext;
@@ -84,6 +85,8 @@ public class ConnectContext {
     protected volatile String traceId;
     // id for this connection
     protected volatile int connectionId;
+    // Timestamp when the connection is make
+    protected volatile long loginTime;
     // mysql net
     protected volatile MysqlChannel mysqlChannel;
     // state
@@ -482,6 +485,10 @@ public class ConnectContext {
         this.connectionId = connectionId;
     }
 
+    public void resetLoginTime() {
+        this.loginTime = System.currentTimeMillis();
+    }
+
     public MysqlChannel getMysqlChannel() {
         return mysqlChannel;
     }
@@ -731,6 +738,8 @@ public class ConnectContext {
         if (executor != null && executor.isLoadKindStmt()) {
             // particular for insert stmt, we can expand other type of timeout in the same way
             return Math.max(sessionVariable.getInsertTimeoutS(), sessionVariable.getQueryTimeoutS());
+        } else if (executor != null && executor.isAnalyzeStmt()) {
+            return sessionVariable.getAnalyzeTimeoutS();
         } else {
             // normal query stmt
             return sessionVariable.getQueryTimeoutS();
@@ -748,20 +757,33 @@ public class ConnectContext {
     public class ThreadInfo {
         public boolean isFull;
 
-        public List<String> toRow(long nowMs) {
+        public List<String> toRow(int connId, long nowMs) {
             List<String> row = Lists.newArrayList();
+            if (connId == connectionId) {
+                row.add("Yes");
+            } else {
+                row.add("");
+            }
             row.add("" + connectionId);
             row.add(ClusterNamespace.getNameFromFullName(qualifiedUser));
             row.add(getMysqlChannel().getRemoteHostPortString());
+<<<<<<< HEAD
             // row.add(clusterName);
             // http://jira.selectdb.com:8090/browse/CORE-995?filter=-1
             row.add(cloudCluster);
+=======
+            row.add(TimeUtils.longToTimeString(loginTime));
+            row.add(defaultCatalog);
+>>>>>>> 2.0.3-rc01
             row.add(ClusterNamespace.getNameFromFullName(currentDb));
             row.add(command.toString());
             row.add("" + (nowMs - startTime) / 1000);
-            row.add("");
-            if (queryId != null) {
-                String sql = QeProcessorImpl.INSTANCE.getCurrentQueryByQueryId(queryId);
+            row.add(state.toString());
+            row.add(DebugUtil.printId(queryId));
+            if (state.getStateType() == QueryState.MysqlStateType.ERR) {
+                row.add(state.getErrorMessage());
+            } else if (executor != null) {
+                String sql = executor.getOriginStmtInString();
                 if (!isFull) {
                     sql = sql.substring(0, Math.min(sql.length(), 100));
                 }

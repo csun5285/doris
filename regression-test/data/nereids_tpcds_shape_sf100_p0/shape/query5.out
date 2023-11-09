@@ -25,7 +25,11 @@ PhysicalResultSink
 --------------------------------------PhysicalProject
 ----------------------------------------PhysicalOlapScan[store_returns]
 ----------------------------------PhysicalDistribute
+<<<<<<< HEAD
 ------------------------------------filter((date_dim.d_date <= 2000-09-02)(date_dim.d_date >= 2000-08-19))
+=======
+------------------------------------filter((date_dim.d_date <= '2000-09-02')(date_dim.d_date >= '2000-08-19'))
+>>>>>>> 2.0.3-rc01
 --------------------------------------PhysicalOlapScan[date_dim]
 --------------------------------PhysicalDistribute
 ----------------------------------PhysicalOlapScan[store]
@@ -35,12 +39,17 @@ PhysicalResultSink
 --------------------------hashAgg[LOCAL]
 ----------------------------PhysicalProject
 ------------------------------hashJoin[INNER_JOIN](salesreturns.page_sk = catalog_page.cp_catalog_page_sk)
---------------------------------hashJoin[INNER_JOIN](salesreturns.date_sk = date_dim.d_date_sk)
-----------------------------------PhysicalUnion
+--------------------------------PhysicalDistribute
+----------------------------------hashJoin[INNER_JOIN](salesreturns.date_sk = date_dim.d_date_sk)
+------------------------------------PhysicalUnion
+--------------------------------------PhysicalDistribute
+----------------------------------------PhysicalProject
+------------------------------------------PhysicalOlapScan[catalog_sales]
+--------------------------------------PhysicalDistribute
+----------------------------------------PhysicalProject
+------------------------------------------PhysicalOlapScan[catalog_returns]
 ------------------------------------PhysicalDistribute
---------------------------------------PhysicalProject
-----------------------------------------PhysicalOlapScan[catalog_sales]
-------------------------------------PhysicalDistribute
+<<<<<<< HEAD
 --------------------------------------PhysicalProject
 ----------------------------------------PhysicalOlapScan[catalog_returns]
 ----------------------------------PhysicalDistribute
@@ -57,6 +66,12 @@ PhysicalResultSink
 --------------------------------PhysicalDistribute
 ----------------------------------PhysicalOlapScan[catalog_page]
 >>>>>>> 46f5988245 ([fix](Nereids) set operation children output order not same (#24060))
+=======
+--------------------------------------filter((date_dim.d_date >= '2000-08-19')(date_dim.d_date <= '2000-09-02'))
+----------------------------------------PhysicalOlapScan[date_dim]
+--------------------------------PhysicalDistribute
+----------------------------------PhysicalOlapScan[catalog_page]
+>>>>>>> 2.0.3-rc01
 --------------------PhysicalProject
 ----------------------hashAgg[GLOBAL]
 ------------------------PhysicalDistribute
@@ -74,7 +89,11 @@ PhysicalResultSink
 ------------------------------------------PhysicalOlapScan[web_sales]
 ------------------------------------------PhysicalOlapScan[web_returns]
 ----------------------------------PhysicalDistribute
+<<<<<<< HEAD
 ------------------------------------filter((date_dim.d_date >= 2000-08-19)(date_dim.d_date <= 2000-09-02))
+=======
+------------------------------------filter((date_dim.d_date >= '2000-08-19')(date_dim.d_date <= '2000-09-02'))
+>>>>>>> 2.0.3-rc01
 --------------------------------------PhysicalOlapScan[date_dim]
 --------------------------------PhysicalDistribute
 ----------------------------------PhysicalOlapScan[web_site]

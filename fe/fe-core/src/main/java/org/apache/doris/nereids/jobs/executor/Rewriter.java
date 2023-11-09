@@ -52,6 +52,7 @@ import org.apache.doris.nereids.rules.rewrite.CountLiteralToCountStar;
 import org.apache.doris.nereids.rules.rewrite.CreatePartitionTopNFromWindow;
 import org.apache.doris.nereids.rules.rewrite.DeferMaterializeTopNResult;
 import org.apache.doris.nereids.rules.rewrite.EliminateAggregate;
+import org.apache.doris.nereids.rules.rewrite.EliminateAssertNumRows;
 import org.apache.doris.nereids.rules.rewrite.EliminateDedupJoinCondition;
 import org.apache.doris.nereids.rules.rewrite.EliminateEmptyRelation;
 import org.apache.doris.nereids.rules.rewrite.EliminateFilter;
@@ -75,11 +76,13 @@ import org.apache.doris.nereids.rules.rewrite.MergeOneRowRelationIntoUnion;
 import org.apache.doris.nereids.rules.rewrite.MergeProjects;
 import org.apache.doris.nereids.rules.rewrite.MergeSetOperations;
 import org.apache.doris.nereids.rules.rewrite.NormalizeSort;
+import org.apache.doris.nereids.rules.rewrite.PruneEmptyPartition;
 import org.apache.doris.nereids.rules.rewrite.PruneFileScanPartition;
 import org.apache.doris.nereids.rules.rewrite.PruneOlapScanPartition;
 import org.apache.doris.nereids.rules.rewrite.PruneOlapScanTablet;
 import org.apache.doris.nereids.rules.rewrite.PullUpCteAnchor;
 import org.apache.doris.nereids.rules.rewrite.PullUpProjectUnderApply;
+import org.apache.doris.nereids.rules.rewrite.PushConjunctsIntoEsScan;
 import org.apache.doris.nereids.rules.rewrite.PushConjunctsIntoJdbcScan;
 import org.apache.doris.nereids.rules.rewrite.PushFilterInsideJoin;
 import org.apache.doris.nereids.rules.rewrite.PushProjectIntoOneRowRelation;
@@ -167,7 +170,8 @@ public class Rewriter extends AbstractBatchJobExecutor {
                     bottomUp(
                             new EliminateLimit(),
                             new EliminateFilter(),
-                            new EliminateAggregate()
+                            new EliminateAggregate(),
+                            new EliminateAssertNumRows()
                     )
             ),
             // please note: this rule must run before NormalizeAggregate
@@ -275,8 +279,10 @@ public class Rewriter extends AbstractBatchJobExecutor {
             topic("Table/Physical optimization",
                     topDown(
                             new PruneOlapScanPartition(),
+                            new PruneEmptyPartition(),
                             new PruneFileScanPartition(),
-                            new PushConjunctsIntoJdbcScan()
+                            new PushConjunctsIntoJdbcScan(),
+                            new PushConjunctsIntoEsScan()
                     )
             ),
             topic("MV optimization",

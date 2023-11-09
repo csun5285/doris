@@ -653,6 +653,7 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
         }
     }
 
+<<<<<<< HEAD
     // In CLOUD_MODE, init DeltaWriter will issue RPC, so it's necessary to init writers by batch.
     std::unordered_set<int64_t> partition_ids;
     for (auto& [tablet_id, _] : tablet_to_rowidxs) {
@@ -669,6 +670,10 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
     auto get_send_data = [&]() { return vectorized::Block(request.block()); };
 
     auto send_data = get_send_data();
+=======
+    vectorized::Block send_data;
+    RETURN_IF_ERROR(send_data.deserialize(request.block()));
+>>>>>>> 2.0.3-rc01
     CHECK(send_data.rows() == request.tablet_ids_size())
             << "block rows: " << send_data.rows()
             << ", tablet_ids_size: " << request.tablet_ids_size();

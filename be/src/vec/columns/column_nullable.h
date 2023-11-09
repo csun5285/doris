@@ -115,8 +115,6 @@ public:
     UInt64 get64(size_t n) const override { return nested_column->get64(n); }
     StringRef get_data_at(size_t n) const override;
 
-    TypeIndex get_data_type() const override { return TypeIndex::Nullable; }
-
     /// Will insert null value if pos=nullptr
     void insert_data(const char* pos, size_t length) override;
 
@@ -264,6 +262,8 @@ public:
     bool is_column_decimal() const override { return get_nested_column().is_column_decimal(); }
     bool is_column_string() const override { return get_nested_column().is_column_string(); }
     bool is_column_array() const override { return get_nested_column().is_column_array(); }
+    bool is_column_map() const override { return get_nested_column().is_column_map(); }
+    bool is_column_struct() const override { return get_nested_column().is_column_struct(); }
     bool is_fixed_and_contiguous() const override { return false; }
     bool values_have_fixed_size() const override { return nested_column->values_have_fixed_size(); }
 

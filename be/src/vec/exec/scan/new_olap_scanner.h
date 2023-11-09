@@ -30,6 +30,7 @@
 #include "common/status.h"
 #include "olap/data_dir.h"
 #include "olap/reader.h"
+#include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_reader.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
@@ -57,10 +58,16 @@ public:
                    NewOlapScanNode* parent, int64_t limit, bool aggregation,
                    const std::vector<OlapScanRange*>& key_ranges, RuntimeProfile* profile);
 
+<<<<<<< HEAD
     NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
                    NewOlapScanNode* parent, int64_t limit, bool aggregation,
                    const std::vector<OlapScanRange*>& key_ranges,
                    const std::vector<RowSetSplits>& rs_splits, RuntimeProfile* profile);
+=======
+    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
+                   const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
+                   TabletReader::ReadSource read_source, RuntimeProfile* profile);
+>>>>>>> 2.0.3-rc01
 
     Status init() override;
 

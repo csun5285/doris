@@ -31,6 +31,7 @@
 
 #include "common/status.h"
 #include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_writer_options.h"
 #include "io/fs/fs_utils.h"
 #include "io/fs/path.h"
 #include "olap/olap_common.h"
@@ -75,10 +76,24 @@ class FileSystem : public std::enable_shared_from_this<FileSystem> {
 public:
     // The following are public interface.
     // And derived classes should implement all xxx_impl methods.
+<<<<<<< HEAD
     [[nodiscard]] Status create_file(const Path& file, FileWriterPtr* writer,
                        const FileWriterOptions* opts = nullptr);
     // FIXME(plat1ko): Will deprecate in future
     [[nodiscard]] Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
+=======
+    Status create_file(const Path& file, FileWriterPtr* writer,
+                       const FileWriterOptions* opts = nullptr);
+    Status open_file(const Path& file, FileReaderSPtr* reader) {
+        FileDescription fd;
+        fd.path = file.native();
+        return open_file(fd, FileReaderOptions::DEFAULT, reader);
+    }
+    Status open_file(const FileDescription& fd, FileReaderSPtr* reader) {
+        return open_file(fd, FileReaderOptions::DEFAULT, reader);
+    }
+    Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
+>>>>>>> 2.0.3-rc01
                      FileReaderSPtr* reader);
     [[nodiscard]] Status open_file(const Path& file, FileReaderSPtr* reader,
                      const FileReaderOptions* opts = nullptr);

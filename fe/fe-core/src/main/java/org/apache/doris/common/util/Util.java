@@ -21,7 +21,6 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
-import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.UserException;
 import org.apache.doris.datasource.InternalCatalog;
@@ -584,10 +583,11 @@ public class Util {
     public static TFileFormatType getFileFormatTypeFromName(String formatName, TFileCompressType compressType)
             throws UserException {
         String lowerFileFormat = Objects.requireNonNull(formatName).toLowerCase();
-        if (lowerFileFormat.equals("parquet")) {
+        if (lowerFileFormat.equals(FileFormatConstants.FORMAT_PARQUET)) {
             return TFileFormatType.FORMAT_PARQUET;
-        } else if (lowerFileFormat.equals("orc")) {
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_ORC)) {
             return TFileFormatType.FORMAT_ORC;
+<<<<<<< HEAD
         } else if (lowerFileFormat.equals("json")) {
             if (compressType == null || compressType == TFileCompressType.UNKNOWN
                     || compressType == TFileCompressType.PLAIN) {
@@ -605,10 +605,16 @@ public class Util {
             }
             throw new UserException(
                 "Not supported file format: " + lowerFileFormat + ", and compression: " + compressType);
+=======
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_JSON)) {
+            return TFileFormatType.FORMAT_JSON;
+>>>>>>> 2.0.3-rc01
             // csv/csv_with_name/csv_with_names_and_types treat as csv format
-        } else if (lowerFileFormat.equals(FeConstants.csv) || lowerFileFormat.equals(FeConstants.csv_with_names)
-                || lowerFileFormat.equals(FeConstants.csv_with_names_and_types)
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV)
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV_WITH_NAMES)
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV_WITH_NAMES_AND_TYPES)
                 // TODO: Add TEXTFILE to TFileFormatType to Support hive text file format.
+<<<<<<< HEAD
                 || lowerFileFormat.equals(FeConstants.text)) {
             if (compressType == null || compressType == TFileCompressType.UNKNOWN
                     || compressType == TFileCompressType.PLAIN) {
@@ -628,6 +634,10 @@ public class Util {
                     "Not supported file format: " + lowerFileFormat + ", and compression: " + compressType);
         } else if (lowerFileFormat.equals("wal")) {
             return TFileFormatType.FORMAT_WAL;
+=======
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_HIVE_TEXT)) {
+            return TFileFormatType.FORMAT_CSV_PLAIN;
+>>>>>>> 2.0.3-rc01
         } else {
             return TFileFormatType.FORMAT_UNKNOWN;
         }

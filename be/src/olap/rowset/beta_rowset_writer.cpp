@@ -20,7 +20,11 @@
 #include <assert.h>
 // IWYU pragma: no_include <bthread/errno.h>
 #include <errno.h> // IWYU pragma: keep
+<<<<<<< HEAD
 #include <gen_cpp/olap_file.pb.h>
+=======
+#include <fmt/format.h>
+>>>>>>> 2.0.3-rc01
 #include <stdio.h>
 
 #include <ctime> // time
@@ -84,11 +88,15 @@ BetaRowsetWriter::~BetaRowsetWriter() {
      * when the job is cancelled. Although it is meaningless to continue segcompaction when the job
      * is cancelled, the objects involved in the job should be preserved during segcompaction to
      * avoid crashs for memory issues. */
-    wait_flying_segcompaction();
+    WARN_IF_ERROR(wait_flying_segcompaction(), "segment compaction failed");
 
     // TODO(lingbin): Should wrapper exception logic, no need to know file ops directly.
     if (!_already_built) {       // abnormal exit, remove all files generated
+<<<<<<< HEAD
         _segment_writer.reset(); // ensure all files are closed and all resource are releaseed
+=======
+        _segment_writer.reset(); // ensure all files are closed
+>>>>>>> 2.0.3-rc01
         const auto& fs = _rowset_meta->fs();
         if (!fs || !_rowset_meta->is_local()) { // Remote fs will delete them asynchronously
             return;
@@ -460,7 +468,7 @@ Status BetaRowsetWriter::add_rowset(RowsetSharedPtr rowset) {
     // just to make sure it matches with _num_segment
     _next_segment_id = _num_segment.load();
     // append key_bounds to current rowset
-    rowset->get_segments_key_bounds(&_segments_encoded_key_bounds);
+    RETURN_IF_ERROR(rowset->get_segments_key_bounds(&_segments_encoded_key_bounds));
     // TODO update zonemap
     if (rowset->rowset_meta()->has_delete_predicate()) {
         _rowset_meta->set_delete_predicate(rowset->rowset_meta()->delete_predicate());
@@ -543,6 +551,7 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
     return rowset;
 }
 
+<<<<<<< HEAD
 RowsetSharedPtr BetaRowsetWriter::build() {
     Status status;
     // make sure all segments are flushed
@@ -579,27 +588,36 @@ RowsetSharedPtr BetaRowsetWriter::build() {
 #endif
     }
 
+=======
+Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
+    // make sure all segments are flushed
+    DCHECK_EQ(_num_segment, _next_segment_id);
+    // TODO(lingbin): move to more better place, or in a CreateBlockBatch?
+    for (auto& file_writer : _file_writers) {
+        RETURN_NOT_OK_STATUS_WITH_WARN(
+                file_writer->close(),
+                fmt::format("failed to close file writer, path={}", file_writer->path().string()));
+    }
+>>>>>>> 2.0.3-rc01
     // if _segment_start_id is not zero, that means it's a transient rowset writer for
     // MoW partial update, don't need to do segment compaction.
     if (_segment_start_id == 0) {
         _segcompaction_worker.cancel();
-        status = wait_flying_segcompaction();
-        if (!status.ok()) {
-            LOG(WARNING) << "segcompaction failed when build new rowset, res=" << status;
-            return nullptr;
-        }
-        status = _segcompaction_rename_last_segments();
-        if (!status.ok()) {
-            LOG(WARNING) << "rename last segments failed when build new rowset, res=" << status;
-            return nullptr;
-        }
-
+        RETURN_NOT_OK_STATUS_WITH_WARN(wait_flying_segcompaction(),
+                                       "segcompaction failed when build new rowset");
+        RETURN_NOT_OK_STATUS_WITH_WARN(_segcompaction_rename_last_segments(),
+                                       "rename last segments failed when build new rowset");
         if (_segcompaction_worker.get_file_writer()) {
+<<<<<<< HEAD
             auto s = _segcompaction_worker.get_file_writer()->close();
             if (!s.ok()) [[unlikely]] {
                 LOG_WARNING("segcompaction file writer close failed due to {}", s.to_string());
                 return nullptr;
             }
+=======
+            RETURN_NOT_OK_STATUS_WITH_WARN(_segcompaction_worker.get_file_writer()->close(),
+                                           "close segment compaction worker failed");
+>>>>>>> 2.0.3-rc01
         }
     }
     // When building a rowset, we must ensure that the current _segment_writer has been
@@ -627,6 +645,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
+<<<<<<< HEAD
     if (_context.is_transient_rowset_writer) {
         _rowset_meta->add_segments_file_size(_file_writers, _segment_start_id);
     } else {
@@ -639,8 +658,15 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         LOG(WARNING) << "rowset init failed when build new rowset, res=" << status;
         return nullptr;
     }
+=======
+
+    RETURN_NOT_OK_STATUS_WITH_WARN(
+            RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
+                                         &rowset),
+            "rowset init failed when build new rowset");
+>>>>>>> 2.0.3-rc01
     _already_built = true;
-    return rowset;
+    return Status::OK();
 }
 
 bool BetaRowsetWriter::_is_segment_overlapping(

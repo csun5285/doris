@@ -933,6 +933,18 @@ public class Config extends ConfigBase {
     public static long tablet_repair_delay_factor_second = 60;
 
     /**
+     * clone a tablet, further repair timeout.
+     */
+    @ConfField(mutable = true, masterOnly = true)
+    public static long tablet_further_repair_timeout_second = 20 * 60;
+
+    /**
+     * clone a tablet, further repair max times.
+     */
+    @ConfField(mutable = true, masterOnly = true)
+    public static int tablet_further_repair_max_times = 5;
+
+    /**
      * the default slot number per path for hdd in tablet scheduler
      * TODO(cmy): remove this config and dynamically adjust it by clone task statistic
      */
@@ -1295,6 +1307,10 @@ public class Config extends ConfigBase {
      */
     @ConfField
     public static boolean enable_bdbje_debug_mode = false;
+
+    @ConfField(mutable = false, masterOnly = true, description = {"是否开启debug point模式，测试使用",
+            "is enable debug points, use in test."})
+    public static boolean enable_debug_points = false;
 
     /**
      * This config is used to try skip broker when access bos or other cloud storage via broker
@@ -2436,8 +2452,32 @@ public class Config extends ConfigBase {
     })
     public static int autobucket_min_buckets = 1;
 
+<<<<<<< HEAD
     @ConfField(mutable = true)
     public static boolean enable_profile_when_analyze = false;
+=======
+    @ConfField
+    public static int full_auto_analyze_simultaneously_running_task_num = 1;
+
+    @ConfField
+    public static final int period_analyze_simultaneously_running_task_num = 1;
+
+
+    @ConfField(mutable = true, description = {
+            "Doris 为了兼用 mysql 周边工具生态，会内置一个名为 mysql 的数据库，如果该数据库与用户自建数据库冲突，"
+            + "请修改这个字段，为 doris 内置的 mysql database 更换一个名字",
+            "To ensure compatibility with the MySQL ecosystem, Doris includes a built-in database called mysql. "
+            + "If this database conflicts with a user's own database, please modify this field to replace "
+            + "the name of the Doris built-in MySQL database with a different name."})
+    public static String mysqldb_replace_name = "mysql";
+
+    @ConfField(description = {
+        "设置允许跨域访问的特定域名,默认允许任何域名跨域访问",
+        "Set the specific domain name that allows cross-domain access. "
+            + "By default, any domain name is allowed cross-domain access"
+    })
+    public static String access_control_allowed_origin_domain = "*";
+>>>>>>> 2.0.3-rc01
 
     @ConfField(description = {
             "是否忽略 Image 文件中未知的模块。如果为 true，不在 PersistMetaModules.MODULE_NAMES 中的元数据模块将被忽略并跳过。"
@@ -2451,4 +2491,8 @@ public class Config extends ConfigBase {
                     + "old version can be compatible with new version Image file."
     })
     public static boolean ignore_unknown_metadata_module = false;
+<<<<<<< HEAD
+=======
+
+>>>>>>> 2.0.3-rc01
 }

@@ -468,7 +468,7 @@ Status DataDir::load() {
         PendingPublishInfoPB pending_publish_info_pb;
         bool parsed = pending_publish_info_pb.ParseFromString(info);
         if (!parsed) {
-            LOG(WARNING) << "parse pending publish info failed, tablt_id: " << tablet_id
+            LOG(WARNING) << "parse pending publish info failed, tablet_id: " << tablet_id
                          << " publish_version: " << publish_version;
         }
         StorageEngine::instance()->add_async_publish_task(
@@ -611,12 +611,23 @@ void DataDir::remove_pending_ids(const std::string& id) {
     _pending_path_ids.erase(id);
 }
 
-// gc unused tablet schemahash dir
-void DataDir::perform_path_gc_by_tablet() {
+void DataDir::perform_path_gc() {
     std::unique_lock<std::mutex> lck(_check_path_mutex);
-    _check_path_cv.wait(
-            lck, [this] { return _stop_bg_worker || !_all_tablet_schemahash_paths.empty(); });
+    _check_path_cv.wait(lck, [this] {
+        return _stop_bg_worker || !_all_tablet_schemahash_paths.empty() ||
+               !_all_check_paths.empty();
+    });
     if (_stop_bg_worker) {
+        return;
+    }
+
+    _perform_path_gc_by_tablet();
+    _perform_path_gc_by_rowsetid();
+}
+
+// gc unused tablet schemahash dir
+void DataDir::_perform_path_gc_by_tablet() {
+    if (_all_tablet_schemahash_paths.empty()) {
         return;
     }
     LOG(INFO) << "start to path gc by tablet schemahash.";
@@ -660,12 +671,10 @@ void DataDir::perform_path_gc_by_tablet() {
     LOG(INFO) << "finished one time path gc by tablet.";
 }
 
-void DataDir::perform_path_gc_by_rowsetid() {
+void DataDir::_perform_path_gc_by_rowsetid() {
     // init the set of valid path
     // validate the path in data dir
-    std::unique_lock<std::mutex> lck(_check_path_mutex);
-    _check_path_cv.wait(lck, [this] { return _stop_bg_worker || !_all_check_paths.empty(); });
-    if (_stop_bg_worker) {
+    if (_all_check_paths.empty()) {
         return;
     }
     LOG(INFO) << "start to path gc by rowsetid.";
@@ -823,7 +832,12 @@ Status DataDir::update_capacity() {
 
 void DataDir::update_trash_capacity() {
     auto trash_path = fmt::format("{}/{}", _path, TRASH_PREFIX);
-    _trash_used_bytes = StorageEngine::instance()->get_file_or_directory_size(trash_path);
+    try {
+        _trash_used_bytes = StorageEngine::instance()->get_file_or_directory_size(trash_path);
+    } catch (const std::filesystem::filesystem_error& e) {
+        LOG(WARNING) << "update trash capacity failed, path: " << _path << ", err: " << e.what();
+        return;
+    }
     disks_trash_used_capacity->set_value(_trash_used_bytes);
     LOG(INFO) << "path: " << _path << " trash capacity: " << _trash_used_bytes;
 }
@@ -836,7 +850,15 @@ void DataDir::update_remote_data_size(int64_t size) {
     disks_remote_used_capacity->set_value(size);
 }
 
-size_t DataDir::tablet_size() const {
+size_t DataDir::disk_capacity() const {
+    return _disk_capacity_bytes;
+}
+
+size_t DataDir::disk_available() const {
+    return _available_bytes;
+}
+
+size_t DataDir::tablet_num() const {
     std::lock_guard<std::mutex> l(_mutex);
     return _tablet_set.size();
 }

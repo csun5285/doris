@@ -40,3 +40,8 @@ INSERT INTO doris_test.final_test Values (1, 'first');
 INSERT INTO doris_test.final_test Values (1, 'second');
 
 INSERT INTO doris_test.ts values (1,1694438743);
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 2.0.3-rc01

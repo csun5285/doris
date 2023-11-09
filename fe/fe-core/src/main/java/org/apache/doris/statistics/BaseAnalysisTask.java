@@ -17,14 +17,20 @@
 
 package org.apache.doris.statistics;
 
+import org.apache.doris.analysis.TableSample;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.TableIf;
+import org.apache.doris.common.Config;
 import org.apache.doris.datasource.CatalogIf;
+import org.apache.doris.qe.AuditLogHelper;
+import org.apache.doris.qe.QueryState;
+import org.apache.doris.qe.QueryState.MysqlStateType;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.statistics.AnalysisInfo.AnalysisMethod;
 import org.apache.doris.statistics.AnalysisInfo.AnalysisType;
+import org.apache.doris.statistics.util.DBObjects;
 import org.apache.doris.statistics.util.StatisticsUtil;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -37,6 +43,14 @@ import java.util.concurrent.TimeUnit;
 public abstract class BaseAnalysisTask {
 
     public static final Logger LOG = LogManager.getLogger(BaseAnalysisTask.class);
+
+    protected static final String NDV_MULTIPLY_THRESHOLD = "0.3";
+
+    protected static final String NDV_SAMPLE_TEMPLATE = "case when NDV(`${colName}`)/count('${colName}') < "
+            + NDV_MULTIPLY_THRESHOLD
+            + " then NDV(`${colName}`) "
+            + "else NDV(`${colName}`) * ${scaleFactor} end AS ndv, "
+            ;
 
     /**
      * Stats stored in the column_statistics table basically has two types, `part_id` is null which means it is
@@ -64,7 +78,7 @@ public abstract class BaseAnalysisTask {
     protected static final String INSERT_COL_STATISTICS = "INSERT INTO "
             + "${internalDB}.${columnStatTbl}"
             + "    SELECT id, catalog_id, db_id, tbl_id, idx_id, col_id, part_id, row_count, "
-            + "        ndv, null_count, min, max, data_size, update_time\n"
+            + "        ndv, null_count, CAST(min AS string), CAST(max AS string), data_size, update_time\n"
             + "    FROM \n"
             + "     (SELECT CONCAT(${tblId}, '-', ${idxId}, '-', '${colId}') AS id, "
             + "         ${catalogId} AS catalog_id, "
@@ -78,7 +92,7 @@ public abstract class BaseAnalysisTask {
             + "         MIN(CAST(min AS ${type})) AS min, "
             + "         MAX(CAST(max AS ${type})) AS max, "
             + "         SUM(data_size_in_bytes) AS data_size, "
-            + "         NOW() AS update_time\n"
+            + "         NOW() AS update_time \n"
             + "     FROM ${internalDB}.${columnStatTbl}"
             + "     WHERE ${internalDB}.${columnStatTbl}.db_id = '${dbId}' AND "
             + "     ${internalDB}.${columnStatTbl}.tbl_id='${tblId}' AND "
@@ -87,11 +101,29 @@ public abstract class BaseAnalysisTask {
             + "     ${internalDB}.${columnStatTbl}.part_id IS NOT NULL"
             + "     ) t1, \n";
 
+    protected static final String ANALYZE_PARTITION_COLUMN_TEMPLATE = "INSERT INTO "
+            + "${internalDB}.${columnStatTbl}"
+            + " SELECT "
+            + "CONCAT(${tblId}, '-', ${idxId}, '-', '${colId}') AS id, "
+            + "${catalogId} AS catalog_id, "
+            + "${dbId} AS db_id, "
+            + "${tblId} AS tbl_id, "
+            + "${idxId} AS idx_id, "
+            + "'${colId}' AS col_id, "
+            + "NULL AS part_id, "
+            + "${row_count} AS row_count, "
+            + "${ndv} AS ndv, "
+            + "${null_count} AS null_count, "
+            + "'${min}' AS min, "
+            + "'${max}' AS max, "
+            + "${data_size} AS data_size, "
+            + "NOW() ";
+
     protected AnalysisInfo info;
 
-    protected CatalogIf catalog;
+    protected CatalogIf<? extends DatabaseIf<? extends TableIf>> catalog;
 
-    protected DatabaseIf db;
+    protected DatabaseIf<? extends TableIf> db;
 
     protected TableIf tbl;
 
@@ -100,6 +132,8 @@ public abstract class BaseAnalysisTask {
     protected StmtExecutor stmtExecutor;
 
     protected volatile boolean killed;
+
+    protected TableSample tableSample = null;
 
     @VisibleForTesting
     public BaseAnalysisTask() {
@@ -111,25 +145,12 @@ public abstract class BaseAnalysisTask {
         init(info);
     }
 
-    private void init(AnalysisInfo info) {
-        catalog = Env.getCurrentEnv().getCatalogMgr().getCatalog(info.catalogName);
-        if (catalog == null) {
-            Env.getCurrentEnv().getAnalysisManager().updateTaskStatus(info, AnalysisState.FAILED,
-                    String.format("Catalog with name: %s not exists", info.dbName), System.currentTimeMillis());
-            return;
-        }
-        db = (DatabaseIf) catalog.getDb(info.dbName).orElse(null);
-        if (db == null) {
-            Env.getCurrentEnv().getAnalysisManager().updateTaskStatus(info, AnalysisState.FAILED,
-                    String.format("DB with name %s not exists", info.dbName), System.currentTimeMillis());
-            return;
-        }
-        tbl = (TableIf) db.getTable(info.tblName).orElse(null);
-        if (tbl == null) {
-            Env.getCurrentEnv().getAnalysisManager().updateTaskStatus(
-                    info, AnalysisState.FAILED,
-                    String.format("Table with name %s not exists", info.tblName), System.currentTimeMillis());
-        }
+    protected void init(AnalysisInfo info) {
+        DBObjects dbObjects = StatisticsUtil.convertIdToObjects(info.catalogId, info.dbId, info.tblId);
+        catalog = dbObjects.catalog;
+        db = dbObjects.db;
+        tbl = dbObjects.table;
+        tableSample = getTableSample();
         // External Table level task doesn't contain a column. Don't need to do the column related analyze.
         if (info.externalTableLevelTask) {
             return;
@@ -138,12 +159,11 @@ public abstract class BaseAnalysisTask {
                 || info.analysisType.equals(AnalysisType.HISTOGRAM))) {
             col = tbl.getColumn(info.colName);
             if (col == null) {
-                throw new RuntimeException(String.format("Column with name %s not exists", info.tblName));
+                throw new RuntimeException(String.format("Column with name %s not exists", tbl.getName()));
             }
             Preconditions.checkArgument(!StatisticsUtil.isUnsupportedType(col.getType()),
                     String.format("Column with type %s is not supported", col.getType().toString()));
         }
-
     }
 
     public void execute() {
@@ -166,6 +186,9 @@ public abstract class BaseAnalysisTask {
                 doExecute();
                 break;
             } catch (Throwable t) {
+                if (killed) {
+                    throw new RuntimeException(t);
+                }
                 LOG.warn("Failed to execute analysis task, retried times: {}", retriedTimes++, t);
                 if (retriedTimes > StatisticConstants.ANALYZE_TASK_RETRY_TIMES) {
                     throw new RuntimeException(t);
@@ -181,12 +204,16 @@ public abstract class BaseAnalysisTask {
         if (killed) {
             return;
         }
-        Env.getCurrentEnv().getStatisticsCache().syncLoadColStats(tbl.getId(), -1, col.getName());
+        long tblId = tbl.getId();
+        String colName = col.getName();
+        if (!Env.getCurrentEnv().getStatisticsCache().syncLoadColStats(tblId, -1, colName)) {
+            Env.getCurrentEnv().getAnalysisManager().removeColStatsStatus(tblId, colName);
+        }
     }
 
     protected void setTaskStateToRunning() {
         Env.getCurrentEnv().getAnalysisManager()
-            .updateTaskStatus(info, AnalysisState.RUNNING, "", System.currentTimeMillis());
+                .updateTaskStatus(info, AnalysisState.RUNNING, "", System.currentTimeMillis());
     }
 
     public void cancel() {
@@ -197,10 +224,6 @@ public abstract class BaseAnalysisTask {
         Env.getCurrentEnv().getAnalysisManager()
                 .updateTaskStatus(info, AnalysisState.FAILED,
                         String.format("Job has been cancelled: %s", info.message), System.currentTimeMillis());
-    }
-
-    public long getLastExecTime() {
-        return info.lastExecTimeInMs;
     }
 
     public long getJobId() {
@@ -215,22 +238,67 @@ public abstract class BaseAnalysisTask {
         return "COUNT(1) * " + column.getType().getSlotSize();
     }
 
-    protected String getSampleExpression() {
-        if (info.analysisMethod == AnalysisMethod.FULL) {
-            return "";
-        }
-        // TODO Add sampling methods for external tables
-        if (info.samplePercent > 0) {
-            return String.format("TABLESAMPLE(%d PERCENT)", info.samplePercent);
+    // Min value is not accurate while sample, so set it to NULL to avoid optimizer generate bad plan.
+    protected String getMinFunction() {
+        if (tableSample == null) {
+            return "MIN(`${colName}`) ";
         } else {
-            return String.format("TABLESAMPLE(%d ROWS)", info.sampleRows);
+            return "NULL ";
+        }
+    }
+
+    // Max value is not accurate while sample, so set it to NULL to avoid optimizer generate bad plan.
+    protected String getMaxFunction() {
+        if (tableSample == null) {
+            return "MAX(`${colName}`) ";
+        } else {
+            return "NULL ";
+        }
+    }
+
+    protected TableSample getTableSample() {
+        if (info.forceFull) {
+            return null;
+        }
+        // If user specified sample percent or sample rows, use it.
+        if (info.samplePercent > 0) {
+            return new TableSample(true, (long) info.samplePercent);
+        } else if (info.sampleRows > 0) {
+            return new TableSample(false, info.sampleRows);
+        } else if (info.analysisMethod == AnalysisMethod.FULL
+                && Config.enable_auto_sample
+                && tbl.getDataSize(true) > Config.huge_table_lower_bound_size_in_bytes) {
+            // If user doesn't specify sample percent/rows, use auto sample and update sample rows in analysis info.
+            return new TableSample(false, (long) Config.huge_table_default_sample_rows);
+        } else {
+            return null;
         }
     }
 
     @Override
     public String toString() {
         return String.format("Job id [%d], Task id [%d], catalog [%s], db [%s], table [%s], column [%s]",
-            info.jobId, info.taskId, catalog.getName(), db.getFullName(), tbl.getName(),
-            col == null ? "TableRowCount" : col.getName());
+                info.jobId, info.taskId, catalog.getName(), db.getFullName(), tbl.getName(),
+                col == null ? "TableRowCount" : col.getName());
+    }
+
+    protected void executeWithExceptionOnFail(StmtExecutor stmtExecutor) throws Exception {
+        if (killed) {
+            return;
+        }
+        LOG.debug("execute internal sql: {}", stmtExecutor.getOriginStmt());
+        try {
+            stmtExecutor.execute();
+            QueryState queryState = stmtExecutor.getContext().getState();
+            if (queryState.getStateType().equals(MysqlStateType.ERR)) {
+                throw new RuntimeException(String.format("Failed to analyze %s.%s.%s, error: %s sql: %s",
+                        catalog.getName(), db.getFullName(), info.colName, stmtExecutor.getOriginStmt().toString(),
+                        queryState.getErrorMessage()));
+            }
+        } finally {
+            AuditLogHelper.logAuditLog(stmtExecutor.getContext(), stmtExecutor.getOriginStmt().toString(),
+                    stmtExecutor.getParsedStmt(), stmtExecutor.getQueryStatisticsForAuditLog(),
+                    true);
+        }
     }
 }

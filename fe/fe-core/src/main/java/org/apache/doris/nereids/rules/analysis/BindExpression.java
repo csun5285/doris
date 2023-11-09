@@ -39,9 +39,9 @@ import org.apache.doris.nereids.trees.expressions.BoundStar;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.Properties;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
-import org.apache.doris.nereids.trees.expressions.TVFProperties;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.Function;
 import org.apache.doris.nereids.trees.expressions.functions.FunctionBuilder;
@@ -54,7 +54,7 @@ import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.algebra.Aggregate;
 import org.apache.doris.nereids.trees.plans.algebra.SetOperation.Qualifier;
 import org.apache.doris.nereids.trees.plans.logical.LogicalAggregate;
-import org.apache.doris.nereids.trees.plans.logical.LogicalCTE;
+import org.apache.doris.nereids.trees.plans.logical.LogicalCTEAnchor;
 import org.apache.doris.nereids.trees.plans.logical.LogicalCTEConsumer;
 import org.apache.doris.nereids.trees.plans.logical.LogicalExcept;
 import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
@@ -408,17 +408,19 @@ public class BindExpression implements AnalysisRuleFactory {
                     LogicalProject<Plan> project = sort.child();
                     return bindSort(sort, project, ctx.cascadesContext);
                 })
-            ), RuleType.BINDING_SORT_SLOT.build(
+            ),
+            RuleType.BINDING_SORT_SLOT.build(
                 logicalSort(logicalCTEConsumer()).thenApply(ctx -> {
                     LogicalSort<LogicalCTEConsumer> sort = ctx.root;
                     LogicalCTEConsumer cteConsumer = sort.child();
                     return bindSort(sort, cteConsumer, ctx.cascadesContext);
                 })
-            ), RuleType.BINDING_SORT_SLOT.build(
-                logicalSort(logicalCTE()).thenApply(ctx -> {
-                    LogicalSort<LogicalCTE<Plan>> sort = ctx.root;
-                    LogicalCTE<Plan> cteConsumer = sort.child();
-                    return bindSort(sort, cteConsumer, ctx.cascadesContext);
+            ),
+            RuleType.BINDING_SORT_SLOT.build(
+                logicalSort(logicalCTEAnchor()).thenApply(ctx -> {
+                    LogicalSort<LogicalCTEAnchor<Plan, Plan>> sort = ctx.root;
+                    LogicalCTEAnchor<Plan, Plan> cteAnchor = sort.child();
+                    return bindSort(sort, cteAnchor, ctx.cascadesContext);
                 })
             ),
             RuleType.BINDING_SORT_SET_OPERATION_SLOT.build(
@@ -696,9 +698,9 @@ public class BindExpression implements AnalysisRuleFactory {
         FunctionRegistry functionRegistry = env.getFunctionRegistry();
 
         String functionName = unboundTVFRelation.getFunctionName();
-        TVFProperties arguments = unboundTVFRelation.getProperties();
+        Properties arguments = unboundTVFRelation.getProperties();
         FunctionBuilder functionBuilder = functionRegistry.findFunctionBuilder(functionName, arguments);
-        BoundFunction function = functionBuilder.build(functionName, arguments);
+        Expression function = functionBuilder.build(functionName, arguments);
         if (!(function instanceof TableValuedFunction)) {
             throw new AnalysisException(function.toSql() + " is not a TableValuedFunction");
         }
@@ -708,11 +710,11 @@ public class BindExpression implements AnalysisRuleFactory {
     private void checkSameNameSlot(List<Slot> childOutputs, String subQueryAlias) {
         Set<String> nameSlots = new HashSet<>();
         for (Slot s : childOutputs) {
-            if (nameSlots.contains(s.getName())) {
+            if (nameSlots.contains(s.getInternalName())) {
                 throw new AnalysisException("Duplicated inline view column alias: '" + s.getName()
                         + "'" + " in inline view: '" + subQueryAlias + "'");
             } else {
-                nameSlots.add(s.getName());
+                nameSlots.add(s.getInternalName());
             }
         }
     }
@@ -726,12 +728,11 @@ public class BindExpression implements AnalysisRuleFactory {
 
         String functionName = unboundFunction.getName();
         FunctionBuilder functionBuilder = functionRegistry.findFunctionBuilder(functionName, boundArguments);
-        BoundFunction function = functionBuilder.build(functionName, boundArguments);
+        Expression function = functionBuilder.build(functionName, boundArguments);
         if (!(function instanceof TableGeneratingFunction)) {
             throw new AnalysisException(function.toSql() + " is not a TableGeneratingFunction");
         }
-        function = (BoundFunction) TypeCoercionUtils.processBoundFunction(function);
-        return function;
+        return (BoundFunction) TypeCoercionUtils.processBoundFunction((BoundFunction) function);
     }
 
     private void checkIfOutputAliasNameDuplicatedForGroupBy(List<Expression> expressions,
