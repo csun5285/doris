@@ -413,4 +413,26 @@ TEST(TxnKvTest, RunInBthread) {
     bthread_join(tid, nullptr);
 }
 
+TEST(TxnKvTest, KvErrorCodeFormat) {
+    std::vector<std::tuple<TxnErrorCode, std::string_view>> codes {
+            {TxnErrorCode::TXN_OK, "Ok"},
+            {TxnErrorCode::TXN_KEY_NOT_FOUND, "KeyNotFound"},
+            {TxnErrorCode::TXN_CONFLICT, "Conflict"},
+            {TxnErrorCode::TXN_TOO_OLD, "TxnTooOld"},
+            {TxnErrorCode::TXN_MAYBE_COMMITTED, "MaybeCommitted"},
+            {TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED, "RetryableNotCommitted"},
+            {TxnErrorCode::TXN_TIMEOUT, "Timeout"},
+            {TxnErrorCode::TXN_INVALID_ARGUMENT, "InvalidArgument"},
+            {TxnErrorCode::TXN_UNIDENTIFIED_ERROR, "Unknown"},
+    };
+    for (auto&& [code, expect] : codes) {
+        std::string msg = fmt::format("{}", code);
+        ASSERT_EQ(msg, expect);
+        std::stringstream out;
+        out << code;
+        msg = out.str();
+        ASSERT_EQ(msg, expect);
+    }
+}
+
 // vim: et tw=100 ts=4 sw=4 cc=80:

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <fmt/core.h>
+
 #include <ostream>
 
 namespace selectdb {
@@ -17,22 +19,38 @@ enum class [[nodiscard]] TxnErrorCode : int {
     TXN_UNIDENTIFIED_ERROR = -7,
 };
 
-inline std::ostream& operator<<(std::ostream& out, selectdb::TxnErrorCode code) {
+inline const char* format_as(TxnErrorCode code) {
     // clang-format off
-    using selectdb::TxnErrorCode;
     switch (code) {
-    case TxnErrorCode::TXN_OK: out << "Ok"; break;
-    case TxnErrorCode::TXN_KEY_NOT_FOUND: out << "KeyNotFound"; break;
-    case TxnErrorCode::TXN_CONFLICT: out << "Conflict"; break;
-    case TxnErrorCode::TXN_TOO_OLD: out << "TxnTooOld"; break;
-    case TxnErrorCode::TXN_MAYBE_COMMITTED: out << "MaybeCommitted"; break;
-    case TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED: out << "RetryableNotCommitted"; break;
-    case TxnErrorCode::TXN_TIMEOUT: out << "Timeout"; break;
-    case TxnErrorCode::TXN_INVALID_ARGUMENT: out << "InvalidArgument"; break;
-    case TxnErrorCode::TXN_UNIDENTIFIED_ERROR: out << "Unknown"; break;
+    case TxnErrorCode::TXN_OK: return "Ok";
+    case TxnErrorCode::TXN_KEY_NOT_FOUND: return "KeyNotFound";
+    case TxnErrorCode::TXN_CONFLICT: return "Conflict";
+    case TxnErrorCode::TXN_TOO_OLD: return "TxnTooOld";
+    case TxnErrorCode::TXN_MAYBE_COMMITTED: return "MaybeCommitted";
+    case TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED: return "RetryableNotCommitted";
+    case TxnErrorCode::TXN_TIMEOUT: return "Timeout";
+    case TxnErrorCode::TXN_INVALID_ARGUMENT: return "InvalidArgument";
+    case TxnErrorCode::TXN_UNIDENTIFIED_ERROR: return "Unknown";
     }
-    return out;
+    return "NotImplemented";
     // clang-format on
 }
 
+inline std::ostream& operator<<(std::ostream& out, TxnErrorCode code) {
+    out << format_as(code);
+    return out;
+}
+
 } // namespace selectdb
+
+template <>
+struct fmt::formatter<selectdb::TxnErrorCode> {
+    constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator {
+        return ctx.begin();
+    }
+
+    auto format(const selectdb::TxnErrorCode& code, format_context& ctx) const
+            -> format_context::iterator {
+        return fmt::format_to(ctx.out(), "{}", selectdb::format_as(code));
+    }
+};
