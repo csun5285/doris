@@ -2295,10 +2295,10 @@ void MetaServiceImpl::alter_iam(google::protobuf::RpcController* controller,
         return;
     }
     if (is_add_req) {
-        LOG(INFO) << "add new iam info, cipher ak: " << ak << " cipher sk: " << sk;
+        LOG(INFO) << "add new iam info, cipher ak: " << iam_user.ak() << " cipher sk: " << iam_user.sk();
     } else {
         LOG(INFO) << "alter iam info, old:  cipher ak: " << old_ak << " cipher sk" << old_sk
-                  << " new: cipher ak: " << ak << " cipher sk:" << sk;
+                  << " new: cipher ak: " << iam_user.ak() << " cipher sk:" << iam_user.sk();
     }
 }
 
