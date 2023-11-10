@@ -323,6 +323,10 @@ private:
 
 private:
     EngineOptions _options;
+
+    std::unique_ptr<cloud::MetaMgr> _meta_mgr;
+    std::unique_ptr<cloud::CloudTabletMgr> _tablet_mgr;
+
     std::mutex _store_lock;
     std::mutex _trash_sweep_lock;
     std::map<std::string, DataDir*> _store_map;
@@ -369,11 +373,7 @@ private:
     scoped_refptr<Thread> _tablet_checkpoint_tasks_producer_thread;
 
     // CLOUD_MODE
-    scoped_refptr<Thread> _refresh_s3_info_thread;
-    scoped_refptr<Thread> _vacuum_stale_rowsets_thread;
-    scoped_refptr<Thread> _sync_tablets_thread;
-    scoped_refptr<Thread> _lease_compaction_thread;
-    scoped_refptr<Thread> _check_bucket_enable_versioning_thread;
+    std::vector<scoped_refptr<Thread>> _bg_threads;
 
     // For tablet and disk-stat report
     std::mutex _report_mtx;
@@ -396,9 +396,6 @@ private:
 
     HeartbeatFlags* _heartbeat_flags;
 
-    std::unique_ptr<ThreadPool> _quick_compaction_thread_pool;
-    std::unique_ptr<ThreadPool> _base_compaction_thread_pool;
-    std::unique_ptr<ThreadPool> _cumu_compaction_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
 
@@ -406,6 +403,7 @@ private:
 
     std::unique_ptr<ThreadPool> _calc_tablet_delete_bitmap_task_thread_pool;
 
+    // ATTN: Compactions in maps depend on `CloudTabletMgr` and `CloudMetaMgr`
     mutable std::mutex _compaction_mtx;
     // tablet_id -> submitted base compaction, guarded by `_compaction_mtx`
     std::unordered_map<int64_t, std::shared_ptr<CloudBaseCompaction>> _submitted_base_compactions;
@@ -416,6 +414,11 @@ private:
     // tablet_id -> submitted cumu compactions, guarded by `_compaction_mtx`
     std::unordered_map<int64_t, std::vector<std::shared_ptr<CloudCumulativeCompaction>>>
             _submitted_cumu_compactions;
+
+    // ATTN: MUST shutdown before destory compaction maps, as compaction maps are referenced by the
+    // callbacks running on the threadpool
+    std::unique_ptr<ThreadPool> _base_compaction_thread_pool;
+    std::unique_ptr<ThreadPool> _cumu_compaction_thread_pool;
 
     std::shared_ptr<StreamLoadRecorder> _stream_load_recorder;
 
@@ -430,9 +433,6 @@ private:
     std::mutex _running_cooldown_mutex;
     std::unordered_map<DataDir*, int64_t> _running_cooldown_tasks_cnt;
     std::unordered_set<int64_t> _running_cooldown_tablets;
-
-    std::unique_ptr<cloud::MetaMgr> _meta_mgr;
-    std::unique_ptr<cloud::CloudTabletMgr> _tablet_mgr;
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
 };

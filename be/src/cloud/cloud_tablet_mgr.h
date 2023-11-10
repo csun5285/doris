@@ -48,10 +48,9 @@ public:
                                        std::vector<TabletSharedPtr>* tablets, int64_t* max_score);
 
 private:
-    std::unique_ptr<Cache> _cache;
-
     class TabletMap;
-    std::shared_ptr<TabletMap> _tablet_map;
+    std::unique_ptr<TabletMap> _tablet_map;
+    std::unique_ptr<Cache> _cache;
 
 public:
     // When sync rowsets from ms, if it has overlap rowsets, the new rowsets data need to be downloaded

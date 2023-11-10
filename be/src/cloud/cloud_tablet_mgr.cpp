@@ -91,6 +91,9 @@ public:
     void erase(Tablet* tablet) {
         std::lock_guard lock(_mtx);
         auto it = _map.find(tablet->tablet_id());
+        // According to the implementation of `LRUCache`, `deleter` may be called after a tablet
+        // with same tablet id insert into cache and `TabletMap`. So we MUST check if the tablet
+        // instance to be erased is the same one in the map.
         if (it != _map.end() && it->second.get() == tablet) {
             _map.erase(it);
         }
@@ -119,9 +122,9 @@ private:
 };
 
 CloudTabletMgr::CloudTabletMgr()
-        : _cache(new_lru_cache("TabletCache", config::tablet_cache_capacity, LRUCacheType::NUMBER,
-                               config::tablet_cache_shards)),
-          _tablet_map(std::make_shared<TabletMap>()) {
+        : _tablet_map(std::make_unique<TabletMap>()),
+          _cache(new_lru_cache("TabletCache", config::tablet_cache_capacity, LRUCacheType::NUMBER,
+                               config::tablet_cache_shards)) {
     for (size_t i = 0; i < mgr_size; i++) {
         _ovarlap_rowsets_mgrs[i].consumer =
                 std::thread(&CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets,
@@ -147,10 +150,12 @@ CloudTabletMgr::~CloudTabletMgr() {
 }
 
 Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool warmup_data) {
-    // LRU value type
+    // LRU value type. `Value`'s lifetime MUST NOT be longer than `CloudTabletMgr`
     struct Value {
+        // FIXME(plat1ko): The ownership of tablet seems to belong to 'TabletMap', while `Value`
+        // only requires a reference.
         TabletSharedPtr tablet;
-        std::shared_ptr<TabletMap> tablet_map;
+        TabletMap& tablet_map;
     };
 
     auto tablet_id_str = std::to_string(tablet_id);
@@ -166,27 +171,31 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
                 LOG(WARNING) << "failed to tablet " << tablet_id << ": " << st;
                 return nullptr;
             }
+
             auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir());
-            auto value = new Value();
-            value->tablet = tablet;
-            value->tablet_map = _tablet_map;
+            auto value = std::make_unique<Value>(Value {
+                    .tablet = tablet,
+                    .tablet_map = *_tablet_map,
+            });
             // MUST sync stats to let compaction scheduler work correctly
             st = meta_mgr()->sync_tablet_rowsets(tablet.get(), warmup_data);
             if (!st.ok()) {
                 LOG(WARNING) << "failed to sync tablet " << tablet_id << ": " << st;
                 return nullptr;
             }
+
             static auto deleter = [](const CacheKey& key, void* value) {
                 auto value1 = reinterpret_cast<Value*>(value);
                 // tablet has been evicted, release it from `tablet_map`
-                value1->tablet_map->erase(value1->tablet.get());
+                value1->tablet_map.erase(value1->tablet.get());
                 delete value1;
             };
 
-            auto handle = _cache->insert(key, value, 1, deleter);
+            auto handle = _cache->insert(key, value.release(), 1, deleter);
+            auto ret = std::shared_ptr<Tablet>(
+                    tablet.get(), [cache = _cache.get(), handle](...) { cache->release(handle); });
             _tablet_map->put(std::move(tablet));
-            return std::shared_ptr<Tablet>(value->tablet.get(),
-                                           [this, handle](...) { _cache->release(handle); });
+            return ret;
         };
 
         *tablet = s_singleflight_load_tablet.load(tablet_id, std::move(load_tablet));
@@ -197,7 +206,8 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
     }
 
     Tablet* tablet1 = reinterpret_cast<Value*>(_cache->value(handle))->tablet.get();
-    *tablet = std::shared_ptr<Tablet>(tablet1, [this, handle](...) { _cache->release(handle); });
+    *tablet = std::shared_ptr<Tablet>(
+            tablet1, [cache = _cache.get(), handle](...) { cache->release(handle); });
     return Status::OK();
 }
 
