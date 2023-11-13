@@ -42,13 +42,7 @@ class ServiceRegistryPB;
 class MetaServerRegister {
 public:
     MetaServerRegister(std::shared_ptr<TxnKv> txn_kv);
-    ~MetaServerRegister() {
-        bool expect = true;
-        if (running_.compare_exchange_strong(expect, false)) {
-            cv_.notify_all();
-            if (register_thread_ != nullptr) register_thread_->join();
-        }
-    };
+    ~MetaServerRegister();
 
     /**
      * Starts registering
@@ -76,7 +70,7 @@ private:
 
 private:
     std::unique_ptr<std::thread> register_thread_;
-    std::atomic<bool> running_;
+    std::atomic<int> running_;
     std::mutex mtx_;
     std::condition_variable cv_;
     std::string id_;
