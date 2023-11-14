@@ -169,8 +169,22 @@ void TabletCalcDeleteBitmapTask::handle() {
     if (partial_update_info && partial_update_info->is_partial_update &&
         rowset_writer->num_rows() > 0) {
         // build rowset writer and merge transient rowset
-        rowset_writer->flush();
+        status = rowset_writer->flush();
+        if (status != Status::OK()) {
+            LOG(WARNING) << "failed to flush the transient rowset writer. rowset_id="
+                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
+                         << ", txn_id=" << _transaction_id << ", status=" << status;
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
+            return;
+        }
         RowsetSharedPtr transient_rowset = rowset_writer->build();
+        if (!transient_rowset) {
+            LOG(WARNING) << "failed to build the transient rowset. rowset_id="
+                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
+                         << ", txn_id=" << _transaction_id;
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
+            return;
+        }
         rowset->merge_rowset_meta(transient_rowset->rowset_meta());
         const auto& rowset_meta = rowset->rowset_meta();
         status = cloud::meta_mgr()->update_tmp_rowset(*rowset_meta);
