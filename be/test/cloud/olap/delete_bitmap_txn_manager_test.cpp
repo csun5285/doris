@@ -19,10 +19,13 @@
 
 #include <gtest/gtest.h>
 #include <unistd.h>
+
 #include <chrono>
 #include <memory>
 #include <thread>
+
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset.h"
@@ -31,6 +34,13 @@
 namespace doris::cloud {
 
 TEST(DeleteBitmapTxnManagerTest, normal) {
+    auto sp = SyncPoint::get_instance();
+    sp->enable_processing();
+    sp->set_call_back("DeleteBitmapTxnManager::remove_expired_tablet_txn_info", [](auto&& args) {
+        bool* pred = try_any_cast<bool*>(args.at(0));
+        *pred = true;
+    });
+
     DeleteBitmapTxnManager txn_manager(1024 * 1024);
     auto st = txn_manager.init();
     EXPECT_EQ(st, Status::OK());
@@ -48,14 +58,15 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     rowset_meta_pb.set_rowset_id(123);
     rst_meta_ptr->init_from_pb(rowset_meta_pb);
     RowsetSharedPtr input_rowset = std::make_shared<BetaRowset>(nullptr, "", rst_meta_ptr);
-    std::shared_ptr<PartialUpdateInfo> input_partial_update_info = std::make_shared<PartialUpdateInfo>();
+    std::shared_ptr<PartialUpdateInfo> input_partial_update_info =
+            std::make_shared<PartialUpdateInfo>();
 
     // set txn_id1
     TTransactionId txn_id1 = 111;
     int64_t tablet_id1 = 222;
     int64_t txn_expiration1 =
             duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
-                    .count() + 1;
+                    .count();
     txn_manager.set_tablet_txn_info(txn_id1, tablet_id1, input_delete_bitmap, input_rowset_ids,
                                     input_rowset, txn_expiration1, input_partial_update_info);
 
@@ -112,7 +123,10 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     EXPECT_EQ(out_partial_update_info.get(), input_partial_update_info.get());
     EXPECT_EQ(out_txn_expiration, txn_expiration1);
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    sp->set_call_back("DeleteBitmapTxnManager::remove_expired_tablet_txn_info", [](auto&& args) {
+        bool* pred = try_any_cast<bool*>(args.at(0));
+        *pred = false;
+    });
     // remove expired txn
     txn_manager.remove_expired_tablet_txn_info();
 

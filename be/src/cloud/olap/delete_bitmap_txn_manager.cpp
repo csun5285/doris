@@ -24,6 +24,7 @@
 #include <shared_mutex>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "olap/olap_common.h"
 #include "olap/tablet_meta.h"
 
@@ -156,6 +157,7 @@ void DeleteBitmapTxnManager::update_tablet_txn_info(TTransactionId transaction_i
 }
 
 void DeleteBitmapTxnManager::remove_expired_tablet_txn_info() {
+    TEST_SYNC_POINT_RETURN_WITH_VOID("DeleteBitmapTxnManager::remove_expired_tablet_txn_info");
     std::unique_lock<std::shared_mutex> wlock(_rwlock);
     while (!_expiration_txn.empty()) {
         auto iter = _expiration_txn.begin();
