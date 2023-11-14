@@ -155,15 +155,17 @@ void TabletCalcDeleteBitmapTask::handle() {
             LOG(WARNING) << "failed to flush the transient rowset writer. rowset_id="
                          << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
                          << ", txn_id=" << _transaction_id << ", status=" << status;
-            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
             return;
         }
         RowsetSharedPtr transient_rowset = rowset_writer->build();
         if (!transient_rowset) {
-            LOG(WARNING) << "failed to build the transient rowset. rowset_id="
-                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
-                         << ", txn_id=" << _transaction_id;
-            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id());
+            std::string msg = fmt::format(
+                    "failed to build the transient rowset. rowset_id={}, tablet_id={}, txn_id={}",
+                    rowset->rowset_id().to_string(), _tablet->tablet_id(), _transaction_id);
+            LOG(WARNING) << msg;
+            status = Status::Error<ErrorCode::INTERNAL_ERROR, false>(msg);
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
             return;
         }
         rowset->merge_rowset_meta(transient_rowset->rowset_meta());

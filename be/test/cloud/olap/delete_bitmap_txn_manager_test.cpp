@@ -55,7 +55,7 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     int64_t tablet_id1 = 222;
     int64_t txn_expiration1 =
             duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
-                    .count();
+                    .count() + 1;
     txn_manager.set_tablet_txn_info(txn_id1, tablet_id1, input_delete_bitmap, input_rowset_ids,
                                     input_rowset, txn_expiration1, input_partial_update_info);
 
@@ -112,6 +112,7 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     EXPECT_EQ(out_partial_update_info.get(), input_partial_update_info.get());
     EXPECT_EQ(out_txn_expiration, txn_expiration1);
 
+    std::this_thread::sleep_for(std::chrono::seconds(2));
     // remove expired txn
     txn_manager.remove_expired_tablet_txn_info();
 
