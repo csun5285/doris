@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/cached_remote_file_reader.h"
 #include "io/file_factory.h"
 #include "io/fs/broker_file_reader.h"
@@ -171,6 +172,8 @@ public:
             // the underlying buffer is closed in its own destructor
             // return _reader->close();
             if (_profile != nullptr) {
+                // Make the thread sleep for a while to test data race
+                TEST_INJECTION_POINT_CALLBACK("MergeRangeFileReader::close");
                 COUNTER_UPDATE(_copy_time, _statistics.copy_time);
                 COUNTER_UPDATE(_read_time, _statistics.read_time);
                 COUNTER_UPDATE(_request_io, _statistics.request_io);
@@ -178,6 +181,7 @@ public:
                 COUNTER_UPDATE(_request_bytes, _statistics.request_bytes);
                 COUNTER_UPDATE(_read_bytes, _statistics.read_bytes);
             }
+            _profile = nullptr;
         }
         return Status::OK();
     }
