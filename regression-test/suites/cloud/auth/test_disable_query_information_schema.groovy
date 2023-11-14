@@ -4,6 +4,8 @@ suite("test_disable_query_information_schema", "cloud_auth") {
 
     sql """create user ${user1} identified by '12345' default role 'admin'"""
 
+    sql "sync"
+    
     try {
         result = connect(user = "${user1}", password = '12345', url = context.config.jdbcUrl) {
              sql "set enable_nereids_planner = false"

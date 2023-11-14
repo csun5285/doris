@@ -28,16 +28,25 @@ import org.apache.logging.log4j.Logger;
 public class CloudInstanceStatusChecker extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(CloudInstanceStatusChecker.class);
 
+    public CloudInstanceStatusChecker() {
+        super("cloud instance check");
+    }
+
     @Override
     protected void runAfterCatalogReady() {
-        SelectdbCloud.GetInstanceResponse response =
-                Env.getCurrentSystemInfo().getCloudInstance();
-        if (!response.hasStatus() || !response.getStatus().hasCode()
-                || response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
-            LOG.warn("failed to get cloud instance due to incomplete response, "
-                    + "cloud_unique_id={}, response={}", Config.cloud_unique_id, response);
-        } else {
-            Env.getCurrentSystemInfo().setInstanceStatus(response.getInstance().getStatus());
+        try {
+            SelectdbCloud.GetInstanceResponse response =
+                    Env.getCurrentSystemInfo().getCloudInstance();
+            LOG.debug("get from ms response {}", response);
+            if (!response.hasStatus() || !response.getStatus().hasCode()
+                    || response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
+                LOG.warn("failed to get cloud instance due to incomplete response, "
+                        + "cloud_unique_id={}, response={}", Config.cloud_unique_id, response);
+            } else {
+                Env.getCurrentSystemInfo().setInstanceStatus(response.getInstance().getStatus());
+            }
+        } catch (Exception e) {
+            LOG.warn("get instance from ms exception", e);
         }
     }
 }

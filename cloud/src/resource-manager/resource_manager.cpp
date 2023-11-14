@@ -205,7 +205,7 @@ std::pair<MetaServiceCode, std::string> ResourceManager::add_cluster(const std::
         return std::make_pair(cast_as<ErrCategory::READ>(c0), msg);
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         msg = "instance status has been set delete, plz check it";
         return std::make_pair(MetaServiceCode::CLUSTER_NOT_FOUND, msg);
     }
@@ -309,7 +309,7 @@ std::pair<MetaServiceCode, std::string> ResourceManager::drop_cluster(
         return std::make_pair(cast_as<ErrCategory::READ>(c0), msg);
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         msg = "instance status has been set delete, plz check it";
         return std::make_pair(MetaServiceCode::CLUSTER_NOT_FOUND, msg);
     }
@@ -402,7 +402,7 @@ std::string ResourceManager::update_cluster(
         return msg;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         msg = "instance status has been set delete, plz check it";
         return msg;
     }
@@ -616,7 +616,7 @@ std::string ResourceManager::modify_nodes(const std::string& instance_id,
         return msg;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         msg = "instance status has been set delete, plz check it";
         LOG(WARNING) << msg;
         return msg;

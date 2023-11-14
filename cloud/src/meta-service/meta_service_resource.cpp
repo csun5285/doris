@@ -296,7 +296,7 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -461,7 +461,7 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -2348,7 +2348,7 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
         msg = "failed to parse InstanceInfoPB";
         return;
     }
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;

@@ -12,10 +12,11 @@ suite("test_disable_show_system_info_not_root", "cloud_auth") {
     def role= 'admin'
     def user = 'acloud_auth_test_user_jackma'
     def dbName = 'cloud_auth_test_database'
-    try_sql("DROP USER ${user}")
+    try_sql("DROP USER if exists ${user}")
     sql """DROP DATABASE IF EXISTS ${dbName}"""
     sql """CREATE DATABASE ${dbName}"""
     sql """CREATE USER '${user}' IDENTIFIED BY 'Cloud123456' DEFAULT ROLE '${role}'"""
+    sql "sync"
     def result1 = connect(user=user, password='Cloud123456', url=context.config.jdbcUrl) {
         try_sql """show backends"""
     }
@@ -31,6 +32,6 @@ suite("test_disable_show_system_info_not_root", "cloud_auth") {
         assertTrue(false);
     }
 
-    sql """DROP USER ${user}"""
+    sql """DROP USER if exists ${user}"""
     sql """DROP DATABASE ${dbName}"""
 }
