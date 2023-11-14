@@ -577,9 +577,9 @@ void MetaServiceImpl::update_tablet(::google::protobuf::RpcController* controlle
         if (code != MetaServiceCode::OK) {
             return;
         }
-        if (tablet_meta_info.has_is_in_memory()) {
+        if (tablet_meta_info.has_is_in_memory()) { // deprecate after 3.0.0
             tablet_meta.set_is_in_memory(tablet_meta_info.is_in_memory());
-        } else if (tablet_meta_info.has_is_persistent()) {
+        } else if (tablet_meta_info.has_is_persistent()) { // deprecate after 3.0.0
             tablet_meta.set_is_persistent(tablet_meta_info.is_persistent());
         } else if (tablet_meta_info.has_ttl_seconds()) {
             tablet_meta.set_ttl_seconds(tablet_meta_info.ttl_seconds());

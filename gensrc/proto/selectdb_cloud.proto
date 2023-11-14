@@ -412,8 +412,8 @@ message TabletIndexPB {
 
 message TabletMetaInfoPB { // For update tablet meta
     optional int64 tablet_id = 1;
-    optional bool is_in_memory = 2;
-    optional bool is_persistent = 3;
+    optional bool is_in_memory = 2; // deprecated
+    optional bool is_persistent = 3; // deprecated
     optional int64 ttl_seconds = 4;
 }
 
