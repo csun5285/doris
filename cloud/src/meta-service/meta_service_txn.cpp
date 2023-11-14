@@ -948,7 +948,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         rl_job_progress_key_info(rl_progress_key_info, &rl_progress_key);
         TxnErrorCode err = txn->get(rl_progress_key, &rl_progress_val);
         if (err != TxnErrorCode::TXN_OK) {
-            if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
                 prev_progress_existed = false;
             } else {
                 code = cast_as<ErrCategory::READ>(err);
