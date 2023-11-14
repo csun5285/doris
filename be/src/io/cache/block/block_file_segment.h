@@ -109,7 +109,7 @@ public:
     [[nodiscard]] Status read_at(Slice buffer, size_t read_offset);
 
     // finish write, release the file writer
-    [[nodiscard]] Status finalize_write(bool need_to_get_file_size = false);
+    [[nodiscard]] Status finalize_write();
 
     // set downloader if state == EMPTY
     uint64_t get_or_set_downloader();

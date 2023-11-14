@@ -146,9 +146,8 @@ Status BetaRowset::load_segments(int64_t seg_id_begin, int64_t seg_id_end,
     if (!fs || _schema == nullptr) {
         return Status::Error<INIT_FAILED>("get fs failed");
     }
-    auto count = [table_id = _rowset_meta->table_id(),
-                  partition_id = _rowset_meta->partition_id()](io::FileCacheStatistics* stats) {
-        io::FileCacheProfile::instance().update(table_id, partition_id, stats);
+    auto count = [table_id = _rowset_meta->table_id()](io::FileCacheStatistics* stats) {
+        io::FileCacheProfile::instance().update(table_id, stats);
     };
     int64_t seg_id = seg_id_begin;
     while (seg_id < seg_id_end) {

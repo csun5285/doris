@@ -56,7 +56,7 @@ public:
     FileReader* get_remote_reader() { return _remote_file_reader.get(); }
 
 protected:
-    Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+    [[nodiscard]] Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                         const IOContext* io_ctx) override;
 
 private:
