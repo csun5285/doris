@@ -78,10 +78,13 @@ public class UserPrivTable extends PrivTable {
                     ClusterNamespace.getNameFromFullName(entry.getOrigUser()), entry.getUserId());
         }
         Optional<PrivEntry> user = entries.stream()
-                .filter(e -> ClusterNamespace.getNameFromFullName(e.getOrigUser()).equals(userName)).findAny();
+                .filter(e -> ClusterNamespace.getNameFromFullName(e.getOrigUser())
+                    .equals(ClusterNamespace.getNameFromFullName(userName))).findAny();
         if (user.isPresent()) {
+            LOG.info("update auth username {} get user {}, userid {}", userName, user.get(), user.get().getUserId());
             return user.get().getUserId();
         } else {
+            LOG.warn("update auth username {} get userid empty", userName);
             return "";
         }
     }

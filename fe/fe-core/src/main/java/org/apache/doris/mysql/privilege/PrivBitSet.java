@@ -106,7 +106,7 @@ public class PrivBitSet implements Writable {
     }
 
     public boolean containsResourcePriv() {
-        return containsPrivs(Privilege.USAGE_PRIV);
+        return containsPrivs(Privilege.USAGE_PRIV, Privilege.CLUSTER_USAGE_PRIV, Privilege.STAGE_USAGE_PRIV);
     }
 
     public boolean containsDbTablePriv() {
@@ -193,7 +193,8 @@ public class PrivBitSet implements Writable {
         Text.writeString(out, GsonUtils.GSON.toJson(this));
     }
 
-    public static void convertResourcePrivToCloudPriv(ResourcePattern resourcePattern, Set<Privilege> privileges) {
+    public static Set<Privilege> convertResourcePrivToCloudPriv(ResourcePattern resourcePattern,
+                                                                Set<Privilege> privileges) {
         PrivBitSet privs = PrivBitSet.of();
         for (Privilege privilege : privileges) {
             if (resourcePattern.isGeneralResource()) {
@@ -207,7 +208,7 @@ public class PrivBitSet implements Writable {
                 privs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
             }
         }
-        privileges = new HashSet<>(privs.toPrivilegeList());
+        return new HashSet<>(privs.toPrivilegeList());
     }
 }
 

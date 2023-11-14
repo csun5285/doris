@@ -159,7 +159,7 @@ public class RevokeStmt extends DdlStmt {
             GrantStmt.checkTablePrivileges(privileges, role, tblPattern, colPrivileges);
         } else if (resourcePattern != null) {
             if (Config.isCloudMode()) {
-                PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
+                privileges = PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
             }
             GrantStmt.checkResourcePrivileges(privileges, role, resourcePattern);
         } else if (workloadGroupPattern != null) {
