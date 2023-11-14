@@ -38,7 +38,10 @@ public enum InternalErrorCode {
 
     // for external catalog
     GET_REMOTE_METADATA_ERROR(201),
-    GET_REMOTE_DATA_ERROR(202);
+    GET_REMOTE_DATA_ERROR(202),
+
+    // for MoW table
+    DELETE_BITMAP_LOCK_ERR(301);
 
     private long errCode;
 

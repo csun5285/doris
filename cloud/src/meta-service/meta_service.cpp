@@ -1448,6 +1448,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
     err = txn->get(lock_key, &lock_val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        msg = "lock id key not found";
+        code = MetaServiceCode::LOCK_EXPIRED;
+        return;
+    }
     if (err != TxnErrorCode::TXN_OK) {
         ss << "failed to get delete bitmap lock info, instance_id=" << instance_id
            << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;

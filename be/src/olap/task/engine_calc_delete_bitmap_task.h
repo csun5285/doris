@@ -26,8 +26,7 @@ class EngineCalcDeleteBitmapTask;
 class TabletCalcDeleteBitmapTask {
 public:
     TabletCalcDeleteBitmapTask(EngineCalcDeleteBitmapTask* engine_task, TabletSharedPtr tablet,
-                               int64_t transaction_id, int64_t version,
-                               std::atomic<int64_t>* total_task_num);
+                               int64_t transaction_id, int64_t version);
     ~TabletCalcDeleteBitmapTask() = default;
 
     void handle();
@@ -38,8 +37,6 @@ private:
     TabletSharedPtr _tablet;
     int64_t _transaction_id;
     int64_t _version;
-
-    std::atomic<int64_t>* _total_task_num;
 };
 
 class EngineCalcDeleteBitmapTask : public EngineTask {
@@ -51,20 +48,16 @@ public:
 
     Status finish() override;
 
-    void add_error_tablet_id(int64_t tablet_id);
+    void add_error_tablet_id(int64_t tablet_id, const Status& err);
     void add_succ_tablet_id(int64_t tablet_id);
-
-    void notify();
-    void wait();
 
 private:
     const TCalcDeleteBitmapRequest& _cal_delete_bitmap_req;
-    std::mutex _tablet_ids_mutex;
+    std::mutex _mutex;
     vector<TTabletId>* _error_tablet_ids;
     vector<TTabletId>* _succ_tablet_ids;
 
-    std::mutex _tablet_finish_sleep_mutex;
-    std::condition_variable _tablet_finish_sleep_cond;
+    Status _res;
 };
 
 } // namespace doris

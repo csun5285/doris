@@ -60,6 +60,7 @@ TStatusError(DATA_QUALITY_ERROR);
 TStatusError(LABEL_ALREADY_EXISTS);
 TStatusError(NOT_AUTHORIZED);
 TStatusError(HTTP_ERROR);
+TStatusError(DELETE_BITMAP_LOCK_ERROR);
 #undef TStatusError
 // BE internal errors
 E(OS_ERROR, -100);
@@ -361,9 +362,10 @@ public:
         return *this;
     }
 
+    template <bool stacktrace = true>
     Status static create(const TStatus& status) {
-        return Error<true>(status.status_code,
-                           status.error_msgs.empty() ? "" : status.error_msgs[0]);
+        return Error<stacktrace>(status.status_code,
+                                 status.error_msgs.empty() ? "" : status.error_msgs[0]);
     }
 
     Status static create(const PStatus& pstatus) {

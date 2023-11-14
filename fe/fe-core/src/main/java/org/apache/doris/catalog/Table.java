@@ -262,7 +262,7 @@ public abstract class Table extends MetaObject implements Writable, TableIf {
             boolean res = this.cloudCommitLock.tryLock(timeout, unit);
             if (!res && unit.toSeconds(timeout) >= 1) {
                 LOG.warn("Failed to try table {}'s cloud commit lock. timeout {} {}. Current owner: {}",
-                        name, timeout, unit.name(), rwLock.getOwner());
+                        name, timeout, unit.name(), cloudCommitLock);
             }
             return res;
         } catch (InterruptedException e) {

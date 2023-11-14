@@ -46,6 +46,10 @@ public:
                              RowsetSharedPtr rowset, int64_t txn_expirationm,
                              std::shared_ptr<PartialUpdateInfo> partial_update_info);
 
+    void update_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
+                                DeleteBitmapPtr delete_bitmap,
+                                const RowsetIdUnorderedSet& rowset_ids);
+
     void remove_expired_tablet_txn_info();
 
 private:
