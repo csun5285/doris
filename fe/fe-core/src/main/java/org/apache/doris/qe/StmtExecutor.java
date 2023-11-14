@@ -540,6 +540,9 @@ public class StmtExecutor {
             if (logicalPlan instanceof Forward) {
                 redirectStatus = ((Forward) logicalPlan).toRedirectStatus();
                 if (isForwardToMaster()) {
+                    if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
+                        throw new UserException("Forward master command is not supported for prepare statement");
+                    }
                     if (isProxy) {
                         // This is already a stmt forwarded from other FE.
                         // If we goes here, means we can't find a valid Master FE(some error happens).
@@ -759,6 +762,9 @@ public class StmtExecutor {
                     queryAnalysisSpan.end();
                 }
                 if (isForwardToMaster()) {
+                    if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
+                        throw new UserException("Forward master command is not supported for prepare statement");
+                    }
                     if (isProxy) {
                         // This is already a stmt forwarded from other FE.
                         // If goes here, which means we can't find a valid Master FE(some error happens).
@@ -1180,6 +1186,10 @@ public class StmtExecutor {
             }
 
             analyzeVariablesInStmt();
+        }
+        if (context.getSessionVariable().enableInsertGroupCommit && parsedStmt instanceof NativeInsertStmt) {
+            NativeInsertStmt nativeInsertStmt = (NativeInsertStmt) parsedStmt;
+            nativeInsertStmt.analyzeGroupCommit(new Analyzer(context.getEnv(), context));
         }
         redirectStatus = parsedStmt.getRedirectStatus();
     }
