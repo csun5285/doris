@@ -245,8 +245,9 @@ void FdbMetricExporter::stop() {
         running_cond_.notify_all();
     }
 
-    if (thread_ != nullptr) {
+    if (thread_ != nullptr && thread_->joinable()) {
         thread_->join();
+        thread_.reset();
     }
 }
 

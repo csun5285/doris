@@ -173,7 +173,10 @@ void MetaServerRegister::stop() {
         running_.store(2);
         cv_.notify_all();
     }
-    if (register_thread_ != nullptr) register_thread_->join();
+    if (register_thread_ != nullptr && register_thread_->joinable()) {
+    	register_thread_->join();
+    	register_thread_.reset();
+  	}
 }
 
 } // namespace selectdb
