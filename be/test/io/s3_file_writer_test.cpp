@@ -32,6 +32,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -41,6 +42,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "common/config.h"
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
@@ -352,6 +354,88 @@ TEST_F(S3FileWriterTest, multi_part_io_error) {
     st = s3_fs->exists("multi_part_io_error", &exists);
     ASSERT_TRUE(st.ok()) << st;
     ASSERT_FALSE(exists);
+}
+
+TEST_F(S3FileWriterTest, offset_test) {
+    mock_client = std::make_shared<MockS3Client>();
+    doris::io::FileWriterOptions state;
+    auto fs = io::global_local_filesystem();
+    std::map<int, std::shared_ptr<io::FileBuffer>> bufs;
+
+    auto sp = SyncPoint::get_instance();
+    // The buffer wouldn't be submitted to the threadpool after it reaches 5MB, it would immediately
+    // return when it finishes the appending data logic
+    sp->set_call_back("s3_file_writer::appenv_1", [&bufs](auto&& outcome) {
+        std::shared_ptr<io::FileBuffer> buf =
+                *try_any_cast<std::shared_ptr<io::FileBuffer>*>(outcome.at(0));
+        int part_num = try_any_cast<int>(outcome.at(1));
+        bufs.emplace(part_num, buf);
+    });
+    sp->set_call_back("UploadFileBuffer::append_data", [](auto&& outcome) {
+        auto pair = try_any_cast_ret<Status>(outcome);
+        pair->second = true;
+    });
+    sp->set_call_back("UploadFileBuffer::submit", [](auto&& outcome) {
+        io::UploadFileBuffer* upload_buf = try_any_cast<io::UploadFileBuffer*>(outcome.at(0));
+        upload_buf->set_val(Status::OK());
+        bool* pred = try_any_cast<bool*>(outcome.back());
+        *pred = true;
+    });
+    Defer defer {[&]() {
+        sp->clear_call_back("s3_file_writer::appenv_1");
+        sp->clear_call_back("UploadFileBuffer::append_data");
+        sp->clear_call_back("UploadFileBuffer::submit");
+    }};
+
+    {
+        constexpr int buf_size = 8192; // 8 * 1024
+        char buf[buf_size];
+        doris::Slice slice(buf, buf_size);
+        bufs.clear();
+        io::FileWriterPtr s3_file_writer;
+        auto st = s3_fs->create_file("file1", &s3_file_writer, &state);
+        ASSERT_TRUE(st.ok()) << st;
+        size_t offset = 0;
+        constexpr size_t slice_num = 10;
+        std::array<Slice, slice_num> slices;
+        slices.fill(slice);
+        int cur_part_num = dynamic_cast<io::S3FileWriter*>(s3_file_writer.get())->_cur_part_num;
+        for (auto s : slices) {
+            st = s3_file_writer->append(s);
+            ASSERT_TRUE(st.ok()) << st;
+            cur_part_num = dynamic_cast<io::S3FileWriter*>(s3_file_writer.get())->_cur_part_num;
+            const auto& buffer = bufs.at(cur_part_num);
+            offset += s.get_size();
+            ASSERT_EQ(buffer->get_file_offset(), 0);
+            ASSERT_EQ(s3_file_writer->bytes_appended(), offset);
+        }
+    }
+
+    {
+        constexpr int buf_size = 8888;
+        char buf[buf_size];
+        doris::Slice slice(buf, buf_size);
+        bufs.clear();
+        io::FileWriterPtr s3_file_writer;
+        auto st = s3_fs->create_file("file2", &s3_file_writer, &state);
+        ASSERT_TRUE(st.ok()) << st;
+        size_t offset = 0;
+        constexpr size_t slice_num = 1024;
+        std::array<Slice, slice_num> slices;
+        slices.fill(slice);
+        int cur_part_num = dynamic_cast<io::S3FileWriter*>(s3_file_writer.get())->_cur_part_num;
+        for (auto s : slices) {
+            st = s3_file_writer->append(s);
+            ASSERT_TRUE(st.ok()) << st;
+            auto ptr = dynamic_cast<io::S3FileWriter*>(s3_file_writer.get());
+            cur_part_num = ptr->_cur_part_num;
+            const auto& buffer = bufs.at(cur_part_num);
+            offset += s.get_size();
+            ASSERT_EQ(buffer->get_file_offset(), (cur_part_num - 1) * config::s3_write_buffer_size);
+            ASSERT_EQ(s3_file_writer->bytes_appended(), offset);
+        }
+        st = s3_file_writer->close();
+    }
 }
 
 TEST_F(S3FileWriterTest, put_object_io_error) {

@@ -118,6 +118,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     * @return the size of the buffered data
     */
     size_t get_size() const { return _size; }
+    size_t get_capacaticy() const { return _capacity; }
     /**
     * detect whether the execution task is done
     *

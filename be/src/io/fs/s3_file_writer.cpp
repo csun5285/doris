@@ -233,8 +233,8 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     size_t buffer_size = config::s3_write_buffer_size;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::appenv", Status());
     for (size_t i = 0; i < data_cnt; i++) {
-        size_t data_size = data[i].get_size();
-        for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
+        Slice slice = data[i];
+        while (!slice.empty()) {
             if (_failed) {
                 return _st;
             }
@@ -286,13 +286,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
             }
             // we need to make sure all parts except the last one to be 5MB or more
             // and shouldn't be larger than buf
-            data_size_to_append = std::min(data_size - pos, _pending_buf->get_file_offset() +
-                                                                    buffer_size - _bytes_appended);
+            auto data_size_to_append = std::min(
+                    _pending_buf->get_capacaticy() - _pending_buf->get_size(), slice.get_size());
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
-            RETURN_IF_ERROR(_pending_buf->append_data(
-                    Slice {data[i].get_data() + pos, data_size_to_append}));
+            RETURN_IF_ERROR(
+                    _pending_buf->append_data(Slice {slice.get_data(), data_size_to_append}));
+            slice.remove_prefix(data_size_to_append);
+            TEST_SYNC_POINT_CALLBACK("s3_file_writer::appenv_1", &_pending_buf, _cur_part_num);
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB

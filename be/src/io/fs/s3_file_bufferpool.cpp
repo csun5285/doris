@@ -95,6 +95,7 @@ Status UploadFileBuffer::append_data(const Slice& data) {
         _size += data.get_size();
         _crc_value = crc32c::Extend(_crc_value, data.get_data(), data.get_size());
     }};
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("UploadFileBuffer::append_data", Status::OK());
     while (true) {
         // if buf is not empty, it means there is memory preserved for this buf
         if (!_buffer.empty()) {
@@ -238,6 +239,7 @@ void DownloadFileBuffer::submit() {
  * 1. submit the on_upload() callback to executor
  */
 void UploadFileBuffer::submit() {
+    TEST_SYNC_POINT_RETURN_WITH_VOID("UploadFileBuffer::submit", this);
     if (!_buffer.empty()) [[likely]] {
         _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);
     }
