@@ -742,7 +742,7 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
             code = cast_as<ErrCategory::READ>(err);
             msg = fmt::format("failed to get schema, schema_version={}: {}",
                               rowset_meta.schema_version(),
-                              err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
+                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, existed_rowset_meta.mutable_tablet_schema())) {

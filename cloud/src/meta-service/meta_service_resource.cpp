@@ -1040,7 +1040,7 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
     err = txn->get(key, &val);
     if (err != TxnErrorCode::TXN_OK) {
         std::stringstream ss;
-        ss << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "instance not existed"
+        ss << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "instance not existed"
                                                       : "internal error failed to check instance")
            << ", instance_id=" << request->instance_id();
         // TODO(dx): fix CLUSTER_NOT_FOUND，VERSION_NOT_FOUND，TXN_LABEL_NOT_FOUND，etc to NOT_FOUND

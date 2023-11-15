@@ -77,7 +77,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
     if (err != TxnErrorCode::TXN_OK) {
         code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
                                                       : cast_as<ErrCategory::READ>(err);
-        SS << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "get kv error")
+        SS << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "get kv error")
            << " when get tablet stats, tablet_id=" << tablet_id << " key=" << hex(stats_key)
            << " err=" << err;
         msg = ss.str();
@@ -1053,10 +1053,10 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
         TxnErrorCode err = txn->get(tmp_rowset_key, &tmp_rowset_val);
         if (err != TxnErrorCode::TXN_OK) {
             SS << "failed to get tmp rowset key"
-               << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
+               << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
                << ", tablet_id=" << new_tablet_id << " tmp_rowset_key=" << hex(tmp_rowset_key);
             msg = ss.str();
-            code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
                                                           : cast_as<ErrCategory::READ>(err);
             return;
         }
