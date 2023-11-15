@@ -329,10 +329,10 @@ TEST(MetaServiceJobTest, StartSchemaChangeArguments) {
     EXPECT_NE(res.status().msg().find("no initiator"), std::string::npos) << res.status().msg();
 
     sc->set_initiator("BE1");
-    meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
-    ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT) << res.status().msg();
-    EXPECT_NE(res.status().msg().find("no valid expiration"), std::string::npos)
-            << res.status().msg();
+//     meta_service->start_tablet_job(&cntl, &req, &res, nullptr);
+//     ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT) << res.status().msg();
+//     EXPECT_NE(res.status().msg().find("no valid expiration"), std::string::npos)
+//             << res.status().msg();
 
     sc->set_expiration(114115);
     meta_service->start_tablet_job(&cntl, &req, &res, nullptr);

@@ -206,11 +206,6 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
         msg = "no initiator specified";
         return;
     }
-    if (schema_change.expiration() <= 0) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "no valid expiration given";
-        return;
-    }
 
     // check new_tablet state
     int64_t new_tablet_id = schema_change.new_tablet_idx().tablet_id();
