@@ -122,18 +122,18 @@ int main(int argc, char** argv) {
 
             auto count = std::make_shared<std::atomic<uint64_t>>(0);
             auto inject_at = std::make_shared<std::atomic<uint64_t>>(0);
-            sp->set_call_back(name, [&](void* raw) mutable {
+            sp->set_call_back(name, [=](void* raw) mutable {
                 size_t n = count->fetch_add(1);
                 if (n == *inject_at) {
                     *reinterpret_cast<fdb_error_t*>(raw) = err;
                 }
             });
-            sp->set_call_back("MetaServiceProxy::call_impl:1", [&](void*) {
+            sp->set_call_back("MetaServiceProxy::call_impl:1", [=](void*) {
                 // For each RPC invoking, inject every fdb txn kv call.
                 count->store(0);
                 inject_at->store(0);
             });
-            sp->set_call_back("MetaServiceProxy::call_impl:2", [&](void*) {
+            sp->set_call_back("MetaServiceProxy::call_impl:2", [=](void*) {
                 count->store(0);
                 inject_at->fetch_add(1);
             });

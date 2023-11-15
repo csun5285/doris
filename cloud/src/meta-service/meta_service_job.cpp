@@ -15,7 +15,6 @@
 #include "common/logging.h"
 #include "common/util.h"
 #include "common/sync_point.h"
-#include "common/object_pool.h"
 
 #include "brpc/closure_guard.h"
 #include "brpc/controller.h"
