@@ -30,8 +30,26 @@
 
 std::unique_ptr<selectdb::MockAccessor> _mock_fs;
 
-class MockS3Client {
-    auto ListObjectsV2(const Aws::S3::Model::ListObjectsV2Request& req) -> decltype(auto) {
+class S3ClientInterface {
+public:
+    S3ClientInterface() = default;
+    virtual ~S3ClientInterface() = default;
+    virtual Aws::S3::Model::ListObjectsV2Outcome ListObjectsV2(
+            const Aws::S3::Model::ListObjectsV2Request& req) = 0;
+    virtual Aws::S3::Model::DeleteObjectsOutcome DeleteObjects(
+            const Aws::S3::Model::DeleteObjectsRequest& req) = 0;
+    virtual Aws::S3::Model::PutObjectOutcome PutObject(
+            const Aws::S3::Model::PutObjectRequest& req) = 0;
+    virtual Aws::S3::Model::HeadObjectOutcome HeadObject(
+            const Aws::S3::Model::HeadObjectRequest& req) = 0;
+};
+
+class S3Client : public S3ClientInterface {
+public:
+    S3Client() = default;
+    ~S3Client() override = default;
+    Aws::S3::Model::ListObjectsV2Outcome ListObjectsV2(
+            const Aws::S3::Model::ListObjectsV2Request& req) override {
         auto prefix = req.GetPrefix();
         auto continuation_token =
                 req.ContinuationTokenHasBeenSet() ? req.GetContinuationToken() : "";
@@ -62,7 +80,8 @@ class MockS3Client {
         return Aws::S3::Model::ListObjectsV2Outcome(std::move(result));
     }
 
-    auto DeleteObjects(const Aws::S3::Model::DeleteObjectsRequest& req) -> decltype(auto) {
+    Aws::S3::Model::DeleteObjectsOutcome DeleteObjects(
+            const Aws::S3::Model::DeleteObjectsRequest& req) override {
         Aws::S3::Model::DeleteObjectsResult result;
         const auto& deletes = req.GetDelete();
         for (const auto& obj : deletes.GetObjects()) {
@@ -71,14 +90,16 @@ class MockS3Client {
         return Aws::S3::Model::DeleteObjectsOutcome(std::move(result));
     }
 
-    auto PutObject(const Aws::S3::Model::PutObjectRequest& req) -> decltype(auto) {
+    Aws::S3::Model::PutObjectOutcome PutObject(
+            const Aws::S3::Model::PutObjectRequest& req) override {
         Aws::S3::Model::PutObjectResult result;
         const auto& key = req.GetKey();
         _mock_fs->put_object(key, "");
         return Aws::S3::Model::PutObjectOutcome(std::move(result));
     }
 
-    auto HeadObject(const Aws::S3::Model::HeadObjectRequest& req) -> decltype(auto) {
+    Aws::S3::Model::HeadObjectOutcome HeadObject(
+            const Aws::S3::Model::HeadObjectRequest& req) override {
         Aws::S3::Model::HeadObjectResult result;
         const auto& key = req.GetKey();
         auto v = _mock_fs->exist(key);
@@ -91,6 +112,87 @@ class MockS3Client {
         }
         return Aws::S3::Model::HeadObjectOutcome(std::move(result));
     }
+};
+
+static bool return_error_for_error_s3_client = false;
+static bool delete_objects_return_part_error = false;
+
+class ErrorS3Client : public S3ClientInterface {
+public:
+    ErrorS3Client() : _correct_impl(std::make_unique<S3Client>()) {}
+    ~ErrorS3Client() override = default;
+    Aws::S3::Model::ListObjectsV2Outcome ListObjectsV2(
+            const Aws::S3::Model::ListObjectsV2Request& req) override {
+        if (!return_error_for_error_s3_client) {
+            return _correct_impl->ListObjectsV2(req);
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::NOT_FOUND);
+        return Aws::S3::Model::ListObjectsV2Outcome(std::move(err));
+    }
+
+    Aws::S3::Model::DeleteObjectsOutcome DeleteObjects(
+            const Aws::S3::Model::DeleteObjectsRequest& req) override {
+        if (!delete_objects_return_part_error) {
+            Aws::S3::Model::DeleteObjectsResult result;
+            Aws::Vector<Aws::S3::Model::Error> errors;
+            Aws::S3::Model::Error error;
+            errors.emplace_back(std::move(error));
+            result.SetErrors(std::move(errors));
+            return Aws::S3::Model::DeleteObjectsOutcome(std::move(result));
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::NOT_FOUND);
+        // return -1
+        return Aws::S3::Model::DeleteObjectsOutcome(std::move(err));
+    }
+
+    Aws::S3::Model::PutObjectOutcome PutObject(
+            const Aws::S3::Model::PutObjectRequest& req) override {
+        if (!return_error_for_error_s3_client) {
+            return _correct_impl->PutObject(req);
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::NOT_FOUND);
+        return Aws::S3::Model::PutObjectOutcome(std::move(err));
+    }
+
+    Aws::S3::Model::HeadObjectOutcome HeadObject(
+            const Aws::S3::Model::HeadObjectRequest& req) override {
+        if (!return_error_for_error_s3_client) {
+            return _correct_impl->HeadObject(req);
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::INTERNAL_SERVER_ERROR);
+        return Aws::S3::Model::HeadObjectOutcome(std::move(err));
+    }
+
+private:
+    std::unique_ptr<S3ClientInterface> _correct_impl;
+};
+
+class MockS3Client {
+public:
+    MockS3Client(std::unique_ptr<S3ClientInterface> impl = std::make_unique<S3Client>())
+            : _impl(std::move(impl)) {}
+    auto ListObjectsV2(const Aws::S3::Model::ListObjectsV2Request& req) {
+        return _impl->ListObjectsV2(req);
+    }
+
+    auto DeleteObjects(const Aws::S3::Model::DeleteObjectsRequest& req) {
+        return _impl->DeleteObjects(req);
+    }
+
+    auto PutObject(const Aws::S3::Model::PutObjectRequest& req) { return _impl->PutObject(req); }
+
+    auto HeadObject(const Aws::S3::Model::HeadObjectRequest& req) { return _impl->HeadObject(req); }
+
+private:
+    std::unique_ptr<S3ClientInterface> _impl;
 };
 
 std::unique_ptr<MockS3Client> _mock_client;
@@ -152,6 +254,11 @@ void create_file_under_prefix(std::string_view prefix, size_t file_nums) {
     }
 }
 
+TEST(S3AccessorTest, init) {
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    ASSERT_EQ(0, accessor->init());
+}
+
 TEST(S3AccessorTest, list) {
     _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
     _mock_client = std::make_unique<MockS3Client>();
@@ -173,6 +280,30 @@ TEST(S3AccessorTest, list) {
     std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("test_list", &files));
     ASSERT_EQ(300, files.size());
+}
+
+TEST(S3AccessorTest, list_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    return_error_for_error_s3_client = true;
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+    });
+    create_file_under_prefix("test_list", 300);
+    std::vector<ObjectMeta> files;
+    ASSERT_EQ(-1, accessor->list("test_list", &files));
 }
 
 TEST(S3AccessorTest, put) {
@@ -201,6 +332,38 @@ TEST(S3AccessorTest, put) {
     ASSERT_EQ(300, files.size());
 }
 
+TEST(S3AccessorTest, put_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+    });
+    std::string prefix = "test_put_error";
+    for (size_t i = 0; i < 300; i++) {
+        if (i % 2) {
+            return_error_for_error_s3_client = true;
+            ASSERT_EQ(-1, accessor->put_object(fmt::format("{}{}", prefix, i), ""));
+            return_error_for_error_s3_client = false;
+            break;
+        }
+        ASSERT_EQ(0, accessor->put_object(fmt::format("{}{}", prefix, i), ""));
+    }
+    std::vector<ObjectMeta> files;
+    ASSERT_EQ(0, accessor->list("test_put_error", &files));
+}
+
 TEST(S3AccessorTest, exist) {
     _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
     _mock_client = std::make_unique<MockS3Client>();
@@ -222,6 +385,31 @@ TEST(S3AccessorTest, exist) {
     ASSERT_EQ(1, accessor->exist(prefix));
     ASSERT_EQ(0, accessor->put_object(prefix, ""));
     ASSERT_EQ(0, accessor->exist(prefix));
+}
+
+TEST(S3AccessorTest, exist_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+    });
+    std::string prefix = "test_exist_error";
+    ASSERT_EQ(1, accessor->exist(prefix));
+    ASSERT_EQ(0, accessor->put_object(prefix, ""));
+    return_error_for_error_s3_client = true;
+    ASSERT_EQ(-1, accessor->exist(prefix));
 }
 
 // function is not implemented
@@ -283,6 +471,47 @@ TEST(S3AccessorTest, delete_objects) {
     }
 }
 
+TEST(S3AccessorTest, delete_objects_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+        delete_objects_return_part_error = false;
+    });
+    std::string prefix = "test_delete_objects";
+    std::vector<std::string> paths_first_half;
+    std::vector<std::string> paths_second_half;
+    size_t num = 300;
+    for (size_t i = 0; i < num; i++) {
+        auto path = fmt::format("{}{}", prefix, i);
+        _mock_fs->put_object(path, "");
+        if (i < 150) {
+            paths_first_half.emplace_back(std::move(path));
+        } else {
+            paths_second_half.emplace_back(std::move(path));
+        }
+    }
+    std::vector<std::string> empty;
+    ASSERT_EQ(0, accessor->delete_objects(empty));
+    return_error_for_error_s3_client = true;
+    delete_objects_return_part_error = true;
+    ASSERT_EQ(-1, accessor->delete_objects(paths_first_half));
+    delete_objects_return_part_error = false;
+    ASSERT_EQ(-2, accessor->delete_objects(paths_second_half));
+}
+
 TEST(S3AccessorTest, delete_object_by_prefix) {
     _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
     _mock_client = std::make_unique<MockS3Client>();
@@ -308,6 +537,37 @@ TEST(S3AccessorTest, delete_object_by_prefix) {
         auto path = fmt::format("{}{}", prefix, i);
         ASSERT_EQ(1, accessor->exist(path));
     }
+}
+
+TEST(S3AccessorTest, delete_object_by_prefix_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+        delete_objects_return_part_error = false;
+    });
+    std::string prefix = "test_delete_objects_by_prefix";
+    size_t num = 2000;
+    create_file_under_prefix(prefix, num);
+    delete_objects_return_part_error = true;
+    return_error_for_error_s3_client = true;
+    ASSERT_EQ(-1, accessor->delete_objects_by_prefix(prefix));
+    return_error_for_error_s3_client = false;
+    ASSERT_EQ(-2, accessor->delete_objects_by_prefix(prefix));
+    delete_objects_return_part_error = false;
+    ASSERT_EQ(-3, accessor->delete_objects_by_prefix(prefix));
 }
 
 } // namespace selectdb
