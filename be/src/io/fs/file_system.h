@@ -31,15 +31,12 @@
 
 #include "common/status.h"
 #include "io/fs/file_reader_writer_fwd.h"
-#include "io/fs/file_writer_options.h"
 #include "io/fs/fs_utils.h"
 #include "io/fs/path.h"
 #include "olap/olap_common.h"
 namespace doris {
 namespace io {
 class FileSystem;
-class FileReaderOptions;
-struct FileWriterOptions;
 
 #ifndef FILESYSTEM_M
 #define FILESYSTEM_M(stmt)                    \

@@ -544,18 +544,13 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
     return rowset;
 }
 
-<<<<<<< HEAD
-RowsetSharedPtr BetaRowsetWriter::build() {
-    Status status;
+Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
     // make sure all segments are flushed
     DCHECK_EQ(_num_segment, _next_segment_id);
-    for (auto& [segment_id, file_writer] : _file_writers) {
-        status = file_writer->close();
-        if (!status.ok()) {
-            LOG(WARNING) << "failed to close file writer, path=" << file_writer->path()
-                         << " res=" << status;
-            return nullptr;
-        }
+    for (auto& file_writer : _file_writers) {
+        RETURN_NOT_OK_STATUS_WITH_WARN(
+                file_writer->close(),
+                fmt::format("failed to close file writer, path={}", file_writer->path().string()));
 #ifdef CLOUD_MODE
         if (config::enable_check_segment_footer && !_rowset_meta->is_local()) {
             std::string path = BetaRowset::remote_segment_path(_context.tablet_id,
@@ -567,31 +562,11 @@ RowsetSharedPtr BetaRowsetWriter::build() {
             auto type = config::enable_file_cache ? config::file_cache_type : "";
             io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
             reader_options.file_size = file_writer->bytes_appended();
-            status = fs->open_file(path, &file_reader, &reader_options);
-            if (!status.ok()) {
-                LOG(WARNING) << "failed to open file. path=" << path << ", err: " << status;
-                return nullptr;
-            }
-            status = Segment::check_segment_footer(std::move(file_reader));
-            if (!status.ok()) {
-                LOG(WARNING) << "check segment footer failed. path=" << path << ", err: " << status;
-                return nullptr;
-            }
+            RETURN_NOT_OK_STATUS_WITH_WARN(fs->open_file(path, &file_reader, &reader_options));
+            RETURN_NOT_OK_STATUS_WITH_WARN(Segment::check_segment_footer(std::move(file_reader)));
         }
 #endif
     }
-
-=======
-Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
-    // make sure all segments are flushed
-    DCHECK_EQ(_num_segment, _next_segment_id);
-    // TODO(lingbin): move to more better place, or in a CreateBlockBatch?
-    for (auto& file_writer : _file_writers) {
-        RETURN_NOT_OK_STATUS_WITH_WARN(
-                file_writer->close(),
-                fmt::format("failed to close file writer, path={}", file_writer->path().string()));
-    }
->>>>>>> 2.0.3-rc01
     // if _segment_start_id is not zero, that means it's a transient rowset writer for
     // MoW partial update, don't need to do segment compaction.
     if (_segment_start_id == 0) {
@@ -601,16 +576,8 @@ Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
         RETURN_NOT_OK_STATUS_WITH_WARN(_segcompaction_rename_last_segments(),
                                        "rename last segments failed when build new rowset");
         if (_segcompaction_worker.get_file_writer()) {
-<<<<<<< HEAD
-            auto s = _segcompaction_worker.get_file_writer()->close();
-            if (!s.ok()) [[unlikely]] {
-                LOG_WARNING("segcompaction file writer close failed due to {}", s.to_string());
-                return nullptr;
-            }
-=======
             RETURN_NOT_OK_STATUS_WITH_WARN(_segcompaction_worker.get_file_writer()->close(),
                                            "close segment compaction worker failed");
->>>>>>> 2.0.3-rc01
         }
     }
     // When building a rowset, we must ensure that the current _segment_writer has been
@@ -638,26 +605,15 @@ Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
-<<<<<<< HEAD
     if (_context.is_transient_rowset_writer) {
         _rowset_meta->add_segments_file_size(_file_writers, _segment_start_id);
     } else {
         _rowset_meta->add_segments_file_size(_file_writers);
     }
-    RowsetSharedPtr rowset;
-    status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
-                                          &rowset);
-    if (!status.ok()) {
-        LOG(WARNING) << "rowset init failed when build new rowset, res=" << status;
-        return nullptr;
-    }
-=======
-
     RETURN_NOT_OK_STATUS_WITH_WARN(
             RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                          &rowset),
             "rowset init failed when build new rowset");
->>>>>>> 2.0.3-rc01
     _already_built = true;
     return Status::OK();
 }
@@ -812,10 +768,10 @@ Status BetaRowsetWriter::_do_create_segment_writer(
     }
     io::FileWriterPtr file_writer;
     io::FileWriterOptions opts;
-    opts.expiration_time =
+    opts.file_cache_expiration =
             _context.ttl_seconds == 0 ? 0 : _context.newest_write_timestamp + _context.ttl_seconds;
     opts.is_cold_data = !_context.is_hot_data;
-    opts.disable_file_cache = _context.disable_file_cache;
+    opts.write_file_cache = _context.write_file_cache;
     Status st = fs->create_file(path, &file_writer, &opts);
     if (!st.ok()) {
         LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;

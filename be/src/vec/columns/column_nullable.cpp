@@ -363,11 +363,6 @@ Status ColumnNullable::filter_by_selector(const uint16_t* sel, size_t sel_size, 
     ColumnPtr null_map_ptr = nullable_col_ptr->null_map;
     RETURN_IF_ERROR(get_nested_column().filter_by_selector(
             sel, sel_size, const_cast<doris::vectorized::IColumn*>(nest_col_ptr.get())));
-<<<<<<< HEAD
-    RETURN_IF_ERROR(get_null_map_column().filter_by_selector(
-            sel, sel_size, const_cast<doris::vectorized::IColumn*>(null_map_ptr.get())));
-    _update_has_null();
-=======
     //insert cur nullmap into result nullmap which is empty
     auto& res_nullmap = reinterpret_cast<vectorized::ColumnVector<UInt8>*>(
                                 const_cast<doris::vectorized::IColumn*>(null_map_ptr.get()))
@@ -378,7 +373,6 @@ Status ColumnNullable::filter_by_selector(const uint16_t* sel, size_t sel_size, 
     for (size_t i = 0; i < sel_size; i++) {
         res_nullmap[i] = cur_nullmap[sel[i]];
     }
->>>>>>> 2.0.3-rc01
     return Status::OK();
 }
 

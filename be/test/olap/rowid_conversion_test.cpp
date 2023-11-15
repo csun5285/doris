@@ -39,6 +39,7 @@
 #include "gutil/strings/numbers.h"
 #include "io/fs/local_file_system.h"
 #include "io/io_common.h"
+#include "json2pb/json_to_pb.h"
 #include "olap/delete_handler.h"
 #include "olap/merger.h"
 #include "olap/options.h"
@@ -54,6 +55,7 @@
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
+#include "runtime/exec_env.h"
 #include "util/uid_util.h"
 #include "vec/columns/column.h"
 #include "vec/core/block.h"
@@ -64,18 +66,6 @@ using namespace ErrorCode;
 
 static const uint32_t MAX_PATH_LEN = 1024;
 static StorageEngine* k_engine = nullptr;
-
-static constexpr int64_t tablet_id = 10005;
-
-static RowsetId next_rowset_id() {
-    // FIXME(plat1ko): If `inc_id` set to 1000, and run `VerticalCompactionTest` before `TestRowIdConversion`,
-    // will `TestRowIdConversion` will fail. There may be some strange global states here.
-    static int64_t inc_id = 0;
-    RowsetId rowset_id;
-    inc_id++;
-    rowset_id.init(inc_id);
-    return rowset_id;
-}
 
 class TestRowIdConversion : public testing::TestWithParam<std::tuple<KeysType, bool, bool, bool>> {
 protected:
@@ -89,7 +79,7 @@ protected:
                             .ok());
         doris::EngineOptions options;
         k_engine = new StorageEngine(options);
-        StorageEngine::_s_instance = k_engine;
+        ExecEnv::GetInstance()->set_storage_engine(k_engine);
     }
 
     void TearDown() override {
@@ -98,6 +88,7 @@ protected:
             k_engine->stop();
             delete k_engine;
             k_engine = nullptr;
+            ExecEnv::GetInstance()->set_storage_engine(nullptr);
         }
     }
 
@@ -153,9 +144,13 @@ protected:
                                                      const SegmentsOverlapPB& overlap,
                                                      uint32_t max_rows_per_segment,
                                                      Version version) {
+        // FIXME(plat1ko): If `inc_id` set to 1000, and run `VerticalCompactionTest` before `TestRowIdConversion`,
+        //  will `TestRowIdConversion` will fail. There may be some strange global states here.
+        static int64_t inc_id = 0;
         RowsetWriterContext rowset_writer_context;
-        rowset_writer_context.tablet_id = tablet_id;
-        rowset_writer_context.rowset_id = next_rowset_id();
+        RowsetId rowset_id;
+        rowset_id.init(inc_id);
+        rowset_writer_context.rowset_id = rowset_id;
         rowset_writer_context.rowset_type = BETA_ROWSET;
         rowset_writer_context.rowset_state = VISIBLE;
         rowset_writer_context.tablet_schema = tablet_schema;
@@ -163,7 +158,7 @@ protected:
         rowset_writer_context.version = version;
         rowset_writer_context.segments_overlap = overlap;
         rowset_writer_context.max_rows_per_segment = max_rows_per_segment;
-        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
+        inc_id++;
         return rowset_writer_context;
     }
 
@@ -224,66 +219,32 @@ protected:
         return rowset;
     }
 
-<<<<<<< HEAD
-    void init_rs_meta(RowsetMetaSharedPtr& pb1, int64_t start, int64_t end) {
+    void init_rs_meta(RowsetMetaSharedPtr& rs_meta, int64_t start, int64_t end) {
         std::string json_rowset_meta = R"({
             "rowset_id": 540081,
             "tablet_id": 15673,
-            "txn_id": 4042,
             "tablet_schema_hash": 567997577,
             "rowset_type": "BETA_ROWSET",
             "rowset_state": "VISIBLE",
-            "start_version": 2,
-            "end_version": 2,
-            "num_rows": 3929,
-            "total_disk_size": 84699,
-            "data_disk_size": 84464,
-            "index_disk_size": 235,
-            "empty": false,
-            "load_id": {
-                "hi": -5350970832824939812,
-                "lo": -6717994719194512122
-            },
-            "creation_time": 1553765670
+            "empty": false
         })";
         RowsetMetaPB rowset_meta_pb;
         json2pb::JsonToProtoMessage(json_rowset_meta, &rowset_meta_pb);
         rowset_meta_pb.set_start_version(start);
         rowset_meta_pb.set_end_version(end);
-        rowset_meta_pb.set_creation_time(10000);
-        pb1->init_from_pb(rowset_meta_pb);
+        rs_meta->init_from_pb(rowset_meta_pb);
     }
 
-    void add_delete_predicate(TabletSharedPtr tablet, DeletePredicatePB& del_pred,
-                              int64_t version) {
+    RowsetSharedPtr create_delete_predicate(const TabletSchemaSPtr& schema,
+                                            DeletePredicatePB del_pred, int64_t version) {
         RowsetMetaSharedPtr rsm(new RowsetMeta());
         init_rs_meta(rsm, version, version);
         RowsetId id;
-        id.init(version * 1000);
+        id.init(version);
         rsm->set_rowset_id(id);
-        rsm->set_delete_predicate(del_pred);
-        rsm->set_tablet_schema(tablet->tablet_schema());
-        RowsetSharedPtr rowset = std::make_shared<BetaRowset>(tablet->tablet_schema(), "", rsm);
-#ifdef CLOUD_MODE
-        std::vector<RowsetSharedPtr> to_add;
-        to_add.push_back(rowset);
-        tablet->cloud_add_rowsets(to_add, false, false);
-#else
-        tablet->add_rowset(rowset);
-#endif
-=======
-    RowsetSharedPtr create_delete_predicate(const TabletSchemaSPtr& schema,
-                                            DeletePredicatePB del_pred, int64_t version) {
-        auto rs_meta = std::make_shared<RowsetMeta>();
-        rs_meta->set_tablet_id(tablet_id);
-        rs_meta->set_rowset_id(next_rowset_id());
-        rs_meta->set_rowset_type(BETA_ROWSET);
-        rs_meta->set_rowset_state(VISIBLE);
-        rs_meta->set_delete_predicate(std::move(del_pred));
-        rs_meta->set_tablet_schema(schema);
-        rs_meta->set_version({version, version});
-        return std::make_shared<BetaRowset>(schema, "", std::move(rs_meta));
->>>>>>> 2.0.3-rc01
+        rsm->set_delete_predicate(std::move(del_pred));
+        rsm->set_tablet_schema(schema);
+        return std::make_shared<BetaRowset>(schema, "", rsm);
     }
 
     TabletSharedPtr create_tablet(const TabletSchema& tablet_schema,
@@ -310,13 +271,13 @@ protected:
         }
         t_tablet_schema.__set_storage_type(TStorageType::COLUMN);
         t_tablet_schema.__set_columns(cols);
-        TabletMetaSharedPtr tablet_meta(new TabletMeta(
-                1, 1, tablet_id, 1, 1, 1, t_tablet_schema, 1, col_ordinal_to_unique_id,
-                UniqueId(1, 2), TTabletType::TABLET_TYPE_DISK, TCompressionType::LZ4F, 0,
-                enable_unique_key_merge_on_write));
+        TabletMetaSharedPtr tablet_meta(
+                new TabletMeta(1, 1, 1, 1, 1, 1, t_tablet_schema, 1, col_ordinal_to_unique_id,
+                               UniqueId(1, 2), TTabletType::TABLET_TYPE_DISK,
+                               TCompressionType::LZ4F, 0, enable_unique_key_merge_on_write));
 
         TabletSharedPtr tablet(new Tablet(tablet_meta, nullptr));
-        tablet->init();
+        static_cast<void>(tablet->init());
         return tablet;
     }
 

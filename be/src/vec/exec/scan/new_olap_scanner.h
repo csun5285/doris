@@ -54,20 +54,18 @@ class NewOlapScanner : public VScanner {
     ENABLE_FACTORY_CREATOR(NewOlapScanner);
 
 public:
-    NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
-                   NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   const std::vector<OlapScanRange*>& key_ranges, RuntimeProfile* profile);
+    struct Params {
+        RuntimeState* state;
+        RuntimeProfile* profile;
+        std::vector<OlapScanRange*> key_ranges;
+        TabletSharedPtr tablet;
+        int64_t version;
+        TabletReader::ReadSource read_source;
+        int64_t limit;
+        bool aggregation;
+    };
 
-<<<<<<< HEAD
-    NewOlapScanner(TabletSharedPtr tablet, int64_t version, RuntimeState* state,
-                   NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   const std::vector<OlapScanRange*>& key_ranges,
-                   const std::vector<RowSetSplits>& rs_splits, RuntimeProfile* profile);
-=======
-    NewOlapScanner(RuntimeState* state, NewOlapScanNode* parent, int64_t limit, bool aggregation,
-                   const TPaloScanRange& scan_range, const std::vector<OlapScanRange*>& key_ranges,
-                   TabletReader::ReadSource read_source, RuntimeProfile* profile);
->>>>>>> 2.0.3-rc01
+    NewOlapScanner(NewOlapScanNode* parent, Params&& params);
 
     Status init() override;
 
@@ -97,11 +95,6 @@ private:
 
     [[nodiscard]] Status _init_return_columns();
 
-    bool _aggregation;
-
-    TabletSchemaSPtr _tablet_schema;
-    TabletSharedPtr _tablet;
-    int64_t _version;
     std::vector<OlapScanRange*> _key_ranges;
 
     TabletReader::ReaderParams _tablet_reader_params;

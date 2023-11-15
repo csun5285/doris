@@ -304,7 +304,6 @@ private:
     size_t _mem_usage;
 
     std::shared_ptr<MowContext> _mow_context;
-    bool _is_partial_update {false};
     size_t _num_columns;
     int32_t _seq_col_idx_in_block = -1;
 }; // class MemTable

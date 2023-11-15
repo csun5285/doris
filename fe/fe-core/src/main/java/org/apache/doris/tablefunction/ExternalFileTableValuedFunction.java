@@ -91,48 +91,7 @@ import java.util.stream.Collectors;
  */
 public abstract class ExternalFileTableValuedFunction extends TableValuedFunctionIf {
     public static final Logger LOG = LogManager.getLogger(ExternalFileTableValuedFunction.class);
-<<<<<<< HEAD
-    protected static String DEFAULT_COLUMN_SEPARATOR = ",";
-    protected static String DEFAULT_HIVE_TEXT_COLUMN_SEPARATOR = "\001";
-    protected static final String DEFAULT_LINE_DELIMITER = "\n";
-    public static final String FORMAT = "format";
-    public static final String TABLE_ID = "table_id";
-    public static final String COMPRESS = "compress";
-    public static final String COLUMN_SEPARATOR = "column_separator";
-    public static final String LINE_DELIMITER = "line_delimiter";
-    protected static final String JSON_ROOT = "json_root";
-    protected static final String JSON_PATHS = "jsonpaths";
-    protected static final String STRIP_OUTER_ARRAY = "strip_outer_array";
-    protected static final String READ_JSON_BY_LINE = "read_json_by_line";
-    protected static final String NUM_AS_STRING = "num_as_string";
-    protected static final String FUZZY_PARSE = "fuzzy_parse";
-    protected static final String TRIM_DOUBLE_QUOTES = "trim_double_quotes";
-    protected static final String SKIP_LINES = "skip_lines";
-    protected static final String CSV_SCHEMA = "csv_schema";
-    protected static final String COMPRESS_TYPE = "compress_type";
-    public static final String PATH_PARTITION_KEYS = "path_partition_keys";
-    // decimal(p,s)
-    private static final Pattern DECIMAL_TYPE_PATTERN = Pattern.compile("decimal\\((\\d+),(\\d+)\\)");
-    // datetime(p)
-    private static final Pattern DATETIME_TYPE_PATTERN = Pattern.compile("datetime\\((\\d+)\\)");
-
-    protected static final ImmutableSet<String> FILE_FORMAT_PROPERTIES = new ImmutableSet.Builder<String>()
-            .add(FORMAT)
-            .add(TABLE_ID)
-            .add(JSON_ROOT)
-            .add(JSON_PATHS)
-            .add(STRIP_OUTER_ARRAY)
-            .add(READ_JSON_BY_LINE)
-            .add(NUM_AS_STRING)
-            .add(FUZZY_PARSE)
-            .add(COLUMN_SEPARATOR)
-            .add(LINE_DELIMITER)
-            .add(TRIM_DOUBLE_QUOTES)
-            .add(SKIP_LINES)
-            .add(CSV_SCHEMA)
-            .add(COMPRESS_TYPE)
-            .add(PATH_PARTITION_KEYS)
-=======
+    public static final String PROP_TABLE_ID = "table_id";
 
     protected static final ImmutableSet<String> FILE_FORMAT_PROPERTIES = new ImmutableSet.Builder<String>()
             .add(FileFormatConstants.PROP_FORMAT)
@@ -149,7 +108,6 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
             .add(FileFormatConstants.PROP_CSV_SCHEMA)
             .add(FileFormatConstants.PROP_COMPRESS_TYPE)
             .add(FileFormatConstants.PROP_PATH_PARTITION_KEYS)
->>>>>>> 2.0.3-rc01
             .build();
 
     // Columns got from file and path(if has)
@@ -257,6 +215,7 @@ public abstract class ExternalFileTableValuedFunction extends TableValuedFunctio
                 throw new AnalysisException("format:" + formatString + " is not supported.");
         }
 
+        tableId = Long.valueOf(getOrDefaultAndRemove(copiedProps, PROP_TABLE_ID, "-1"));
         columnSeparator = getOrDefaultAndRemove(copiedProps, FileFormatConstants.PROP_COLUMN_SEPARATOR,
                 defaultColumnSeparator);
         if (Strings.isNullOrEmpty(columnSeparator)) {

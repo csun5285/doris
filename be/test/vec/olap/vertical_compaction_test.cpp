@@ -41,6 +41,7 @@
 #include "gutil/stringprintf.h"
 #include "io/fs/local_file_system.h"
 #include "io/io_common.h"
+#include "json2pb/json_to_pb.h"
 #include "olap/delete_handler.h"
 #include "olap/field.h"
 #include "olap/merger.h"
@@ -61,6 +62,7 @@
 #include "olap/tablet_meta.h"
 #include "olap/tablet_schema.h"
 #include "olap/utils.h"
+#include "runtime/exec_env.h"
 #include "util/uid_util.h"
 #include "vec/columns/column.h"
 #include "vec/core/block.h"
@@ -88,12 +90,12 @@ protected:
                             ->create_directory(absolute_dir + "/tablet_path")
                             .ok());
 
-        _data_dir = new DataDir(absolute_dir, 1000000);
-        _data_dir->init();
+        _data_dir = new DataDir(absolute_dir, 100000000);
+        static_cast<void>(_data_dir->init());
 
         doris::EngineOptions options;
         k_engine = new StorageEngine(options);
-        StorageEngine::_s_instance = k_engine;
+        ExecEnv::GetInstance()->set_storage_engine(k_engine);
     }
     void TearDown() override {
         SAFE_DELETE(_data_dir);
@@ -102,6 +104,7 @@ protected:
             k_engine->stop();
             delete k_engine;
             k_engine = nullptr;
+            ExecEnv::GetInstance()->set_storage_engine(nullptr);
         }
     }
 
@@ -204,8 +207,6 @@ protected:
         rowset_writer_context.version = version;
         rowset_writer_context.segments_overlap = overlap;
         rowset_writer_context.max_rows_per_segment = max_rows_per_segment;
-        rowset_writer_context->txn_expiration = ::time(nullptr); // Required by CLOUD
-        rowset_writer_context->newest_write_timestamp = 10086;
         inc_id++;
         return rowset_writer_context;
     }
@@ -282,13 +283,7 @@ protected:
         rowset_meta_pb.set_start_version(start);
         rowset_meta_pb.set_end_version(end);
         rowset_meta_pb.set_creation_time(10000);
-<<<<<<< HEAD
-        rowset_meta_pb.set_index_id(10001);   // For DCHECK
-        rowset_meta_pb.set_schema_version(1); // For DCHECK
-        pb1->init_from_pb(rowset_meta_pb);
-=======
         rs_meta->init_from_pb(rowset_meta_pb);
->>>>>>> 2.0.3-rc01
     }
 
     RowsetSharedPtr create_delete_predicate(const TabletSchemaSPtr& schema,
@@ -298,16 +293,9 @@ protected:
         RowsetId id;
         id.init(version * 1000);
         rsm->set_rowset_id(id);
-<<<<<<< HEAD
-        rsm->set_delete_predicate(del_pred);
-        rsm->set_tablet_schema(tablet->tablet_schema());
-        RowsetSharedPtr rowset = std::make_shared<BetaRowset>(tablet->tablet_schema(), "", rsm);
-        tablet->cloud_add_rowsets({rowset}, false);
-=======
         rsm->set_delete_predicate(std::move(del_pred));
         rsm->set_tablet_schema(schema);
         return std::make_shared<BetaRowset>(schema, "", rsm);
->>>>>>> 2.0.3-rc01
     }
 
     TabletSharedPtr create_tablet(const TabletSchema& tablet_schema,
@@ -342,7 +330,7 @@ protected:
                                TCompressionType::LZ4F, 0, enable_unique_key_merge_on_write));
 
         TabletSharedPtr tablet(new Tablet(tablet_meta, _data_dir));
-        tablet->init();
+        static_cast<void>(tablet->init());
         bool exists = false;
         auto res = io::global_local_filesystem()->exists(tablet->tablet_path(), &exists);
         EXPECT_TRUE(res.ok() && !exists);
@@ -410,8 +398,8 @@ TEST_F(VerticalCompactionTest, TestRowSourcesBuffer) {
     EXPECT_TRUE(buffer.append(tmp_row_source).ok());
     EXPECT_EQ(buffer.total_size(), 6);
     size_t limit = 10;
-    buffer.flush();
-    buffer.seek_to_begin();
+    static_cast<void>(buffer.flush());
+    static_cast<void>(buffer.seek_to_begin());
 
     int idx = -1;
     while (buffer.has_remaining().ok()) {
@@ -429,8 +417,8 @@ TEST_F(VerticalCompactionTest, TestRowSourcesBuffer) {
     EXPECT_TRUE(buffer1.append(tmp_row_source).ok());
     buffer1.set_agg_flag(2, false);
     buffer1.set_agg_flag(4, true);
-    buffer1.flush();
-    buffer1.seek_to_begin();
+    static_cast<void>(buffer1.flush());
+    static_cast<void>(buffer1.seek_to_begin());
     EXPECT_EQ(buffer1.total_size(), 12);
     idx = -1;
     while (buffer1.has_remaining().ok()) {
@@ -451,7 +439,7 @@ TEST_F(VerticalCompactionTest, TestRowSourcesBuffer) {
 TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -558,7 +546,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -665,7 +653,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -764,7 +752,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
 TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -866,7 +854,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
 TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);
@@ -968,7 +956,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
 TEST_F(VerticalCompactionTest, TestAggKeyVerticalMerge) {
     auto num_input_rowset = 2;
     auto num_segments = 2;
-    auto rows_per_segment = 100;
+    auto rows_per_segment = 2 * 100 * 1024;
     SegmentsOverlapPB overlap = NONOVERLAPPING;
     std::vector<std::vector<std::vector<std::tuple<int64_t, int64_t>>>> input_data;
     generate_input_data(num_input_rowset, num_segments, rows_per_segment, overlap, input_data);

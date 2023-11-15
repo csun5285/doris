@@ -1486,29 +1486,15 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
         if (null == routineLoadTaskInfoList || routineLoadTaskInfoList.isEmpty()) {
             return rows;
         }
-        DatabaseTransactionMgr databaseTransactionMgr = Env.getCurrentEnv().getGlobalTransactionMgr()
-                .getDatabaseTransactionMgr(dbId);
 
         routineLoadTaskInfoList.forEach(entity -> {
-<<<<<<< HEAD
-            try {
-                TransactionState transactionState = Env.getCurrentEnv().getGlobalTransactionMgr()
-                        .getTransactionState(dbId, entity.getTxnId());
-                if (transactionState == null) {
-                    throw new UserException("txn does not exist: " + entity.getTxnId());
-                }
-                entity.setTxnStatus(transactionState.getTransactionStatus());
-                rows.add(entity.getTaskShowInfo());
-            } catch (UserException e) {
-                LOG.warn("failed to setTxnStatus db: {}, txnId: {}, err: {}", dbId, entity.getTxnId(), e.getMessage());
-=======
             long txnId = entity.getTxnId();
             if (RoutineLoadTaskInfo.INIT_TXN_ID == txnId) {
                 rows.add(entity.getTaskShowInfo());
                 return;
->>>>>>> 2.0.3-rc01
             }
-            TransactionState transactionState = databaseTransactionMgr.getTransactionState(entity.getTxnId());
+            TransactionState transactionState = Env.getCurrentEnv().getGlobalTransactionMgr()
+                                                .getTransactionState(dbId, entity.getTxnId());
             if (null != transactionState && null != transactionState.getTransactionStatus()) {
                 entity.setTxnStatus(transactionState.getTransactionStatus());
             }

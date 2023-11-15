@@ -205,8 +205,7 @@ public class FileGroupInfo {
             long leftBytes = fileStatus.size - curFileOffset;
             long tmpBytes = curInstanceBytes + leftBytes;
             // header_type
-            TFileFormatType formatType = formatType(context.fileGroup.getFileFormat(),
-                    context.fileGroup.getCompressType(), fileStatus.path);
+            TFileFormatType formatType = formatType(context.fileGroup.getFileFormat(), fileStatus.path);
             context.params.setFormatType(formatType);
             TFileCompressType compressType =
                     Util.getOrInferCompressType(context.fileGroup.getCompressType(), fileStatus.path);
@@ -218,8 +217,8 @@ public class FileGroupInfo {
             if (tmpBytes > bytesPerInstance && jobType != JobType.STREAM_LOAD) {
                 // Now only support split plain text
                 if (compressType == TFileCompressType.PLAIN
-                        && (formatType == TFileFormatType.FORMAT_CSV_PLAIN && fileStatus.isSplitable)
-                        || formatType == TFileFormatType.FORMAT_JSON) {
+                        && ((formatType == TFileFormatType.FORMAT_CSV_PLAIN
+                                || formatType == TFileFormatType.FORMAT_JSON) && fileStatus.isSplitable)) {
                     long rangeBytes = bytesPerInstance - curInstanceBytes;
                     TFileRangeDesc rangeDesc = createFileRangeDesc(curFileOffset, fileStatus, rangeBytes,
                             columnsFromPath);
@@ -296,13 +295,13 @@ public class FileGroupInfo {
         return locations;
     }
 
-    private TFileFormatType formatType(String fileFormat, TFileCompressType compressType, String path)
+    private TFileFormatType formatType(String fileFormat, String path)
             throws UserException {
         if (fileFormat == null) {
             // get file format by the file path
-            return Util.getFileFormatTypeFromPath(path, compressType);
+            return Util.getFileFormatTypeFromPath(path);
         }
-        TFileFormatType formatType = Util.getFileFormatTypeFromName(fileFormat, compressType);
+        TFileFormatType formatType = Util.getFileFormatTypeFromName(fileFormat);
         if (formatType == TFileFormatType.FORMAT_UNKNOWN) {
             throw new UserException("Not supported file format: " + fileFormat);
         }
