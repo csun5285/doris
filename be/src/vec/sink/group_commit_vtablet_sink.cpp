@@ -33,7 +33,7 @@ GroupCommitVOlapTableSink::GroupCommitVOlapTableSink(ObjectPool* pool,
 
 Status GroupCommitVOlapTableSink::write_wal(vectorized::Block* block, RuntimeState* state,
                                             int64_t num_rows, int64_t filtered_rows,
-                                            Bitmap* filter_bitmap) {
+                                            std::vector<char>& filter_bitmap) {
     PBlock pblock;
     size_t uncompressed_bytes = 0, compressed_bytes = 0;
     if (filtered_rows == 0) {
@@ -45,7 +45,7 @@ Status GroupCommitVOlapTableSink::write_wal(vectorized::Block* block, RuntimeSta
         auto cloneBlock = block->clone_without_columns();
         auto res_block = vectorized::MutableBlock::build_mutable_block(&cloneBlock);
         for (int i = 0; i < num_rows; ++i) {
-            if (filter_bitmap->Get(i)) {
+            if (filter_bitmap[i]) {
                 continue;
             }
             res_block.add_row(block, i);
@@ -60,7 +60,7 @@ Status GroupCommitVOlapTableSink::write_wal(vectorized::Block* block, RuntimeSta
 void GroupCommitVOlapTableSink::handle_block(vectorized::Block* input_block, int64_t rows,
                                              int64_t filter_rows, RuntimeState* state,
                                              vectorized::Block* output_block,
-                                             Bitmap* filter_bitmap) {
+                                             std::vector<char>& filter_bitmap) {
     write_wal(output_block, state, rows, filter_rows, filter_bitmap);
 #ifndef BE_TEST
     auto* future_block = dynamic_cast<vectorized::FutureBlock*>(input_block);

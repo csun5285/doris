@@ -29,7 +29,6 @@ import org.apache.doris.analysis.StatementBase;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
-import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
@@ -48,8 +47,6 @@ import org.apache.doris.nereids.trees.plans.commands.ExplainCommand.ExplainLevel
 import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.planner.OriginalPlanner;
 import org.apache.doris.planner.Planner;
-import org.apache.doris.qe.CommonResultSet;
-import org.apache.doris.qe.CommonResultSet.CommonResultSetMetaData;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.qe.QueryState.MysqlStateType;
@@ -58,8 +55,6 @@ import org.apache.doris.qe.ResultSetMetaData;
 import org.apache.doris.qe.ShowResultSet;
 import org.apache.doris.qe.ShowResultSetMetaData;
 import org.apache.doris.qe.StmtExecutor;
-import org.apache.doris.statistics.util.InternalQueryResult;
-import org.apache.doris.statistics.util.InternalQueryResult.ResultRow;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 
@@ -248,26 +243,6 @@ public class ShowSqlAction extends RestBaseController {
 
             // step5: parse result data and return
             return result;
-        }
-
-        private ResultSet convert(InternalQueryResult rs) {
-            List<Column> columns = Lists.newArrayList();
-            List<ResultRow> resultRows = rs.getResultRows();
-            ResultRow row = resultRows.get(0);
-            List<String> columnNames = row.getColumns();
-            List<PrimitiveType> types = row.getTypes();
-            for (int i = 0; i < columnNames.size(); i++) {
-                columns.add(new Column(columnNames.get(i), types.get(i)));
-            }
-            CommonResultSetMetaData metaData = new CommonResultSetMetaData(columns);
-            List<List<String>> data = Lists.newArrayList();
-            for (int i = 0; i < resultRows.size(); i++) {
-                row = resultRows.get(i);
-                for (int j = 0; j < row.getColumns().size(); j++) {
-                    data.add(row.getValues());
-                }
-            }
-            return new CommonResultSet(metaData, data);
         }
 
         private void buildContext() {

@@ -105,32 +105,6 @@ Status StorageEngine::start_bg_threads() {
             [this]() { this->_fd_cache_clean_callback(); }, &_fd_cache_clean_thread));
     LOG(INFO) << "fd cache clean thread started";
 
-    // path scan and gc thread
-    if (config::path_gc_check) {
-        for (auto data_dir : get_stores()) {
-            scoped_refptr<Thread> path_scan_thread;
-            RETURN_IF_ERROR(Thread::create(
-                    "StorageEngine", "path_scan_thread",
-                    [this, data_dir]() {
-                        SCOPED_CONSUME_MEM_TRACKER(_mem_tracker);
-                        this->_path_scan_thread_callback(data_dir);
-                    },
-                    &path_scan_thread));
-            _path_scan_threads.emplace_back(path_scan_thread);
-
-            scoped_refptr<Thread> path_gc_thread;
-            RETURN_IF_ERROR(Thread::create(
-                    "StorageEngine", "path_gc_thread",
-                    [this, data_dir]() {
-                        SCOPED_CONSUME_MEM_TRACKER(_mem_tracker);
-                        this->_path_gc_thread_callback(data_dir);
-                    },
-                    &path_gc_thread));
-            _path_gc_threads.emplace_back(path_gc_thread);
-        }
-        LOG(INFO) << "path scan/gc threads started. number:" << get_stores().size();
-    }
-
     ThreadPoolBuilder("CooldownTaskThreadPool")
             .set_min_threads(config::cooldown_thread_num)
             .set_max_threads(config::cooldown_thread_num)
@@ -415,48 +389,6 @@ void StorageEngine::_unused_rowset_monitor_thread_callback() {
             LOG(WARNING) << "unused_rowset_monitor_interval config is illegal: " << interval
                          << ", force set to 1";
             interval = 1;
-        }
-    } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));
-}
-
-void StorageEngine::_path_gc_thread_callback(DataDir* data_dir) {
-#ifdef GOOGLE_PROFILER
-    ProfilerRegisterThread();
-#endif
-
-    LOG(INFO) << "try to start path gc thread!";
-    int32_t interval = config::path_gc_check_interval_second;
-    do {
-        LOG(INFO) << "try to perform path gc by tablet!";
-        data_dir->perform_path_gc_by_tablet();
-
-        LOG(INFO) << "try to perform path gc by rowsetid!";
-        data_dir->perform_path_gc_by_rowsetid();
-
-        interval = config::path_gc_check_interval_second;
-        if (interval <= 0) {
-            LOG(WARNING) << "path gc thread check interval config is illegal:" << interval
-                         << "will be forced set to half hour";
-            interval = 1800; // 0.5 hour
-        }
-    } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));
-}
-
-void StorageEngine::_path_scan_thread_callback(DataDir* data_dir) {
-#ifdef GOOGLE_PROFILER
-    ProfilerRegisterThread();
-#endif
-
-    int32_t interval = config::path_scan_interval_second;
-    do {
-        LOG(INFO) << "try to perform path scan!";
-        data_dir->perform_path_scan();
-
-        interval = config::path_scan_interval_second;
-        if (interval <= 0) {
-            LOG(WARNING) << "path gc thread check interval config is illegal:" << interval
-                         << "will be forced set to one day";
-            interval = 24 * 3600; // one day
         }
     } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval)));
 }

@@ -7,10 +7,10 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/tablet_meta.h"
+#include "service/backend_options.h"
 #include "util/thread.h"
 #include "util/uuid_generator.h"
 #include "vec/columns/column.h"
-#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -278,7 +278,8 @@ Status CloudFullCompaction::_cloud_full_compaction_update_delete_bitmap(int64_t 
     }
     for (const auto& it : tmp_rowsets) {
         const int64_t& cur_version = it->rowset_meta()->start_version();
-        RETURN_IF_ERROR(_cloud_full_compaction_calc_delete_bitmap(it, cur_version, initiator,delete_bitmap));
+        RETURN_IF_ERROR(_cloud_full_compaction_calc_delete_bitmap(it, cur_version, initiator,
+                                                                  delete_bitmap));
     }
 
     RETURN_IF_ERROR(cloud::meta_mgr()->get_delete_bitmap_update_lock(_tablet.get(), -1, initiator));
@@ -290,7 +291,7 @@ Status CloudFullCompaction::_cloud_full_compaction_update_delete_bitmap(int64_t 
         const RowsetSharedPtr& published_rowset = it.second;
         if (cur_version > max_version) {
             RETURN_IF_ERROR(_cloud_full_compaction_calc_delete_bitmap(published_rowset, cur_version,
-                                                                      initiator,delete_bitmap));
+                                                                      initiator, delete_bitmap));
         }
     }
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(_tablet.get(), -1, initiator,
@@ -300,7 +301,8 @@ Status CloudFullCompaction::_cloud_full_compaction_update_delete_bitmap(int64_t 
 }
 
 Status CloudFullCompaction::_cloud_full_compaction_calc_delete_bitmap(
-        const RowsetSharedPtr& published_rowset, const int64_t& cur_version, int64_t initiator,const DeleteBitmapPtr& delete_bitmap) {
+        const RowsetSharedPtr& published_rowset, const int64_t& cur_version, int64_t initiator,
+        const DeleteBitmapPtr& delete_bitmap) {
     std::vector<segment_v2::SegmentSharedPtr> segments;
     auto beta_rowset = reinterpret_cast<BetaRowset*>(published_rowset.get());
     RETURN_IF_ERROR(beta_rowset->load_segments(&segments));
@@ -311,8 +313,7 @@ Status CloudFullCompaction::_cloud_full_compaction_calc_delete_bitmap(
     RETURN_IF_ERROR(_tablet->calc_delete_bitmap(published_rowset, segments, specified_rowsets,
                                                 delete_bitmap, cur_version, token.get(),
                                                 _output_rs_writer.get()));
-    token->wait();
-    token->get_delete_bitmap(delete_bitmap);
+    RETURN_IF_ERROR(token->wait());
     size_t total_rows = std::accumulate(
             segments.begin(), segments.end(), 0,
             [](size_t sum, const segment_v2::SegmentSharedPtr& s) { return sum += s->num_rows(); });

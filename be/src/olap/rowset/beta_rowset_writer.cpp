@@ -20,8 +20,8 @@
 #include <assert.h>
 // IWYU pragma: no_include <bthread/errno.h>
 #include <errno.h> // IWYU pragma: keep
-#include <gen_cpp/olap_file.pb.h>
 #include <fmt/format.h>
+#include <gen_cpp/olap_file.pb.h>
 #include <stdio.h>
 
 #include <ctime> // time
@@ -547,7 +547,7 @@ RowsetSharedPtr BetaRowsetWriter::manual_build(const RowsetMetaSharedPtr& spec_r
 Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
     // make sure all segments are flushed
     DCHECK_EQ(_num_segment, _next_segment_id);
-    for (auto& file_writer : _file_writers) {
+    for (auto& [segment_id, file_writer] : _file_writers) {
         RETURN_NOT_OK_STATUS_WITH_WARN(
                 file_writer->close(),
                 fmt::format("failed to close file writer, path={}", file_writer->path().string()));
@@ -562,8 +562,8 @@ Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
             auto type = config::enable_file_cache ? config::file_cache_type : "";
             io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
             reader_options.file_size = file_writer->bytes_appended();
-            RETURN_NOT_OK_STATUS_WITH_WARN(fs->open_file(path, &file_reader, &reader_options));
-            RETURN_NOT_OK_STATUS_WITH_WARN(Segment::check_segment_footer(std::move(file_reader)));
+            RETURN_IF_ERROR(fs->open_file(path, &file_reader, &reader_options));
+            RETURN_IF_ERROR(Segment::check_segment_footer(std::move(file_reader)));
         }
 #endif
     }

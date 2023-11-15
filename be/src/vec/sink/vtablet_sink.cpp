@@ -1236,7 +1236,7 @@ size_t VOlapTableSink::get_pending_bytes() const {
 Status VOlapTableSink::find_tablet(RuntimeState* state, vectorized::Block* block, int row_index,
                                    const VOlapTablePartition** partition, uint32_t& tablet_index,
                                    bool& stop_processing, bool& is_continue,
-                                   Bitmap* filter_bitmap) {
+                                   std::vector<char>& filter_bitmap) {
     Status status = Status::OK();
     *partition = nullptr;
     tablet_index = 0;
@@ -1253,7 +1253,7 @@ Status VOlapTableSink::find_tablet(RuntimeState* state, vectorized::Block* block
                 },
                 &stop_processing));
         _number_filtered_rows++;
-        filter_bitmap->Set(row_index, true);
+        filter_bitmap[row_index] = true;
         if (stop_processing) {
             return Status::EndOfFile("Encountered unqualified data, stop processing");
         }
@@ -1320,7 +1320,7 @@ Status VOlapTableSink::_single_partition_generate(RuntimeState* state, vectorize
         }
         bool is_continue = false;
         RETURN_IF_ERROR(find_tablet(state, block, i, &partition, tablet_index, stop_processing,
-                                    is_continue, &_filter_bitmap));
+                                    is_continue, _filter_bitmap));
         if (is_continue) {
             continue;
         }
@@ -1429,7 +1429,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
             bool is_continue = false;
             uint32_t tablet_index = 0;
             RETURN_IF_ERROR(find_tablet(state, &block, i, &partition, tablet_index, stop_processing,
-                                        is_continue, &_filter_bitmap));
+                                        is_continue, _filter_bitmap));
             if (is_continue) {
                 continue;
             }
@@ -1461,7 +1461,7 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
         }
     }
     handle_block(input_block, rows, _number_filtered_rows - number_filtered_rows0, _state, &block,
-                 &_filter_bitmap);
+                 _filter_bitmap);
     // Add block to node channel
     for (size_t i = 0; i < _channels.size(); i++) {
         for (const auto& entry : channel_to_payload[i]) {

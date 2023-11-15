@@ -519,7 +519,7 @@ public:
     // handle block after data is filtered, only useful for GroupCommitVOlapTabletSink
     virtual void handle_block(vectorized::Block* input_block, int64_t rows, int64_t filter_rows,
                               RuntimeState* state, vectorized::Block* output_block,
-                              Bitmap* filter_bitmap) {}
+                              std::vector<char>& filter_bitmap) {}
 
 private:
     friend class VNodeChannel;
@@ -561,7 +561,7 @@ private:
 
     Status find_tablet(RuntimeState* state, vectorized::Block* block, int row_index,
                        const VOlapTablePartition** partition, uint32_t& tablet_index,
-                       bool& stop_processing, bool& is_continue, Bitmap* filter_bitmap);
+                       bool& stop_processing, bool& is_continue, std::vector<char>& filter_bitmap);
 
     Status _cancel_channel_and_check_intolerable_failure(Status status, const std::string& err_msg,
                                                          const std::shared_ptr<IndexChannel> ich,

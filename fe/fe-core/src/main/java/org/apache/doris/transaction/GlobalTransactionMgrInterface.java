@@ -40,7 +40,6 @@ import org.apache.doris.transaction.TransactionState.TxnCoordinator;
 import java.io.DataInput;
 import java.io.IOException;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 public interface GlobalTransactionMgrInterface extends Writable {
@@ -100,7 +99,7 @@ public interface GlobalTransactionMgrInterface extends Writable {
 
     public boolean existCommittedTxns(Long dbId, Long tableId, Long partitionId);
 
-    public void finishTransaction(long dbId, long transactionId, Set<Long> errorReplicaIds) throws UserException;
+    public void finishTransaction(long dbId, long transactionId) throws UserException;
 
     public boolean isPreviousTransactionsFinished(long endTransactionId, long dbId, List<Long> tableIdList)
             throws AnalysisException;
@@ -170,5 +169,7 @@ public interface GlobalTransactionMgrInterface extends Writable {
             throws AnalysisException;
 
     public void cleanLabel(long dbId, String label) throws UserException;
+
+    public TransactionIdGenerator getTransactionIDGenerator();
 }
 

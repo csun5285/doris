@@ -106,9 +106,9 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     _read_options.stats = _stats;
     _read_options.io_ctx.file_cache_stats = &_stats->file_cache_stats;
     _read_options.io_ctx.async_io_stats = &_stats->async_io_stats;
-    _read_options.push_down_agg_type_opt = _context->push_down_agg_type_opt;
-    _read_options.remaining_conjunct_roots = _context->remaining_conjunct_roots;
-    _read_options.common_expr_ctxs_push_down = _context->common_expr_ctxs_push_down;
+    _read_options.push_down_agg_type_opt = _read_context->push_down_agg_type_opt;
+    _read_options.remaining_conjunct_roots = _read_context->remaining_conjunct_roots;
+    _read_options.common_expr_ctxs_push_down = _read_context->common_expr_ctxs_push_down;
     _read_options.push_down_agg_type_opt = _read_context->push_down_agg_type_opt;
     _read_options.remaining_conjunct_roots = _read_context->remaining_conjunct_roots;
     _read_options.common_expr_ctxs_push_down = _read_context->common_expr_ctxs_push_down;

@@ -619,7 +619,7 @@ Status VSchemaChangeWithSorting::_internal_sorting(
     RETURN_IF_ERROR(merger.merge(blocks, rowset_writer.get(), &merged_rows));
 
     _add_merged_rows(merged_rows);
-    auto st = rowset_writer->build(*rowset)
+    auto st = rowset_writer->build(*rowset);
     if (!st.ok()) {
         LOG(WARNING) << "sc rowset_writer return with nullptr, rowset_id=" << rowset_writer->rowset_id().to_string()
         << " tablet_id=" << context.table_id << " newest_write_timestamp=" << context.newest_write_timestamp

@@ -218,8 +218,6 @@ private:
     // total rows num written by DeltaWriter
     std::atomic<int64_t> _total_received_rows = 0;
 
-    std::shared_ptr<PartialUpdateInfo> _partial_update_info;
-
     RuntimeProfile* _profile = nullptr;
     RuntimeProfile::Counter* _lock_timer = nullptr;
     RuntimeProfile::Counter* _sort_timer = nullptr;

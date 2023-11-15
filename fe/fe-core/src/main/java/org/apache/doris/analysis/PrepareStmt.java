@@ -69,17 +69,7 @@ public class PrepareStmt extends StatementBase {
     // Since, serialize fields is too heavy when table is wide
     Map<String, byte[]> serializedFields =  Maps.newHashMap();
 
-    // We provide bellow types of prepared statement:
-    // NONE, which is not prepared
-    // FULL_PREPARED, which is really prepared, which will cache analyzed statement and planner
-    // STATEMENT, which only cache statement itself, but need to analyze each time executed
-    public enum PreparedType {
-        NONE, FULL_PREPARED, STATEMENT
-    }
-
-    private PreparedType preparedType = PreparedType.STATEMENT;
-
-    public PrepareStmt(StatementBase stmt, String name, boolean binaryRowFormat) {
+    public PrepareStmt(StatementBase stmt, String name) {
         this.inner = stmt;
         this.stmtName = name;
         this.id = UUID.randomUUID();
@@ -90,7 +80,8 @@ public class PrepareStmt extends StatementBase {
     }
 
     public boolean needReAnalyze() {
-        if (preparedType == PreparedType.FULL_PREPARED && schemaVersion == tbl.getBaseSchemaVersion()) {
+        if (preparedType == PreparedType.FULL_PREPARED
+                    && schemaVersion == tbl.getBaseSchemaVersion()) {
             return false;
         }
         reset();
@@ -153,32 +144,41 @@ public class PrepareStmt extends StatementBase {
 
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
+        // TODO support more Statement
+        if (!(inner instanceof SelectStmt) && !(inner instanceof NativeInsertStmt)) {
+            throw new UserException("Only support prepare SelectStmt or NativeInsertStmt");
+        }
+        analyzer.setPrepareStmt(this);
         if (inner instanceof SelectStmt) {
-            // Use tmpAnalyzer since selectStmt will be reAnalyzed
-            Analyzer tmpAnalyzer = new Analyzer(context.getEnv(), context);
+            // Try to use FULL_PREPARED to increase performance
             SelectStmt selectStmt = (SelectStmt) inner;
-            inner.analyze(tmpAnalyzer);
-            if (!selectStmt.checkAndSetPointQuery()) {
-                throw new UserException("Only support prepare SelectStmt point query now");
+            try {
+                // Use tmpAnalyzer since selectStmt will be reAnalyzed
+                Analyzer tmpAnalyzer = new Analyzer(context.getEnv(), context);
+                inner.analyze(tmpAnalyzer);
+                // Case 1 short circuit point query
+                if (selectStmt.checkAndSetPointQuery()) {
+                    tbl = (OlapTable) selectStmt.getTableRefs().get(0).getTable();
+                    schemaVersion = tbl.getBaseSchemaVersion();
+                    preparedType = PreparedType.FULL_PREPARED;
+                    isPointQueryShortCircuit = true;
+                    LOG.debug("using FULL_PREPARED prepared");
+                    return;
+                }
+            } catch (UserException e) {
+                LOG.debug("fallback to STATEMENT prepared, {}", e);
+            } finally {
+                // will be reanalyzed
+                selectStmt.reset();
             }
-            tbl = (OlapTable) selectStmt.getTableRefs().get(0).getTable();
-            schemaVersion = tbl.getBaseSchemaVersion();
-            // reset will be reAnalyzed
-            selectStmt.reset();
-            analyzer.setPrepareStmt(this);
-            // tmpAnalyzer.setPrepareStmt(this);
-            preparedType = PreparedType.FULL_PREPARED;
         } else if (inner instanceof NativeInsertStmt) {
             LabelName label = ((NativeInsertStmt) inner).getLoadLabel();
-            if (label == null || Strings.isNullOrEmpty(label.getLabelName())) {
-                analyzer.setPrepareStmt(this);
-                preparedType = PreparedType.STATEMENT;
-            } else {
+            if (label != null && !Strings.isNullOrEmpty(label.getLabelName())) {
                 throw new UserException("Only support prepare InsertStmt without label now");
             }
-        } else {
-            throw new UserException("Only support prepare SelectStmt or InsertStmt now");
         }
+        preparedType = PreparedType.STATEMENT;
+        LOG.debug("using STATEMENT prepared");
     }
 
     public String getName() {
@@ -252,10 +252,6 @@ public class PrepareStmt extends StatementBase {
         }
     }
 
-    public PreparedType getPreparedType() {
-        return preparedType;
-    }
-
     @Override
     public void reset() {
         serializedDescTable = null;
@@ -263,9 +259,6 @@ public class PrepareStmt extends StatementBase {
         descTable = null;
         this.id = UUID.randomUUID();
         inner.reset();
-        if (inner instanceof NativeInsertStmt) {
-            ((NativeInsertStmt) inner).resetPrepare();
-        }
         serializedFields.clear();
     }
 }

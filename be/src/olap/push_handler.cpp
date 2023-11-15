@@ -110,12 +110,13 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     //  recycler is much longer than the duration of the push task
     context.txn_expiration = ::time(nullptr) + request.timeout;
     RETURN_IF_ERROR(tablet->create_rowset_writer(context, &rowset_writer));
-    auto rowset = rowset_writer->build();
-    if (!rowset) {
-        return Status::InternalError("failed to build rowset");
+    RowsetSharedPtr rowset;
+    auto st = rowset_writer->build(rowset);
+    if (!st.ok()) {
+        return st;
     }
     rowset->rowset_meta()->set_delete_predicate(del_pred);
-    auto st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta().get(), true);
+    st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta().get(), true);
     if (!st.ok() && !st.is<ALREADY_EXIST>()) {
         return st;
     }

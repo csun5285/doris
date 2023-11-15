@@ -287,7 +287,7 @@ Status DeltaWriter::init() {
     context.tablet_id = _tablet->table_id();
     context.is_direct_write = true;
     context.tablet = _tablet;
-    context.disable_file_cache = _req.disable_file_cache;
+    context.write_file_cache = !_req.disable_file_cache;
     context.newest_write_timestamp = UnixSeconds();
     context.write_type = DataWriteType::TYPE_DIRECT;
     context.mow_context = std::make_shared<MowContext>(_cur_max_version, _req.txn_id, _rowset_ids,
@@ -534,9 +534,9 @@ Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
         return Status::InternalError("rows number written by delta writer dosen't match");
     }
     // use rowset meta manager to save meta
-    _cur_rowset = _rowset_writer->build();
-    if (_cur_rowset == nullptr) {
-        return Status::InternalError("fail to build rowset");
+    st = _rowset_writer->build(_cur_rowset);
+    if (!st.ok()) {
+        return st;
     }
 
     _delta_written_success = true;

@@ -289,9 +289,6 @@ private:
     // Check bucket enable versioning
     void _check_bucket_enable_versioning_callback();
 
-    // path gc process function
-    void _path_gc_thread_callback(DataDir* data_dir);
-
     void _path_scan_thread_callback(DataDir* data_dir);
 
     void _tablet_checkpoint_callback(const std::vector<DataDir*>& data_dirs);

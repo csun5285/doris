@@ -97,8 +97,9 @@ Status Segment::open(io::FileSystemSPtr fs, const std::string& path, uint32_t se
 
 Status Segment::check_segment_footer(io::FileReaderSPtr file_reader) {
     Segment segment;
+    SegmentFooterPB footer;
     segment._file_reader = std::move(file_reader);
-    return segment._parse_footer();
+    return segment._parse_footer(&footer);
 }
 
 Segment::Segment()
@@ -109,7 +110,6 @@ Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr table
           _meta_mem_usage(0),
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
-          _meta_mem_usage(0),
           _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {
     memory_segment_counter << 1;
 }
@@ -281,13 +281,13 @@ Status Segment::_parse_footer(SegmentFooterPB* footer) {
     }
 
     // deserialize footer PB
-    if (!_footer->ParseFromString(footer_buf)) {
+    if (!footer->ParseFromString(footer_buf)) {
         std::string err_msg = fmt::format("Bad segment file {}: failed to parse SegmentFooterPB",
                                           _file_reader->path().native());
         DCHECK(false) << err_msg;
         return Status::Corruption(std::move(err_msg));
     }
-    if (_footer->num_rows() == 0) {
+    if (footer->num_rows() == 0) {
         // this is a pad segment
         return Status::Error<EMPTY_SEGMENT>("empty segment");
     }

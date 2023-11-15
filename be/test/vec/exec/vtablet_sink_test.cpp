@@ -965,7 +965,8 @@ TEST_F(VOlapTableSinkTest, group_commit) {
     ASSERT_TRUE(st.ok());
     st = wal_reader.read_block(pblock);
     ASSERT_TRUE(st.ok());
-    vectorized::Block wal_block(pblock);
+    vectorized::Block wal_block;
+    EXPECT_TRUE(wal_block.deserialize(pblock).ok());
     ASSERT_TRUE(st.ok() || st.is<ErrorCode::END_OF_FILE>());
     ASSERT_EQ(org_block.rows(), wal_block.rows());
     for (int i = 0; i < org_block.rows(); i++) {
@@ -1091,7 +1092,8 @@ TEST_F(VOlapTableSinkTest, group_commit_with_filter_row) {
     ASSERT_TRUE(st.ok());
     st = wal_reader.read_block(pblock);
     ASSERT_TRUE(st.ok());
-    vectorized::Block wal_block(pblock);
+    vectorized::Block wal_block;
+    EXPECT_TRUE(wal_block.deserialize(pblock).ok());
     ASSERT_TRUE(st.ok() || st.is<ErrorCode::END_OF_FILE>());
     ASSERT_EQ(org_block.rows() - 1, wal_block.rows());
     for (int i = 0; i < wal_block.rows(); i++) {

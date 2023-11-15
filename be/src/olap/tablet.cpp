@@ -1078,22 +1078,14 @@ void Tablet::delete_expired_stale_rowset() {
     LOG(FATAL) << "MUST NOT call delete_expired_stale_rowset";
     return;
 #endif
-    int64_t now = UnixSeconds();
     // hold write lock while processing stable rowset
     {
         std::lock_guard<std::shared_mutex> wrlock(_meta_lock);
         SCOPED_SIMPLE_TRACE_IF_TIMEOUT(TRACE_TABLET_LOCK_THRESHOLD);
-        // Compute the end time to delete rowsets, when a expired rowset createtime less then this time, it will be deleted.
-        double expired_stale_sweep_endtime =
-                ::difftime(now, config::tablet_rowset_stale_sweep_time_sec);
-        if (config::tablet_rowset_stale_sweep_by_size) {
-            expired_stale_sweep_endtime = now;
-        }
 
         std::vector<int64_t> path_id_vec;
         // capture the path version to delete
-        _timestamped_version_tracker.capture_expired_paths(
-                static_cast<int64_t>(expired_stale_sweep_endtime), &path_id_vec);
+        _timestamped_version_tracker.capture_expired_paths(&path_id_vec);
 
         if (path_id_vec.empty()) {
             return;
@@ -1208,8 +1200,7 @@ void Tablet::delete_expired_stale_rowset() {
                     VLOG_NOTICE << "delete stale rowset tablet=" << full_name() << " version["
                                 << timestampedVersion->version().first << ","
                                 << timestampedVersion->version().second
-                                << "] move to unused_rowset success " << std::fixed
-                                << expired_stale_sweep_endtime;
+                                << "] move to unused_rowset success " << std::fixed;
                 } else {
                     LOG(WARNING) << "delete stale rowset tablet=" << full_name() << " version["
                                  << timestampedVersion->version().first << ","
@@ -1226,8 +1217,8 @@ void Tablet::delete_expired_stale_rowset() {
         VLOG_NOTICE << "delete stale rowset _stale_rs_version_map tablet=" << full_name()
                     << " current_size=" << _stale_rs_version_map.size() << " old_size=" << old_size
                     << " current_meta_size=" << _tablet_meta->all_stale_rs_metas().size()
-                    << " old_meta_size=" << old_meta_size << " sweep endtime " << std::fixed
-                    << expired_stale_sweep_endtime << ", reconstructed=" << reconstructed;
+                    << " old_meta_size=" << old_meta_size << std::fixed
+                    << ", reconstructed=" << reconstructed;
     }
 #ifndef BE_TEST
     {

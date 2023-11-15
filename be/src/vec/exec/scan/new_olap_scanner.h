@@ -75,8 +75,6 @@ public:
 
     Status prepare(RuntimeState* state, const VExprContextSPtrs& conjuncts);
 
-    const std::string& scan_disk() const { return _tablet->data_dir()->path(); }
-
     void set_compound_filters(const std::vector<TCondition>& compound_filters);
 
     doris::TabletStorageType get_storage_type() override;

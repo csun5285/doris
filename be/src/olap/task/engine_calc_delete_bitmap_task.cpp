@@ -170,7 +170,15 @@ void TabletCalcDeleteBitmapTask::handle() {
         rowset_writer->num_rows() > 0) {
         // build rowset writer and merge transient rowset
         rowset_writer->flush();
-        RowsetSharedPtr transient_rowset = rowset_writer->build();
+        RowsetSharedPtr transient_rowset;
+        auto st = rowset_writer->build(transient_rowset);
+        if (!st.ok()) {
+            LOG(WARNING) << "failed to build rowset calculate delete bitmap."
+                         << " rowset_id=" << rowset->rowset_id()
+                         << ", tablet_id=" << _tablet->tablet_id() << ", txn_id=" << _transaction_id
+                         << ", status=" << st;
+            return;
+        }
         rowset->merge_rowset_meta(transient_rowset->rowset_meta());
         const auto& rowset_meta = rowset->rowset_meta();
         status = cloud::meta_mgr()->update_tmp_rowset(*rowset_meta);
