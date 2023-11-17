@@ -127,7 +127,9 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
         // Never request more than IOV_MAX in one request.
         size_t iov_count = std::min(data_cnt - completed_iov, static_cast<size_t>(IOV_MAX));
         ssize_t res;
-        RETRY_ON_EINTR(res, ::writev(_fd, iov + completed_iov, iov_count));
+        RETRY_ON_EINTR(res,
+                       SYNC_POINT_HOOK_RETURN_VALUE(::writev(_fd, iov + completed_iov, iov_count),
+                                                    "LocalFileWriter::writev", _fd));
         if (UNLIKELY(res < 0)) {
             return Status::IOError("cannot write to {}: {}", _path.native(), std::strerror(errno));
         }
