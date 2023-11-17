@@ -102,7 +102,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
     }
     s3_file_reader_counter << 1;
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            client->GetObject(request), "s3_file_reader::get_object", std::ref(request).get());
+            client->GetObject(request), "s3_file_reader::get_object", std::ref(request).get(), &result);
     s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}, ErrorCode {}, Exception {}",
@@ -111,6 +111,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                outcome.GetError().GetExceptionName());
     }
     *bytes_read = outcome.GetResult().GetContentLength();
+    LOG_INFO("the returned file size is {}", *bytes_read);
     if (*bytes_read != bytes_req) {
         return Status::IOError("failed to read from {}(bytes read: {}, bytes req: {})",
                                _path.native(), *bytes_read, bytes_req);
