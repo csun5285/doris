@@ -34,9 +34,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -95,8 +97,8 @@ public:
                 Aws::S3::Model::AbortMultipartUploadResult());
     }
 
-    Aws::S3::Model::UploadPartOutcome upload_part(
-            const Aws::S3::Model::UploadPartRequest& request) {
+    Aws::S3::Model::UploadPartOutcome upload_part(const Aws::S3::Model::UploadPartRequest& request,
+                                                  const io::UploadFileBuffer& buf) {
         if (request.GetKey() != key || request.GetBucket() != bucket ||
             upload_id != request.GetUploadId()) {
             return Aws::S3::Model::UploadPartOutcome(Aws::Client::AWSError<Aws::S3::S3Errors>(
@@ -114,10 +116,15 @@ public:
             }
         }
         {
+            Slice slice = buf._buffer;
+            std::string str;
+            str.resize(slice.get_size());
+            std::memcpy(str.data(), slice.get_data(), slice.get_size());
             std::unique_lock lck {latch};
-            uploaded_parts.insert(request.GetPartNumber());
+            uploaded_parts.insert({request.GetPartNumber(), std::move(str)});
             file_size += request.GetContentLength();
         }
+        LOG_INFO("upload part size is {}", request.GetContentLength());
         return Aws::S3::Model::UploadPartOutcome(Aws::S3::Model::UploadPartResult());
     }
 
@@ -149,11 +156,17 @@ public:
                 Aws::S3::Model::CompleteMultipartUploadResult());
     }
 
-    Aws::S3::Model::PutObjectOutcome put_object(const Aws::S3::Model::PutObjectRequest& request) {
+    Aws::S3::Model::PutObjectOutcome put_object(const Aws::S3::Model::PutObjectRequest& request,
+                                                const io::UploadFileBuffer& buf) {
         exists = true;
         file_size = request.GetContentLength();
         key = request.GetKey();
         bucket = request.GetBucket();
+        Slice s = buf._buffer;
+        std::string str;
+        str.resize(s.get_size());
+        std::memcpy(str.data(), s.get_data(), s.get_size());
+        uploaded_parts.insert({1, std::move(str)});
         return Aws::S3::Model::PutObjectOutcome(Aws::S3::Model::PutObjectResult());
     }
 
@@ -170,11 +183,13 @@ public:
         return Aws::S3::Model::HeadObjectOutcome(result);
     }
 
+    [[nodiscard]] const std::map<int64_t, std::string>& contents() const { return uploaded_parts; }
+
 private:
     std::mutex latch;
     std::string upload_id;
     size_t file_size {0};
-    std::set<int64_t> uploaded_parts;
+    std::map<int64_t, std::string> uploaded_parts;
     std::string key;
     std::string bucket;
     bool exists {false};
@@ -213,9 +228,10 @@ static auto test_mock_callbacks = std::array {
                       [](auto&& outcome) {
                           const auto& req = try_any_cast<const Aws::S3::Model::UploadPartRequest&>(
                                   outcome.at(0));
+                          const auto& buf = try_any_cast<io::UploadFileBuffer*>(outcome.at(1));
                           auto pair = try_any_cast_ret<Aws::S3::Model::UploadPartOutcome>(outcome);
                           pair->second = true;
-                          pair->first = mock_client->upload_part(req);
+                          pair->first = mock_client->upload_part(req, *buf);
                       }},
         MockCallback {
                 "s3_file_writer::complete_multi_part",
@@ -232,9 +248,10 @@ static auto test_mock_callbacks = std::array {
                       [](auto&& outcome) {
                           const auto& req = try_any_cast<const Aws::S3::Model::PutObjectRequest&>(
                                   outcome.at(0));
+                          const auto& buf = try_any_cast<io::UploadFileBuffer*>(outcome.at(1));
                           auto pair = try_any_cast_ret<Aws::S3::Model::PutObjectOutcome>(outcome);
                           pair->second = true;
-                          pair->first = mock_client->put_object(req);
+                          pair->first = mock_client->put_object(req, *buf);
                       }},
         MockCallback {"s3_file_system::head_object",
                       [](auto&& outcome) {
@@ -788,6 +805,7 @@ TEST_F(S3FileWriterTest, normal) {
     size_t offset = 0;
     size_t bytes_read = 0;
     auto file_size = local_file_reader->size();
+    LOG_INFO("the file size is {}", file_size);
     while (offset < file_size) {
         st = local_file_reader->read_at(offset, slice, &bytes_read);
         ASSERT_TRUE(st.ok()) << st;
@@ -804,6 +822,17 @@ TEST_F(S3FileWriterTest, normal) {
     st = s3_fs->file_size("normal", &s3_file_size);
     ASSERT_TRUE(st.ok()) << st;
     ASSERT_EQ(s3_file_size, file_size);
+    const auto& contents = mock_client->contents();
+    std::stringstream ss;
+    for (size_t i = 1; i <= contents.size(); i++) {
+        ss << contents.at(i);
+    }
+    std::string content = ss.str();
+    std::unique_ptr<char[]> content_buf = std::make_unique<char[]>(file_size);
+    Slice s(content_buf.get(), file_size);
+    bytes_read = 0;
+    st = local_file_reader->read_at(0, s, &bytes_read);
+    ASSERT_EQ(0, std::memcmp(content.data(), s.get_data(), file_size));
 }
 
 TEST_F(S3FileWriterTest, smallFile) {
@@ -843,6 +872,17 @@ TEST_F(S3FileWriterTest, smallFile) {
     st = s3_fs->file_size("small", &s3_file_size);
     ASSERT_TRUE(st.ok()) << st;
     ASSERT_EQ(s3_file_size, file_size);
+    const auto& contents = mock_client->contents();
+    std::stringstream ss;
+    for (size_t i = 1; i <= contents.size(); i++) {
+        ss << contents.at(i);
+    }
+    std::string content = ss.str();
+    std::unique_ptr<char[]> content_buf = std::make_unique<char[]>(file_size);
+    Slice s(content_buf.get(), file_size);
+    bytes_read = 0;
+    st = local_file_reader->read_at(0, s, &bytes_read);
+    ASSERT_EQ(0, std::memcmp(content.data(), s.get_data(), file_size));
 }
 
 TEST_F(S3FileWriterTest, close_error) {

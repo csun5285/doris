@@ -333,7 +333,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     auto upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->UploadPart(upload_request),
                                                             "s3_file_writer::upload_part",
-                                                            std::cref(upload_request).get());
+                                                            std::cref(upload_request).get(), &buf);
     s3_bvar::s3_multi_part_upload_total << 1;
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
@@ -462,8 +462,9 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
     TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
-    auto response = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->PutObject(request), "s3_file_writer::put_object", std::cref(request).get());
+    auto response =
+            SYNC_POINT_HOOK_RETURN_VALUE(_client->PutObject(request), "s3_file_writer::put_object",
+                                         std::cref(request).get(), &buf);
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::IOError(
