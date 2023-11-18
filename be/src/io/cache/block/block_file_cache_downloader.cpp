@@ -13,6 +13,7 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
@@ -35,9 +36,11 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
     request.WithBucket(bucket).WithKey(key_name);
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
-    auto outcome = client->GetObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObject(request), "io::_download_part",
+                                                std::cref(request).get(), &s);
     s3_bvar::s3_get_total << 1;
 
+    TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", key_name,
                                outcome.GetError().GetMessage());
@@ -141,16 +144,18 @@ struct DownloadTaskExecutor {
             auto buffer = builder.build();
             buffer->submit();
         }
+        auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
         timespec current_time;
         // We don't need high accuracy here, so we use time(nullptr)
         // since it's the fastest way to get current time(second)
         auto current_time_second = time(nullptr);
-        current_time.tv_sec = current_time_second + 300;
+        current_time.tv_sec = current_time_second + timeout_duration;
         current_time.tv_nsec = 0;
         // bthread::countdown_event::timed_wait() should use absolute time
         while (0 != _countdown_event.timed_wait(current_time)) {
-            current_time.tv_sec += 300;
-            LOG_WARNING("Downloading {} {} {} {} is too long", bucket, key_name, offset, size);
+            current_time.tv_sec += timeout_duration;
+            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds", bucket, key_name,
+                        offset, size, timeout_duration);
         }
     }
 
@@ -170,7 +175,7 @@ void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_na
                    size_t size, std::string bucket,
                    std::function<FileBlocksHolderPtr(size_t, size_t)> alloc_holder,
                    std::function<void(Status)> download_callback, Slice s) {
-    ExecEnv::GetInstance()->buffered_reader_prefetch_thread_pool()->submit_func(
+    ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
             [c = std::move(client), key_name_ = std::move(key_name), offset, size,
              bucket_ = std::move(bucket), s, holder = std::move(alloc_holder),
              cb = std::move(download_callback)]() mutable {

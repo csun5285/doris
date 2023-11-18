@@ -17,24 +17,16 @@
 
 #pragma once
 
-#include <string>
-
-#include "common/status.h"
 #include "http/http_handler.h"
 
 namespace doris {
-
-class HttpRequest;
-
-class FileCacheAction : public HttpHandler {
+class ExecEnv;
+class ClearFileCacheAsyncAction : public HttpHandler {
 public:
-    FileCacheAction() = default;
+    ClearFileCacheAsyncAction() = default;
 
-    ~FileCacheAction() override = default;
+    ~ClearFileCacheAsyncAction() override = default;
 
     void handle(HttpRequest* req) override;
-
-private:
-    Status _handle_header(HttpRequest* req, std::string* json_metrics);
 };
 } // namespace doris

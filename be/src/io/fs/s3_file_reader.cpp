@@ -26,19 +26,20 @@
 #include <fmt/format.h>
 #include <glog/logging.h>
 
-#include "common/config.h"
 #include <algorithm>
 #include <utility>
 
+#include "common/config.h"
+
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/sync_point.h"
 #include "io/fs/s3_common.h"
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
 #include "util/doris_metrics.h"
 #include "util/s3_util.h"
 #include "util/trace.h"
-
 
 namespace doris {
 namespace io {
@@ -75,7 +76,8 @@ Status S3FileReader::close() {
     return Status::OK();
 }
 
-Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read, const IOContext*) {
+Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
+                                  const IOContext*) {
     DCHECK(!closed());
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
@@ -99,7 +101,8 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
         return Status::InternalError("init s3 client error");
     }
     s3_file_reader_counter << 1;
-    auto outcome = client->GetObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            client->GetObject(request), "s3_file_reader::get_object", std::ref(request).get());
     s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}", _path.native(),

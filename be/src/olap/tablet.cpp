@@ -248,7 +248,7 @@ TabletSharedPtr Tablet::create_tablet_from_meta(TabletMetaSharedPtr tablet_meta,
 }
 
 Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
-           const std::string_view& cumulative_compaction_type)
+               const std::string_view& cumulative_compaction_type)
         : BaseTablet(std::move(tablet_meta), data_dir),
           _is_bad(false),
           _last_cumu_compaction_failure_millis(0),
@@ -2420,20 +2420,26 @@ Status Tablet::create_rowset_writer(RowsetWriterContext& context,
 
 // create a rowset writer with rowset_id and seg_id
 // after writer, merge this transient rowset with original rowset
-Status Tablet::create_transient_rowset_writer(RowsetSharedPtr rowset_ptr,
-                                              std::unique_ptr<RowsetWriter>* rowset_writer) {
+Status Tablet::create_transient_rowset_writer(
+        RowsetSharedPtr rowset_ptr, std::unique_ptr<RowsetWriter>* rowset_writer,
+        std::shared_ptr<PartialUpdateInfo> partial_update_info, int64_t txn_expiration) {
     RowsetWriterContext context;
     context.rowset_state = PREPARED;
     context.segments_overlap = OVERLAPPING;
     context.tablet_schema = std::make_shared<TabletSchema>();
     context.tablet_schema->copy_from(*(rowset_ptr->tablet_schema()));
-    context.tablet_schema->set_partial_update_info(false, std::set<std::string>());
     context.newest_write_timestamp = UnixSeconds();
     context.tablet_id = table_id();
     context.enable_segcompaction = false;
+    context.partial_update_info = partial_update_info;
+    context.is_transient_rowset_writer = true;
     // ATTN: context.tablet is a shared_ptr, can't simply set it's value to `this`. We should
     // get the shared_ptr from tablet_manager.
 #ifdef CLOUD_MODE
+    if (partial_update_info && partial_update_info->is_partial_update) {
+        context.fs = cloud::latest_fs();
+        context.txn_expiration = txn_expiration;
+    }
     cloud::tablet_mgr()->get_tablet(tablet_id(), &context.tablet);
 #else
     context.tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
@@ -3382,7 +3388,7 @@ Status Tablet::calc_segment_delete_bitmap(RowsetSharedPtr rowset,
     auto rowset_id = rowset->rowset_id();
     Version dummy_version(end_version + 1, end_version + 1);
     auto rowset_schema = rowset->tablet_schema();
-    bool is_partial_update = rowset_schema->is_partial_update();
+    bool is_partial_update = rowset_writer && rowset_writer->is_partial_update();
     // use for partial update
     PartialUpdateReadPlan read_plan_ori;
     PartialUpdateReadPlan read_plan_update;
@@ -3497,8 +3503,11 @@ Status Tablet::calc_segment_delete_bitmap(RowsetSharedPtr rowset,
     }
 
     if (pos > 0) {
+        auto partial_update_info = rowset_writer->get_partial_update_info();
+        DCHECK(partial_update_info);
         RETURN_IF_ERROR(generate_new_block_for_partial_update(
-                rowset_schema, read_plan_ori, read_plan_update, rsid_to_rowset, &block));
+                rowset_schema, partial_update_info->missing_cids, partial_update_info->update_cids,
+                read_plan_ori, read_plan_update, rsid_to_rowset, &block));
         sort_block(block, ordered_block);
         int64_t size;
         RETURN_IF_ERROR(rowset_writer->flush_single_memtable(&ordered_block, &size));
@@ -3577,7 +3586,8 @@ std::vector<RowsetSharedPtr> Tablet::get_rowset_by_ids(
 }
 
 Status Tablet::generate_new_block_for_partial_update(
-        TabletSchemaSPtr rowset_schema, const PartialUpdateReadPlan& read_plan_ori,
+        TabletSchemaSPtr rowset_schema, const std::vector<uint32>& missing_cids,
+        const std::vector<uint32>& update_cids, const PartialUpdateReadPlan& read_plan_ori,
         const PartialUpdateReadPlan& read_plan_update,
         const std::map<RowsetId, RowsetSharedPtr>& rsid_to_rowset,
         vectorized::Block* output_block) {
@@ -3588,10 +3598,8 @@ Status Tablet::generate_new_block_for_partial_update(
     // 4. mark current keys deleted
     CHECK(output_block);
     auto full_mutable_columns = output_block->mutate_columns();
-    auto old_block = rowset_schema->create_missing_columns_block();
-    auto missing_cids = rowset_schema->get_missing_cids();
-    auto update_block = rowset_schema->create_update_columns_block();
-    auto update_cids = rowset_schema->get_update_cids();
+    auto old_block = rowset_schema->create_block_by_cids(missing_cids);
+    auto update_block = rowset_schema->create_block_by_cids(update_cids);
 
     std::map<uint32_t, uint32_t> read_index_old;
     RETURN_IF_ERROR(read_columns_by_plan(rowset_schema, missing_cids, read_plan_ori, rsid_to_rowset,
@@ -3835,6 +3843,12 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
               << ", cur max_version: " << cur_version << ", transaction_id: " << txn_id
               << ", cost: " << watch.get_elapse_time_us() << "(us), total rows: " << total_rows;
 
+#ifdef CLOUD_MODE
+    // update delete bitmap info, in order to avoid recalculation when trying again
+    StorageEngine::instance()->delete_bitmap_txn_manager()->update_tablet_txn_info(
+            txn_id, tablet_id(), delete_bitmap, cur_rowset_ids);
+#endif
+
     if (config::enable_merge_on_write_correctness_check && rowset->num_rows() != 0) {
         // only do correctness check if the rowset has at least one row written
         // check if all the rowset has ROWSET_SENTINEL_MARK
@@ -3853,6 +3867,7 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
         new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
                                  iter->second);
     }
+
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
             this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
 #else
@@ -4011,10 +4026,9 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
     // 1. calc delete bitmap for historical data
     RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(this));
     Version version = max_version();
-    calc_compaction_output_rowset_delete_bitmap(input_rowsets, rowid_conversion, 0,
-                                                version.second + 1, &missed_rows, &location_map,
-                                                tablet_meta()->delete_bitmap(),
-                                                output_rowset_delete_bitmap.get());
+    calc_compaction_output_rowset_delete_bitmap(
+            input_rowsets, rowid_conversion, 0, version.second + 1, &missed_rows, &location_map,
+            tablet_meta()->delete_bitmap(), output_rowset_delete_bitmap.get());
     std::size_t missed_rows_size = missed_rows.size();
     if (compaction_type == ReaderType::READER_CUMULATIVE_COMPACTION) {
         if (merged_rows >= 0 && merged_rows != missed_rows_size) {

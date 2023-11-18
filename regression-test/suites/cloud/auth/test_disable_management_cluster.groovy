@@ -9,6 +9,8 @@ suite("test_disable_management_cluster", "cloud_auth") {
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
 
+    sql "sync"
+
     try {
         result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
              sql """

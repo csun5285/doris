@@ -282,11 +282,10 @@ public class MasterImpl {
         try {
             CalcDeleteBitmapTask calcDeleteBitmapTask = (CalcDeleteBitmapTask) task;
             if (request.getTaskStatus().getStatusCode() != TStatusCode.OK) {
-                calcDeleteBitmapTask.countDownToZero(task.getBackendId() + ": "
-                        + request.getTaskStatus().getErrorMsgs().toString());
-            } else if (request.getErrorTabletIdsSize() > 0) {
-                calcDeleteBitmapTask.countDownToZero(task.getBackendId() + ": error tablet size: "
-                        + request.getErrorTabletIdsSize());
+                calcDeleteBitmapTask.countDownToZero(request.getTaskStatus().getStatusCode(),
+                        "backend: " + task.getBackendId() + ", error_tablet_size: "
+                                + request.getErrorTabletIdsSize() + ", err_msg: "
+                                + request.getTaskStatus().getErrorMsgs().toString());
             } else {
                 calcDeleteBitmapTask.countDownLatch(task.getBackendId(), calcDeleteBitmapTask.getTransactionId());
                 if (LOG.isDebugEnabled()) {

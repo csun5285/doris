@@ -47,6 +47,7 @@ class TabletSchema;
 class TupleDescriptor;
 enum KeysType : int;
 struct FlushContext;
+struct PartialUpdateInfo;
 
 // row pos in _input_mutable_block
 struct RowInBlock {
@@ -159,16 +160,16 @@ public:
         return *this;
     }
 
-    int64_t raw_rows = 0;
-    int64_t merged_rows = 0;
+    std::atomic<int64_t> raw_rows = 0;
+    std::atomic<int64_t> merged_rows = 0;
     int64_t sort_ns = 0;
     int64_t agg_ns = 0;
     int64_t put_into_output_ns = 0;
     int64_t delete_bitmap_ns = 0;
     int64_t segment_writer_ns = 0;
     int64_t duration_ns = 0;
-    int64_t sort_times = 0;
-    int64_t agg_times = 0;
+    std::atomic<int64_t> sort_times = 0;
+    std::atomic<int64_t> agg_times = 0;
 };
 
 class MemTable {
@@ -176,6 +177,7 @@ public:
     MemTable(TabletSharedPtr tablet, Schema* schema, const TabletSchema* tablet_schema,
              const std::vector<SlotDescriptor*>* slot_descs, TupleDescriptor* tuple_desc,
              RowsetWriter* rowset_writer, std::shared_ptr<MowContext> mow_context,
+             PartialUpdateInfo* partial_update_info,
              const std::shared_ptr<MemTracker>& insert_mem_tracker,
              const std::shared_ptr<MemTracker>& flush_mem_tracker);
     ~MemTable();
@@ -300,6 +302,7 @@ private:
     size_t _mem_usage;
 
     std::shared_ptr<MowContext> _mow_context;
+    bool _is_partial_update {false};
     size_t _num_columns;
     int32_t _seq_col_idx_in_block = -1;
 }; // class MemTable

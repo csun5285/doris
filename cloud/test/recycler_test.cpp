@@ -18,6 +18,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_service.h"
+#include "meta-service/txn_kv_error.h"
 #include "mock_resource_manager.h"
 #include "rate-limiter/rate_limiter.h"
 #include "recycler/checker.h"
@@ -111,7 +112,7 @@ static int create_recycle_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     rowset_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
@@ -121,7 +122,7 @@ static int create_recycle_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
         rowset.tablet_schema().SerializeToString(&schema_val);
         txn->put(schema_key, schema_val);
     }
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
 
@@ -149,7 +150,7 @@ static int create_tmp_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
         rowset.SerializeToString(&val);
     }
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
@@ -159,7 +160,7 @@ static int create_tmp_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
         rowset.tablet_schema().SerializeToString(&schema_val);
         txn->put(schema_key, schema_val);
     }
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
 
@@ -202,11 +203,11 @@ static int create_committed_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     rowset_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
 
@@ -224,7 +225,7 @@ static int create_committed_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
 static int create_tablet(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t partition_id,
                          int64_t tablet_id) {
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     auto key = meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
@@ -238,7 +239,7 @@ static int create_tablet(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int6
     txn->put(key, val); // val is not necessary
     key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
     txn->put(key, val); // val is not necessary
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -263,11 +264,11 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t part
     partition_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -279,11 +280,11 @@ static int create_version_kv(TxnKv* txn_kv, int64_t table_id, int64_t partition_
     version.set_version(1);
     auto val = version.SerializeAsString();
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -295,11 +296,11 @@ static int create_txn_label_kv(TxnKv* txn_kv, std::string label, int64_t db_id) 
     auto keyinfo = TxnLabelKeyInfo({instance_id, db_id, label});
     txn_label_key(keyinfo, &txn_label_key_);
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(txn_label_key_, label);
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -320,11 +321,11 @@ static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_i
     index_pb.SerializeToString(&val);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -339,14 +340,14 @@ static int get_txn_info(std::shared_ptr<TxnKv> txn_kv, std::string instance_id, 
     LOG(INFO) << instance_id << "|" << db_id << "|" << txn_id;
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn_info_key(txn_inf_key_info, &txn_inf_key);
     LOG(INFO) << "txn_inf_key:" << hex(txn_inf_key);
-    int ret = txn->get(txn_inf_key, &txn_inf_val);
-    if (ret != 0) {
-        LOG(WARNING) << "txn->get failed, ret=" << ret;
+    TxnErrorCode err = txn->get(txn_inf_key, &txn_inf_val);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "txn->get failed, err=" << err;
         return -2;
     }
 
@@ -355,8 +356,9 @@ static int get_txn_info(std::shared_ptr<TxnKv> txn_kv, std::string instance_id, 
         return -3;
     }
     LOG(INFO) << "txn_info_pb" << txn_info_pb.DebugString();
-    if (txn->commit() != 0) {
-        LOG(WARNING) << "txn->commit failed, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "txn->commit failed, err=" << err;
         return -4;
     }
     return 0;
@@ -371,26 +373,26 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
     LOG(INFO) << instance_id << "|" << db_id << "|" << txn_id;
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn_info_key(txn_inf_key_info, &txn_inf_key);
-    int ret = txn->get(txn_inf_key, &txn_inf_val);
-    if (ret != 1) {
+    TxnErrorCode err = txn->get(txn_inf_key, &txn_inf_val);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -2;
     }
 
     std::string label_key, label_val;
     txn_label_key({instance_id, db_id, label}, &label_key);
-    ret = txn->get(label_key, &label_val);
-    if (ret != 1) {
+    err = txn->get(label_key, &label_val);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -3;
     }
 
     std::string index_key, index_val;
     index_key = txn_index_key({instance_id, txn_id});
-    ret = txn->get(index_key, &index_val);
-    if (ret != 1) {
+    err = txn->get(index_key, &index_val);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -4;
     }
 
@@ -398,8 +400,8 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
     std::string running_value;
     TxnRunningKeyInfo running_key_info {instance_id, db_id, txn_id};
     txn_running_key(running_key_info, &running_key);
-    ret = txn->get(running_key, &running_value);
-    if (ret != 1) {
+    err = txn->get(running_key, &running_value);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -5;
     }
 
@@ -407,8 +409,8 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
     std::string rec_txn_val;
     RecycleTxnKeyInfo recycle_txn_key_info {instance_id, db_id, txn_id};
     recycle_txn_key(recycle_txn_key_info, &rec_txn_key);
-    ret = txn->get(rec_txn_key, &rec_txn_val);
-    if (ret != 1) {
+    err = txn->get(rec_txn_key, &rec_txn_val);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -6;
     }
 
@@ -510,14 +512,14 @@ static int create_copy_job(TxnKv* txn_kv, const std::string& stage_id, int64_t t
     }
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     txn->put(key, val);
     for (const auto& file_key : file_keys) {
         txn->put(file_key, file_val);
     }
-    if (txn->commit() != 0) {
+    if (txn->commit() != TxnErrorCode::TXN_OK) {
         return -1;
     }
     return 0;
@@ -531,14 +533,14 @@ static int copy_job_exists(TxnKv* txn_kv, const std::string& stage_id, int64_t t
     copy_job_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
-    auto ret = txn->get(key, &val);
-    if (ret < 0) {
-        return ret;
+    TxnErrorCode err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        return -1;
     }
-    *exist = ret == 0;
+    *exist = err == TxnErrorCode::TXN_OK;
     return 0;
 }
 
@@ -565,12 +567,12 @@ static int get_copy_file_num(TxnKv* txn_kv, const std::string& stage_id, int64_t
     copy_file_key(key_info1, &key1);
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != 0) {
+    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
         return -1;
     }
     std::unique_ptr<RangeGetIterator> it;
     do {
-        if (txn->get(key0, key1, &it) != 0) {
+        if (txn->get(key0, key1, &it) != TxnErrorCode::TXN_OK) {
             return -1;
         }
         while (it->has_next()) {
@@ -664,11 +666,11 @@ TEST(RecyclerTest, recycle_rowsets) {
     EXPECT_TRUE(files.empty());
     // check all recycle rowset kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     auto begin_key = recycle_key_prefix(instance_id);
     auto end_key = recycle_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     EXPECT_EQ(it->size(), 0);
     // Check InvertedIndexIdCache
     EXPECT_EQ(insert_inverted_index, 4);
@@ -734,11 +736,11 @@ TEST(RecyclerTest, bench_recycle_rowsets) {
     ASSERT_TRUE(files.empty());
     // check all recycle rowset kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     auto begin_key = recycle_key_prefix(instance_id);
     auto end_key = recycle_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
 
@@ -801,11 +803,11 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
     ASSERT_TRUE(files.empty());
     // check all tmp rowset kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     auto begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
     auto end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // Check InvertedIndexIdCache
     EXPECT_EQ(insert_inverted_index, 16);
@@ -860,27 +862,27 @@ TEST(RecyclerTest, recycle_tablet) {
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_tablet_key, meta_tablet_idx_key, meta_rowset_key
     auto begin_key = meta_key_prefix(instance_id);
     auto end_key = meta_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
     begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
     begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
     begin_key = recycle_key_prefix(instance_id);
     end_key = recycle_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
 
@@ -941,55 +943,55 @@ TEST(RecyclerTest, recycle_indexes) {
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_rowset_key
     auto begin_key = meta_rowset_key({instance_id, 0, 0});
     auto end_key = meta_rowset_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_rowset_tmp_key
     begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
     end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 1000);
     // meta_tablet_idx_key
     begin_key = meta_tablet_idx_key({instance_id, 0});
     end_key = meta_tablet_idx_key({instance_id, INT64_MAX});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_key
     begin_key = meta_tablet_key({instance_id, 0, 0, 0, 0});
     end_key = meta_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_schema_key
     begin_key = meta_schema_key({instance_id, 0, 0});
     end_key = meta_schema_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
     begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
     begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
     begin_key = recycle_key_prefix(instance_id);
     end_key = recycle_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     // Test recycle tmp rowsets after recycle indexes
     ASSERT_EQ(recycler.recycle_tmp_rowsets(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
     end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
 
@@ -1052,42 +1054,42 @@ TEST(RecyclerTest, recycle_partitions) {
     ASSERT_TRUE(files.empty());
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_rowset_key
     auto begin_key = meta_rowset_key({instance_id, 0, 0});
     auto end_key = meta_rowset_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_rowset_tmp_key
     begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
     end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_idx_key
     begin_key = meta_tablet_idx_key({instance_id, 0});
     end_key = meta_tablet_idx_key({instance_id, INT64_MAX});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_key
     begin_key = meta_tablet_key({instance_id, 0, 0, 0, 0});
     end_key = meta_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
     begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
     begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
     end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
     begin_key = recycle_key_prefix(instance_id);
     end_key = recycle_key_prefix(instance_id + '\xff');
-    ASSERT_EQ(txn->get(begin_key, end_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
 
@@ -1123,11 +1125,11 @@ TEST(RecyclerTest, recycle_versions) {
     ASSERT_EQ(recycler.recycle_versions(), 0); // `recycle_versions` should do nothing
     // All version kvs except version of partition 30006 must have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     auto key_begin = version_key({instance_id, db_id, table_id, 0});
     auto key_end = version_key({instance_id, db_id, table_id, INT64_MAX});
     std::unique_ptr<RangeGetIterator> iter;
-    ASSERT_EQ(txn->get(key_begin, key_end, &iter), 0);
+    ASSERT_EQ(txn->get(key_begin, key_end, &iter), TxnErrorCode::TXN_OK);
     ASSERT_EQ(iter->size(), 1);
     auto [k, v] = iter->next();
     EXPECT_EQ(k, version_key({instance_id, db_id, table_id, 30006}));
@@ -1140,8 +1142,8 @@ TEST(RecyclerTest, recycle_versions) {
     ASSERT_EQ(recycler.recycle_indexes(), 0);
     // `recycle_versions` should delete all version kvs of the dropped table
     ASSERT_EQ(recycler.recycle_versions(), 0);
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
-    ASSERT_EQ(txn->get(key_begin, key_end, &iter), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(key_begin, key_end, &iter), TxnErrorCode::TXN_OK);
     ASSERT_EQ(iter->size(), 0);
 }
 
@@ -1619,19 +1621,19 @@ TEST(RecyclerTest, recycle_stage) {
     recycle_stage.mutable_stage()->CopyFrom(stage);
     val = recycle_stage.SerializeAsString();
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(0, txn_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn_kv->create_txn(&txn));
     txn->put(key, val);
-    ASSERT_EQ(0, txn->commit());
-    ASSERT_EQ(0, txn_kv->create_txn(&txn));
-    ASSERT_EQ(0, txn->get(key, &val));
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn->get(key, &val));
 
     // recycle stage
     ASSERT_EQ(0, recycler.recycle_stage());
     std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("", &files));
     ASSERT_EQ(0, files.size());
-    ASSERT_EQ(0, txn_kv->create_txn(&txn));
-    ASSERT_EQ(1, txn->get(key, &val));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_KEY_NOT_FOUND, txn->get(key, &val));
 }
 
 TEST(RecyclerTest, recycle_deleted_instance) {
@@ -1705,37 +1707,37 @@ TEST(RecyclerTest, recycle_deleted_instance) {
     // check if all the keys are deleted
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
 
     std::string start_txn_key = txn_key_prefix(instance_id);
     std::string end_txn_key = txn_key_prefix(instance_id + '\x00');
-    ASSERT_EQ(txn->get(start_txn_key, end_txn_key, &it), 0);
+    ASSERT_EQ(txn->get(start_txn_key, end_txn_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     std::string start_version_key = version_key({instance_id, 0, 0, 0});
     std::string end_version_key = version_key({instance_id, INT64_MAX, 0, 0});
-    ASSERT_EQ(txn->get(start_version_key, end_version_key, &it), 0);
+    ASSERT_EQ(txn->get(start_version_key, end_version_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     std::string start_meta_key = meta_key_prefix(instance_id);
     std::string end_meta_key = meta_key_prefix(instance_id + '\x00');
-    ASSERT_EQ(txn->get(start_meta_key, end_meta_key, &it), 0);
+    ASSERT_EQ(txn->get(start_meta_key, end_meta_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     auto begin_recycle_key = recycle_key_prefix(instance_id);
     auto end_recycle_key = recycle_key_prefix(instance_id + '\x00');
-    ASSERT_EQ(txn->get(begin_recycle_key, end_recycle_key, &it), 0);
+    ASSERT_EQ(txn->get(begin_recycle_key, end_recycle_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     std::string start_stats_tablet_key = stats_tablet_key({instance_id, 0, 0, 0, 0});
     std::string end_stats_tablet_key = stats_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
-    ASSERT_EQ(txn->get(start_stats_tablet_key, end_stats_tablet_key, &it), 0);
+    ASSERT_EQ(txn->get(start_stats_tablet_key, end_stats_tablet_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     std::string start_copy_key = copy_key_prefix(instance_id);
     std::string end_copy_key = copy_key_prefix(instance_id + '\x00');
-    ASSERT_EQ(txn->get(start_copy_key, end_copy_key, &it), 0);
+    ASSERT_EQ(txn->get(start_copy_key, end_copy_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
 
@@ -1757,7 +1759,7 @@ TEST(RecyclerTest, multi_recycler) {
     sp->enable_processing();
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
     for (int i = 0; i < 10; ++i) {
         InstanceInfoPB instance;
         instance.set_instance_id(std::to_string(i));
@@ -1775,7 +1777,7 @@ TEST(RecyclerTest, multi_recycler) {
         std::string val = instance.SerializeAsString();
         txn->put(key, val);
     }
-    ASSERT_EQ(0, txn->commit());
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
 
     Recycler r1(mem_kv);
     r1.ip_port_ = "r1:p1";
@@ -1793,14 +1795,14 @@ TEST(RecyclerTest, multi_recycler) {
     r2.stop();
     r3.stop();
 
-    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
     for (int i = 0; i < 10; ++i) {
         JobRecycleKeyInfo key_info {std::to_string(i)};
         JobRecyclePB job_info;
         std::string key;
         std::string val;
         job_recycle_key(key_info, &key);
-        ASSERT_EQ(0, txn->get(key, &val)) << i;
+        ASSERT_EQ(TxnErrorCode::TXN_OK, txn->get(key, &val)) << i;
         ASSERT_TRUE(job_info.ParseFromString(val));
         EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
         EXPECT_GT(job_info.last_finish_time_ms(), 0);
@@ -2034,7 +2036,7 @@ TEST(CheckerTest, multi_checker) {
     sp->enable_processing();
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
     for (int i = 0; i < 10; ++i) {
         InstanceInfoPB instance;
         instance.set_instance_id(std::to_string(i));
@@ -2052,7 +2054,7 @@ TEST(CheckerTest, multi_checker) {
         std::string val = instance.SerializeAsString();
         txn->put(key, val);
     }
-    ASSERT_EQ(0, txn->commit());
+    ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
 
     Checker c1(mem_kv);
     c1.ip_port_ = "r1:p1";
@@ -2070,14 +2072,14 @@ TEST(CheckerTest, multi_checker) {
     c2.stop();
     c3.stop();
 
-    ASSERT_EQ(0, mem_kv->create_txn(&txn));
+    ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
     for (int i = 0; i < 10; ++i) {
         JobRecycleKeyInfo key_info {std::to_string(i)};
         JobRecyclePB job_info;
         std::string key;
         std::string val;
         job_check_key(key_info, &key);
-        ASSERT_EQ(0, txn->get(key, &val)) << i;
+        ASSERT_EQ(TxnErrorCode::TXN_OK, txn->get(key, &val)) << i;
         ASSERT_TRUE(job_info.ParseFromString(val));
         EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
         EXPECT_GT(job_info.last_finish_time_ms(), 0);
@@ -2123,13 +2125,13 @@ TEST(CheckerTest, do_inspect) {
         {
             // add job_info but no last ctime
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
             job_info.set_instance_id(instance_id);
             std::string key = job_check_key({instance_id});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
-            ASSERT_EQ(0, txn->commit());
+            ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
             checker.do_inspect(instance);
             auto sp = SyncPoint::get_instance();
             std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -2143,7 +2145,7 @@ TEST(CheckerTest, do_inspect) {
         {
             // add job_info with last ctime
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
             job_info.set_instance_id(instance_id);
             job_info.set_last_ctime_ms(12345);
@@ -2157,7 +2159,7 @@ TEST(CheckerTest, do_inspect) {
             std::string key = job_check_key({instance_id});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
-            ASSERT_EQ(0, txn->commit());
+            ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
             checker.do_inspect(instance);
         }
         {
@@ -2167,7 +2169,7 @@ TEST(CheckerTest, do_inspect) {
                                             : 7 * 3600000;
             auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
             std::unique_ptr<Transaction> txn;
-            ASSERT_EQ(0, mem_kv->create_txn(&txn));
+            ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
             job_info.set_instance_id(instance_id);
             job_info.set_last_ctime_ms(now - expiration_ms - 10);
@@ -2181,10 +2183,108 @@ TEST(CheckerTest, do_inspect) {
             std::string key = job_check_key({instance_id});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
-            ASSERT_EQ(0, txn->commit());
+            ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
             checker.do_inspect(instance);
             ASSERT_TRUE(alarm);
         }
+    }
+}
+
+TEST(RecyclerTest, delete_rowset_data) {
+    auto txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    InstanceInfoPB instance;
+    instance.set_instance_id(instance_id);
+    auto obj_info = instance.add_obj_info();
+    obj_info->set_id("recycle_tmp_rowsets");
+    obj_info->set_ak(config::test_s3_ak);
+    obj_info->set_sk(config::test_s3_sk);
+    obj_info->set_endpoint(config::test_s3_endpoint);
+    obj_info->set_region(config::test_s3_region);
+    obj_info->set_bucket(config::test_s3_bucket);
+    obj_info->set_prefix("recycle_tmp_rowsets");
+
+    std::vector<doris::TabletSchemaPB> schemas;
+    for (int i = 0; i < 5; ++i) {
+        auto& schema = schemas.emplace_back();
+        schema.set_schema_version(i);
+        for (int j = 0; j < i; ++j) {
+            schema.add_index()->set_index_id(j);
+        }
+    }
+
+    {
+        InstanceRecycler recycler(txn_kv, instance);
+        ASSERT_EQ(recycler.init(), 0);
+        auto accessor = recycler.accessor_map_.begin()->second;
+        int64_t txn_id_base = 114115;
+        int64_t tablet_id_base = 10015;
+        int64_t index_id_base = 1000;
+        // Delete each rowset directly using one RowsetPB
+        for (int i = 0; i < 100; ++i) {
+            int64_t txn_id = txn_id_base + i;
+            for (int j = 0; j < 20; ++j) {
+                auto rowset = create_rowset("recycle_tmp_rowsets", tablet_id_base + j,
+                                            index_id_base + j % 4, 5, schemas[i % 5], txn_id);
+                create_tmp_rowset(txn_kv.get(), accessor.get(), rowset, i & 1);
+                ASSERT_EQ(0, recycler.delete_rowset_data(rowset));
+            }
+        }
+        std::vector<ObjectMeta> files;
+        accessor->list("", &files);
+        ASSERT_EQ(0, files.size());
+    }
+    {
+        InstanceInfoPB tmp_instance;
+        std::string resource_id = "recycle_tmp_rowsets";
+        tmp_instance.set_instance_id(instance_id);
+        auto tmp_obj_info = tmp_instance.add_obj_info();
+        tmp_obj_info->set_id(resource_id);
+        tmp_obj_info->set_ak(config::test_s3_ak);
+        tmp_obj_info->set_sk(config::test_s3_sk);
+        tmp_obj_info->set_endpoint(config::test_s3_endpoint);
+        tmp_obj_info->set_region(config::test_s3_region);
+        tmp_obj_info->set_bucket(config::test_s3_bucket);
+        tmp_obj_info->set_prefix(resource_id);
+
+        InstanceRecycler recycler(txn_kv, tmp_instance);
+        ASSERT_EQ(recycler.init(), 0);
+        auto accessor = recycler.accessor_map_.begin()->second;
+        // Delete multiple rowset files using one series of RowsetPB
+        constexpr int index_id = 10001, tablet_id = 10002;
+        std::vector<doris::RowsetMetaPB> rowset_pbs;
+        for (int i = 0; i < 10; ++i) {
+            auto rowset = create_rowset(resource_id, tablet_id, index_id, 5, schemas[i % 5]);
+            create_recycle_rowset(
+                    txn_kv.get(), accessor.get(), rowset,
+                    static_cast<RecycleRowsetPB::Type>(i % (RecycleRowsetPB::Type_MAX + 1)), true);
+
+            rowset_pbs.emplace_back(std::move(rowset));
+        }
+        ASSERT_EQ(0, recycler.delete_rowset_data(rowset_pbs));
+        std::vector<ObjectMeta> files;
+        accessor->list("", &files);
+        ASSERT_EQ(0, files.size());
+    }
+    {
+        InstanceRecycler recycler(txn_kv, instance);
+        ASSERT_EQ(recycler.init(), 0);
+        auto accessor = recycler.accessor_map_.begin()->second;
+        // Delete multiple rowset files using one series of RowsetPB
+        constexpr int index_id = 20001, tablet_id = 20002;
+        // Delete each rowset file directly using it's id to construct one path
+        for (int i = 0; i < 1000; ++i) {
+            auto rowset =
+                    create_rowset("recycle_tmp_rowsets", tablet_id, index_id, 5, schemas[i % 5]);
+            create_recycle_rowset(txn_kv.get(), accessor.get(), rowset, RecycleRowsetPB::COMPACT,
+                                  true);
+            ASSERT_EQ(0, recycler.delete_rowset_data(rowset.resource_id(), rowset.tablet_id(),
+                                                     rowset.rowset_id_v2()));
+        }
+        std::vector<ObjectMeta> files;
+        accessor->list("", &files);
+        ASSERT_EQ(0, files.size());
     }
 }
 

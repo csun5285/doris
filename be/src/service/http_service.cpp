@@ -17,7 +17,6 @@
 
 #include "service/http_service.h"
 
-#include "http/action/change_file_cache_state_action.h"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -26,11 +25,11 @@
 #include "http/action/check_rpc_channel_action.h"
 #include "http/action/check_tablet_segment_action.h"
 #include "http/action/checksum_action.h"
+#include "http/action/clear_file_cache_async_action.h"
 #include "http/action/compaction_action.h"
 #include "http/action/config_action.h"
 #include "http/action/download_action.h"
 #include "http/action/download_binlog_action.h"
-#include "http/action/file_cache_action.h"
 #include "http/action/health_action.h"
 #include "http/action/jeprofile_actions.h"
 #include "http/action/meta_action.h"
@@ -165,9 +164,6 @@ Status HttpService::start() {
     MetaAction* meta_action =
             _pool.add(new MetaAction(_env, TPrivilegeHier::GLOBAL, TPrivilegeType::ADMIN));
     _ev_http_server->register_handler(HttpMethod::GET, "/api/meta/{op}/{tablet_id}", meta_action);
-
-    FileCacheAction* file_cache_action = _pool.add(new FileCacheAction());
-    _ev_http_server->register_handler(HttpMethod::GET, "/api/file_cache", file_cache_action);
 
 #ifndef BE_TEST
     // Register BE checksum action
@@ -326,10 +322,10 @@ Status HttpService::cloud_start() {
     ShrinkMemAction* shrink_mem_action = _pool.add(new ShrinkMemAction());
     _ev_http_server->register_handler(HttpMethod::GET, "/api/shrink_mem", shrink_mem_action);
 
-    ChangeFileCacheStateAction* change_file_cache_action =
-            _pool.add(new ChangeFileCacheStateAction());
-    _ev_http_server->register_handler(HttpMethod::POST, "/api/change_file_cache_state",
-                                      change_file_cache_action);
+    ClearFileCacheAsyncAction* clear_file_cache_async_action =
+            _pool.add(new ClearFileCacheAsyncAction());
+    _ev_http_server->register_handler(HttpMethod::GET, "/api/clear_file_cache_async",
+                                      clear_file_cache_async_action);
 
     PadRowsetAction* pad_rowset_action =
             _pool.add(new PadRowsetAction(_env, TPrivilegeHier::GLOBAL, TPrivilegeType::ADMIN));

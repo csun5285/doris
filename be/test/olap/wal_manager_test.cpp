@@ -70,12 +70,16 @@ public:
     }
     void TearDown() override {
         io::global_local_filesystem()->delete_directory(wal_dir);
+        _env->_wal_manager->stop();
         SAFE_DELETE(_env->_function_client_cache);
         SAFE_DELETE(_env->_internal_client_cache);
         SAFE_DELETE(_env->_master_info);
     }
 
-    void prepare() { io::global_local_filesystem()->create_directory(wal_dir); }
+    void prepare() {
+        auto st = io::global_local_filesystem()->create_directory(wal_dir);
+        ASSERT_TRUE(st.ok()) << st;
+    }
 
     void createWal(const std::string& wal_path) {
         auto wal_writer = WalWriter(wal_path);

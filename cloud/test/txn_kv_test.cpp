@@ -17,6 +17,7 @@
 #include "common/sync_point.h"
 
 #include "gtest/gtest.h"
+#include "meta-service/txn_kv_error.h"
 // clang-format on
 
 using namespace selectdb;
@@ -48,30 +49,31 @@ TEST(TxnKvTest, GetVersionTest) {
     std::unique_ptr<Transaction> txn;
     std::string key;
     std::string val;
-    int ret;
     {
-        ret = txn_kv->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         key.push_back('\xfe');
         key.append(" unit_test_prefix ");
         key.append(" GetVersionTest ");
         txn->atomic_set_ver_value(key, "");
-        ret = txn->commit();
+        TxnErrorCode err = txn->commit();
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+
         int64_t ver0 = 0;
-        ASSERT_EQ(txn->get_committed_version(&ver0), 0);
+        ASSERT_EQ(txn->get_committed_version(&ver0), TxnErrorCode::TXN_OK);
         ASSERT_GT(ver0, 0);
 
-        ret = txn_kv->create_txn(&txn);
-        ASSERT_EQ(ret, 0);
-        ret = txn->get(key, &val);
-        ASSERT_EQ(ret, 0);
+        err = txn_kv->create_txn(&txn);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        err = txn->get(key, &val);
+        ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+
         int64_t ver1 = 0;
-        ASSERT_EQ(txn->get_read_version(&ver1), 0);
+        ASSERT_EQ(txn->get_read_version(&ver1), TxnErrorCode::TXN_OK);
         ASSERT_GE(ver1, ver0);
 
         int64_t ver2;
         int64_t txn_id;
-        ret = get_txn_id_from_fdb_ts(val, &txn_id);
+        int ret = get_txn_id_from_fdb_ts(val, &txn_id);
         ASSERT_EQ(ret, 0);
         ver2 = txn_id >> 10;
 
@@ -83,105 +85,126 @@ TEST(TxnKvTest, ConflictTest) {
     std::unique_ptr<Transaction> txn, txn1, txn2;
     std::string key = "unit_test";
     std::string val, val1, val2;
-    int ret = 0;
 
     // Historical data
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->put("unit_test", "xxxxxxxxxxxxx");
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // txn1 begin
-    ret = txn_kv->create_txn(&txn1);
-    ASSERT_EQ(ret, 0);
-    ret = txn1->get(key, &val1);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn1), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn1->get(key, &val1), TxnErrorCode::TXN_OK);
     std::cout << "val1=" << val1 << std::endl;
 
     // txn2 begin
-    ret = txn_kv->create_txn(&txn2);
-    ASSERT_EQ(ret, 0);
-    ret = txn2->get(key, &val2);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn2), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn2->get(key, &val2), TxnErrorCode::TXN_OK);
     std::cout << "val2=" << val2 << std::endl;
 
     // txn2 commit
     val2 = "zzzzzzzzzzzzzzz";
     txn2->put(key, val2);
-    ret = txn2->commit();
-    EXPECT_EQ(ret, 0);
+    ASSERT_EQ(txn2->commit(), TxnErrorCode::TXN_OK);
 
     // txn1 commit, intend to fail
     val1 = "yyyyyyyyyyyyyyy";
     txn1->put(key, val1);
-    ret = txn1->commit();
-    EXPECT_EQ(ret, -1);
+    ASSERT_NE(txn1->commit(), TxnErrorCode::TXN_OK);
 
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = txn->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
     ASSERT_EQ(val, val2); // First wins
     std::cout << "final val=" << val << std::endl;
+}
+
+TEST(TxnKvTest, AtomicSetVerKeyTest) {
+    std::string key_prefix = "key_1";
+
+    std::string versionstamp_1;
+    {
+        // write key_1
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        txn->atomic_set_ver_key(key_prefix, "1");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_1
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_1, _1] = it->next();
+        ASSERT_EQ(key_1.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_1.remove_prefix(key_prefix.size());
+        versionstamp_1 = key_1;
+    }
+
+    std::string versionstamp_2;
+    {
+        // write key_2
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        key_prefix = "key_2";
+        txn->atomic_set_ver_key(key_prefix, "2");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_2
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_2, _2] = it->next();
+        ASSERT_EQ(key_2.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_2.remove_prefix(key_prefix.size());
+        versionstamp_2 = key_2;
+    }
+
+    ASSERT_LT(versionstamp_1, versionstamp_2);
 }
 
 TEST(TxnKvTest, AtomicAddTest) {
     std::unique_ptr<Transaction> txn, txn1, txn2;
     std::string key = "counter";
     // clear counter
-    int ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     txn->remove(key);
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     // txn1 atomic add
-    ret = txn_kv->create_txn(&txn1);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn1), TxnErrorCode::TXN_OK);
     txn1->atomic_add(key, 10);
     // txn2 atomic add
-    ret = txn_kv->create_txn(&txn2);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn2), TxnErrorCode::TXN_OK);
     txn2->atomic_add(key, 20);
     // txn1 commit success
-    ret = txn1->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn1->commit(), TxnErrorCode::TXN_OK);
     // txn2 commit success
-    ret = txn2->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn2->commit(), TxnErrorCode::TXN_OK);
     // Check counter val
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::string val;
-    ret = txn->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
     ASSERT_EQ(val.size(), 8);
     ASSERT_EQ(*(int64_t*)val.data(), 30);
 
     // txn1 atomic add
-    ret = txn_kv->create_txn(&txn1);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn1), TxnErrorCode::TXN_OK);
     txn1->atomic_add(key, 30);
     // txn2 get and put
-    ret = txn_kv->create_txn(&txn2);
-    ASSERT_EQ(ret, 0);
-    ret = txn2->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn2), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn2->get(key, &val), TxnErrorCode::TXN_OK);
     ASSERT_EQ(val.size(), 8);
     ASSERT_EQ(*(int64_t*)val.data(), 30);
     *(int64_t*)val.data() = 100;
     txn2->put(key, val);
     // txn1 commit success
-    ret = txn1->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn1->commit(), TxnErrorCode::TXN_OK);
     // txn2 commit, intend to fail
-    ret = txn2->commit();
-    ASSERT_EQ(ret, -1);
+    ASSERT_NE(txn2->commit(), TxnErrorCode::TXN_OK);
     // Check counter val
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = txn->get(key, &val);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
     ASSERT_EQ(val.size(), 8);
     ASSERT_EQ(*(int64_t*)val.data(), 60);
 }
@@ -204,24 +227,20 @@ TEST(TxnKvTest, CompatibleGetTest) {
     auto val = schema.SerializeAsString();
 
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
     ValueBuf val_buf;
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 1);
+    ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
     txn->put(key, val);
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // Check get
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 0);
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+    err = selectdb::key_exists(txn.get(), key);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+    err = selectdb::get(txn.get(), key, &val_buf);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     EXPECT_EQ(val_buf.ver, 0);
     doris::TabletSchemaPB saved_schema;
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
@@ -232,18 +251,13 @@ TEST(TxnKvTest, CompatibleGetTest) {
         EXPECT_EQ(saved_col.name(), col.name());
     }
 
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     val_buf.remove(txn.get());
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     // Check remove
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 1);
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
+    ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
 }
 
 TEST(TxnKvTest, PutLargeValueTest) {
@@ -270,21 +284,17 @@ TEST(TxnKvTest, PutLargeValueTest) {
     std::string instance_id = "put_large_value_" + std::to_string(::time(nullptr));
     auto key = meta_schema_key({instance_id, 10005, 1});
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     selectdb::put(txn.get(), key, schema, 1, 100);
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     // Check get
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     ValueBuf val_buf;
     doris::TabletSchemaPB saved_schema;
-    ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_OK);
+    TxnErrorCode err = selectdb::get(txn.get(), key, &val_buf);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     std::cout << "num iterators=" << val_buf.iters.size() << std::endl;
     EXPECT_EQ(val_buf.ver, 1);
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
@@ -296,8 +306,8 @@ TEST(TxnKvTest, PutLargeValueTest) {
     }
     // Check multi range get
     sp->set_call_back("memkv::Transaction::get", [](void* limit) { *((int*)limit) = 100; });
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 0);
+    err = selectdb::get(txn.get(), key, &val_buf);
+    ASSERT_EQ(err, TxnErrorCode::TXN_OK);
     std::cout << "num iterators=" << val_buf.iters.size() << std::endl;
     EXPECT_EQ(val_buf.ver, 1);
     ASSERT_TRUE(val_buf.to_pb(&saved_schema));
@@ -317,7 +327,7 @@ TEST(TxnKvTest, PutLargeValueTest) {
             auto [k, _] = it->next();
             k.remove_prefix(1);
             fields.clear();
-            ret = decode_key(&k, &fields);
+            int ret = decode_key(&k, &fields);
             ASSERT_EQ(ret, 0);
             int64_t* suffix = std::get_if<int64_t>(&std::get<0>(fields.back()));
             ASSERT_TRUE(suffix);
@@ -325,18 +335,13 @@ TEST(TxnKvTest, PutLargeValueTest) {
         }
     }
 
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     val_buf.remove(txn.get());
-    ret = txn->commit();
-    ASSERT_EQ(ret, 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     // Check remove
-    ret = txn_kv->create_txn(&txn);
-    ASSERT_EQ(ret, 0);
-    ret = selectdb::key_exists(txn.get(), key);
-    ASSERT_EQ(ret, 1);
-    ret = selectdb::get(txn.get(), key, &val_buf);
-    ASSERT_EQ(ret, 1);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+    ASSERT_EQ(selectdb::key_exists(txn.get(), key), TxnErrorCode::TXN_KEY_NOT_FOUND);
+    ASSERT_EQ(selectdb::get(txn.get(), key, &val_buf), TxnErrorCode::TXN_KEY_NOT_FOUND);
 }
 
 TEST(TxnKvTest, RangeGetIteratorContinue) {
@@ -344,19 +349,19 @@ TEST(TxnKvTest, RangeGetIteratorContinue) {
     std::string prefix("range_get_iterator_continue");
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         for (size_t i = 0; i < 1000; ++i) {
             txn->put(fmt::format("{}-{:05}", prefix, i), std::to_string(i));
         }
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     }
 
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
 
     std::unique_ptr<RangeGetIterator> it;
     std::string end = prefix + "\xFF";
-    ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+    ASSERT_EQ(txn->get(prefix, end, &it, true, 500), TxnErrorCode::TXN_OK);
 
     size_t i = 0;
     while (true) {
@@ -370,7 +375,7 @@ TEST(TxnKvTest, RangeGetIteratorContinue) {
             break;
         }
         std::string begin = it->next_begin_key();
-        ASSERT_EQ(txn->get(begin, end, &it, true, 500), 0);
+        ASSERT_EQ(txn->get(begin, end, &it, true, 500), TxnErrorCode::TXN_OK);
     }
     ASSERT_EQ(i, 1000);
 }
@@ -380,21 +385,21 @@ TEST(TxnKvTest, RangeGetIteratorSeek) {
     std::string prefix("range_get_iterator_seek");
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         for (size_t i = 0; i < 10; ++i) {
             txn->put(fmt::format("{}-{:05}", prefix, i), std::to_string(i));
         }
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
     }
 
     // Seek to MID
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
 
         std::unique_ptr<RangeGetIterator> it;
         std::string end = prefix + "\xFF";
-        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), TxnErrorCode::TXN_OK);
 
         it->seek(5);
         std::vector<std::string_view> values;
@@ -420,11 +425,11 @@ TEST(TxnKvTest, RangeGetIteratorSeek) {
     // Seek out of range?
     {
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
 
         std::unique_ptr<RangeGetIterator> it;
         std::string end = prefix + "\xFF";
-        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), 0);
+        ASSERT_EQ(txn->get(prefix, end, &it, true, 500), TxnErrorCode::TXN_OK);
 
         it->seek(10);
         ASSERT_FALSE(it->has_next());
@@ -433,26 +438,48 @@ TEST(TxnKvTest, RangeGetIteratorSeek) {
 
 TEST(TxnKvTest, AbortTxn) {
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
 
     txn->atomic_set_ver_key("prefix", "value");
-    ASSERT_EQ(txn->abort(), 0);
+    ASSERT_EQ(txn->abort(), TxnErrorCode::TXN_OK);
 }
 
 TEST(TxnKvTest, RunInBthread) {
     bthread_t tid;
     auto thread = +[](void*) -> void* {
         std::unique_ptr<Transaction> txn;
-        EXPECT_EQ(txn_kv->create_txn(&txn), 0);
+        EXPECT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
 
         std::string value;
-        EXPECT_EQ(txn->get("not_exists_key", &value), 1);
+        EXPECT_EQ(txn->get("not_exists_key", &value), TxnErrorCode::TXN_KEY_NOT_FOUND);
         txn->remove("not_exists_key");
-        EXPECT_EQ(txn->commit(), 0);
+        EXPECT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
         return nullptr;
     };
     bthread_start_background(&tid, nullptr, thread, nullptr);
     bthread_join(tid, nullptr);
+}
+
+TEST(TxnKvTest, KvErrorCodeFormat) {
+    std::vector<std::tuple<TxnErrorCode, std::string_view>> codes {
+            {TxnErrorCode::TXN_OK, "Ok"},
+            {TxnErrorCode::TXN_KEY_NOT_FOUND, "KeyNotFound"},
+            {TxnErrorCode::TXN_CONFLICT, "Conflict"},
+            {TxnErrorCode::TXN_TOO_OLD, "TxnTooOld"},
+            {TxnErrorCode::TXN_MAYBE_COMMITTED, "MaybeCommitted"},
+            {TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED, "RetryableNotCommitted"},
+            {TxnErrorCode::TXN_TIMEOUT, "Timeout"},
+            {TxnErrorCode::TXN_INVALID_ARGUMENT, "InvalidArgument"},
+            {TxnErrorCode::TXN_UNIDENTIFIED_ERROR, "Unknown"},
+    };
+    for (auto&& [code, expect] : codes) {
+        std::string msg = fmt::format("{}", code);
+        ASSERT_EQ(msg, expect);
+        std::stringstream out;
+        out << code;
+        msg = out.str();
+        ASSERT_EQ(msg, expect);
+    }
 }
 
 // vim: et tw=100 ts=4 sw=4 cc=80:

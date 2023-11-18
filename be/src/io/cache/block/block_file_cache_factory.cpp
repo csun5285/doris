@@ -31,6 +31,7 @@
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/fs/local_file_system.h"
+#include "vec/common/hash_table/hash_table.h"
 
 namespace doris {
 class TUniqueId;
@@ -42,42 +43,16 @@ FileCacheFactory& FileCacheFactory::instance() {
     return ret;
 }
 
-size_t FileCacheFactory::try_release() {
-    int elements = 0;
-    for (auto& cache : _caches) {
-        elements += cache->try_release();
-    }
-    return elements;
-}
-
-size_t FileCacheFactory::try_release(const std::string& base_path) {
-    auto iter = _path_to_cache.find(base_path);
-    if (iter != _path_to_cache.end()) {
-        return iter->second->try_release();
-    }
-    return 0;
-}
-
 Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
                                            FileCacheSettings file_cache_settings) {
-    if (config::clear_file_cache) {
-        auto fs = global_local_filesystem();
-        bool res = false;
-        fs->exists(cache_base_path, &res);
-        if (res) {
-            fs->delete_directory(cache_base_path);
-            fs->create_directory(cache_base_path);
-        }
-    }
-
     auto fs = global_local_filesystem();
-    bool res = false;
-    RETURN_IF_ERROR(fs->exists(cache_base_path, &res));
-    if (!res) {
-        fs->create_directory(cache_base_path);
+    bool exists = false;
+    RETURN_IF_ERROR(fs->exists(cache_base_path, &exists));
+    if (!exists) {
+        RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     } else if (config::clear_file_cache) {
-        fs->delete_directory(cache_base_path);
-        fs->create_directory(cache_base_path);
+        RETURN_IF_ERROR(fs->delete_directory(cache_base_path));
+        RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     }
 
     struct statfs stat;
@@ -92,6 +67,7 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
     }
     auto cache = std::make_unique<BlockFileCache>(cache_base_path, file_cache_settings);
     RETURN_IF_ERROR(cache->initialize());
+    _path_to_cache.emplace(cache_base_path, cache.get());
     _caches.push_back(std::move(cache));
 
     LOG(INFO) << "[FileCache] path: " << cache_base_path
@@ -122,16 +98,10 @@ FileCacheFactory::get_query_context_holders(const TUniqueId& query_id) {
     return holders;
 }
 
-Status FileCacheFactory::reload_file_cache() {
-    for (auto& cache : _caches) {
-        RETURN_IF_ERROR(cache->reinitialize());
+void FileCacheFactory::clear_file_caches() {
+    for (const auto& cache : _caches) {
+        cache->clear_file_cache_async();
     }
-    BlockFileCache::set_read_only(false);
-    return Status::OK();
-}
-
-void FileCacheFactory::set_read_only() {
-    BlockFileCache::set_read_only(true);
 }
 
 } // namespace io

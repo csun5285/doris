@@ -23,6 +23,8 @@ public:
     Status commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                          std::shared_ptr<RowsetMeta>* existed_rs_meta = nullptr) override;
 
+    Status update_tmp_rowset(const RowsetMeta& rs_meta) override;
+
     Status commit_txn(StreamLoadContext* ctx, bool is_2pc) override;
 
     Status abort_txn(StreamLoadContext* ctx) override;

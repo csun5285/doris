@@ -44,6 +44,8 @@ enum RowsetStatePB {
     COMMITTED = 1;
     // Rowset is already visible to the user
     VISIBLE = 2;
+
+    BEGIN_PARTIAL_UPDATE = 10000;
 }
 
 // indicate whether date between segments of a rowset is overlappinng
@@ -242,8 +244,8 @@ message TabletSchemaPB {
     repeated TabletIndexPB index = 15;
     optional int32 version_col_idx = 16 [default = -1];
     optional bool store_row_column = 18 [default=false]; // store tuplerow oriented column
-    optional bool is_partial_update = 20 [default=false];
-    repeated string partial_update_input_columns = 21;
+    reserved 20; // deprecated is_partial_update
+    reserved 21; // deprecated partial_update_input_columns
     optional bool enable_single_replica_compaction = 22 [default=false];
     optional bool skip_write_index_on_load = 23 [default=false];
 

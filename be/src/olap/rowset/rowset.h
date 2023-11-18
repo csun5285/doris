@@ -31,9 +31,9 @@
 #include <string>
 #include <vector>
 
-#include "io/fs/remote_file_system.h"
 #include "common/logging.h"
 #include "common/status.h"
+#include "io/fs/remote_file_system.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet_schema.h"
@@ -142,6 +142,7 @@ public:
 
     // publish rowset to make it visible to read
     void make_visible(Version version);
+    void set_version(Version version);
     TabletSchemaSPtr tablet_schema() { return _schema; }
 
     // helper class to access RowsetMeta

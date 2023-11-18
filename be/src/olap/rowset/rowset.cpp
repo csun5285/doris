@@ -76,6 +76,10 @@ void Rowset::make_visible(Version version) {
     }
 }
 
+void Rowset::set_version(Version version) {
+    _rowset_meta->set_version(version);
+}
+
 bool Rowset::check_rowset_segment() {
     std::lock_guard load_lock(_lock);
     return check_current_rowset_segment();
@@ -88,8 +92,14 @@ void Rowset::merge_rowset_meta(const RowsetMetaSharedPtr& other) {
     _rowset_meta->set_index_disk_size(index_disk_size() + other->index_disk_size());
     std::vector<KeyBoundsPB> key_bounds;
     other->get_segments_key_bounds(&key_bounds);
-    for (auto key_bound : key_bounds) {
+    for (const auto& key_bound : key_bounds) {
         _rowset_meta->add_segment_key_bounds(key_bound);
+    }
+
+    if (other->enable_segments_file_size()) {
+        for (size_t idx = 0; idx < other->num_segments(); idx++) {
+            _rowset_meta->add_segments_file_size(other->get_segment_file_size(idx));
+        }
     }
 }
 

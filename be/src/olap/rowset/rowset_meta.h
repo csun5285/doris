@@ -398,17 +398,20 @@ public:
     const TabletSchemaSPtr& tablet_schema() { return _schema; }
 
     void add_segments_file_size(
-            const std::vector<std::pair<int, io::FileWriterPtr>>& segment_file_writers) {
+            const std::vector<std::pair<int, io::FileWriterPtr>>& segment_file_writers,
+            int segment_start_id = 0) {
         size_t size = segment_file_writers.size();
         auto check = [&]() -> bool {
-            std::unordered_set<int> segment_ids;
+            std::unordered_set<int> segment_id_offsets;
             for (const auto& [segment_id, _] : segment_file_writers) {
-                if (segment_id < 0 || segment_id >= size ||
-                    segment_ids.find(segment_id) != segment_ids.end()) {
-                    LOG(ERROR) << fmt::format("segments_file_size error {} {}", segment_id, size);
+                int segment_id_offset = segment_id - segment_start_id;
+                if (segment_id_offset < 0 || segment_id_offset >= size ||
+                    segment_id_offsets.find(segment_id_offset) != segment_id_offsets.end()) {
+                    LOG(ERROR) << fmt::format("segments_file_size error {} {}", segment_id_offset,
+                                              size);
                     return false;
                 }
-                segment_ids.insert(segment_id);
+                segment_id_offsets.insert(segment_id_offset);
             }
             return true;
         };
@@ -418,7 +421,8 @@ public:
         }
         std::vector<size_t> segment_file_writers_size(size, 0);
         for (auto& [segment_id, file_writer] : segment_file_writers) {
-            segment_file_writers_size[segment_id] = file_writer->bytes_appended();
+            segment_file_writers_size[segment_id - segment_start_id] =
+                    file_writer->bytes_appended();
         }
         for (size_t i = 0; i < size; i++) {
             size_t file_size = segment_file_writers_size[i];
@@ -433,6 +437,10 @@ public:
         _rowset_meta_pb.set_enable_segments_file_size(true);
     }
 
+    void add_segments_file_size(size_t file_size) {
+        _rowset_meta_pb.add_segments_file_size(file_size);
+    }
+
     int64_t get_segment_file_size(int idx) const {
         DCHECK(_rowset_meta_pb.segments_file_size_size() == 0 ||
                _rowset_meta_pb.segments_file_size_size() > idx);
@@ -443,6 +451,11 @@ public:
                                              : -1)
                                   : -1)
                        : -1;
+    }
+
+    bool enable_segments_file_size() const {
+        return _rowset_meta_pb.has_enable_segments_file_size() &&
+               _rowset_meta_pb.enable_segments_file_size();
     }
 
 private:

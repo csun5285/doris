@@ -424,7 +424,6 @@ Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& loca
     VLOG(2) << "read remote file: " << remote_file << " to local: " << local_file;
     constexpr size_t buf_sz = 1024 * 1024;
     std::unique_ptr<uint8_t[]> read_buf(new uint8_t[buf_sz]);
-    size_t write_offset = 0;
     size_t cur_offset = 0;
     while (true) {
         size_t read_len = 0;
@@ -435,8 +434,7 @@ Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& loca
             break;
         }
 
-        RETURN_IF_ERROR(local_writer->write_at(write_offset, {read_buf.get(), read_len}));
-        write_offset += read_len;
+        RETURN_IF_ERROR(local_writer->append({read_buf.get(), read_len}));
     } // file_handler should be closed before calculating checksum
 
     return Status::OK();

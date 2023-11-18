@@ -68,12 +68,16 @@ suite("insert_group_commit_with_prepare_stmt") {
     def group_commit_insert = { stmt, expected_row_count ->
         def result = stmt.executeBatch()
         logger.info("insert result: " + result)
+        def count = 0;
+        for(int n : result){
+            count += n;
+        }
         def serverInfo = (((StatementImpl) stmt).results).getServerInfo()
         logger.info("result server info: " + serverInfo)
-        if (result != expected_row_count) {
-            logger.warn("insert result: " + result + ", expected_row_count: " + expected_row_count)
+        if (count != expected_row_count) {
+            logger.warn("insert result: " + count + ", expected_row_count: " + expected_row_count)
         }
-        assertEquals(result, expected_row_count)
+        assertEquals(count, expected_row_count)
         assertTrue(serverInfo.contains("'status':'PREPARE'"))
         assertTrue(serverInfo.contains("'label':'group_commit_"))
     }

@@ -413,6 +413,7 @@ void ExecEnv::_destroy() {
         return;
     }
     _deregister_metrics();
+    _wal_manager->stop();
     SAFE_DELETE(_internal_client_cache);
     SAFE_DELETE(_function_client_cache);
     SAFE_DELETE(_load_channel_mgr);

@@ -21,6 +21,7 @@
 
 #include "olap/lru_cache.h"
 #include "olap/olap_common.h"
+#include "olap/partial_update_info.h"
 #include "olap/rowset/rowset.h"
 #include "olap/tablet_meta.h"
 #include "util/countdown_latch.h"
@@ -37,17 +38,21 @@ public:
 
     Status get_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
                                RowsetSharedPtr* rowset, DeleteBitmapPtr* delete_bitmap,
-                               RowsetIdUnorderedSet* rowset_ids);
+                               RowsetIdUnorderedSet* rowset_ids, int64_t* txn_expiration,
+                               std::shared_ptr<PartialUpdateInfo>* partial_update_info);
 
     void set_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
-                                       DeleteBitmapPtr delete_bitmap,
-                                       const RowsetIdUnorderedSet& rowset_ids,
-                                       RowsetSharedPtr rowset, int64_t txn_expiration);
+                             DeleteBitmapPtr delete_bitmap, const RowsetIdUnorderedSet& rowset_ids,
+                             RowsetSharedPtr rowset, int64_t txn_expirationm,
+                             std::shared_ptr<PartialUpdateInfo> partial_update_info);
+
+    void update_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
+                                DeleteBitmapPtr delete_bitmap,
+                                const RowsetIdUnorderedSet& rowset_ids);
 
     void remove_expired_tablet_txn_info();
 
 private:
-
     void _clean_thread_callback();
 
     struct DeleteBitmapCacheValue {
@@ -56,7 +61,7 @@ private:
         RowsetIdUnorderedSet rowset_ids;
 
         DeleteBitmapCacheValue(DeleteBitmapPtr delete_bitmap_, const RowsetIdUnorderedSet& ids_)
-                : delete_bitmap(delete_bitmap_), rowset_ids(ids_) {}
+                : delete_bitmap(std::move(delete_bitmap_)), rowset_ids(ids_) {}
     };
 
     struct TxnKey {
@@ -64,15 +69,19 @@ private:
         int64_t tablet_id;
         TxnKey(TTransactionId txn_id_, int64_t tablet_id_)
                 : txn_id(txn_id_), tablet_id(tablet_id_) {}
-        auto operator<=>(const TxnKey&) const = default; 
+        auto operator<=>(const TxnKey&) const = default;
     };
 
     struct TxnVal {
         RowsetSharedPtr rowset;
         int64_t txn_expiration;
+        std::shared_ptr<PartialUpdateInfo> partial_update_info;
         TxnVal() : txn_expiration(0) {};
-        TxnVal(RowsetSharedPtr rowset_, int64_t txn_expiration_)
-                : rowset(rowset_), txn_expiration(txn_expiration_) {}
+        TxnVal(RowsetSharedPtr rowset_, int64_t txn_expiration_,
+               std::shared_ptr<PartialUpdateInfo> partial_update_info_)
+                : rowset(std::move(rowset_)),
+                  txn_expiration(txn_expiration_),
+                  partial_update_info(std::move(partial_update_info_)) {}
     };
 
     ShardedLRUCache _delete_bitmap_cache;

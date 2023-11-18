@@ -8,12 +8,14 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/mem_txn_kv.h"
 #include "meta-service/meta_server.h"
 #include "meta-service/meta_service.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
 #include "mock_resource_manager.h"
@@ -83,7 +85,9 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
     std::shared_ptr<selectdb::TxnKv> txn_kv = std::make_shared<selectdb::MemTxnKv>();
     auto resource_mgr = std::make_shared<MockResourceManager>(txn_kv);
     auto rate_limiter = std::make_shared<selectdb::RateLimiter>();
-    MockMetaService meta_service(txn_kv, resource_mgr, rate_limiter);
+    auto mock_service = std::make_unique<MockMetaService>(txn_kv, resource_mgr, rate_limiter);
+    MockMetaService* mock_service_ptr = mock_service.get();
+    MetaServiceProxy meta_service(std::move(mock_service));
 
     brpc::ServerOptions options;
     options.num_threads = 1;
@@ -103,10 +107,10 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
-        if (txn->get(system_key, &value) == 0) {
+        if (txn->get(system_key, &value) == TxnErrorCode::TXN_OK) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -120,7 +124,7 @@ TEST(MetaServerTest, FQDNRefreshInstance) {
 
     bool refreshed = false;
     for (size_t i = 0; i < 100; ++i) {
-        if (meta_service.is_instance_refreshed("fqdn_instance_id")) {
+        if (mock_service_ptr->is_instance_refreshed("fqdn_instance_id")) {
             refreshed = true;
             break;
         }
@@ -142,6 +146,35 @@ TEST(MetaServerTest, StartAndStop) {
     brpc::ServerOptions options;
     options.num_threads = 1;
     brpc::Server brpc_server;
+
+    auto sp = selectdb::SyncPoint::get_instance();
+
+    std::array<std::string, 3> sps{"MetaServer::start:1", "MetaServer::start:2", "MetaServer::start:3"};
+    // use structured binding for point alias (avoid multi lines of declaration)
+    auto [meta_server_start_1, meta_server_start_2, meta_server_start_3] = sps;
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&](...) {
+        for (auto& i : sps) { sp->clear_call_back(i); } // redundant
+        sp->disable_processing();
+    });
+
+    auto foo = [](void* ret) { *((int*)ret) = 1; };
+
+    // failed to init resource mgr
+    sp->set_call_back(meta_server_start_1, foo);
+    ASSERT_EQ(server->start(&brpc_server), 1);
+    sp->clear_call_back(meta_server_start_1);
+
+    // failed to start registry
+    sp->set_call_back(meta_server_start_2, foo);
+    ASSERT_EQ(server->start(&brpc_server), -1);
+    sp->clear_call_back(meta_server_start_2);
+
+    // failed to start fdb metrics exporter
+    sp->set_call_back(meta_server_start_3, foo);
+    ASSERT_EQ(server->start(&brpc_server), -2);
+    sp->clear_call_back(meta_server_start_3);
+
     ASSERT_EQ(server->start(&brpc_server), 0);
     ASSERT_EQ(brpc_server.Start(0, &options), 0);
     auto addr = brpc_server.listen_address();
@@ -152,10 +185,10 @@ TEST(MetaServerTest, StartAndStop) {
 
     while (true) {
         std::unique_ptr<selectdb::Transaction> txn;
-        txn_kv->create_txn(&txn);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         auto system_key = selectdb::system_meta_service_registry_key();
         std::string value;
-        if (txn->get(system_key, &value) == 0) {
+        if (txn->get(system_key, &value) == TxnErrorCode::TXN_OK) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

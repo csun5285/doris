@@ -128,7 +128,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
         RowsetIdUnorderedSet rowset_ids;
         StorageEngine::instance()->delete_bitmap_txn_manager()->set_tablet_txn_info(
                 request.transaction_id, tablet->tablet_id(), delete_bitmap, rowset_ids, rowset,
-                request.timeout);
+                request.timeout, nullptr);
     }
 
     TTabletInfo tablet_info;

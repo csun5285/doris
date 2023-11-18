@@ -12,6 +12,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/txn_kv.h"
 #include "rate-limiter/rate_limiter.h"
@@ -28,6 +29,10 @@ public:
     ~MetaServiceImpl() override;
 
     [[nodiscard]] const std::shared_ptr<TxnKv>& txn_kv() const { return txn_kv_; }
+    [[nodiscard]] const std::shared_ptr<RateLimiter>& rate_limiter() const { return rate_limiter_; }
+    [[nodiscard]] const std::shared_ptr<ResourceManager>& resource_mgr() const {
+        return resource_mgr_;
+    }
 
     void begin_txn(::google::protobuf::RpcController* controller,
                    const ::selectdb::BeginTxnRequest* request,
@@ -111,6 +116,11 @@ public:
                        ::selectdb::CreateRowsetResponse* response,
                        ::google::protobuf::Closure* done) override;
 
+    void update_tmp_rowset(::google::protobuf::RpcController* controller,
+                           const ::selectdb::CreateRowsetRequest* request,
+                           ::selectdb::CreateRowsetResponse* response,
+                           ::google::protobuf::Closure* done) override;
+
     void get_rowset(::google::protobuf::RpcController* controller,
                     const ::selectdb::GetRowsetRequest* request,
                     ::selectdb::GetRowsetResponse* response,
@@ -187,12 +197,12 @@ public:
                         const ::selectdb::AlterInstanceRequest* request,
                         ::selectdb::AlterInstanceResponse* response,
                         ::google::protobuf::Closure* done) override;
-    
+
     void get_instance(google::protobuf::RpcController* controller,
                       const ::selectdb::GetInstanceRequest* request,
                       ::selectdb::GetInstanceResponse* response,
                       ::google::protobuf::Closure* done) override;
- 
+
     void alter_cluster(google::protobuf::RpcController* controller,
                        const ::selectdb::AlterClusterRequest* request,
                        ::selectdb::AlterClusterResponse* response,
@@ -294,12 +304,20 @@ private:
     std::shared_ptr<RateLimiter> rate_limiter_;
 };
 
-class MetaServiceProxy final : public selectdb::MetaService {
+class MetaServiceProxy final : public MetaService {
 public:
-    MetaServiceProxy(std::unique_ptr<selectdb::MetaService> service) : impl_(std::move(service)) {}
+    MetaServiceProxy(std::unique_ptr<MetaServiceImpl> service) : impl_(std::move(service)) {}
     ~MetaServiceProxy() override = default;
     MetaServiceProxy(const MetaServiceProxy&) = delete;
     MetaServiceProxy& operator=(const MetaServiceProxy&) = delete;
+
+    [[nodiscard]] const std::shared_ptr<TxnKv>& txn_kv() const { return impl_->txn_kv(); }
+    [[nodiscard]] const std::shared_ptr<RateLimiter>& rate_limiter() const {
+        return impl_->rate_limiter();
+    }
+    [[nodiscard]] const std::shared_ptr<ResourceManager>& resource_mgr() const {
+        return impl_->resource_mgr();
+    }
 
     void begin_txn(::google::protobuf::RpcController* controller,
                    const ::selectdb::BeginTxnRequest* request,
@@ -357,7 +375,6 @@ public:
         call_impl(&selectdb::MetaService::clean_txn_label, controller, request, response, done);
     }
 
-
     void get_version(::google::protobuf::RpcController* controller,
                      const ::selectdb::GetVersionRequest* request,
                      ::selectdb::GetVersionResponse* response,
@@ -405,7 +422,14 @@ public:
                        const ::selectdb::CreateRowsetRequest* request,
                        ::selectdb::CreateRowsetResponse* response,
                        ::google::protobuf::Closure* done) override {
-        call_impl(&selectdb::MetaService::prepare_rowset, controller, request, response, done);
+        call_impl(&selectdb::MetaService::commit_rowset, controller, request, response, done);
+    }
+
+    void update_tmp_rowset(::google::protobuf::RpcController* controller,
+                           const ::selectdb::CreateRowsetRequest* request,
+                           ::selectdb::CreateRowsetResponse* response,
+                           ::google::protobuf::Closure* done) override {
+        call_impl(&selectdb::MetaService::update_tmp_rowset, controller, request, response, done);
     }
 
     void get_rowset(::google::protobuf::RpcController* controller,
@@ -509,6 +533,13 @@ public:
                          ::selectdb::CreateInstanceResponse* response,
                          ::google::protobuf::Closure* done) override {
         call_impl(&selectdb::MetaService::create_instance, controller, request, response, done);
+    }
+
+    void get_instance(google::protobuf::RpcController* controller,
+                      const ::selectdb::GetInstanceRequest* request,
+                      ::selectdb::GetInstanceResponse* response,
+                      ::google::protobuf::Closure* done) override {
+        call_impl(&selectdb::MetaService::get_instance, controller, request, response, done);
     }
 
     void alter_instance(google::protobuf::RpcController* controller,
@@ -654,6 +685,21 @@ private:
         static_assert(std::is_base_of_v<::google::protobuf::Message, Response>);
 
         brpc::ClosureGuard done_guard(done);
+        if (!config::enable_txn_store_retry) {
+            (impl_.get()->*method)(ctrl, req, resp, brpc::DoNothing());
+            if (DCHECK_IS_ON()) {
+                MetaServiceCode code = resp->status().code();
+                DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE)
+                        << "KV_TXN_STORE_GET_RETRYABLE should not be sent back to client";
+                DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE)
+                        << "KV_TXN_STORE_COMMIT_RETRYABLE should not be sent back to client";
+                DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_CREATE_RETRYABLE)
+                        << "KV_TXN_STORE_CREATE_RETRYABLE should not be sent back to client";
+            }
+            return;
+        }
+
+        TEST_SYNC_POINT("MetaServiceProxy::call_impl:1");
 
         int32_t retry_times = config::txn_store_retry_times;
         uint64_t duration_ms = 0;
@@ -665,26 +711,22 @@ private:
             (impl_.get()->*method)(ctrl, req, resp, brpc::DoNothing());
             MetaServiceCode code = resp->status().code();
             if (code != MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE &&
-                code != MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE) {
+                code != MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE &&
+                code != MetaServiceCode::KV_TXN_STORE_CREATE_RETRYABLE) {
                 return;
             }
 
-            if (!config::enable_txn_store_retry) {
-                DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE)
-                        << "KV_TXN_STORE_GET_RETRYABLE should not be sent back to client";
-                DCHECK_NE(code, MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE)
-                        << "KV_TXN_STORE_COMMIT_RETRYABLE should not be sent back to client";
-                return;
-            }
-
+            TEST_SYNC_POINT("MetaServiceProxy::call_impl:2");
             if (--retry_times < 0) {
                 resp->mutable_status()->set_code(
                         code == MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE ? KV_TXN_COMMIT_ERR
-                                                                               : KV_TXN_GET_ERR);
+                        : code == MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE  ? KV_TXN_GET_ERR
+                                                                               : KV_TXN_CREATE_ERR);
                 return;
             }
 
             duration_ms = retry_times > 10 ? u(rng) : u2(rng);
+            TEST_SYNC_POINT_CALLBACK("MetaServiceProxy::call_impl_duration_ms", &duration_ms);
             LOG(WARNING) << __PRETTY_FUNCTION__ << " sleep " << duration_ms
                          << " ms before next round, retry times left: " << retry_times
                          << ", code: " << MetaServiceCode_Name(code)
@@ -693,8 +735,8 @@ private:
         }
     }
 
-    std::unique_ptr<selectdb::MetaService> impl_;
+    std::unique_ptr<MetaServiceImpl> impl_;
 };
 
 } // namespace selectdb
-// vim: et tw=120 ts=4 sw=4 cc=80:
+  // vim: et tw=120 ts=4 sw=4 cc=80:

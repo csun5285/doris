@@ -360,7 +360,12 @@ void StreamLoadExecutor::get_commit_request(StreamLoadContext* ctx,
     request.tbl = ctx->table;
     request.txnId = ctx->txn_id;
     request.sync = true;
+#ifdef CLOUD_MODE
+    // retrying will reuse this infos, so can't use move
+    request.commitInfos = ctx->commit_infos;
+#else
     request.commitInfos = std::move(ctx->commit_infos);
+#endif
     request.__isset.commitInfos = true;
     request.__set_thrift_rpc_timeout_ms(config::txn_commit_rpc_timeout_ms);
     request.tbls = ctx->table_list;
@@ -397,7 +402,7 @@ Status StreamLoadExecutor::commit_txn(StreamLoadContext* ctx) {
     // Return if this transaction is committed successful; otherwise, we need try
     // to
     // rollback this transaction
-    Status status(Status::create(result.status));
+    Status status(Status::create<false>(result.status));
     if (!status.ok()) {
         LOG(WARNING) << "commit transaction failed, errmsg=" << status << ", " << ctx->brief();
         if (status.is<PUBLISH_TIMEOUT>()) {

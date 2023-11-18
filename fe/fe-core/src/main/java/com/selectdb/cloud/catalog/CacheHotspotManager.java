@@ -252,7 +252,7 @@ public class CacheHotspotManager extends MasterDaemon {
         Optional<Partition> op = t.getPartitionNames().stream().map(t::getPartition)
                                 .filter(p -> p.getId() == partition.partition_id).findAny();
         if (!op.isPresent()) {
-            LOG.warn("partition id {} is invalid", tableId);
+            LOG.warn("partition id {} is invalid", partition.partition_id);
             return;
         }
         params.put("partition_name", op.get().getName());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "resource-manager/resource_manager.h"
 
 using namespace selectdb;
@@ -45,10 +46,10 @@ public:
         return "";
     }
 
-    std::pair<int, std::string> get_instance(std::shared_ptr<Transaction> txn,
-                                             const std::string& instance_id,
-                                             InstanceInfoPB* inst_pb) override {
-        return {1, ""};
+    std::pair<TxnErrorCode, std::string> get_instance(std::shared_ptr<Transaction> txn,
+                                                      const std::string& instance_id,
+                                                      InstanceInfoPB* inst_pb) override {
+        return {TxnErrorCode::TXN_KEY_NOT_FOUND, ""};
     }
 
     std::string modify_nodes(const std::string& instance_id, const std::vector<NodeInfo>& to_add,

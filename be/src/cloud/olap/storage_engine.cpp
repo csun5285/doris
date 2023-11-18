@@ -129,6 +129,8 @@ Status StorageEngine::open(const EngineOptions& options, StorageEngine** engine_
 
 StorageEngine::StorageEngine(const EngineOptions& options)
         : _options(options),
+          _meta_mgr(std::make_unique<cloud::CloudMetaMgr>()),
+          _tablet_mgr(std::make_unique<cloud::CloudTabletMgr>()),
           _available_storage_medium_type_count(0),
           _effective_cluster_id(-1),
           _is_all_cluster_id_exist(true),
@@ -143,9 +145,7 @@ StorageEngine::StorageEngine(const EngineOptions& options)
           _default_rowset_type(BETA_ROWSET),
           _heartbeat_flags(nullptr),
           _cumulative_compaction_policy(
-                  CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy()),
-          _meta_mgr(std::make_unique<cloud::CloudMetaMgr>()),
-          _tablet_mgr(std::make_unique<cloud::CloudTabletMgr>()) {
+                  CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy()) {
     _s_instance = this;
     REGISTER_HOOK_METRIC(unused_rowsets_count, [this]() {
         // std::lock_guard<std::mutex> lock(_gc_mutex);
@@ -155,6 +155,12 @@ StorageEngine::StorageEngine(const EngineOptions& options)
 
 StorageEngine::~StorageEngine() {
     DEREGISTER_HOOK_METRIC(unused_rowsets_count);
+
+    for (auto&& thread : _bg_threads) {
+        if (thread != nullptr) {
+            thread->join();
+        }
+    }
 
     if (_base_compaction_thread_pool) {
         _base_compaction_thread_pool->shutdown();
@@ -908,7 +914,8 @@ Status StorageEngine::create_tablet(const TCreateTabletReq& request) {
     stores = get_stores_for_create_tablet(request.storage_medium);
     if (stores.empty()) {
         LOG(WARNING) << "there is no available disk that can be used to create tablet.";
-        return Status::Error<CE_CMD_PARAMS_ERROR>("there is no available disk that can be used to create tablet.");
+        return Status::Error<CE_CMD_PARAMS_ERROR>(
+                "there is no available disk that can be used to create tablet.");
     }
     return _tablet_manager->create_tablet(request, stores, nullptr);
 }
@@ -919,13 +926,15 @@ Status StorageEngine::obtain_shard_path(TStorageMedium::type storage_medium,
 
     if (shard_path == nullptr) {
         LOG(WARNING) << "invalid output parameter which is null pointer.";
-        return Status::Error<CE_CMD_PARAMS_ERROR>("invalid output parameter which is null pointer.");
+        return Status::Error<CE_CMD_PARAMS_ERROR>(
+                "invalid output parameter which is null pointer.");
     }
 
     auto stores = get_stores_for_create_tablet(storage_medium);
     if (stores.empty()) {
         LOG(WARNING) << "no available disk can be used to create tablet.";
-        return Status::Error<NO_AVAILABLE_ROOT_PATH>("no available disk can be used to create tablet.");
+        return Status::Error<NO_AVAILABLE_ROOT_PATH>(
+                "no available disk can be used to create tablet.");
     }
 
     Status res = Status::OK();

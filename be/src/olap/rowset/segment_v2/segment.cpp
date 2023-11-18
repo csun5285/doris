@@ -74,6 +74,8 @@ class FileReaderOptions;
 namespace segment_v2 {
 class InvertedIndexIterator;
 
+bvar::Adder<uint64_t> memory_segment_counter("segment_count_in_memroy");
+
 Status Segment::open(io::FileSystemSPtr fs, const std::string& path, uint32_t segment_id,
                      RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
                      const io::FileReaderOptions& reader_options, std::shared_ptr<Segment>* output,
@@ -107,11 +109,14 @@ Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr table
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
           _meta_mem_usage(0),
-          _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {}
+          _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {
+    memory_segment_counter << 1;
+}
 
 Segment::~Segment() {
 #ifndef BE_TEST
     _segment_meta_mem_tracker->release(_meta_mem_usage);
+    memory_segment_counter << -1;
 #endif
 }
 

@@ -1,5 +1,6 @@
 #include <brpc/channel.h>
 #include <fmt/core.h>
+#include <gen_cpp/selectdb_cloud.pb.h>
 
 #include <chrono>
 
@@ -9,6 +10,8 @@
 #include "common/sync_point.h"
 #include "meta-service/meta_service.h"
 #include "meta-service/meta_service_helper.h"
+#include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 using namespace std::chrono;
 
@@ -102,8 +105,8 @@ int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_
     }
 
     std::string val;
-    int ret = txn->get(system_meta_service_arn_info_key(), &val);
-    if (ret == 1) {
+    TxnErrorCode err = txn->get(system_meta_service_arn_info_key(), &val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
         // For compatibility, use arn_info of config
         RamUserPB iam_user;
         iam_user.set_user_id(config::arn_id);
@@ -111,7 +114,7 @@ int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_
         iam_user.set_ak(config::arn_ak);
         iam_user.set_sk(config::arn_sk);
         instance.mutable_iam_user()->CopyFrom(iam_user);
-    } else if (ret == 0) {
+    } else if (err == TxnErrorCode::TXN_OK) {
         RamUserPB iam_user;
         if (!iam_user.ParseFromString(val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -127,9 +130,9 @@ int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_
         iam_user.set_sk(std::move(plain_ak_sk_pair.second));
         instance.mutable_iam_user()->CopyFrom(iam_user);
     } else {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to get arn_info_key";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return -1;
     }
 
@@ -174,19 +177,19 @@ void MetaServiceImpl::get_obj_store_info(google::protobuf::RpcController* contro
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -228,8 +231,8 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
 
     EncryptionInfoPB encryption_info;
     AkSkPair cipher_ak_sk_pair;
-    ret = encrypt_ak_sk_helper(plain_ak, plain_sk, &encryption_info, &cipher_ak_sk_pair, code, msg);
-    if (ret != 0) {
+    if (encrypt_ak_sk_helper(plain_ak, plain_sk, &encryption_info, &cipher_ak_sk_pair, code, msg) !=
+        0) {
         return;
     }
     const auto& [ak, sk] = cipher_ak_sk_pair;
@@ -269,19 +272,19 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -293,7 +296,7 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -402,10 +405,10 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
 
     txn->put(key, val);
     LOG(INFO) << "put instance_id=" << instance_id << " instance_key=" << hex(key);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -434,19 +437,19 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -458,7 +461,7 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -486,9 +489,8 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
         auto& ram_user = request->ram_user();
         EncryptionInfoPB encryption_info;
         AkSkPair cipher_ak_sk_pair;
-        ret = encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info,
-                                   &cipher_ak_sk_pair, code, msg);
-        if (ret != 0) {
+        if (encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info, &cipher_ak_sk_pair,
+                                 code, msg) != 0) {
             return;
         }
         const auto& [ak, sk] = cipher_ak_sk_pair;
@@ -525,9 +527,8 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
         std::string user_id = alter_bucket_user.user_id();
         EncryptionInfoPB encryption_info;
         AkSkPair cipher_ak_sk_pair;
-        ret = encrypt_ak_sk_helper(alter_bucket_user.ak(), alter_bucket_user.sk(), &encryption_info,
-                                   &cipher_ak_sk_pair, code, msg);
-        if (ret != 0) {
+        if (encrypt_ak_sk_helper(alter_bucket_user.ak(), alter_bucket_user.sk(), &encryption_info,
+                                 &cipher_ak_sk_pair, code, msg) != 0) {
             return;
         }
         const auto& [ak, sk] = cipher_ak_sk_pair;
@@ -600,10 +601,10 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
 
     txn->put(key, val);
     LOG(INFO) << "put instance_id=" << instance_id << " instance_key=" << hex(key);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
     LOG(INFO) << update_record.str();
@@ -649,8 +650,8 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
 
     EncryptionInfoPB encryption_info;
     AkSkPair cipher_ak_sk_pair;
-    ret = encrypt_ak_sk_helper(plain_ak, plain_sk, &encryption_info, &cipher_ak_sk_pair, code, msg);
-    if (ret != 0) {
+    if (encrypt_ak_sk_helper(plain_ak, plain_sk, &encryption_info, &cipher_ak_sk_pair, code, msg) !=
+        0) {
         return;
     }
     InstanceInfoPB instance;
@@ -685,9 +686,8 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
         auto& ram_user = request->ram_user();
         EncryptionInfoPB encryption_info;
         AkSkPair cipher_ak_sk_pair;
-        ret = encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info,
-                                   &cipher_ak_sk_pair, code, msg);
-        if (ret != 0) {
+        if (encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info, &cipher_ak_sk_pair,
+                                 code, msg) != 0) {
             return;
         }
         RamUserPB new_ram_user;
@@ -718,32 +718,34 @@ void MetaServiceImpl::create_instance(google::protobuf::RpcController* controlle
     LOG(INFO) << "xxx instance json=" << proto_to_json(instance);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
     // Check existence before proceeding
-    ret = txn->get(key, &val);
-    if (ret != 1) {
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         std::stringstream ss;
-        ss << (ret == 0 ? "instance already existed" : "internal error failed to check instance")
+        ss << (err == TxnErrorCode::TXN_OK ? "instance already existed"
+                                           : "internal error failed to check instance")
            << ", instance_id=" << request->instance_id();
-        code = ret == 0 ? MetaServiceCode::ALREADY_EXISTED : MetaServiceCode::UNDEFINED_ERR;
+        code = err == TxnErrorCode::TXN_OK ? MetaServiceCode::ALREADY_EXISTED
+                                           : cast_as<ErrCategory::READ>(err);
         msg = ss.str();
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
     txn->put(key, val);
     LOG(INFO) << "put instance_id=" << request->instance_id() << " instance_key=" << hex(key);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -983,19 +985,19 @@ void MetaServiceImpl::get_instance(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -1013,7 +1015,6 @@ void MetaServiceImpl::get_instance(google::protobuf::RpcController* controller,
 std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
         const selectdb::AlterInstanceRequest* request,
         std::function<std::pair<MetaServiceCode, std::string>(InstanceInfoPB*)> action) {
-    int ret = 0;
     MetaServiceCode code = MetaServiceCode::OK;
     std::string msg = "OK";
     std::string instance_id = request->has_instance_id() ? request->instance_id() : "";
@@ -1028,23 +1029,25 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
     std::string val;
     instance_key(key_info, &key);
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
-        return std::make_pair(MetaServiceCode::KV_TXN_CREATE_ERR, msg);
+        LOG(WARNING) << msg << " err=" << err;
+        return std::make_pair(cast_as<ErrCategory::CREATE>(err), msg);
     }
 
     // Check existence before proceeding
-    ret = txn->get(key, &val);
-    if (ret != 0) {
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
         std::stringstream ss;
-        ss << (ret == 1 ? "instance not existed" : "internal error failed to check instance")
+        ss << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "instance not existed"
+                                                      : "internal error failed to check instance")
            << ", instance_id=" << request->instance_id();
         // TODO(dx): fix CLUSTER_NOT_FOUND，VERSION_NOT_FOUND，TXN_LABEL_NOT_FOUND，etc to NOT_FOUND
-        code = ret == 1 ? MetaServiceCode::CLUSTER_NOT_FOUND : MetaServiceCode::UNDEFINED_ERR;
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::CLUSTER_NOT_FOUND
+                                                      : cast_as<ErrCategory::READ>(err);
         msg = ss.str();
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return std::make_pair(code, msg);
     }
     LOG(INFO) << "alter instance key=" << hex(key);
@@ -1061,10 +1064,10 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
     }
     val = r.second;
     txn->put(key, val);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
         return std::make_pair(code, msg);
     }
@@ -1474,19 +1477,19 @@ void MetaServiceImpl::get_cluster(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -1596,19 +1599,19 @@ void MetaServiceImpl::create_stage(::google::protobuf::RpcController* controller
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -1694,9 +1697,8 @@ void MetaServiceImpl::create_stage(::google::protobuf::RpcController* controller
             auto obj_info = tmp_stage.mutable_obj_info();
             EncryptionInfoPB encryption_info;
             AkSkPair cipher_ak_sk_pair;
-            ret = encrypt_ak_sk_helper(obj_info->ak(), obj_info->sk(), &encryption_info,
-                                       &cipher_ak_sk_pair, code, msg);
-            if (ret != 0) {
+            if (encrypt_ak_sk_helper(obj_info->ak(), obj_info->sk(), &encryption_info,
+                                     &cipher_ak_sk_pair, code, msg) != 0) {
                 return;
             }
             obj_info->set_ak(std::move(cipher_ak_sk_pair.first));
@@ -1715,10 +1717,10 @@ void MetaServiceImpl::create_stage(::google::protobuf::RpcController* controller
     txn->put(key, val);
     LOG(INFO) << "put instance_id=" << instance_id << " instance_key=" << hex(key)
               << " json=" << proto_to_json(instance);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -1756,19 +1758,19 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -1925,13 +1927,13 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
                 }
             } else if (stage.access_type() == StagePB::IAM) {
                 std::string val;
-                ret = txn->get(system_meta_service_arn_info_key(), &val);
-                if (ret == 1) {
+                TxnErrorCode err = txn->get(system_meta_service_arn_info_key(), &val);
+                if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
                     // For compatibility, use arn_info of config
                     stage.mutable_obj_info()->set_ak(config::arn_ak);
                     stage.mutable_obj_info()->set_sk(config::arn_sk);
                     stage.set_external_id(instance_id);
-                } else if (ret == 0) {
+                } else if (err == TxnErrorCode::TXN_OK) {
                     RamUserPB iam_user;
                     if (!iam_user.ParseFromString(val)) {
                         code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -1947,8 +1949,8 @@ void MetaServiceImpl::get_stage(google::protobuf::RpcController* controller,
                     stage.mutable_obj_info()->set_sk(std::move(plain_ak_sk_pair.second));
                     stage.set_external_id(instance_id);
                 } else {
-                    code = MetaServiceCode::KV_TXN_GET_ERR;
-                    ss << "failed to get arn_info_key, ret=" << ret;
+                    code = cast_as<ErrCategory::READ>(err);
+                    ss << "failed to get arn_info_key, err=" << err;
                     msg = ss.str();
                     return;
                 }
@@ -2030,20 +2032,20 @@ void MetaServiceImpl::drop_stage(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
     std::stringstream ss;
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -2105,10 +2107,10 @@ void MetaServiceImpl::drop_stage(google::protobuf::RpcController* controller,
         txn->put(key1, val1);
     }
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -2140,19 +2142,19 @@ void MetaServiceImpl::get_iam(google::protobuf::RpcController* controller,
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
 
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -2165,8 +2167,8 @@ void MetaServiceImpl::get_iam(google::protobuf::RpcController* controller,
     }
 
     val.clear();
-    ret = txn->get(system_meta_service_arn_info_key(), &val);
-    if (ret == 1) {
+    err = txn->get(system_meta_service_arn_info_key(), &val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
         // For compatibility, use arn_info of config
         RamUserPB iam_user;
         iam_user.set_user_id(config::arn_id);
@@ -2174,7 +2176,7 @@ void MetaServiceImpl::get_iam(google::protobuf::RpcController* controller,
         iam_user.set_ak(config::arn_ak);
         iam_user.set_sk(config::arn_sk);
         response->mutable_iam_user()->CopyFrom(iam_user);
-    } else if (ret == 0) {
+    } else if (err == TxnErrorCode::TXN_OK) {
         RamUserPB iam_user;
         if (!iam_user.ParseFromString(val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -2190,8 +2192,8 @@ void MetaServiceImpl::get_iam(google::protobuf::RpcController* controller,
         iam_user.set_sk(std::move(plain_ak_sk_pair.second));
         response->mutable_iam_user()->CopyFrom(iam_user);
     } else {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get arn_info_key, ret=" << ret;
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get arn_info_key, err=" << err;
         msg = ss.str();
         return;
     }
@@ -2230,26 +2232,26 @@ void MetaServiceImpl::alter_iam(google::protobuf::RpcController* controller,
     std::string key = system_meta_service_arn_info_key();
     std::string val;
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
-    if (ret != 0 && ret != 1) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "fail to arn_info_key, ret=" << ret;
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "fail to arn_info_key, err=" << err;
         msg = ss.str();
         return;
     }
 
-    bool is_add_req = ret == 1;
+    bool is_add_req = err == TxnErrorCode::TXN_KEY_NOT_FOUND;
     EncryptionInfoPB encryption_info;
     AkSkPair cipher_ak_sk_pair;
-    ret = encrypt_ak_sk_helper(arn_ak, arn_sk, &encryption_info, &cipher_ak_sk_pair, code, msg);
-    if (ret != 0) {
+    if (encrypt_ak_sk_helper(arn_ak, arn_sk, &encryption_info, &cipher_ak_sk_pair, code, msg) !=
+        0) {
         return;
     }
     const auto& [ak, sk] = cipher_ak_sk_pair;
@@ -2285,18 +2287,18 @@ void MetaServiceImpl::alter_iam(google::protobuf::RpcController* controller,
         return;
     }
     txn->put(key, val);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "txn->commit failed() ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "txn->commit failed() err=" << err;
         msg = ss.str();
         return;
     }
     if (is_add_req) {
-        LOG(INFO) << "add new iam info, cipher ak: " << ak << " cipher sk: " << sk;
+        LOG(INFO) << "add new iam info, cipher ak: " << iam_user.ak() << " cipher sk: " << iam_user.sk();
     } else {
         LOG(INFO) << "alter iam info, old:  cipher ak: " << old_ak << " cipher sk" << old_sk
-                  << " new: cipher ak: " << ak << " cipher sk:" << sk;
+                  << " new: cipher ak: " << iam_user.ak() << " cipher sk:" << iam_user.sk();
     }
 }
 
@@ -2325,18 +2327,18 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
     instance_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get instance_key=" << hex(key);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get instance, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -2346,7 +2348,7 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
         msg = "failed to parse InstanceInfoPB";
         return;
     }
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -2357,9 +2359,8 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
     }
     EncryptionInfoPB encryption_info;
     AkSkPair cipher_ak_sk_pair;
-    ret = encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info, &cipher_ak_sk_pair,
-                               code, msg);
-    if (ret != 0) {
+    if (encrypt_ak_sk_helper(ram_user.ak(), ram_user.sk(), &encryption_info, &cipher_ak_sk_pair,
+                             code, msg) != 0) {
         return;
     }
     RamUserPB new_ram_user;
@@ -2377,10 +2378,10 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
     }
     txn->put(key, val);
     LOG(INFO) << "put instance_id=" << instance_id << " instance_key=" << hex(key);
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -2406,11 +2407,11 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
     }
     RPC_RATE_LIMIT(begin_copy)
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
@@ -2440,13 +2441,13 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
         std::string file_key;
         copy_file_key(file_key_info, &file_key);
         std::string file_val;
-        ret = txn->get(file_key, &file_val);
-        if (ret == 0) { // found key
+        TxnErrorCode err = txn->get(file_key, &file_val);
+        if (err == TxnErrorCode::TXN_OK) { // found key
             continue;
-        } else if (ret < 0) { // error
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        } else if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) { // error
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get copy file";
-            LOG(WARNING) << msg << " ret=" << ret;
+            LOG(WARNING) << msg << " err=" << err;
             return;
         }
         // 2. check if reach any limit
@@ -2495,10 +2496,10 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
         LOG(INFO) << "put copy_file_key=" << hex(k);
     }
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -2525,11 +2526,11 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
     RPC_RATE_LIMIT(finish_copy)
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
@@ -2539,17 +2540,17 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
     std::string key;
     std::string val;
     copy_job_key(key_info, &key);
-    ret = txn->get(key, &val);
+    err = txn->get(key, &val);
     LOG(INFO) << "get copy_job_key=" << hex(key);
 
-    if (ret == 1) { // not found
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // not found
         code = MetaServiceCode::COPY_JOB_NOT_FOUND;
         ss << "copy job does not found";
         msg = ss.str();
         return;
-    } else if (ret < 0) { // error
-        code = MetaServiceCode::KV_TXN_GET_ERR;
-        ss << "failed to get copy_job, instance_id=" << instance_id << " ret=" << ret;
+    } else if (err != TxnErrorCode::TXN_OK) { // error
+        code = cast_as<ErrCategory::READ>(err);
+        ss << "failed to get copy_job, instance_id=" << instance_id << " err=" << err;
         msg = ss.str();
         return;
     }
@@ -2601,10 +2602,10 @@ void MetaServiceImpl::finish_copy(google::protobuf::RpcController* controller,
         return;
     }
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to commit kv txn, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to commit kv txn, err={}", err);
         LOG(WARNING) << msg;
     }
 }
@@ -2630,11 +2631,11 @@ void MetaServiceImpl::get_copy_job(google::protobuf::RpcController* controller,
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
@@ -2643,13 +2644,13 @@ void MetaServiceImpl::get_copy_job(google::protobuf::RpcController* controller,
     std::string key;
     copy_job_key(key_info, &key);
     std::string val;
-    ret = txn->get(key, &val);
-    if (ret == 1) { // not found key
+    err = txn->get(key, &val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) { // not found key
         return;
-    } else if (ret < 0) { // error
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+    } else if (err != TxnErrorCode::TXN_OK) { // error
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to get copy job";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
     CopyJobPB copy_job;
@@ -2683,11 +2684,11 @@ void MetaServiceImpl::get_copy_files(google::protobuf::RpcController* controller
     RPC_RATE_LIMIT(get_copy_files)
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
@@ -2699,11 +2700,11 @@ void MetaServiceImpl::get_copy_files(google::protobuf::RpcController* controller
     copy_job_key(key_info1, &key1);
     std::unique_ptr<RangeGetIterator> it;
     do {
-        ret = txn->get(key0, key1, &it);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        TxnErrorCode err = txn->get(key0, key1, &it);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = "failed to get copy jobs";
-            LOG(WARNING) << msg << " ret=" << ret;
+            LOG(WARNING) << msg << " err=" << err;
             return;
         }
 
@@ -2747,11 +2748,11 @@ void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* control
     RPC_RATE_LIMIT(filter_copy_files)
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
-        LOG(WARNING) << msg << " ret=" << ret;
+        LOG(WARNING) << msg << " err=" << err;
         return;
     }
 
@@ -2764,13 +2765,12 @@ void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* control
         std::string file_key;
         copy_file_key(file_key_info, &file_key);
         std::string file_val;
-        ret = txn->get(file_key, &file_val);
-        if (ret == 0) { // found key
+        TxnErrorCode err = txn->get(file_key, &file_val);
+        if (err == TxnErrorCode::TXN_OK) { // found key
             continue;
-        } else if (ret < 0) { // error
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        } else if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) { // error
             msg = "failed to get copy file";
-            LOG(WARNING) << msg << " ret=" << ret;
+            LOG(WARNING) << msg << " err=" << err;
             return;
         } else {
             response->add_object_files()->CopyFrom(file);
@@ -2827,16 +2827,16 @@ void MetaServiceImpl::get_cluster_status(google::protobuf::RpcController* contro
         instance_key(key_info, &key);
 
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to create txn ret=" << ret;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to create txn err=" << err;
             return;
         }
-        ret = txn->get(key, &val);
+        err = txn->get(key, &val);
         LOG(INFO) << "get instance_key=" << hex(key);
 
-        if (ret != 0) {
-            LOG(WARNING) << "failed to get instance, instance_id=" << instance_id << " ret=" << ret;
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to get instance, instance_id=" << instance_id << " err=" << err;
             return;
         }
 
@@ -2879,18 +2879,16 @@ void MetaServiceImpl::get_cluster_status(google::protobuf::RpcController* contro
 void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id) {
     LOG(INFO) << "begin notify_refresh_instance";
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to create txn"
-                     << " ret=" << ret;
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to create txn err=" << err;
         return;
     }
     std::string key = system_meta_service_registry_key();
     std::string val;
-    ret = txn->get(key, &val);
-    if (ret != 0) {
-        LOG(WARNING) << "failed to get server registry"
-                     << " ret=" << ret;
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to get server registry" << " err=" << err;
         return;
     }
     std::string self_endpoint;
@@ -2911,7 +2909,7 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
     std::vector<bthread_t> btids;
     btids.reserve(reg.items_size());
     for (int i = 0; i < reg.items_size(); ++i) {
-        ret = 0;
+        int ret = 0;
         auto& e = reg.items(i);
         std::string endpoint;
         if (e.has_host()) {

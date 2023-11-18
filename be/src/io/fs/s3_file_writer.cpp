@@ -77,10 +77,16 @@ namespace doris {
 namespace io {
 using namespace Aws::S3::Model;
 
-bvar::Adder<uint64_t> s3_file_writer_total("s3_file_writer", "total_num");
-bvar::Adder<uint64_t> s3_bytes_written_total("s3_file_writer", "bytes_written");
-bvar::Adder<uint64_t> s3_file_created_total("s3_file_writer", "file_created");
-bvar::Adder<uint64_t> s3_file_being_written("s3_file_writer", "file_being_written");
+// Whole s3 file writer ever created by the process
+bvar::Adder<uint64_t> s3_file_writer_total("s3_file_writer_total_num");
+// Whole bytes persistent on S3
+bvar::Adder<uint64_t> s3_bytes_written_total("s3_file_writer_bytes_written");
+// Whole files created on S3
+bvar::Adder<uint64_t> s3_file_created_total("s3_file_writer_file_created");
+// S3 file writer currently exists in process
+bvar::Adder<uint64_t> s3_file_being_written("s3_file_writer_file_being_written");
+// Whole bytes sent to S3(doesn't mean it would be persistent)
+bvar::Adder<uint64_t> s3_bytes_uploaded_total("s3_bytes_uploaded_total");
 
 S3FileWriter::S3FileWriter(std::string key, std::shared_ptr<S3FileSystem> fs,
                            const FileWriterOptions* opts)
@@ -107,7 +113,7 @@ S3FileWriter::~S3FileWriter() {
     if (!_closed || _failed) {
         // if we don't abort multi part upload, the uploaded part in object
         // store will not automatically reclaim itself, it would cost more money
-        abort();
+        _abort();
         _bytes_written = 0;
     }
     s3_bytes_written_total << _bytes_written;
@@ -115,18 +121,19 @@ S3FileWriter::~S3FileWriter() {
 }
 
 void S3FileWriter::_wait_until_finish(std::string_view task_name) {
-    auto msg =
-            fmt::format("{} multipart upload already takes 5 min, bucket={}, key={}, upload_id={}",
-                        task_name, _bucket, _path.native(), _upload_id);
+    auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
+    auto msg = fmt::format(
+            "{} multipart upload already takes {} seconds, bucket={}, key={}, upload_id={}",
+            task_name, timeout_duration, _bucket, _path.native(), _upload_id);
     timespec current_time;
     // We don't need high accuracy here, so we use time(nullptr)
     // since it's the fastest way to get current time(second)
     auto current_time_second = time(nullptr);
-    current_time.tv_sec = current_time_second + 300;
+    current_time.tv_sec = current_time_second + timeout_duration;
     current_time.tv_nsec = 0;
     // bthread::countdown_event::timed_wait() should use absolute time
     while (0 != _countdown_event.timed_wait(current_time)) {
-        current_time.tv_sec += 300;
+        current_time.tv_sec += timeout_duration;
         LOG(WARNING) << msg;
     }
 }
@@ -139,7 +146,9 @@ Status S3FileWriter::_open() {
         create_request.WithServerSideEncryption(Aws::S3::Model::ServerSideEncryption::AES256);
     }
 
-    auto outcome = _client->CreateMultipartUpload(create_request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->CreateMultipartUpload(create_request),
+                                                "s3_file_writer::create_multi_part_upload",
+                                                std::cref(create_request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
     SYNC_POINT_CALLBACK("s3_file_writer::_open", &outcome);
 
@@ -153,7 +162,7 @@ Status S3FileWriter::_open() {
             outcome.GetError().GetMessage());
 }
 
-Status S3FileWriter::abort() {
+Status S3FileWriter::_abort() {
     _failed = true;
     _closed = true;
     if (_aborted) {
@@ -177,7 +186,9 @@ Status S3FileWriter::abort() {
     _wait_until_finish("early quit");
     AbortMultipartUploadRequest request;
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
-    auto outcome = _client->AbortMultipartUpload(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->AbortMultipartUpload(request),
+                                                "s3_file_writer::abort_multi_part",
+                                                std::cref(request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
     if (outcome.IsSuccess() ||
         outcome.GetError().GetErrorType() == Aws::S3::S3Errors::NO_SUCH_UPLOAD ||
@@ -222,8 +233,8 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     size_t buffer_size = config::s3_write_buffer_size;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::appenv", Status());
     for (size_t i = 0; i < data_cnt; i++) {
-        size_t data_size = data[i].get_size();
-        for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
+        Slice slice = data[i];
+        while (!slice.empty()) {
             if (_failed) {
                 return _st;
             }
@@ -275,13 +286,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
             }
             // we need to make sure all parts except the last one to be 5MB or more
             // and shouldn't be larger than buf
-            data_size_to_append = std::min(data_size - pos, _pending_buf->get_file_offset() +
-                                                                    buffer_size - _bytes_appended);
+            auto data_size_to_append = std::min(
+                    _pending_buf->get_capacaticy() - _pending_buf->get_size(), slice.get_size());
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
-            RETURN_IF_ERROR(_pending_buf->append_data(
-                    Slice {data[i].get_data() + pos, data_size_to_append}));
+            RETURN_IF_ERROR(
+                    _pending_buf->append_data(Slice {slice.get_data(), data_size_to_append}));
+            slice.remove_prefix(data_size_to_append);
+            TEST_SYNC_POINT_CALLBACK("s3_file_writer::appenv_1", &_pending_buf, _cur_part_num);
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB
@@ -316,10 +329,10 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     upload_request.SetContentLength(buf.get_size());
 
-    auto upload_part_callable = _client->UploadPartCallable(upload_request);
+    auto upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->UploadPart(upload_request),
+                                                            "s3_file_writer::upload_part",
+                                                            std::cref(upload_request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
-
-    UploadPartOutcome upload_part_outcome = upload_part_callable.get();
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
         auto s = Status::IOError(
@@ -343,6 +356,7 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
     _bytes_written += buf.get_size();
+    s3_bytes_uploaded_total << buf.get_size();
 }
 
 Status S3FileWriter::_complete() {
@@ -388,7 +402,9 @@ Status S3FileWriter::_complete() {
     complete_request.WithMultipartUpload(completed_upload);
 
     TEST_SYNC_POINT_RETURN_WITH_VALUE("S3FileWriter::_complete:3", Status(), this);
-    auto compute_outcome = _client->CompleteMultipartUpload(complete_request);
+    auto compute_outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            _client->CompleteMultipartUpload(complete_request),
+            "s3_file_writer::complete_multi_part", std::cref(complete_request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
@@ -442,7 +458,8 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
     TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
-    auto response = _client->PutObject(request);
+    auto response = SYNC_POINT_HOOK_RETURN_VALUE(
+            _client->PutObject(request), "s3_file_writer::put_object", std::cref(request).get());
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::IOError(
@@ -454,6 +471,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
         return;
     }
     _bytes_written += buf.get_size();
+    s3_bytes_uploaded_total << buf.get_size();
     s3_file_created_total << 1;
 }
 

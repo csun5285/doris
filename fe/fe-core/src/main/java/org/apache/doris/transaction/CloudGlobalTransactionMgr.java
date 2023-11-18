@@ -27,9 +27,9 @@ import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.catalog.TabletMeta;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
-import org.apache.doris.common.DdlException;
 import org.apache.doris.common.DuplicatedRequestException;
 import org.apache.doris.common.FeNameFormat;
+import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.LabelAlreadyUsedException;
 import org.apache.doris.common.MarkedCountDownLatch;
 import org.apache.doris.common.MetaNotFoundException;
@@ -50,6 +50,7 @@ import org.apache.doris.task.AgentTaskQueue;
 import org.apache.doris.task.CalcDeleteBitmapTask;
 import org.apache.doris.thrift.TCalcDeleteBitmapPartitionInfo;
 import org.apache.doris.thrift.TStatus;
+import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TTaskType;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.thrift.TWaitingTxnStatusRequest;
@@ -104,6 +105,8 @@ import java.util.stream.Collectors;
 
 public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface {
     private static final Logger LOG = LogManager.getLogger(CloudGlobalTransactionMgr.class);
+    private static final int DELETE_BITMAP_LOCK_EXPIRATION_SECONDS = 10;
+    private static final int CALCULATE_DELETE_BITMAP_TASK_TIMEOUT_SECONDS = 15;
 
     private Env env;
 
@@ -322,6 +325,11 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 && commitTxnResponse.getStatus().getCode() != MetaServiceCode.TXN_ALREADY_VISIBLE) {
             LOG.warn("commitTxn failed, transactionId:{}, retryTime:{}, commitTxnResponse:{}",
                     transactionId, retryTime, commitTxnResponse);
+            if (commitTxnResponse.getStatus().getCode() == MetaServiceCode.LOCK_EXPIRED) {
+                // DELETE_BITMAP_LOCK_ERR will be retried on be
+                throw new UserException(InternalErrorCode.DELETE_BITMAP_LOCK_ERR,
+                        "delete bitmap update lock expired, transactionId:" + transactionId);
+            }
             StringBuilder internalMsgBuilder =
                     new StringBuilder("commitTxn failed, transactionId:");
             internalMsgBuilder.append(transactionId);
@@ -453,7 +461,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             builder.setTableId(entry.getKey())
                     .setLockId(transactionId)
                     .setInitiator(-1)
-                    .setExpiration(10);
+                    .setExpiration(DELETE_BITMAP_LOCK_EXPIRATION_SECONDS);
             final GetDeleteBitmapUpdateLockRequest request = builder.build();
             GetDeleteBitmapUpdateLockResponse response = null;
 
@@ -484,13 +492,18 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                     LOG.info("InterruptedException: ", e);
                 }
             }
-            if (response == null || !response.hasStatus()) {
-                throw new UserException("internal error, txnid=" + transactionId);
-            }
+            Preconditions.checkNotNull(response);
+            Preconditions.checkNotNull(response.getStatus());
             if (response.getStatus().getCode() != MetaServiceCode.OK) {
                 LOG.warn("get delete bitmap lock failed, transactionId={}, for {} times, response:{}",
                         transactionId, retryTime, response);
-                throw new UserException("internal error, try later");
+                if (response.getStatus().getCode() == MetaServiceCode.LOCK_CONFLICT
+                        || response.getStatus().getCode() == MetaServiceCode.KV_TXN_CONFLICT) {
+                    // DELETE_BITMAP_LOCK_ERR will be retried on be
+                    throw new UserException(InternalErrorCode.DELETE_BITMAP_LOCK_ERR,
+                            "Failed to get delete bitmap lock due to confilct");
+                }
+                throw new UserException("Failed to get delete bitmap lock, code: " + response.getStatus().getCode());
             }
         }
         stopWatch.stop();
@@ -526,7 +539,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
 
         boolean ok;
         try {
-            ok = countDownLatch.await(30 * 1000, TimeUnit.MILLISECONDS);
+            ok = countDownLatch.await(CALCULATE_DELETE_BITMAP_TASK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             LOG.warn("InterruptedException: ", e);
             ok = false;
@@ -538,7 +551,10 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             AgentTaskQueue.removeBatchTask(batchTask, TTaskType.CALCULATE_DELETE_BITMAP);
 
             if (!countDownLatch.getStatus().ok()) {
-                errMsg += " Error: " + countDownLatch.getStatus().getErrorMsg();
+                errMsg += countDownLatch.getStatus().getErrorMsg();
+                if (countDownLatch.getStatus().getErrorCode() != TStatusCode.DELETE_BITMAP_LOCK_ERROR) {
+                    throw new UserException(errMsg);
+                }
             } else {
                 errMsg += " Timeout.";
                 List<Entry<Long, Long>> unfinishedMarks = countDownLatch.getLeftMarks();
@@ -550,11 +566,12 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 }
             }
             LOG.warn(errMsg);
-            throw new DdlException(errMsg);
+            // DELETE_BITMAP_LOCK_ERR will be retried on be
+            throw new UserException(InternalErrorCode.DELETE_BITMAP_LOCK_ERR, errMsg);
         }
         stopWatch.stop();
         LOG.info("calc delete bitmap task successfully. txns: {}. time cost: {} ms.",
-                 transactionId, stopWatch.getTime());
+                transactionId, stopWatch.getTime());
     }
 
     @Override
@@ -569,8 +586,10 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                                                List<TabletCommitInfo> tabletCommitInfos, long timeoutMillis,
                                                TxnCommitAttachment txnCommitAttachment) throws UserException {
         if (!MetaLockUtils.tryCloudCommitLockTables(tableList, timeoutMillis, TimeUnit.MILLISECONDS)) {
-            throw new UserException("get tableList cloud commit lock timeout, tableList=("
-                    + StringUtils.join(tableList, ",") + ")");
+            // DELETE_BITMAP_LOCK_ERR will be retried on be
+            throw new UserException(InternalErrorCode.DELETE_BITMAP_LOCK_ERR,
+                    "get table cloud commit lock timeout, tableList=("
+                            + StringUtils.join(tableList, ",") + ")");
         }
         try {
             commitTransaction(db.getId(), tableList, transactionId, tabletCommitInfos, txnCommitAttachment);

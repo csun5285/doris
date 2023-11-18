@@ -28,6 +28,7 @@
 
 #include "common/status.h"
 #include "io/cache/block/block_file_segment.h"
+#include "util/crc32c.h"
 #include "util/slice.h"
 #include "util/threadpool.h"
 
@@ -117,6 +118,7 @@ struct FileBuffer : public std::enable_shared_from_this<FileBuffer> {
     * @return the size of the buffered data
     */
     size_t get_size() const { return _size; }
+    size_t get_capacaticy() const { return _capacity; }
     /**
     * detect whether the execution task is done
     *
@@ -191,8 +193,17 @@ struct UploadFileBuffer final : public FileBuffer {
     void on_upload() {
         if (config::enable_file_cache_as_load_buffer && _buffer.empty()) {
             read_from_cache();
+            // The cache allocation logic might fail due to no free buffer
+            // So we should skip doing the following logic in such situation
+            if (_buffer.empty()) [[unlikely]] {
+                return;
+            }
         }
-        CHECK(!_buffer.empty());
+        if (_crc_value != crc32c::Value(_buffer.get_data(), _size)) {
+            DCHECK(false);
+            set_val(Status::IOError("Buffer checksum not match"));
+            return;
+        }
         _upload_to_remote(*this);
         if (config::enable_flush_file_cache_async) {
             // If we call is_cancelled() after _state.set_val() then there might one situation where
@@ -229,6 +240,7 @@ private:
     decltype(_holder->file_segments.begin()) _cur_file_segment;
     size_t _append_offset {0};
     size_t _index_offset {0};
+    uint32_t _crc_value = 0;
 };
 
 struct FileBufferBuilder {

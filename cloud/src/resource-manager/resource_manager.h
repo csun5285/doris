@@ -4,6 +4,7 @@
 
 #include "meta-service/txn_kv.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
+#include "meta-service/txn_kv_error.h"
 
 #include <map>
 #include <string>
@@ -61,7 +62,7 @@ public:
     /**
      * Drops a cluster
      *
-     * @param clsuter cluster to drop, only cluster name and clsuter id are concered
+     * @param cluster cluster to drop, only cluster name and cluster id are concered
      * @return empty string for success, otherwise failure reason returned
      */
     virtual std::pair<MetaServiceCode, std::string> drop_cluster(const std::string& instance_id,
@@ -70,7 +71,7 @@ public:
     /**
      * Update a cluster
      *
-     * @param clsuter cluster to update, only cluster name and clsuter id are concered
+     * @param cluster cluster to update, only cluster name and cluster id are concered
      * @param action update operation code snippet
      * @filter filter condition
      * @return empty string for success, otherwise failure reason returned
@@ -86,11 +87,11 @@ public:
      *
      * @param txn if txn is not given, get with a new txn inside this function
      *
-     * @return a <code, msg> pair, code == 0 for success, otherwise error
+     * @return a <code, msg> pair, code == TXN_OK for success, otherwise error
      */
-    virtual std::pair<int, std::string> get_instance(std::shared_ptr<Transaction> txn,
-                                                     const std::string& instance_id,
-                                                     InstanceInfoPB* inst_pb);
+    virtual std::pair<TxnErrorCode, std::string> get_instance(std::shared_ptr<Transaction> txn,
+                                                              const std::string& instance_id,
+                                                              InstanceInfoPB* inst_pb);
     // return err msg
     virtual std::string modify_nodes(const std::string& instance_id, const std::vector<NodeInfo>& to_add,
                                      const std::vector<NodeInfo>& to_del);
@@ -102,7 +103,7 @@ public:
      * Refreshes the cache of given instance. This process removes the instance in cache
      * and then replaces it with persisted instance state read from underlying KV storage.
      *
-     * @param instance_id insntance to manipulate
+     * @param instance_id instance to manipulate
      * @return a pair of code and msg
      */
     virtual std::pair<MetaServiceCode, std::string> refresh_instance(const std::string& instance_id);

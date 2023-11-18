@@ -44,7 +44,10 @@ namespace doris {
 class WalReaderWriterTest : public testing::Test {
 public:
     // create a mock cgroup folder
-    virtual void SetUp() { io::global_local_filesystem()->create_directory(_s_test_data_path); }
+    virtual void SetUp() {
+        auto st = io::global_local_filesystem()->create_directory(_s_test_data_path);
+        ASSERT_TRUE(st.ok()) << st;
+    }
 
     // delete the mock cgroup folder
     virtual void TearDown() { io::global_local_filesystem()->delete_directory(_s_test_data_path); }
@@ -97,7 +100,8 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock}));
         file_len += WalWriter::VERSION_SIZE + pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE +
                     WalWriter::CHECKSUM_SIZE;
-        io::global_local_filesystem()->file_size(file_name, &file_size);
+        auto st = io::global_local_filesystem()->file_size(file_name, &file_size);
+        ASSERT_TRUE(st.ok()) << st;
         EXPECT_EQ(file_len, file_size);
     }
     // add 2 block
@@ -113,7 +117,8 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
                     WalWriter::CHECKSUM_SIZE;
 
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock, &pblock1}));
-        io::global_local_filesystem()->file_size(file_name, &file_size);
+        auto st = io::global_local_filesystem()->file_size(file_name, &file_size);
+        ASSERT_TRUE(st.ok()) << st;
         EXPECT_EQ(file_len, file_size);
     }
     wal_writer.finalize();

@@ -33,14 +33,22 @@
 
 namespace doris {
 WalManager::WalManager(ExecEnv* exec_env, const std::string& wal_dir_list)
-        : _exec_env(exec_env), _stop_background_threads_latch(1) {
+        : _exec_env(exec_env), _stop_background_threads_latch(1), _stop(false) {
     doris::vectorized::WalReader::string_split(wal_dir_list, ",", _wal_dirs);
 }
 
 WalManager::~WalManager() {
-    _stop_background_threads_latch.count_down();
-    if (_replay_thread) {
-        _replay_thread->join();
+    LOG(INFO) << "WalManager is destoried";
+}
+
+void WalManager::stop() {
+    if (!this->_stop.load()) {
+        this->_stop.store(true);
+        _stop_background_threads_latch.count_down();
+        if (_replay_thread) {
+            _replay_thread->join();
+        }
+        LOG(INFO) << "WalManager is stopped";
     }
 }
 
@@ -176,12 +184,12 @@ Status WalManager::scan_wals(const std::string& wal_path) {
 
 Status WalManager::replay() {
     do {
-        if (_exec_env->master_info() == nullptr) {
+        if (_stop.load()) {
             break;
         }
         // port == 0 means not received heartbeat yet
-        while (_exec_env->master_info()->network_address.port == 0) {
-            sleep(1);
+        if (_exec_env->master_info() != nullptr &&
+            _exec_env->master_info()->network_address.port == 0) {
             continue;
         }
         std::vector<std::string> replay_tables;

@@ -1,6 +1,7 @@
 
 // clang-format off
 #include "meta_service.h"
+#include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/selectdb_cloud.pb.h>
 
 #include "common/bvars.h"
@@ -18,6 +19,7 @@
 #include "meta-service/meta_service_schema.h"
 #include "meta-service/meta_service_tablet_stats.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "rate-limiter/rate_limiter.h"
 
 #include "brpc/channel.h"
@@ -118,8 +120,8 @@ bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t
                        int64_t partition_id) {
     auto key = recycle_index_key({instance_id, index_id});
     std::string val;
-    int ret = txn->get(key, &val);
-    if (ret == 0) {
+    TxnErrorCode err = txn->get(key, &val);
+    if (err == TxnErrorCode::TXN_OK) {
         RecycleIndexPB pb;
         if (!pb.ParseFromString(val)) [[unlikely]] {
             LOG_WARNING("malformed recycle index pb").tag("key", hex(key));
@@ -127,12 +129,12 @@ bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t
         }
         return pb.state() == RecycleIndexPB::DROPPED || pb.state() == RecycleIndexPB::RECYCLING;
     }
-    if (ret != 1) { // Get kv failed, cannot determine, return false
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) { // Get kv failed, cannot determine, return false
         return false;
     }
     key = recycle_partition_key({instance_id, partition_id});
-    ret = txn->get(key, &val);
-    if (ret == 0) {
+    err = txn->get(key, &val);
+    if (err == TxnErrorCode::TXN_OK) {
         RecyclePartitionPB pb;
         if (!pb.ParseFromString(val)) [[unlikely]] {
             LOG_WARNING("malformed recycle partition pb").tag("key", hex(key));
@@ -144,14 +146,18 @@ bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t
     return false;
 }
 
-void get_tablet_idx(MetaServiceCode& code, std::string& msg, int& ret, Transaction* txn,
+void get_tablet_idx(MetaServiceCode& code, std::string& msg, Transaction* txn,
                     const std::string& instance_id, int64_t tablet_id, TabletIndexPB& tablet_idx) {
     std::string key, val;
     meta_tablet_idx_key({instance_id, tablet_id}, &key);
-    ret = txn->get(key, &val);
-    if (ret != 0) {
-        code = ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR;
-        msg = fmt::format("failed to get tablet_idx, ret={} tablet_id={} ", ret, tablet_id);
+    TxnErrorCode err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            code = MetaServiceCode::TABLET_NOT_FOUND;
+        } else {
+            code = cast_as<ErrCategory::READ>(err);
+        }
+        msg = fmt::format("failed to get tablet_idx, err={} tablet_id={} ", err, tablet_id);
         return;
     }
     if (!tablet_idx.ParseFromString(val)) [[unlikely]] {
@@ -209,19 +215,19 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     version_key(ver_key_info, &ver_key);
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         msg = "failed to create txn";
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+        code = cast_as<ErrCategory::CREATE>(err);
         return;
     }
 
     std::string ver_val;
     VersionPB version_pb;
     // 0 for success get a key, 1 for key not found, negative for error
-    ret = txn->get(ver_key, &ver_val);
+    err = txn->get(ver_key, &ver_val);
     VLOG_DEBUG << "xxx get version_key=" << hex(ver_key);
-    if (ret == 0) {
+    if (err == TxnErrorCode::TXN_OK) {
         if (!version_pb.ParseFromString(ver_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
             msg = "malformed version value";
@@ -230,13 +236,13 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
         response->set_version(version_pb.version());
         { TEST_SYNC_POINT_CALLBACK("get_version_code", &code); }
         return;
-    } else if (ret == 1) {
+    } else if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
         msg = "not found";
         code = MetaServiceCode::VERSION_NOT_FOUND;
         return;
     }
     msg = "failed to get txn";
-    code = MetaServiceCode::KV_TXN_GET_ERR;
+    code = cast_as<ErrCategory::READ>(err);
 }
 
 void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* controller,
@@ -278,10 +284,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
     while (code == MetaServiceCode::OK &&
             response->versions_size() < response->partition_ids_size()) {
         std::unique_ptr<Transaction> txn;
-        ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             msg = "failed to create txn";
-            code = MetaServiceCode::KV_TXN_CREATE_ERR;
+            code = cast_as<ErrCategory::CREATE>(err);
             break;
         }
         for (size_t i = response->versions_size(); i < num_acquired; ++i) {
@@ -292,10 +298,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
 
             // TODO(walter) support batch get.
             std::string ver_val;
-            ret = txn->get(ver_key, &ver_val, true);
-            TEST_SYNC_POINT_CALLBACK("batch_get_version_ret", &ret);
+            err = txn->get(ver_key, &ver_val, true);
+            TEST_SYNC_POINT_CALLBACK("batch_get_version_err", &err);
             VLOG_DEBUG << "xxx get version_key=" << hex(ver_key);
-            if (ret == 0) {
+            if (err == TxnErrorCode::TXN_OK) {
                 VersionPB version_pb;
                 if (!version_pb.ParseFromString(ver_val)) {
                     code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -303,10 +309,10 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
                     break;
                 }
                 response->add_versions(version_pb.version());
-            } else if (ret == 1) {
+            } else if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
                 // return -1 if the target version is not exists.
                 response->add_versions(-1);
-            } else if (ret == TxnErrorCode::TXN_TOO_OLD) {
+            } else if (err == TxnErrorCode::TXN_TOO_OLD) {
                 // txn too old, fallback to non-snapshot versions.
                 LOG(WARNING) << "batch_get_version execution time exceeds the txn mvcc window, "
                                 "fallback to acquire non-snapshot versions, partition_ids_size="
@@ -314,7 +320,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
                 break;
             } else {
                 msg = "failed to get txn";
-                code = MetaServiceCode::KV_TXN_GET_ERR;
+                code = cast_as<ErrCategory::READ>(err);
                 break;
             }
         }
@@ -326,10 +332,11 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
     }
 }
 
-void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
-                            doris::TabletMetaPB& tablet_meta, std::shared_ptr<TxnKv> txn_kv,
+void internal_create_tablet(MetaServiceCode& code, std::string& msg,
+                            const doris::TabletMetaPB& meta, std::shared_ptr<TxnKv> txn_kv,
                             const std::string& instance_id,
                             std::set<std::pair<int64_t, int32_t>>& saved_schema) {
+    doris::TabletMetaPB tablet_meta(meta);
     bool has_first_rowset = tablet_meta.rs_metas_size() > 0;
 
     // TODO: validate tablet meta, check existence
@@ -345,9 +352,9 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
@@ -450,10 +457,10 @@ void internal_create_tablet(MetaServiceCode& code, std::string& msg, int& ret,
     txn->put(stats_key, stats_val);
     LOG(INFO) << "put tablet stats, tablet_id=" << tablet_id << " key=" << hex(stats_key);
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        msg = fmt::format("failed to save tablet meta, ret={}", ret);
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        msg = fmt::format("failed to save tablet meta, ret={}", err);
         return;
     }
 }
@@ -480,31 +487,33 @@ void MetaServiceImpl::create_tablets(::google::protobuf::RpcController* controll
     // [index_id, schema_version]
     std::set<std::pair<int64_t, int32_t>> saved_schema;
     for (auto& tablet_meta : request->tablet_metas()) {
-        auto& meta = const_cast<doris::TabletMetaPB&>(tablet_meta);
-        internal_create_tablet(code, msg, ret, meta, txn_kv_, instance_id, saved_schema);
+        internal_create_tablet(code, msg, tablet_meta, txn_kv_, instance_id, saved_schema);
         if (code != MetaServiceCode::OK) {
             return;
         }
     }
 }
 
-void internal_get_tablet(MetaServiceCode& code, std::string& msg, int& ret,
-                         const std::string& instance_id, Transaction* txn, int64_t tablet_id,
-                         doris::TabletMetaPB* tablet_meta, bool skip_schema) {
+void internal_get_tablet(MetaServiceCode& code, std::string& msg, const std::string& instance_id,
+                         Transaction* txn, int64_t tablet_id, doris::TabletMetaPB* tablet_meta,
+                         bool skip_schema) {
     // TODO: validate request
     TabletIndexPB tablet_idx;
-    get_tablet_idx(code, msg, ret, txn, instance_id, tablet_id, tablet_idx);
+    get_tablet_idx(code, msg, txn, instance_id, tablet_id, tablet_idx);
     if (code != MetaServiceCode::OK) return;
 
     MetaTabletKeyInfo key_info1 {instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
                                  tablet_idx.partition_id(), tablet_id};
     std::string key1, val1;
     meta_tablet_key(key_info1, &key1);
-    ret = txn->get(key1, &val1);
-    if (ret != 0) {
-        code = (ret == 1 ? MetaServiceCode::TABLET_NOT_FOUND : MetaServiceCode::KV_TXN_GET_ERR);
-        msg = fmt::format("failed to get tablet, err={}",
-                          ret == 1 ? "not found" : "internal error");
+    TxnErrorCode err = txn->get(key1, &val1);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = MetaServiceCode::TABLET_NOT_FOUND;
+        msg = "failed to get tablet, err=not found";
+        return;
+    } else if (err != TxnErrorCode::TXN_OK) [[unlikely]] {
+        code = cast_as<ErrCategory::READ>(err);
+        msg = "failed to get tablet, err=internal error";
         return;
     }
 
@@ -526,11 +535,11 @@ void internal_get_tablet(MetaServiceCode& code, std::string& msg, int& ret,
         auto key = meta_schema_key(
                 {instance_id, tablet_meta->index_id(), tablet_meta->schema_version()});
         ValueBuf val_buf;
-        ret = selectdb::get(txn, key, &val_buf);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        err = selectdb::get(txn, key, &val_buf);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = fmt::format("failed to get schema, err={}",
-                              ret == 1 ? "not found" : "internal error");
+                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, tablet_meta->mutable_schema())) {
@@ -555,21 +564,22 @@ void MetaServiceImpl::update_tablet(::google::protobuf::RpcController* controlle
     }
     RPC_RATE_LIMIT(update_tablet)
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
     for (const TabletMetaInfoPB& tablet_meta_info : request->tablet_meta_infos()) {
         doris::TabletMetaPB tablet_meta;
-        internal_get_tablet(code, msg, ret, instance_id, txn.get(), tablet_meta_info.tablet_id(),
+        internal_get_tablet(code, msg, instance_id, txn.get(), tablet_meta_info.tablet_id(),
                             &tablet_meta, true);
         if (code != MetaServiceCode::OK) {
             return;
         }
-        if (tablet_meta_info.has_is_in_memory()) {
+        if (tablet_meta_info.has_is_in_memory()) { // deprecate after 3.0.0
             tablet_meta.set_is_in_memory(tablet_meta_info.is_in_memory());
-        } else if (tablet_meta_info.has_is_persistent()) {
+        } else if (tablet_meta_info.has_is_persistent()) { // deprecate after 3.0.0
             tablet_meta.set_is_persistent(tablet_meta_info.is_persistent());
         } else if (tablet_meta_info.has_ttl_seconds()) {
             tablet_meta.set_ttl_seconds(tablet_meta_info.ttl_seconds());
@@ -591,9 +601,10 @@ void MetaServiceImpl::update_tablet(::google::protobuf::RpcController* controlle
         txn->put(key, val);
         LOG(INFO) << "xxx put tablet_key=" << hex(key);
     }
-    if (txn->commit() != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to update tablet meta, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to update tablet meta, err=" << err;
         msg = ss.str();
         return;
     }
@@ -616,14 +627,15 @@ void MetaServiceImpl::update_tablet_schema(::google::protobuf::RpcController* co
     RPC_RATE_LIMIT(update_tablet_schema)
 
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
 
     doris::TabletMetaPB tablet_meta;
-    internal_get_tablet(code, msg, ret, instance_id, txn.get(), request->tablet_id(), &tablet_meta,
+    internal_get_tablet(code, msg, instance_id, txn.get(), request->tablet_id(), &tablet_meta,
                         true);
     if (code != MetaServiceCode::OK) {
         return;
@@ -638,7 +650,7 @@ void MetaServiceImpl::update_tablet_schema(::google::protobuf::RpcController* co
         tablet_meta.set_schema_version(request->tablet_schema().schema_version());
         meta_schema_key({instance_id, tablet_meta.index_id(), tablet_meta.schema_version()},
                         &schema_key);
-        if (txn->get(schema_key, &schema_val, true) == 0) {
+        if (txn->get(schema_key, &schema_val, true) == TxnErrorCode::TXN_OK) {
             break; // schema has already been saved
         }
         if (!request->tablet_schema().SerializeToString(&schema_val)) [[unlikely]] {
@@ -664,9 +676,10 @@ void MetaServiceImpl::update_tablet_schema(::google::protobuf::RpcController* co
         return;
     }
     txn->put(key, val);
-    if (txn->commit() != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to update tablet meta, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to update tablet meta, err=" << err;
         msg = ss.str();
         return;
     }
@@ -686,17 +699,18 @@ void MetaServiceImpl::get_tablet(::google::protobuf::RpcController* controller,
     }
     RPC_RATE_LIMIT(get_tablet)
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
-    internal_get_tablet(code, msg, ret, instance_id, txn.get(), request->tablet_id(),
+    internal_get_tablet(code, msg, instance_id, txn.get(), request->tablet_id(),
                         response->mutable_tablet_meta(), false);
 }
 
-static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg, int& ret,
-                                         Transaction* txn, const std::string& instance_id,
+static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg, Transaction* txn,
+                                         const std::string& instance_id,
                                          doris::RowsetMetaPB& rowset_meta,
                                          doris::RowsetMetaPB& existed_rowset_meta) {
     DCHECK(existed_rowset_meta.has_index_id());
@@ -723,12 +737,12 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
         std::string schema_key = meta_schema_key({instance_id, existed_rowset_meta.index_id(),
                                                   existed_rowset_meta.schema_version()});
         ValueBuf val_buf;
-        ret = selectdb::get(txn, schema_key, &val_buf, true);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
+        TxnErrorCode err = selectdb::get(txn, schema_key, &val_buf, true);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
             msg = fmt::format("failed to get schema, schema_version={}: {}",
                               rowset_meta.schema_version(),
-                              ret == 1 ? "not found" : "internal error");
+                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, existed_rowset_meta.mutable_tablet_schema())) {
@@ -764,7 +778,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
         LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
-    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
     if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "rowset_meta must have either schema or schema_version";
@@ -791,16 +805,16 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
 
     // Check if commit key already exists.
-    ret = txn->get(commit_key, &commit_val);
-    if (ret == 0) {
+    err = txn->get(commit_key, &commit_val);
+    if (err == TxnErrorCode::TXN_OK) {
         auto existed_rowset_meta = response->mutable_existed_rowset_meta();
         if (!existed_rowset_meta->ParseFromString(commit_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -812,7 +826,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
                 existed_rowset_meta->set_index_id(rowset_meta.index_id());
             } else {
                 TabletIndexPB tablet_idx;
-                get_tablet_idx(code, msg, ret, txn.get(), instance_id, rowset_meta.tablet_id(),
+                get_tablet_idx(code, msg, txn.get(), instance_id, rowset_meta.tablet_id(),
                                tablet_idx);
                 if (code != MetaServiceCode::OK) return;
                 existed_rowset_meta->set_index_id(tablet_idx.index_id());
@@ -820,7 +834,7 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
             }
         }
         if (!existed_rowset_meta->has_tablet_schema()) {
-            set_schema_in_existed_rowset(code, msg, ret, txn.get(), instance_id, rowset_meta,
+            set_schema_in_existed_rowset(code, msg, txn.get(), instance_id, rowset_meta,
                                          *existed_rowset_meta);
             if (code != MetaServiceCode::OK) return;
         } else {
@@ -831,8 +845,8 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
         msg = "rowset already exists";
         return;
     }
-    if (ret != 1) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to check whether rowset exists";
         return;
     }
@@ -856,10 +870,10 @@ void MetaServiceImpl::prepare_rowset(::google::protobuf::RpcController* controll
     LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "prepare_rowset_key "
               << hex(prepare_key) << " associated commit_rowset_key " << hex(commit_key)
               << " value_size " << prepare_val.size();
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to save recycle rowset, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to save recycle rowset, err=" << err;
         msg = ss.str();
         return;
     }
@@ -894,7 +908,7 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
-    auto& rowset_meta = const_cast<doris::RowsetMetaPB&>(request->rowset_meta());
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
     if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "rowset_meta must have either schema or schema_version";
@@ -921,17 +935,17 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     }
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
 
     // Check if commit key already exists.
     std::string existed_commit_val;
-    ret = txn->get(commit_key, &existed_commit_val);
-    if (ret == 0) {
+    err = txn->get(commit_key, &existed_commit_val);
+    if (err == TxnErrorCode::TXN_OK) {
         auto existed_rowset_meta = response->mutable_existed_rowset_meta();
         if (!existed_rowset_meta->ParseFromString(existed_commit_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -948,14 +962,14 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
                 existed_rowset_meta->set_index_id(rowset_meta.index_id());
             } else {
                 TabletIndexPB tablet_idx;
-                get_tablet_idx(code, msg, ret, txn.get(), instance_id, rowset_meta.tablet_id(),
+                get_tablet_idx(code, msg, txn.get(), instance_id, rowset_meta.tablet_id(),
                                tablet_idx);
                 if (code != MetaServiceCode::OK) return;
                 existed_rowset_meta->set_index_id(tablet_idx.index_id());
             }
         }
         if (!existed_rowset_meta->has_tablet_schema()) {
-            set_schema_in_existed_rowset(code, msg, ret, txn.get(), instance_id, rowset_meta,
+            set_schema_in_existed_rowset(code, msg, txn.get(), instance_id, rowset_meta,
                                          *existed_rowset_meta);
             if (code != MetaServiceCode::OK) return;
         } else {
@@ -966,8 +980,8 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
         msg = "rowset already exists";
         return;
     }
-    if (ret != 1) {
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+    if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = cast_as<ErrCategory::READ>(err);
         msg = "failed to check whether rowset exists";
         return;
     }
@@ -975,8 +989,7 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     if (config::write_schema_kv && rowset_meta.has_tablet_schema()) {
         if (!rowset_meta.has_index_id()) {
             TabletIndexPB tablet_idx;
-            get_tablet_idx(code, msg, ret, txn.get(), instance_id, rowset_meta.tablet_id(),
-                           tablet_idx);
+            get_tablet_idx(code, msg, txn.get(), instance_id, rowset_meta.tablet_id(), tablet_idx);
             if (code != MetaServiceCode::OK) return;
             rowset_meta.set_index_id(tablet_idx.index_id());
         }
@@ -1005,19 +1018,108 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
     LOG(INFO) << "xxx put" << (temporary ? " tmp " : " ") << "commit_rowset_key " << hex(commit_key)
               << " delete prepare_rowset_key " << hex(prepare_key) << " value_size "
               << commit_val.size();
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to save rowset meta, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to save rowset meta, err=" << err;
+        msg = ss.str();
+        return;
+    }
+}
+
+void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* controller,
+                                              const ::selectdb::CreateRowsetRequest* request,
+                                              ::selectdb::CreateRowsetResponse* response,
+                                              ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(update_tmp_rowset);
+    if (!request->has_rowset_meta()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "no rowset meta";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        LOG(INFO) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
+        return;
+    }
+    doris::RowsetMetaPB rowset_meta(request->rowset_meta());
+    if (!rowset_meta.has_tablet_schema() && !rowset_meta.has_schema_version()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "rowset_meta must have either schema or schema_version";
+        return;
+    }
+    RPC_RATE_LIMIT(update_tmp_rowset)
+    int64_t tablet_id = rowset_meta.tablet_id();
+
+    std::string update_key;
+    std::string update_val;
+
+    int64_t txn_id = rowset_meta.txn_id();
+    MetaRowsetTmpKeyInfo key_info {instance_id, txn_id, tablet_id};
+    meta_rowset_tmp_key(key_info, &update_key);
+
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
+        msg = "failed to create txn";
+        return;
+    }
+
+    // Check if commit key already exists.
+    std::string existed_commit_val;
+    err = txn->get(update_key, &existed_commit_val);
+    if (err == TxnErrorCode::TXN_OK) {
+        auto existed_rowset_meta = response->mutable_existed_rowset_meta();
+        if (!existed_rowset_meta->ParseFromString(existed_commit_val)) {
+            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+            msg = fmt::format("malformed rowset meta value. key={}", hex(update_key));
+            return;
+        }
+    } else if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        code = MetaServiceCode::ROWSET_META_NOT_FOUND;
+        LOG_WARNING(
+                "fail to find the rowset meta with key={}, instance_id={}, txn_id={}, "
+                "tablet_id={}, rowset_id={}",
+                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                rowset_meta.rowset_id_v2());
+        msg = "can't find the rowset";
+        return;
+    } else {
+        code = cast_as<ErrCategory::READ>(err);
+        LOG_WARNING(
+                "internal error, fail to find the rowset meta with key={}, instance_id={}, "
+                "txn_id={}, tablet_id={}, rowset_id={}",
+                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                rowset_meta.rowset_id_v2());
+        msg = "failed to check whether rowset exists";
+        return;
+    }
+
+    DCHECK_GT(rowset_meta.txn_expiration(), 0);
+    if (!rowset_meta.SerializeToString(&update_val)) {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "failed to serialize rowset meta";
+        return;
+    }
+
+    txn->put(update_key, update_val);
+    LOG(INFO) << "xxx put "
+              << "update_rowset_key " << hex(update_key) << " value_size " << update_val.size();
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to update rowset meta, err=" << err;
         msg = ss.str();
         return;
     }
 }
 
 void internal_get_rowset(Transaction* txn, int64_t start, int64_t end,
-                         const std::string& instance_id, int64_t tablet_id, int& ret,
-                         MetaServiceCode& code, std::string& msg,
-                         ::selectdb::GetRowsetResponse* response) {
+                         const std::string& instance_id, int64_t tablet_id, MetaServiceCode& code,
+                         std::string& msg, ::selectdb::GetRowsetResponse* response) {
     LOG(INFO) << "get_rowset start=" << start << ", end=" << end;
     MetaRowsetKeyInfo key_info0 {instance_id, tablet_id, start};
     MetaRowsetKeyInfo key_info1 {instance_id, tablet_id, end + 1};
@@ -1036,10 +1138,10 @@ void internal_get_rowset(Transaction* txn, int64_t start, int64_t end,
 
     std::stringstream ss;
     do {
-        ret = txn->get(key0, key1, &it);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_GET_ERR;
-            ss << "internal error, failed to get rowset, ret=" << ret;
+        TxnErrorCode err = txn->get(key0, key1, &it);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            ss << "internal error, failed to get rowset, err=" << err;
             msg = ss.str();
             LOG(WARNING) << msg;
             return;
@@ -1052,7 +1154,6 @@ void internal_get_rowset(Transaction* txn, int64_t start, int64_t end,
                 code = MetaServiceCode::PROTOBUF_PARSE_ERR;
                 msg = "malformed rowset meta, unable to deserialize";
                 LOG(WARNING) << msg << " key=" << hex(k);
-                ret = -1;
                 return;
             }
             ++num_rowsets;
@@ -1166,23 +1267,23 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
     int64_t req_cp = request->cumulative_point();
 
     std::unique_ptr<Transaction> txn;
-    ret = txn_kv_->create_txn(&txn);
-    if (ret != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to create txn";
         return;
     }
 
-    auto& idx = const_cast<TabletIndexPB&>(request->idx());
+    TabletIndexPB idx(request->idx());
     // Get tablet id index from kv
     if (!idx.has_table_id() || !idx.has_index_id() || !idx.has_partition_id()) {
-        get_tablet_idx(code, msg, ret, txn.get(), instance_id, tablet_id, idx);
+        get_tablet_idx(code, msg, txn.get(), instance_id, tablet_id, idx);
         if (code != MetaServiceCode::OK) return;
     }
     // TODO(plat1ko): Judge if tablet has been dropped (in dropped index/partition)
 
     TabletStatsPB tablet_stat;
-    internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, idx, tablet_stat, true);
+    internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, tablet_stat, true);
     if (code != MetaServiceCode::OK) return;
     VLOG_DEBUG << "tablet_id=" << tablet_id << " stats=" << proto_to_json(tablet_stat);
 
@@ -1213,9 +1314,8 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
     auto versions = calc_sync_versions(req_bc_cnt, bc_cnt, req_cc_cnt, cc_cnt, req_cp, cp,
                                        req_start, req_end);
     for (auto [start, end] : versions) {
-        internal_get_rowset(txn.get(), start, end, instance_id, tablet_id, ret, code, msg,
-                            response);
-        if (ret != 0) {
+        internal_get_rowset(txn.get(), start, end, instance_id, tablet_id, code, msg, response);
+        if (code != MetaServiceCode::OK) {
             return;
         }
     }
@@ -1251,13 +1351,14 @@ void MetaServiceImpl::get_rowset(::google::protobuf::RpcController* controller,
         } else {
             auto key = meta_schema_key({instance_id, idx.index_id(), rowset_meta.schema_version()});
             ValueBuf val_buf;
-            ret = selectdb::get(txn.get(), key, &val_buf);
-            if (ret != 0) {
-                code = MetaServiceCode::KV_TXN_GET_ERR;
+            TxnErrorCode err = selectdb::get(txn.get(), key, &val_buf);
+            if (err != TxnErrorCode::TXN_OK) {
+                code = cast_as<ErrCategory::READ>(err);
                 msg = fmt::format(
                         "failed to get schema, schema_version={}, rowset_version=[{}-{}]: {}",
                         rowset_meta.schema_version(), rowset_meta.start_version(),
-                        rowset_meta.end_version(), ret == 1 ? "not found" : "internal error");
+                        rowset_meta.end_version(),
+                        err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
                 return;
             }
             auto schema = rowset_meta.mutable_tablet_schema();
@@ -1287,21 +1388,21 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
 
     std::unique_ptr<Transaction> txn;
     for (auto& i : request->tablet_idx()) {
+        TabletIndexPB idx(i);
         // FIXME(plat1ko): Get all tablet stats in one txn
-        ret = txn_kv_->create_txn(&txn);
-        if (ret != 0) {
-            code = MetaServiceCode::KV_TXN_CREATE_ERR;
-            msg = fmt::format("failed to create txn, tablet_id={}", i.tablet_id());
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = fmt::format("failed to create txn, tablet_id={}", idx.tablet_id());
             return;
         }
-        if (!(/* i.has_db_id() && */ i.has_table_id() && i.has_index_id() && i.has_partition_id() &&
-              i.has_tablet_id())) {
-            get_tablet_idx(code, msg, ret, txn.get(), instance_id, i.tablet_id(),
-                           const_cast<TabletIndexPB&>(i));
+        if (!(/* idx.has_db_id() && */ idx.has_table_id() && idx.has_index_id() &&
+              idx.has_partition_id() && i.has_tablet_id())) {
+            get_tablet_idx(code, msg, txn.get(), instance_id, idx.tablet_id(), idx);
             if (code != MetaServiceCode::OK) return;
         }
         auto tablet_stats = response->add_tablet_stats();
-        internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, i, *tablet_stats, true);
+        internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, *tablet_stats, true);
         if (code != MetaServiceCode::OK) {
             response->clear_tablet_stats();
             break;
@@ -1334,8 +1435,9 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     }
     RPC_RATE_LIMIT(update_delete_bitmap)
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
@@ -1345,12 +1447,17 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
-    ret = txn->get(lock_key, &lock_val);
-    if (ret != 0) {
+    err = txn->get(lock_key, &lock_val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        msg = "lock id key not found";
+        code = MetaServiceCode::LOCK_EXPIRED;
+        return;
+    }
+    if (err != TxnErrorCode::TXN_OK) {
         ss << "failed to get delete bitmap lock info, instance_id=" << instance_id
-           << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+           << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;
         msg = ss.str();
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         return;
     }
     if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
@@ -1361,7 +1468,7 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     if (lock_info.lock_id() != request->lock_id()) {
         LOG(WARNING) << "lock is expired, table_id=" << table_id << " key=" << hex(lock_key)
                      << " request lock_id=" << request->lock_id()
-                     << " locked lock_id=" << lock_info.lock_id() << " ret=" << ret;
+                     << " locked lock_id=" << lock_info.lock_id() << " err=" << err;
         msg = "lock id not match";
         code = MetaServiceCode::LOCK_EXPIRED;
         return;
@@ -1377,8 +1484,8 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         LOG(WARNING) << "cannot found initiator, table_id=" << table_id << " key=" << hex(lock_key)
                      << " request lock_id=" << request->lock_id()
                      << " request initiator=" << request->initiator()
-                     << " locked lock_id=" << lock_info.lock_id() << " ret=" << ret;
-        msg = "lock initator not exist";
+                     << " locked lock_id=" << lock_info.lock_id() << " err=" << err;
+        msg = "lock initiator not exist";
         code = MetaServiceCode::LOCK_EXPIRED;
         return;
     }
@@ -1387,17 +1494,17 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     auto tablet_id = request->tablet_id();
     std::string pending_key = meta_pending_delete_bitmap_key({instance_id, tablet_id});
     std::string pending_val;
-    ret = txn->get(pending_key, &pending_val);
-    if (ret < 0) {
+    err = txn->get(pending_key, &pending_val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         ss << "failed to get delete bitmap pending info, instance_id=" << instance_id
-           << " tablet_id=" << tablet_id << " key=" << hex(pending_key) << " ret=" << ret;
+           << " tablet_id=" << tablet_id << " key=" << hex(pending_key) << " err=" << err;
         msg = ss.str();
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         return;
     }
 
-    // delete delete bitmpap of expired txn
-    if (ret == 0) {
+    // delete delete bitmap of expired txn
+    if (err == TxnErrorCode::TXN_OK) {
         PendingDeleteBitmapPB pending_info;
         if (!pending_info.ParseFromString(pending_val)) [[unlikely]] {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
@@ -1465,10 +1572,10 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
                   << " lock_id=" << request->lock_id() << " value_size: " << pending_val.size();
     }
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to update delete bitmap, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to update delete bitmap, err=" << err;
         msg = ss.str();
         return;
     }
@@ -1494,31 +1601,6 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
         return;
     }
     RPC_RATE_LIMIT(get_delete_bitmap)
-    std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
-        msg = "failed to init txn";
-        return;
-    }
-
-    if (request->has_idx()) {
-        auto& idx = const_cast<TabletIndexPB&>(request->idx());
-        TabletStatsPB tablet_stat;
-        internal_get_tablet_stats(code, msg, ret, txn.get(), instance_id, idx, tablet_stat,
-                                  true /*snapshot_read*/);
-        if (code != MetaServiceCode::OK) {
-            return;
-        }
-        // The requested compaction state and the actual compaction state are different, which indicates that
-        // the requested rowsets are expired and their delete bitmap may have been deleted.
-        if (request->base_compaction_cnt() != tablet_stat.base_compaction_cnt() ||
-            request->cumulative_compaction_cnt() != tablet_stat.cumulative_compaction_cnt() ||
-            request->cumulative_point() != tablet_stat.cumulative_point()) {
-            code = MetaServiceCode::ROWSETS_EXPIRED;
-            msg = "rowsets are expired";
-            return;
-        }
-    }
 
     auto tablet_id = request->tablet_id();
     auto& rowset_ids = request->rowset_ids();
@@ -1535,6 +1617,14 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 
     for (size_t i = 0; i < rowset_ids.size(); i++) {
+        // create a new transaction every time, avoid using one transaction that takes too long
+        std::unique_ptr<Transaction> txn;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = "failed to init txn";
+            return;
+        }
         MetaDeleteBitmapInfo start_key_info {instance_id, tablet_id, rowset_ids[i],
                                              begin_versions[i], 0};
         MetaDeleteBitmapInfo end_key_info {instance_id, tablet_id, rowset_ids[i], end_versions[i],
@@ -1551,10 +1641,10 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
         int64_t last_ver = -1;
         int64_t last_seg_id = -1;
         do {
-            ret = txn->get(start_key, end_key, &it);
-            if (ret != 0) {
-                code = MetaServiceCode::KV_TXN_GET_ERR;
-                ss << "internal error, failed to get delete bitmap, ret=" << ret;
+            err = txn->get(start_key, end_key, &it);
+            if (err != TxnErrorCode::TXN_OK) {
+                code = cast_as<ErrCategory::READ>(err);
+                ss << "internal error, failed to get delete bitmap, ret=" << err;
                 msg = ss.str();
                 return;
             }
@@ -1586,6 +1676,32 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
             start_key = it->next_begin_key(); // Update to next smallest key for iteration
         } while (it->more());
     }
+
+    if (request->has_idx()) {
+        std::unique_ptr<Transaction> txn;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = "failed to init txn";
+            return;
+        }
+        TabletIndexPB idx(request->idx());
+        TabletStatsPB tablet_stat;
+        internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, tablet_stat,
+                                  true /*snapshot_read*/);
+        if (code != MetaServiceCode::OK) {
+            return;
+        }
+        // The requested compaction state and the actual compaction state are different, which indicates that
+        // the requested rowsets are expired and their delete bitmap may have been deleted.
+        if (request->base_compaction_cnt() != tablet_stat.base_compaction_cnt() ||
+            request->cumulative_compaction_cnt() != tablet_stat.cumulative_compaction_cnt() ||
+            request->cumulative_point() != tablet_stat.cumulative_point()) {
+            code = MetaServiceCode::ROWSETS_EXPIRED;
+            msg = "rowsets are expired";
+            return;
+        }
+    }
 }
 
 void MetaServiceImpl::get_delete_bitmap_update_lock(
@@ -1611,8 +1727,9 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(
 
     RPC_RATE_LIMIT(get_delete_bitmap_update_lock)
     std::unique_ptr<Transaction> txn;
-    if (txn_kv_->create_txn(&txn) != 0) {
-        code = MetaServiceCode::KV_TXN_CREATE_ERR;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
@@ -1620,17 +1737,17 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(
     std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
-    ret = txn->get(lock_key, &lock_val);
-    if (ret < 0) {
+    err = txn->get(lock_key, &lock_val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         ss << "failed to get delete bitmap update lock, instance_id=" << instance_id
-           << " table_id=" << table_id << " key=" << hex(lock_key) << " ret=" << ret;
+           << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;
         msg = ss.str();
         code = MetaServiceCode::KV_TXN_GET_ERR;
         return;
     }
     using namespace std::chrono;
     int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
-    if (ret == 0) {
+    if (err == TxnErrorCode::TXN_OK) {
         if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
             msg = "failed to parse DeleteBitmapUpdateLockPB";
@@ -1641,7 +1758,7 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(
                       << lock_info.lock_id() << " table_id=" << table_id << " now=" << now;
             lock_info.clear_initiators();
         } else if (lock_info.lock_id() != request->lock_id()) {
-            ss << "already be locked. requset lock_id=" << request->lock_id()
+            ss << "already be locked. request lock_id=" << request->lock_id()
                << " locked by lock_id=" << lock_info.lock_id() << " table_id=" << table_id
                << " now=" << now << " expiration=" << lock_info.expiration();
             msg = ss.str();
@@ -1672,10 +1789,10 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(
     LOG(INFO) << "xxx put lock_key=" << hex(lock_key) << " lock_id=" << request->lock_id()
               << " initiators_size: " << lock_info.initiators_size();
 
-    ret = txn->commit();
-    if (ret != 0) {
-        code = ret == -1 ? MetaServiceCode::KV_TXN_CONFLICT : MetaServiceCode::KV_TXN_COMMIT_ERR;
-        ss << "failed to get_delete_bitmap_update_lock, ret=" << ret;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to get_delete_bitmap_update_lock, err=" << err;
         msg = ss.str();
         return;
     }
@@ -1699,15 +1816,15 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::get_instance_info(
     }
 
     std::unique_ptr<Transaction> txn0;
-    int ret_txn = txn_kv_->create_txn(&txn0);
-    if (ret_txn != 0) {
-        return {MetaServiceCode::KV_TXN_CREATE_ERR, "failed to create txn"};
+    TxnErrorCode err = txn_kv_->create_txn(&txn0);
+    if (err != TxnErrorCode::TXN_OK) {
+        return {cast_as<ErrCategory::CREATE>(err), "failed to create txn"};
     }
 
     std::shared_ptr<Transaction> txn(txn0.release());
     auto [c0, m0] = resource_mgr_->get_instance(txn, cloned_instance_id, instance);
-    if (c0 != 0) {
-        return {MetaServiceCode::KV_TXN_GET_ERR, "failed to get instance, info=" + m0};
+    if (c0 != TxnErrorCode::TXN_OK) {
+        return {cast_as<ErrCategory::READ>(err), "failed to get instance, info=" + m0};
     }
 
     // maybe do not decrypt ak/sk?

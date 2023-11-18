@@ -38,6 +38,8 @@ public:
     virtual Status commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
                                  std::shared_ptr<RowsetMeta>* existed_rs_meta = nullptr) = 0;
 
+    virtual Status update_tmp_rowset(const RowsetMeta& rs_meta) = 0;
+
     virtual Status commit_txn(StreamLoadContext* ctx, bool is_2pc) = 0;
 
     virtual Status abort_txn(StreamLoadContext* ctx) = 0;

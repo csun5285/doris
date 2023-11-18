@@ -225,7 +225,7 @@ Status OrcReader::_create_file_reader() {
         RETURN_IF_ERROR(io::DelegateReader::create_file_reader(
                 _profile, _system_properties, _file_description, reader_options, &_file_system,
                 &inner_reader, io::DelegateReader::AccessMode::RANDOM, _io_ctx));
-        _file_input_stream.reset(new ORCFileInputStream(_scan_range.path, inner_reader,
+        _file_input_stream.reset(new ORCFileInputStream(_scan_range.path, std::move(inner_reader),
                                                         &_statistics, _io_ctx, _profile));
     }
     if (_file_input_stream->getLength() == 0) {

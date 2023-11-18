@@ -70,16 +70,6 @@ FileBlock::State FileBlock::state() const {
     return _download_state;
 }
 
-size_t FileBlock::get_download_offset() const {
-    std::lock_guard segment_lock(_mutex);
-    return range().left + get_downloaded_size(segment_lock);
-}
-
-size_t FileBlock::get_downloaded_size() const {
-    std::lock_guard segment_lock(_mutex);
-    return get_downloaded_size(segment_lock);
-}
-
 size_t FileBlock::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segment_lock */) const {
     if (_download_state == State::DOWNLOADED) {
         return _downloaded_size;
@@ -90,8 +80,7 @@ size_t FileBlock::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segment_
 }
 
 uint64_t FileBlock::get_caller_id() {
-    uint64_t id = 0;
-    id = bthread_self() == 0 ? static_cast<uint64_t>(pthread_self()) : bthread_self();
+    uint64_t id = static_cast<uint64_t>(pthread_self());
     DCHECK(id != 0);
     return id;
 }
@@ -242,15 +231,8 @@ FileBlock::~FileBlock() {
     }
 }
 
-Status FileBlock::finalize_write(bool need_to_get_file_size) {
+Status FileBlock::finalize_write() {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("file_block::finalize_write", Status());
-    if (need_to_get_file_size) {
-        int64_t downloaded_size = 0;
-        std::string file_path = get_path_in_local_cache(true);
-        RETURN_IF_ERROR(global_local_filesystem()->file_size(file_path, &downloaded_size));
-        std::lock_guard segment_lock(_mutex);
-        _downloaded_size = downloaded_size;
-    }
     if (_downloaded_size != 0 && _downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
@@ -368,10 +350,6 @@ std::string FileBlock::state_to_string(FileBlock::State state) {
     }
 }
 
-bool FileBlock::has_finalized_state() const {
-    return _download_state == State::DOWNLOADED;
-}
-
 FileBlocksHolder::~FileBlocksHolder() {
     /// In CacheableReadBufferFromRemoteFS file segment's downloader removes file segments from
     /// FileSegmentsHolder right after calling file_segment->complete(), so on destruction here
@@ -402,17 +380,6 @@ FileBlocksHolder::~FileBlocksHolder() {
 
         file_segment_it = file_segments.erase(current_file_segment_it);
     }
-}
-
-std::string FileBlocksHolder::to_string() {
-    std::string ranges;
-    for (const auto& file_segment : file_segments) {
-        if (!ranges.empty()) {
-            ranges += ", ";
-        }
-        ranges += file_segment->range().to_string();
-    }
-    return ranges;
 }
 
 } // namespace io

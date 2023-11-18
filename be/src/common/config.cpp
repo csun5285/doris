@@ -1057,6 +1057,8 @@ DEFINE_mInt32(s3_write_buffer_size, "5242880");
 // can at most buffer 50MB data. And the num of multi part upload task is
 // s3_write_buffer_whole_size / s3_write_buffer_size
 DEFINE_mInt32(s3_write_buffer_whole_size, "524288000");
+// The timeout config for S3 buffer allocation
+DEFINE_mInt32(s3_writer_buffer_allocation_timeout, "60");
 
 //disable shrink memory by default
 DEFINE_Bool(enable_shrink_memory, "false");
@@ -1157,6 +1159,8 @@ DEFINE_mInt64(max_load_pressure_wait_time_ms, "3000");
 DEFINE_Int32(calc_delete_bitmap_worker_count, "8");
 // the count of thread to calc tablet delete bitmap task, only used for cloud
 DEFINE_Int32(calc_tablet_delete_bitmap_task_max_thread, "32");
+// stream load commit retry times for mow table
+DEFINE_mInt32(mow_stream_load_commit_retry_times, "10");
 
 // the maximum condition vatiable wait time for buffered reader
 DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "io/cache/block/cached_remote_file_reader.h"
 #include "io/file_factory.h"
 #include "io/fs/broker_file_reader.h"
@@ -167,17 +168,26 @@ public:
 
     Status close() override {
         if (!_closed) {
+            
             _closed = true;
             // the underlying buffer is closed in its own destructor
             // return _reader->close();
-            if (_profile != nullptr) {
-                COUNTER_UPDATE(_copy_time, _statistics.copy_time);
-                COUNTER_UPDATE(_read_time, _statistics.read_time);
-                COUNTER_UPDATE(_request_io, _statistics.request_io);
-                COUNTER_UPDATE(_merged_io, _statistics.merged_io);
-                COUNTER_UPDATE(_request_bytes, _statistics.request_bytes);
-                COUNTER_UPDATE(_read_bytes, _statistics.read_bytes);
-            }
+            // Fixme(AlexYue): Temporiraly comment the profile update logic
+            // if (_profile != nullptr) {
+            //     COUNTER_UPDATE(_copy_time, _statistics.copy_time);
+            //     COUNTER_UPDATE(_read_time, _statistics.read_time);
+            //     COUNTER_UPDATE(_request_io, _statistics.request_io);
+            //     COUNTER_UPDATE(_merged_io, _statistics.merged_io);
+            //     COUNTER_UPDATE(_request_bytes, _statistics.request_bytes);
+            //     COUNTER_UPDATE(_read_bytes, _statistics.read_bytes);
+            // }
+            // _profile = nullptr;
+            LOG_INFO(
+                    "The merge range reader's profile, path {}, copy time {}, read time {}, "
+                    "request io {}, merged io {}, request bytes {}, merged bytes {}",
+                    _reader->path().string(), _statistics.copy_time, _statistics.read_time,
+                    _statistics.request_io, _statistics.merged_io, _statistics.request_bytes,
+                    _statistics.read_bytes);
         }
         return Status::OK();
     }

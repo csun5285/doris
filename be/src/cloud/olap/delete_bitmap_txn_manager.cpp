@@ -24,7 +24,9 @@
 #include <shared_mutex>
 
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "olap/olap_common.h"
+#include "olap/tablet_meta.h"
 
 namespace doris {
 
@@ -47,19 +49,22 @@ Status DeleteBitmapTxnManager::init() {
     return st;
 }
 
-Status DeleteBitmapTxnManager::get_tablet_txn_info(TTransactionId transaction_id, int64_t tablet_id,
-                                                   RowsetSharedPtr* rowset,
-                                                   DeleteBitmapPtr* delete_bitmap,
-                                                   RowsetIdUnorderedSet* rowset_ids) {
+Status DeleteBitmapTxnManager::get_tablet_txn_info(
+        TTransactionId transaction_id, int64_t tablet_id, RowsetSharedPtr* rowset,
+        DeleteBitmapPtr* delete_bitmap, RowsetIdUnorderedSet* rowset_ids, int64_t* txn_expiration,
+        std::shared_ptr<PartialUpdateInfo>* partial_update_info) {
     {
         std::shared_lock<std::shared_mutex> rlock(_rwlock);
         TxnKey key(transaction_id, tablet_id);
         auto iter = _txn_map.find(key);
         if (iter == _txn_map.end()) {
-            return Status::NotFound("not found txn info, tablet_id={}, transaction_id={}",
-                                    tablet_id, transaction_id);
+            return Status::Error<ErrorCode::NOT_FOUND, false>(
+                    "not found txn info, tablet_id={}, transaction_id={}", tablet_id,
+                    transaction_id);
         }
         *rowset = iter->second.rowset;
+        *txn_expiration = iter->second.txn_expiration;
+        *partial_update_info = iter->second.partial_update_info;
     }
     std::string key_str = fmt::format("{}/{}", transaction_id, tablet_id);
     CacheKey key(key_str);
@@ -88,7 +93,8 @@ Status DeleteBitmapTxnManager::get_tablet_txn_info(TTransactionId transaction_id
 
 void DeleteBitmapTxnManager::set_tablet_txn_info(
         TTransactionId transaction_id, int64_t tablet_id, DeleteBitmapPtr delete_bitmap,
-        const RowsetIdUnorderedSet& rowset_ids, RowsetSharedPtr rowset, int64_t txn_expiration) {
+        const RowsetIdUnorderedSet& rowset_ids, RowsetSharedPtr rowset, int64_t txn_expiration,
+        std::shared_ptr<PartialUpdateInfo> partial_update_info) {
     if (txn_expiration <= 0) {
         txn_expiration = duration_cast<std::chrono::seconds>(
                                  std::chrono::system_clock::now().time_since_epoch())
@@ -98,7 +104,7 @@ void DeleteBitmapTxnManager::set_tablet_txn_info(
     {
         std::unique_lock<std::shared_mutex> wlock(_rwlock);
         TxnKey txn_key(transaction_id, tablet_id);
-        _txn_map[txn_key] = TxnVal(rowset, txn_expiration);
+        _txn_map[txn_key] = TxnVal(rowset, txn_expiration, std::move(partial_update_info));
         _expiration_txn.emplace(txn_expiration, txn_key);
     }
     std::string key_str = fmt::format("{}/{}", transaction_id, tablet_id);
@@ -123,8 +129,35 @@ void DeleteBitmapTxnManager::set_tablet_txn_info(
             .tag("delete_bitmap_size", charge);
 }
 
+void DeleteBitmapTxnManager::update_tablet_txn_info(TTransactionId transaction_id,
+                                                    int64_t tablet_id,
+                                                    DeleteBitmapPtr delete_bitmap,
+                                                    const RowsetIdUnorderedSet& rowset_ids) {
+    std::string key_str = fmt::format("{}/{}", transaction_id, tablet_id);
+    CacheKey key(key_str);
+
+    DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id);
+    *new_delete_bitmap = *delete_bitmap;
+    auto val = new DeleteBitmapCacheValue(new_delete_bitmap, rowset_ids);
+    auto deleter = [](const CacheKey&, void* value) {
+        delete (DeleteBitmapCacheValue*)value; // Just delete to reclaim
+    };
+    size_t charge = sizeof(DeleteBitmapCacheValue);
+    for (auto& [k, v] : val->delete_bitmap->delete_bitmap) {
+        charge += v.getSizeInBytes();
+    }
+    auto handle = _delete_bitmap_cache.insert(key, val, charge, deleter, CachePriority::NORMAL);
+    // must call release handle to reduce the reference count,
+    // otherwise there will be memory leak
+    _delete_bitmap_cache.release(handle);
+    LOG_INFO("update txn related delete bitmap")
+            .tag("txn_id", transaction_id)
+            .tag("tablt_id", tablet_id)
+            .tag("delete_bitmap_size", charge);
+}
 
 void DeleteBitmapTxnManager::remove_expired_tablet_txn_info() {
+    TEST_SYNC_POINT_RETURN_WITH_VOID("DeleteBitmapTxnManager::remove_expired_tablet_txn_info");
     std::unique_lock<std::shared_mutex> wlock(_rwlock);
     while (!_expiration_txn.empty()) {
         auto iter = _expiration_txn.begin();

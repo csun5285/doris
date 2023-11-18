@@ -50,6 +50,7 @@ class TupleDescriptor;
 class SlotDescriptor;
 class OlapTableSchemaParam;
 class RowsetWriter;
+struct PartialUpdateInfo;
 
 namespace vectorized {
 class Block;
@@ -210,7 +211,7 @@ private:
     int64_t _cur_max_version;
 
     // total rows num written by DeltaWriter
-    int64_t _total_received_rows = 0;
+    std::atomic<int64_t> _total_received_rows = 0;
 
     RuntimeProfile* _profile = nullptr;
     RuntimeProfile::Counter* _lock_timer = nullptr;
@@ -231,6 +232,8 @@ private:
     MonotonicStopWatch _lock_watch;
 
     MemTableStat _memtable_stat;
+
+    std::shared_ptr<PartialUpdateInfo> _partial_update_info;
 };
 
 } // namespace doris

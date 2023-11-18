@@ -177,7 +177,7 @@ public class GrantStmt extends DdlStmt {
             checkTablePrivileges(privileges, role, tblPattern, colPrivileges);
         } else if (resourcePattern != null) {
             if (Config.isCloudMode()) {
-                PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
+                privileges = PrivBitSet.convertResourcePrivToCloudPriv(this.resourcePattern, privileges);
             }
             checkResourcePrivileges(privileges, role, resourcePattern);
         } else if (workloadGroupPattern != null) {

@@ -1958,7 +1958,7 @@ public class Config extends ConfigBase {
      * This is to solve the case that user forgot the password.
      */
     @ConfField(mutable = false)
-    public static boolean skip_localhost_auth_check  = true;
+    public static boolean skip_localhost_auth_check  = false;
 
     @ConfField(mutable = true)
     public static boolean enable_round_robin_create_tablet = false;
@@ -2319,6 +2319,10 @@ public class Config extends ConfigBase {
     // for example: jdbc_driver_url_white_list=a,b,c
     @ConfField(mutable = true)
     public static String[] jdbc_driver_url_white_list = {};
+
+    // the white list for ShowProcStmt
+    @ConfField(mutable = true)
+    public static String[] cloud_show_proc_white_list = {"/current_query_stmts"};
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
@@ -2426,11 +2430,23 @@ public class Config extends ConfigBase {
     })
     public static long auto_analyze_job_record_count = 20000;
 
-    @ConfField(description = {
+    @ConfField(mutable = true, description = {
             "Auto Buckets中最小的buckets数目",
             "min buckets of auto bucket"
     })
     public static int autobucket_min_buckets = 1;
+
+    @ConfField(mutable = true, description = {
+            "Auto Buckets中最大的buckets数目",
+            "max buckets of auto bucket"
+    })
+    public static int autobucket_max_buckets = 128;
+
+    @ConfField(mutable = true, description = {
+            "Cloud Auto Buckets中最大的buckets数目",
+            "cloud max buckets of auto bucket"
+    })
+    public static int cloud_autobucket_max_buckets = 50;
 
     @ConfField(mutable = true)
     public static boolean enable_profile_when_analyze = false;

@@ -379,7 +379,6 @@ Status HdfsFileSystem::download_impl(const Path& remote_file, const Path& local_
     LOG(INFO) << "read remote file: " << remote_file << " to local: " << local_file;
     constexpr size_t buf_sz = 1024 * 1024;
     std::unique_ptr<char[]> read_buf(new char[buf_sz]);
-    size_t write_offset = 0;
     size_t cur_offset = 0;
     while (true) {
         size_t read_len = 0;
@@ -390,8 +389,7 @@ Status HdfsFileSystem::download_impl(const Path& remote_file, const Path& local_
             break;
         }
 
-        RETURN_IF_ERROR(local_writer->write_at(write_offset, {read_buf.get(), read_len}));
-        write_offset += read_len;
+        RETURN_IF_ERROR(local_writer->append({read_buf.get(), read_len}));
     }
 
     return Status::OK();

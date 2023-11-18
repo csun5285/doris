@@ -10,6 +10,7 @@
 #include "meta-service/txn_kv.h"
 
 #include "google/protobuf/util/json_util.h"
+#include "meta-service/txn_kv_error.h"
 
 #include <iomanip>
 #include <sstream>
@@ -238,7 +239,7 @@ void ValueBuf::remove(Transaction* txn) const {
     }
 }
 
-int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
+TxnErrorCode ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
     iters.clear();
     ver = -1;
 
@@ -246,11 +247,12 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
     std::string end_key {key};
     encode_int64(INT64_MAX, &end_key);
     std::unique_ptr<RangeGetIterator> it;
-    if (txn->get(begin_key, end_key, &it, snapshot) != 0) {
-        return -1;
+    TxnErrorCode err = txn->get(begin_key, end_key, &it, snapshot);
+    if (err != TxnErrorCode::TXN_OK) {
+        return err;
     }
-    if (!it->has_next()) { // Not found
-        return 1;
+    if (!it->has_next()) {
+        return TxnErrorCode::TXN_KEY_NOT_FOUND;
     }
     // Extract version
     auto [k, _] = it->next();
@@ -263,20 +265,21 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
         int64_t suffix;
         if (decode_int64(&k, &suffix) != 0) [[unlikely]] {
             LOG_WARNING("failed to decode key").tag("key", hex(k));
-            return -2;
+            return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
         }
         ver = suffix >> 56 & 0xff;
     }
     bool more = it->more();
     if (!more) {
         iters.push_back(std::move(it));
-        return 0;
+        return TxnErrorCode::TXN_OK;
     }
     begin_key = it->next_begin_key();
     iters.push_back(std::move(it));
     do {
-        if (txn->get(begin_key, end_key, &it, snapshot) != 0) {
-            return -1;
+        err = txn->get(begin_key, end_key, &it, snapshot);
+        if (err != TxnErrorCode::TXN_OK) {
+            return err;
         }
         more = it->more();
         if (more) {
@@ -284,21 +287,22 @@ int ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot) {
         }
         iters.push_back(std::move(it));
     } while (more);
-    return 0;
+    return TxnErrorCode::TXN_OK;
 }
 
-int get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot) {
+TxnErrorCode get(Transaction* txn, std::string_view key, ValueBuf* val, bool snapshot) {
     return val->get(txn, key, snapshot);
 }
 
-int key_exists(Transaction* txn, std::string_view key, bool snapshot) {
+TxnErrorCode key_exists(Transaction* txn, std::string_view key, bool snapshot) {
     std::string end_key {key};
     encode_int64(INT64_MAX, &end_key);
     std::unique_ptr<RangeGetIterator> it;
-    if (txn->get(key, end_key, &it, snapshot, 1) != 0) {
-        return -1;
+    TxnErrorCode err = txn->get(key, end_key, &it, snapshot, 1);
+    if (err != TxnErrorCode::TXN_OK) {
+        return err;
     }
-    return !it->has_next();
+    return it->has_next() ? TxnErrorCode::TXN_OK : TxnErrorCode::TXN_KEY_NOT_FOUND;
 }
 
 void put(Transaction* txn, std::string_view key, const google::protobuf::Message& pb, uint8_t ver,

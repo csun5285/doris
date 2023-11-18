@@ -1,11 +1,13 @@
 #include "recycler/util.h"
 
 #include <glog/logging.h>
+
 #include <cstdint>
 
 #include "common/util.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 namespace config {
@@ -21,17 +23,17 @@ int get_all_instances(TxnKv* txn_kv, std::vector<InstanceInfoPB>& res) {
     instance_key(key1_info, &key1);
 
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        LOG(INFO) << "failed to init txn, ret=" << ret;
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(INFO) << "failed to init txn, err=" << err;
         return -1;
     }
 
     std::unique_ptr<RangeGetIterator> it;
     do {
-        ret = txn->get(key0, key1, &it);
-        if (ret != 0) {
-            LOG(WARNING) << "failed to get instance, ret=" << ret;
+        TxnErrorCode err = txn->get(key0, key1, &it);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to get instance, err=" << err;
             return -1;
         }
 
@@ -57,14 +59,14 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
                                  int64_t interval_ms) {
     std::string val;
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to create txn";
         return -1;
     }
-    ret = txn->get(key, &val);
-    if (ret < 0) {
-        LOG(WARNING) << "failed to get kv, ret=" << ret << " key=" << hex(key);
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        LOG(WARNING) << "failed to get kv, err=" << err << " key=" << hex(key);
         return -1;
     }
     using namespace std::chrono;
@@ -85,16 +87,16 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         return lease_expired || finish_expired;
     };
 
-    if (ret == 1 || is_expired()) {
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND || is_expired()) {
         job_info.set_status(JobRecyclePB::BUSY);
         job_info.set_instance_id(instance_id);
         job_info.set_ip_port(ip_port);
         job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
         val = job_info.SerializeAsString();
         txn->put(key, val);
-        ret = txn->commit();
-        if (ret != 0) {
-            LOG(WARNING) << "failed to commit, ret=" << ret << " key=" << hex(key);
+        err = txn->commit();
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to commit, err=" << err << " key=" << hex(key);
             return -1;
         }
         return 0;
@@ -109,14 +111,14 @@ void finish_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
     int retry_times = 0;
     do {
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             LOG(WARNING) << "failed to create txn";
             return;
         }
-        ret = txn->get(key, &val);
-        if (ret < 0 || ret == 1) {
-            LOG(WARNING) << "failed to get kv, ret=" << ret << " key=" << hex(key);
+        err = txn->get(key, &val);
+        if (err != TxnErrorCode::TXN_OK) {
+            LOG(WARNING) << "failed to get kv, err=" << err << " key=" << hex(key);
             return;
         }
 
@@ -146,13 +148,13 @@ void finish_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         }
         val = job_info.SerializeAsString();
         txn->put(key, val);
-        ret = txn->commit();
-        if (ret == 0) {
+        err = txn->commit();
+        if (err == TxnErrorCode::TXN_OK) {
             LOG(INFO) << "succ to commit to finish recycle job, key=" << hex(key);
             return;
         }
         // maybe conflict with the commit of the leased thread
-        LOG(WARNING) << "failed to commit to finish recycle job, ret=" << ret << " key=" << hex(key)
+        LOG(WARNING) << "failed to commit to finish recycle job, err=" << err << " key=" << hex(key)
                      << " retry_times=" << retry_times;
     } while (retry_times++ < 3);
     LOG(WARNING) << "finally failed to commit to finish recycle job, key=" << hex(key);
@@ -162,15 +164,15 @@ int lease_instance_recycle_job(TxnKv* txn_kv, std::string_view key, const std::s
                                const std::string& ip_port) {
     std::string val;
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
         LOG(WARNING) << "failed to create txn";
         return -1;
     }
-    ret = txn->get(key, &val);
-    if (ret < 0 || ret == 1) {
-        LOG(WARNING) << "failed to get kv, ret=" << ret << " key=" << hex(key);
-        return ret;
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to get kv, err=" << err << " key=" << hex(key);
+        return -1;
     }
 
     using namespace std::chrono;
@@ -193,9 +195,9 @@ int lease_instance_recycle_job(TxnKv* txn_kv, std::string_view key, const std::s
     job_info.set_expiration_time_ms(now + config::recycle_job_lease_expired_ms);
     val = job_info.SerializeAsString();
     txn->put(key, val);
-    ret = txn->commit();
-    if (ret != 0) {
-        LOG(WARNING) << "failed to commit, failed to lease recycle job, ret=" << ret
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG(WARNING) << "failed to commit, failed to lease recycle job, err=" << err
                      << " key=" << hex(key);
         return -1;
     }

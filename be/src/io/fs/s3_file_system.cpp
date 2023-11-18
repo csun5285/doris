@@ -56,6 +56,7 @@
 
 #include <algorithm>
 
+#include "common/sync_point.h"
 #include "io/fs/file_reader_options.h"
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
@@ -75,9 +76,9 @@
 #include "io/fs/remote_file_system.h"
 #include "io/fs/s3_file_reader.h"
 #include "io/fs/s3_file_writer.h"
+#include "service/backend_options.h"
 #include "util/s3_uri.h"
 #include "util/s3_util.h"
-#include "service/backend_options.h"
 
 namespace doris {
 namespace io {
@@ -313,7 +314,8 @@ Status S3FileSystem::exists_impl(const Path& path, bool* res) const {
     Aws::S3::Model::HeadObjectRequest request;
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
-    auto outcome = client->HeadObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            client->HeadObject(request), "s3_file_system::head_object", std::ref(request).get());
     s3_bvar::s3_head_total << 1;
     if (outcome.IsSuccess()) {
         *res = true;
@@ -334,7 +336,8 @@ Status S3FileSystem::file_size_impl(const Path& file, int64_t* file_size) const 
     GET_KEY(key, file);
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
-    auto outcome = client->HeadObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            client->HeadObject(request), "s3_file_system::head_object", std::ref(request).get());
     s3_bvar::s3_head_total << 1;
     if (outcome.IsSuccess()) {
         *file_size = outcome.GetResult().GetContentLength();

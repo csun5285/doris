@@ -420,7 +420,6 @@ private:
     bool commited_ = false;
     bool aborted_ = false;
     FDBTransaction* txn_ = nullptr;
-    std::vector<std::unique_ptr<std::string>> kv_pool_;
 };
 
 } // namespace fdb

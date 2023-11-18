@@ -20,6 +20,7 @@
 #include <assert.h>
 // IWYU pragma: no_include <bthread/errno.h>
 #include <errno.h> // IWYU pragma: keep
+#include <gen_cpp/olap_file.pb.h>
 #include <stdio.h>
 
 #include <ctime> // time
@@ -626,7 +627,11 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         }
         _rowset_meta->set_tablet_schema(new_schema);
     }
-    _rowset_meta->add_segments_file_size(_file_writers);
+    if (_context.is_transient_rowset_writer) {
+        _rowset_meta->add_segments_file_size(_file_writers, _segment_start_id);
+    } else {
+        _rowset_meta->add_segments_file_size(_file_writers);
+    }
     RowsetSharedPtr rowset;
     status = RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                           &rowset);
@@ -708,7 +713,40 @@ void BetaRowsetWriter::_build_rowset_meta(std::shared_ptr<RowsetMeta> rowset_met
     rowset_meta->set_creation_time(time(nullptr));
 
     if (_is_pending) {
+        // `is_pending == true` means that we are in a load job rather than a schema change/compaction/pad job
+
+#ifdef CLOUD_MODE
+        // If the current load is a partial update, new segments may be appended to the tmp rowset after the tmp rowset
+        // has been committed if conflicts occur due to concurrent partial updates. However, when the recycler do recycling,
+        // it will generate the paths for the segments to be recycled on the object storage based on the number of segments
+        // in the rowset meta. If these newly added segments are written to the object storage and the transaction is aborted
+        // due to a failure before successfully updating the rowset meta of the corresponding tmp rowset, these newly added
+        // segments cannot be recycled by the recycler on the object storage. Therefore, we need a new state `BEGIN_PARTIAL_UPDATE`
+        // to indicate that the recycler should use list+delete to recycle segments. After the tmp rowset's rowset meta being
+        // updated successfully, the `rowset_state` will be set to `COMMITTED` and the recycler can do recycling based on the
+        // number of segments in the rowset meta safely.
+
+        // rowset_state's FSM:
+        //
+        //                      transfer 0
+        //       PREPARED ---------------------------> COMMITTED
+        //                 |                               ^
+        //                 | transfer 1                    |
+        //                 |                               | transfer 2
+        //                 |--> BEGIN_PARTIAL_UPDATE ------|
+        //
+        // transfer 0 (PREPARED -> COMMITTED): finish writing a rowset and the rowset' meta will not be changed
+        // transfer 1 (PREPARED -> BEGIN_PARTIAL_UPDATE): finish writing a rowset, but may append new segments later and the rowset's meta may be changed
+        // transfer 2 (BEGIN_PARTIAL_UPDATE -> VISIBLE): finish adding new segments and the rowset' meta will not be changed, the rowset is visible to users
+
+        if (_context.partial_update_info && _context.partial_update_info->is_partial_update) {
+            rowset_meta->set_rowset_state(BEGIN_PARTIAL_UPDATE);
+        } else {
+            rowset_meta->set_rowset_state(COMMITTED);
+        }
+#else
         rowset_meta->set_rowset_state(COMMITTED);
+#endif
     } else {
         rowset_meta->set_rowset_state(VISIBLE);
     }

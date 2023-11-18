@@ -26,16 +26,16 @@
 
 #include <cstddef>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
-#include <vector>
-#include <map>
-#include <optional>
-#include <thread>
 #include <utility>
+#include <vector>
 
 #include "common/config.h"
 #include "common/status.h"
@@ -43,11 +43,17 @@
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/cache/block/block_file_segment.h"
 #include "io/io_common.h"
-#include "util/metrics.h"
 #include "util/lock.h"
+#include "util/metrics.h"
 
 namespace doris {
 namespace io {
+
+template <class Lock>
+concept IsXLock = requires {
+    std::same_as<Lock, std::lock_guard<doris::Mutex>> ||
+            std::same_as<Lock, std::unique_lock<doris::Mutex>>;
+};
 
 using FileBlockSPtr = std::shared_ptr<FileBlock>;
 using FileBlocks = std::list<FileBlockSPtr>;
@@ -68,6 +74,13 @@ struct CacheContext {
         query_id = io_context->query_id ? *io_context->query_id : TUniqueId();
     }
     CacheContext() = default;
+
+    bool operator==(const CacheContext& rhs) const {
+        return query_id == rhs.query_id && cache_type == rhs.cache_type 
+                && expiration_time == rhs.expiration_time
+                && is_cold_data == rhs.is_cold_data;
+    }
+
     TUniqueId query_id;
     FileCacheType cache_type;
     int64_t expiration_time {0};
@@ -116,14 +129,10 @@ public:
 
     static Key hash(const std::string& path);
 
-    size_t try_release();
-
     std::string get_path_in_local_cache(const Key& key, int64_t expiration_time, size_t offset,
                                         FileCacheType type, bool is_tmp = false) const;
 
     std::string get_path_in_local_cache(const Key& key, int64_t expiration_time) const;
-
-    std::string get_version_path() const;
 
     const std::string& get_base_path() const { return _cache_base_path; }
 
@@ -139,7 +148,7 @@ public:
      * it is guaranteed that these file segments are not removed from cache.
      */
     FileBlocksHolder get_or_set(const Key& key, size_t offset, size_t size,
-                                        const CacheContext& context);
+                                const CacheContext& context);
 
     /// For debug.
     std::string dump_structure(const Key& key);
@@ -163,12 +172,9 @@ public:
     std::vector<std::tuple<size_t, size_t, FileCacheType, int64_t>> get_hot_segments_meta(
             const Key& key) const;
 
-    // when cache change to read-write  from read-only, it need reinitialize
-    [[nodiscard]] Status reinitialize();
+    void clear_file_cache_async();
 
-    bool get_lazy_open_success() {
-        return _lazy_open_done;
-    }
+    bool get_lazy_open_success() { return _lazy_open_done; }
 
     BlockFileCache& operator=(const BlockFileCache&) = delete;
     BlockFileCache(const BlockFileCache&) = delete;
@@ -188,15 +194,14 @@ protected:
     std::shared_ptr<bvar::Status<size_t>> _cur_disposable_queue_element_count_metrics;
     std::shared_ptr<bvar::Status<size_t>> _cur_disposable_queue_cache_size_metrics;
 
-    bool _is_initialized = false;
-
     mutable doris::Mutex _mutex;
 
-    bool try_reserve(const Key& key, const CacheContext& context, size_t offset,
-                             size_t size, std::lock_guard<doris::Mutex>& cache_lock);
+    bool try_reserve(const Key& key, const CacheContext& context, size_t offset, size_t size,
+                     std::lock_guard<doris::Mutex>& cache_lock);
 
-    void remove(FileBlockSPtr file_block, std::lock_guard<doris::Mutex>& cache_lock,
-                        std::lock_guard<doris::Mutex>& segment_lock);
+    template <class T, class U>
+        requires IsXLock<T> && IsXLock<U>
+    void remove(FileBlockSPtr file_block, T& cache_lock, U& segment_lock);
 
     class LRUQueue {
     public:
@@ -226,7 +231,9 @@ protected:
         size_t get_max_size() const { return max_size; }
         size_t get_max_element_size() const { return max_element_size; }
 
-        size_t get_total_cache_size(std::lock_guard<doris::Mutex>& /* cache_lock */) const {
+        template <class T>
+            requires IsXLock<T>
+        size_t get_total_cache_size(T& /* cache_lock */) const {
             return cache_size;
         }
 
@@ -237,19 +244,20 @@ protected:
         Iterator add(const Key& key, size_t offset, size_t size,
                      std::lock_guard<doris::Mutex>& cache_lock);
 
-        void remove(Iterator queue_it, std::lock_guard<doris::Mutex>& cache_lock);
+        template <class T>
+            requires IsXLock<T>
+        void remove(Iterator queue_it, T& cache_lock);
 
         void move_to_end(Iterator queue_it, std::lock_guard<doris::Mutex>& cache_lock);
 
         std::string to_string(std::lock_guard<doris::Mutex>& cache_lock) const;
 
-        bool contains(const Key& key, size_t offset, std::lock_guard<doris::Mutex>& cache_lock) const;
+        bool contains(const Key& key, size_t offset,
+                      std::lock_guard<doris::Mutex>& cache_lock) const;
 
         Iterator begin() { return queue.begin(); }
 
         Iterator end() { return queue.end(); }
-
-        void remove_all(std::lock_guard<doris::Mutex>& cache_lock);
 
         Iterator get(const Key& key, size_t offset,
                      std::lock_guard<doris::Mutex>& /* cache_lock */) const;
@@ -347,6 +355,7 @@ private:
         std::optional<LRUQueue::Iterator> queue_iterator;
 
         mutable int64_t atime {0};
+        mutable bool is_deleted {false};
         void update_atime() const {
             atime = std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::steady_clock::now().time_since_epoch())
@@ -402,7 +411,9 @@ private:
     FileBlocks get_impl(const Key& key, const CacheContext& context, const FileBlock::Range& range,
                         std::lock_guard<doris::Mutex>& cache_lock);
 
-    FileBlockCell* get_cell(const Key& key, size_t offset, std::lock_guard<doris::Mutex>& cache_lock);
+    template <class T>
+        requires IsXLock<T>
+    FileBlockCell* get_cell(const Key& key, size_t offset, T& cache_lock);
 
     FileBlockCell* add_cell(const Key& key, const CacheContext& context, size_t offset, size_t size,
                             FileBlock::State state, std::lock_guard<doris::Mutex>& cache_lock);
@@ -420,8 +431,6 @@ private:
 
     bool try_reserve_from_other_queue(FileCacheType cur_cache_type, size_t offset, int64_t cur_time,
                                       std::lock_guard<doris::Mutex>& cache_lock);
-
-    size_t get_available_cache_size(FileCacheType cache_type) const;
 
     [[nodiscard]] Status load_cache_info_into_memory();
 
@@ -443,11 +452,8 @@ private:
 
     void check_disk_resource_limit(const std::string& path);
 
-    size_t get_available_cache_size_unlocked(FileCacheType type,
-                                             std::lock_guard<doris::Mutex>& cache_lock) const;
-
     size_t get_file_blocks_num_unlocked(FileCacheType type,
-                                          std::lock_guard<doris::Mutex>& cache_lock) const;
+                                        std::lock_guard<doris::Mutex>& cache_lock) const;
 
     bool need_to_move(FileCacheType cell_type, FileCacheType query_type) const;
 
@@ -457,6 +463,8 @@ private:
     void run_background_operation();
 
     Status initialize_unlocked(std::lock_guard<doris::Mutex>&);
+
+    void recycle_deleted_blocks();
 
     struct BatchLoadArgs {
         Key key;
@@ -476,6 +484,7 @@ private:
     std::thread _cache_background_load_thread;
     // disk space or inode is less than the specified value
     std::atomic_bool _disk_resource_limit_mode {false};
+    bool _async_clear_file_cache {false};
 
 private:
     static inline std::list<std::pair<AccessKeyAndOffset, std::shared_ptr<FileReader>>>
@@ -484,14 +493,9 @@ private:
                                      KeyAndOffsetHash>
             s_file_name_to_reader;
     static inline doris::Mutex s_file_reader_cache_mtx;
-    static inline std::atomic_bool s_read_only {false};
     static inline uint64_t _max_file_reader_cache_size = 65533;
 
 public:
-    static void set_read_only(bool read_only);
-
-    static bool read_only() { return s_read_only; }
-
     static std::weak_ptr<FileReader> cache_file_reader(const AccessKeyAndOffset& key,
                                                        std::shared_ptr<FileReader> file_reader);
 

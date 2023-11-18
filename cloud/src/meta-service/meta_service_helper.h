@@ -7,11 +7,14 @@
 #include <string_view>
 
 #include "common/bvars.h"
+#include "common/logging.h"
+#include "common/config.h"
 #include "common/stopwatch.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 #include "resource-manager/resource_manager.h"
 
 namespace selectdb {
@@ -79,12 +82,47 @@ void finish_rpc(std::string_view func_name, brpc::Controller* ctrl, Response* re
     }
 }
 
+enum ErrCategory { CREATE, READ, COMMIT };
+
+template <ErrCategory category>
+inline MetaServiceCode cast_as(TxnErrorCode code) {
+    switch (code) {
+    case TxnErrorCode::TXN_OK:
+        return MetaServiceCode::OK;
+    case TxnErrorCode::TXN_CONFLICT:
+        return MetaServiceCode::KV_TXN_CONFLICT;
+    case TxnErrorCode::TXN_TOO_OLD:
+    case TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED:
+        if (config::enable_txn_store_retry) {
+            if constexpr (category == ErrCategory::READ) {
+                return MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE;
+            } else {
+                return MetaServiceCode::KV_TXN_STORE_COMMIT_RETRYABLE;
+            }
+        }
+        [[fallthrough]];
+    case TxnErrorCode::TXN_KEY_NOT_FOUND:
+    case TxnErrorCode::TXN_MAYBE_COMMITTED:
+    case TxnErrorCode::TXN_TIMEOUT:
+    case TxnErrorCode::TXN_INVALID_ARGUMENT:
+    case TxnErrorCode::TXN_UNIDENTIFIED_ERROR:
+        if constexpr (category == ErrCategory::READ) {
+            return MetaServiceCode::KV_TXN_GET_ERR;
+        } else if constexpr (category == ErrCategory::CREATE) {
+            return MetaServiceCode::KV_TXN_CREATE_ERR;
+        } else {
+            return MetaServiceCode::KV_TXN_COMMIT_ERR;
+        }
+    default:
+        return MetaServiceCode::UNDEFINED_ERR;
+    }
+}
+
 #define RPC_PREPROCESS(func_name)                                                        \
     StopWatch sw;                                                                        \
     auto ctrl = static_cast<brpc::Controller*>(controller);                              \
     begin_rpc(#func_name, ctrl, request);                                                \
     brpc::ClosureGuard closure_guard(done);                                              \
-    [[maybe_unused]] int ret = 0;                                                        \
     [[maybe_unused]] std::stringstream ss;                                               \
     [[maybe_unused]] MetaServiceCode code = MetaServiceCode::OK;                         \
     [[maybe_unused]] std::string msg;                                                    \
@@ -124,8 +162,14 @@ int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_
                           std::shared_ptr<Transaction>& txn);
 
 /**
- * Nodtifies other metaservice to refresh instance
+ * Notifies other metaservice to refresh instance
  */
 void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& instance_id);
+
+void get_tablet_idx(MetaServiceCode& code, std::string& msg, Transaction* txn,
+                    const std::string& instance_id, int64_t tablet_id, TabletIndexPB& tablet_idx);
+
+bool is_dropped_tablet(Transaction* txn, const std::string& instance_id, int64_t index_id,
+                       int64_t partition_id);
 
 } // namespace selectdb

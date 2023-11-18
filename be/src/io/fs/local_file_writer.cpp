@@ -43,7 +43,7 @@
 #include "util/doris_metrics.h"
 
 namespace doris {
-namespace detail {
+namespace {
 
 Status sync_dir(const io::Path& dirname) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("sync_dir", Status::IOError(""));
@@ -65,7 +65,7 @@ Status sync_dir(const io::Path& dirname) {
     return Status::OK();
 }
 
-} // namespace detail
+} // namespace
 
 namespace io {
 
@@ -80,25 +80,35 @@ LocalFileWriter::LocalFileWriter(Path path, int fd)
         : LocalFileWriter(path, fd, global_local_filesystem()) {}
 
 LocalFileWriter::~LocalFileWriter() {
-    if (_opened) {
-        close();
+    if (!_closed) {
+        _abort();
     }
-    CHECK(!_opened || _closed) << "open: " << _opened << ", closed: " << _closed;
+    DorisMetrics::instance()->local_file_open_writing->increment(-1);
+    DorisMetrics::instance()->file_created_total->increment(1);
+    DorisMetrics::instance()->local_bytes_written_total->increment(_bytes_appended);
 }
 
 Status LocalFileWriter::close() {
     return _close(true);
 }
 
-Status LocalFileWriter::abort() {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::abort", Status::IOError("inject io error"));
-    RETURN_IF_ERROR(_close(false));
-    return io::global_local_filesystem()->delete_file(_path);
+void LocalFileWriter::_abort() {
+    auto st = _close(false);
+    if (!st.ok()) [[unlikely]] {
+        LOG(WARNING) << "close file failed when abort file writer: " << st;
+    }
+    st = io::global_local_filesystem()->delete_file(_path);
+    if (!st.ok()) [[unlikely]] {
+        LOG(WARNING) << "delete file failed when abort file writer: " << st;
+    }
 }
 
 Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::appendv", Status::IOError("inject io error"));
-    DCHECK(!_closed);
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::appendv",
+                                      Status::IOError("inject io error"));
+    if (_closed) [[unlikely]] {
+        return Status::InternalError("append to closed file: ", _path.native());
+    }
     _dirty = true;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("local_file_writer::appendv", Status());
 
@@ -150,28 +160,9 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
     return Status::OK();
 }
 
-Status LocalFileWriter::write_at(size_t offset, const Slice& data) {
-    DCHECK(!_closed);
-    _dirty = true;
-
-    size_t bytes_req = data.size;
-    char* from = data.data;
-
-    while (bytes_req != 0) {
-        auto res = ::pwrite(_fd, from, bytes_req, offset);
-        if (-1 == res && errno != EINTR) {
-            return Status::IOError("cannot write to {}: {}", _path.native(), std::strerror(errno));
-        }
-        if (res > 0) {
-            from += res;
-            bytes_req -= res;
-        }
-    }
-    return Status::OK();
-}
-
 Status LocalFileWriter::finalize() {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::finalize", Status::IOError("inject io error"));
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::finalize",
+                                      Status::IOError("inject io error"));
     DCHECK(!_closed);
     if (_dirty) {
 #if defined(__linux__)
@@ -188,29 +179,29 @@ Status LocalFileWriter::_close(bool sync) {
     if (_closed) {
         return Status::OK();
     }
-    _closed = true;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::close", Status::IOError("inject io error"));
-    if (sync && _dirty) {
+    if (sync) {
+        if (_dirty) {
 #ifdef __APPLE__
-        if (fcntl(_fd, F_FULLFSYNC) < 0) {
-            return Status::IOError("cannot sync {}: {}", _path.native(), std::strerror(errno));
-        }
+            if (fcntl(_fd, F_FULLFSYNC) < 0) [[unlikely]] {
+                return Status::IOError("cannot sync {}: {}", _path.native(), std::strerror(errno));
+            }
 #else
-        if (0 != ::fdatasync(_fd)) {
-            return Status::IOError("cannot fdatasync {}: {}", _path.native(), std::strerror(errno));
-        }
+            if (0 != ::fdatasync(_fd)) [[unlikely]] {
+                return Status::IOError("cannot fdatasync {}: {}", _path.native(),
+                                       std::strerror(errno));
+            }
 #endif
-        RETURN_IF_ERROR(detail::sync_dir(_path.parent_path()));
-        _dirty = false;
+            _dirty = false;
+        }
+        RETURN_IF_ERROR(sync_dir(_path.parent_path()));
     }
-
-    DorisMetrics::instance()->local_file_open_writing->increment(-1);
-    DorisMetrics::instance()->file_created_total->increment(1);
-    DorisMetrics::instance()->local_bytes_written_total->increment(_bytes_appended);
 
     if (0 != ::close(_fd)) {
         return Status::IOError("cannot close {}: {}", _path.native(), std::strerror(errno));
     }
+
+    _closed = true;
     return Status::OK();
 }
 

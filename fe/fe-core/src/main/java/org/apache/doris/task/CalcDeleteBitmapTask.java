@@ -70,6 +70,15 @@ public class CalcDeleteBitmapTask extends AgentTask  {
         }
     }
 
+    public void countDownToZero(TStatusCode code, String errMsg) {
+        if (this.latch != null) {
+            latch.countDownToZero(new Status(code, errMsg));
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("CalcDeleteBitmapTask download to zero. error msg: {}", errMsg);
+            }
+        }
+    }
+
     public void setLatch(MarkedCountDownLatch<Long, Long> latch) {
         this.latch = latch;
     }

@@ -54,12 +54,8 @@ public:
 
     Status close() override;
 
-    Status abort() override;
     Status appendv(const Slice* data, size_t data_cnt) override;
     Status finalize() override;
-    Status write_at(size_t offset, const Slice& data) override {
-        return Status::NotSupported("not support");
-    }
 
     void mark_index_offset() {
         if (_expiration_time == 0) {
@@ -75,6 +71,7 @@ public:
 private:
     Status _open();
     Status _close();
+    Status _abort();
 
     [[nodiscard]] int64_t upload_cost_ms() const { return *_upload_cost_ms; }
 

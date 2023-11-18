@@ -12,9 +12,31 @@
 #include <aws/s3/model/ListObjectsV2Request.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
+#include <utility>
+
 #include "common/logging.h"
+#include "common/sync_point.h"
 
 namespace selectdb {
+#ifndef UNIT_TEST
+#define HELP_MACRO(ret, req, point_name)
+#else
+#define HELP_MACRO(ret, req, point_name)                       \
+    do {                                                       \
+        std::pair p {&ret, &req};                              \
+        [[maybe_unused]] auto ret_pair = [&p]() mutable {      \
+            TEST_SYNC_POINT_RETURN_WITH_VALUE(point_name, &p); \
+            return p;                                          \
+        }();                                                   \
+        return ret;                                            \
+    } while (false)
+#endif
+#define SYNC_POINT_HOOK_RETURN_VALUE(expr, point_name, req) \
+    [&]() mutable {                                         \
+        [[maybe_unused]] decltype((expr)) t;                \
+        HELP_MACRO(t, req, point_name);                     \
+        return (expr);                                      \
+    }()
 
 class S3Environment {
 public:
@@ -62,7 +84,8 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
     delete_request.SetBucket(conf_.bucket);
     bool is_trucated = false;
     do {
-        auto outcome = s3_client_->ListObjectsV2(request);
+        auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->ListObjectsV2(request),
+                                                    "s3_client::list_objects_v2", request);
         if (!outcome.IsSuccess()) {
             LOG_WARNING("failed to list objects")
                     .tag("endpoint", conf_.endpoint)
@@ -90,7 +113,9 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
             Aws::S3::Model::Delete del;
             del.WithObjects(std::move(objects)).SetQuiet(true);
             delete_request.SetDelete(std::move(del));
-            auto delete_outcome = s3_client_->DeleteObjects(delete_request);
+            auto delete_outcome =
+                    SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
+                                                 "s3_client::delete_objects", delete_request);
             if (!delete_outcome.IsSuccess()) {
                 LOG_WARNING("failed to delete objects")
                         .tag("endpoint", conf_.endpoint)
@@ -149,7 +174,9 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
         }
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
-        auto delete_outcome = s3_client_->DeleteObjects(delete_request);
+        auto delete_outcome =
+                SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
+                                             "s3_client::delete_objects", delete_request);
         if (!delete_outcome.IsSuccess()) {
             LOG_WARNING("failed to delete objects")
                     .tag("endpoint", conf_.endpoint)
@@ -188,7 +215,8 @@ int S3Accessor::put_object(const std::string& relative_path, const std::string& 
     auto input = Aws::MakeShared<Aws::StringStream>("S3Accessor");
     *input << content;
     request.SetBody(input);
-    auto outcome = s3_client_->PutObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->PutObject(request),
+                                                "s3_client::put_object", request);
     if (!outcome.IsSuccess()) {
         LOG_WARNING("failed to put object")
                 .tag("endpoint", conf_.endpoint)
@@ -208,7 +236,9 @@ int S3Accessor::list(const std::string& relative_path, std::vector<ObjectMeta>* 
 
     bool is_trucated = false;
     do {
-        auto outcome = s3_client_->ListObjectsV2(request);
+        auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->ListObjectsV2(request),
+                                                    "s3_client::list_objects_v2", request);
+        ;
         if (!outcome.IsSuccess()) {
             LOG_WARNING("failed to list objects")
                     .tag("endpoint", conf_.endpoint)
@@ -233,7 +263,9 @@ int S3Accessor::exist(const std::string& relative_path) {
     Aws::S3::Model::HeadObjectRequest request;
     auto key = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithKey(key);
-    auto outcome = s3_client_->HeadObject(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->HeadObject(request),
+                                                "s3_client::head_object", request);
+    ;
     if (outcome.IsSuccess()) {
         return 0;
     } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
@@ -256,7 +288,9 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
 
     bool is_truncated = false;
     do {
-        auto outcome = s3_client_->ListObjectsV2(request);
+        auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->ListObjectsV2(request),
+                                                    "s3_client::list_objects_v2", request);
+        ;
         if (!outcome.IsSuccess()) {
             LOG_WARNING("failed to list objects")
                     .tag("endpoint", conf_.endpoint)
@@ -362,4 +396,6 @@ int S3Accessor::check_bucket_versioning() {
     }
     return 0;
 }
+
+#undef HELP_MACRO
 } // namespace selectdb

@@ -42,13 +42,7 @@ class ServiceRegistryPB;
 class MetaServerRegister {
 public:
     MetaServerRegister(std::shared_ptr<TxnKv> txn_kv);
-    ~MetaServerRegister() {
-        bool expect = true;
-        if (running_.compare_exchange_strong(expect, false)) {
-            cv_.notify_all();
-            if (register_thread_ != nullptr) register_thread_->join();
-        }
-    };
+    ~MetaServerRegister();
 
     /**
      * Starts registering
@@ -68,15 +62,15 @@ private:
     /**
      * Prepares registry with given existing registry. If the server already
      * exists in the registry list, update mtime and lease, otherwise create a
-     * new item for the server in the rgistry list.
-     * 
+     * new item for the server in the registry list.
+     *
      * @param reg input and output param
      */
     void prepare_registry(ServiceRegistryPB* reg);
 
 private:
     std::unique_ptr<std::thread> register_thread_;
-    std::atomic<bool> running_;
+    std::atomic<int> running_;
     std::mutex mtx_;
     std::condition_variable cv_;
     std::string id_;

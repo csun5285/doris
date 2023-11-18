@@ -620,7 +620,7 @@ function md5sum_func() {
     if [[ "${md5}" != "${MD5SUM}  ${FILENAME}" ]]; then
         echo "${FILENAME} md5sum check failed!"
         echo -e "except-md5 ${MD5SUM} \nactual-md5 ${md5}"
-        exit 1
+        return 1
     fi
     return 0
 }
@@ -629,31 +629,64 @@ function build_jdbc_driver() {
     echo "Build jdbc driver"
     # download jdbc rivers
     JDBC_DRIVER_URL=${JDBC_DRIVER_URL:-"https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver"}
-
     JDBC_DRIVERS_DIR="${DORIS_THIRDPARTY}/src/jdbc_drivers/"
     mkdir -p ${JDBC_DRIVERS_DIR}
-    rm -rf ${DORIS_THIRDPARTY}/src/jdbc_drivers/*
 
-    CK_DRIVER_MD5=9be22a93267dc4b066e0a3aefc2dd024
-    MSSQL_DRIVER_MD5=b204274eb02a848ac405961e6f43e7bd
-    MYSQL_DRIVER_MD5=fdf55dcef04b09f2eaf42b75e61ccc9a
-    OJBC6_DRIVER_MD5=621a393d7be9ff0f2fec6fbba2c8f9b6
-    PG_DRIVER_MD5=20c8228267b6c9ce620fddb39467d3eb
+    local driver_array=(\
+    clickhouse-jdbc-0.3.2-patch11-all.jar \
+    mssql-jdbc-11.2.0.jre8.jar \
+    mysql-connector-java-8.0.25.jar \
+    ojdbc6.jar \
+    postgresql-42.5.0.jar)
 
-    wget ${JDBC_DRIVER_URL}/clickhouse-jdbc-0.3.2-patch11-all.jar -P "${JDBC_DRIVERS_DIR}/"
-    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/clickhouse-jdbc-0.3.2-patch11-all.jar ${CK_DRIVER_MD5}
+    local driver_md5_array=(\
+    9be22a93267dc4b066e0a3aefc2dd024 \
+    b204274eb02a848ac405961e6f43e7bd \
+    fdf55dcef04b09f2eaf42b75e61ccc9a \
+    621a393d7be9ff0f2fec6fbba2c8f9b6 \
+    20c8228267b6c9ce620fddb39467d3eb)
 
-    wget ${JDBC_DRIVER_URL}/mssql-jdbc-11.2.0.jre8.jar -P "${JDBC_DRIVERS_DIR}/"
-    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/mssql-jdbc-11.2.0.jre8.jar ${MSSQL_DRIVER_MD5}
+    local i=0
+    for ((i=0; i<${#driver_array[@]}; i++)); do
+        local driver="${driver_array[i]}"
+        local dirver_md5=${driver_md5_array[${i}]}
 
-    wget ${JDBC_DRIVER_URL}/mysql-connector-java-8.0.25.jar -P "${JDBC_DRIVERS_DIR}/"
-    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/mysql-connector-java-8.0.25.jar ${MYSQL_DRIVER_MD5}
+        # driver path in local file system
+        local driver_path=${DORIS_THIRDPARTY}/src/jdbc_drivers/${driver}
+        local driver_url=${JDBC_DRIVER_URL}/${driver}
+        echo "index: ${i}, dirver: ${driver} md5: ${dirver_md5}"
 
-    wget ${JDBC_DRIVER_URL}/ojdbc6.jar -P "${JDBC_DRIVERS_DIR}/"
-    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/ojdbc6.jar ${OJBC6_DRIVER_MD5}
+        local status=1
+        for attemp in 1 2; do
+            if [[ -r "${driver_path}" ]]; then
+                if md5sum_func ${driver_path} ${dirver_md5}; then
+                    echo "Archive ${driver} already exist."
+                    status=0
+                    break
+                fi
+                echo "Archive ${driver} will be removed and download again."
+                rm -f "${driver_path}"
+            else
+                echo "Downloading ${driver} from ${driver_url} to ${driver_path}"
+                if wget --no-check-certificate -q "${driver_url}" -O "${driver_path}"; then
+                     if md5sum_func ${driver_path} ${dirver_md5}; then
+                        status=0
+                        echo "Success to download ${driver}"
+                        break
+                    fi
+                    echo "Archive ${driver} will be removed and download again."
+                    rm -f "${driver_path}"
+                else
+                    echo "Failed to download ${driver}. attemp: ${attemp}"
+                fi
+            fi
+        done
 
-    wget ${JDBC_DRIVER_URL}/postgresql-42.5.0.jar -P "${JDBC_DRIVERS_DIR}/"
-    md5sum_func ${DORIS_THIRDPARTY}/src/jdbc_drivers/postgresql-42.5.0.jar ${PG_DRIVER_MD5}
+        if [[ "${status}" -ne 0 ]]; then
+            echo "Failed to download ${driver}"
+            exit 1
+        fi
+    done
 }
 
 BUILD_JDBC_DRIVER=${BUILD_JDBC_DRIVER:-"ON"}

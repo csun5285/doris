@@ -3,9 +3,12 @@
 #include <fmt/format.h>
 
 #include "common/logging.h"
+#include "common/sync_point.h"
 #include "common/util.h"
 #include "meta-service/keys.h"
+#include "meta-service/meta_service_helper.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 namespace config {
@@ -14,8 +17,9 @@ extern int16_t meta_schema_value_version;
 
 void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                    std::string_view schema_key, const doris::TabletSchemaPB& schema) {
-    int ret = selectdb::key_exists(txn, schema_key);
-    if (ret == 0) { // schema has already been saved
+    TxnErrorCode err = selectdb::key_exists(txn, schema_key);
+    if (err == TxnErrorCode::TXN_OK) { // schema has already been saved
+        TEST_SYNC_POINT_RETURN_WITH_VOID("put_schema_kv:schema_key_exists_return");
         DCHECK([&] {
             auto transform = [](std::string_view type) -> std::string_view {
                 if (type == "DECIMALV2") return "DECIMAL";
@@ -23,9 +27,9 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
                 return type;
             };
             ValueBuf buf;
-            ret = selectdb::get(txn, schema_key, &buf);
-            if (ret != 0) {
-                LOG(WARNING) << "failed to get schema";
+            auto err = selectdb::get(txn, schema_key, &buf);
+            if (err != TxnErrorCode::TXN_OK) {
+                LOG(WARNING) << "failed to get schema, err=" << err;
                 return false;
             }
             doris::TabletSchemaPB saved_schema;
@@ -78,9 +82,9 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
         }()) << hex(schema_key)
              << "\n to_save: " << schema.ShortDebugString();
         return;
-    } else if (ret < 0) {
+    } else if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         msg = "failed to check that key exists";
-        code = MetaServiceCode::KV_TXN_GET_ERR;
+        code = cast_as<ErrCategory::READ>(err);
         return;
     }
     uint8_t ver = config::meta_schema_value_version;

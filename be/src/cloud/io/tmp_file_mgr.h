@@ -29,8 +29,15 @@ public:
                              << " and ignore the following tmp file dir " << config.path;
                 return;
             }
-            global_local_filesystem()->delete_directory(config.path);
-            global_local_filesystem()->create_directory(config.path);
+            // FIXME: Error handling
+            auto st = global_local_filesystem()->delete_directory(config.path);
+            if (!st.ok()) [[unlikely]] {
+                LOG(ERROR) << st;
+            }
+            st = global_local_filesystem()->create_directory(config.path);
+            if (!st.ok()) [[unlikely]] {
+                LOG(ERROR) << st;
+            }
             _tmp_file_dirs[_tmp_file_dirs_size].path = config.path;
             _tmp_file_dirs[_tmp_file_dirs_size].max_cache_bytes = config.max_cache_bytes;
             _tmp_file_dirs[_tmp_file_dirs_size].max_upload_bytes = config.max_upload_bytes;

@@ -91,7 +91,11 @@ void UploadFileBuffer::set_index_offset(size_t offset) {
  * 1. write to file cache otherwise, then we'll wait for free buffer and to rob it
  */
 Status UploadFileBuffer::append_data(const Slice& data) {
-    Defer defer {[&] { _size += data.get_size(); }};
+    Defer defer {[&] { 
+        _size += data.get_size();
+        _crc_value = crc32c::Extend(_crc_value, data.get_data(), data.get_size());
+    }};
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("UploadFileBuffer::append_data", Status::OK());
     while (true) {
         // if buf is not empty, it means there is memory preserved for this buf
         if (!_buffer.empty()) {
@@ -152,8 +156,8 @@ Status UploadFileBuffer::append_data(const Slice& data) {
             // wait allocate buffer pool
             auto tmp = S3FileBufferPool::GetInstance()->allocate(true);
             if (tmp.empty()) {
-                LOG_WARNING("no free buffer for 5 minutes");
-                return Status::InternalError("no free buffer for 5 minutes");
+                return Status::InternalError("no free buffer for {} seconds",
+                                             config::s3_writer_buffer_allocation_timeout);
             }
             swap_buffer(tmp);
         }
@@ -170,8 +174,10 @@ void UploadFileBuffer::read_from_cache() {
     TEST_SYNC_POINT_CALLBACK("upload_file_buffer::read_from_cache");
     auto tmp = S3FileBufferPool::GetInstance()->allocate(true);
     if (tmp.empty()) {
-        LOG_WARNING("no free buffer for 5 minutes");
-        set_val(Status::InternalError("no free buffer for 5 minutes"));
+        auto err_msg = fmt::format("no free buffer for {} seconds",
+                                   config::s3_writer_buffer_allocation_timeout);
+        LOG_WARNING(err_msg);
+        set_val(Status::InternalError(err_msg));
         return;
     }
     swap_buffer(tmp);
@@ -186,8 +192,8 @@ void UploadFileBuffer::read_from_cache() {
         if (segment->state() != FileBlock::State::DOWNLOADED) {
             DCHECK(false);
             LOG_WARNING("File Block State is not Downloaded")
-                .tag("key", segment->key().to_string())
-                .tag("range", segment->range().to_string());
+                    .tag("key", segment->key().to_string())
+                    .tag("range", segment->range().to_string());
             set_val(Status::InternalError("File Block State is not Downloaded"));
             return;
         }
@@ -199,7 +205,11 @@ void UploadFileBuffer::read_from_cache() {
         }
         pos += segment_size;
     }
-
+    if (pos != _size) {
+        DCHECK(false);            
+        set_val(Status::InternalError("The cache data size {} is not match append data size {}", pos, _size));
+        return;
+    }
     // the real lenght should be the buf.get_size() in this situation(consider it's the last part,
     // size of it could be less than 5MB)
     _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);
@@ -213,6 +223,7 @@ void DownloadFileBuffer::submit() {
     // so we just skip executing the download task when file cache is not enabled
     if (!config::enable_file_cache) [[unlikely]] {
         LOG(INFO) << "Skip download file task because file cache is not enabled";
+        set_val(Status::InternalError("Download failed because file cache not enabled"));
         return;
     }
     ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
@@ -228,6 +239,7 @@ void DownloadFileBuffer::submit() {
  * 1. submit the on_upload() callback to executor
  */
 void UploadFileBuffer::submit() {
+    TEST_SYNC_POINT_RETURN_WITH_VOID("UploadFileBuffer::submit", this);
     if (!_buffer.empty()) [[likely]] {
         _stream_ptr = std::make_shared<StringViewStream>(_buffer.get_data(), _size);
     }
@@ -346,7 +358,6 @@ void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write
     for (size_t i = 0; i < buf_num; i++) {
         Slice s {_whole_mem_buffer.get() + i * s3_write_buffer_size,
                  static_cast<size_t>(s3_write_buffer_size)};
-        // auto buf = std::make_shared<S3FileBuffer>(s);
         _free_raw_buffers.emplace_back(s);
     }
 }
@@ -365,7 +376,7 @@ Slice S3FileBufferPool::allocate(bool reserve) {
     if (reserve || !config::enable_file_cache) {
         {
             std::unique_lock<std::mutex> lck {_lock};
-            _cv.wait_for(lck, std::chrono::seconds(300),
+            _cv.wait_for(lck, std::chrono::seconds(config::s3_writer_buffer_allocation_timeout),
                          [this]() { return !_free_raw_buffers.empty(); });
             if (!_free_raw_buffers.empty()) {
                 buf = _free_raw_buffers.front();
@@ -410,17 +421,16 @@ void S3FileBufferPool::reclaim(Slice buf) {
  */
 void DownloadFileBuffer::on_download() {
     if (_buffer.empty()) {
-        LOG_WARNING("no free buffer for 5 minutes");
-        _state.set_val(Status::InternalError("no free buffer for 5 minutes"));
+        auto err_msg = fmt::format("no free buffer for {} seconds",
+                                   config::s3_writer_buffer_allocation_timeout);
+        LOG_WARNING(err_msg);
+        set_val(Status::InternalError(err_msg));
         return;
     }
     FileBlocksHolderPtr holder = nullptr;
     bool need_to_download_into_cache = false;
     auto s = Status::OK();
-    Defer def {[&]() {
-        _state.set_val(std::move(s));
-        on_finish();
-    }};
+    Defer def {[&]() { _state.set_val(std::move(s)); }};
     if (_alloc_holder != nullptr) {
         holder = _alloc_holder();
         std::for_each(holder->file_segments.begin(), holder->file_segments.end(),
@@ -451,12 +461,11 @@ void DownloadFileBuffer::on_download() {
             }
             _state.set_val(std::move(s));
         }
-        on_finish();
     } else {
         Slice tmp {_buffer.get_data(), _capacity};
         s = _download(tmp);
         _size = tmp.get_size();
-        if (_write_to_use_buffer != nullptr) {
+        if (s.ok() && _write_to_use_buffer != nullptr) {
             _write_to_use_buffer({_buffer.get_data(), get_size()}, get_file_offset());
         }
     }

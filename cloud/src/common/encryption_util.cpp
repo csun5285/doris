@@ -23,6 +23,7 @@
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 
 namespace selectdb {
 namespace config {
@@ -535,18 +536,18 @@ static int generate_random_root_key(TxnKv* txn_kv, KmsClient* kms_client, std::s
     std::string key = system_meta_service_encryption_key_info_key();
     std::string val;
     std::unique_ptr<Transaction> txn;
-    int ret = txn_kv->create_txn(&txn);
-    if (ret != 0) {
-        LOG_WARNING("failed to create txn").tag("ret", ret);
+    TxnErrorCode err = txn_kv->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        LOG_WARNING("failed to create txn").tag("err", err);
         return -1;
     }
-    ret = txn->get(key, &val);
-    if (ret != 0 && ret != 1) {
-        LOG_WARNING("failed to get key of encryption_key_info").tag("ret", ret);
+    err = txn->get(key, &val);
+    if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        LOG_WARNING("failed to get key of encryption_key_info").tag("err", err);
         return -1;
     }
 
-    if (ret == 0) {
+    if (err == TxnErrorCode::TXN_OK) {
         if (config::enable_kms && config::focus_add_kms_data_key) {
             EncryptionKeyInfoPB key_info;
             if (!key_info.ParseFromString(val)) {
@@ -698,12 +699,12 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
         std::string key = system_meta_service_encryption_key_info_key();
         std::string val;
         std::unique_ptr<Transaction> txn;
-        int ret = txn_kv->create_txn(&txn);
-        if (ret != 0) {
+        TxnErrorCode err = txn_kv->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
             LOG_WARNING("failed to create txn").tag("ret", ret);
             return -1;
         }
-        ret = txn->get(key, &val);
+        err = txn->get(key, &val);
         if (ret != 0 && ret != 1) {
             LOG_WARNING("failed to get key of encryption_key_info").tag("ret", ret);
             return -1;
@@ -711,7 +712,7 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
 
         bool need_to_focus_add_kms_data_key = true;
         EncryptionKeyInfoPB key_info;
-        if (ret == 0) {
+        if (err == TxnErrorCode::TXN_OK) {
             if (!key_info.ParseFromString(val)) {
                 LOG_WARNING("failed to parse encryption_root_key");
                 return -1;
@@ -791,12 +792,12 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
         LOG_INFO("put server encryption_key")
                 .tag("encryption_key", encoded_root_key_ciphertext)
                 .tag("key_id", new_key_id);
-        ret = txn->commit();
-        if (ret == -1) {
+        err = txn->commit();
+        if (err == TxnErrorCode::TXN_CONFLICT) {
             LOG_WARNING("commit encryption_key is conflicted, retry it later");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
-        } else if (ret != 0) {
+        } else if (err != TxnErrorCode::TXN_OK) {
             LOG_WARNING("failed to commit encryption_key");
             return -1;
         }

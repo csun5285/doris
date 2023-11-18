@@ -1,13 +1,17 @@
-#include <gtest/gtest.h>
-#include "common/bvars.h"
-#include "common/config.h"
 #include "common/metric.h"
-#include "meta-service/mem_txn_kv.h"
-#include "meta-service/txn_kv.h"
-#include <iostream>
+
+#include <gtest/gtest.h>
+
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <thread>
+
+#include "common/bvars.h"
+#include "common/config.h"
+#include "meta-service/mem_txn_kv.h"
+#include "meta-service/txn_kv.h"
+#include "meta-service/txn_kv_error.h"
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
@@ -27,9 +31,9 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put("\xff\xff/status/json", fileContent);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         FdbMetricExporter fdb_metric_exporter(txn_kv);
         fdb_metric_exporter.sleep_interval_ms_ = 1;
@@ -77,9 +81,9 @@ TEST(MetricTest, FdbMetricExporterTest) {
         }
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put("\xff\xff/status/json", fileContent);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         FdbMetricExporter fdb_metric_exporter(txn_kv);
         fdb_metric_exporter.sleep_interval_ms_ = 1;
@@ -112,9 +116,9 @@ TEST(MetricTest, FdbMetricExporterTest) {
         }
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put("\xff\xff/status/json", fileContent);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         FdbMetricExporter fdb_metric_exporter(txn_kv);
         fdb_metric_exporter.sleep_interval_ms_ = 1;
@@ -139,9 +143,9 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;
-        ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         txn->put("\xff\xff/status/json", fileContent);
-        ASSERT_EQ(txn->commit(), 0);
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
         FdbMetricExporter fdb_metric_exporter(txn_kv);
         fdb_metric_exporter.sleep_interval_ms_ = 1;

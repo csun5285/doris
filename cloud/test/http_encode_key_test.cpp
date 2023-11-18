@@ -477,13 +477,13 @@ TEST(HttpGetValueTest, process_http_get_value_test_cover_all_template) {
     ASSERT_EQ(txn_kv->init(), 0);
     // Generate kvs
     std::unique_ptr<Transaction> txn;
-    ASSERT_EQ(txn_kv->create_txn(&txn), 0);
+    ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     for (auto&& input : test_inputs) {
         auto key = unhex(input.key);
         auto val = input.gen_value();
         txn->put(key, val);
     }
-    ASSERT_EQ(txn->commit(), 0);
+    ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
 
     brpc::URI uri;
     (void)uri.get_query_map(); // initialize query map
