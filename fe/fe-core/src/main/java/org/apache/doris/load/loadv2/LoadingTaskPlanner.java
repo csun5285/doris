@@ -115,16 +115,6 @@ public class LoadingTaskPlanner {
         }
     }
 
-    public LoadingTaskPlanner(Long loadJobId, long txnId, long dbId, OlapTable table,
-            BrokerDesc brokerDesc, List<BrokerFileGroup> brokerFileGroups,
-            boolean strictMode, boolean isPartialUpdate, String timezone, long timeoutS, int loadParallelism,
-            int sendBatchParallelism, boolean useNewLoadScanNode, UserIdentity userInfo,
-            String cluster) {
-        this(loadJobId, txnId, dbId, table, brokerDesc, brokerFileGroups, strictMode, isPartialUpdate,
-                timezone, timeoutS, loadParallelism, sendBatchParallelism, useNewLoadScanNode, userInfo);
-        this.cluster = cluster;
-    }
-
     public void plan(TUniqueId loadId, List<List<TBrokerFileStatus>> fileStatusesList, int filesAdded)
             throws UserException {
         // Generate tuple descriptor

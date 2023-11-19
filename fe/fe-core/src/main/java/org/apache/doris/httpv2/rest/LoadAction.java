@@ -48,8 +48,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import javax.servlet.http.HttpServletRequest;

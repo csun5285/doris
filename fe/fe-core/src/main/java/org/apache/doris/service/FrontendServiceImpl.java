@@ -3164,7 +3164,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             requestGroupCommitFragmentImpl(request, result);
         } catch (UserException e) {
             LOG.warn("failed to get group commit fragment", e);
+            status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
         }
+        return result;
     }
 
     public TGetMetaResult getMeta(TGetMetaRequest request) throws TException {
@@ -3339,10 +3341,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());
         } finally {
             table.readUnlock();
-            status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
         }
-
-        return result;
     }
 
     private TGetBackendMetaResult getBackendMetaImpl(TGetBackendMetaRequest request, String clientAddr)
