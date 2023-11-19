@@ -236,7 +236,16 @@ import org.apache.doris.task.MasterTaskExecutor;
 import org.apache.doris.task.PriorityMasterTaskExecutor;
 import org.apache.doris.thrift.BackendService;
 import org.apache.doris.thrift.TCompressionType;
+import org.apache.doris.thrift.TGetMetaDBMeta;
+import org.apache.doris.thrift.TGetMetaIndexMeta;
+import org.apache.doris.thrift.TGetMetaPartitionMeta;
+import org.apache.doris.thrift.TGetMetaReplicaMeta;
+import org.apache.doris.thrift.TGetMetaResult;
+import org.apache.doris.thrift.TGetMetaTableMeta;
+import org.apache.doris.thrift.TGetMetaTabletMeta;
 import org.apache.doris.thrift.TNetworkAddress;
+import org.apache.doris.thrift.TStatus;
+import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TStorageMedium;
 import org.apache.doris.transaction.CloudGlobalTransactionMgr;
 import org.apache.doris.transaction.DbUsedDataQuotaInfoCollector;
@@ -1673,6 +1682,7 @@ public class Env {
 
     // start threads that should running on all FE
     private void startNonMasterDaemonThreads() {
+<<<<<<< HEAD
         if (Config.isNotCloudMode()) {
             tabletStatMgr.start();
         } else {
@@ -1682,6 +1692,11 @@ public class Env {
         // start load manager thread, for MySQL load only: cannot forward to master
         loadManager.start();
 
+=======
+        // start load manager thread
+        loadManager.start();
+        tabletStatMgr.start();
+>>>>>>> 2.0.3-rc03
         // load and export job label cleaner thread
         labelCleaner.start();
         // es repository
@@ -1828,7 +1843,8 @@ public class Env {
                 String url = "http://" + hostPort + "/image?version=" + version;
                 String filename = Storage.IMAGE + "." + version;
                 File dir = new File(this.imageDir);
-                MetaHelper.getRemoteFile(url, HTTP_TIMEOUT_SECOND * 1000, MetaHelper.getFile(filename, dir));
+                MetaHelper.getRemoteFile(url, Config.sync_image_timeout_second * 1000,
+                        MetaHelper.getFile(filename, dir));
                 MetaHelper.complete(filename, dir);
             } else {
                 LOG.warn("get an image with a lower version, localImageVersion: {}, got version: {}",
@@ -2814,14 +2830,20 @@ public class Env {
                 throw new DdlException("frontend name already exists " + nodeName + ". Try again");
             }
 
-            fe = new Frontend(role, nodeName, host, editLogPort);
-            frontends.put(nodeName, fe);
             BDBHA bdbha = (BDBHA) haProtocol;
+            bdbha.removeConflictNodeIfExist(host, editLogPort);
+            int targetFollowerCount = getFollowerCount() + 1;
             if (role == FrontendNodeType.FOLLOWER || role == FrontendNodeType.REPLICA) {
                 helperNodes.add(new HostInfo(host, editLogPort));
-                bdbha.addUnReadyElectableNode(nodeName, getFollowerCount());
+                bdbha.addUnReadyElectableNode(nodeName, targetFollowerCount);
             }
-            bdbha.removeConflictNodeIfExist(host, editLogPort);
+
+            // Only add frontend after removing the conflict nodes, to ensure the exception safety.
+            fe = new Frontend(role, nodeName, host, editLogPort);
+            frontends.put(nodeName, fe);
+
+            LOG.info("add frontend: {}", fe);
+
             editLog.logAddFrontend(fe);
         } finally {
             unlock();
@@ -2845,6 +2867,8 @@ public class Env {
             if (fe == null) {
                 throw new DdlException("frontend does not exist, nodeName:" + nodeName);
             }
+
+            LOG.info("modify frontend with new host: {}, exist frontend: {}", fe.getHost(), fe);
             boolean needLog = false;
             // we use hostname as address of bdbha, so we don't need to update node address when ip changed
             if (!Strings.isNullOrEmpty(destHost) && !destHost.equals(fe.getHost())) {
@@ -2879,15 +2903,22 @@ public class Env {
                 throw new DdlException(role.toString() + " does not exist[" + NetUtils
                         .getHostPortInAccessibleFormat(host, port) + "]");
             }
-            frontends.remove(fe.getNodeName());
-            removedFrontends.add(fe.getNodeName());
 
+            int targetFollowerCount = getFollowerCount() - 1;
             if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
                 haProtocol.removeElectableNode(fe.getNodeName());
                 removeHelperNode(host, port);
                 BDBHA ha = (BDBHA) haProtocol;
-                ha.removeUnReadyElectableNode(fe.getNodeName(), getFollowerCount());
+                ha.removeUnReadyElectableNode(fe.getNodeName(), targetFollowerCount);
             }
+
+            LOG.info("remove frontend: {}", fe);
+
+            // Only remove frontend after removing the electable node success, to ensure the
+            // exception safety.
+            frontends.remove(fe.getNodeName());
+            removedFrontends.add(fe.getNodeName());
+
             editLog.logRemoveFrontend(fe);
         } finally {
             unlock();
@@ -3675,6 +3706,7 @@ public class Env {
                     sb.append("  ").append(column.toSql());
                 }
             }
+<<<<<<< HEAD
             if (table.getType() == TableType.OLAP) {
                 OlapTable olapTable = (OlapTable) table;
                 if (CollectionUtils.isNotEmpty(olapTable.getIndexes())) {
@@ -3683,6 +3715,15 @@ public class Env {
                         sb.append("  ").append(index.toSql());
                     }
                 }
+=======
+            LOG.info("replay add frontend: {}", fe);
+            frontends.put(fe.getNodeName(), fe);
+            if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
+                // DO NOT add helper sockets here, cause BDBHA is not instantiated yet.
+                // helper sockets will be added after start BDBHA
+                // But add to helperNodes, just for show
+                helperNodes.add(new HostInfo(fe.getHost(), fe.getEditLogPort()));
+>>>>>>> 2.0.3-rc03
             }
             sb.append("\n) ENGINE=");
             sb.append(table.getType().name());
@@ -3692,6 +3733,7 @@ public class Env {
                     .append(materializedView.getRefreshInfo().toString());
         }
 
+<<<<<<< HEAD
         if (table.getType() == TableType.OLAP || table.getType() == TableType.MATERIALIZED_VIEW) {
             OlapTable olapTable = (OlapTable) table;
 
@@ -4156,14 +4198,40 @@ public class Env {
         }
     }
 
+=======
+    public void replayModifyFrontend(Frontend fe) {
+        tryLock(true);
+        try {
+            Frontend existFe = getFeByName(fe.getNodeName());
+            if (existFe == null) {
+                // frontend may already be dropped. this may happen when
+                // drop and modify operations do not guarantee the order.
+                return;
+            }
+            // modify fe in frontends
+            LOG.info("replay modify frontend with new host: {}, exist frontend: {}", fe.getHost(), existFe);
+            existFe.setHost(fe.getHost());
+        } finally {
+            unlock();
+        }
+    }
+
+>>>>>>> 2.0.3-rc03
     public void replayDropFrontend(Frontend frontend) {
         tryLock(true);
         try {
             Frontend removedFe = frontends.remove(frontend.getNodeName());
             if (removedFe == null) {
+<<<<<<< HEAD
                 LOG.error(frontend.toString() + " does not exist.");
                 return;
             }
+=======
+                LOG.error(frontend + " does not exist.");
+                return;
+            }
+            LOG.info("replay drop frontend: {}", removedFe);
+>>>>>>> 2.0.3-rc03
             if (removedFe.getRole() == FrontendNodeType.FOLLOWER || removedFe.getRole() == FrontendNodeType.REPLICA) {
                 removeHelperNode(removedFe.getHost(), removedFe.getEditLogPort());
             }
@@ -6301,6 +6369,89 @@ public class Env {
 
     public static boolean isTableNamesCaseInsensitive() {
         return GlobalVariable.lowerCaseTableNames == 2;
+    }
+
+    private static void getTableMeta(OlapTable olapTable, TGetMetaDBMeta dbMeta) {
+        LOG.debug("get table meta. table: {}", olapTable.getName());
+
+        TGetMetaTableMeta tableMeta = new TGetMetaTableMeta();
+        olapTable.readLock();
+        try {
+            tableMeta.setId(olapTable.getId());
+            tableMeta.setName(olapTable.getName());
+
+            PartitionInfo tblPartitionInfo = olapTable.getPartitionInfo();
+
+            Collection<Partition> partitions = olapTable.getAllPartitions();
+            for (Partition partition : partitions) {
+                TGetMetaPartitionMeta partitionMeta = new TGetMetaPartitionMeta();
+                long partitionId = partition.getId();
+                partitionMeta.setId(partitionId);
+                partitionMeta.setName(partition.getName());
+                String partitionRange = "";
+                if (tblPartitionInfo.getType() == PartitionType.RANGE
+                        || tblPartitionInfo.getType() == PartitionType.LIST) {
+                    partitionRange = tblPartitionInfo.getItem(partitionId).getItems().toString();
+                }
+                partitionMeta.setRange(partitionRange);
+                partitionMeta.setVisibleVersion(partition.getVisibleVersion());
+                // partitionMeta.setTemp（partition.isTemp());
+
+                for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.ALL)) {
+                    TGetMetaIndexMeta indexMeta = new TGetMetaIndexMeta();
+                    indexMeta.setId(index.getId());
+                    indexMeta.setName(olapTable.getIndexNameById(index.getId()));
+
+                    for (Tablet tablet : index.getTablets()) {
+                        TGetMetaTabletMeta tabletMeta = new TGetMetaTabletMeta();
+                        tabletMeta.setId(tablet.getId());
+
+                        for (Replica replica : tablet.getReplicas()) {
+                            TGetMetaReplicaMeta replicaMeta = new TGetMetaReplicaMeta();
+                            replicaMeta.setId(replica.getId());
+                            replicaMeta.setBackendId(replica.getBackendId());
+                            replicaMeta.setVersion(replica.getVersion());
+                            tabletMeta.addToReplicas(replicaMeta);
+                        }
+
+                        indexMeta.addToTablets(tabletMeta);
+                    }
+
+                    partitionMeta.addToIndexes(indexMeta);
+                }
+                tableMeta.addToPartitions(partitionMeta);
+            }
+            dbMeta.addToTables(tableMeta);
+        } finally {
+            olapTable.readUnlock();
+        }
+    }
+
+    public static TGetMetaResult getMeta(Database db, List<Table> tables) throws MetaNotFoundException {
+        TGetMetaResult result = new TGetMetaResult();
+        result.setStatus(new TStatus(TStatusCode.OK));
+
+        TGetMetaDBMeta dbMeta = new TGetMetaDBMeta();
+        dbMeta.setId(db.getId());
+        dbMeta.setName(db.getFullName());
+
+        if (tables == null) {
+            db.readLock();
+            tables = db.getTables();
+            db.readUnlock();
+        }
+
+        for (Table table : tables) {
+            if (table.getType() != TableType.OLAP) {
+                continue;
+            }
+
+            OlapTable olapTable = (OlapTable) table;
+            getTableMeta(olapTable, dbMeta);
+        }
+
+        result.setDbMeta(dbMeta);
+        return result;
     }
 
     public void compactTable(AdminCompactTableStmt stmt) throws DdlException {

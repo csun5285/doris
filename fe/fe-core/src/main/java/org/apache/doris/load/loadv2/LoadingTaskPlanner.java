@@ -72,6 +72,7 @@ public class LoadingTaskPlanner {
     private final int loadParallelism;
     private final int sendBatchParallelism;
     private final boolean useNewLoadScanNode;
+    private final boolean singleTabletLoadPerSink;
     private UserIdentity userInfo;
     private String cluster;
     // Something useful
@@ -88,7 +89,8 @@ public class LoadingTaskPlanner {
     public LoadingTaskPlanner(Long loadJobId, long txnId, long dbId, OlapTable table,
             BrokerDesc brokerDesc, List<BrokerFileGroup> brokerFileGroups,
             boolean strictMode, boolean isPartialUpdate, String timezone, long timeoutS, int loadParallelism,
-            int sendBatchParallelism, boolean useNewLoadScanNode, UserIdentity userInfo) {
+            int sendBatchParallelism, boolean useNewLoadScanNode, UserIdentity userInfo,
+            boolean singleTabletLoadPerSink) {
         this.loadJobId = loadJobId;
         this.txnId = txnId;
         this.dbId = dbId;
@@ -102,6 +104,7 @@ public class LoadingTaskPlanner {
         this.loadParallelism = loadParallelism;
         this.sendBatchParallelism = sendBatchParallelism;
         this.useNewLoadScanNode = useNewLoadScanNode;
+        this.singleTabletLoadPerSink = singleTabletLoadPerSink;
         this.userInfo = userInfo;
         if (Env.getCurrentEnv().getAccessManager()
                 .checkDbPriv(userInfo, Env.getCurrentInternalCatalog().getDbNullable(dbId).getFullName(),
@@ -222,8 +225,12 @@ public class LoadingTaskPlanner {
         List<Long> partitionIds = getAllPartitionIds();
         OlapTableSink olapTableSink = new OlapTableSink(table, destTupleDesc, partitionIds,
                 Config.enable_single_replica_load);
+<<<<<<< HEAD
         long txnTimeout = timeoutS == 0 ? ConnectContext.get().getExecTimeout() : timeoutS;
         olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, false, strictMode, txnTimeout);
+=======
+        olapTableSink.init(loadId, txnId, dbId, timeoutS, sendBatchParallelism, singleTabletLoadPerSink, strictMode);
+>>>>>>> 2.0.3-rc03
         olapTableSink.setPartialUpdateInputColumns(isPartialUpdate, partialUpdateInputColumns);
         olapTableSink.complete(analyzer);
 

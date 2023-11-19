@@ -91,6 +91,7 @@ import org.apache.doris.thrift.FrontendService;
 import org.apache.doris.thrift.FrontendServiceVersion;
 import org.apache.doris.thrift.TAddColumnsRequest;
 import org.apache.doris.thrift.TAddColumnsResult;
+import org.apache.doris.thrift.TBackend;
 import org.apache.doris.thrift.TBeginTxnRequest;
 import org.apache.doris.thrift.TBeginTxnResult;
 import org.apache.doris.thrift.TBinlog;
@@ -119,6 +120,8 @@ import org.apache.doris.thrift.TFinishTaskRequest;
 import org.apache.doris.thrift.TFrontendPingFrontendRequest;
 import org.apache.doris.thrift.TFrontendPingFrontendResult;
 import org.apache.doris.thrift.TFrontendPingFrontendStatusCode;
+import org.apache.doris.thrift.TGetBackendMetaRequest;
+import org.apache.doris.thrift.TGetBackendMetaResult;
 import org.apache.doris.thrift.TGetBinlogLagResult;
 import org.apache.doris.thrift.TGetBinlogRequest;
 import org.apache.doris.thrift.TGetBinlogResult;
@@ -126,6 +129,10 @@ import org.apache.doris.thrift.TGetDbsParams;
 import org.apache.doris.thrift.TGetDbsResult;
 import org.apache.doris.thrift.TGetMasterTokenRequest;
 import org.apache.doris.thrift.TGetMasterTokenResult;
+import org.apache.doris.thrift.TGetMetaDB;
+import org.apache.doris.thrift.TGetMetaRequest;
+import org.apache.doris.thrift.TGetMetaResult;
+import org.apache.doris.thrift.TGetMetaTable;
 import org.apache.doris.thrift.TGetQueryStatsRequest;
 import org.apache.doris.thrift.TGetSnapshotRequest;
 import org.apache.doris.thrift.TGetSnapshotResult;
@@ -358,12 +365,23 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
         Env env = Env.getCurrentEnv();
         List<CatalogIf> catalogIfs = Lists.newArrayList();
-        if (Strings.isNullOrEmpty(params.catalog)) {
-            catalogIfs = env.getCatalogMgr().listCatalogs();
+        // If infodb_support_ext_catalog is true, we will list all catalogs or the specified catalog.
+        // Otherwise, we will only list internal catalog, or if the specified catalog is internal catalog.
+        if (Config.infodb_support_ext_catalog) {
+            if (Strings.isNullOrEmpty(params.catalog)) {
+                catalogIfs = env.getCatalogMgr().listCatalogs();
+            } else {
+                catalogIfs.add(env.getCatalogMgr()
+                        .getCatalogOrException(params.catalog,
+                                catalog -> new TException("Unknown catalog " + catalog)));
+            }
         } else {
-            catalogIfs.add(env.getCatalogMgr()
-                    .getCatalogOrException(params.catalog, catalog -> new TException("Unknown catalog " + catalog)));
+            if (Strings.isNullOrEmpty(params.catalog)
+                    || params.catalog.equalsIgnoreCase(InternalCatalog.INTERNAL_CATALOG_NAME)) {
+                catalogIfs.add(env.getInternalCatalog());
+            }
         }
+
         for (CatalogIf catalog : catalogIfs) {
             Collection<DatabaseIf> dbs = new HashSet<DatabaseIf>();
             try {
@@ -601,6 +619,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
         String catalogName = Strings.isNullOrEmpty(params.catalog) ? InternalCatalog.INTERNAL_CATALOG_NAME
                 : params.catalog;
+        if (!Config.infodb_support_ext_catalog
+                && !catalogName.equalsIgnoreCase(InternalCatalog.INTERNAL_CATALOG_NAME)) {
+            throw new TException("Not support getting external catalog info when "
+                    + "infodb_support_ext_catalog is false");
+        }
 
         DatabaseIf<TableIf> db = Env.getCurrentEnv().getCatalogMgr()
                 .getCatalogOrException(catalogName, catalog -> new TException("Unknown catalog " + catalog))
@@ -656,6 +679,12 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (params.isSetCatalog()) {
             catalogName = params.catalog;
         }
+        if (!Config.infodb_support_ext_catalog
+                && !catalogName.equalsIgnoreCase(InternalCatalog.INTERNAL_CATALOG_NAME)) {
+            throw new TException("Not support getting external catalog info when "
+                    + "infodb_support_ext_catalog is false");
+        }
+
         CatalogIf catalog = Env.getCurrentEnv().getCatalogMgr().getCatalog(catalogName);
         if (catalog != null) {
             DatabaseIf db = catalog.getDbNullable(params.db);
@@ -711,7 +740,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
     }
 
     public TListTableMetadataNameIdsResult listTableMetadataNameIds(TGetTablesParams params) throws TException {
-
         LOG.debug("get list simple table request: {}", params);
 
         TListTableMetadataNameIdsResult result = new TListTableMetadataNameIdsResult();
@@ -870,6 +898,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
         String catalogName = Strings.isNullOrEmpty(params.catalog) ? InternalCatalog.INTERNAL_CATALOG_NAME
                 : params.catalog;
+        if (!Config.infodb_support_ext_catalog
+                && !catalogName.equalsIgnoreCase(InternalCatalog.INTERNAL_CATALOG_NAME)) {
+            throw new TException("Not support getting external catalog info when "
+                    + "infodb_support_ext_catalog is false");
+        }
         DatabaseIf<TableIf> db = Env.getCurrentEnv().getCatalogMgr()
                 .getCatalogOrException(catalogName, catalog -> new TException("Unknown catalog " + catalog))
                 .getDbNullable(params.db);
@@ -940,6 +973,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
         String catalogName = Strings.isNullOrEmpty(params.catalog) ? InternalCatalog.INTERNAL_CATALOG_NAME
                 : params.catalog;
+        if (!Config.infodb_support_ext_catalog
+                && !catalogName.equalsIgnoreCase(InternalCatalog.INTERNAL_CATALOG_NAME)) {
+            throw new TException("Not support getting external catalog info when "
+                    + "infodb_support_ext_catalog is false");
+        }
         DatabaseIf<TableIf> db = Env.getCurrentEnv().getCatalogMgr()
                 .getCatalogOrException(catalogName, catalog -> new TException("Unknown catalog " + catalog))
                 .getDbNullable(params.db);
@@ -2148,6 +2186,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             if (txnState == null) {
                 throw new UserException("txn does not exist: " + request.getTxnId());
             }
+            if (request.isPartialUpdate()) {
+                txnState.setSchemaForPartialUpdate(table);
+            }
             txnState.addTableIndexes(table);
             plan.setTableName(table.getName());
             plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
@@ -2208,6 +2249,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                     .getTransactionState(db.getId(), request.getTxnId());
             if (txnState == null) {
                 throw new UserException("txn does not exist: " + request.getTxnId());
+            }
+            if (request.isPartialUpdate()) {
+                txnState.setSchemaForPartialUpdate(table);
             }
             txnState.addTableIndexes(table);
             plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
@@ -3108,6 +3152,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         return new TStatus(TStatusCode.OK);
     }
 
+<<<<<<< HEAD
     @Override
     public TRequestGroupCommitFragmentResult requestGroupCommitFragment(TRequestGroupCommitFragmentRequest request) {
         String clientAddr = getClientAddrAsString();
@@ -3120,11 +3165,125 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             requestGroupCommitFragmentImpl(request, result);
         } catch (UserException e) {
             LOG.warn("failed to get group commit fragment", e);
+=======
+    public TGetMetaResult getMeta(TGetMetaRequest request) throws TException {
+        String clientAddr = getClientAddrAsString();
+        LOG.debug("receive get meta request: {}", request);
+
+        TGetMetaResult result = new TGetMetaResult();
+        TStatus status = new TStatus(TStatusCode.OK);
+        result.setStatus(status);
+        try {
+            result = getMetaImpl(request, clientAddr);
+        } catch (UserException e) {
+            LOG.warn("failed to get meta: {}", e.getMessage());
             status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
             status.addToErrorMsgs(e.getMessage());
         } catch (Throwable e) {
             LOG.warn("catch unknown result.", e);
             status.setStatusCode(TStatusCode.INTERNAL_ERROR);
+            status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
+        }
+        return result;
+    }
+
+    private TGetMetaResult getMetaImpl(TGetMetaRequest request, String clientIp)
+            throws Exception {
+        //  Step 1: check fields
+        if (!request.isSetUser()) {
+            throw new UserException("user is not set");
+        }
+        if (!request.isSetPasswd()) {
+            throw new UserException("passwd is not set");
+        }
+        if (!request.isSetDb()) {
+            throw new UserException("db is not set");
+        }
+
+        // Step 2: check auth
+        TGetMetaResult result = new TGetMetaResult();
+        result.setStatus(new TStatus(TStatusCode.OK));
+        Database db = null;
+        List<Table> tables = null;
+
+        String cluster = request.getCluster();
+        if (Strings.isNullOrEmpty(cluster)) {
+            cluster = SystemInfoService.DEFAULT_CLUSTER;
+        }
+        if (Strings.isNullOrEmpty(request.getToken())) {
+            TGetMetaDB getMetaDb = request.getDb();
+
+            if (getMetaDb.isSetId()) {
+                db = Env.getCurrentInternalCatalog().getDbNullable(getMetaDb.getId());
+            } else if (getMetaDb.isSetName()) {
+                db = Env.getCurrentInternalCatalog().getDbNullable(getMetaDb.getName());
+            }
+
+            if (db == null) {
+                LOG.warn("db not found {}", getMetaDb);
+                return result;
+            }
+
+            if (getMetaDb.isSetTables()) {
+                tables = Lists.newArrayList();
+                List<TGetMetaTable> getMetaTables = getMetaDb.getTables();
+                for (TGetMetaTable getMetaTable : getMetaTables) {
+                    Table table = null;
+                    if (getMetaTable.isSetId()) {
+                        table = db.getTableNullable(getMetaTable.getId());
+                    } else {
+                        table = db.getTableNullable(getMetaTable.getName());
+                    }
+
+                    if (table == null) {
+                        LOG.warn("table not found {}", getMetaTable);
+                        continue;
+                    }
+
+                    tables.add(table);
+                }
+            }
+
+            if (tables == null) {
+                checkDbPasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), db.getFullName(), clientIp,
+                        PrivPredicate.SELECT);
+            } else {
+                List<String> tableList = Lists.newArrayList();
+                for (Table table : tables) {
+                    tableList.add(table.getName());
+                }
+                checkPasswordAndPrivs(cluster, request.getUser(), request.getPasswd(), db.getFullName(), tableList,
+                        clientIp,
+                        PrivPredicate.SELECT);
+            }
+        }
+
+        // Step 3: get meta
+        try {
+            return Env.getMeta(db, tables);
+        } catch (Throwable e) {
+            throw e;
+        }
+    }
+
+    public TGetBackendMetaResult getBackendMeta(TGetBackendMetaRequest request) throws TException {
+        String clientAddr = getClientAddrAsString();
+        LOG.debug("receive get backend meta request: {}", request);
+
+        TGetBackendMetaResult result = new TGetBackendMetaResult();
+        TStatus status = new TStatus(TStatusCode.OK);
+        result.setStatus(status);
+        try {
+            result = getBackendMetaImpl(request, clientAddr);
+        } catch (UserException e) {
+            LOG.warn("failed to get backend meta: {}", e.getMessage());
+>>>>>>> 2.0.3-rc03
+            status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
+            status.addToErrorMsgs(e.getMessage());
+        } catch (Throwable e) {
+            LOG.warn("catch unknown result.", e);
+            status.setStatusCode(TStatusCode.INTERNAL_ERROR);
+<<<<<<< HEAD
             status.addToErrorMsgs(e.getClass().getSimpleName() + ": " + Strings.nullToEmpty(e.getMessage()));
             return result;
         }
@@ -3181,6 +3340,56 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());
         } finally {
             table.readUnlock();
+=======
+            status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
+        }
+
+        return result;
+    }
+
+    private TGetBackendMetaResult getBackendMetaImpl(TGetBackendMetaRequest request, String clientAddr)
+            throws UserException {
+        // Step 1: Check fields
+        if (!request.isSetUser()) {
+            throw new UserException("user is not set");
+        }
+        if (!request.isSetPasswd()) {
+            throw new UserException("passwd is not set");
+        }
+
+        // Step 2: check auth
+        String cluster = request.getCluster();
+        if (Strings.isNullOrEmpty(cluster)) {
+            cluster = SystemInfoService.DEFAULT_CLUSTER;
+        }
+        checkPassword(request.getCluster(), request.getUser(), request.getPasswd(), clientAddr);
+
+
+        // TODO: check getBackendMeta privilege, which privilege should be checked?
+
+        // Step 3: get meta
+        try {
+            TGetBackendMetaResult result = new TGetBackendMetaResult();
+            result.setStatus(new TStatus(TStatusCode.OK));
+
+            final SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
+            List<Backend> backends = systemInfoService.getAllBackends();
+
+            for (Backend backend : backends) {
+                TBackend tBackend = new TBackend();
+                tBackend.setId(backend.getId());
+                tBackend.setHost(backend.getHost());
+                tBackend.setHttpPort(backend.getHttpPort());
+                tBackend.setBrpcPort(backend.getBrpcPort());
+                tBackend.setBePort(backend.getBePort());
+                tBackend.setIsAlive(backend.isAlive());
+                result.addToBackends(tBackend);
+            }
+
+            return result;
+        } catch (Throwable e) {
+            throw e;
+>>>>>>> 2.0.3-rc03
         }
     }
 }

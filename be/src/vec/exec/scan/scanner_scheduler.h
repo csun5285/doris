@@ -67,6 +67,8 @@ public:
     std::unique_ptr<ThreadPoolToken> new_limited_scan_pool_token(ThreadPool::ExecutionMode mode,
                                                                  int max_concurrency);
 
+    int remote_thread_pool_max_size() const { return _remote_thread_pool_max_size; }
+
 private:
     // scheduling thread function
     void _schedule_thread(int queue_id);
@@ -75,7 +77,10 @@ private:
     // execution thread function
     void _scanner_scan(ScannerScheduler* scheduler, ScannerContext* ctx, VScannerSPtr scanner);
 
-private:
+    void _register_metrics();
+
+    static void _deregister_metrics();
+
     // Scheduling queue number.
     // TODO: make it configurable.
     static const int QUEUE_NUM = 4;
@@ -101,6 +106,7 @@ private:
     // true is the scheduler is closed.
     std::atomic_bool _is_closed = {false};
     bool _is_init = false;
+    int _remote_thread_pool_max_size;
 };
 
 } // namespace doris::vectorized

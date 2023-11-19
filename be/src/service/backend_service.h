@@ -60,6 +60,7 @@ class TTransmitDataParams;
 class TUniqueId;
 class TIngestBinlogRequest;
 class TIngestBinlogResult;
+class ThreadPool;
 
 // This class just forward rpc for actual handler
 // make this class because we can bind multiple service on single point
@@ -133,6 +134,7 @@ public:
 
     void ingest_binlog(TIngestBinlogResult& result, const TIngestBinlogRequest& request) override;
 
+<<<<<<< HEAD
     void pre_cache_async(TPreCacheAsyncResponse& response,
                          const TPreCacheAsyncRequest& request) override;
 
@@ -148,11 +150,16 @@ public:
 
     void warm_up_tablets(TWarmUpTabletsResponse& response,
                          const TWarmUpTabletsRequest& request) override;
+=======
+    void query_ingest_binlog(TQueryIngestBinlogResult& result,
+                             const TQueryIngestBinlogRequest& request) override;
+>>>>>>> 2.0.3-rc03
 
 private:
     Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);
     ExecEnv* _exec_env;
     std::unique_ptr<AgentServer> _agent_server;
+    std::unique_ptr<ThreadPool> _ingest_binlog_workers;
 };
 
 } // namespace doris

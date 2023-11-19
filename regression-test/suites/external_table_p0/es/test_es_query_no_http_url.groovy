@@ -16,7 +16,10 @@
 // under the License.
 
 suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_docker_es") {
+<<<<<<< ours
 
+=======
+>>>>>>> theirs
     String enabled = context.config.otherConfigs.get("enableEsTest")
     if (enabled != null && enabled.equalsIgnoreCase("true")) {
         String externalEnvIp = context.config.otherConfigs.get("externalEnvIp")
@@ -29,6 +32,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         String external_table_v1 = "external_table_test_v1"
         String external_table_v2 = "external_table_test_v2"
 
+<<<<<<< ours
         sql """drop catalog if exists $es_6_catalog;"""
         sql """drop catalog if exists $es_7_catalog;"""
         sql """drop catalog if exists $es_8_catalog;"""
@@ -39,6 +43,17 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         sql """
             create catalog if not exists $es_6_catalog
             properties (
+=======
+        sql """drop catalog if exists es6_no_http_url;"""
+        sql """drop catalog if exists es7_no_http_url;"""
+        sql """drop catalog if exists es8_no_http_url;"""
+        sql """drop table if exists test_v1_no_http_url;"""
+        sql """drop table if exists test_v2_no_http_url;"""
+
+        // test old create-catalog syntax for compatibility
+        sql """
+            create catalog if not exists es6_no_http_url properties (
+>>>>>>> theirs
                 "type"="es",
                 "elasticsearch.hosts"="${externalEnvIp}:$es_6_port",
                 "elasticsearch.nodes_discovery"="false",
@@ -47,6 +62,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         """
 
         // test new create catalog syntax
+<<<<<<< ours
         sql """create catalog if not exists $es_7_catalog properties(
             "type"="es",
             "hosts"="${externalEnvIp}:$es_7_port",
@@ -60,12 +76,33 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
             "hosts"="${externalEnvIp}:$es_8_port",
             "nodes_discovery"="false",
             "enable_keyword_sniff"="true"
+=======
+        sql """
+            create catalog if not exists es7_no_http_url properties(
+                "type"="es",
+                "hosts"="${externalEnvIp}:$es_7_port",
+                "nodes_discovery"="false",
+                "enable_keyword_sniff"="true"
+        );
+        """
+
+        sql """
+            create catalog if not exists es8_no_http_url properties(
+                "type"="es",
+                "hosts"="${externalEnvIp}:$es_8_port",
+                "nodes_discovery"="false",
+                "enable_keyword_sniff"="true"
+>>>>>>> theirs
         );
         """
 
         // test external table for datetime
         sql """
+<<<<<<< ours
             CREATE TABLE $external_table_v1 (
+=======
+            CREATE TABLE `test_v1_no_http_url` (
+>>>>>>> theirs
                 `c_datetime` array<datev2> NULL,
                 `c_long` array<bigint(20)> NULL,
                 `c_unsigned_long` array<largeint(40)> NULL,
@@ -100,10 +137,17 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
                 "http_ssl_enabled"="false"
             );
         """
+<<<<<<< ours
         order_qt_sql51 """select * from $external_table_v1 where test2='text#1'"""
 
        sql """
             CREATE TABLE $external_table_v2 (
+=======
+        order_qt_sql51 """select * from test_v1_no_http_url where test2='text#1'"""
+
+       sql """
+            CREATE TABLE `test_v2_no_http_url` (
+>>>>>>> theirs
                 `c_datetime` array<datev2> NULL,
                 `c_long` array<bigint(20)> NULL,
                 `c_unsigned_long` array<largeint(40)> NULL,
@@ -138,6 +182,7 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
                 "http_ssl_enabled"="false"
             );
         """
+<<<<<<< ours
         order_qt_sql52 """select * from $external_table_v2 where test2='text#1'"""
 
         // $es_6_catalog
@@ -148,6 +193,18 @@ suite("test_es_query_no_http_url", "p0,external,es,external_docker,external_dock
         order_qt_sql71 """select * from test1 where test2='text#1'"""
         // $es_8_catalog
         sql """switch $es_8_catalog"""
+=======
+        order_qt_sql52 """select * from test_v2_no_http_url where test2='text#1'"""
+
+        // es6
+        sql """switch es6_no_http_url"""
+        order_qt_sql61 """select * from test1 where test2='text#1'"""
+        // es7
+        sql """switch es7_no_http_url"""
+        order_qt_sql71 """select * from test1 where test2='text#1'"""
+        // es8
+        sql """switch es8_no_http_url"""
+>>>>>>> theirs
         order_qt_sql81 """select * from test1 where test2='text#1'"""
     }
 }

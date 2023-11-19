@@ -260,6 +260,13 @@ public class BrokerLoadJob extends BulkLoadJob {
                 } catch (UserException e) {
                     throw new UserException(e.getMessage());
                 }
+<<<<<<< HEAD
+=======
+                txnState.addTableIndexes(table);
+                if (isPartialUpdate()) {
+                    txnState.setSchemaForPartialUpdate(table);
+                }
+>>>>>>> 2.0.3-rc03
             }
         } finally {
             MetaLockUtils.readUnlockTables(tableList);

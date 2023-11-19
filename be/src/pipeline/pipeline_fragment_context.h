@@ -203,7 +203,12 @@ private:
     // If this is set to false, and '_is_report_success' is false as well,
     // This executor will not report status to FE on being cancelled.
     bool _is_report_on_cancel;
+<<<<<<< HEAD
     bool _group_commit;
+=======
+
+    DescriptorTbl* _desc_tbl;
+>>>>>>> 2.0.3-rc03
 };
 } // namespace pipeline
 } // namespace doris

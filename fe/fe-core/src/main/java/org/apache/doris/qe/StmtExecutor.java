@@ -412,7 +412,11 @@ public class StmtExecutor {
         return masterOpExecutor.getProxyStatus();
     }
 
+<<<<<<< HEAD
     public boolean isLoadKindStmt() {
+=======
+    public boolean isSyncLoadKindStmt() {
+>>>>>>> 2.0.3-rc03
         if (parsedStmt == null) {
             return false;
         }
@@ -420,9 +424,13 @@ public class StmtExecutor {
             LogicalPlan logicalPlan = ((LogicalPlanAdapter) parsedStmt).getLogicalPlan();
             return logicalPlan instanceof InsertIntoTableCommand;
         }
+<<<<<<< HEAD
         return parsedStmt instanceof InsertStmt
                 || parsedStmt instanceof CopyStmt
                 || parsedStmt instanceof CreateTableAsSelectStmt;
+=======
+        return parsedStmt instanceof InsertStmt || parsedStmt instanceof CreateTableAsSelectStmt;
+>>>>>>> 2.0.3-rc03
     }
 
     public boolean isAnalyzeStmt() {
@@ -547,6 +555,9 @@ public class StmtExecutor {
             if (logicalPlan instanceof Forward) {
                 redirectStatus = ((Forward) logicalPlan).toRedirectStatus();
                 if (isForwardToMaster()) {
+                    if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
+                        throw new UserException("Forward master command is not supported for prepare statement");
+                    }
                     if (isProxy) {
                         // This is already a stmt forwarded from other FE.
                         // If we goes here, means we can't find a valid Master FE(some error happens).
@@ -766,6 +777,9 @@ public class StmtExecutor {
                     queryAnalysisSpan.end();
                 }
                 if (isForwardToMaster()) {
+                    if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
+                        throw new UserException("Forward master command is not supported for prepare statement");
+                    }
                     if (isProxy) {
                         // This is already a stmt forwarded from other FE.
                         // If goes here, which means we can't find a valid Master FE(some error happens).
@@ -2210,7 +2224,7 @@ public class StmtExecutor {
         context.getState().setOk();
     }
 
-    private void handleAnalyzeStmt() throws DdlException {
+    private void handleAnalyzeStmt() throws DdlException, AnalysisException {
         context.env.getAnalysisManager().createAnalyze((AnalyzeStmt) parsedStmt, isProxy);
     }
 

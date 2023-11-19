@@ -181,9 +181,13 @@ Status NewOlapScanner::init() {
 #endif
                 if (!st.ok()) {
                     LOG(WARNING) << "fail to init reader.res=" << st;
+<<<<<<< HEAD
                     return Status::InternalError(
                             "failed to initialize storage reader. tablet_id={} : {}",
                             tablet->tablet_id(), st.to_string());
+=======
+                    return st;
+>>>>>>> 2.0.3-rc03
                 }
             }
             if (!_state->skip_delete_predicate()) {
@@ -492,7 +496,8 @@ void NewOlapScanner::_update_realtime_counters() {
 }
 
 void NewOlapScanner::_update_counters_before_close() {
-    if (!_state->enable_profile() || _has_updated_counter) {
+    //  Please don't directly enable the profile here, we need to set QueryStatistics using the counter inside.
+    if (_has_updated_counter) {
         return;
     }
     _has_updated_counter = true;

@@ -203,8 +203,6 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
     }
 
 
-    
-
     String enabled = context.config.otherConfigs.get("enableHiveTest")
     if (enabled != null && enabled.equalsIgnoreCase("true")) {
         try {

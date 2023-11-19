@@ -266,6 +266,9 @@ public class JdbcMySQLClient extends JdbcClient {
             case "BIGINT":
                 return Type.BIGINT;
             case "DATE":
+                if (convertDateToNull) {
+                    fieldSchema.setAllowNull(true);
+                }
                 return ScalarType.createDateV2Type();
             case "TIMESTAMP":
             case "DATETIME": {

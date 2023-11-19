@@ -323,7 +323,15 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                   << ", disk=" << _tablet->data_dir()->path()
                   << ", segments=" << _input_num_segments << ", input_row_num=" << _input_row_num
                   << ", output_row_num=" << _output_rowset->num_rows()
+<<<<<<< HEAD
                   << ". elapsed time=" << watch.get_elapse_second() << 's';
+=======
+                  << ", input_rowset_size=" << _input_rowsets_size
+                  << ", output_rowset_size=" << _output_rowset->data_disk_size()
+                  << ". elapsed time=" << watch.get_elapse_second()
+                  << "s. cumulative_compaction_policy="
+                  << (cumu_policy == nullptr ? "quick" : cumu_policy->name());
+>>>>>>> 2.0.3-rc03
         return Status::OK();
     }
     build_basic_info();
@@ -484,6 +492,8 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                       << ". tablet=" << _tablet->full_name()
                       << ", input row number=" << _input_row_num
                       << ", output row number=" << _output_rowset->num_rows()
+                      << ", input_rowset_size=" << _input_rowsets_size
+                      << ", output_rowset_size=" << _output_rowset->data_disk_size()
                       << ". elapsed time=" << inverted_watch.get_elapse_second() << "s.";
         } else {
             LOG(INFO) << "skip doing index compaction due to no output segments"
@@ -526,8 +536,12 @@ Status Compaction::do_compaction_impl(int64_t permits) {
               << ". tablet=" << _tablet->full_name() << ", output_version=" << _output_version
               << ", current_max_version=" << current_max_version
               << ", disk=" << _tablet->data_dir()->path() << ", segments=" << _input_num_segments
+              << ", input_rowset_size=" << _input_rowsets_size
+              << ", output_rowset_size=" << _output_rowset->data_disk_size()
               << ", input_row_num=" << _input_row_num
               << ", output_row_num=" << _output_rowset->num_rows()
+              << ", filtered_row_num=" << stats.filtered_rows
+              << ", merged_row_num=" << stats.merged_rows
               << ". elapsed time=" << watch.get_elapse_second()
               << "s. cumulative_compaction_policy=" << cumu_policy->name()
               << ", compact_row_per_second=" << int(_input_row_num / watch.get_elapse_second());
@@ -732,25 +746,24 @@ Status Compaction::modify_rowsets(const Merger::Statistics* stats) {
                     // Therefore, we need to check if every committed rowset has calculated delete bitmap for
                     // all compaction input rowsets.
                     continue;
-                } else {
-                    DeleteBitmap txn_output_delete_bitmap(_tablet->tablet_id());
-                    _tablet->calc_compaction_output_rowset_delete_bitmap(
-                            _input_rowsets, _rowid_conversion, 0, UINT64_MAX, &missed_rows,
-                            &location_map, *it.delete_bitmap.get(), &txn_output_delete_bitmap);
-                    if (config::enable_merge_on_write_correctness_check) {
-                        RowsetIdUnorderedSet rowsetids;
-                        rowsetids.insert(_output_rowset->rowset_id());
-                        _tablet->add_sentinel_mark_to_delete_bitmap(&txn_output_delete_bitmap,
-                                                                    rowsetids);
-                    }
-                    it.delete_bitmap->merge(txn_output_delete_bitmap);
-                    // Step3: write back updated delete bitmap and tablet info.
-                    it.rowset_ids.insert(_output_rowset->rowset_id());
-                    StorageEngine::instance()->txn_manager()->set_txn_related_delete_bitmap(
-                            it.partition_id, it.transaction_id, _tablet->tablet_id(),
-                            _tablet->schema_hash(), _tablet->tablet_uid(), true, it.delete_bitmap,
-                            it.rowset_ids, nullptr);
                 }
+                DeleteBitmap txn_output_delete_bitmap(_tablet->tablet_id());
+                _tablet->calc_compaction_output_rowset_delete_bitmap(
+                        _input_rowsets, _rowid_conversion, 0, UINT64_MAX, &missed_rows,
+                        &location_map, *it.delete_bitmap.get(), &txn_output_delete_bitmap);
+                if (config::enable_merge_on_write_correctness_check) {
+                    RowsetIdUnorderedSet rowsetids;
+                    rowsetids.insert(_output_rowset->rowset_id());
+                    _tablet->add_sentinel_mark_to_delete_bitmap(&txn_output_delete_bitmap,
+                                                                rowsetids);
+                }
+                it.delete_bitmap->merge(txn_output_delete_bitmap);
+                // Step3: write back updated delete bitmap and tablet info.
+                it.rowset_ids.insert(_output_rowset->rowset_id());
+                StorageEngine::instance()->txn_manager()->set_txn_related_delete_bitmap(
+                        it.partition_id, it.transaction_id, _tablet->tablet_id(),
+                        _tablet->schema_hash(), _tablet->tablet_uid(), true, it.delete_bitmap,
+                        it.rowset_ids, it.partial_update_info);
             }
 
             // Convert the delete bitmap of the input rowsets to output rowset for

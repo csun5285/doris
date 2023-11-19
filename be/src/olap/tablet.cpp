@@ -456,7 +456,7 @@ Status Tablet::add_rowset(RowsetSharedPtr rowset) {
         }
     }
     std::vector<RowsetSharedPtr> empty_vec;
-    modify_rowsets(empty_vec, rowsets_to_delete);
+    RETURN_IF_ERROR(modify_rowsets(empty_vec, rowsets_to_delete));
     ++_newly_created_rowset_num;
     return Status::OK();
 }
@@ -1249,10 +1249,14 @@ Status Tablet::capture_consistent_versions(const Version& spec_version,
             // if version_path is null, it may be a compaction check logic.
             // so to avoid print too many logs.
             if (version_path != nullptr) {
-                LOG(WARNING) << "tablet:" << full_name()
-                             << ", version already has been merged. spec_version: " << spec_version;
+                LOG(WARNING) << "tablet:" << tablet_id()
+                             << ", version already has been merged. spec_version: " << spec_version
+                             << ", max_version: " << max_version_unlocked();
             }
-            status = Status::Error<VERSION_ALREADY_MERGED>("missed_versions is empty");
+            status = Status::Error<VERSION_ALREADY_MERGED>(
+                    "missed_versions is empty, spec_version "
+                    "{}, max_version {}, tablet_id {}",
+                    spec_version.second, max_version_unlocked().second, tablet_id());
         } else {
             if (version_path != nullptr) {
                 LOG(WARNING) << "status:" << status << ", tablet:" << full_name()
@@ -2455,6 +2459,7 @@ Status Tablet::create_transient_rowset_writer(
     context.is_transient_rowset_writer = true;
     // ATTN: context.tablet is a shared_ptr, can't simply set it's value to `this`. We should
     // get the shared_ptr from tablet_manager.
+<<<<<<< HEAD
 #ifdef CLOUD_MODE
     if (partial_update_info && partial_update_info->is_partial_update) {
         context.fs = cloud::latest_fs();
@@ -2464,6 +2469,14 @@ Status Tablet::create_transient_rowset_writer(
 #else
     context.tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
 #endif
+=======
+    auto tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
+    if (!tablet) {
+        LOG(WARNING) << "cant find tablet by tablet_id=" << tablet_id();
+        return Status::NotFound(fmt::format("cant find tablet by tablet_id= {}", tablet_id()));
+    }
+    context.tablet = tablet;
+>>>>>>> 2.0.3-rc03
     context.write_type = DataWriteType::TYPE_DIRECT;
     context.partial_update_info = partial_update_info;
     context.is_transient_rowset_writer = true;
@@ -3129,7 +3142,8 @@ void Tablet::update_max_version_schema(const TabletSchemaSPtr& tablet_schema) {
 }
 
 // fetch value by row column
-Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint32_t segid,
+Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset,
+                                              const TabletSchema& tablet_schema, uint32_t segid,
                                               const std::vector<uint32_t>& rowids,
                                               const std::vector<uint32_t>& cids,
                                               vectorized::Block& block) {
@@ -3137,7 +3151,6 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
     BetaRowsetSharedPtr rowset = std::static_pointer_cast<BetaRowset>(input_rowset);
     CHECK(rowset);
 
-    const TabletSchemaSPtr tablet_schema = rowset->tablet_schema();
     SegmentCacheHandle segment_cache;
     RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(rowset, &segment_cache, true));
     // find segment
@@ -3156,10 +3169,10 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
         LOG_EVERY_N(INFO, 500) << "fetch_value_by_rowids, cost(us):" << watch.elapsed_time() / 1000
                                << ", row_batch_size:" << rowids.size();
     });
-    CHECK(tablet_schema->store_row_column());
+    CHECK(tablet_schema.store_row_column());
     // create _source column
     std::unique_ptr<segment_v2::ColumnIterator> column_iterator;
-    RETURN_IF_ERROR(segment->new_column_iterator(tablet_schema->column(BeConsts::ROW_STORE_COL),
+    RETURN_IF_ERROR(segment->new_column_iterator(tablet_schema.column(BeConsts::ROW_STORE_COL),
                                                  &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
@@ -3181,7 +3194,7 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint
     std::vector<std::string> default_values;
     default_values.resize(cids.size());
     for (int i = 0; i < cids.size(); ++i) {
-        const TabletColumn& column = tablet_schema->column(cids[i]);
+        const TabletColumn& column = tablet_schema.column(cids[i]);
         vectorized::DataTypePtr type =
                 vectorized::DataTypeFactory::instance().create_data_type(column);
         col_uid_to_idx[column.unique_id()] = i;
@@ -3446,7 +3459,7 @@ Status Tablet::calc_segment_delete_bitmap(RowsetSharedPtr rowset,
     vectorized::Block ordered_block = block.clone_empty();
     uint32_t pos = 0;
 
-    seg->load_pk_index_and_bf(); // We need index blocks to iterate
+    RETURN_IF_ERROR(seg->load_pk_index_and_bf()); // We need index blocks to iterate
     auto pk_idx = seg->get_primary_key_index();
     int total = pk_idx->num_rows();
     uint32_t row_id = 0;
@@ -3714,8 +3727,8 @@ Status Tablet::read_columns_by_plan(TabletSchemaSPtr tablet_schema,
                 (*read_index)[id_and_pos.pos] = read_idx++;
             }
             if (has_row_column) {
-                auto st = fetch_value_through_row_column(rowset_iter->second, seg_it.first, rids,
-                                                         cids_to_read, block);
+                auto st = fetch_value_through_row_column(rowset_iter->second, *tablet_schema,
+                                                         seg_it.first, rids, cids_to_read, block);
                 if (!st.ok()) {
                     LOG(WARNING) << "failed to fetch value through row column";
                     return st;
@@ -3777,7 +3790,7 @@ void Tablet::_rowset_ids_difference(const RowsetIdUnorderedSet& cur,
 Status Tablet::update_delete_bitmap_without_lock(const RowsetSharedPtr& rowset) {
     int64_t cur_version = rowset->end_version();
     std::vector<segment_v2::SegmentSharedPtr> segments;
-    _load_rowset_segments(rowset, &segments);
+    RETURN_IF_ERROR(_load_rowset_segments(rowset, &segments));
 
     // If this rowset does not have a segment, there is no need for an update.
     if (segments.empty()) {
@@ -4009,7 +4022,7 @@ Status Tablet::check_rowid_conversion(
         return Status::OK();
     }
     std::vector<segment_v2::SegmentSharedPtr> dst_segments;
-    _load_rowset_segments(dst_rowset, &dst_segments);
+    RETURN_IF_ERROR(_load_rowset_segments(dst_rowset, &dst_segments));
     std::unordered_map<RowsetId, std::vector<segment_v2::SegmentSharedPtr>, HashOfRowsetId>
             input_rowsets_segment;
 
@@ -4018,7 +4031,7 @@ Status Tablet::check_rowid_conversion(
         std::vector<segment_v2::SegmentSharedPtr>& segments =
                 input_rowsets_segment[src_rowset->rowset_id()];
         if (segments.empty()) {
-            _load_rowset_segments(src_rowset, &segments);
+            RETURN_IF_ERROR(_load_rowset_segments(src_rowset, &segments));
         }
         for (auto& [src, dst] : locations) {
             std::string src_key;

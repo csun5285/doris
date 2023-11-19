@@ -305,7 +305,7 @@ public class TabletSchedCtx implements Comparable<TabletSchedCtx> {
             if (decommissionTime < 0) {
                 decommissionTime = System.currentTimeMillis();
             }
-            return System.currentTimeMillis() > decommissionTime + 10 * 60 * 1000L;
+            return System.currentTimeMillis() > decommissionTime + Config.decommission_tablet_wait_time_seconds * 1000L;
         } else {
             decommissionTime = -1;
             if (code == SubCode.WAITING_SLOT && type != Type.BALANCE) {
@@ -1122,6 +1122,13 @@ public class TabletSchedCtx implements Comparable<TabletSchedCtx> {
 
             replica.updateVersionInfo(reportedTablet.getVersion(), reportedTablet.getDataSize(),
                     reportedTablet.getDataSize(), reportedTablet.getRowCount());
+            if (replica.getLastFailedVersion() > partition.getCommittedVersion()
+                    && reportedTablet.getVersion() >= partition.getCommittedVersion()
+                    //&& !(reportedTablet.isSetVersionMiss() && reportedTablet.isVersionMiss()
+                    && !(reportedTablet.isSetUsed() && !reportedTablet.isUsed())) {
+                LOG.info("change replica {} of tablet {} 's last failed version to -1", replica, tabletId);
+                replica.updateLastFailedVersion(-1L);
+            }
             if (reportedTablet.isSetPathHash()) {
                 replica.setPathHash(reportedTablet.getPathHash());
             }

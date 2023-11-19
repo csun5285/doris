@@ -99,6 +99,10 @@ suite("test_hdfs_json_load", "p0,external,external_docker,external_docker_hive,h
 
 
     String hdfs_port = context.config.otherConfigs.get("hdfs_port")
+<<<<<<< ours
+=======
+    String externalEnvIp = context.config.otherConfigs.get("externalEnvIp")
+>>>>>>> theirs
     def fsPath = "hdfs://${externalEnvIp}:${hdfs_port}"
     // It's okay to use random `hdfsUser`, but can not be empty.
     def hdfsUser = "doris"

@@ -77,6 +77,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
@@ -600,6 +601,15 @@ public class TabletScheduler extends MasterDaemon {
         long succTime = pathSlot.getDiskBalanceLastSuccTime(pathHash);
         if (succTime > lastStatUpdateTime) {
             throw new SchedException(Status.UNRECOVERABLE, "stat info is outdated");
+        }
+    }
+
+    public void updateDestPathHash(TabletSchedCtx tabletCtx) {
+        // find dest replica
+        Optional<Replica> destReplica = tabletCtx.getReplicas()
+                .stream().filter(replica -> replica.getBackendId() == tabletCtx.getDestBackendId()).findAny();
+        if (destReplica.isPresent() && tabletCtx.getDestPathHash() != -1) {
+            destReplica.get().setPathHash(tabletCtx.getDestPathHash());
         }
     }
 
@@ -1145,7 +1155,7 @@ public class TabletScheduler extends MasterDaemon {
         // it will also delete replica from tablet inverted index.
         tabletCtx.deleteReplica(replica);
 
-        if (force) {
+        if (force || FeConstants.runningUnitTest) {
             // send the delete replica task.
             // also, this may not be necessary, but delete it will make things simpler.
             // NOTICE: only delete the replica from meta may not work. sometimes we can depend on tablet report
@@ -1633,6 +1643,7 @@ public class TabletScheduler extends MasterDaemon {
             // if we have a success task, then stat must be refreshed before schedule a new task
             updateDiskBalanceLastSuccTime(tabletCtx.getSrcBackendId(), tabletCtx.getSrcPathHash());
             updateDiskBalanceLastSuccTime(tabletCtx.getDestBackendId(), tabletCtx.getDestPathHash());
+            updateDestPathHash(tabletCtx);
             finalizeTabletCtx(tabletCtx, TabletSchedCtx.State.FINISHED, Status.FINISHED, "finished");
         } else {
             finalizeTabletCtx(tabletCtx, TabletSchedCtx.State.CANCELLED, Status.UNRECOVERABLE,

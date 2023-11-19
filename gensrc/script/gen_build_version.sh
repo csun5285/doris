@@ -31,8 +31,13 @@ set -eo pipefail
 build_version_prefix="selectdb"
 build_version_major=0
 build_version_minor=0
+<<<<<<< HEAD
 build_version_patch=0
 build_version_rc_version="dev"
+=======
+build_version_patch=3
+build_version_rc_version="rc03"
+>>>>>>> 2.0.3-rc03
 
 build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
 
