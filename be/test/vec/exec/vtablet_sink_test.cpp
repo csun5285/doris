@@ -380,6 +380,7 @@ public:
 
     void TearDown() override {
         io::global_local_filesystem()->delete_directory(wal_dir);
+        _env->_wal_manager->stop();
         SAFE_DELETE(_env->_internal_client_cache);
         SAFE_DELETE(_env->_function_client_cache);
         SAFE_DELETE(_env->_master_info);

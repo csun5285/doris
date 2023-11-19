@@ -130,35 +130,35 @@ Status StorageEngine::start_bg_threads() {
 Status StorageEngine::cloud_start_bg_threads() {
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "refresh_s3_info_thread",
-            [this]() { this->_refresh_s3_info_thread_callback(); }, &_refresh_s3_info_thread));
+            [this]() { this->_refresh_s3_info_thread_callback(); }, &_bg_threads.emplace_back()));
     LOG(INFO) << "refresh s3 info thread started";
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "vacuum_stale_rowsets_thread",
             [this]() { this->_vacuum_stale_rowsets_thread_callback(); },
-            &_vacuum_stale_rowsets_thread));
+            &_bg_threads.emplace_back()));
     LOG(INFO) << "vacuum stale rowsets thread started";
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "sync_tablets_thread",
-            [this]() { this->_sync_tablets_thread_callback(); }, &_sync_tablets_thread));
+            [this]() { this->_sync_tablets_thread_callback(); }, &_bg_threads.emplace_back()));
     LOG(INFO) << "sync tablets thread started";
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "lease_compaction_thread",
-            [this]() { this->_lease_compaction_thread_callback(); }, &_lease_compaction_thread));
+            [this]() { this->_lease_compaction_thread_callback(); }, &_bg_threads.emplace_back()));
     LOG(INFO) << "lease compaction thread started";
 
     // fd cache clean thread
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "fd_cache_clean_thread",
-            [this]() { this->_fd_cache_clean_callback(); }, &_fd_cache_clean_thread));
+            [this]() { this->_fd_cache_clean_callback(); }, &_bg_threads.emplace_back()));
     LOG(INFO) << "fd cache clean thread started";
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "check_bucket_enable_versioning_thread",
             [this]() { this->_check_bucket_enable_versioning_callback(); },
-            &_check_bucket_enable_versioning_thread));
+            &_bg_threads.emplace_back()));
     LOG(INFO) << "check bucket enable versioning thread started";
 
     // compaction tasks producer thread
@@ -173,7 +173,7 @@ Status StorageEngine::cloud_start_bg_threads() {
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "compaction_tasks_producer_thread",
             [this]() { this->_compaction_tasks_producer_callback(); },
-            &_compaction_tasks_producer_thread));
+            &_bg_threads.emplace_back()));
     LOG(INFO) << "compaction tasks producer thread started";
 
     // add calculate tablet delete bitmap task thread pool

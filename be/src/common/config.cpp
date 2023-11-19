@@ -1169,6 +1169,8 @@ DEFINE_mInt64(max_load_pressure_wait_time_ms, "3000");
 DEFINE_Int32(calc_delete_bitmap_worker_count, "8");
 // the count of thread to calc tablet delete bitmap task, only used for cloud
 DEFINE_Int32(calc_tablet_delete_bitmap_task_max_thread, "32");
+// stream load commit retry times for mow table
+DEFINE_mInt32(mow_stream_load_commit_retry_times, "10");
 
 // the maximum condition vatiable wait time for buffered reader
 DEFINE_mInt32(buffered_reader_read_timeout_ms, "60000");

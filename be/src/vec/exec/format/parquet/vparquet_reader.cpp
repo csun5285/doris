@@ -203,6 +203,7 @@ void ParquetReader::_close_internal() {
                            _column_statistics.decode_level_time);
             COUNTER_UPDATE(_parquet_profile.decode_null_map_time,
                            _column_statistics.decode_null_map_time);
+            _file_reader->close();
         }
         _closed = true;
     }

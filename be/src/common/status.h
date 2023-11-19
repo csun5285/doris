@@ -60,6 +60,7 @@ TStatusError(DATA_QUALITY_ERROR);
 TStatusError(LABEL_ALREADY_EXISTS);
 TStatusError(NOT_AUTHORIZED);
 TStatusError(HTTP_ERROR);
+TStatusError(DELETE_BITMAP_LOCK_ERROR);
 #undef TStatusError
 // BE internal errors
 E(OS_ERROR, -100);

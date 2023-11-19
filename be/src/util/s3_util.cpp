@@ -140,7 +140,8 @@ bool S3ClientFactory::is_s3_conf_valid(const S3Conf& s3_conf) {
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_client_factory::create", std::make_shared<Aws::S3::S3Client>());
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_client_factory::create",
+                                      std::make_shared<Aws::S3::S3Client>());
     if (!is_s3_conf_valid(s3_conf)) {
         return nullptr;
     }
@@ -156,6 +157,7 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
 
     Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
     DCHECK(!aws_cred.IsExpiredOrEmpty());
+
     if (!s3_conf.token.empty()) {
         aws_cred.SetSessionToken(s3_conf.token);
     }

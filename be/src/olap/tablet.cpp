@@ -3929,6 +3929,12 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
               << ", cur version: " << cur_version << ", transaction_id: " << txn_id << ","
               << ss.str() << " , total rows: " << total_rows;
 
+#ifdef CLOUD_MODE
+    // update delete bitmap info, in order to avoid recalculation when trying again
+    StorageEngine::instance()->delete_bitmap_txn_manager()->update_tablet_txn_info(
+            txn_id, tablet_id(), delete_bitmap, cur_rowset_ids);
+#endif
+
     if (config::enable_merge_on_write_correctness_check && rowset->num_rows() != 0) {
         // only do correctness check if the rowset has at least one row written
         // check if all the rowset has ROWSET_SENTINEL_MARK
@@ -3947,6 +3953,7 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
         new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
                                  iter->second);
     }
+
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
             this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
 #else

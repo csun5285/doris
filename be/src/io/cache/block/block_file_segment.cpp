@@ -80,8 +80,7 @@ size_t FileBlock::get_downloaded_size(std::lock_guard<doris::Mutex>& /* segment_
 }
 
 uint64_t FileBlock::get_caller_id() {
-    uint64_t id = 0;
-    id = bthread_self() == 0 ? static_cast<uint64_t>(pthread_self()) : bthread_self();
+    uint64_t id = static_cast<uint64_t>(pthread_self());
     DCHECK(id != 0);
     return id;
 }
@@ -233,14 +232,7 @@ FileBlock::~FileBlock() {
     }
 }
 
-Status FileBlock::finalize_write(bool need_to_get_file_size) {
-    if (need_to_get_file_size) {
-        int64_t downloaded_size = 0;
-        std::string file_path = get_path_in_local_cache(true);
-        RETURN_IF_ERROR(global_local_filesystem()->file_size(file_path, &downloaded_size));
-        std::lock_guard segment_lock(_mutex);
-        _downloaded_size = downloaded_size;
-    }
+Status FileBlock::finalize_write() {
     if (_downloaded_size != 0 && _downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();

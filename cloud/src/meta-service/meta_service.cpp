@@ -577,9 +577,9 @@ void MetaServiceImpl::update_tablet(::google::protobuf::RpcController* controlle
         if (code != MetaServiceCode::OK) {
             return;
         }
-        if (tablet_meta_info.has_is_in_memory()) {
+        if (tablet_meta_info.has_is_in_memory()) { // deprecate after 3.0.0
             tablet_meta.set_is_in_memory(tablet_meta_info.is_in_memory());
-        } else if (tablet_meta_info.has_is_persistent()) {
+        } else if (tablet_meta_info.has_is_persistent()) { // deprecate after 3.0.0
             tablet_meta.set_is_persistent(tablet_meta_info.is_persistent());
         } else if (tablet_meta_info.has_ttl_seconds()) {
             tablet_meta.set_ttl_seconds(tablet_meta_info.ttl_seconds());
@@ -742,7 +742,7 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
             code = cast_as<ErrCategory::READ>(err);
             msg = fmt::format("failed to get schema, schema_version={}: {}",
                               rowset_meta.schema_version(),
-                              err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
+                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, existed_rowset_meta.mutable_tablet_schema())) {
@@ -1448,6 +1448,11 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
     err = txn->get(lock_key, &lock_val);
+    if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+        msg = "lock id key not found";
+        code = MetaServiceCode::LOCK_EXPIRED;
+        return;
+    }
     if (err != TxnErrorCode::TXN_OK) {
         ss << "failed to get delete bitmap lock info, instance_id=" << instance_id
            << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;
@@ -1596,32 +1601,6 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
         return;
     }
     RPC_RATE_LIMIT(get_delete_bitmap)
-    std::unique_ptr<Transaction> txn;
-    TxnErrorCode err = txn_kv_->create_txn(&txn);
-    if (err != TxnErrorCode::TXN_OK) {
-        code = cast_as<ErrCategory::CREATE>(err);
-        msg = "failed to init txn";
-        return;
-    }
-
-    if (request->has_idx()) {
-        TabletIndexPB idx(request->idx());
-        TabletStatsPB tablet_stat;
-        internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, tablet_stat,
-                                  true /*snapshot_read*/);
-        if (code != MetaServiceCode::OK) {
-            return;
-        }
-        // The requested compaction state and the actual compaction state are different, which indicates that
-        // the requested rowsets are expired and their delete bitmap may have been deleted.
-        if (request->base_compaction_cnt() != tablet_stat.base_compaction_cnt() ||
-            request->cumulative_compaction_cnt() != tablet_stat.cumulative_compaction_cnt() ||
-            request->cumulative_point() != tablet_stat.cumulative_point()) {
-            code = MetaServiceCode::ROWSETS_EXPIRED;
-            msg = "rowsets are expired";
-            return;
-        }
-    }
 
     auto tablet_id = request->tablet_id();
     auto& rowset_ids = request->rowset_ids();
@@ -1638,6 +1617,14 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 
     for (size_t i = 0; i < rowset_ids.size(); i++) {
+        // create a new transaction every time, avoid using one transaction that takes too long
+        std::unique_ptr<Transaction> txn;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = "failed to init txn";
+            return;
+        }
         MetaDeleteBitmapInfo start_key_info {instance_id, tablet_id, rowset_ids[i],
                                              begin_versions[i], 0};
         MetaDeleteBitmapInfo end_key_info {instance_id, tablet_id, rowset_ids[i], end_versions[i],
@@ -1688,6 +1675,32 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
             }
             start_key = it->next_begin_key(); // Update to next smallest key for iteration
         } while (it->more());
+    }
+
+    if (request->has_idx()) {
+        std::unique_ptr<Transaction> txn;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = "failed to init txn";
+            return;
+        }
+        TabletIndexPB idx(request->idx());
+        TabletStatsPB tablet_stat;
+        internal_get_tablet_stats(code, msg, txn.get(), instance_id, idx, tablet_stat,
+                                  true /*snapshot_read*/);
+        if (code != MetaServiceCode::OK) {
+            return;
+        }
+        // The requested compaction state and the actual compaction state are different, which indicates that
+        // the requested rowsets are expired and their delete bitmap may have been deleted.
+        if (request->base_compaction_cnt() != tablet_stat.base_compaction_cnt() ||
+            request->cumulative_compaction_cnt() != tablet_stat.cumulative_compaction_cnt() ||
+            request->cumulative_point() != tablet_stat.cumulative_point()) {
+            code = MetaServiceCode::ROWSETS_EXPIRED;
+            msg = "rowsets are expired";
+            return;
+        }
     }
 }
 

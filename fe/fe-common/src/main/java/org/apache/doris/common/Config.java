@@ -1366,7 +1366,7 @@ public class Config extends ConfigBase {
      * The number is determined by "start" and "end" in the dynamic partition parameters.
      */
     @ConfField(mutable = true, masterOnly = true)
-    public static int max_dynamic_partition_num = 500;
+    public static int max_dynamic_partition_num = 2000;
 
     /**
      * Used to limit the maximum number of partitions that can be created when creating multi partition,
@@ -2426,12 +2426,23 @@ public class Config extends ConfigBase {
     })
     public static long analyze_record_limit = 20000;
 
-    @ConfField(description = {
+    @ConfField(mutable = true, description = {
             "Auto Buckets中最小的buckets数目",
             "min buckets of auto bucket"
     })
     public static int autobucket_min_buckets = 1;
 
+    @ConfField(mutable = true, description = {
+            "Auto Buckets中最大的buckets数目",
+            "max buckets of auto bucket"
+    })
+    public static int autobucket_max_buckets = 128;
+
+    @ConfField(mutable = true, description = {
+            "Cloud Auto Buckets中最大的buckets数目",
+            "cloud max buckets of auto bucket"
+    })
+    public static int cloud_autobucket_max_buckets = 50;
 
     @ConfField(mutable = true)
     public static boolean enable_profile_when_analyze = false;

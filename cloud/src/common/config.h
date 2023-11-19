@@ -27,7 +27,7 @@ namespace selectdb::config {
 CONF_Int32(brpc_listen_port, "5000");
 CONF_Int32(brpc_num_threads, "-1");
 // Set -1 to disable it.
-CONF_Int32(brpc_idle_timeout_sec, "30");
+CONF_Int32(brpc_idle_timeout_sec, "-1");
 CONF_String(hostname, "");
 CONF_String(fdb_cluster, "xxx:yyy@127.0.0.1:4500");
 CONF_String(fdb_cluster_file_path, "./conf/fdb.cluster");

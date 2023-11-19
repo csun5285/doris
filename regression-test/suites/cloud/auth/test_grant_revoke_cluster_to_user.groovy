@@ -37,6 +37,8 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     def cluster1 = "clusterA"
     def result
 
+    sql "sync"
+
     // admin role user can grant cluster to use
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
@@ -61,6 +63,8 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     // grant GRANT_PRIV to general user, he can grant cluster to other user.
     sql """grant GRANT_PRIV on *.*.* to ${user2}"""
 
+    sql "sync"
+
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
@@ -73,6 +77,7 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     assertTrue(show_cluster_2[2].equals(user2), "Expect just only have user regression_test_cloud_user2")
     sql """REVOKE USAGE_PRIV ON CLUSTER '${validCluster}' FROM '${user2}'"""
 
+    sql "sync"
     // 3. revoke cluster
     // admin role user can revoke cluster
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
@@ -82,6 +87,8 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     // revoke GRANT_PRIV from general user, he can not revoke cluster to other user.
     sql """revoke GRANT_PRIV on *.*.* from ${user2}"""
 
+    sql "sync"
+    
     // general user can't revoke cluster
     try {
         result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {

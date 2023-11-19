@@ -6,5 +6,5 @@
 'regression_test_cloud_user1'@'%'	Yes	admin	Admin_priv 	\N	internal.information_schema: Select_priv ; internal.mysql: Select_priv 	\N	\N	\N	\N	\N	normal: Usage_priv 
 
 -- !show_user5_grants5 --
-'regression_test_cloud_user2'@'%'	Yes		Select_priv 	\N	internal.information_schema: Select_priv ; internal.mysql: Select_priv 	\N	\N	\N	clusterA: Usage_priv 	\N	normal: Usage_priv 
+'regression_test_cloud_user2'@'%'	Yes		Select_priv 	\N	internal.information_schema: Select_priv ; internal.mysql: Select_priv 	\N	\N	\N	clusterA: Cluster_Usage_priv 	\N	normal: Usage_priv 
 

@@ -80,7 +80,8 @@ Status LocalFileReader::close() {
 
 Status LocalFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                                      const IOContext* /*io_ctx*/) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileReader::read_at_impl", Status::IOError("inject io error"));
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileReader::read_at_impl",
+                                      Status::IOError("inject io error"));
     DCHECK(!closed());
     if (offset > _file_size) {
         return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
@@ -91,7 +92,8 @@ Status LocalFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_
     bytes_req = std::min(bytes_req, _file_size - offset);
     *bytes_read = 0;
     while (bytes_req != 0) {
-        auto res = ::pread(_fd, to, bytes_req, offset);
+        auto res = SYNC_POINT_HOOK_RETURN_VALUE(::pread(_fd, to, bytes_req, offset),
+                                                "LocalFileReader::pread", _fd, to);
         if (UNLIKELY(-1 == res && errno != EINTR)) {
             return Status::IOError("cannot read from {}: {}", _path.native(), std::strerror(errno));
         }

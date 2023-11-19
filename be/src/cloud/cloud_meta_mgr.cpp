@@ -14,6 +14,7 @@
 
 #include "common/config.h"
 #include "common/logging.h"
+#include "common/status.h"
 #include "common/sync_point.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
@@ -844,8 +845,14 @@ Status CloudMetaMgr::update_delete_bitmap(const Tablet* tablet, int64_t lock_id,
         iter->second.write(bitmap_data.data());
         *(req.add_segment_delete_bitmaps()) = std::move(bitmap_data);
     }
-    return retry_rpc("update delete bitmap", req, res,
+    auto st = retry_rpc("update delete bitmap", req, res,
                      std::mem_fn(&selectdb::MetaService_Stub::update_delete_bitmap));
+    if (res.status().code() == selectdb::LOCK_EXPIRED) {
+        return Status::Error<ErrorCode::DELETE_BITMAP_LOCK_ERROR, false>(
+                "lock expired when update delete bitmap, tablet_id: {}, lock_id: {}",
+                tablet->tablet_id(), lock_id);
+    }
+    return st;
 }
 
 Status CloudMetaMgr::get_delete_bitmap_update_lock(const Tablet* tablet, int64_t lock_id,

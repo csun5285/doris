@@ -117,6 +117,53 @@ TEST(TxnKvTest, ConflictTest) {
     std::cout << "final val=" << val << std::endl;
 }
 
+TEST(TxnKvTest, AtomicSetVerKeyTest) {
+    std::string key_prefix = "key_1";
+
+    std::string versionstamp_1;
+    {
+        // write key_1
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        txn->atomic_set_ver_key(key_prefix, "1");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_1
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_1, _1] = it->next();
+        ASSERT_EQ(key_1.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_1.remove_prefix(key_prefix.size());
+        versionstamp_1 = key_1;
+    }
+
+    std::string versionstamp_2;
+    {
+        // write key_2
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        key_prefix = "key_2";
+        txn->atomic_set_ver_key(key_prefix, "2");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_2
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_2, _2] = it->next();
+        ASSERT_EQ(key_2.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_2.remove_prefix(key_prefix.size());
+        versionstamp_2 = key_2;
+    }
+
+    ASSERT_LT(versionstamp_1, versionstamp_2);
+}
+
 TEST(TxnKvTest, AtomicAddTest) {
     std::unique_ptr<Transaction> txn, txn1, txn2;
     std::string key = "counter";

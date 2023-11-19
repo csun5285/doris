@@ -15,7 +15,6 @@
 #include "common/logging.h"
 #include "common/util.h"
 #include "common/sync_point.h"
-#include "common/object_pool.h"
 
 #include "brpc/closure_guard.h"
 #include "brpc/controller.h"
@@ -40,7 +39,7 @@ static constexpr int SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID = -2;
 void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
                           std::unique_ptr<Transaction>& txn, const StartTabletJobRequest* request,
                           StartTabletJobResponse* response, std::string& instance_id,
-                          bool& need_commit, ObjectPool& obj_pool) {
+                          bool& need_commit) {
     auto& compaction = request->job().compaction(0);
     if (!compaction.has_id() || compaction.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -54,6 +53,19 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         msg = "no valid compaction_cnt given";
         return;
     }
+
+    if (compaction.expiration() <= 0 && compaction.type() != TabletCompactionJobPB::EMPTY_CUMULATIVE) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "no valid expiration given";
+        return;
+    }
+
+    if (compaction.lease() <= 0) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "no valid lease given";
+        return;
+    }
+
     int64_t table_id = request->job().idx().table_id();
     int64_t index_id = request->job().idx().index_id();
     int64_t partition_id = request->job().idx().partition_id();
@@ -65,7 +77,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
     if (err != TxnErrorCode::TXN_OK) {
         code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
                                                       : cast_as<ErrCategory::READ>(err);
-        SS << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "get kv error")
+        SS << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "get kv error")
            << " when get tablet stats, tablet_id=" << tablet_id << " key=" << hex(stats_key)
            << " err=" << err;
         msg = ss.str();
@@ -85,9 +97,8 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         return;
     }
 
-    auto& job_key = *obj_pool.add(new std::string(
-            job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
-    auto& job_val = *obj_pool.add(new std::string());
+    auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    std::string job_val;
     TabletJobInfoPB job_pb;
     err = txn->get(job_key, &job_val);
     if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -183,7 +194,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
 void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
                              std::unique_ptr<Transaction>& txn,
                              const StartTabletJobRequest* request, std::string& instance_id,
-                             bool& need_commit, ObjectPool& obj_pool) {
+                             bool& need_commit) {
     auto& schema_change = request->job().schema_change();
     if (!schema_change.has_id() || schema_change.id().empty()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -254,9 +265,8 @@ void start_schema_change_job(MetaServiceCode& code, std::string& msg, std::strin
         return;
     }
 
-    auto& job_key = *obj_pool.add(new std::string(
-            job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
-    auto& job_val = *obj_pool.add(new std::string());
+    auto job_key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    std::string job_val;
     TabletJobInfoPB job_pb;
     err = txn->get(job_key, &job_val);
     if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -331,7 +341,6 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
         return;
     }
 
-    ObjectPool obj_pool; // To save KVs that txn may use asynchronously
     bool need_commit = false;
     std::unique_ptr<int, std::function<void(int*)>> defer_commit(
             (int*)0x01, [&ss, &txn, &code, &msg, &need_commit](int*) {
@@ -346,13 +355,12 @@ void MetaServiceImpl::start_tablet_job(::google::protobuf::RpcController* contro
             });
 
     if (!request->job().compaction().empty()) {
-        start_compaction_job(code, msg, ss, txn, request, response, instance_id, need_commit,
-                             obj_pool);
+        start_compaction_job(code, msg, ss, txn, request, response, instance_id, need_commit);
         return;
     }
 
     if (request->job().has_schema_change()) {
-        start_schema_change_job(code, msg, ss, txn, request, instance_id, need_commit, obj_pool);
+        start_schema_change_job(code, msg, ss, txn, request, instance_id, need_commit);
         return;
     }
 }
@@ -362,7 +370,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                             const ::selectdb::FinishTabletJobRequest* request,
                             ::selectdb::FinishTabletJobResponse* response,
                             TabletJobInfoPB& recorded_job, std::string& instance_id,
-                            std::string& job_key, bool& need_commit, ObjectPool& obj_pool) {
+                            std::string& job_key, bool& need_commit) {
     //==========================================================================
     //                                check
     //==========================================================================
@@ -424,8 +432,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
             return;
         }
         recorded_compaction->set_lease(compaction.lease());
-        auto& job_val = *obj_pool.add(new std::string());
-        recorded_job.SerializeToString(&job_val);
+        auto job_val = recorded_job.SerializeAsString();
         txn->put(job_key, job_val);
         INSTANCE_LOG(INFO) << "lease tablet compaction job, tablet_id=" << tablet_id
                            << " key=" << hex(job_key);
@@ -439,8 +446,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     if (request->action() == FinishTabletJobRequest::ABORT) {
         // TODO(gavin): mv tmp rowsets to recycle or remove them directly
         recorded_job.mutable_compaction()->erase(recorded_compaction);
-        auto& job_val = *obj_pool.add(new std::string());
-        recorded_job.SerializeToString(&job_val);
+        auto job_val = recorded_job.SerializeAsString();
         txn->put(job_key, job_val);
         INSTANCE_LOG(INFO) << "abort tablet compaction job, tablet_id=" << tablet_id
                            << " key=" << hex(job_key);
@@ -513,10 +519,8 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         code = MetaServiceCode::INVALID_ARGUMENT;
         return;
     }
-    auto& stats_key = *obj_pool.add(new std::string(
-            stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id})));
-    auto& stats_val = *obj_pool.add(new std::string());
-    stats->SerializeToString(&stats_val);
+    auto stats_key = stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
+    auto stats_val = stats->SerializeAsString();
     txn->put(stats_key, stats_val);
     merge_tablet_stats(*stats, detached_stats);
     if (stats->data_size() < 0 || stats->num_rowsets() < 1) [[unlikely]] {
@@ -533,8 +537,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                << " stats=" << proto_to_json(*stats);
     if (compaction.type() == TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         recorded_job.mutable_compaction()->erase(recorded_compaction);
-        auto& job_val = *obj_pool.add(new std::string());
-        recorded_job.SerializeToString(&job_val);
+        auto job_val = recorded_job.SerializeAsString();
         txn->put(job_key, job_val);
         INSTANCE_LOG(INFO) << "remove compaction job, tablet_id=" << tablet_id
                            << " key=" << hex(job_key);
@@ -545,8 +548,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     // remove delete bitmap update lock for MoW table
     bool enable_unique_key_merge_on_write = compaction.has_delete_bitmap_lock_initiator();
     if (enable_unique_key_merge_on_write) {
-        std::string lock_key =
-                meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+        std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
         std::string lock_val;
         TxnErrorCode err = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << table_id
@@ -614,10 +616,8 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
 
     auto start = compaction.input_versions(0);
     auto end = compaction.input_versions(1);
-    auto& rs_start =
-            *obj_pool.add(new std::string(meta_rowset_key({instance_id, tablet_id, start})));
-    auto& rs_end =
-            *obj_pool.add(new std::string(meta_rowset_key({instance_id, tablet_id, end + 1})));
+    auto rs_start = meta_rowset_key({instance_id, tablet_id, start});
+    auto rs_end = meta_rowset_key({instance_id, tablet_id, end + 1});
 
     std::unique_ptr<RangeGetIterator> it;
     int num_rowsets = 0;
@@ -653,20 +653,19 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
 
             // remove delete bitmap of input rowset for MoW table
             if (enable_unique_key_merge_on_write) {
-                auto& delete_bitmap_start = *obj_pool.add(new std::string(
-                        meta_delete_bitmap_key({instance_id, tablet_id, rs.rowset_id_v2(), 0, 0})));
-                auto& delete_bitmap_end = *obj_pool.add(new std::string(meta_delete_bitmap_key(
-                        {instance_id, tablet_id, rs.rowset_id_v2(), INT64_MAX, INT64_MAX})));
+                auto delete_bitmap_start =
+                        meta_delete_bitmap_key({instance_id, tablet_id, rs.rowset_id_v2(), 0, 0});
+                auto delete_bitmap_end = meta_delete_bitmap_key(
+                        {instance_id, tablet_id, rs.rowset_id_v2(), INT64_MAX, INT64_MAX});
                 txn->remove(delete_bitmap_start, delete_bitmap_end);
             }
 
-            auto& recycle_key = *obj_pool.add(new std::string(
-                    recycle_rowset_key({instance_id, tablet_id, rs.rowset_id_v2()})));
+            auto recycle_key = recycle_rowset_key({instance_id, tablet_id, rs.rowset_id_v2()});
             RecycleRowsetPB recycle_rowset;
             recycle_rowset.set_creation_time(now);
             recycle_rowset.mutable_rowset_meta()->CopyFrom(rs);
             recycle_rowset.set_type(RecycleRowsetPB::COMPACT);
-            auto& recycle_val = *obj_pool.add(new std::string(recycle_rowset.SerializeAsString()));
+            auto recycle_val = recycle_rowset.SerializeAsString();
             txn->put(recycle_key, recycle_val);
             INSTANCE_LOG(INFO) << "put recycle rowset, tablet_id=" << tablet_id
                                << " key=" << hex(recycle_key);
@@ -686,8 +685,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         code = MetaServiceCode::UNDEFINED_ERR;
         msg = ss.str();
         recorded_job.mutable_compaction()->erase(recorded_compaction);
-        auto& job_val = *obj_pool.add(new std::string());
-        recorded_job.SerializeToString(&job_val);
+        auto job_val = recorded_job.SerializeAsString();
         txn->put(job_key, job_val);
         INSTANCE_LOG(INFO) << "remove compaction job, tablet_id=" << tablet_id
                            << " key=" << hex(job_key);
@@ -714,9 +712,8 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         code = MetaServiceCode::INVALID_ARGUMENT;
         return;
     }
-    auto& tmp_rowset_key =
-            *obj_pool.add(new std::string(meta_rowset_tmp_key({instance_id, txn_id, tablet_id})));
-    auto& tmp_rowset_val = *obj_pool.add(new std::string());
+    auto tmp_rowset_key = meta_rowset_tmp_key({instance_id, txn_id, tablet_id});
+    std::string tmp_rowset_val;
     TxnErrorCode err = txn->get(tmp_rowset_key, &tmp_rowset_val);
     if (err != TxnErrorCode::TXN_OK) {
         SS << "failed to get tmp rowset key"
@@ -744,8 +741,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
                        << " tmp_rowset_key=" << hex(tmp_rowset_key);
 
     int64_t version = compaction.output_versions(0);
-    auto& rowset_key =
-            *obj_pool.add(new std::string(meta_rowset_key({instance_id, tablet_id, version})));
+    auto rowset_key = meta_rowset_key({instance_id, tablet_id, version});
     txn->put(rowset_key, tmp_rowset_val);
     INSTANCE_LOG(INFO) << "put rowset meta, tablet_id=" << tablet_id
                        << " rowset_key=" << hex(rowset_key);
@@ -755,8 +751,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
     //==========================================================================
     // TODO(gavin): move deleted job info into recycle or history
     recorded_job.mutable_compaction()->erase(recorded_compaction);
-    auto& job_val = *obj_pool.add(new std::string());
-    recorded_job.SerializeToString(&job_val);
+    auto job_val = recorded_job.SerializeAsString();
     txn->put(job_key, job_val);
     INSTANCE_LOG(INFO) << "remove compaction job tabelt_id=" << tablet_id
                        << " key=" << hex(job_key);
@@ -769,7 +764,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
                                const ::selectdb::FinishTabletJobRequest* request,
                                ::selectdb::FinishTabletJobResponse* response,
                                TabletJobInfoPB& recorded_job, std::string& instance_id,
-                               std::string& job_key, bool& need_commit, ObjectPool& obj_pool) {
+                               std::string& job_key, bool& need_commit) {
     //==========================================================================
     //                                check
     //==========================================================================
@@ -796,12 +791,10 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     int64_t new_index_id = new_tablet_idx.index_id();
     int64_t new_partition_id = new_tablet_idx.partition_id();
 
-    MetaTabletKeyInfo new_tablet_key_info {instance_id, new_table_id, new_index_id,
-                                           new_partition_id, new_tablet_id};
-    auto& new_tablet_key = *obj_pool.add(new std::string());
-    auto& new_tablet_val = *obj_pool.add(new std::string());
+    auto new_tablet_key = meta_tablet_key(
+            {instance_id, new_table_id, new_index_id, new_partition_id, new_tablet_id});
+    std::string new_tablet_val;
     doris::TabletMetaPB new_tablet_meta;
-    meta_tablet_key(new_tablet_key_info, &new_tablet_key);
     TxnErrorCode err = txn->get(new_tablet_key, &new_tablet_val);
     if (err != TxnErrorCode::TXN_OK) {
         SS << "failed to get new tablet meta"
@@ -915,10 +908,8 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     int64_t num_remove_rowsets = 0;
     int64_t num_remove_segments = 0;
 
-    auto& rs_start =
-            *obj_pool.add(new std::string(meta_rowset_key({instance_id, new_tablet_id, 2})));
-    auto& rs_end = *obj_pool.add(new std::string(
-            meta_rowset_key({instance_id, new_tablet_id, schema_change.alter_version() + 1})));
+    auto rs_start = meta_rowset_key({instance_id, new_tablet_id, 2});
+    auto rs_end = meta_rowset_key({instance_id, new_tablet_id, schema_change.alter_version() + 1});
     std::unique_ptr<RangeGetIterator> it;
     auto rs_start1 = rs_start;
     do {
@@ -949,13 +940,12 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
             ++num_remove_rowsets;
             num_remove_segments += rs.num_segments();
 
-            auto& recycle_key = *obj_pool.add(new std::string(
-                    recycle_rowset_key({instance_id, new_tablet_id, rs.rowset_id_v2()})));
+            auto recycle_key = recycle_rowset_key({instance_id, new_tablet_id, rs.rowset_id_v2()});
             RecycleRowsetPB recycle_rowset;
             recycle_rowset.set_creation_time(now);
             recycle_rowset.mutable_rowset_meta()->CopyFrom(rs);
             recycle_rowset.set_type(RecycleRowsetPB::DROP);
-            auto& recycle_val = *obj_pool.add(new std::string(recycle_rowset.SerializeAsString()));
+            auto recycle_val = recycle_rowset.SerializeAsString();
             txn->put(recycle_key, recycle_val);
             INSTANCE_LOG(INFO) << "put recycle rowset, tablet_id=" << new_tablet_id
                                << " key=" << hex(recycle_key);
@@ -984,10 +974,9 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     stats->set_num_rowsets(stats->num_rowsets() + (schema_change.num_output_rowsets() - num_remove_rowsets));
     stats->set_num_segments(stats->num_segments() + (schema_change.num_output_segments() - num_remove_segments));
     // clang-format on
-    auto& stats_key = *obj_pool.add(new std::string(stats_tablet_key(
-            {instance_id, new_table_id, new_index_id, new_partition_id, new_tablet_id})));
-    auto& stats_val = *obj_pool.add(new std::string());
-    stats->SerializePartialToString(&stats_val);
+    auto stats_key = stats_tablet_key(
+            {instance_id, new_table_id, new_index_id, new_partition_id, new_tablet_id});
+    auto stats_val = stats->SerializeAsString();
     txn->put(stats_key, stats_val);
     merge_tablet_stats(*stats, detached_stats);
     VLOG_DEBUG << "update tablet stats tablet_id=" << tablet_id << " key=" << hex(stats_key)
@@ -1003,8 +992,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
 
     // process mow table, check lock
     if (new_tablet_meta.enable_unique_key_merge_on_write()) {
-        std::string lock_key =
-                meta_delete_bitmap_update_lock_key({instance_id, new_table_id, -1});
+        std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, new_table_id, -1});
         std::string lock_val;
         TxnErrorCode err = txn->get(lock_key, &lock_val);
         LOG(INFO) << "get delete bitmap update lock info, table_id=" << new_table_id
@@ -1058,22 +1046,22 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     }
 
     for (size_t i = 0; i < schema_change.txn_ids().size(); ++i) {
-        auto& tmp_rowset_key = *obj_pool.add(new std::string(
-                meta_rowset_tmp_key({instance_id, schema_change.txn_ids().at(i), new_tablet_id})));
-        auto& tmp_rowset_val = *obj_pool.add(new std::string());
+        auto tmp_rowset_key =
+                meta_rowset_tmp_key({instance_id, schema_change.txn_ids().at(i), new_tablet_id});
+        std::string tmp_rowset_val;
         // FIXME: async get
         TxnErrorCode err = txn->get(tmp_rowset_key, &tmp_rowset_val);
         if (err != TxnErrorCode::TXN_OK) {
             SS << "failed to get tmp rowset key"
-               << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
+               << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
                << ", tablet_id=" << new_tablet_id << " tmp_rowset_key=" << hex(tmp_rowset_key);
             msg = ss.str();
-            code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::UNDEFINED_ERR
                                                           : cast_as<ErrCategory::READ>(err);
             return;
         }
-        auto& rowset_key = *obj_pool.add(new std::string(meta_rowset_key(
-                {instance_id, new_tablet_id, schema_change.output_versions().at(i)})));
+        auto rowset_key = meta_rowset_key(
+                {instance_id, new_tablet_id, schema_change.output_versions().at(i)});
         txn->put(rowset_key, tmp_rowset_val);
         txn->remove(tmp_rowset_key);
     }
@@ -1082,8 +1070,7 @@ void process_schema_change_job(MetaServiceCode& code, std::string& msg, std::str
     //                      remove schema_change job
     //==========================================================================
     recorded_job.clear_schema_change();
-    auto& job_val = *obj_pool.add(new std::string());
-    recorded_job.SerializeToString(&job_val);
+    auto job_val = recorded_job.SerializeAsString();
     txn->put(job_key, job_val);
     INSTANCE_LOG(INFO) << "remove schema_change job tablet_id=" << tablet_id
                        << " key=" << hex(job_key);
@@ -1114,7 +1101,6 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
         return;
     }
 
-    ObjectPool obj_pool; // To save KVs that txn may use asynchronously
     bool need_commit = false;
     std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
@@ -1151,7 +1137,7 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     std::string job_val;
     err = txn->get(job_key, &job_val);
     if (err != TxnErrorCode::TXN_OK) {
-        SS << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "job not found," : "internal error,")
+        SS << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "job not found," : "internal error,")
            << " instance_id=" << instance_id << " tablet_id=" << tablet_id
            << " job=" << proto_to_json(request->job());
         msg = ss.str();
@@ -1179,20 +1165,18 @@ void MetaServiceImpl::finish_tablet_job(::google::protobuf::RpcController* contr
     // Process compaction commit
     if (!request->job().compaction().empty()) {
         process_compaction_job(code, msg, ss, txn, request, response, recorded_job, instance_id,
-                               job_key, need_commit, obj_pool);
+                               job_key, need_commit);
         return;
     }
 
     // Process schema change commit
     if (request->job().has_schema_change()) {
         process_schema_change_job(code, msg, ss, txn, request, response, recorded_job, instance_id,
-                                  job_key, need_commit, obj_pool);
+                                  job_key, need_commit);
         return;
     }
 }
 
-#undef RPC_PREPROCESS
-#undef RPC_RATE_LIMIT
 #undef SS
 #undef INSTANCE_LOG
 } // namespace selectdb

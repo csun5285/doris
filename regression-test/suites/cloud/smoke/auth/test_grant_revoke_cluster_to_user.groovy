@@ -22,6 +22,7 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     sql """grant select_priv on *.*.* to ${user2}"""
     order_qt_show_user2_grants2 """show grants for '${user2}'"""
 
+    sql "sync"
 
     // 2. grant cluster
     def cluster1 = "clusterA"
@@ -44,6 +45,8 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     // grant GRANT_PRIV to general user, he can grant cluster to other user.
     sql """grant GRANT_PRIV on *.*.* to ${user2}"""
 
+    sql "sync"
+
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
@@ -58,6 +61,8 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     // revoke GRANT_PRIV from general user, he can not revoke cluster to other user.
     sql """revoke GRANT_PRIV on *.*.* from ${user2}"""
 
+    sql "sync"
+    
     // general user can't revoke cluster
     try {
         result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
@@ -70,4 +75,7 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     order_qt_show_user4_grants4 """show grants for '${user1}'"""
 
     order_qt_show_user5_grants5 """show grants for '${user2}'"""
+
+    sql """drop user if exists ${user1}"""
+    sql """drop user if exists ${user2}"""
 }

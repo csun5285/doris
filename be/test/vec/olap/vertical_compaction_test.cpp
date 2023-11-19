@@ -207,6 +207,8 @@ protected:
         rowset_writer_context.version = version;
         rowset_writer_context.segments_overlap = overlap;
         rowset_writer_context.max_rows_per_segment = max_rows_per_segment;
+        rowset_writer_context.newest_write_timestamp = 10086;
+
         inc_id++;
         return rowset_writer_context;
     }

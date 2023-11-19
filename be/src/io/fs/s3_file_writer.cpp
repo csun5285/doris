@@ -157,9 +157,10 @@ Status S3FileWriter::_open() {
         return Status::OK();
     }
     return Status::IOError(
-            "failed to create multipart upload(bucket={}, key={}, upload_id={}, exception={}): {}",
+            "failed to create multipart upload(bucket={}, key={}, upload_id={}, exception={}, "
+            "error code={}): {}",
             _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
-            outcome.GetError().GetMessage());
+            outcome.GetError().GetResponseCode(), outcome.GetError().GetMessage());
 }
 
 Status S3FileWriter::_abort() {
@@ -200,9 +201,10 @@ Status S3FileWriter::_abort() {
         return Status::OK();
     }
     return Status::IOError(
-            "failed to abort multipart upload(bucket={}, key={}, upload_id={}, exception={}): {}",
+            "failed to abort multipart upload(bucket={}, key={}, upload_id={}, exception={}, error "
+            "code={}): {}",
             _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
-            outcome.GetError().GetMessage());
+            outcome.GetError().GetResponseCode(), outcome.GetError().GetMessage());
 }
 
 Status S3FileWriter::close() {
@@ -233,8 +235,8 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
     size_t buffer_size = config::s3_write_buffer_size;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::appenv", Status());
     for (size_t i = 0; i < data_cnt; i++) {
-        size_t data_size = data[i].get_size();
-        for (size_t pos = 0, data_size_to_append = 0; pos < data_size; pos += data_size_to_append) {
+        Slice slice = data[i];
+        while (!slice.empty()) {
             if (_failed) {
                 return _st;
             }
@@ -286,13 +288,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
             }
             // we need to make sure all parts except the last one to be 5MB or more
             // and shouldn't be larger than buf
-            data_size_to_append = std::min(data_size - pos, _pending_buf->get_file_offset() +
-                                                                    buffer_size - _bytes_appended);
+            auto data_size_to_append = std::min(
+                    _pending_buf->get_capacaticy() - _pending_buf->get_size(), slice.get_size());
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
-            RETURN_IF_ERROR(_pending_buf->append_data(
-                    Slice {data[i].get_data() + pos, data_size_to_append}));
+            RETURN_IF_ERROR(
+                    _pending_buf->append_data(Slice {slice.get_data(), data_size_to_append}));
+            slice.remove_prefix(data_size_to_append);
+            TEST_SYNC_POINT_CALLBACK("s3_file_writer::appenv_1", &_pending_buf, _cur_part_num);
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB
@@ -329,15 +333,16 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     auto upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->UploadPart(upload_request),
                                                             "s3_file_writer::upload_part",
-                                                            std::cref(upload_request).get());
+                                                            std::cref(upload_request).get(), &buf);
     s3_bvar::s3_multi_part_upload_total << 1;
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
         auto s = Status::IOError(
                 "failed to upload part (bucket={}, key={}, part_num={}, upload_id={}, "
-                "exception={}): {}",
+                "exception={}, error code={}): {}",
                 _bucket, _path.native(), part_num, _upload_id,
                 upload_part_outcome.GetError().GetExceptionName(),
+                upload_part_outcome.GetError().GetResponseCode(),
                 upload_part_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
         buf.set_val(s);
@@ -408,8 +413,9 @@ Status S3FileWriter::_complete() {
     if (!compute_outcome.IsSuccess()) {
         auto s = Status::IOError(
                 "failed to complete multi part upload (bucket={}, key={}, upload_id={}, "
-                "exception={}): {}",
+                "exception={}, error code={}): {}",
                 _bucket, _path.native(), _upload_id, compute_outcome.GetError().GetExceptionName(),
+                compute_outcome.GetError().GetResponseCode(),
                 compute_outcome.GetError().GetMessage());
         LOG(WARNING) << s;
         _st = std::move(s);
@@ -456,14 +462,16 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
     TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
-    auto response = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->PutObject(request), "s3_file_writer::put_object", std::cref(request).get());
+    auto response =
+            SYNC_POINT_HOOK_RETURN_VALUE(_client->PutObject(request), "s3_file_writer::put_object",
+                                         std::cref(request).get(), &buf);
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::IOError(
-                "failed to put object (bucket={}, key={}, upload_id={}, exception={}): {}", _bucket,
-                _path.native(), _upload_id, response.GetError().GetExceptionName(),
-                response.GetError().GetMessage());
+                "failed to put object (bucket={}, key={}, upload_id={}, exception={}, error "
+                "code={}): {}",
+                _bucket, _path.native(), _upload_id, response.GetError().GetExceptionName(),
+                response.GetError().GetResponseCode(), response.GetError().GetMessage());
         LOG(WARNING) << _st;
         buf.set_val(_st);
         return;

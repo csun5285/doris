@@ -214,4 +214,41 @@ void FdbMetricExporter::export_fdb_metrics(TxnKv* txn_kv) {
     export_fdb_status_details(fdb_status);
 }
 
+FdbMetricExporter::~FdbMetricExporter() {
+    stop();
+}
+
+int FdbMetricExporter::start() {
+    if (txn_kv_ == nullptr) return -1;
+    std::unique_lock lock(running_mtx_);
+    if (running_) {
+        return 0;
+    }
+
+    running_ = true;
+    thread_.reset(new std::thread([this] {
+        while (running_.load(std::memory_order_acquire)) {
+            export_fdb_metrics(txn_kv_.get());
+            std::unique_lock l(running_mtx_);
+            running_cond_.wait_for(l, std::chrono::milliseconds(sleep_interval_ms_),
+                                   [this]() { return !running_.load(std::memory_order_acquire); });
+            LOG(INFO) << "finish to collect fdb metric";
+        }
+    }));
+    return 0;
+}
+
+void FdbMetricExporter::stop() {
+    {
+        std::unique_lock lock(running_mtx_);
+        running_.store(false);
+        running_cond_.notify_all();
+    }
+
+    if (thread_ != nullptr && thread_->joinable()) {
+        thread_->join();
+        thread_.reset();
+    }
+}
+
 } // namespace selectdb

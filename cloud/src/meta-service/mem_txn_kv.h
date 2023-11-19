@@ -5,9 +5,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "meta-service/txn_kv_error.h"
@@ -29,6 +31,10 @@ public:
     TxnErrorCode create_txn(std::unique_ptr<Transaction>* txn) override;
 
     int init() override;
+
+    TxnErrorCode get_kv(const std::string& key, std::string* val, int64_t version);
+    TxnErrorCode get_kv(const std::string& begin, const std::string& end, int64_t version,
+                        int limit, bool* more, std::map<std::string, std::string>* kv_list);
 
 private:
     using OpTuple = std::tuple<memkv::ModifyOpType, std::string, std::string>;
@@ -56,8 +62,13 @@ private:
         std::string value;
     };
 
-    std::map<std::string, std::string> mem_kv_;
-    std::map<std::string, std::list<LogItem>> log_kv_;
+    struct Version {
+        int64_t commit_version;
+        std::optional<std::string> value;
+    };
+
+    std::map<std::string, std::list<Version>> mem_kv_;
+    std::unordered_map<std::string, std::list<LogItem>> log_kv_;
     std::mutex lock_;
     int64_t committed_version_ = 0;
     int64_t read_version_ = 0;
@@ -76,9 +87,7 @@ enum class ModifyOpType {
 
 class Transaction : public selectdb::Transaction {
 public:
-    Transaction(std::shared_ptr<MemTxnKv> kv) : kv_(std::move(kv)) {
-        kv_->get_kv(&inner_kv_, &read_version_);
-    }
+    Transaction(std::shared_ptr<MemTxnKv> kv);
 
     ~Transaction() override = default;
 
@@ -162,9 +171,10 @@ private:
     bool commited_ = false;
     bool aborted_ = false;
     std::mutex lock_;
-    std::map<std::string, std::string> inner_kv_;
     std::set<std::string> unreadable_keys_;
     std::set<std::string> read_set_;
+    std::map<std::string, std::string> writes_;
+    std::list<std::pair<std::string, std::string>> remove_ranges_;
     std::vector<std::tuple<ModifyOpType, std::string, std::string>> op_list_;
 
     int64_t committed_version_ = -1;

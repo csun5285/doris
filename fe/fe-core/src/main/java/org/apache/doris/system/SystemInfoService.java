@@ -1427,8 +1427,8 @@ public class SystemInfoService {
             return response;
         } catch (RpcException e) {
             LOG.warn("rpcToGetInstance exception: {}", e.getMessage());
-            throw new RuntimeException(e);
         }
+        return null;
     }
 
     public InstanceInfoPB.Status getInstanceStatus() {
@@ -1436,6 +1436,10 @@ public class SystemInfoService {
     }
 
     public void setInstanceStatus(InstanceInfoPB.Status instanceStatus) {
+        LOG.debug("fe set instance status {}", instanceStatus);
+        if (this.instanceStatus != instanceStatus) {
+            LOG.info("fe change instance status from {} to {}", this.instanceStatus, instanceStatus);
+        }
         this.instanceStatus = instanceStatus;
     }
 }

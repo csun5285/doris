@@ -296,7 +296,7 @@ void MetaServiceImpl::alter_obj_store_info(google::protobuf::RpcController* cont
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -461,7 +461,7 @@ void MetaServiceImpl::update_ak_sk(google::protobuf::RpcController* controller,
         return;
     }
 
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;
@@ -1040,7 +1040,7 @@ std::pair<MetaServiceCode, std::string> MetaServiceImpl::alter_instance(
     err = txn->get(key, &val);
     if (err != TxnErrorCode::TXN_OK) {
         std::stringstream ss;
-        ss << (err != TxnErrorCode::TXN_KEY_NOT_FOUND ? "instance not existed"
+        ss << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "instance not existed"
                                                       : "internal error failed to check instance")
            << ", instance_id=" << request->instance_id();
         // TODO(dx): fix CLUSTER_NOT_FOUND，VERSION_NOT_FOUND，TXN_LABEL_NOT_FOUND，etc to NOT_FOUND
@@ -2295,10 +2295,10 @@ void MetaServiceImpl::alter_iam(google::protobuf::RpcController* controller,
         return;
     }
     if (is_add_req) {
-        LOG(INFO) << "add new iam info, cipher ak: " << ak << " cipher sk: " << sk;
+        LOG(INFO) << "add new iam info, cipher ak: " << iam_user.ak() << " cipher sk: " << iam_user.sk();
     } else {
         LOG(INFO) << "alter iam info, old:  cipher ak: " << old_ak << " cipher sk" << old_sk
-                  << " new: cipher ak: " << ak << " cipher sk:" << sk;
+                  << " new: cipher ak: " << iam_user.ak() << " cipher sk:" << iam_user.sk();
     }
 }
 
@@ -2348,7 +2348,7 @@ void MetaServiceImpl::alter_ram_user(google::protobuf::RpcController* controller
         msg = "failed to parse InstanceInfoPB";
         return;
     }
-    if (instance.status() != InstanceInfoPB::NORMAL) {
+    if (instance.status() == InstanceInfoPB::DELETED) {
         code = MetaServiceCode::CLUSTER_NOT_FOUND;
         msg = "instance status has been set delete, plz check it";
         return;

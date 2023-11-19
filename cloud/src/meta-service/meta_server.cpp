@@ -109,9 +109,9 @@ void MetaServerRegister::prepare_registry(ServiceRegistryPB* reg) {
 }
 
 MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
-        : running_(false), txn_kv_(std::move(txn_kv)) {
+        : running_(0), txn_kv_(std::move(txn_kv)) {
     register_thread_.reset(new std::thread([this] {
-        while (!running_.load()) {
+        while (running_.load() == 0) {
             LOG(INFO) << "register thread wait for start";
             std::unique_lock l(mtx_);
             cv_.wait_for(l, std::chrono::milliseconds(config::meta_server_register_interval_ms));
@@ -120,7 +120,7 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
         std::mt19937 gen(std::random_device("/dev/urandom")());
         std::uniform_int_distribution<int> rd_len(50, 300);
 
-        while (running_.load()) {
+        while (running_.load() == 1) {
             std::string key = system_meta_service_registry_key();
             std::string val;
             std::unique_ptr<Transaction> txn;
@@ -155,10 +155,14 @@ MetaServerRegister::MetaServerRegister(std::shared_ptr<TxnKv> txn_kv)
     }));
 }
 
+MetaServerRegister::~MetaServerRegister() {
+    stop();
+}
+
 int MetaServerRegister::start() {
     if (txn_kv_ == nullptr) return -1;
     std::unique_lock<std::mutex> lock(mtx_);
-    running_.store(true);
+    running_.store(1);
     cv_.notify_all();
     return 0;
 }
@@ -166,10 +170,13 @@ int MetaServerRegister::start() {
 void MetaServerRegister::stop() {
     {
         std::unique_lock<std::mutex> lock(mtx_);
-        running_.store(false);
+        running_.store(2);
         cv_.notify_all();
     }
-    if (register_thread_ != nullptr) register_thread_->join();
+    if (register_thread_ != nullptr && register_thread_->joinable()) {
+    	register_thread_->join();
+    	register_thread_.reset();
+  	}
 }
 
 } // namespace selectdb

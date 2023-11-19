@@ -77,16 +77,14 @@ static void range_get_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     std::string txn_kv_class = dynamic_cast<MemTxnKv*>(txn_kv.get()) != nullptr ? " memkv" : " fdb";
     std::unique_ptr<Transaction> txn;
     std::vector<std::pair<std::string, std::string>> put_kv = {
-         std::make_pair("key1", "val1"),
-         std::make_pair("key2", "val2"),
-         std::make_pair("key3", "val3"),
-         std::make_pair("key4", "val4"),
-         std::make_pair("key5", "val5"),
+            std::make_pair("key1", "val1"), std::make_pair("key2", "val2"),
+            std::make_pair("key3", "val3"), std::make_pair("key4", "val4"),
+            std::make_pair("key5", "val5"),
     };
 
     // put some kvs before test
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    for (const auto &[key, val] : put_kv) {
+    for (const auto& [key, val] : put_kv) {
         txn->put(key, val);
     }
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
@@ -155,8 +153,8 @@ TEST(TxnMemKvTest, RangeGetTest) {
     auto mem_txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     ASSERT_NE(mem_txn_kv.get(), nullptr);
 
-   range_get_test(mem_txn_kv);
-   range_get_test(fdb_txn_kv);
+    range_get_test(mem_txn_kv);
+    range_get_test(fdb_txn_kv);
 }
 
 static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
@@ -164,16 +162,14 @@ static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     std::unique_ptr<Transaction> txn;
     std::string txn_kv_class = dynamic_cast<MemTxnKv*>(txn_kv.get()) != nullptr ? " memkv" : " fdb";
     std::vector<std::pair<std::string, std::string>> put_kv = {
-         std::make_pair("key1", "val1"),
-         std::make_pair("key2", "val2"),
-         std::make_pair("key3", "val3"),
-         std::make_pair("key4", "val4"),
-         std::make_pair("key5", "val5"),
+            std::make_pair("key1", "val1"), std::make_pair("key2", "val2"),
+            std::make_pair("key3", "val3"), std::make_pair("key4", "val4"),
+            std::make_pair("key5", "val5"),
     };
 
     // put some kvs before test
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    for (const auto &[key, val] : put_kv) {
+    for (const auto& [key, val] : put_kv) {
         txn->put(key, val);
     }
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
@@ -198,7 +194,6 @@ static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         std::unique_ptr<RangeGetIterator> iter;
         ASSERT_EQ(txn->get("key2", "key6", &iter), TxnErrorCode::TXN_OK);
         ASSERT_EQ(iter->size(), 4) << txn_kv_class;
-
     }
 
     // range remove
@@ -270,6 +265,63 @@ TEST(TxnMemKvTest, AtomicSetVerValueTest) {
     atomic_set_ver_value_test(fdb_txn_kv);
 }
 
+static void atomic_set_ver_key_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
+    using namespace selectdb;
+    std::string key_prefix = "key_1";
+
+    std::string versionstamp_1;
+    {
+        // write key_1
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        txn->atomic_set_ver_key(key_prefix, "1");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_1
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_1, _1] = it->next();
+        ASSERT_EQ(key_1.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_1.remove_prefix(key_prefix.size());
+        versionstamp_1 = key_1;
+    }
+
+    std::string versionstamp_2;
+    {
+        // write key_2
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        key_prefix = "key_2";
+        txn->atomic_set_ver_key(key_prefix, "2");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        // read key_2
+        ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        std::string end_key = key_prefix + "\xFF";
+        std::unique_ptr<RangeGetIterator> it;
+        ASSERT_EQ(txn->get(key_prefix, end_key, &it), TxnErrorCode::TXN_OK);
+        ASSERT_TRUE(it->has_next());
+        auto&& [key_2, _2] = it->next();
+        ASSERT_EQ(key_2.length(), key_prefix.size() + 10); // versionstamp = 10bytes
+        key_2.remove_prefix(key_prefix.size());
+        versionstamp_2 = key_2;
+    }
+
+    ASSERT_LT(versionstamp_1, versionstamp_2);
+}
+
+TEST(TxnMemKvTest, AtomicSetVerKeyTest) {
+    using namespace selectdb;
+    auto mem_txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
+    ASSERT_NE(mem_txn_kv.get(), nullptr);
+
+    atomic_set_ver_key_test(mem_txn_kv);
+    atomic_set_ver_key_test(fdb_txn_kv);
+}
+
 static void atomic_add_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     using namespace selectdb;
     std::unique_ptr<Transaction> txn;
@@ -322,7 +374,6 @@ TEST(TxnMemKvTest, AtomicAddTest) {
 
     atomic_add_test(mem_txn_kv);
     atomic_add_test(fdb_txn_kv);
-
 }
 
 // modify identical key in one transcation
@@ -355,7 +406,6 @@ static void modify_identical_key_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         ASSERT_EQ(txn->get("test", &get_val), TxnErrorCode::TXN_KEY_NOT_FOUND) << txn_kv_class;
     }
-
 }
 
 TEST(TxnMemKvTest, ModifyIdenticalKeyTest) {
@@ -451,7 +501,6 @@ TEST(TxnMemKvTest, ModifySnapshotTest) {
     modify_snapshot_test(mem_txn_kv);
     modify_snapshot_test(fdb_txn_kv);
 }
-
 
 static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
     using namespace selectdb;
@@ -654,8 +703,6 @@ static void check_conflicts_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         // conflicts
         ASSERT_NE(txn_2->commit(), TxnErrorCode::TXN_OK) << txn_kv_class;
     }
-
-
 }
 
 TEST(TxnMemKvTest, CheckConflictsTest) {
@@ -827,6 +874,47 @@ TEST(TxnMemKvTest, TxnBehaviorTest) {
 
     txn_behavior_test(mem_txn_kv);
     txn_behavior_test(fdb_txn_kv);
+}
+
+TEST(TxnMemKvTest, MaybeUnusedFunctionTest) {
+    using namespace selectdb;
+    auto mem_txn_kv = std::make_shared<MemTxnKv>();
+    ASSERT_EQ(mem_txn_kv->init(), 0);
+
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(mem_txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        txn->put("key", "v1");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(mem_txn_kv->get_last_commited_version(), 1);
+        ASSERT_EQ(mem_txn_kv->get_last_read_version(), 1);
+    }
+
+    {
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(mem_txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        auto t = dynamic_cast<memkv::Transaction*>(txn.get());
+        ASSERT_EQ(t->init(), 0);
+        ASSERT_EQ(t->abort(), TxnErrorCode::TXN_OK);
+    }
+
+    {
+        auto new_mem_txn_kv = std::make_shared<MemTxnKv>();
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(new_mem_txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
+        txn->atomic_set_ver_key("", "v2");
+        ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK);
+
+        std::unique_ptr<Transaction> txn2;
+        ASSERT_EQ(new_mem_txn_kv->create_txn(&txn2), TxnErrorCode::TXN_OK);
+        for (auto& t : new_mem_txn_kv->mem_kv_) {
+            int64_t txn_id;
+            ASSERT_EQ(get_txn_id_from_fdb_ts(t.first, &txn_id), 0);
+            auto ver = txn_id >> 10;
+            std::cout << "version: " << ver << std::endl;
+            ASSERT_EQ(ver, 1);
+        }
+    }
 }
 
 // vim: et tw=100 ts=4 sw=4 cc=80:

@@ -193,7 +193,8 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
                 // clang-format on
             }
             code = MetaServiceCode::TXN_LABEL_ALREADY_USED;
-            ss << "Label [" << label << "] has already been used, relate to txn [" << cur_txn_info.txn_id() << "]";
+            ss << "Label [" << label << "] has already been used, relate to txn ["
+               << cur_txn_info.txn_id() << "]";
             msg = ss.str();
             return;
         }
@@ -258,8 +259,8 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
         return;
     }
     txn->atomic_set_ver_value(label_key, label_val);
-    LOG(INFO) << "txn->atomic_set_ver_value label_key=" << hex(label_key)
-              << " label=" << label << " txn_id=" << txn_id;
+    LOG(INFO) << "txn->atomic_set_ver_value label_key=" << hex(label_key) << " label=" << label
+              << " txn_id=" << txn_id;
 
     txn->put(info_key, info_val);
     txn->put(index_key, index_val);
@@ -319,7 +320,7 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
         std::string index_val;
         err = txn->get(index_key, &index_val);
         if (err != TxnErrorCode::TXN_OK) {
-            code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
                                                           : cast_as<ErrCategory::READ>(err);
             ss << "failed to get db id with txn_id=" << txn_id << " err=" << err;
             msg = ss.str();
@@ -867,7 +868,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
             auto& val = kv_pool.emplace_back();
             TxnErrorCode err = txn->get(key, &val);
             if (err != TxnErrorCode::TXN_OK) {
-                code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
                                                               : cast_as<ErrCategory::READ>(err);
                 msg = fmt::format("failed to get tablet stats, err={} tablet_id={}", err,
                                   std::get<4>(info));
@@ -948,7 +949,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
         rl_job_progress_key_info(rl_progress_key_info, &rl_progress_key);
         TxnErrorCode err = txn->get(rl_progress_key, &rl_progress_val);
         if (err != TxnErrorCode::TXN_OK) {
-            if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
                 prev_progress_existed = false;
             } else {
                 code = cast_as<ErrCategory::READ>(err);
@@ -1094,7 +1095,7 @@ void MetaServiceImpl::abort_txn(::google::protobuf::RpcController* controller,
             index_key = txn_index_key({instance_id, txn_id});
             err = txn->get(index_key, &index_val);
             if (err != TxnErrorCode::TXN_OK) {
-                code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+                code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
                                                               : cast_as<ErrCategory::READ>(err);
                 ss << "failed to get db id, txn_id=" << txn_id << " err=" << err;
                 msg = ss.str();
@@ -1120,7 +1121,7 @@ void MetaServiceImpl::abort_txn(::google::protobuf::RpcController* controller,
         info_key = txn_info_key({instance_id, db_id, txn_id});
         err = txn->get(info_key, &info_val);
         if (err != TxnErrorCode::TXN_OK) {
-            code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
                                                           : cast_as<ErrCategory::READ>(err);
             ss << "failed to get txn_info, db_id=" << db_id << "txn_id=" << txn_id << "err=" << err;
             msg = ss.str();
@@ -1347,7 +1348,7 @@ void MetaServiceImpl::get_txn(::google::protobuf::RpcController* controller,
     std::string info_val;
     err = txn->get(info_key, &info_val);
     if (err != TxnErrorCode::TXN_OK) {
-        code = err != TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
+        code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TXN_ID_NOT_FOUND
                                                       : cast_as<ErrCategory::READ>(err);
         ss << "failed to get db id with db_id=" << db_id << " txn_id=" << txn_id << " err=" << err;
         msg = ss.str();

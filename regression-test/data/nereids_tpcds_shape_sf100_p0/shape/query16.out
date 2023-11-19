@@ -9,6 +9,13 @@ PhysicalTopN
 ------------PhysicalProject
 --------------hashJoin[INNER_JOIN](cs1.cs_call_center_sk = call_center.cc_call_center_sk)
 ----------------PhysicalProject
+<<<<<<< HEAD
+------------------filter(cc_county IN ('Ziebach County', 'Luce County', 'Richland County', 'Daviess County', 'Barrow County'))
+--------------------PhysicalOlapScan[call_center]
+----------------PhysicalDistribute
+------------------PhysicalProject
+--------------------hashJoin[RIGHT_SEMI_JOIN](cs1.cs_order_number = cs2.cs_order_number)( not (cs_warehouse_sk = cs_warehouse_sk))
+=======
 ------------------hashJoin[RIGHT_SEMI_JOIN] hashCondition=((cs1.cs_order_number = cs2.cs_order_number))otherCondition=(( not (cs_warehouse_sk = cs_warehouse_sk)))
 --------------------PhysicalDistribute
 ----------------------PhysicalProject
@@ -31,6 +38,7 @@ PhysicalTopN
 ------------------------------PhysicalProject
 --------------------------------filter((date_dim.d_date <= '2002-05-31') and (date_dim.d_date >= '2002-04-01'))
 ----------------------------------PhysicalOlapScan[date_dim]
+>>>>>>> 85d4a0dbf6 (fix tosql of date literal)
 ----------------------PhysicalDistribute
 ------------------------PhysicalProject
 --------------------------PhysicalOlapScan[catalog_sales]

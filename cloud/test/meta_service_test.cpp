@@ -3014,7 +3014,7 @@ TEST(MetaServiceTest, GetIamTest) {
     sp->disable_processing();
 }
 
-TEST(MetaServiceTest, AlterIamTest) {
+TEST(MetaServiceTest, AlterRamTest) {
     auto meta_service = get_meta_service();
     brpc::Controller cntl;
     auto cloud_unique_id = "test_cloud_unique_id";
@@ -3165,6 +3165,69 @@ static void get_tablet_stats(MetaServiceProxy* meta_service, int64_t table_id, i
     idx->set_partition_id(partition_id);
     idx->set_tablet_id(tablet_id);
     meta_service->get_tablet_stats(&cntl, &req, &res, nullptr);
+}
+
+TEST(MetaServiceTest, UpdateTablet) {
+    auto meta_service = get_meta_service();
+    std::string cloud_unique_id = "test_cloud_unique_id";
+    constexpr auto table_id = 11231, index_id = 11232, partition_id = 11233, tablet_id1 = 11234, tablet_id2 = 21234;
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id1));
+    ASSERT_NO_FATAL_FAILURE(
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id2));
+    auto get_and_check_tablet_meta = [&](int tablet_id, int64_t ttl_seconds, bool in_memory, bool is_persistent) {
+        brpc::Controller cntl;
+        GetTabletRequest req;
+        req.set_cloud_unique_id(cloud_unique_id);
+        req.set_tablet_id(tablet_id);
+        GetTabletResponse resp;
+        meta_service->get_tablet(&cntl, &req, &resp, nullptr);
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK) << tablet_id;
+        EXPECT_EQ(resp.tablet_meta().ttl_seconds(), ttl_seconds);
+        EXPECT_EQ(resp.tablet_meta().is_in_memory(), in_memory);
+        EXPECT_EQ(resp.tablet_meta().is_persistent(), is_persistent);
+    };
+    get_and_check_tablet_meta(tablet_id1, 0, false, false);
+    get_and_check_tablet_meta(tablet_id2, 0, false, false);
+    {
+        brpc::Controller cntl;
+        UpdateTabletRequest req;
+        UpdateTabletResponse resp;
+        req.set_cloud_unique_id(cloud_unique_id);
+        TabletMetaInfoPB* tablet_meta_info = req.add_tablet_meta_infos();
+        tablet_meta_info->set_tablet_id(tablet_id1);
+        tablet_meta_info->set_ttl_seconds(300);
+        tablet_meta_info = req.add_tablet_meta_infos();
+        tablet_meta_info->set_tablet_id(tablet_id2);
+        tablet_meta_info->set_ttl_seconds(3000);
+        meta_service->update_tablet(&cntl, &req, &resp, nullptr);
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK);
+    }
+    get_and_check_tablet_meta(tablet_id1, 300, false, false);
+    get_and_check_tablet_meta(tablet_id2, 3000, false, false);
+    {
+        brpc::Controller cntl;
+        UpdateTabletRequest req;
+        UpdateTabletResponse resp;
+        req.set_cloud_unique_id(cloud_unique_id);
+        TabletMetaInfoPB* tablet_meta_info = req.add_tablet_meta_infos();
+        tablet_meta_info->set_tablet_id(tablet_id1);
+        tablet_meta_info->set_is_in_memory(true);
+        meta_service->update_tablet(&cntl, &req, &resp, nullptr);
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK);
+    }
+    {
+        brpc::Controller cntl;
+        UpdateTabletRequest req;
+        UpdateTabletResponse resp;
+        req.set_cloud_unique_id(cloud_unique_id);
+        TabletMetaInfoPB* tablet_meta_info = req.add_tablet_meta_infos();
+        tablet_meta_info->set_tablet_id(tablet_id1);
+        tablet_meta_info->set_is_persistent(true);
+        meta_service->update_tablet(&cntl, &req, &resp, nullptr);
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::OK);
+    }
+    get_and_check_tablet_meta(tablet_id1, 300, true, true);
 }
 
 TEST(MetaServiceTest, GetTabletStatsTest) {
@@ -4722,6 +4785,71 @@ TEST(MetaServiceTest, UpdateAkSkTest) {
     update(false, false);
     update(true, false);
     update(true, true);
+}
+
+TEST(MetaServiceTest, AlterIamTest) {
+    auto meta_service = get_meta_service();
+
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->enable_processing();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key", [](void* p) {
+        *reinterpret_cast<std::string*>(p) = "selectdbselectdbselectdbselectdb";
+    });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+
+    std::string cipher_sk = "JUkuTDctR+ckJtnPkLScWaQZRcOtWBhsLLpnCRxQLxr734qB8cs6gNLH6grE1FxO";
+    std::string plain_sk = "Hx60p12123af234541nsVsffdfsdfghsdfhsdf34t";
+
+    auto get_arn_info_key = [&](RamUserPB& i) {
+        std::string val;
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(system_meta_service_arn_info_key(), &val), TxnErrorCode::TXN_OK);
+        i.ParseFromString(val);
+    };
+
+    // add new system_meta_service_arn_info_key
+    {
+        AlterIamRequest req;
+        req.set_account_id("123");
+        req.set_ak("ak1");
+        req.set_sk(plain_sk);
+
+        brpc::Controller cntl;
+        AlterIamResponse res;
+        meta_service->alter_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
+                                &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        RamUserPB ram_user;
+        get_arn_info_key(ram_user);
+        ASSERT_EQ(ram_user.user_id(), "123");
+        ASSERT_EQ(ram_user.ak(), "ak1");
+        ASSERT_EQ(ram_user.sk(), cipher_sk);
+    }
+    // with old system_meta_service_arn_info_key
+    {
+        AlterIamRequest req;
+        req.set_account_id("321");
+        req.set_ak("ak2");
+        req.set_sk(plain_sk);
+
+        brpc::Controller cntl;
+        AlterIamResponse res;
+        meta_service->alter_iam(reinterpret_cast<::google::protobuf::RpcController*>(&cntl), &req,
+                                &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+        RamUserPB ram_user;
+        get_arn_info_key(ram_user);
+        ASSERT_EQ(ram_user.user_id(), "321");
+        ASSERT_EQ(ram_user.ak(), "ak2");
+        ASSERT_EQ(ram_user.sk(), cipher_sk);
+    }
+
+    SyncPoint::get_instance()->disable_processing();
+    SyncPoint::get_instance()->clear_all_call_backs();
 }
 
 } // namespace selectdb

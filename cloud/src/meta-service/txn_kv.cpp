@@ -342,7 +342,6 @@ void Transaction::atomic_set_ver_key(std::string_view key_prefix, std::string_vi
                               val.size(),
                               FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
 
-    kv_pool_.push_back(std::move(key));
     g_bvar_txn_kv_atomic_set_ver_key << sw.elapsed_us();
 }
 
@@ -359,7 +358,6 @@ void Transaction::atomic_set_ver_value(std::string_view key, std::string_view va
                               val->size(),
                               FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
-    kv_pool_.push_back(std::move(val));
     g_bvar_txn_kv_atomic_set_ver_value << sw.elapsed_us();
 }
 
@@ -370,7 +368,6 @@ void Transaction::atomic_add(std::string_view key, int64_t to_add) {
     fdb_transaction_atomic_op(txn_, (uint8_t*)key.data(), key.size(), (uint8_t*)val->data(),
                               sizeof(to_add), FDBMutationType::FDB_MUTATION_TYPE_ADD);
 
-    kv_pool_.push_back(std::move(val));
     g_bvar_txn_kv_atomic_add << sw.elapsed_us();
 }
 
