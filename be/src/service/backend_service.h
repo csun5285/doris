@@ -134,7 +134,6 @@ public:
 
     void ingest_binlog(TIngestBinlogResult& result, const TIngestBinlogRequest& request) override;
 
-<<<<<<< HEAD
     void pre_cache_async(TPreCacheAsyncResponse& response,
                          const TPreCacheAsyncRequest& request) override;
 
@@ -150,10 +149,9 @@ public:
 
     void warm_up_tablets(TWarmUpTabletsResponse& response,
                          const TWarmUpTabletsRequest& request) override;
-=======
+
     void query_ingest_binlog(TQueryIngestBinlogResult& result,
                              const TQueryIngestBinlogRequest& request) override;
->>>>>>> 2.0.3-rc03
 
 private:
     Status start_plan_fragment_execution(const TExecPlanFragmentParams& exec_params);

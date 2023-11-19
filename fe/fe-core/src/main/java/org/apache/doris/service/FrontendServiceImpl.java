@@ -3152,7 +3152,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         return new TStatus(TStatusCode.OK);
     }
 
-<<<<<<< HEAD
     @Override
     public TRequestGroupCommitFragmentResult requestGroupCommitFragment(TRequestGroupCommitFragmentRequest request) {
         String clientAddr = getClientAddrAsString();
@@ -3165,7 +3164,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             requestGroupCommitFragmentImpl(request, result);
         } catch (UserException e) {
             LOG.warn("failed to get group commit fragment", e);
-=======
+        }
+    }
+
     public TGetMetaResult getMeta(TGetMetaRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         LOG.debug("receive get meta request: {}", request);
@@ -3277,13 +3278,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             result = getBackendMetaImpl(request, clientAddr);
         } catch (UserException e) {
             LOG.warn("failed to get backend meta: {}", e.getMessage());
->>>>>>> 2.0.3-rc03
             status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
             status.addToErrorMsgs(e.getMessage());
         } catch (Throwable e) {
             LOG.warn("catch unknown result.", e);
             status.setStatusCode(TStatusCode.INTERNAL_ERROR);
-<<<<<<< HEAD
             status.addToErrorMsgs(e.getClass().getSimpleName() + ": " + Strings.nullToEmpty(e.getMessage()));
             return result;
         }
@@ -3340,7 +3339,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());
         } finally {
             table.readUnlock();
-=======
             status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
         }
 
@@ -3389,7 +3387,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             return result;
         } catch (Throwable e) {
             throw e;
->>>>>>> 2.0.3-rc03
         }
     }
 }

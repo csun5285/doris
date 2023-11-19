@@ -871,33 +871,9 @@ void BackendService::ingest_binlog(TIngestBinlogResult& result,
     }
 }
 
-<<<<<<< HEAD
-    // Step 5.3: get all segment files
-    for (int64_t segment_index = 0; segment_index < num_segments; ++segment_index) {
-        auto segment_file_size = segment_file_sizes[segment_index];
-        auto get_segment_file_url = segment_file_urls[segment_index];
-
-        uint64_t estimate_timeout =
-                segment_file_size / config::download_low_speed_limit_kbps / 1024;
-        if (estimate_timeout < config::download_low_speed_time) {
-            estimate_timeout = config::download_low_speed_time;
-        }
-
-        std::string local_segment_path =
-                fmt::format("{}/{}_{}.dat", local_tablet->tablet_path(),
-                            rowset_meta->rowset_id().to_string(), segment_index);
-        LOG(INFO) << fmt::format("download segment file from {} to {}", get_segment_file_url,
-                                 local_segment_path);
-        auto get_segment_file_cb = [&get_segment_file_url, &local_segment_path, segment_file_size,
-                                    estimate_timeout](HttpClient* client) {
-            RETURN_IF_ERROR(client->init(get_segment_file_url));
-            client->set_timeout_ms(estimate_timeout * 1000); // 10ms
-            RETURN_IF_ERROR(client->download(local_segment_path));
-=======
 void BackendService::query_ingest_binlog(TQueryIngestBinlogResult& result,
                                          const TQueryIngestBinlogRequest& request) {
     LOG(INFO) << "query ingest binlog. request: " << apache::thrift::ThriftDebugString(request);
->>>>>>> 2.0.3-rc03
 
     auto set_result = [&](TIngestBinlogStatus::type status, std::string error_msg) {
         result.__set_status(status);

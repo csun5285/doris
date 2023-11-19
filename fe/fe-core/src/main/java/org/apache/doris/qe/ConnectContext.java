@@ -681,11 +681,7 @@ public class ConnectContext {
         } else {
             String timeoutTag = "query";
             // insert stmt particularly
-<<<<<<< HEAD
-            if (executor != null && executor.isLoadKindStmt()) {
-=======
             if (executor != null && executor.isSyncLoadKindStmt()) {
->>>>>>> 2.0.3-rc03
                 timeoutTag = "insert";
             }
             //to ms
@@ -739,11 +735,7 @@ public class ConnectContext {
      * @return exact execution timeout
      */
     public int getExecTimeout() {
-<<<<<<< HEAD
-        if (executor != null && executor.isLoadKindStmt()) {
-=======
         if (executor != null && executor.isSyncLoadKindStmt()) {
->>>>>>> 2.0.3-rc03
             // particular for insert stmt, we can expand other type of timeout in the same way
             return Math.max(sessionVariable.getInsertTimeoutS(), sessionVariable.getQueryTimeoutS());
         } else if (executor != null && executor.isAnalyzeStmt()) {

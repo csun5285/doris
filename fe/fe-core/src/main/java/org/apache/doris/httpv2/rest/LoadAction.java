@@ -47,12 +47,9 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
-<<<<<<< HEAD
 import java.net.InetAddress;
 import java.util.ArrayList;
-=======
 import java.net.URI;
->>>>>>> 2.0.3-rc03
 import java.util.List;
 import java.util.Random;
 import javax.servlet.http.HttpServletRequest;
@@ -294,7 +291,6 @@ public class LoadAction extends RestBaseController {
         return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
     }
 
-<<<<<<< HEAD
     private Pair<String, Integer> splitHostAndPort(String hostPort) throws AnalysisException {
         hostPort = hostPort.replaceAll("\\s+", "");
         if (hostPort.isEmpty()) {
@@ -411,7 +407,9 @@ public class LoadAction extends RestBaseController {
             } else {
                 return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
             }
-=======
+        }
+    }
+
     // NOTE: This function can only be used for AuditlogPlugin stream load for now.
     // AuditlogPlugin should be re-disigned carefully, and blow method focuses on
     // temporarily addressing the users' needs for audit logs.
@@ -504,7 +502,6 @@ public class LoadAction extends RestBaseController {
         } catch (Exception e) {
             LOG.warn("Failed to execute stream load with cluster token, {}", e);
             return new RestBaseResult(e.getMessage());
->>>>>>> 2.0.3-rc03
         }
     }
 }

@@ -2459,7 +2459,6 @@ Status Tablet::create_transient_rowset_writer(
     context.is_transient_rowset_writer = true;
     // ATTN: context.tablet is a shared_ptr, can't simply set it's value to `this`. We should
     // get the shared_ptr from tablet_manager.
-<<<<<<< HEAD
 #ifdef CLOUD_MODE
     if (partial_update_info && partial_update_info->is_partial_update) {
         context.fs = cloud::latest_fs();
@@ -2467,16 +2466,13 @@ Status Tablet::create_transient_rowset_writer(
     }
     cloud::tablet_mgr()->get_tablet(tablet_id(), &context.tablet);
 #else
-    context.tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
-#endif
-=======
     auto tablet = StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id());
     if (!tablet) {
         LOG(WARNING) << "cant find tablet by tablet_id=" << tablet_id();
         return Status::NotFound(fmt::format("cant find tablet by tablet_id= {}", tablet_id()));
     }
     context.tablet = tablet;
->>>>>>> 2.0.3-rc03
+#endif
     context.write_type = DataWriteType::TYPE_DIRECT;
     context.partial_update_info = partial_update_info;
     context.is_transient_rowset_writer = true;

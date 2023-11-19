@@ -181,14 +181,9 @@ public class StatisticsUtil {
         sessionVariable.enablePageCache = false;
         sessionVariable.parallelExecInstanceNum = Config.statistics_sql_parallel_exec_instance_num;
         sessionVariable.parallelPipelineTaskNum = Config.statistics_sql_parallel_exec_instance_num;
-<<<<<<< HEAD
-        sessionVariable.setEnableNereidsPlanner(false);
-        sessionVariable.enableProfile = Config.enable_profile_when_analyze;
-=======
         sessionVariable.setEnableNereidsPlanner(true);
         sessionVariable.setEnablePipelineEngine(false);
-        sessionVariable.enableProfile = false;
->>>>>>> 2.0.3-rc03
+        sessionVariable.enableProfile = Config.enable_profile_when_analyze;
         sessionVariable.enableScanRunSerial = limitScan;
         sessionVariable.queryTimeoutS = StatisticsUtil.getAnalyzeTimeout();
         sessionVariable.insertTimeoutS = StatisticsUtil.getAnalyzeTimeout();

@@ -323,15 +323,9 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                   << ", disk=" << _tablet->data_dir()->path()
                   << ", segments=" << _input_num_segments << ", input_row_num=" << _input_row_num
                   << ", output_row_num=" << _output_rowset->num_rows()
-<<<<<<< HEAD
-                  << ". elapsed time=" << watch.get_elapse_second() << 's';
-=======
                   << ", input_rowset_size=" << _input_rowsets_size
                   << ", output_rowset_size=" << _output_rowset->data_disk_size()
-                  << ". elapsed time=" << watch.get_elapse_second()
-                  << "s. cumulative_compaction_policy="
-                  << (cumu_policy == nullptr ? "quick" : cumu_policy->name());
->>>>>>> 2.0.3-rc03
+                  << ", elapsed time=" << watch.get_elapse_second() << 's';
         return Status::OK();
     }
     build_basic_info();

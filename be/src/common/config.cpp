@@ -1229,9 +1229,8 @@ DEFINE_Bool(exit_on_exception, "false");
 
 DEFINE_Bool(ignore_always_true_predicate_for_segment, "true");
 
-<<<<<<< HEAD
 DEFINE_Bool(enable_check_max_min_key, "false");
-=======
+
 // Dir of default timezone files
 DEFINE_String(default_tzfiles_path, "${DORIS_HOME}/zoneinfo");
 
@@ -1244,7 +1243,6 @@ DEFINE_Int32(ingest_binlog_work_pool_size, "-1");
 
 // Download binlog rate limit, unit is KB/s, 0 means no limit
 DEFINE_Int32(download_binlog_rate_limit_kbs, "0");
->>>>>>> 2.0.3-rc03
 
 // clang-format off
 #ifdef BE_TEST

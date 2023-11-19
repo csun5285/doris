@@ -53,14 +53,11 @@ import org.apache.doris.thrift.THeartbeatResult;
 import org.apache.doris.thrift.TIngestBinlogRequest;
 import org.apache.doris.thrift.TIngestBinlogResult;
 import org.apache.doris.thrift.TMasterInfo;
-<<<<<<< HEAD
+import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPreCacheAsyncRequest;
 import org.apache.doris.thrift.TPreCacheAsyncResponse;
-=======
-import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TQueryIngestBinlogRequest;
 import org.apache.doris.thrift.TQueryIngestBinlogResult;
->>>>>>> 2.0.3-rc03
 import org.apache.doris.thrift.TRoutineLoadTask;
 import org.apache.doris.thrift.TScanBatchResult;
 import org.apache.doris.thrift.TScanCloseParams;
@@ -389,11 +386,11 @@ public class MockedBackendFactory {
         }
 
         @Override
-<<<<<<< HEAD
         public TSyncLoadForTabletsResponse syncLoadForTablets(TSyncLoadForTabletsRequest request) throws TException {
             return new TSyncLoadForTabletsResponse();
         }
 
+        @Override
         public TGetTopNHotPartitionsResponse getTopNHotPartitions(TGetTopNHotPartitionsRequest request) throws TException {
             return new TGetTopNHotPartitionsResponse();
         }
@@ -401,11 +398,12 @@ public class MockedBackendFactory {
         @Override
         public TWarmUpTabletsResponse warmUpTablets(TWarmUpTabletsRequest request) throws TException {
             return new TWarmUpTabletsResponse();
-=======
+        }
+
+        @Override
         public TQueryIngestBinlogResult queryIngestBinlog(TQueryIngestBinlogRequest queryIngestBinlogRequest)
                 throws TException {
             return null;
->>>>>>> 2.0.3-rc03
         }
     }
 

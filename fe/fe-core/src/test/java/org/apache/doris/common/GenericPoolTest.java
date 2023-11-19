@@ -36,13 +36,10 @@ import org.apache.doris.thrift.TGetTopNHotPartitionsResponse;
 import org.apache.doris.thrift.TIngestBinlogRequest;
 import org.apache.doris.thrift.TIngestBinlogResult;
 import org.apache.doris.thrift.TNetworkAddress;
-<<<<<<< HEAD
 import org.apache.doris.thrift.TPreCacheAsyncRequest;
 import org.apache.doris.thrift.TPreCacheAsyncResponse;
-=======
 import org.apache.doris.thrift.TQueryIngestBinlogRequest;
 import org.apache.doris.thrift.TQueryIngestBinlogResult;
->>>>>>> 2.0.3-rc03
 import org.apache.doris.thrift.TRoutineLoadTask;
 import org.apache.doris.thrift.TScanBatchResult;
 import org.apache.doris.thrift.TScanCloseParams;

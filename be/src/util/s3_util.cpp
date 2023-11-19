@@ -34,11 +34,8 @@
 
 #include "common/config.h"
 #include "common/logging.h"
-<<<<<<< HEAD
 #include "common/sync_point.h"
-=======
 #include "runtime/exec_env.h"
->>>>>>> 2.0.3-rc03
 #include "s3_uri.h"
 #include "vec/exec/scan/scanner_scheduler.h"
 

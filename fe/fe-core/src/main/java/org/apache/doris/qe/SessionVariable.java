@@ -443,8 +443,6 @@ public class SessionVariable implements Serializable, Writable {
             SKIP_STORAGE_ENGINE_MERGE,
             SHOW_HIDDEN_COLUMNS
     );
-<<<<<<< HEAD
-=======
 
     public static final String ENABLE_STATS = "enable_stats";
     /**
@@ -453,7 +451,6 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = ENABLE_STATS)
     public  boolean enableStats = true;
 
->>>>>>> 2.0.3-rc03
     // session origin value
     public Map<Field, String> sessionOriginValue = new HashMap<Field, String>();
     // check stmt is or not [select /*+ SET_VAR(...)*/ ...]

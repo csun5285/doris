@@ -340,7 +340,6 @@ public class CatalogTestUtil {
         return backend;
     }
 
-<<<<<<< HEAD
     public static Database createCloudSimpleDb(long dbId, long tableId, long partitionId, long indexId, long tabletId,
             long version) {
         Env.getCurrentInvertedIndex().clear();
@@ -406,7 +405,8 @@ public class CatalogTestUtil {
             // e.printStackTrace();
         }
         return db;
-=======
+    }
+
     public static long getTabletDataSize(long tabletId) {
         Env env = Env.getCurrentEnv();
         TabletInvertedIndex invertedIndex = env.getTabletInvertedIndex();
@@ -449,6 +449,5 @@ public class CatalogTestUtil {
         } finally {
             olapTable.readUnlock();
         }
->>>>>>> 2.0.3-rc03
     }
 }

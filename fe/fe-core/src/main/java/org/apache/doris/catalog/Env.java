@@ -1682,7 +1682,6 @@ public class Env {
 
     // start threads that should running on all FE
     private void startNonMasterDaemonThreads() {
-<<<<<<< HEAD
         if (Config.isNotCloudMode()) {
             tabletStatMgr.start();
         } else {
@@ -1692,11 +1691,6 @@ public class Env {
         // start load manager thread, for MySQL load only: cannot forward to master
         loadManager.start();
 
-=======
-        // start load manager thread
-        loadManager.start();
-        tabletStatMgr.start();
->>>>>>> 2.0.3-rc03
         // load and export job label cleaner thread
         labelCleaner.start();
         // es repository
@@ -3706,7 +3700,6 @@ public class Env {
                     sb.append("  ").append(column.toSql());
                 }
             }
-<<<<<<< HEAD
             if (table.getType() == TableType.OLAP) {
                 OlapTable olapTable = (OlapTable) table;
                 if (CollectionUtils.isNotEmpty(olapTable.getIndexes())) {
@@ -3715,15 +3708,6 @@ public class Env {
                         sb.append("  ").append(index.toSql());
                     }
                 }
-=======
-            LOG.info("replay add frontend: {}", fe);
-            frontends.put(fe.getNodeName(), fe);
-            if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
-                // DO NOT add helper sockets here, cause BDBHA is not instantiated yet.
-                // helper sockets will be added after start BDBHA
-                // But add to helperNodes, just for show
-                helperNodes.add(new HostInfo(fe.getHost(), fe.getEditLogPort()));
->>>>>>> 2.0.3-rc03
             }
             sb.append("\n) ENGINE=");
             sb.append(table.getType().name());
@@ -3733,7 +3717,6 @@ public class Env {
                     .append(materializedView.getRefreshInfo().toString());
         }
 
-<<<<<<< HEAD
         if (table.getType() == TableType.OLAP || table.getType() == TableType.MATERIALIZED_VIEW) {
             OlapTable olapTable = (OlapTable) table;
 
@@ -4170,6 +4153,7 @@ public class Env {
                 }
                 return;
             }
+            LOG.info("replay add frontend: {}", fe);
             frontends.put(fe.getNodeName(), fe);
             if (fe.getRole() == FrontendNodeType.FOLLOWER || fe.getRole() == FrontendNodeType.REPLICA) {
                 // DO NOT add helper sockets here, cause BDBHA is not instantiated yet.
@@ -4192,23 +4176,6 @@ public class Env {
                 return;
             }
             // modify fe in frontends
-            existFe.setHost(fe.getHost());
-        } finally {
-            unlock();
-        }
-    }
-
-=======
-    public void replayModifyFrontend(Frontend fe) {
-        tryLock(true);
-        try {
-            Frontend existFe = getFeByName(fe.getNodeName());
-            if (existFe == null) {
-                // frontend may already be dropped. this may happen when
-                // drop and modify operations do not guarantee the order.
-                return;
-            }
-            // modify fe in frontends
             LOG.info("replay modify frontend with new host: {}, exist frontend: {}", fe.getHost(), existFe);
             existFe.setHost(fe.getHost());
         } finally {
@@ -4216,22 +4183,15 @@ public class Env {
         }
     }
 
->>>>>>> 2.0.3-rc03
     public void replayDropFrontend(Frontend frontend) {
         tryLock(true);
         try {
             Frontend removedFe = frontends.remove(frontend.getNodeName());
             if (removedFe == null) {
-<<<<<<< HEAD
-                LOG.error(frontend.toString() + " does not exist.");
-                return;
-            }
-=======
                 LOG.error(frontend + " does not exist.");
                 return;
             }
             LOG.info("replay drop frontend: {}", removedFe);
->>>>>>> 2.0.3-rc03
             if (removedFe.getRole() == FrontendNodeType.FOLLOWER || removedFe.getRole() == FrontendNodeType.REPLICA) {
                 removeHelperNode(removedFe.getHost(), removedFe.getEditLogPort());
             }

@@ -110,14 +110,11 @@ public class LoadManager implements Writable {
         this.mysqlLoadManager = new MysqlLoadManager(tokenManager);
     }
 
-<<<<<<< HEAD
     public LoadManager(LoadJobScheduler loadJobScheduler, CleanCopyJobScheduler cleanCopyJobScheduler) {
         this(loadJobScheduler);
         this.cleanCopyJobScheduler = cleanCopyJobScheduler;
     }
 
-=======
->>>>>>> 2.0.3-rc03
     public void start() {
         tokenManager.start();
         mysqlLoadManager.start();

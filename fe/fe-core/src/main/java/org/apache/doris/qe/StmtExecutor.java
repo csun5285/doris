@@ -412,11 +412,7 @@ public class StmtExecutor {
         return masterOpExecutor.getProxyStatus();
     }
 
-<<<<<<< HEAD
-    public boolean isLoadKindStmt() {
-=======
     public boolean isSyncLoadKindStmt() {
->>>>>>> 2.0.3-rc03
         if (parsedStmt == null) {
             return false;
         }
@@ -424,13 +420,9 @@ public class StmtExecutor {
             LogicalPlan logicalPlan = ((LogicalPlanAdapter) parsedStmt).getLogicalPlan();
             return logicalPlan instanceof InsertIntoTableCommand;
         }
-<<<<<<< HEAD
         return parsedStmt instanceof InsertStmt
                 || parsedStmt instanceof CopyStmt
                 || parsedStmt instanceof CreateTableAsSelectStmt;
-=======
-        return parsedStmt instanceof InsertStmt || parsedStmt instanceof CreateTableAsSelectStmt;
->>>>>>> 2.0.3-rc03
     }
 
     public boolean isAnalyzeStmt() {

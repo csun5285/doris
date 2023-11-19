@@ -208,11 +208,9 @@ private:
 
     OpentelemetrySpan _span;
 
-<<<<<<< HEAD
     bool _group_commit = false;
-=======
+
     DescriptorTbl* _desc_tbl;
->>>>>>> 2.0.3-rc03
 
     ObjectPool* obj_pool() { return _runtime_state->obj_pool(); }
 

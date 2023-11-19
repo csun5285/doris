@@ -180,14 +180,10 @@ Status NewOlapScanner::init() {
                                                       &read_source.rs_splits);
 #endif
                 if (!st.ok()) {
-                    LOG(WARNING) << "fail to init reader.res=" << st;
-<<<<<<< HEAD
+                    LOG(WARNING) << "fail to init reader. status=" << st;
                     return Status::InternalError(
                             "failed to initialize storage reader. tablet_id={} : {}",
                             tablet->tablet_id(), st.to_string());
-=======
-                    return st;
->>>>>>> 2.0.3-rc03
                 }
             }
             if (!_state->skip_delete_predicate()) {

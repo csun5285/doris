@@ -1114,7 +1114,6 @@ struct TUpdateFollowerStatsCacheRequest {
     2: list<string> statsRows;
 }
 
-<<<<<<< HEAD
 struct TRequestGroupCommitFragmentRequest {
     1: optional i64 db_id
     2: optional i64 table_id
@@ -1127,7 +1126,8 @@ struct TRequestGroupCommitFragmentResult {
     // valid when status is OK
     3: optional PaloInternalService.TExecPlanFragmentParams params
     4: optional PaloInternalService.TPipelineFragmentParams pipeline_params
-=======
+}
+
 struct TGetMetaReplica {
     1: optional i64 id
 }
@@ -1233,7 +1233,6 @@ struct TGetBackendMetaRequest {
 struct TGetBackendMetaResult {
     1: required Status.TStatus status
     2: optional list<Types.TBackend> backends
->>>>>>> 2.0.3-rc03
 }
 
 service FrontendService {
@@ -1304,11 +1303,9 @@ service FrontendService {
 
     Status.TStatus updateStatsCache(1: TUpdateFollowerStatsCacheRequest request)
 
-<<<<<<< HEAD
     TRequestGroupCommitFragmentResult requestGroupCommitFragment(1: TRequestGroupCommitFragmentRequest request)
-=======
+
     TGetMetaResult getMeta(1: TGetMetaRequest request)
 
     TGetBackendMetaResult getBackendMeta(1: TGetBackendMetaRequest request)
->>>>>>> 2.0.3-rc03
 }
