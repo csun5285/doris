@@ -16,11 +16,7 @@
 // under the License.
 
 
-<<<<<<< ours
- suite("test_numbers","p0,external,external_docker") {
-=======
  suite("test_numbers","external,hive,tvf,external_docker") {
->>>>>>> theirs
     // Test basic features
     qt_basic1 """ select * from numbers("number" = "1"); """
     qt_basic2 """ select * from numbers("number" = "10"); """

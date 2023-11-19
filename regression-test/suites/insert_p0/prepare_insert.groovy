@@ -42,13 +42,6 @@ suite("prepare_insert") {
     """
 
     // Parse url
-<<<<<<< HEAD
-    String url = getServerPrepareJdbcUrl(context.config.jdbcUrl, realDb)
-
-    def result1 = connect(user = user, password = password, url = url) {
-        def stmt = prepareStatement "insert into ${tableName} values(?, ?, ?)"
-        assertEquals(com.mysql.cj.jdbc.ServerPreparedStatement, stmt.class)
-=======
     String jdbcUrl = context.config.jdbcUrl
     String urlWithoutSchema = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3)
     def sql_ip = urlWithoutSchema.substring(0, urlWithoutSchema.indexOf(":"))
@@ -66,7 +59,6 @@ suite("prepare_insert") {
     def result1 = connect(user = user, password = password, url = url) {
         def stmt = prepareStatement "insert into ${tableName} values(?, ?, ?)"
         assertEquals(stmt.class, com.mysql.cj.jdbc.ServerPreparedStatement)
->>>>>>> 2.0.3-rc01
         stmt.setInt(1, 1)
         stmt.setString(2, "a")
         stmt.setInt(3, 90)
@@ -99,11 +91,7 @@ suite("prepare_insert") {
     def label = "insert_" + System.currentTimeMillis()
     result1 = connect(user = user, password = password, url = url) {
         def stmt = prepareStatement "insert into ${tableName} with label ${label} values(?, ?, ?)"
-<<<<<<< HEAD
-        assertEquals(com.mysql.cj.jdbc.ClientPreparedStatement, stmt.class)
-=======
         assertEquals(stmt.class, com.mysql.cj.jdbc.ClientPreparedStatement)
->>>>>>> 2.0.3-rc01
         stmt.setInt(1, 5)
         stmt.setString(2, "a5")
         stmt.setInt(3, 94)
@@ -116,11 +104,7 @@ suite("prepare_insert") {
     url += "&rewriteBatchedStatements=true"
     result1 = connect(user = user, password = password, url = url) {
         def stmt = prepareStatement "insert into ${tableName} values(?, ?, ?)"
-<<<<<<< HEAD
-        assertEquals(com.mysql.cj.jdbc.ServerPreparedStatement, stmt.class)
-=======
         assertEquals(stmt.class, com.mysql.cj.jdbc.ServerPreparedStatement)
->>>>>>> 2.0.3-rc01
         stmt.setInt(1, 10)
         stmt.setString(2, "a")
         stmt.setInt(3, 90)

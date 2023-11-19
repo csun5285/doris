@@ -267,7 +267,6 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-<<<<<<< ours
     List<List<Object>> insert_into_sql(String sqlStr, int num) {
         logger.info("insert into " + num + " records")
         def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -278,7 +277,8 @@ class Suite implements GroovyInterceptable {
         logger.info("Execute sql: ${stmt}".toString())
         def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
         return result
-=======
+    }
+
     def sql_return_maparray(String sqlStr) {
         logger.info("Execute sql: ${sqlStr}".toString())
         def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -299,7 +299,6 @@ class Suite implements GroovyInterceptable {
             res.add(row)
         }
         return res;
->>>>>>> theirs
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
@@ -1030,7 +1029,6 @@ class Suite implements GroovyInterceptable {
 
         return (row[4] as String) == "FINISHED"
     }
-<<<<<<< ours
 
     String getServerPrepareJdbcUrl(String jdbcUrl, String database) {
         String urlWithoutSchema = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3)
@@ -1045,11 +1043,10 @@ class Suite implements GroovyInterceptable {
         }
         // set server side prepared statement url
         return "jdbc:mysql://" + sql_ip + ":" + sql_port + "/" + database + "?&useServerPrepStmts=true"
-=======
-    
+    }
+
     DebugPoint GetDebugPoint() {
         return debugPoint
->>>>>>> theirs
     }
 }
 

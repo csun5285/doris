@@ -34,11 +34,7 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
             logger.info("record res" + res1_2.toString())
 
         def res1_3 = sql """
-<<<<<<< HEAD
-            select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_byte_array/delta_byte_array.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
             select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_byte_array/delta_byte_array.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
             """ 
             logger.info("record res" + res1_3.toString())
     }
@@ -61,11 +57,7 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
 
         //return nothing,but no exception
         def res3_3 = sql """
-<<<<<<< HEAD
-            select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_binary_packed/delta_binary_packed.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
             select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_binary_packed/delta_binary_packed.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
             """ 
             logger.info("record res" + res3_3.toString())
     }
@@ -83,11 +75,7 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res4_2.toString())
 
         def res4_3 = sql """
-<<<<<<< HEAD
-             select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_encoding_required_column/delta_encoding_required_column.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
              select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_encoding_required_column/delta_encoding_required_column.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
              """ 
         logger.info("record res" + res4_3.toString())
     }
@@ -106,12 +94,8 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res5_2.toString())
 
          def res5_3 = sql """
-<<<<<<< HEAD
-        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_encoding_optional_column/delta_encoding_optional_column.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
         select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/delta_encoding_optional_column/delta_encoding_optional_column.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
-        """ 
+        """
         logger.info("record res" + res5_3.toString())
     }
 
@@ -148,12 +132,8 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res7_2.toString())
 
          def res7_3 = sql """
-<<<<<<< HEAD
-        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/overflow_i16_page_cnt/overflow_i16_page_cnt.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
         select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/overflow_i16_page_cnt/overflow_i16_page_cnt.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
-        """ 
+        """
         logger.info("record res" + res7_3.toString())
     }
 
@@ -171,12 +151,8 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res8_2.toString())
 
         def res8_3 = sql """
-<<<<<<< HEAD
-        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/alltypes_tiny_pages/alltypes_tiny_pages.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
         select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/alltypes_tiny_pages/alltypes_tiny_pages.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
-        """ 
+        """
         logger.info("record res" + res8_3.toString())
     }
     //pass
@@ -193,12 +169,8 @@ suite("test_different_parquet_types", "p0,external,hive,external_docker,external
         logger.info("record res" + res9_2.toString())
 
          def res9_3 = sql """
-<<<<<<< HEAD
-        select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/alltypes_tiny_pages_plain/alltypes_tiny_pages_plain.parquet\",\"fs.defaultFS\" = \"hdfs://${externalEnvIp}:${hdfs_port}\",\"format\" = \"parquet\") limit 10
-=======
         select * from hdfs(\"uri" = \"hdfs://${externalEnvIp}:${hdfs_port}/user/doris/preinstalled_data/different_types_parquet/alltypes_tiny_pages_plain/alltypes_tiny_pages_plain.parquet\",\"format\" = \"parquet\") limit 10
->>>>>>> 2.0.3-rc01
-        """ 
+        """
         logger.info("record res" + res9_3.toString())
     }
 

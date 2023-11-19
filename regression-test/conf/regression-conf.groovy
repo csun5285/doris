@@ -214,8 +214,4 @@ max_failure_num=0
 // used for exporting test
 s3ExportBucketName = ""
 
-<<<<<<< ours
 externalEnvIp="127.0.0.1"
-=======
-externalEnvIp="127.0.0.1"
->>>>>>> theirs
