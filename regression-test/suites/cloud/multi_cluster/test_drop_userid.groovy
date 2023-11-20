@@ -48,6 +48,11 @@ suite("test_drop_userid", "cloud_auth") {
             boolean found = false
             for (def stage : stages) {
                 log.info("stage info ${stage}".toString())
+                // external stage doesn't contain mysql_user_name
+                if ("EXTERNAL".equals(stage.type)) {
+                    log.info("external stage skip".toString())
+                    continue;
+                }
                 String name = stage.mysql_user_name[0]
                 if(name.equals("${user1}".toString())) {
                     found = true
@@ -78,6 +83,11 @@ suite("test_drop_userid", "cloud_auth") {
             boolean found = false
             for (stage : stages) {
                 log.info("stage info ${stage}".toString())
+                // external stage doesn't contain mysql_user_name
+                if ("EXTERNAL".equals(stage.type)) {
+                    log.info("external stage skip".toString())
+                    continue;
+                }
                 String name = stage.mysql_user_name
                 if(name.equals("${user1}".toString())) {
                     found = true

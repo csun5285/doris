@@ -138,7 +138,8 @@ bool S3ClientFactory::is_s3_conf_valid(const S3Conf& s3_conf) {
 }
 
 std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf) {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_client_factory::create", std::make_shared<Aws::S3::S3Client>());
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_client_factory::create",
+                                      std::make_shared<Aws::S3::S3Client>());
     if (!is_s3_conf_valid(s3_conf)) {
         return nullptr;
     }
@@ -154,6 +155,9 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
 
     Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
     DCHECK(!aws_cred.IsExpiredOrEmpty());
+    if (!s3_conf.sts.empty()) {
+        aws_cred.SetSessionToken(s3_conf.sts);
+    }
 
     Aws::Client::ClientConfiguration aws_config = S3ClientFactory::getClientConfiguration();
     aws_config.endpointOverride = s3_conf.endpoint;
@@ -210,6 +214,9 @@ Status S3ClientFactory::convert_properties_to_s3_conf(
     if (properties.find(S3_CONN_TIMEOUT_MS) != properties.end()) {
         s3_conf->connect_timeout_ms =
                 std::atoi(properties.find(S3_CONN_TIMEOUT_MS)->second.c_str());
+    }
+    if (properties.find(S3_TOKEN) != properties.end()) {
+        s3_conf->sts = properties.find(S3_TOKEN)->second;
     }
     if (s3_uri.get_bucket() == "") {
         return Status::InvalidArgument("Invalid S3 URI {}, bucket is not specified",

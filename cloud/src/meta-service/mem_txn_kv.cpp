@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <string>
 
@@ -22,6 +23,69 @@ int MemTxnKv::init() {
 TxnErrorCode MemTxnKv::create_txn(std::unique_ptr<Transaction>* txn) {
     auto t = new memkv::Transaction(this->shared_from_this());
     txn->reset(t);
+    return TxnErrorCode::TXN_OK;
+}
+
+TxnErrorCode MemTxnKv::get_kv(const std::string& key, std::string* val, int64_t version) {
+    std::lock_guard<std::mutex> l(lock_);
+    auto it = mem_kv_.find(key);
+    if (it == mem_kv_.end() || it->second.empty()) {
+        return TxnErrorCode::TXN_KEY_NOT_FOUND;
+    }
+
+    for (auto&& entry : it->second) {
+        if (entry.commit_version <= version) {
+            if (!entry.value.has_value()) {
+                return TxnErrorCode::TXN_KEY_NOT_FOUND;
+            }
+            *val = *entry.value;
+            return TxnErrorCode::TXN_OK;
+        }
+    }
+    return TxnErrorCode::TXN_KEY_NOT_FOUND;
+}
+
+TxnErrorCode MemTxnKv::get_kv(const std::string& begin, const std::string& end, int64_t version,
+                              int limit, bool* more, std::map<std::string, std::string>* kv_list) {
+    if (begin >= end) {
+        return TxnErrorCode::TXN_OK;
+    }
+
+    bool use_limit = true;
+
+    if (limit < 0) {
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+    }
+    if (limit == 0) {
+        use_limit = false;
+    }
+
+    std::unique_lock<std::mutex> l(lock_);
+
+    *more = false;
+    auto begin_iter = mem_kv_.lower_bound(begin);
+    auto end_iter = mem_kv_.lower_bound(end);
+    for (; begin_iter != mem_kv_.end() && begin_iter != end_iter; begin_iter++) {
+        for (auto&& entry : begin_iter->second) {
+            if (entry.commit_version > version) {
+                continue;
+            }
+
+            if (!entry.value.has_value()) {
+                break;
+            }
+
+            kv_list->insert_or_assign(begin_iter->first, *entry.value);
+            limit--;
+            break;
+        }
+        if (use_limit && limit == 0) {
+            break;
+        }
+    }
+    if (use_limit && limit == 0 && ++begin_iter != end_iter) {
+        *more = true;
+    }
     return TxnErrorCode::TXN_OK;
 }
 
@@ -43,63 +107,63 @@ TxnErrorCode MemTxnKv::update(const std::set<std::string>& read_set,
         }
     }
 
-    ++committed_version_;;
+    ++committed_version_;
+
     int16_t seq = 0;
-    for (const auto& vec: op_list) {
+    for (const auto& vec : op_list) {
         auto& [op_type, k, v] = vec;
         LogItem log_item {op_type, committed_version_, k, v};
         log_kv_[k].push_front(log_item);
         switch (op_type) {
-            case memkv::ModifyOpType::PUT: {
-                mem_kv_[k] = v;
-                break;
-            }
-            case memkv::ModifyOpType::ATOMIC_SET_VER_KEY: {
-                std::string ver_key(k);
-                gen_version_timestamp(committed_version_, seq, &ver_key);
-                mem_kv_[ver_key] = v;
-                break;
-            }
-            case memkv::ModifyOpType::ATOMIC_SET_VER_VAL: {
-                std::string ver_val(v);
-                gen_version_timestamp(committed_version_, seq, &ver_val);
-                mem_kv_[k] = ver_val;
-                break;
-            }
-            case memkv::ModifyOpType::ATOMIC_ADD: {
-                auto& org_val = mem_kv_[k];
-                if (org_val.size() != 8) {
-                    org_val.resize(8, '\0');
-                }
-                int64_t res = *(int64_t*)org_val.data() + *(int64_t*)v.data();
-                std::memcpy(org_val.data(), &res, 8);
-                break;
-            }
-            case memkv::ModifyOpType::REMOVE: {
-                mem_kv_.erase(k);
-                break;
-            }
-            case memkv::ModifyOpType::REMOVE_RANGE: {
-                auto begin_iter = mem_kv_.lower_bound(k);
-                auto end_iter = mem_kv_.lower_bound(v);
-                mem_kv_.erase(begin_iter, end_iter);
-                break;
-            }
-            default:
-                break;
+        case memkv::ModifyOpType::PUT: {
+            mem_kv_[k].push_front(Version {committed_version_, v});
+            break;
         }
-
+        case memkv::ModifyOpType::ATOMIC_SET_VER_KEY: {
+            std::string ver_key(k);
+            gen_version_timestamp(committed_version_, seq, &ver_key);
+            mem_kv_[ver_key].push_front(Version {committed_version_, v});
+            break;
+        }
+        case memkv::ModifyOpType::ATOMIC_SET_VER_VAL: {
+            std::string ver_val(v);
+            gen_version_timestamp(committed_version_, seq, &ver_val);
+            mem_kv_[k].push_front(Version {committed_version_, ver_val});
+            break;
+        }
+        case memkv::ModifyOpType::ATOMIC_ADD: {
+            std::string org_val;
+            if (!mem_kv_[k].empty()) {
+                org_val = mem_kv_[k].front().value.value_or("");
+            }
+            if (org_val.size() != 8) {
+                org_val.resize(8, '\0');
+            }
+            int64_t res = *(int64_t*)org_val.data() + *(int64_t*)v.data();
+            std::memcpy(org_val.data(), &res, 8);
+            mem_kv_[k].push_front(Version {committed_version_, org_val});
+            break;
+        }
+        case memkv::ModifyOpType::REMOVE: {
+            mem_kv_[k].push_front(Version {committed_version_, std::nullopt});
+            break;
+        }
+        case memkv::ModifyOpType::REMOVE_RANGE: {
+            auto begin_iter = mem_kv_.lower_bound(k);
+            auto end_iter = mem_kv_.lower_bound(v);
+            while (begin_iter != end_iter) {
+                mem_kv_[begin_iter->first].push_front(Version {committed_version_, std::nullopt});
+                begin_iter++;
+            }
+            break;
+        }
+        default:
+            break;
+        }
     }
 
     *committed_version = committed_version_;
     return TxnErrorCode::TXN_OK;
-}
-
-int MemTxnKv::get_kv(std::map<std::string, std::string> *kv, int64_t* version) {
-    std::lock_guard<std::mutex> l(lock_);
-    *kv = mem_kv_;
-    *version = committed_version_;
-    return 0;
 }
 
 int MemTxnKv::gen_version_timestamp(int64_t ver, int16_t seq, std::string* str) {
@@ -145,6 +209,11 @@ namespace selectdb::memkv {
 // Impl of Transaction
 // =============================================================================
 
+Transaction::Transaction(std::shared_ptr<MemTxnKv> kv) : kv_(std::move(kv)) {
+    std::lock_guard<std::mutex> l(lock_);
+    read_version_ = kv_->committed_version_;
+}
+
 int Transaction::init() {
     return 0;
 }
@@ -153,16 +222,15 @@ void Transaction::put(std::string_view key, std::string_view val) {
     std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
     std::string v(val.data(), val.size());
-    inner_kv_[k] = v;
+    writes_.insert_or_assign(k, v);
     op_list_.emplace_back(ModifyOpType::PUT, k, v);
 }
 
 TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snapshot) {
     std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
-
     // the key set by atomic_xxx can't not be read before the txn is committed.
-    // if it is read, the txn will not be able to commit. 
+    // if it is read, the txn will not be able to commit.
     if (unreadable_keys_.count(k) != 0) {
         aborted_ = true;
         LOG(WARNING) << "read unreadable key, abort";
@@ -172,7 +240,8 @@ TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snaps
 }
 
 TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
-                     std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot, int limit) {
+                              std::unique_ptr<selectdb::RangeGetIterator>* iter, bool snapshot,
+                              int limit) {
     TEST_SYNC_POINT_CALLBACK("memkv::Transaction::get", &limit);
     std::lock_guard<std::mutex> l(lock_);
     std::string begin_k(begin.data(), begin.size());
@@ -187,48 +256,69 @@ TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
 }
 
 TxnErrorCode Transaction::inner_get(const std::string& key, std::string* val, bool snapshot) {
-    auto iter = inner_kv_.find(key);
-    if (!snapshot) read_set_.emplace(key);
-    if (iter == inner_kv_.end()) {
-        return TxnErrorCode::TXN_KEY_NOT_FOUND;
+    // Read your writes.
+    auto it = writes_.find(key);
+    if (it != writes_.end()) {
+        *val = it->second;
+        return TxnErrorCode::TXN_OK;
     }
-    *val = iter->second;
+
+    if (!snapshot) read_set_.emplace(key);
+    TxnErrorCode err = kv_->get_kv(key, val, read_version_);
+    if (err != TxnErrorCode::TXN_OK) {
+        return err;
+    }
+
+    for (auto&& [start, end] : remove_ranges_) {
+        if (start <= key && key < end) {
+            return TxnErrorCode::TXN_KEY_NOT_FOUND;
+        }
+    }
     return TxnErrorCode::TXN_OK;
 }
 
 TxnErrorCode Transaction::inner_get(const std::string& begin, const std::string& end,
                                     std::unique_ptr<selectdb::RangeGetIterator>* iter,
                                     bool snapshot, int limit) {
-    std::vector<std::pair<std::string, std::string>> kv_list;
-    if (begin >= end) {
-        std::unique_ptr<RangeGetIterator> ret(new memkv::RangeGetIterator(kv_list, false));
-        *(iter) = std::move(ret);
-        return TxnErrorCode::TXN_OK;
-    }
-
-    bool use_limit = true;
-
-    if (limit < 0) {
-        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
-    }
-    if (limit == 0) { use_limit = false;}
-
     bool more = false;
-    auto begin_iter = inner_kv_.lower_bound(begin);
-    auto end_iter = inner_kv_.lower_bound(end);
-    for (; begin_iter != inner_kv_.end() && begin_iter != end_iter; begin_iter++) {
-        kv_list.push_back({begin_iter->first, begin_iter->second});
-        if (!snapshot) read_set_.emplace(begin_iter->first);
-        if (use_limit) {
-            limit--;
-            if (limit == 0) { break;}
+    std::map<std::string, std::string> kv_map;
+    TxnErrorCode err = kv_->get_kv(begin, end, read_version_, limit, &more, &kv_map);
+    if (err != TxnErrorCode::TXN_OK) {
+        return err;
+    }
+
+    // Overwrite by your writes.
+    auto pred = [&](const std::pair<std::string, std::string>& val) {
+        for (auto&& [start, end] : remove_ranges_) {
+            if (start <= val.first && val.first < end) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (auto it = kv_map.begin(), last = kv_map.end(); it != last;) {
+        if (pred(*it)) {
+            it = kv_map.erase(it);
+        } else {
+            ++it;
         }
     }
-    if (use_limit && limit == 0 && ++begin_iter != end_iter) {
-        more = true;
+
+    if (!snapshot) {
+        for (auto&& [key, _] : kv_map) {
+            read_set_.insert(key);
+        }
     }
-    std::unique_ptr<RangeGetIterator> ret(new memkv::RangeGetIterator(kv_list, more));
-    *(iter) = std::move(ret);
+
+    auto begin_iter = writes_.lower_bound(begin);
+    auto end_iter = writes_.lower_bound(end);
+    while (begin_iter != end_iter) {
+        kv_map.insert_or_assign(begin_iter->first, begin_iter->second);
+        begin_iter++;
+    }
+
+    std::vector<std::pair<std::string, std::string>> kv_list(kv_map.begin(), kv_map.end());
+    *iter = std::make_unique<memkv::RangeGetIterator>(std::move(kv_list), more);
     return TxnErrorCode::TXN_OK;
 }
 
@@ -259,7 +349,10 @@ void Transaction::atomic_add(std::string_view key, int64_t to_add) {
 void Transaction::remove(std::string_view key) {
     std::lock_guard<std::mutex> l(lock_);
     std::string k(key.data(), key.size());
-    inner_kv_.erase(k);
+    writes_.erase(k);
+    std::string end_key = k;
+    end_key.push_back(0x0);
+    remove_ranges_.push_back({k, end_key});
     op_list_.emplace_back(ModifyOpType::REMOVE, k, "");
 }
 
@@ -270,9 +363,11 @@ void Transaction::remove(std::string_view begin, std::string_view end) {
     if (begin_k >= end_k) {
         aborted_ = true;
     } else {
-        auto begin_iter = inner_kv_.lower_bound(begin_k);
-        auto end_iter = inner_kv_.lower_bound(end_k);
-        inner_kv_.erase(begin_iter, end_iter);
+        // ATTN: we do not support read your writes about delete range.
+        auto begin_iter = writes_.lower_bound(begin_k);
+        auto end_iter = writes_.lower_bound(end_k);
+        writes_.erase(begin_iter, end_iter);
+        remove_ranges_.push_back({begin_k, end_k});
         op_list_.emplace_back(ModifyOpType::REMOVE_RANGE, begin_k, end_k);
     }
 }
@@ -288,8 +383,9 @@ TxnErrorCode Transaction::commit() {
     }
     commited_ = true;
     op_list_.clear();
-    inner_kv_.clear();
     read_set_.clear();
+    writes_.clear();
+    remove_ranges_.clear();
     return TxnErrorCode::TXN_OK;
 }
 
@@ -301,6 +397,9 @@ TxnErrorCode Transaction::get_read_version(int64_t* version) {
 
 TxnErrorCode Transaction::get_committed_version(int64_t* version) {
     std::lock_guard<std::mutex> l(lock_);
+    if (!commited_) {
+        return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+    }
     *version = committed_version_;
     return TxnErrorCode::TXN_OK;
 }

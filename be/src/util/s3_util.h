@@ -73,6 +73,7 @@ struct S3Conf {
     std::string region;
     std::string bucket;
     std::string prefix;
+    std::string sts;
     int max_connections = -1;
     int request_timeout_ms = -1;
     int connect_timeout_ms = -1;

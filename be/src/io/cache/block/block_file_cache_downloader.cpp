@@ -94,20 +94,21 @@ struct DownloadTaskExecutor {
         size_t task_num = (size + one_single_task_size - 1) / one_single_task_size;
         auto sync_task = [this, task_num, download_callback](Status st) {
             Defer defer {[&] { _countdown_event.signal(); }};
+            bool ret = false;
             if (!st.ok()) [[unlikely]] {
-                _failed = true;
-                if (download_callback) {
-                    download_callback(st);
+                bool expect = false;
+                if (_failed.compare_exchange_strong(expect, true)) {
+                    _st = std::move(st);
                 }
-                return true;
+                ret = true;
             }
-            _succ++;
-            if (_succ == task_num) {
+            _finished_num++;
+            if (_finished_num == task_num) {
                 if (download_callback) {
-                    download_callback(st);
+                    download_callback(_st);
                 }
             }
-            return false;
+            return ret;
         };
         _countdown_event.add_count(task_num);
         for (size_t i = 0; i < task_num; i++) {
@@ -161,7 +162,8 @@ struct DownloadTaskExecutor {
 
 private:
     std::atomic_bool _failed {false};
-    std::atomic_uint64_t _succ {0};
+    std::atomic_uint64_t _finished_num {0};
+    Status _st {Status::OK()};
     // **Attention** call add_count() before submitting buf to async thread pool
     bthread::CountdownEvent _countdown_event {0};
 };
