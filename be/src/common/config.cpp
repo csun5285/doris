@@ -1115,6 +1115,7 @@ DEFINE_mInt32(meta_service_rpc_timeout_ms, "10000");
 DEFINE_Bool(meta_service_connection_pooled, "true");
 DEFINE_mInt64(meta_service_connection_pool_size, "20");
 DEFINE_mInt32(meta_service_connection_age_base_minutes, "5");
+DEFINE_mInt32(meta_service_idle_connection_timeout_ms, "0");
 DEFINE_Int64(tablet_cache_capacity, "10000");
 DEFINE_Int64(tablet_cache_shards, "16");
 DEFINE_mInt32(refresh_s3_info_interval_seconds, "60");

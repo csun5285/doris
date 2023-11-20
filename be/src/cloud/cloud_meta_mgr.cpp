@@ -123,13 +123,20 @@ private:
         return Status::OK();
     }
 
+    bool is_idle_timeout(long now) {
+        auto idle_timeout_ms = config::meta_service_idle_connection_timeout_ms;
+        return idle_timeout_ms > 0 &&
+               _last_access_at_ms.load(std::memory_order_relaxed) + idle_timeout_ms < now;
+    }
+
     Status get(std::shared_ptr<selectdb::MetaService_Stub>* stub) {
         using namespace std::chrono;
 
         auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         {
             std::shared_lock lock(_mutex);
-            if (_deadline_ms >= now) {
+            if (_deadline_ms >= now && !is_idle_timeout(now)) {
+                _last_access_at_ms.store(now, std::memory_order_relaxed);
                 *stub = _stub;
                 return Status::OK();
             }
@@ -153,12 +160,14 @@ private:
 
         // Last one WIN
         std::unique_lock lock(_mutex);
+        _last_access_at_ms.store(now, std::memory_order_relaxed);
         _deadline_ms = deadline;
         _stub = *stub;
         return Status::OK();
     }
 
     std::shared_mutex _mutex;
+    std::atomic<long> _last_access_at_ms {0};
     long _deadline_ms {0};
     std::shared_ptr<selectdb::MetaService_Stub> _stub;
 };
@@ -845,7 +854,7 @@ Status CloudMetaMgr::update_delete_bitmap(const Tablet* tablet, int64_t lock_id,
         *(req.add_segment_delete_bitmaps()) = std::move(bitmap_data);
     }
     auto st = retry_rpc("update delete bitmap", req, res,
-                     std::mem_fn(&selectdb::MetaService_Stub::update_delete_bitmap));
+                        std::mem_fn(&selectdb::MetaService_Stub::update_delete_bitmap));
     if (res.status().code() == selectdb::LOCK_EXPIRED) {
         return Status::Error<ErrorCode::DELETE_BITMAP_LOCK_ERROR, false>(
                 "lock expired when update delete bitmap, tablet_id: {}, lock_id: {}",
