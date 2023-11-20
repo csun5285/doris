@@ -1131,6 +1131,8 @@ DECLARE_mInt64(meta_service_connection_pool_size);
 // A connection will expire after a random time during [base, 2*base], so that the BE
 // has a chance to connect to a new RS. Set zero to disable it.
 DECLARE_mInt32(meta_service_connection_age_base_minutes);
+// Rebuild the idle connections after the timeout exceeds. Set zero to disable it.
+DECLARE_mInt32(meta_service_idle_connection_timeout_ms);
 DECLARE_mInt32(meta_service_rpc_timeout_ms);
 DECLARE_Int64(tablet_cache_capacity);
 DECLARE_Int64(tablet_cache_shards);
