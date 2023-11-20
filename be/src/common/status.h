@@ -605,3 +605,17 @@ using Result = expected<T, Status>;
     } while (false)
 
 } // namespace doris
+
+// specify formatter for Status
+template <>
+struct fmt::formatter<doris::Status> {
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(doris::Status const& status, FormatContext& ctx) {
+        return fmt::format_to(ctx.out(), "{}", status.to_string());
+    }
+};
