@@ -450,7 +450,10 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
 
     int64_t new_max_version = std::max(old_max_version, rs_metas.rbegin()->end_version());
     brpc::Controller cntl;
-    cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
+    // When there are many delete bitmaps that need to be synchronized, it
+    // may take a longer time, especially when loading the tablet for the
+    // first time, so set a relatively long timeout time.
+    cntl.set_timeout_ms(3 * config::meta_service_brpc_timeout_ms);
     selectdb::GetDeleteBitmapRequest req;
     selectdb::GetDeleteBitmapResponse res;
     req.set_cloud_unique_id(config::cloud_unique_id);
