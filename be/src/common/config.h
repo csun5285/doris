@@ -1064,6 +1064,8 @@ DECLARE_mInt64(s3_write_buffer_size);
 // can at most buffer 50MB data. And the num of multi part upload task is
 // s3_write_buffer_whole_size / s3_write_buffer_size
 DECLARE_mInt64(s3_write_buffer_whole_size);
+// Directly mem allocation using new and delelte
+DECLARE_Bool(allocate_s3_writer_buffer_with_new);
 //enable shrink memory
 DECLARE_Bool(enable_shrink_memory);
 // enable cache for high concurrent point query work load

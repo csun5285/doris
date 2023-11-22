@@ -91,7 +91,7 @@ void UploadFileBuffer::set_index_offset(size_t offset) {
  * 1. write to file cache otherwise, then we'll wait for free buffer and to rob it
  */
 Status UploadFileBuffer::append_data(const Slice& data) {
-    Defer defer {[&] { 
+    Defer defer {[&] {
         _size += data.get_size();
         _crc_value = crc32c::Extend(_crc_value, data.get_data(), data.get_size());
     }};
@@ -177,7 +177,7 @@ void UploadFileBuffer::read_from_cache() {
         auto err_msg = fmt::format("no free buffer for {} seconds",
                                    config::s3_writer_buffer_allocation_timeout);
         LOG_WARNING(err_msg);
-        set_val(Status::InternalError(err_msg));
+        set_val(Status::Error<false>(ErrorCode::INTERNAL_ERROR, err_msg));
         return;
     }
     swap_buffer(tmp);
@@ -194,7 +194,8 @@ void UploadFileBuffer::read_from_cache() {
             LOG_WARNING("File Block State is not Downloaded")
                     .tag("key", segment->key().to_string())
                     .tag("range", segment->range().to_string());
-            set_val(Status::InternalError("File Block State is not Downloaded"));
+            set_val(Status::Error<false>(ErrorCode::INTERNAL_ERROR,
+                                         "File Block State is not Downloaded"));
             return;
         }
         size_t segment_size = segment->range().size();
@@ -206,8 +207,10 @@ void UploadFileBuffer::read_from_cache() {
         pos += segment_size;
     }
     if (pos != _size) {
-        DCHECK(false);            
-        set_val(Status::InternalError("The cache data size {} is not match append data size {}", pos, _size));
+        DCHECK(false);
+        set_val(Status::Error<false>(ErrorCode::IO_ERROR,
+                                     "The cache data size {} is not match append data size {}", pos,
+                                     _size));
         return;
     }
     // the real lenght should be the buf.get_size() in this situation(consider it's the last part,
@@ -372,6 +375,10 @@ Slice S3FileBufferPool::allocate(bool reserve) {
         s3_file_buffer_allocating << -1;
     }};
     s3_file_buffer_allocating << 1;
+    if (config::allocate_s3_writer_buffer_with_new) {
+        auto memory = new char[config::s3_write_buffer_size];
+        return Slice {memory, static_cast<size_t>(config::s3_write_buffer_size)};
+    }
     // if need reserve or no cache then we must ensure return buf with memory preserved
     if (reserve || !config::enable_file_cache) {
         {
@@ -404,7 +411,9 @@ Slice S3FileBufferPool::allocate(bool reserve) {
 }
 
 void S3FileBufferPool::reclaim(Slice buf) {
-    {
+    if (config::allocate_s3_writer_buffer_with_new) {
+        delete[] buf.data;
+    } else {
         std::unique_lock<std::mutex> lck {_lock};
         _free_raw_buffers.emplace_back(buf);
         // only works when not set file cache
@@ -429,7 +438,7 @@ void DownloadFileBuffer::on_download() {
         auto err_msg = fmt::format("no free buffer for {} seconds",
                                    config::s3_writer_buffer_allocation_timeout);
         LOG_WARNING(err_msg);
-        set_val(Status::InternalError(err_msg));
+        set_val(Status::Error<false>(ErrorCode::INTERNAL_ERROR, err_msg));
         return;
     }
     FileBlocksHolderPtr holder = nullptr;
