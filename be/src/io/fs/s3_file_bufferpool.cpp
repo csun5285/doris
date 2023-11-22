@@ -347,7 +347,7 @@ std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
     return nullptr;
 }
 
-void S3FileBufferPool::init(int32_t s3_write_buffer_whole_size, int32_t s3_write_buffer_size,
+void S3FileBufferPool::init(size_t s3_write_buffer_whole_size, size_t s3_write_buffer_size,
                             ThreadPool* thread_pool) {
     // the nums could be one configuration
     size_t buf_num = s3_write_buffer_whole_size / s3_write_buffer_size;
