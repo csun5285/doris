@@ -1058,12 +1058,6 @@ DECLARE_mInt32(tablet_path_check_batch_size);
 
 // Page size of row column, default 4KB
 DECLARE_mInt64(row_column_page_size);
-// it must be larger than or equal to 5MB
-DECLARE_mInt32(s3_write_buffer_size);
-// the size of the whole s3 buffer pool, which indicates the s3 file writer
-// can at most buffer 50MB data. And the num of multi part upload task is
-// s3_write_buffer_whole_size / s3_write_buffer_size
-DECLARE_mInt32(s3_write_buffer_whole_size);
 //enable shrink memory
 DECLARE_Bool(enable_shrink_memory);
 // enable cache for high concurrent point query work load
@@ -1145,11 +1139,11 @@ DECLARE_mInt32(lease_compaction_interval_seconds);
 DECLARE_mInt32(check_enable_versioning_interval_seconds); // 1 hours
 DECLARE_mInt32(meta_service_rpc_retry_times);
 // it must be larger than or equal to 5MB
-DECLARE_mInt32(s3_write_buffer_size);
+DECLARE_mInt64(s3_write_buffer_size);
 // the size of the whole s3 buffer pool, which indicates the s3 file writer
 // can at most buffer 50MB data. And the num of multi part upload task is
 // s3_write_buffer_whole_size / s3_write_buffer_size
-DECLARE_mInt32(s3_write_buffer_whole_size);
+DECLARE_mInt64(s3_write_buffer_whole_size);
 // The timeout config for S3 buffer allocation
 DECLARE_mInt32(s3_writer_buffer_allocation_timeout);
 DECLARE_mInt64(file_cache_max_file_reader_cache_size);

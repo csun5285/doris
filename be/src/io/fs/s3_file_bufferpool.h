@@ -352,7 +352,7 @@ public:
 
     // should be called one and only once
     // at startup
-    void init(int32_t s3_write_buffer_whole_size, int32_t s3_write_buffer_size,
+    void init(size_t s3_write_buffer_whole_size, size_t s3_write_buffer_size,
               ThreadPool* thread_pool);
 
     /**
