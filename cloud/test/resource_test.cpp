@@ -70,63 +70,56 @@ std::unique_ptr<MetaServiceProxy> get_meta_service(std::shared_ptr<TxnKv> txn_kv
     }
 
     auto rs = std::make_shared<ResourceManager>(txn_kv);
+    EXPECT_EQ(rs->init(), 0);
     auto rl = std::make_shared<RateLimiter>();
     auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
     return std::make_unique<MetaServiceProxy>(std::move(meta_service));
 }
 
-static void create_args_to_add(std::vector<NodeInfo>* to_add, std::vector<NodeInfo>* to_del, bool is_host = false) {
-    to_add->clear();to_del->clear();
-    auto ni_1 = NodeInfo {
-        .role = Role::COMPUTE_NODE,
-        .instance_id = "test-resource-instance",
-        .cluster_name = "cluster_name_1",
-        .cluster_id = "cluster_id_1",
-        .node_info= NodeInfoPB {
-        }
-    };
+static void create_args_to_add(std::vector<NodeInfo>* to_add, std::vector<NodeInfo>* to_del,
+                               bool is_host = false) {
+    to_add->clear();
+    to_del->clear();
+    auto ni_1 = NodeInfo {.role = Role::COMPUTE_NODE,
+                          .instance_id = "test-resource-instance",
+                          .cluster_name = "cluster_name_1",
+                          .cluster_id = "cluster_id_1",
+                          .node_info = NodeInfoPB {}};
     is_host ? ni_1.node_info.set_host("host1") : ni_1.node_info.set_ip("127.0.0.1");
     ni_1.node_info.set_cloud_unique_id("test_cloud_unique_id_1");
     ni_1.node_info.set_heartbeat_port(9999);
     to_add->push_back(ni_1);
 
-    auto ni_2 = NodeInfo {
-        .role = Role::COMPUTE_NODE,
-        .instance_id = "test-resource-instance",
-        .cluster_name = "cluster_name_1",
-        .cluster_id = "cluster_id_1",
-        .node_info= NodeInfoPB {
-        }
-    };
+    auto ni_2 = NodeInfo {.role = Role::COMPUTE_NODE,
+                          .instance_id = "test-resource-instance",
+                          .cluster_name = "cluster_name_1",
+                          .cluster_id = "cluster_id_1",
+                          .node_info = NodeInfoPB {}};
     is_host ? ni_2.node_info.set_host("host2") : ni_2.node_info.set_ip("127.0.0.2");
     ni_2.node_info.set_cloud_unique_id("test_cloud_unique_id_1");
     ni_2.node_info.set_heartbeat_port(9999);
     to_add->push_back(ni_2);
 
-    auto ni_3 = NodeInfo {
-        .role = Role::COMPUTE_NODE,
-        .instance_id = "test-resource-instance",
-        .cluster_name = "cluster_name_2",
-        .cluster_id = "cluster_id_2",
-        .node_info= NodeInfoPB {
-        }
-    };
+    auto ni_3 = NodeInfo {.role = Role::COMPUTE_NODE,
+                          .instance_id = "test-resource-instance",
+                          .cluster_name = "cluster_name_2",
+                          .cluster_id = "cluster_id_2",
+                          .node_info = NodeInfoPB {}};
     is_host ? ni_3.node_info.set_host("host3") : ni_3.node_info.set_ip("127.0.0.3");
     ni_3.node_info.set_cloud_unique_id("test_cloud_unique_id_2");
     ni_3.node_info.set_heartbeat_port(9999);
     to_add->push_back(ni_3);
 }
 
-static void create_args_to_del(std::vector<NodeInfo>* to_add, std::vector<NodeInfo>* to_del, bool is_host = false) {
-    to_add->clear();to_del->clear();
-    auto ni_1 = NodeInfo {
-        .role = Role::COMPUTE_NODE,
-        .instance_id = "test-resource-instance",
-        .cluster_name = "cluster_name_1",
-        .cluster_id = "cluster_id_1",
-        .node_info= NodeInfoPB {
-        }
-    };
+static void create_args_to_del(std::vector<NodeInfo>* to_add, std::vector<NodeInfo>* to_del,
+                               bool is_host = false) {
+    to_add->clear();
+    to_del->clear();
+    auto ni_1 = NodeInfo {.role = Role::COMPUTE_NODE,
+                          .instance_id = "test-resource-instance",
+                          .cluster_name = "cluster_name_1",
+                          .cluster_id = "cluster_id_1",
+                          .node_info = NodeInfoPB {}};
     is_host ? ni_1.node_info.set_host("host2") : ni_1.node_info.set_ip("127.0.0.2");
     ni_1.node_info.set_cloud_unique_id("test_cloud_unique_id_1");
     ni_1.node_info.set_heartbeat_port(9999);
@@ -211,13 +204,12 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     auto meta_service = get_meta_service();
     std::vector<NodeInfo> to_add = {};
     std::vector<NodeInfo> to_del = {};
-    auto ins = InstanceInfoPB{};
+    auto ins = InstanceInfoPB {};
     create_args_to_add(&to_add, &to_del);
     auto sp = SyncPoint::get_instance();
     sp->set_call_back("modify_nodes:get_instance",
                       [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
-    sp->set_call_back("modify_nodes:get_instance_ret",
-                      [&](void* p) {
+    sp->set_call_back("modify_nodes:get_instance_ret", [&](void* p) {
         ins.set_instance_id("test-resource-instance");
         ins.set_status(InstanceInfoPB::NORMAL);
         auto c = ins.mutable_clusters()->Add();
@@ -248,9 +240,7 @@ TEST(ResourceTest, ModifyNodesIpTest) {
     sp->set_call_back("modify_nodes:get_instance",
                       [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
-                      [&](void* p) {
-                          *reinterpret_cast<InstanceInfoPB*>(p) = instance;
-    });
+                      [&](void* p) { *reinterpret_cast<InstanceInfoPB*>(p) = instance; });
     sp->enable_processing();
     create_args_to_del(&to_add, &to_del);
     // test cluster del node
@@ -274,23 +264,22 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     auto meta_service = get_meta_service();
     std::vector<NodeInfo> to_add = {};
     std::vector<NodeInfo> to_del = {};
-    auto ins = InstanceInfoPB{};
+    auto ins = InstanceInfoPB {};
     create_args_to_add(&to_add, &to_del, true);
     auto sp = SyncPoint::get_instance();
     sp->set_call_back("modify_nodes:get_instance",
                       [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
-    sp->set_call_back("modify_nodes:get_instance_ret",
-                      [&](void* p) {
-                          ins.set_instance_id("test-resource-instance");
-                          ins.set_status(InstanceInfoPB::NORMAL);
-                          auto c = ins.mutable_clusters()->Add();
-                          c->set_cluster_name("cluster_name_1");
-                          c->set_cluster_id("cluster_id_1");
-                          auto c1 = ins.mutable_clusters()->Add();
-                          c1->set_cluster_name("cluster_name_2");
-                          c1->set_cluster_id("cluster_id_2");
-                          *reinterpret_cast<InstanceInfoPB*>(p) = ins;
-                      });
+    sp->set_call_back("modify_nodes:get_instance_ret", [&](void* p) {
+        ins.set_instance_id("test-resource-instance");
+        ins.set_status(InstanceInfoPB::NORMAL);
+        auto c = ins.mutable_clusters()->Add();
+        c->set_cluster_name("cluster_name_1");
+        c->set_cluster_id("cluster_id_1");
+        auto c1 = ins.mutable_clusters()->Add();
+        c1->set_cluster_name("cluster_name_2");
+        c1->set_cluster_id("cluster_id_2");
+        *reinterpret_cast<InstanceInfoPB*>(p) = ins;
+    });
     sp->enable_processing();
 
     // test cluster add nodes
@@ -311,9 +300,7 @@ TEST(ResourceTest, ModifyNodesHostTest) {
     sp->set_call_back("modify_nodes:get_instance",
                       [](void* p) { *reinterpret_cast<TxnErrorCode*>(p) = TxnErrorCode::TXN_OK; });
     sp->set_call_back("modify_nodes:get_instance_ret",
-                      [&](void* p) {
-                          *reinterpret_cast<InstanceInfoPB*>(p) = instance;
-                      });
+                      [&](void* p) { *reinterpret_cast<InstanceInfoPB*>(p) = instance; });
     sp->enable_processing();
     create_args_to_del(&to_add, &to_del, true);
     r = meta_service->resource_mgr()->modify_nodes("test-resource-instance", to_add, to_del);
@@ -352,7 +339,8 @@ TEST(ResourceTest, RestartResourceManager) {
         auto meta_service = get_meta_service(txn_kv);
         create_instance(meta_service.get(), "test_instance_id");
         create_instance(meta_service.get(), "test_instance_id_2");
-        create_cluster(meta_service.get(), "test_instance_id", "cluster_id", "cluster_name", ClusterPB::SQL);
+        create_cluster(meta_service.get(), "test_instance_id", "cluster_id", "cluster_name",
+                       ClusterPB::SQL);
     }
 
     {
@@ -394,7 +382,8 @@ TEST(ResourceTest, AddDropCluster) {
     auto meta_service = get_meta_service();
     create_instance(meta_service.get(), "test_instance_id");
     create_cluster(meta_service.get(), "test_instance_id", "sql_id", "sql_cluster", ClusterPB::SQL);
-    create_cluster(meta_service.get(), "test_instance_id", "compute_id", "compute_cluster", ClusterPB::COMPUTE);
+    create_cluster(meta_service.get(), "test_instance_id", "compute_id", "compute_cluster",
+                   ClusterPB::COMPUTE);
 
     InstanceInfoPB info;
     get_instance_info(meta_service.get(), &info, "test_instance_id");
@@ -411,4 +400,51 @@ TEST(ResourceTest, AddDropCluster) {
     sp->clear_all_call_backs();
 }
 
+TEST(ResourceTest, InitScanRetry) {
+    auto sp = selectdb::SyncPoint::get_instance();
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->set_call_back("encrypt_ak_sk:get_encryption_key_id",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 1; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key_ret",
+                      [](void* p) { *reinterpret_cast<int*>(p) = 0; });
+    sp->set_call_back("decrypt_ak_sk:get_encryption_key",
+                      [](void* p) { *reinterpret_cast<std::string*>(p) = "test"; });
+    sp->enable_processing();
+
+    constexpr size_t NUM_BATCH_SIZE = 100;
+    sp->set_call_back("ResourceManager:init:limit",
+                      [&](void* raw) { *reinterpret_cast<int*>(raw) = NUM_BATCH_SIZE; });
+
+    auto txn_kv = create_txn_kv();
+    {
+        auto meta_service = get_meta_service(txn_kv);
+        for (size_t i = 0; i < NUM_BATCH_SIZE * 2; i++) {
+            std::string instance_id = "test_instance_id_" + std::to_string(i);
+            create_instance(meta_service.get(), instance_id);
+        }
+    }
+
+    {
+        size_t count = 0;
+        sp->set_call_back("ResourceManager:init:get_err", [&](void* raw) {
+            if (++count == 2) {
+                *reinterpret_cast<TxnErrorCode*>(raw) = TxnErrorCode::TXN_TOO_OLD;
+            }
+        });
+        auto meta_service = get_meta_service(txn_kv);
+        ASSERT_GT(count, 1) << count;
+        for (size_t i = 0; i < NUM_BATCH_SIZE * 2; i++) {
+            InstanceInfoPB info;
+            std::string instance_id = "test_instance_id_" + std::to_string(i);
+            get_instance_info(meta_service.get(), &info, instance_id);
+        }
+    }
+
+    sp->disable_processing();
+    sp->clear_all_call_backs();
 }
+
+} // namespace selectdb

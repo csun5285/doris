@@ -206,6 +206,10 @@ static void remove_test(std::shared_ptr<selectdb::TxnKv> txn_kv) {
         ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
         std::unique_ptr<RangeGetIterator> iter;
         ASSERT_EQ(txn->get("key2", "key6", &iter), TxnErrorCode::TXN_OK);
+        while (iter->has_next()) {
+            auto [key, value] = iter->next();
+            std::cout << "key: " << key << ", value: " << value << std::endl;
+        }
         ASSERT_EQ(iter->size(), 0) << txn_kv_class;
     }
 }
