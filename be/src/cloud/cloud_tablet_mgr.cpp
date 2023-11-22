@@ -150,6 +150,8 @@ CloudTabletMgr::~CloudTabletMgr() {
 }
 
 Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool warmup_data) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudTabletMgr::get_tablet_2", Status::OK(), tablet_id,
+                                      tablet);
     // LRU value type. `Value`'s lifetime MUST NOT be longer than `CloudTabletMgr`
     struct Value {
         // FIXME(plat1ko): The ownership of tablet seems to belong to 'TabletMap', while `Value`

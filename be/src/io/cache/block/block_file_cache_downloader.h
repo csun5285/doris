@@ -61,8 +61,8 @@ public:
 
     void polling_download_task();
 
-    virtual void check_download_task(const std::vector<int64_t>& tablets,
-                                     std::map<int64_t, bool>* done) = 0;
+    void check_download_task(const std::vector<int64_t>& tablets,
+                                     std::map<int64_t, bool>* done);
 
 protected:
     std::mutex _mtx;
@@ -90,9 +90,6 @@ public:
     ~FileCacheSegmentS3Downloader() override = default;
 
     void download_segments(DownloadTask& task) override;
-
-    void check_download_task(const std::vector<int64_t>& tablets,
-                             std::map<int64_t, bool>* done) override;
 
 private:
     std::mutex _mtx;

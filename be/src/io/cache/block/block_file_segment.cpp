@@ -27,6 +27,7 @@
 #include <string>
 #include <thread>
 
+#include "common/logging.h"
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
@@ -192,12 +193,10 @@ bool FileBlock::change_cache_type(FileCacheType new_type) {
         return true;
     }
     if (_download_state == State::DOWNLOADED) {
-        std::error_code ec;
-        std::filesystem::rename(
-                get_path_in_local_cache(),
-                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
             return false;
         }
     }
@@ -212,12 +211,11 @@ void FileBlock::change_cache_type_self(FileCacheType new_type) {
         return;
     }
     if (_download_state == State::DOWNLOADED) {
-        std::error_code ec;
-        std::filesystem::rename(
-                get_path_in_local_cache(),
-                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
+            return;
         }
     }
     _cache_type = new_type;
@@ -285,13 +283,7 @@ Status FileBlock::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock 
     }
     
     if (status.ok()) {
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(true), get_path_in_local_cache(), ec);
-        if (ec) {
-            LOG(ERROR) << fmt::format("failed to rename {} to {} : {}", get_path_in_local_cache(true),
-                                    get_path_in_local_cache(), ec.message());
-            status = Status::IOError(ec.message());
-        }
+        status = global_local_filesystem()->rename(get_path_in_local_cache(true), get_path_in_local_cache());
     }
     TEST_SYNC_POINT_CALLBACK("FileBlock::rename_error", &status);
 

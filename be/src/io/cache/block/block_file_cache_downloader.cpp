@@ -221,7 +221,7 @@ void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
 }
 
 void FileCacheSegmentDownloader::polling_download_task() {
-    const int64_t hot_interval = 2 * 60 * 60; // 2 hours
+    static int64_t hot_interval = 2 * 60 * 60; // 2 hours
     while (true) {
         DownloadTask task;
         {
@@ -244,7 +244,7 @@ void FileCacheSegmentDownloader::polling_download_task() {
     }
 }
 
-void FileCacheSegmentS3Downloader::check_download_task(const std::vector<int64_t>& tablets,
+void FileCacheSegmentDownloader::check_download_task(const std::vector<int64_t>& tablets,
                                                        std::map<int64_t, bool>* done) {
     std::lock_guard lock(_inflight_mtx);
     for (int64_t tablet_id : tablets) {
@@ -254,11 +254,12 @@ void FileCacheSegmentS3Downloader::check_download_task(const std::vector<int64_t
 
 void FileCacheSegmentS3Downloader::download_file_cache_segment(
         std::vector<FileCacheSegmentMeta>& metas) {
-    std::for_each(metas.cbegin(), metas.cend(), [&](const FileCacheSegmentMeta& meta) {
+    std::ranges::for_each(metas, [&](const FileCacheSegmentMeta& meta) {
         TabletSharedPtr tablet;
         auto download_callback = [&, tablet_id = meta.tablet_id()](Status) {
             std::lock_guard lock(_inflight_mtx);
             auto it = _inflight_tablets.find(tablet_id);
+            TEST_SYNC_POINT_CALLBACK("FileCacheSegmentS3Downloader::download_file_cache_segment");
             if (it == _inflight_tablets.end()) {
                 LOG(WARNING) << "inflight ref cnt not exist, tablet id " << tablet_id;
             } else {
@@ -305,11 +306,11 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
                 auto h = c->get_or_set(k, off, size, ctx);
                 return std::make_unique<FileBlocksHolder>(std::move(h));
             };
-            download_file(client,
-                          s3_file_system->s3_conf().prefix + '/' +
+            std::string key_name = s3_file_system->s3_conf().prefix + '/' +
                                   BetaRowset::remote_segment_path(
-                                          meta.tablet_id(), meta.rowset_id(), meta.segment_id()),
-                          meta.offset(), meta.size(), s3_file_system->s3_conf().bucket,
+                                          meta.tablet_id(), meta.rowset_id(), meta.segment_id());
+            TEST_SYNC_POINT_CALLBACK("BlockFileCache::mock_key", &key_name);
+            download_file(client, key_name, meta.offset(), meta.size(), s3_file_system->s3_conf().bucket,
                           std::move(alloc_holder), download_callback);
         }
     });
@@ -344,8 +345,10 @@ void FileCacheSegmentS3Downloader::download_s3_file(S3FileMeta& meta) {
         auto h = c->get_or_set(k, off, size, ctx);
         return std::make_unique<FileBlocksHolder>(std::move(h));
     };
+    std::string key_name = s3_file_system->s3_conf().prefix + '/' + meta.path.native();
+    TEST_SYNC_POINT_CALLBACK("BlockFileCache::remove_prefix", &key_name);
     download_file(s3_file_system->get_client(),
-                  s3_file_system->s3_conf().prefix + '/' + meta.path.native(), 0, file_size,
+                  key_name, 0, file_size,
                   s3_file_system->s3_conf().bucket, std::move(alloc_holder),
                   std::move(meta.download_callback));
 }

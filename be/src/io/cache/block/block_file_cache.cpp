@@ -28,9 +28,11 @@
 #include <filesystem>
 #include <utility>
 
+#include "common/logging.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
+#include "io/fs/local_file_system.h"
 #include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
@@ -129,7 +131,7 @@ std::string BlockFileCache::get_path_in_local_cache(const Key& key, int64_t expi
 std::string BlockFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time) const {
     auto key_str = key.to_string();
     try {
-        return std::filesystem::path(_cache_base_path) /
+        return Path(_cache_base_path) /
                (key_str + "_" + std::to_string(expiration_time));
     } catch (std::filesystem::filesystem_error& e) {
         LOG(WARNING) << "fail to get_path_in_local_cache=" << e.what();
@@ -514,11 +516,10 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
         }
         _key_to_time[key] = context.expiration_time;
         _time_to_key.insert(std::make_pair(context.expiration_time, key));
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(key, 0),
-                                get_path_in_local_cache(key, context.expiration_time), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, 0),
+                                get_path_in_local_cache(key, context.expiration_time));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
         } else {
             DCHECK(std::filesystem::exists(get_path_in_local_cache(key, context.expiration_time)));
         }
@@ -526,14 +527,13 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
     if (auto iter = _key_to_time.find(key);
         (context.cache_type == FileCacheType::NORMAL || context.cache_type == FileCacheType::TTL) &&
         iter != _key_to_time.end() && iter->second != context.expiration_time) {
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(key, iter->second),
-                                get_path_in_local_cache(key, context.expiration_time), ec);
-        if (ec) [[unlikely]] {
+         Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, iter->second),
+                                get_path_in_local_cache(key, context.expiration_time));
+        if (!st.ok()) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
                          << get_path_in_local_cache(key, iter->second)
                          << " to file=" << get_path_in_local_cache(key, context.expiration_time)
-                         << " error=" << ec.message();
+                         << " error=" << st;
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
@@ -728,7 +728,6 @@ FileBlocksHolder BlockFileCache::get_or_set(const Key& key, size_t offset, size_
     FileBlock::Range range(offset, offset + size - 1);
 
     std::lock_guard cache_lock(_mutex);
-
     /// Get all segments which intersect with the given range.
     auto file_blocks = get_impl(key, context, range, cache_lock);
 
@@ -1016,11 +1015,10 @@ bool BlockFileCache::remove_if_ttl_file_unlock(const Key& file_key, bool remove_
                     }
                 }
             }
-            std::error_code ec;
-            std::filesystem::rename(get_path_in_local_cache(file_key, iter->second),
-                                    get_path_in_local_cache(file_key, 0), ec);
-            if (ec) {
-                LOG(ERROR) << ec.message();
+            Status st = global_local_filesystem()->rename(get_path_in_local_cache(file_key, iter->second),
+                                    get_path_in_local_cache(file_key, 0));
+            if (!st.ok()) {
+                LOG_WARNING("").error(st);
             }
         } else {
             std::vector<FileBlockCell*> to_remove;
@@ -1282,12 +1280,7 @@ Status BlockFileCache::load_cache_info_into_memory() {
     }
     for (; upgrade_key_it != std::filesystem::directory_iterator(); ++upgrade_key_it) {
         if (upgrade_key_it->path().filename().native().find('_') == std::string::npos) {
-            std::error_code ec;
-            std::filesystem::rename(upgrade_key_it->path(), upgrade_key_it->path().native() + "_0",
-                                    ec);
-            if (ec) {
-                return Status::IOError(ec.message());
-            }
+            RETURN_IF_ERROR(global_local_filesystem()->rename(upgrade_key_it->path(), upgrade_key_it->path().native() + "_0"));
         }
     }
     int scan_length = 10000;
@@ -1648,14 +1641,13 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
     }
     // 2. If the key in ttl cache, modify its expiration time.
     if (auto iter = _key_to_time.find(key); iter != _key_to_time.end()) {
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(key, iter->second),
-                                get_path_in_local_cache(key, new_expiration_time), ec);
-        if (ec) [[unlikely]] {
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, iter->second),
+                                get_path_in_local_cache(key, new_expiration_time));
+        if (!st.ok()) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
                          << get_path_in_local_cache(key, iter->second)
                          << " to file=" << get_path_in_local_cache(key, new_expiration_time)
-                         << " error=" << ec.message();
+                         << " error=" << st;
         } else {
             // remove from _time_to_key
             auto _time_to_key_iter = _time_to_key.equal_range(iter->second);
@@ -1687,11 +1679,10 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
         }
         _key_to_time[key] = new_expiration_time;
         _time_to_key.insert(std::make_pair(new_expiration_time, key));
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(key, 0),
-                                get_path_in_local_cache(key, new_expiration_time), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, 0),
+                                get_path_in_local_cache(key, new_expiration_time));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
         } else {
             DCHECK(std::filesystem::exists(get_path_in_local_cache(key, new_expiration_time)));
         }

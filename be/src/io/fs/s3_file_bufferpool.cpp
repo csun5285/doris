@@ -420,6 +420,11 @@ void S3FileBufferPool::reclaim(Slice buf) {
  * 3. write the downloaded content into user buffer if necessary
  */
 void DownloadFileBuffer::on_download() {
+    auto s = Status::OK();
+    Defer def {[&]() { _state.set_val(std::move(s)); }};
+    if (is_cancelled()) {
+        return;
+    }
     if (_buffer.empty()) {
         auto err_msg = fmt::format("no free buffer for {} seconds",
                                    config::s3_writer_buffer_allocation_timeout);
@@ -429,8 +434,6 @@ void DownloadFileBuffer::on_download() {
     }
     FileBlocksHolderPtr holder = nullptr;
     bool need_to_download_into_cache = false;
-    auto s = Status::OK();
-    Defer def {[&]() { _state.set_val(std::move(s)); }};
     if (_alloc_holder != nullptr) {
         holder = _alloc_holder();
         std::for_each(holder->file_segments.begin(), holder->file_segments.end(),

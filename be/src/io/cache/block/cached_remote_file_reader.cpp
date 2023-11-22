@@ -87,6 +87,10 @@ std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
     align_right = (right / FILE_CACHE_MAX_FILE_BLOCK_SIZE + 1) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     align_right = align_right < size() ? align_right : size();
     size_t align_size = align_right - align_left;
+    if (config::enable_file_cache_block_prefetch && align_size < FILE_CACHE_MAX_FILE_BLOCK_SIZE && align_left != 0) {
+        align_size += FILE_CACHE_MAX_FILE_BLOCK_SIZE;
+        align_left -= FILE_CACHE_MAX_FILE_BLOCK_SIZE;
+    }
     return std::make_pair(align_left, align_size);
 }
 
@@ -195,8 +199,8 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         }
         FileBlock::State segment_state = segment->state();
         int64_t wait_time = 0;
-        static int64_t MAX_WAIT_TIME = 10;
-        TEST_SYNC_POINT_CALLBACK("CachedRemoteFileReader::max_wait_time", &MAX_WAIT_TIME);
+        static int64_t max_wait_time = 10;
+        TEST_SYNC_POINT_CALLBACK("CachedRemoteFileReader::max_wait_time", &max_wait_time);
         if (segment_state != FileBlock::State::DOWNLOADED) {
             do {
                 {
@@ -207,9 +211,9 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                 if (segment_state != FileBlock::State::DOWNLOADING) {
                     break;
                 }
-            } while (++wait_time < MAX_WAIT_TIME);
+            } while (++wait_time < max_wait_time);
         }
-        if (wait_time == MAX_WAIT_TIME) [[unlikely]] {
+        if (wait_time == max_wait_time) [[unlikely]] {
             LOG_WARNING("Waiting too long for the download to complete");
         }
         {

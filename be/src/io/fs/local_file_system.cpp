@@ -206,6 +206,8 @@ Status LocalFileSystem::list_impl(const Path& dir, bool only_file, std::vector<F
 }
 
 Status LocalFileSystem::rename_impl(const Path& orig_name, const Path& new_name) {
+     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileSystem::rename",
+                                      Status::IOError("inject io error"));
     std::error_code ec;
     std::filesystem::rename(orig_name, new_name, ec);
     if (ec) {
