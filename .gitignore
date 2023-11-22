@@ -47,10 +47,7 @@ rpc_data/
 metastore_db/
 thirdparty/src*
 thirdparty/installed*
-<<<<<<< HEAD
-=======
 thirdparty/doris-thirdparty*.tar.xz
->>>>>>> 2.0.0-rc01
 
 fe_plugins/output
 fe_plugins/**/.factorypath
@@ -104,12 +101,9 @@ tools/**/tpc-h_v*.docx
 tools/**/tpc-h_v*.pdf
 tools/**/tpch-data/
 tools/single-node-cluster/fe*
-<<<<<<< HEAD
-=======
 tools/tpcds-tools/TPC-DS_Tools_*.zip
 tools/tpcds-tools/bin/DSGen-software*
 tools/tpcds-tools/bin/tpcds-data/
->>>>>>> 2.0.0-rc01
 
 # be-ut
 data_test
@@ -118,3 +112,12 @@ lru_cache_test
 /conf/log4j2-spring.xml
 /fe/fe-core/src/test/resources/real-help-resource.zip
 /ui/dist
+
+be/build_ASAN
+cloud/build_ASAN
+cloud/build_Asan/
+cloud/build_Release/
+cloud/ut_build_ASAN/
+regression-test/realData/
+regression-test/suites/usercases/
+regression-test/suites/usercases_udf/
