@@ -36,6 +36,7 @@
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/global_types.h"
 #include "common/status.h"
+#include "runtime/define_primitive_type.h"
 #include "runtime/types.h"
 #include "vec/data_types/data_type.h"
 
@@ -109,6 +110,8 @@ public:
     bool is_key() const { return _is_key; }
     bool need_materialize() const { return _need_materialize; }
 
+    PrimitiveType col_type() const { return _col_type; }
+
 private:
     friend class DescriptorTbl;
     friend class TupleDescriptor;
@@ -127,6 +130,7 @@ private:
     const std::string _col_name_lower_case;
 
     const int32_t _col_unique_id;
+    const PrimitiveType _col_type;
 
     // the idx of the slot in the tuple descriptor (0-based).
     // this is provided by the FE

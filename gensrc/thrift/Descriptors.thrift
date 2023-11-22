@@ -57,6 +57,7 @@ struct TSlotDescriptor {
   // If set to false, then such slots will be ignored during
   // materialize them.Used to optmize to read less data and less memory usage
   13: optional bool need_materialize = true
+  17: optional Types.TPrimitiveType primitive_type = Types.TPrimitiveType.INVALID_TYPE
 }
 
 struct TTupleDescriptor {
