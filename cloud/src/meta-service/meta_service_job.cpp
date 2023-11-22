@@ -54,7 +54,8 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         return;
     }
 
-    if (compaction.expiration() <= 0 && compaction.type() != TabletCompactionJobPB::EMPTY_CUMULATIVE) {
+    if (compaction.expiration() <= 0 &&
+        compaction.type() != TabletCompactionJobPB::EMPTY_CUMULATIVE) {
         code = MetaServiceCode::INVALID_ARGUMENT;
         msg = "no valid expiration given";
         return;
