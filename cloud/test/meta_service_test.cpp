@@ -185,6 +185,16 @@ static void commit_rowset(MetaServiceProxy* meta_service, const doris::RowsetMet
     if (!arena) delete req;
 }
 
+static void update_tmp_rowset(MetaServiceProxy* meta_service, const doris::RowsetMetaPB& rowset,
+                              CreateRowsetResponse& res) {
+    brpc::Controller cntl;
+    auto arena = res.GetArena();
+    auto req = google::protobuf::Arena::CreateMessage<CreateRowsetRequest>(arena);
+    req->mutable_rowset_meta()->CopyFrom(rowset);
+    meta_service->update_tmp_rowset(&cntl, req, &res, nullptr);
+    if (!arena) delete req;
+}
+
 static void insert_rowset(MetaServiceProxy* meta_service, int64_t db_id, const std::string& label,
                           int64_t table_id, int64_t partition_id, int64_t tablet_id) {
     int64_t txn_id = 0;
@@ -3170,12 +3180,14 @@ static void get_tablet_stats(MetaServiceProxy* meta_service, int64_t table_id, i
 TEST(MetaServiceTest, UpdateTablet) {
     auto meta_service = get_meta_service();
     std::string cloud_unique_id = "test_cloud_unique_id";
-    constexpr auto table_id = 11231, index_id = 11232, partition_id = 11233, tablet_id1 = 11234, tablet_id2 = 21234;
+    constexpr auto table_id = 11231, index_id = 11232, partition_id = 11233, tablet_id1 = 11234,
+                   tablet_id2 = 21234;
     ASSERT_NO_FATAL_FAILURE(
             create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id1));
     ASSERT_NO_FATAL_FAILURE(
             create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id2));
-    auto get_and_check_tablet_meta = [&](int tablet_id, int64_t ttl_seconds, bool in_memory, bool is_persistent) {
+    auto get_and_check_tablet_meta = [&](int tablet_id, int64_t ttl_seconds, bool in_memory,
+                                         bool is_persistent) {
         brpc::Controller cntl;
         GetTabletRequest req;
         req.set_cloud_unique_id(cloud_unique_id);
@@ -4850,6 +4862,147 @@ TEST(MetaServiceTest, AlterIamTest) {
 
     SyncPoint::get_instance()->disable_processing();
     SyncPoint::get_instance()->clear_all_call_backs();
+}
+
+TEST(MetaServiceTest, UpdateTmpRowsetTest) {
+    auto meta_service = get_meta_service();
+
+    std::string instance_id = "update_rowset_meta_test_instance_id";
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    {
+        // 1. normal path
+        constexpr auto db_id = 10000, table_id = 10001, index_id = 10002, partition_id = 10003,
+                       tablet_id = 10004;
+        int64_t txn_id = 0;
+        std::string label = "update_rowset_meta_test_label1";
+        CreateRowsetResponse res;
+
+        ASSERT_NO_FATAL_FAILURE(
+                create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
+
+        ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service.get(), db_id, label, table_id, txn_id));
+        auto rowset = create_rowset(txn_id, tablet_id, partition_id);
+        ASSERT_NO_FATAL_FAILURE(prepare_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        res.Clear();
+
+        rowset.set_rowset_state(doris::BEGIN_PARTIAL_UPDATE);
+        ASSERT_NO_FATAL_FAILURE(commit_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        res.Clear();
+
+        // simulate that there are new segments added to this rowset
+        rowset.set_num_segments(rowset.num_segments() + 3);
+        rowset.set_num_rows(rowset.num_rows() + 1000);
+        rowset.set_data_disk_size(rowset.data_disk_size() + 10000);
+
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+
+        std::string key;
+        std::string val;
+        MetaRowsetTmpKeyInfo key_info {instance_id, txn_id, tablet_id};
+        meta_rowset_tmp_key(key_info, &key);
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
+        doris::RowsetMetaPB fetchedRowsetMeta;
+        ASSERT_TRUE(fetchedRowsetMeta.ParseFromString(val));
+
+        ASSERT_EQ(doris::BEGIN_PARTIAL_UPDATE, fetchedRowsetMeta.rowset_state());
+        ASSERT_EQ(rowset.num_segments(), fetchedRowsetMeta.num_segments());
+        ASSERT_EQ(rowset.num_rows(), fetchedRowsetMeta.num_rows());
+        ASSERT_EQ(rowset.data_disk_size(), fetchedRowsetMeta.data_disk_size());
+
+        ASSERT_NO_FATAL_FAILURE(commit_txn(meta_service.get(), db_id, txn_id, label));
+    }
+
+    {
+        // 2. rpc retryies due to network error will success
+        constexpr auto db_id = 20000, table_id = 20001, index_id = 20002, partition_id = 20003,
+                       tablet_id = 20004;
+        int64_t txn_id = 0;
+        std::string label = "update_rowset_meta_test_label2";
+        CreateRowsetResponse res;
+
+        ASSERT_NO_FATAL_FAILURE(
+                create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
+
+        ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service.get(), db_id, label, table_id, txn_id));
+        auto rowset = create_rowset(txn_id, tablet_id, partition_id);
+        ASSERT_NO_FATAL_FAILURE(prepare_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        res.Clear();
+
+        rowset.set_rowset_state(doris::BEGIN_PARTIAL_UPDATE);
+        ASSERT_NO_FATAL_FAILURE(commit_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        res.Clear();
+
+        // simulate that there are new segments added to this rowset
+        rowset.set_num_segments(rowset.num_segments() + 3);
+        rowset.set_num_rows(rowset.num_rows() + 1000);
+        rowset.set_data_disk_size(rowset.data_disk_size() + 10000);
+
+        // repeated calls to update_tmp_rowset will all success
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+
+        std::string key;
+        std::string val;
+        MetaRowsetTmpKeyInfo key_info {instance_id, txn_id, tablet_id};
+        meta_rowset_tmp_key(key_info, &key);
+        std::unique_ptr<Transaction> txn;
+        ASSERT_EQ(meta_service->txn_kv()->create_txn(&txn), TxnErrorCode::TXN_OK);
+        ASSERT_EQ(txn->get(key, &val), TxnErrorCode::TXN_OK);
+        doris::RowsetMetaPB fetchedRowsetMeta;
+        ASSERT_TRUE(fetchedRowsetMeta.ParseFromString(val));
+
+        ASSERT_EQ(doris::BEGIN_PARTIAL_UPDATE, fetchedRowsetMeta.rowset_state());
+        ASSERT_EQ(rowset.num_segments(), fetchedRowsetMeta.num_segments());
+        ASSERT_EQ(rowset.num_rows(), fetchedRowsetMeta.num_rows());
+        ASSERT_EQ(rowset.data_disk_size(), fetchedRowsetMeta.data_disk_size());
+
+        ASSERT_NO_FATAL_FAILURE(commit_txn(meta_service.get(), db_id, txn_id, label));
+    }
+
+    {
+        // 3. call update_tmp_rowset without commit_rowset first will fail
+        constexpr auto db_id = 30000, table_id = 30001, index_id = 30002, partition_id = 30003,
+                       tablet_id = 30004;
+        int64_t txn_id = 0;
+        std::string label = "update_rowset_meta_test_label1";
+        CreateRowsetResponse res;
+
+        ASSERT_NO_FATAL_FAILURE(
+                create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id));
+
+        ASSERT_NO_FATAL_FAILURE(begin_txn(meta_service.get(), db_id, label, table_id, txn_id));
+        auto rowset = create_rowset(txn_id, tablet_id, partition_id);
+        ASSERT_NO_FATAL_FAILURE(prepare_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << label;
+        res.Clear();
+
+        // simulate that there are new segments added to this rowset
+        rowset.set_num_segments(rowset.num_segments() + 3);
+        rowset.set_num_rows(rowset.num_rows() + 1000);
+        rowset.set_data_disk_size(rowset.data_disk_size() + 10000);
+
+        ASSERT_NO_FATAL_FAILURE(update_tmp_rowset(meta_service.get(), rowset, res));
+        ASSERT_EQ(res.status().code(), MetaServiceCode::ROWSET_META_NOT_FOUND) << label;
+    }
 }
 
 } // namespace selectdb

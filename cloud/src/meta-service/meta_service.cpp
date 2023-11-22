@@ -538,8 +538,9 @@ void internal_get_tablet(MetaServiceCode& code, std::string& msg, const std::str
         err = selectdb::get(txn, key, &val_buf);
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = fmt::format("failed to get schema, err={}",
-                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
+            msg = fmt::format("failed to get schema, err={}", err == TxnErrorCode::TXN_KEY_NOT_FOUND
+                                                                      ? "not found"
+                                                                      : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, tablet_meta->mutable_schema())) {
@@ -740,9 +741,9 @@ static void set_schema_in_existed_rowset(MetaServiceCode& code, std::string& msg
         TxnErrorCode err = selectdb::get(txn, schema_key, &val_buf, true);
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = fmt::format("failed to get schema, schema_version={}: {}",
-                              rowset_meta.schema_version(),
-                              err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
+            msg = fmt::format(
+                    "failed to get schema, schema_version={}: {}", rowset_meta.schema_version(),
+                    err == TxnErrorCode::TXN_KEY_NOT_FOUND ? "not found" : "internal error");
             return;
         }
         if (!parse_schema_value(val_buf, existed_rowset_meta.mutable_tablet_schema())) {
@@ -1028,9 +1029,9 @@ void MetaServiceImpl::commit_rowset(::google::protobuf::RpcController* controlle
 }
 
 void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* controller,
-                                              const ::selectdb::CreateRowsetRequest* request,
-                                              ::selectdb::CreateRowsetResponse* response,
-                                              ::google::protobuf::Closure* done) {
+                                        const ::selectdb::CreateRowsetRequest* request,
+                                        ::selectdb::CreateRowsetResponse* response,
+                                        ::google::protobuf::Closure* done) {
     RPC_PREPROCESS(update_tmp_rowset);
     if (!request->has_rowset_meta()) {
         code = MetaServiceCode::INVALID_ARGUMENT;
@@ -1083,7 +1084,7 @@ void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* contr
         LOG_WARNING(
                 "fail to find the rowset meta with key={}, instance_id={}, txn_id={}, "
                 "tablet_id={}, rowset_id={}",
-                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                hex(update_key), instance_id, rowset_meta.txn_id(), tablet_id,
                 rowset_meta.rowset_id_v2());
         msg = "can't find the rowset";
         return;
@@ -1092,7 +1093,7 @@ void MetaServiceImpl::update_tmp_rowset(::google::protobuf::RpcController* contr
         LOG_WARNING(
                 "internal error, fail to find the rowset meta with key={}, instance_id={}, "
                 "txn_id={}, tablet_id={}, rowset_id={}",
-                update_key, instance_id, rowset_meta.txn_id(), tablet_id,
+                hex(update_key), instance_id, rowset_meta.txn_id(), tablet_id,
                 rowset_meta.rowset_id_v2());
         msg = "failed to check whether rowset exists";
         return;
