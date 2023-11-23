@@ -23,6 +23,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeNameFormat;
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.UserException;
 import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.qe.ConnectContext;
@@ -325,6 +326,7 @@ public class Util {
         StringBuilder sb = new StringBuilder();
         InputStream stream = null;
         try {
+            UrlSecurityChecker.startSSRFChecking(urlStr);
             URL url = new URL(urlStr);
             URLConnection conn = url.openConnection();
             if (encodedAuthInfo != null) {
@@ -471,14 +473,19 @@ public class Util {
     // If no auth info, pass a null.
     public static InputStream getInputStreamFromUrl(String urlStr, String encodedAuthInfo, int connectTimeoutMs,
             int readTimeoutMs) throws IOException {
-        URL url = new URL(urlStr);
-        URLConnection conn = url.openConnection();
-        if (encodedAuthInfo != null) {
-            conn.setRequestProperty("Authorization", "Basic " + encodedAuthInfo);
+        try {
+            UrlSecurityChecker.startSSRFChecking(urlStr);
+            URL url = new URL(urlStr);
+            URLConnection conn = url.openConnection();
+            if (encodedAuthInfo != null) {
+                conn.setRequestProperty("Authorization", "Basic " + encodedAuthInfo);
+            }
+            conn.setConnectTimeout(connectTimeoutMs);
+            conn.setReadTimeout(readTimeoutMs);
+            return conn.getInputStream();
+        } catch (Exception e) {
+            throw new IOException(e);
         }
-        conn.setConnectTimeout(connectTimeoutMs);
-        conn.setReadTimeout(readTimeoutMs);
-        return conn.getInputStream();
     }
 
     public static boolean showHiddenColumns() {

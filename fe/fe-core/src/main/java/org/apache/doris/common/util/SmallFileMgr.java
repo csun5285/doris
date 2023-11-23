@@ -23,6 +23,7 @@ import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 
@@ -49,7 +50,6 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -289,6 +289,7 @@ public class SmallFileMgr implements Writable {
     private SmallFile downloadAndCheck(long dbId, String catalog, String fileName,
             String downloadUrl, String md5sum, boolean saveContent) throws DdlException {
         try {
+            UrlSecurityChecker.startSSRFChecking(downloadUrl);
             URL url = new URL(downloadUrl);
             // get file length
             URLConnection urlConnection = url.openConnection();
@@ -366,7 +367,7 @@ public class SmallFileMgr implements Writable {
                         checksum, false /* not content */);
             }
             return smallFile;
-        } catch (IOException | NoSuchAlgorithmException e) {
+        } catch (Exception e) {
             LOG.warn("failed to get file from url: {}", downloadUrl, e);
             String errorMsg = e.getMessage();
             if (e instanceof FileNotFoundException) {
