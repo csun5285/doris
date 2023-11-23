@@ -3853,6 +3853,12 @@ public class Env {
                 sb.append(olapTable.getEnableLightSchemaChange()).append("\"");
             }
 
+            // show storeRowColumn only when it is set true
+            if (olapTable.storeRowColumn()) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_STORE_ROW_COLUMN).append("\" = \"");
+                sb.append(olapTable.storeRowColumn()).append("\"");
+            }
+
             // enable duplicate without keys by default
             if (olapTable.isDuplicateWithoutKey()) {
                 sb.append(",\n\"")

@@ -67,4 +67,38 @@ suite("test_row_store", "p0") {
     sql "insert into ${testTable} (tag,tag_value,user_ids) values ('10001','23',34.234),('10001','23',34.234);"
     sql "insert into ${testTable} (tag,tag_value,user_ids) values ('10001','23',34.234);"
     sql "select * from  ${testTable}"
+
+    testTable = "tbl_mow_rowstore"
+    sql "DROP TABLE IF EXISTS ${testTable}"
+    sql """
+    CREATE TABLE `${testTable}` (
+         `tag` varchar(45) NULL,
+         `tag_value` varchar(45) NULL,
+         `user_ids` decimalv3(30, 8) NULL,
+         `test` datetime NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=OLAP
+        UNIQUE KEY(`tag`, `tag_value`)
+        COMMENT 'OLAP'
+        DISTRIBUTED BY HASH(`tag`) BUCKETS 2
+        PROPERTIES (
+        "replication_allocation" = "tag.location.default: 1",
+        "storage_format" = "V2",
+        "light_schema_change" = "true",
+        "store_row_column" = "true",
+        "disable_auto_compaction" = "false",
+        "enable_unique_key_merge_on_write" = "true",
+        "enable_single_replica_compaction" = "false"
+        );
+    """
+    sql "insert into ${testTable} (tag,tag_value,user_ids) values ('10001','23',34.234),('10001','23',34.234);"
+    sql "set experimental_enable_nereids_planner = false"
+    explain {
+        sql("select * from ${testTable} where tag='10001' and tag_value='23';")
+        contains "SHORT-CIRCUIT"
+    } 
+    sql "insert overwrite table ${testTable} (tag,tag_value,user_ids) values ('10001','23',34.234),('10001','23',34.234);"
+    explain {
+        sql("select * from ${testTable} where tag='10001' and tag_value='23';")
+        contains "SHORT-CIRCUIT"
+    } 
 }
