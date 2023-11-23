@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -42,7 +43,16 @@ public:
             const Aws::S3::Model::PutObjectRequest& req) = 0;
     virtual Aws::S3::Model::HeadObjectOutcome HeadObject(
             const Aws::S3::Model::HeadObjectRequest& req) = 0;
+    virtual Aws::S3::Model::GetBucketLifecycleConfigurationOutcome GetBucketLifecycleConfiguration(
+            const Aws::S3::Model::GetBucketLifecycleConfigurationRequest& req) = 0;
+    virtual Aws::S3::Model::GetBucketVersioningOutcome GetBucketVersioning(
+            const Aws::S3::Model::GetBucketVersioningRequest& req) = 0;
 };
+
+static bool list_object_v2_with_expire_time = false;
+static int64_t expire_time = 0;
+static bool set_bucket_lifecycle = false;
+static bool set_bucket_versioning_status_error = false;
 
 class S3Client : public S3ClientInterface {
 public:
@@ -73,6 +83,9 @@ public:
             Aws::S3::Model::Object obj;
             obj.SetKey(file.path);
             Aws::Utils::DateTime date;
+            if (list_object_v2_with_expire_time) {
+                date = Aws::Utils::DateTime(expire_time);
+            }
             obj.SetLastModified(date);
             objects.emplace_back(std::move(obj));
         });
@@ -111,6 +124,32 @@ public:
             return Aws::S3::Model::HeadObjectOutcome(std::move(err));
         }
         return Aws::S3::Model::HeadObjectOutcome(std::move(result));
+    }
+
+    Aws::S3::Model::GetBucketLifecycleConfigurationOutcome GetBucketLifecycleConfiguration(
+            const Aws::S3::Model::GetBucketLifecycleConfigurationRequest& req) override {
+        Aws::S3::Model::GetBucketLifecycleConfigurationResult result;
+        Aws::Vector<Aws::S3::Model::LifecycleRule> rules;
+        if (set_bucket_lifecycle) {
+            Aws::S3::Model::LifecycleRule rule;
+            Aws::S3::Model::NoncurrentVersionExpiration expiration;
+            expiration.SetNoncurrentDays(1000);
+            rule.SetNoncurrentVersionExpiration(expiration);
+            rules.emplace_back(std::move(rule));
+        }
+        result.SetRules(std::move(rules));
+        return Aws::S3::Model::GetBucketLifecycleConfigurationOutcome(std::move(result));
+    }
+
+    Aws::S3::Model::GetBucketVersioningOutcome GetBucketVersioning(
+            const Aws::S3::Model::GetBucketVersioningRequest& req) override {
+        Aws::S3::Model::GetBucketVersioningResult result;
+        if (set_bucket_versioning_status_error) {
+            result.SetStatus(Aws::S3::Model::BucketVersioningStatus::Suspended);
+        } else {
+            result.SetStatus(Aws::S3::Model::BucketVersioningStatus::Enabled);
+        }
+        return Aws::S3::Model::GetBucketVersioningOutcome(std::move(result));
     }
 };
 
@@ -171,6 +210,28 @@ public:
         return Aws::S3::Model::HeadObjectOutcome(std::move(err));
     }
 
+    Aws::S3::Model::GetBucketLifecycleConfigurationOutcome GetBucketLifecycleConfiguration(
+            const Aws::S3::Model::GetBucketLifecycleConfigurationRequest& req) override {
+        if (!return_error_for_error_s3_client) {
+            return _correct_impl->GetBucketLifecycleConfiguration(req);
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::INTERNAL_SERVER_ERROR);
+        return Aws::S3::Model::GetBucketLifecycleConfigurationOutcome(std::move(err));
+    }
+
+    Aws::S3::Model::GetBucketVersioningOutcome GetBucketVersioning(
+            const Aws::S3::Model::GetBucketVersioningRequest& req) override {
+        if (!return_error_for_error_s3_client) {
+            return _correct_impl->GetBucketVersioning(req);
+        }
+        auto err = Aws::Client::AWSError<Aws::S3::S3Errors>(Aws::S3::S3Errors::RESOURCE_NOT_FOUND,
+                                                            false);
+        err.SetResponseCode(Aws::Http::HttpResponseCode::INTERNAL_SERVER_ERROR);
+        return Aws::S3::Model::GetBucketVersioningOutcome(std::move(err));
+    }
+
 private:
     std::unique_ptr<S3ClientInterface> _correct_impl;
 };
@@ -190,6 +251,15 @@ public:
     auto PutObject(const Aws::S3::Model::PutObjectRequest& req) { return _impl->PutObject(req); }
 
     auto HeadObject(const Aws::S3::Model::HeadObjectRequest& req) { return _impl->HeadObject(req); }
+
+    auto GetBucketLifecycleConfiguration(
+            const Aws::S3::Model::GetBucketLifecycleConfigurationRequest& req) {
+        return _impl->GetBucketLifecycleConfiguration(req);
+    }
+
+    auto GetBucketVersioning(const Aws::S3::Model::GetBucketVersioningRequest& req) {
+        return _impl->GetBucketVersioning(req);
+    }
 
 private:
     std::unique_ptr<S3ClientInterface> _impl;
@@ -221,10 +291,24 @@ static auto callbacks = std::array {
                                                   Aws::S3::Model::PutObjectRequest*>*)p;
                           *pair.first = (*_mock_client).PutObject(*pair.second);
                       }},
-        MockCallable {"s3_client::head_object", [](void* p) {
+        MockCallable {"s3_client::head_object",
+                      [](void* p) {
                           auto pair = *(std::pair<Aws::S3::Model::HeadObjectOutcome*,
                                                   Aws::S3::Model::HeadObjectRequest*>*)p;
                           *pair.first = (*_mock_client).HeadObject(*pair.second);
+                      }},
+        MockCallable {
+                "s3_client::get_bucket_lifecycle_configuration",
+                [](void* p) {
+                    auto pair =
+                            *(std::pair<Aws::S3::Model::GetBucketLifecycleConfigurationOutcome*,
+                                        Aws::S3::Model::GetBucketLifecycleConfigurationRequest*>*)p;
+                    *pair.first = (*_mock_client).GetBucketLifecycleConfiguration(*pair.second);
+                }},
+        MockCallable {"s3_client::get_bucket_versioning", [](void* p) {
+                          auto pair = *(std::pair<Aws::S3::Model::GetBucketVersioningOutcome*,
+                                                  Aws::S3::Model::GetBucketVersioningRequest*>*)p;
+                          *pair.first = (*_mock_client).GetBucketVersioning(*pair.second);
                       }}};
 
 int main(int argc, char** argv) {
@@ -257,6 +341,105 @@ void create_file_under_prefix(std::string_view prefix, size_t file_nums) {
 TEST(S3AccessorTest, init) {
     auto accessor = std::make_unique<S3Accessor>(S3Conf {});
     ASSERT_EQ(0, accessor->init());
+}
+
+TEST(S3AccessorTest, check_bucket_versioning) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>();
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        set_bucket_versioning_status_error = false;
+    });
+    { ASSERT_EQ(0, accessor->check_bucket_versioning()); }
+    {
+        set_bucket_versioning_status_error = true;
+        ASSERT_EQ(-1, accessor->check_bucket_versioning());
+    }
+}
+
+TEST(S3AccessorTest, check_bucket_versioning_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    return_error_for_error_s3_client = true;
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+    });
+    ASSERT_EQ(-1, accessor->check_bucket_versioning());
+}
+
+TEST(S3AccessorTest, get_bucket_lifecycle) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>();
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        set_bucket_lifecycle = false;
+    });
+    {
+        int64_t expiration_time = 0;
+        ASSERT_EQ(-1, accessor->get_bucket_lifecycle(&expiration_time));
+    }
+    {
+        set_bucket_lifecycle = true;
+        int64_t expiration_time = 0;
+        ASSERT_EQ(0, accessor->get_bucket_lifecycle(&expiration_time));
+    }
+}
+
+TEST(S3AccessorTest, get_bucket_lifecycle_error) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>(std::make_unique<ErrorS3Client>());
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    return_error_for_error_s3_client = true;
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+        return_error_for_error_s3_client = false;
+    });
+    int64_t expiration_time = 0;
+    ASSERT_EQ(-1, accessor->get_bucket_lifecycle(&expiration_time));
 }
 
 TEST(S3AccessorTest, list) {
@@ -510,6 +693,60 @@ TEST(S3AccessorTest, delete_objects_error) {
     ASSERT_EQ(-1, accessor->delete_objects(paths_first_half));
     delete_objects_return_part_error = false;
     ASSERT_EQ(-2, accessor->delete_objects(paths_second_half));
+}
+
+TEST(S3AccessorTest, delete_expired_objects) {
+    _mock_fs = std::make_unique<selectdb::MockAccessor>(selectdb::S3Conf {});
+    _mock_client = std::make_unique<MockS3Client>();
+    auto accessor = std::make_unique<S3Accessor>(S3Conf {});
+    auto sp = SyncPoint::get_instance();
+    std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+        sp->set_call_back(fmt::format("{}::pred", mock_callback.point_name),
+                          [](void* p) { *((bool*)p) = true; });
+        sp->set_call_back(mock_callback.point_name, mock_callback.func);
+    });
+    sp->enable_processing();
+    std::unique_ptr<int, std::function<void(int*)>> defer_log_statistics((int*)0x01, [&](int*) {
+        sp->disable_processing();
+        std::for_each(callbacks.begin(), callbacks.end(), [&](const MockCallable& mock_callback) {
+            sp->clear_call_back(mock_callback.point_name);
+        });
+    });
+    {
+        std::string prefix = "atest_delete_expired_objects";
+        size_t num = 2000;
+        create_file_under_prefix(prefix, num);
+        list_object_v2_with_expire_time = true;
+        expire_time = 50;
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+        for (size_t i = 0; i < num; i++) {
+            auto path = fmt::format("{}{}", prefix, i);
+            ASSERT_EQ(1, accessor->exist(path));
+        }
+    }
+    {
+        std::string prefix = "btest_delete_expired_objects";
+        size_t num = 2000;
+        create_file_under_prefix(prefix, num);
+        list_object_v2_with_expire_time = true;
+        expire_time = 150;
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+        for (size_t i = 0; i < num; i++) {
+            auto path = fmt::format("{}{}", prefix, i);
+            ASSERT_EQ(1, accessor->exist(path));
+        }
+    }
+    {
+        std::string prefix = "ctest_delete_expired_objects";
+        size_t num = 2000;
+        create_file_under_prefix(prefix, num);
+        list_object_v2_with_expire_time = true;
+        expire_time = 150;
+        return_error_for_error_s3_client = true;
+        std::unique_ptr<int, std::function<void(int*)>> defer(
+                (int*)0x01, [&](int*) { return_error_for_error_s3_client = false; });
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+    }
 }
 
 TEST(S3AccessorTest, delete_object_by_prefix) {

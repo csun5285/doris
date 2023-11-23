@@ -341,7 +341,9 @@ int S3Accessor::get_bucket_lifecycle(int64_t* expiration_days) {
     Aws::S3::Model::GetBucketLifecycleConfigurationRequest request;
     request.SetBucket(conf_.bucket);
 
-    auto outcome = s3_client_->GetBucketLifecycleConfiguration(request);
+    auto outcome =
+            SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->GetBucketLifecycleConfiguration(request),
+                                         "s3_client::get_bucket_lifecycle_configuration", request);
     bool has_lifecycle = false;
     if (outcome.IsSuccess()) {
         auto& rules = outcome.GetResult().GetRules();
@@ -374,7 +376,8 @@ int S3Accessor::get_bucket_lifecycle(int64_t* expiration_days) {
 int S3Accessor::check_bucket_versioning() {
     Aws::S3::Model::GetBucketVersioningRequest request;
     request.SetBucket(conf_.bucket);
-    auto outcome = s3_client_->GetBucketVersioning(request);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->GetBucketVersioning(request),
+                                                "s3_client::get_bucket_versioning", request);
 
     if (outcome.IsSuccess()) {
         auto& versioning_configuration = outcome.GetResult().GetStatus();
