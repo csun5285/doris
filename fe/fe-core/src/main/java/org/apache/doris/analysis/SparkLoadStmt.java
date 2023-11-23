@@ -24,6 +24,7 @@ import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.mysql.privilege.PrivPredicate;
@@ -72,6 +73,9 @@ public class SparkLoadStmt extends InsertStmt {
 
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
+        if (Config.apsaradb_env_enabled) {
+            throw new UserException("Spark load feature is disable in apsaradb env");
+        }
         super.analyze(analyzer);
         label.analyze(analyzer);
         Preconditions.checkNotNull(dataDescription, new AnalysisException("No data file in load statement."));

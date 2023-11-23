@@ -25,6 +25,7 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.InternalErrorCode;
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.TimeUtils;
@@ -583,7 +584,9 @@ public class LoadStmt extends DdlStmt {
     private void tryConnect(String endpoint) throws Exception {
         HttpURLConnection connection = null;
         try {
-            URL url = new URL("http://" + endpoint);
+            String urlStr = "http://" + endpoint;
+            UrlSecurityChecker.startSSRFChecking(urlStr);
+            URL url = new URL(urlStr);
             connection = (HttpURLConnection) url.openConnection();
             connection.setConnectTimeout(10000);
             connection.connect();
@@ -591,6 +594,7 @@ public class LoadStmt extends DdlStmt {
             throw e;
         } catch (Exception e) {
             LOG.warn("Failed to connect endpoint=" + endpoint, e);
+            throw e;
         } finally {
             if (connection != null) {
                 try {

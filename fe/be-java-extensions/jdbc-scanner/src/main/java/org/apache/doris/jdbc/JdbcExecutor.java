@@ -17,6 +17,7 @@
 
 package org.apache.doris.jdbc;
 
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.exception.InternalException;
 import org.apache.doris.common.exception.UdfRuntimeException;
 import org.apache.doris.common.jni.utils.JNINativeMethod;
@@ -428,7 +429,7 @@ public class JdbcExecutor {
                             DruidDataSource ds = new DruidDataSource();
                             ds.setDriverClassLoader(classLoader);
                             ds.setDriverClassName(driverClass);
-                            ds.setUrl(jdbcUrl);
+                            ds.setUrl(UrlSecurityChecker.getSafeJdbcUrl(jdbcUrl));
                             ds.setUsername(jdbcUser);
                             ds.setPassword(jdbcPassword);
                             ds.setMinIdle(minIdleSize);

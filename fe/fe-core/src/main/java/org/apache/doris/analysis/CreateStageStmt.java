@@ -24,6 +24,7 @@ import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.InternalErrorCode;
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.UserException;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
@@ -131,7 +132,9 @@ public class CreateStageStmt extends DdlStmt {
     private void tryConnect(String endpoint) throws Exception {
         HttpURLConnection connection = null;
         try {
-            URL url = new URL("http://" + endpoint);
+            String urlStr = "http://" + endpoint;
+            UrlSecurityChecker.startSSRFChecking(urlStr);
+            URL url = new URL(urlStr);
             connection = (HttpURLConnection) url.openConnection();
             connection.setConnectTimeout(10000);
             connection.connect();
@@ -139,6 +142,7 @@ public class CreateStageStmt extends DdlStmt {
             throw e;
         } catch (Exception e) {
             LOG.warn("Failed to connect endpoint=" + endpoint, e);
+            throw e;
         } finally {
             if (connection != null) {
                 try {

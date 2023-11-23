@@ -92,15 +92,17 @@ public class CreateTableStmt extends DdlStmt {
     static {
         engineNames = Sets.newHashSet();
         engineNames.add("olap");
-        engineNames.add("odbc");
-        engineNames.add("mysql");
-        engineNames.add("broker");
-        engineNames.add("elasticsearch");
-        engineNames.add("hive");
-        engineNames.add("iceberg");
-        engineNames.add("hudi");
-        engineNames.add("jdbc");
+        // engineNames.add("odbc");
+        // engineNames.add("mysql");
+        // engineNames.add("broker");
+        // engineNames.add("elasticsearch");
+        // engineNames.add("hive");
+        // engineNames.add("iceberg");
+        // engineNames.add("hudi");
+        // engineNames.add("jdbc");
     }
+
+
 
     // if auto bucket auto bucket enable, rewrite distribution bucket num &&
     // set properties[PropertyAnalyzer.PROPERTIES_AUTO_BUCKET] = "true"

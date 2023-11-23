@@ -477,7 +477,7 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         // create tables in iceberg database
         if (db.getDbProperties().getIcebergProperty().isExist()) {
-            icebergTableCreationRecordMgr.registerDb(db);
+            throw new DdlException("Iceberg database is deprecated now. Please use iceberg catalog instead.");
         }
     }
 

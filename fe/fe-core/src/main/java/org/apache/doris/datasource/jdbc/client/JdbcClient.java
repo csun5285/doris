@@ -22,6 +22,7 @@ import org.apache.doris.catalog.JdbcResource;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.util.Util;
 
 import com.alibaba.druid.pool.DruidDataSource;
@@ -124,7 +125,7 @@ public abstract class JdbcClient {
             dataSource = new DruidDataSource();
             dataSource.setDriverClassLoader(classLoader);
             dataSource.setDriverClassName(driverClass);
-            dataSource.setUrl(jdbcUrl);
+            dataSource.setUrl(UrlSecurityChecker.getSafeJdbcUrl(jdbcUrl));
             dataSource.setUsername(jdbcUser);
             dataSource.setPassword(password);
             dataSource.setMinIdle(1);
@@ -140,6 +141,8 @@ public abstract class JdbcClient {
             dataSource.setMaxWait(5000);
         } catch (MalformedURLException e) {
             throw new JdbcClientException("MalformedURLException to load class about " + driverUrl, e);
+        } catch (Exception e) {
+            throw new JdbcClientException(e.getMessage());
         } finally {
             Thread.currentThread().setContextClassLoader(oldClassLoader);
         }
