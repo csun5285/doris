@@ -985,19 +985,10 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                       << commit_attachment.loaded_rows() << " prev progress "
                       << prev_progress_info.DebugString();
 
-            if (cal_row_num != commit_attachment.loaded_rows()) {
-                if (cal_row_num == 0) {
-                    LOG(WARNING) << " repeated to load task in routine load, db_id=" << db_id
-                                 << " txn_id=" << txn_id << " calculated row num " << cal_row_num
-                                 << " actual row num " << commit_attachment.loaded_rows();
-                    return;
-                }
-
-                code = MetaServiceCode::ROUTINE_LOAD_DATA_INCONSISTENT;
-                ss << " repeated to load task in routine load, db_id=" << db_id
-                   << " txn_id=" << txn_id << " calculated row num " << cal_row_num
-                   << " actual row num " << commit_attachment.loaded_rows();
-                msg = ss.str();
+            if (cal_row_num == 0) {
+                LOG(WARNING) << " repeated to load task in routine load, db_id=" << db_id
+                             << " txn_id=" << txn_id << " calculated row num " << cal_row_num
+                             << " actual row num " << commit_attachment.loaded_rows();
                 return;
             }
         }
