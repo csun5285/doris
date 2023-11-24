@@ -248,6 +248,7 @@ import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -2710,6 +2711,7 @@ public class ShowExecutor {
         List<AnalysisInfo> results = Env.getCurrentEnv().getAnalysisManager()
                 .showAnalysisJob(showStmt);
         List<List<String>> resultRows = Lists.newArrayList();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         for (AnalysisInfo analysisInfo : results) {
             List<String> row = new ArrayList<>();
             row.add(String.valueOf(analysisInfo.jobId));
@@ -2733,6 +2735,14 @@ public class ShowExecutor {
             row.add(analysisInfo.state.toString());
             row.add(Env.getCurrentEnv().getAnalysisManager().getJobProgress(analysisInfo.jobId));
             row.add(analysisInfo.scheduleType.toString());
+            LocalDateTime startTime =
+                    LocalDateTime.ofInstant(Instant.ofEpochMilli(analysisInfo.createTime),
+                            java.time.ZoneId.systemDefault());
+            LocalDateTime endTime =
+                    LocalDateTime.ofInstant(Instant.ofEpochMilli(analysisInfo.endTime),
+                            java.time.ZoneId.systemDefault());
+            row.add(startTime.format(formatter));
+            row.add(endTime.format(formatter));
             resultRows.add(row);
         }
         resultSet = new ShowResultSet(showStmt.getMetaData(), resultRows);

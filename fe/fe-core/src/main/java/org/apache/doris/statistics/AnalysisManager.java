@@ -92,7 +92,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -174,9 +174,9 @@ public class AnalysisManager implements Writable {
             }
             if (allFinished) {
                 if (hasFailure) {
-                    job.state = AnalysisState.FAILED;
+                    job.markFailed();
                 } else {
-                    job.state = AnalysisState.FINISHED;
+                    job.markFinished();
                     try {
                         updateTableStats(job);
                     } catch (Throwable e) {
@@ -223,9 +223,9 @@ public class AnalysisManager implements Writable {
                     taskMap.size() - failedCount, failedCount, 0, taskMap.size());
             if (failedCount > 0) {
                 job.message = reason.toString();
-                job.state = AnalysisState.FAILED;
+                job.markFailed();
             } else {
-                job.state = AnalysisState.FINISHED;
+                job.markFinished();
             }
             autoJobs.offer(job);
             systemJobInfoMap.remove(info.jobId);
@@ -240,7 +240,6 @@ public class AnalysisManager implements Writable {
         if (!Env.isCheckpointThread()) {
             this.taskExecutor = new AnalysisTaskExecutor(Config.statistics_simultaneously_running_task_num);
             this.statisticsCache = new StatisticsCache();
-            taskExecutor.start();
         }
     }
 
@@ -677,7 +676,7 @@ public class AnalysisManager implements Writable {
         return new ThreadPoolExecutor(0,
                 ConnectContext.get().getSessionVariable().parallelSyncAnalyzeTaskNum,
                 0, TimeUnit.SECONDS,
-                new SynchronousQueue(),
+                new LinkedBlockingQueue<>(),
                 new ThreadFactoryBuilder().setDaemon(true).setNameFormat("SYNC ANALYZE" + "-%d")
                         .build(), new BlockedPolicy(poolName,
                 StatisticsUtil.getAnalyzeTimeout()));
@@ -831,6 +830,9 @@ public class AnalysisManager implements Writable {
                 LOG.warn("Thread got interrupted when waiting sync analyze task execution finished", t);
             }
             if (!colNames.isEmpty()) {
+                if (cancelled) {
+                    throw new RuntimeException("Cancelled");
+                }
                 throw new RuntimeException("Failed to analyze following columns:[" + String.join(",", colNames)
                         + "] Reasons: " + String.join(",", errorMessages));
             }
@@ -1069,5 +1071,9 @@ public class AnalysisManager implements Writable {
 
     public void removeJob(long id) {
         idToAnalysisJob.remove(id);
+    }
+
+    public boolean hasUnFinished() {
+        return !analysisJobIdToTaskMap.isEmpty();
     }
 }

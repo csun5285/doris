@@ -520,7 +520,7 @@ public class Auth implements Writable {
 
             // create user
             try {
-                //we should not throw AnalysisException at here,so transfer it
+                // we should not throw AnalysisException at here,so transfer it
                 User user = userManager.createUser(userIdent, password, null, false);
                 if (Strings.isNullOrEmpty(user.getUserId())) {
                     user.setUserId(userId);

@@ -110,13 +110,15 @@ public:
 
     void update_wait_worker_timer() { _scanner_wait_worker_timer += _watch.elapsed_time(); }
 
+    int64_t get_scanner_wait_worker_timer() { return _scanner_wait_worker_timer; }
+
     void update_scan_cpu_timer() {
         if (bthread_self() == 0) {
             _scan_cpu_timer += _cpu_watch.elapsed_time();
             return;
         }
 
-        // If in bthread, use the cputime in TaskMeta.
+        // If in bthread, use the cputime in TaskMeta. BTHREAD_SCANNER
         bthread::TaskMeta* const m = bthread::TaskGroup::address_meta(bthread_self());
         if (m == nullptr) {
             return;
