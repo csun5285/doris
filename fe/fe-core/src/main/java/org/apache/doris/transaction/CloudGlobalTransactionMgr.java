@@ -736,7 +736,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
     }
 
     @Override
-    public void finishTransaction(long dbId, long transactionId, Set<Long> errorReplicaIds) throws UserException {
+    public void finishTransaction(long dbId, long transactionId) throws UserException {
         throw new UserException("Disallow to call finishTransaction()");
     }
 
@@ -1090,5 +1090,9 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             throw new UserException("cleanTxnLabel failed, errMsg:" + cleanTxnLabelResponse.getStatus().getMsg());
         }
         return;
+    }
+
+    public TransactionIdGenerator getTransactionIDGenerator() {
+        return null;
     }
 }

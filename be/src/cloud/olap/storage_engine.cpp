@@ -492,32 +492,6 @@ Status StorageEngine::set_cluster_id(int32_t cluster_id) {
 std::vector<DataDir*> StorageEngine::get_stores_for_create_tablet(
         TStorageMedium::type storage_medium) {
     std::vector<DataDir*> stores;
-    {
-        std::lock_guard<std::mutex> l(_store_lock);
-        for (auto& it : _store_map) {
-            if (it.second->is_used()) {
-                if (_available_storage_medium_type_count == 1 ||
-                    it.second->storage_medium() == storage_medium) {
-                    stores.push_back(it.second);
-                }
-            }
-        }
-    }
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(stores.begin(), stores.end(), g);
-    // Two random choices
-    for (int i = 0; i < stores.size(); i++) {
-        int j = i + 1;
-        if (j < stores.size()) {
-            if (stores[i]->tablet_size() > stores[j]->tablet_size()) {
-                std::swap(stores[i], stores[j]);
-            }
-            std::shuffle(stores.begin() + j, stores.end(), g);
-        } else {
-            break;
-        }
-    }
     return stores;
 }
 

@@ -200,6 +200,16 @@ public class SelectStmt extends QueryStmt {
     }
 
     @Override
+    public void forbiddenMVRewrite() {
+        super.forbiddenMVRewrite();
+        for (TableRef ref : fromClause.getTableRefs()) {
+            if (ref instanceof InlineViewRef) {
+                ((InlineViewRef) ref).getQueryStmt().forbiddenMVRewrite();
+            }
+        }
+    }
+
+    @Override
     public void reset() {
         super.reset();
         selectList.reset();
@@ -591,7 +601,7 @@ public class SelectStmt extends QueryStmt {
                 } else {
                     resultExprs.add(rewriteQueryExprByMvColumnExpr(expr, analyzer));
                 }
-                colLabels.add(expr.toColumnLabel());
+                colLabels.add("col_" + colLabels.size());
             }
         }
         // analyze valueList if exists
@@ -1270,6 +1280,9 @@ public class SelectStmt extends QueryStmt {
                             excludeAliasSMap.removeByLhsExpr(expr);
                         } catch (AnalysisException ex) {
                             // according to case3, column name do not exist, keep alias name inside alias map
+                            if (ConnectContext.get() != null) {
+                                ConnectContext.get().getState().reset();
+                            }
                         }
                     }
                     havingClauseAfterAnalyzed = havingClause.substitute(excludeAliasSMap, analyzer, false);
@@ -1840,6 +1853,9 @@ public class SelectStmt extends QueryStmt {
                     }
                 } catch (AnalysisException ex) {
                     //ignore any exception
+                    if (ConnectContext.get() != null) {
+                        ConnectContext.get().getState().reset();
+                    }
                 }
                 rewriter.rewriteList(oriGroupingExprs, analyzer);
                 // after rewrite, need reset the analyze status for later re-analyze
@@ -1861,6 +1877,9 @@ public class SelectStmt extends QueryStmt {
                     }
                 } catch (AnalysisException ex) {
                     //ignore any exception
+                    if (ConnectContext.get() != null) {
+                        ConnectContext.get().getState().reset();
+                    }
                 }
                 orderByElem.setExpr(rewriter.rewrite(orderByElem.getExpr(), analyzer));
                 // after rewrite, need reset the analyze status for later re-analyze
@@ -2612,6 +2631,14 @@ public class SelectStmt extends QueryStmt {
         }
         TableRef tbl = tblRefs.get(0);
         if (tbl.getTable().getType() != Table.TableType.OLAP) {
+            return false;
+        }
+        // ignore insert into select
+        if (fromInsert) {
+            return false;
+        }
+        // ensure no sub query
+        if (!analyzer.isRootAnalyzer()) {
             return false;
         }
         OlapTable olapTable = (OlapTable) tbl.getTable();

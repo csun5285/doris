@@ -22,6 +22,7 @@ suite("test_index_change_6") {
     def delta_time = 1000
     def alter_res = "null"
     def useTime = 0
+
     def wait_for_latest_op_on_table_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
@@ -36,6 +37,7 @@ suite("test_index_change_6") {
         }
         assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
     }
+
     def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
         for(int t = delta_time; t <= OpTimeout; t += delta_time){
             alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
@@ -108,14 +110,12 @@ suite("test_index_change_6") {
 
     // drop inverted index idx_user_id, idx_note
     sql """ DROP INDEX idx_user_id ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ DROP INDEX idx_note ON ${tableName} """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
 
     // create inverted index
     sql """ CREATE INDEX idx_user_id ON ${tableName}(`user_id`) USING INVERTED """
-    wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ CREATE INDEX idx_note ON ${tableName}(`note`) USING INVERTED PROPERTIES("parser" = "english") """
+
     wait_for_latest_op_on_table_finish(tableName, timeout)
 
     // build inverted index

@@ -192,6 +192,7 @@ suite("test_pk_uk_case", "inverted_index") {
         """
 
         sql "sync"
+
         // count(*)
         def result0 = sql """ SELECT count(*) FROM ${tableNamePk}; """
         def result1 = sql """ SELECT count(*) FROM ${tableNameUk}; """

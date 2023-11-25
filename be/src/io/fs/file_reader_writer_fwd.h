@@ -31,5 +31,8 @@ class FileWriter;
 using FileReaderSPtr = std::shared_ptr<FileReader>;
 using FileWriterPtr = std::unique_ptr<FileWriter>;
 
+class FileReaderOptions;
+struct FileWriterOptions;
+
 } // namespace io
 } // namespace doris

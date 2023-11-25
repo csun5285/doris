@@ -268,11 +268,6 @@ public:
     Status capture_rs_readers(const std::vector<Version>& version_path,
                               std::vector<RowSetSplits>* rs_splits) const;
 
-    const std::vector<RowsetMetaSharedPtr> delete_predicates() {
-        return _tablet_meta->delete_predicates();
-    }
-    bool version_for_delete_predicate(const Version& version);
-
     // meta lock
     std::shared_mutex& get_header_lock() { return _meta_lock; }
     std::mutex& get_rowset_update_lock() { return _rowset_update_lock; }
@@ -342,6 +337,11 @@ public:
         _last_full_compaction_success_millis = millis;
     }
 
+    int64_t last_base_compaction_schedule_time() { return _last_base_compaction_schedule_millis; }
+    void set_last_base_compaction_schedule_time(int64_t millis) {
+        _last_base_compaction_schedule_millis = millis;
+    }
+
     void delete_all_files();
 
     void check_tablet_path_exists();
@@ -404,6 +404,21 @@ public:
     void set_clone_occurred(bool clone_occurred) { _is_clone_occurred = clone_occurred; }
     bool get_clone_occurred() { return _is_clone_occurred; }
 
+    void set_cumulative_compaction_policy(
+            std::shared_ptr<CumulativeCompactionPolicy> cumulative_compaction_policy) {
+        _cumulative_compaction_policy = cumulative_compaction_policy;
+    }
+
+    std::shared_ptr<CumulativeCompactionPolicy> get_cumulative_compaction_policy() {
+        return _cumulative_compaction_policy;
+    }
+
+    void set_last_base_compaction_status(std::string status) {
+        _last_base_compaction_status = status;
+    }
+
+    std::string get_last_base_compaction_status() { return _last_base_compaction_status; }
+
     inline bool all_beta() const {
         std::shared_lock rdlock(_meta_lock);
         return _tablet_meta->all_beta();
@@ -425,6 +440,7 @@ public:
             RowsetSharedPtr rowset_ptr, std::unique_ptr<RowsetWriter>* rowset_writer,
             std::shared_ptr<PartialUpdateInfo> partial_update_info = nullptr,
             int64_t txn_expiration = 0);
+
     Status create_transient_rowset_writer(RowsetWriterContext& context, const RowsetId& rowset_id,
                                           std::unique_ptr<RowsetWriter>* rowset_writer);
 
@@ -513,7 +529,11 @@ public:
                                  const TabletColumn& tablet_column,
                                  vectorized::MutableColumnPtr& dst);
 
-    Status fetch_value_through_row_column(RowsetSharedPtr input_rowset, uint32_t segid,
+    // We use the TabletSchema from the caller because the TabletSchema in the rowset'meta
+    // may be outdated due to schema change. Also note that the the cids should indicate the indexes
+    // of the columns in the TabletSchema passed in.
+    Status fetch_value_through_row_column(RowsetSharedPtr input_rowset,
+                                          const TabletSchema& tablet_schema, uint32_t segid,
                                           const std::vector<uint32_t>& rowids,
                                           const std::vector<uint32_t>& cids,
                                           vectorized::Block& block);
@@ -579,6 +599,7 @@ public:
             RowsetSharedPtr dst_rowset,
             const std::map<RowsetSharedPtr, std::list<std::pair<RowLocation, RowLocation>>>&
                     location_map);
+
     Status update_delete_bitmap(const RowsetSharedPtr& rowset, DeleteBitmapPtr delete_bitmap,
                                 const RowsetIdUnorderedSet& pre_rowset_ids);
 
@@ -592,7 +613,8 @@ public:
 
     std::vector<RowsetSharedPtr> get_snapshot_rowset(bool include_stale_rowset = false) const;
 
-    RowsetIdUnorderedSet all_rs_id(int64_t max_version) const;
+    Status all_rs_id(int64_t max_version, RowsetIdUnorderedSet* rowset_ids) const;
+
     void sort_block(vectorized::Block& in_block, vectorized::Block& output_block);
 
     bool check_all_rowset_segment();
@@ -763,10 +785,13 @@ private:
     std::atomic<int64_t> _last_base_compaction_success_millis;
     // timestamp of last full compaction success
     std::atomic<int64_t> _last_full_compaction_success_millis;
+    // timestamp of last base compaction schedule time
+    std::atomic<int64_t> _last_base_compaction_schedule_millis;
     std::atomic<int64_t> _cumulative_point;
     std::atomic<int64_t> _cumulative_promotion_size;
     std::atomic<int32_t> _newly_created_rowset_num;
     std::atomic<int64_t> _last_checkpoint_time;
+    std::string _last_base_compaction_status;
 
     // CLOUD_MODE
     int64_t _base_compaction_cnt = 0;

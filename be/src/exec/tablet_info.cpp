@@ -69,7 +69,11 @@ Status OlapTableSchemaParam::init(const POlapTableSchemaParam& pschema) {
     for (auto& col : pschema.partial_update_input_columns()) {
         _partial_update_input_columns.insert(col);
     }
+<<<<<<< HEAD
     std::unordered_map<std::pair<std::string, std::string>, SlotDescriptor*> slots_map;
+=======
+    std::unordered_map<std::pair<std::string, FieldType>, SlotDescriptor*> slots_map;
+>>>>>>> merge-doris-2.0.3
     _tuple_desc = _obj_pool.add(new TupleDescriptor(pschema.tuple_desc()));
     // When FE version is less than 2.0.3, But BE upgrade to 2.0.3,
     // the filed col_type in slot_desc is INVALID_TYPE default.
@@ -81,8 +85,13 @@ Status OlapTableSchemaParam::init(const POlapTableSchemaParam& pschema) {
         _tuple_desc->add_slot(slot_desc);
         string data_type;
         EnumToString(TPrimitiveType, to_thrift(slot_desc->col_type()), data_type);
+<<<<<<< HEAD
         LOG(INFO) << "lightman " << data_type;
         slots_map.emplace(std::make_pair(to_lower(slot_desc->col_name()), std::move(data_type)),
+=======
+        slots_map.emplace(std::make_pair(to_lower(slot_desc->col_name()),
+                                         TabletColumn::get_field_type_by_string(data_type)),
+>>>>>>> merge-doris-2.0.3
                           slot_desc);
     }
 
@@ -93,9 +102,16 @@ Status OlapTableSchemaParam::init(const POlapTableSchemaParam& pschema) {
         for (auto& pcolumn_desc : p_index.columns_desc()) {
             if (!_is_partial_update ||
                 _partial_update_input_columns.count(pcolumn_desc.name()) > 0) {
+<<<<<<< HEAD
                 std::string col_type = has_invalid_type ? "INVALID_TYPE" : pcolumn_desc.type();
                 auto it = slots_map.find(
                         std::make_pair(to_lower(pcolumn_desc.name()), col_type));
+=======
+                auto it = slots_map.find(std::make_pair(
+                        to_lower(pcolumn_desc.name()),
+                        TabletColumn::get_field_type_by_string(
+                                has_invalid_type ? "INVALID_TYPE" : pcolumn_desc.type())));
+>>>>>>> merge-doris-2.0.3
                 if (it == std::end(slots_map)) {
                     return Status::InternalError("unknown index column, column={}, type={}",
                                                  pcolumn_desc.name(), pcolumn_desc.type());
@@ -154,9 +170,16 @@ Status OlapTableSchemaParam::init(const TOlapTableSchemaParam& tschema) {
         index->index_id = t_index.id;
         index->schema_hash = t_index.schema_hash;
         for (auto& tcolumn_desc : t_index.columns_desc) {
+<<<<<<< HEAD
             TPrimitiveType::type col_type = has_invalid_type ? TPrimitiveType::INVALID_TYPE : tcolumn_desc.column_type.type;
             auto it = slots_map.find(std::make_pair(to_lower(tcolumn_desc.column_name),
                                                     thrift_to_type(col_type)));
+=======
+            TPrimitiveType::type col_type =
+                    has_invalid_type ? TPrimitiveType::INVALID_TYPE : tcolumn_desc.column_type.type;
+            auto it = slots_map.find(
+                    std::make_pair(to_lower(tcolumn_desc.column_name), thrift_to_type(col_type)));
+>>>>>>> merge-doris-2.0.3
             if (!_is_partial_update ||
                 _partial_update_input_columns.count(tcolumn_desc.column_name) > 0) {
                 if (it == slots_map.end()) {
@@ -271,11 +294,18 @@ Status VOlapTablePartitionParam::init() {
         }
     }
     if (_distributed_slot_locs.empty()) {
-        _compute_tablet_index = [](BlockRow* key, int64_t num_buckets) -> uint32_t {
-            return butil::fast_rand() % num_buckets;
+        _compute_tablet_index = [](BlockRow* key,
+                                   const VOlapTablePartition& partition) -> uint32_t {
+            if (partition.load_tablet_idx == -1) {
+                // load_to_single_tablet = false, just do random
+                return butil::fast_rand() % partition.num_buckets;
+            }
+            // load_to_single_tablet = ture, do round-robin
+            return partition.load_tablet_idx % partition.num_buckets;
         };
     } else {
-        _compute_tablet_index = [this](BlockRow* key, int64_t num_buckets) -> uint32_t {
+        _compute_tablet_index = [this](BlockRow* key,
+                                       const VOlapTablePartition& partition) -> uint32_t {
             uint32_t hash_val = 0;
             for (int i = 0; i < _distributed_slot_locs.size(); ++i) {
                 auto slot_desc = _slots[_distributed_slot_locs[i]];
@@ -288,7 +318,7 @@ Status VOlapTablePartitionParam::init() {
                     hash_val = HashUtil::zlib_crc_hash_null(hash_val);
                 }
             }
-            return hash_val % num_buckets;
+            return hash_val % partition.num_buckets;
         };
     }
 
@@ -301,6 +331,10 @@ Status VOlapTablePartitionParam::init() {
         auto part = _obj_pool.add(new VOlapTablePartition(&_partition_block));
         part->id = t_part.id;
         part->is_mutable = t_part.is_mutable;
+        // only load_to_single_tablet = true will set load_tablet_idx
+        if (t_part.__isset.load_tablet_idx) {
+            part->load_tablet_idx = t_part.load_tablet_idx;
+        }
 
         if (!_is_in_partition) {
             if (t_part.__isset.start_keys) {
@@ -378,7 +412,7 @@ bool VOlapTablePartitionParam::find_partition(BlockRow* block_row,
 
 uint32_t VOlapTablePartitionParam::find_tablet(BlockRow* block_row,
                                                const VOlapTablePartition& partition) const {
-    return _compute_tablet_index(block_row, partition.num_buckets);
+    return _compute_tablet_index(block_row, partition);
 }
 
 Status VOlapTablePartitionParam::_create_partition_keys(const std::vector<TExprNode>& t_exprs,

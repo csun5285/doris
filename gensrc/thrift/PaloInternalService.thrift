@@ -248,6 +248,10 @@ struct TQueryOptions {
 
   85: optional bool enable_page_cache = false;
 
+  86: optional i32 analyze_timeout = 43200;
+
+  87: optional bool faster_float_convert = false;
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }

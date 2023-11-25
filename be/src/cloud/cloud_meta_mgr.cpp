@@ -471,7 +471,8 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
 
     // old rowset sync incremental versions of delete bitmap
     if (old_max_version < new_max_version) {
-        RowsetIdUnorderedSet all_rs_ids = tablet->all_rs_id(old_max_version);
+        RowsetIdUnorderedSet all_rs_ids;
+        RETURN_IF_ERROR(tablet->all_rs_id(old_max_version, &all_rs_ids));
         for (auto& rs_id : all_rs_ids) {
             req.add_rowset_ids(rs_id.to_string());
             req.add_begin_versions(old_max_version + 1);

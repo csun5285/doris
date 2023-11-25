@@ -91,6 +91,7 @@ public class SlotDescriptor {
         this.isAgg = false;
         this.stats = src.stats;
         this.type = src.type;
+        this.sourceExprs.add(new SlotRef(src));
     }
 
     public boolean isMultiRef() {
@@ -294,6 +295,7 @@ public class SlotDescriptor {
             tSlotDescriptor.setColUniqueId(column.getUniqueId());
             tSlotDescriptor.setPrimitiveType(column.getDataType().toThrift());
             tSlotDescriptor.setIsKey(column.isKey());
+            tSlotDescriptor.setColDefaultValue(column.getDefaultValue());
         }
         return tSlotDescriptor;
     }

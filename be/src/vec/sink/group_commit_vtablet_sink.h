@@ -29,11 +29,11 @@ public:
                               const std::vector<TExpr>& texprs, Status* status);
 
     Status write_wal(vectorized::Block* block, RuntimeState* state, int64_t num_rows,
-                     int64_t filtered_rows, Bitmap* filter_bitmap);
+                     int64_t filtered_rows, std::vector<char>& filter_bitmap);
 
     void handle_block(vectorized::Block* input_block, int64_t rows, int64_t filter_rows,
                       RuntimeState* state, vectorized::Block* output_block,
-                      Bitmap* filter_bitmap) override;
+                      std::vector<char>& filter_bitmap) override;
     Status init(const TDataSink& sink) override;
     Status prepare(RuntimeState* state) override;
     Status close(RuntimeState* state, Status exec_status) override;

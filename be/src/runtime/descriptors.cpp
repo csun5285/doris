@@ -65,7 +65,9 @@ SlotDescriptor::SlotDescriptor(const TSlotDescriptor& tdesc)
           _field_idx(-1),
           _is_materialized(tdesc.isMaterialized),
           _is_key(tdesc.is_key),
-          _need_materialize(tdesc.need_materialize) {}
+          _need_materialize(tdesc.need_materialize),
+          _column_paths(tdesc.column_paths),
+          _col_default_value(tdesc.__isset.col_default_value ? tdesc.col_default_value : "") {}
 
 SlotDescriptor::SlotDescriptor(const PSlotDescriptor& pdesc)
         : _id(pdesc.id()),
@@ -190,6 +192,7 @@ MaxComputeTableDescriptor::MaxComputeTableDescriptor(const TTableDescriptor& tde
           _table(tdesc.mcTable.table),
           _access_key(tdesc.mcTable.access_key),
           _secret_key(tdesc.mcTable.secret_key),
+          _partition_spec(tdesc.mcTable.partition_spec),
           _public_access(tdesc.mcTable.public_access) {}
 
 MaxComputeTableDescriptor::~MaxComputeTableDescriptor() = default;

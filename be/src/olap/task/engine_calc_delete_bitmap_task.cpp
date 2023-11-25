@@ -158,12 +158,13 @@ void TabletCalcDeleteBitmapTask::handle() {
             _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
             return;
         }
-        RowsetSharedPtr transient_rowset = rowset_writer->build();
-        if (!transient_rowset) {
+        RowsetSharedPtr transient_rowset;
+        auto st = rowset_writer->build(transient_rowset);
+        if (!st.ok()) {
             std::string msg = fmt::format(
                     "failed to build the transient rowset. rowset_id={}, tablet_id={}, txn_id={}",
                     rowset->rowset_id().to_string(), _tablet->tablet_id(), _transaction_id);
-            LOG(WARNING) << msg;
+            LOG(WARNING) << msg << " status=" << st;
             status = Status::Error<ErrorCode::INTERNAL_ERROR, false>(msg);
             _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
             return;

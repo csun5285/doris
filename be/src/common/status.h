@@ -291,6 +291,7 @@ E(ROWSETS_EXPIRED, -7311);
 constexpr bool capture_stacktrace(int code) {
     return code != ErrorCode::OK
         && code != ErrorCode::END_OF_FILE
+        && code != ErrorCode::DATA_QUALITY_ERROR
         && code != ErrorCode::MEM_LIMIT_EXCEEDED
         && code != ErrorCode::TRY_LOCK_FAILED
         && code != ErrorCode::TOO_MANY_SEGMENTS
@@ -302,6 +303,7 @@ constexpr bool capture_stacktrace(int code) {
         && code != ErrorCode::CUMULATIVE_NO_SUITABLE_VERSION
         && code != ErrorCode::FULL_NO_SUITABLE_VERSION
         && code != ErrorCode::PUBLISH_VERSION_NOT_CONTINUOUS
+        && code != ErrorCode::PUBLISH_TIMEOUT
         && code != ErrorCode::ROWSET_RENAME_FILE_FAILED
         && code != ErrorCode::SEGCOMPACTION_INIT_READER
         && code != ErrorCode::SEGCOMPACTION_INIT_WRITER
@@ -316,6 +318,7 @@ constexpr bool capture_stacktrace(int code) {
         && code != ErrorCode::INVERTED_INDEX_BUILD_WAITTING
         && code != ErrorCode::META_KEY_NOT_FOUND
         && code != ErrorCode::PUSH_VERSION_ALREADY_EXIST
+        && code != ErrorCode::VERSION_NOT_EXIST
         && code != ErrorCode::TABLE_ALREADY_DELETED_ERROR
         && code != ErrorCode::TRANSACTION_NOT_EXIST
         && code != ErrorCode::TRANSACTION_ALREADY_VISIBLE
@@ -364,13 +367,16 @@ public:
 
     template <bool stacktrace = true>
     Status static create(const TStatus& status) {
-        return Error<stacktrace>(status.status_code,
-                                 status.error_msgs.empty() ? "" : status.error_msgs[0]);
+        return Error<stacktrace>(
+                status.status_code,
+                "TStatus: " + (status.error_msgs.empty() ? "" : status.error_msgs[0]));
     }
 
+    template <bool stacktrace = true>
     Status static create(const PStatus& pstatus) {
-        return Error<true>(pstatus.status_code(),
-                           pstatus.error_msgs_size() == 0 ? "" : pstatus.error_msgs(0));
+        return Error<stacktrace>(
+                pstatus.status_code(),
+                "PStatus: " + (pstatus.error_msgs_size() == 0 ? "" : pstatus.error_msgs(0)));
     }
 
     template <int code, bool stacktrace = true, typename... Args>
@@ -390,7 +396,7 @@ public:
         }
 #ifdef ENABLE_STACKTRACE
         if (stacktrace && capture_stacktrace(code)) {
-            status._err_msg->_stack = get_stack_trace();
+            status._err_msg->_stack = get_stack_trace(1);
             LOG(WARNING) << "meet error status: " << status; // may print too many stacks.
         }
 #endif
@@ -399,10 +405,10 @@ public:
 
     static Status OK() { return Status(); }
 
-#define ERROR_CTOR(name, code)                                                 \
-    template <typename... Args>                                                \
-    static Status name(std::string_view msg, Args&&... args) {                 \
-        return Error<ErrorCode::code, true>(msg, std::forward<Args>(args)...); \
+#define ERROR_CTOR(name, code)                                                       \
+    template <bool stacktrace = true, typename... Args>                              \
+    static Status name(std::string_view msg, Args&&... args) {                       \
+        return Error<ErrorCode::code, stacktrace>(msg, std::forward<Args>(args)...); \
     }
     ERROR_CTOR(PublishTimeout, PUBLISH_TIMEOUT)
     ERROR_CTOR(MemoryAllocFailed, MEM_ALLOC_FAILED)
@@ -472,6 +478,8 @@ public:
     std::string to_json() const;
 
     int code() const { return _code; }
+
+    std::string msg() const { return _err_msg != nullptr ? _err_msg->_msg : ""; }
 
     /// Clone this status and add the specified prefix to the message.
     ///

@@ -83,7 +83,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
     for (auto& split : rs_splits) {
         auto& rs_meta = split.rs_reader->rowset()->rowset_meta();
         if (rs_meta->has_delete_predicate()) {
-            base_tablet_schema->merge_dropped_columns(rs_meta->tablet_schema());
+            base_tablet_schema->merge_dropped_columns(*rs_meta->tablet_schema());
             delete_predicates.push_back(rs_meta);
         }
     }
@@ -255,10 +255,12 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         RETURN_IF_ERROR(sc_procedure->process(rs_reader, rowset_writer.get(), sc_params.new_tablet,
                                               sc_params.base_tablet, sc_params.base_tablet_schema));
 
-        auto new_rowset = rowset_writer->build();
-        if (!new_rowset) {
-            return Status::InternalError("failed to build rowset, version=[{}-{}]",
-                                         rs_reader->version().first, rs_reader->version().second);
+        RowsetSharedPtr new_rowset;
+        st = rowset_writer->build(new_rowset);
+        if (!st.ok()) {
+            return Status::InternalError("failed to build rowset, version=[{}-{}] status={}",
+                                         rs_reader->version().first, rs_reader->version().second,
+                                         st.to_string());
         }
 
         st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta().get(), true, &existed_rs_meta);

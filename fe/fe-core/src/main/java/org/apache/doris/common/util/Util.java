@@ -21,7 +21,6 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
-import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeNameFormat;
 import org.apache.doris.common.UrlSecurityChecker;
 import org.apache.doris.common.UserException;
@@ -544,7 +543,7 @@ public class Util {
 
 
     @NotNull
-    public static TFileFormatType getFileFormatTypeFromPath(String path, TFileCompressType compressType)
+    public static TFileFormatType getFileFormatTypeFromPath(String path)
             throws UserException {
         String lowerCasePath = path.toLowerCase();
         if (lowerCasePath.contains(".parquet") || lowerCasePath.contains(".parq")) {
@@ -552,87 +551,28 @@ public class Util {
         } else if (lowerCasePath.contains(".orc")) {
             return TFileFormatType.FORMAT_ORC;
         } else if (lowerCasePath.contains(".json")) {
-            if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                    || compressType == TFileCompressType.PLAIN) {
-                return TFileFormatType.FORMAT_JSON;
-            } else if (compressType == TFileCompressType.GZ) {
-                return TFileFormatType.FORMAT_JSON_GZ;
-            } else if (compressType == TFileCompressType.LZO) {
-                return TFileFormatType.FORMAT_JSON_LZO;
-            } else if (compressType == TFileCompressType.BZ2) {
-                return TFileFormatType.FORMAT_JSON_BZ2;
-            } else if (compressType == TFileCompressType.LZ4FRAME) {
-                return TFileFormatType.FORMAT_JSON_LZ4FRAME;
-            }  else if (compressType == TFileCompressType.DEFLATE) {
-                return TFileFormatType.FORMAT_JSON_DEFLATE;
-            }
-            throw new UserException(
-                    "Not supported file format: " + lowerCasePath + ", and compression: " + compressType);
+            return TFileFormatType.FORMAT_JSON;
         } else {
-            if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                    || compressType == TFileCompressType.PLAIN) {
-                return TFileFormatType.FORMAT_CSV_PLAIN;
-            } else if (compressType == TFileCompressType.GZ) {
-                return TFileFormatType.FORMAT_CSV_GZ;
-            } else if (compressType == TFileCompressType.LZO) {
-                return TFileFormatType.FORMAT_CSV_LZO;
-            } else if (compressType == TFileCompressType.BZ2) {
-                return TFileFormatType.FORMAT_CSV_BZ2;
-            } else if (compressType == TFileCompressType.LZ4FRAME) {
-                return TFileFormatType.FORMAT_CSV_LZ4FRAME;
-            }  else if (compressType == TFileCompressType.DEFLATE) {
-                return TFileFormatType.FORMAT_CSV_DEFLATE;
-            }
-            throw new UserException(
-                    "Not supported file format: " + lowerCasePath + ", and compression: " + compressType);
+            return TFileFormatType.FORMAT_CSV_PLAIN;
         }
     }
 
-    public static TFileFormatType getFileFormatTypeFromName(String formatName, TFileCompressType compressType)
+    public static TFileFormatType getFileFormatTypeFromName(String formatName)
             throws UserException {
         String lowerFileFormat = Objects.requireNonNull(formatName).toLowerCase();
-        if (lowerFileFormat.equals("parquet")) {
+        if (lowerFileFormat.equals(FileFormatConstants.FORMAT_PARQUET)) {
             return TFileFormatType.FORMAT_PARQUET;
-        } else if (lowerFileFormat.equals("orc")) {
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_ORC)) {
             return TFileFormatType.FORMAT_ORC;
-        } else if (lowerFileFormat.equals("json")) {
-            if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                    || compressType == TFileCompressType.PLAIN) {
-                return TFileFormatType.FORMAT_JSON;
-            } else if (compressType == TFileCompressType.GZ) {
-                return TFileFormatType.FORMAT_JSON_GZ;
-            } else if (compressType == TFileCompressType.LZO) {
-                return TFileFormatType.FORMAT_JSON_LZO;
-            } else if (compressType == TFileCompressType.BZ2) {
-                return TFileFormatType.FORMAT_JSON_BZ2;
-            } else if (compressType == TFileCompressType.LZ4FRAME) {
-                return TFileFormatType.FORMAT_JSON_LZ4FRAME;
-            }  else if (compressType == TFileCompressType.DEFLATE) {
-                return TFileFormatType.FORMAT_JSON_DEFLATE;
-            }
-            throw new UserException(
-                "Not supported file format: " + lowerFileFormat + ", and compression: " + compressType);
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_JSON)) {
+            return TFileFormatType.FORMAT_JSON;
             // csv/csv_with_name/csv_with_names_and_types treat as csv format
-        } else if (lowerFileFormat.equals(FeConstants.csv) || lowerFileFormat.equals(FeConstants.csv_with_names)
-                || lowerFileFormat.equals(FeConstants.csv_with_names_and_types)
+        } else if (lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV)
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV_WITH_NAMES)
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_CSV_WITH_NAMES_AND_TYPES)
                 // TODO: Add TEXTFILE to TFileFormatType to Support hive text file format.
-                || lowerFileFormat.equals(FeConstants.text)) {
-            if (compressType == null || compressType == TFileCompressType.UNKNOWN
-                    || compressType == TFileCompressType.PLAIN) {
-                return TFileFormatType.FORMAT_CSV_PLAIN;
-            } else if (compressType == TFileCompressType.GZ) {
-                return TFileFormatType.FORMAT_CSV_GZ;
-            } else if (compressType == TFileCompressType.LZO) {
-                return TFileFormatType.FORMAT_CSV_LZO;
-            } else if (compressType == TFileCompressType.BZ2) {
-                return TFileFormatType.FORMAT_CSV_BZ2;
-            } else if (compressType == TFileCompressType.LZ4FRAME) {
-                return TFileFormatType.FORMAT_CSV_LZ4FRAME;
-            }  else if (compressType == TFileCompressType.DEFLATE) {
-                return TFileFormatType.FORMAT_CSV_DEFLATE;
-            }
-            throw new UserException(
-                    "Not supported file format: " + lowerFileFormat + ", and compression: " + compressType);
+                || lowerFileFormat.equals(FileFormatConstants.FORMAT_HIVE_TEXT)) {
+            return TFileFormatType.FORMAT_CSV_PLAIN;
         } else if (lowerFileFormat.equals("wal")) {
             return TFileFormatType.FORMAT_WAL;
         } else {

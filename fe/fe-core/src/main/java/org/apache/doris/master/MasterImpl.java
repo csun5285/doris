@@ -68,6 +68,7 @@ import org.apache.thrift.TException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class MasterImpl {
@@ -495,6 +496,10 @@ public class MasterImpl {
     }
 
     private void finishPublishVersion(AgentTask task, TFinishTaskRequest request) {
+        Map<Long, Long> succTablets = null;
+        if (request.isSetSuccTablets()) {
+            succTablets = request.getSuccTablets();
+        }
         List<Long> errorTabletIds = null;
         if (request.isSetErrorTabletIds()) {
             errorTabletIds = request.getErrorTabletIds();
@@ -508,12 +513,16 @@ public class MasterImpl {
         }
 
         PublishVersionTask publishVersionTask = (PublishVersionTask) task;
+        publishVersionTask.setSuccTablets(succTablets);
         publishVersionTask.addErrorTablets(errorTabletIds);
         publishVersionTask.setFinished(true);
 
         if (request.getTaskStatus().getStatusCode() != TStatusCode.OK) {
             // not remove the task from queue and be will retry
             return;
+        }
+        if (request.isSetTableIdToDeltaNumRows()) {
+            publishVersionTask.setTableIdToDeltaNumRows(request.getTableIdToDeltaNumRows());
         }
         AgentTaskQueue.removeTask(publishVersionTask.getBackendId(),
                                   publishVersionTask.getTaskType(),
@@ -531,7 +540,11 @@ public class MasterImpl {
         } else {
             LOG.warn("invalid clone task, ignore it. {}", task);
         }
-
+        if (request.isSetReportVersion()) {
+            long reportVersion = request.getReportVersion();
+            Env.getCurrentSystemInfo().updateBackendReportVersion(
+                    task.getBackendId(), reportVersion, task.getDbId(), task.getTableId());
+        }
         AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.CLONE, task.getSignature());
     }
 

@@ -110,6 +110,10 @@ public:
     bool is_key() const { return _is_key; }
     bool need_materialize() const { return _need_materialize; }
 
+<<<<<<< HEAD
+=======
+    const std::string& col_default_value() const { return _col_default_value; }
+>>>>>>> merge-doris-2.0.3
     PrimitiveType col_type() const { return _col_type; }
 
 private:
@@ -145,6 +149,9 @@ private:
 
     const bool _is_key;
     const bool _need_materialize;
+    const std::vector<std::string> _column_paths;
+
+    const std::string _col_default_value;
 
     SlotDescriptor(const TSlotDescriptor& tdesc);
     SlotDescriptor(const PSlotDescriptor& pdesc);
@@ -233,6 +240,7 @@ public:
     const std::string table() const { return _table; }
     const std::string access_key() const { return _access_key; }
     const std::string secret_key() const { return _secret_key; }
+    const std::string partition_spec() const { return _partition_spec; }
     const std::string public_access() const { return _public_access; }
 
 private:
@@ -241,6 +249,7 @@ private:
     std::string _table;
     std::string _access_key;
     std::string _secret_key;
+    std::string _partition_spec;
     std::string _public_access;
 };
 

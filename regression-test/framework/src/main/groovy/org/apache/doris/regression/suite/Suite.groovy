@@ -26,6 +26,7 @@ import com.google.gson.Gson
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 import com.google.common.collect.ImmutableList
+import org.apache.doris.regression.Config
 import org.apache.doris.regression.action.BenchmarkAction
 import org.apache.doris.regression.util.DataUtils
 import org.apache.doris.regression.util.OutputUtils
@@ -41,6 +42,7 @@ import org.apache.doris.regression.util.Hdfs
 import org.apache.doris.regression.util.JdbcUtils
 import org.junit.Assert
 import org.apache.doris.regression.util.SuiteUtils
+import org.apache.doris.regression.util.DebugPoint
 import org.junit.jupiter.api.Assertions
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -57,6 +59,11 @@ import java.util.stream.Collectors
 import java.util.stream.LongStream
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
+import java.sql.DriverManager
+import java.sql.PreparedStatement
+import java.sql.ResultSetMetaData
+import org.junit.Assert
+
 @Slf4j
 class Suite implements GroovyInterceptable {
     final SuiteContext context
@@ -70,10 +77,15 @@ class Suite implements GroovyInterceptable {
     final List<Throwable> lazyCheckExceptions = new Vector<>()
     final List<Future> lazyCheckFutures = new Vector<>()
 
+    SuiteCluster cluster
+    DebugPoint debugPoint
+
     Suite(String name, String group, SuiteContext context) {
         this.name = name
         this.group = group
         this.context = context
+        this.cluster = null
+        this.debugPoint = new DebugPoint(this)
     }
 
     String getConf(String key, String defaultValue = null) {
@@ -196,6 +208,35 @@ class Suite implements GroovyInterceptable {
         return context.connect(user, password, url, actionSupplier)
     }
 
+    public void docker(ClusterOptions options = new ClusterOptions(), Closure actionSupplier) throws Exception {
+        if (context.config.excludeDockerTest) {
+            return
+        }
+
+        cluster = new SuiteCluster(name, context.config)
+        try {
+            cluster.destroy(true)
+            cluster.init(options)
+
+            def user = "root"
+            def password = ""
+            def masterFe = cluster.getMasterFe()
+            def url = String.format(
+                    "jdbc:mysql://%s:%s/?useLocalSessionState=false&allowLoadLocalInfile=false",
+                    masterFe.host, masterFe.queryPort)
+            def conn = DriverManager.getConnection(url, user, password)
+            def sql = "CREATE DATABASE IF NOT EXISTS " + context.dbName
+            logger.info("try create database if not exists {}", context.dbName)
+            JdbcUtils.executeToList(conn, sql)
+            url = Config.buildUrlWithDb(url, context.dbName)
+
+            logger.info("connect to docker cluster: suite={}, url={}", name, url)
+            connect(user, password, url, actionSupplier)
+        } finally {
+            cluster.destroy(context.config.dockerEndDeleteFiles)
+        }
+    }
+
     String get_ccr_body(String table) {
         Gson gson = new Gson()
 
@@ -236,6 +277,28 @@ class Suite implements GroovyInterceptable {
         logger.info("Execute sql: ${stmt}".toString())
         def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
         return result
+    }
+
+    def sql_return_maparray(String sqlStr) {
+        logger.info("Execute sql: ${sqlStr}".toString())
+        def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
+
+        // get all column names as list
+        List<String> columnNames = new ArrayList<>()
+        for (int i = 0; i < meta.getColumnCount(); i++) {
+            columnNames.add(meta.getColumnName(i + 1))
+        }
+
+        // add result to res map list, each row is a map with key is column name
+        List<Map<String, Object>> res = new ArrayList<>()
+        for (int i = 0; i < result.size(); i++) {
+            Map<String, Object> row = new HashMap<>()
+            for (int j = 0; j < columnNames.size(); j++) {
+                row.put(columnNames.get(j), result.get(i).get(j))
+            }
+            res.add(row)
+        }
+        return res;
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
@@ -438,7 +501,7 @@ class Suite implements GroovyInterceptable {
         String s3Url = "http://${s3BucketName}.${s3Endpoint}"
         return s3Url
     }
-    
+
     void scpFiles(String username, String host, String files, String filePath, boolean fromDst=true) {
         String cmd = "scp -r ${username}@${host}:${files} ${filePath}"
         if (!fromDst) {
@@ -449,7 +512,7 @@ class Suite implements GroovyInterceptable {
         def code = process.waitFor()
         Assert.assertEquals(0, code)
     }
-    
+
     void sshExec(String username, String host, String cmd) {
         String command = "ssh ${username}@${host} '${cmd}'"
         def cmds = ["/bin/bash", "-c", command]
@@ -461,7 +524,7 @@ class Suite implements GroovyInterceptable {
         assert errMsg.length() == 0: "error occurred!" + errMsg
         assert p.exitValue() == 0
     }
-    
+
 
     void getBackendIpHttpPort(Map<String, String> backendId_to_backendIP, Map<String, String> backendId_to_backendHttpPort) {
         List<List<Object>> backends = sql("show backends");
@@ -471,7 +534,7 @@ class Suite implements GroovyInterceptable {
             backendId_to_backendHttpPort.put(String.valueOf(backend[0]), String.valueOf(backend[4]));
         }
         return;
-    } 
+    }
 
     String getProvider() {
         String s3Endpoint = context.config.otherConfigs.get("s3Endpoint")
@@ -555,16 +618,48 @@ class Suite implements GroovyInterceptable {
     PreparedStatement prepareStatement(String sql) {
         logger.info("Execute sql: ${sql}".toString())
         return JdbcUtils.prepareStatement(context.getConnection(), sql)
-    } 
+    }
+
+    List<List<Object>> hive_docker(String sqlStr, boolean isOrder = false){
+        String cleanedSqlStr = sqlStr.replaceAll("\\s*;\\s*\$", "")
+        def (result, meta) = JdbcUtils.executeToList(context.getHiveDockerConnection(), cleanedSqlStr)
+        if (isOrder) {
+            result = DataUtils.sortByToString(result)
+        }
+        return result
+    }
+
+    List<List<Object>> hive_remote(String sqlStr, boolean isOrder = false){
+        String cleanedSqlStr = sqlStr.replaceAll("\\s*;\\s*\$", "")
+        def (result, meta) = JdbcUtils.executeToList(context.getHiveRemoteConnection(), cleanedSqlStr)
+        if (isOrder) {
+            result = DataUtils.sortByToString(result)
+        }
+        return result
+    }
 
     void quickRunTest(String tag, Object arg, boolean isOrder = false) {
         logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${arg}".toString())
         if (context.config.generateOutputFile || context.config.forceGenerateOutputFile) {
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
-                tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
+                if (tag.contains("hive_docker")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveDockerConnection(),  (PreparedStatement) arg)
+                }else if (tag.contains("hive_remote")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveRemoteConnection(),  (PreparedStatement) arg)
+                }
+                else{
+                    tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
+                }
             } else {
-                tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
+                if (tag.contains("hive_docker")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveDockerConnection(), (String) arg)
+                }else if (tag.contains("hive_remote")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveRemoteConnection(), (String) arg)
+                }
+                else{
+                    tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
+                }
             }
             def (result, meta) = tupleResult
             if (isOrder) {
@@ -586,9 +681,23 @@ class Suite implements GroovyInterceptable {
             OutputUtils.TagBlockIterator expectCsvResults = context.getOutputIterator().next()
             Tuple2<List<List<Object>>, ResultSetMetaData> tupleResult = null
             if (arg instanceof PreparedStatement) {
-                tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
+                if (tag.contains("hive_docker")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveDockerConnection(),  (PreparedStatement) arg)
+                }else if (tag.contains("hive_remote")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveRemoteConnection(),  (PreparedStatement) arg)
+                }
+                else{
+                    tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (PreparedStatement) arg)
+                }
             } else {
-                tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
+                if (tag.contains("hive_docker")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveDockerConnection(), (String) arg)
+                }else if (tag.contains("hive_remote")) {
+                    tupleResult = JdbcUtils.executeToStringList(context.getHiveRemoteConnection(), (String) arg)
+                }
+                else{
+                    tupleResult = JdbcUtils.executeToStringList(context.getConnection(),  (String) arg)
+                }
             }
             def (realResults, meta) = tupleResult
             if (isOrder) {
@@ -617,14 +726,22 @@ class Suite implements GroovyInterceptable {
 
     void quickTest(String tag, String sql, boolean isOrder = false) {
         logger.info("Execute tag: ${tag}, ${isOrder ? "order_" : ""}sql: ${sql}".toString())
-        quickRunTest(tag, sql, isOrder) 
+        if (tag.contains("hive_docker")) {
+            String cleanedSqlStr = sql.replaceAll("\\s*;\\s*\$", "")
+            sql = cleanedSqlStr
+        }
+        if (tag.contains("hive_remote")) {
+            String cleanedSqlStr = sql.replaceAll("\\s*;\\s*\$", "")
+            sql = cleanedSqlStr
+        }
+        quickRunTest(tag, sql, isOrder)
     }
 
     void quickExecute(String tag, PreparedStatement stmt) {
         logger.info("Execute tag: ${tag}, sql: ${stmt}".toString())
-        quickRunTest(tag, stmt) 
+        quickRunTest(tag, stmt)
     }
-    
+
     @Override
     Object invokeMethod(String name, Object args) {
         // qt: quick test
@@ -926,6 +1043,10 @@ class Suite implements GroovyInterceptable {
         }
         // set server side prepared statement url
         return "jdbc:mysql://" + sql_ip + ":" + sql_port + "/" + database + "?&useServerPrepStmts=true"
+    }
+
+    DebugPoint GetDebugPoint() {
+        return debugPoint
     }
 }
 

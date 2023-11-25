@@ -29,8 +29,8 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.qe.StmtExecutor;
+import org.apache.doris.statistics.ResultRow;
 import org.apache.doris.statistics.util.InternalQuery;
-import org.apache.doris.statistics.util.InternalQueryResult;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.logging.log4j.LogManager;
@@ -121,13 +121,13 @@ public class CacheHotspotManagerUtils {
         StringSubstitutor stringSubstitutor = new StringSubstitutor(params);
         String sql = stringSubstitutor.replace(CONTAINS_CLUSTER_TEMPLATE);
         InternalQuery query = new InternalQuery(FeConstants.INTERNAL_DB_NAME, sql);
-        InternalQueryResult result = null;
+        List<ResultRow> result = null;
         try {
             result = query.query();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return !(result == null || result.getResultRows().size() == 0);
+        return !(result == null || result.size() == 0);
     }
 
     // table_name, index_name, partition_name
@@ -142,19 +142,18 @@ public class CacheHotspotManagerUtils {
         StringSubstitutor stringSubstitutor = new StringSubstitutor(params);
         String sql = stringSubstitutor.replace(GET_CLUSTER_PARTITIONS_TEMPLATE);
         InternalQuery query = new InternalQuery(FeConstants.INTERNAL_DB_NAME, sql);
-        InternalQueryResult result = null;
+        List<ResultRow> result = null;
         try {
             result = query.query();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        if (result == null || result.getResultRows().size() == 0) {
+        if (result == null || result.size() == 0) {
             String err = String.format("cluster doesn't exist, clusterId %s", clusterId);
             LOG.warn(err);
             throw new RuntimeException(err);
         }
-        return result.getResultRows().stream().map(InternalQueryResult.ResultRow::getValues)
-                .collect(Collectors.toList());
+        return result.stream().map(ResultRow::getValues).collect(Collectors.toList());
     }
 
     public static void transformIntoCacheHotSpotTableValue(Map<String, String> params, List<String> values) {

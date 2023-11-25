@@ -97,8 +97,9 @@ Status Segment::open(io::FileSystemSPtr fs, const std::string& path, uint32_t se
 
 Status Segment::check_segment_footer(io::FileReaderSPtr file_reader) {
     Segment segment;
+    SegmentFooterPB footer;
     segment._file_reader = std::move(file_reader);
-    return segment._parse_footer();
+    return segment._parse_footer(&footer);
 }
 
 Segment::Segment()
@@ -106,9 +107,9 @@ Segment::Segment()
 
 Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema)
         : _segment_id(segment_id),
+          _meta_mem_usage(0),
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
-          _meta_mem_usage(0),
           _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {
     memory_segment_counter << 1;
 }
@@ -121,8 +122,16 @@ Segment::~Segment() {
 }
 
 Status Segment::_open() {
-    RETURN_IF_ERROR(_parse_footer());
-    RETURN_IF_ERROR(_create_column_readers());
+    SegmentFooterPB footer;
+    RETURN_IF_ERROR(_parse_footer(&footer));
+    RETURN_IF_ERROR(_create_column_readers(footer));
+    _pk_index_meta.reset(footer.has_primary_key_index_meta()
+                                 ? new PrimaryKeyIndexMetaPB(footer.primary_key_index_meta())
+                                 : nullptr);
+    // delete_bitmap_calculator_test.cpp
+    // DCHECK(footer.has_short_key_index_page());
+    _sk_index_page = footer.short_key_index_page();
+    _num_rows = footer.num_rows();
     return Status::OK();
 }
 
@@ -148,7 +157,6 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
             return Status::OK();
         }
     }
-
     if (read_options.use_topn_opt) {
         auto query_ctx = read_options.runtime_state->get_query_ctx();
         auto runtime_predicate = query_ctx->get_runtime_predicate().get_predictate();
@@ -181,10 +189,43 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
         iter->get()->set_ctx(read_options.ctx);
     }
 
+    if (config::ignore_always_true_predicate_for_segment &&
+        read_options.io_ctx.reader_type == ReaderType::READER_QUERY &&
+        !read_options.column_predicates.empty()) {
+        auto pruned_predicates = read_options.column_predicates;
+        auto pruned = false;
+        for (auto& it : _column_readers) {
+            const auto uid = it.first;
+            const auto column_id = read_options.tablet_schema->field_index(uid);
+            if (it.second->prune_predicates_by_zone_map(pruned_predicates, column_id)) {
+                pruned = true;
+            }
+        }
+
+        if (pruned) {
+            auto options_with_pruned_predicates = read_options;
+            options_with_pruned_predicates.column_predicates = pruned_predicates;
+            //because column_predicates is changed, we need to rebuild col_id_to_predicates so that inverted index will not go through it.
+            options_with_pruned_predicates.col_id_to_predicates.clear();
+            for (auto* pred : options_with_pruned_predicates.column_predicates) {
+                if (!options_with_pruned_predicates.col_id_to_predicates.contains(
+                            pred->column_id())) {
+                    options_with_pruned_predicates.col_id_to_predicates.insert(
+                            {pred->column_id(), std::make_shared<AndBlockColumnPredicate>()});
+                }
+                auto* single_column_block_predicate = new SingleColumnBlockPredicate(pred);
+                options_with_pruned_predicates.col_id_to_predicates[pred->column_id()]
+                        ->add_column_predicate(single_column_block_predicate);
+            }
+            LOG(INFO) << "column_predicates pruned from " << read_options.column_predicates.size()
+                      << " to " << pruned_predicates.size();
+            return iter->get()->init(options_with_pruned_predicates);
+        }
+    }
     return iter->get()->init(read_options);
 }
 
-Status Segment::_parse_footer() {
+Status Segment::_parse_footer(SegmentFooterPB* footer) {
     // Footer := SegmentFooterPB, FooterPBSize(4), FooterPBChecksum(4), MagicNumber(4)
     auto file_size = _file_reader->size();
     if (file_size < 12) {
@@ -205,7 +246,6 @@ Status Segment::_parse_footer() {
             _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read, &io_ctx));
     DCHECK_EQ(bytes_read, 12);
 
-    // validate magic number
     if (memcmp(fixed_buf + 8, k_segment_magic, k_segment_magic_length) != 0) {
         std::string err_msg = fmt::format("Bad segment file {}: magic number not match",
                                           _file_reader->path().native());
@@ -222,8 +262,6 @@ Status Segment::_parse_footer() {
         DCHECK(false) << err_msg;
         return Status::Corruption(err_msg);
     }
-    _meta_mem_usage += footer_length;
-    _segment_meta_mem_tracker->consume(footer_length);
 
     std::string footer_buf;
     footer_buf.resize(footer_length);
@@ -243,13 +281,13 @@ Status Segment::_parse_footer() {
     }
 
     // deserialize footer PB
-    if (!_footer.ParseFromString(footer_buf)) {
+    if (!footer->ParseFromString(footer_buf)) {
         std::string err_msg = fmt::format("Bad segment file {}: failed to parse SegmentFooterPB",
                                           _file_reader->path().native());
         DCHECK(false) << err_msg;
         return Status::Corruption(std::move(err_msg));
     }
-    if (_footer.num_rows() == 0) {
+    if (footer->num_rows() == 0) {
         // this is a pad segment
         return Status::Error<EMPTY_SEGMENT>("empty segment");
     }
@@ -258,14 +296,28 @@ Status Segment::_parse_footer() {
 
 Status Segment::_load_pk_bloom_filter() {
     DCHECK(_tablet_schema->keys_type() == UNIQUE_KEYS);
-    DCHECK(_footer.has_primary_key_index_meta());
+    DCHECK(_pk_index_meta != nullptr);
     DCHECK(_pk_index_reader != nullptr);
-    return _load_pk_bf_once.call([this] {
-        RETURN_IF_ERROR(_pk_index_reader->parse_bf(_file_reader, _footer.primary_key_index_meta()));
-        _meta_mem_usage += _pk_index_reader->get_bf_memory_size();
-        _segment_meta_mem_tracker->consume(_pk_index_reader->get_bf_memory_size());
-        return Status::OK();
-    });
+    auto status = [this]() {
+        return _load_pk_bf_once.call([this] {
+            RETURN_IF_ERROR(_pk_index_reader->parse_bf(_file_reader, *_pk_index_meta));
+            _meta_mem_usage += _pk_index_reader->get_bf_memory_size();
+            _segment_meta_mem_tracker->consume(_pk_index_reader->get_bf_memory_size());
+            return Status::OK();
+        });
+    }();
+    if (!status.ok()) {
+        remove_from_segment_cache();
+    }
+    return status;
+}
+
+void Segment::remove_from_segment_cache() const {
+    if (config::disable_segment_cache) {
+        return;
+    }
+    SegmentCache::CacheKey cache_key(_rowset_id);
+    SegmentLoader::instance()->erase_segments(cache_key);
 }
 
 Status Segment::load_pk_index_and_bf() {
@@ -274,11 +326,18 @@ Status Segment::load_pk_index_and_bf() {
     return Status::OK();
 }
 Status Segment::load_index() {
+    auto status = [this]() { return _load_index_impl(); }();
+    if (!status.ok()) {
+        remove_from_segment_cache();
+    }
+    return status;
+}
+
+Status Segment::_load_index_impl() {
     return _load_index_once.call([this] {
-        if (_tablet_schema->keys_type() == UNIQUE_KEYS && _footer.has_primary_key_index_meta()) {
+        if (_tablet_schema->keys_type() == UNIQUE_KEYS && _pk_index_meta != nullptr) {
             _pk_index_reader.reset(new PrimaryKeyIndexReader());
-            RETURN_IF_ERROR(
-                    _pk_index_reader->parse_index(_file_reader, _footer.primary_key_index_meta()));
+            RETURN_IF_ERROR(_pk_index_reader->parse_index(_file_reader, *_pk_index_meta));
             _meta_mem_usage += _pk_index_reader->get_memory_size();
             _segment_meta_mem_tracker->consume(_pk_index_reader->get_memory_size());
             return Status::OK();
@@ -286,7 +345,7 @@ Status Segment::load_index() {
             // read and parse short key index page
             PageReadOptions opts;
             opts.file_reader = _file_reader.get();
-            opts.page_pointer = PagePointer(_footer.short_key_index_page());
+            opts.page_pointer = PagePointer(_sk_index_page);
             opts.codec = nullptr; // short key index page uses NO_COMPRESSION for now
             OlapReaderStatistics tmp_stats;
             opts.use_page_cache = true;
@@ -311,24 +370,26 @@ Status Segment::load_index() {
     });
 }
 
-Status Segment::_create_column_readers() {
-    for (uint32_t ordinal = 0; ordinal < _footer.columns().size(); ++ordinal) {
-        auto& column_pb = _footer.columns(ordinal);
-        _column_id_to_footer_ordinal.emplace(column_pb.unique_id(), ordinal);
+Status Segment::_create_column_readers(const SegmentFooterPB& footer) {
+    std::unordered_map<uint32_t, uint32_t> column_id_to_footer_ordinal;
+
+    for (uint32_t ordinal = 0; ordinal < footer.columns().size(); ++ordinal) {
+        auto& column_pb = footer.columns(ordinal);
+        column_id_to_footer_ordinal.emplace(column_pb.unique_id(), ordinal);
     }
 
     for (uint32_t ordinal = 0; ordinal < _tablet_schema->num_columns(); ++ordinal) {
         auto& column = _tablet_schema->column(ordinal);
-        auto iter = _column_id_to_footer_ordinal.find(column.unique_id());
-        if (iter == _column_id_to_footer_ordinal.end()) {
+        auto iter = column_id_to_footer_ordinal.find(column.unique_id());
+        if (iter == column_id_to_footer_ordinal.end()) {
             continue;
         }
 
         ColumnReaderOptions opts;
         opts.disable_file_cache = _disable_file_cache;
         std::unique_ptr<ColumnReader> reader;
-        RETURN_IF_ERROR(ColumnReader::create(opts, _footer.columns(iter->second),
-                                             _footer.num_rows(), _file_reader, &reader));
+        RETURN_IF_ERROR(ColumnReader::create(opts, footer.columns(iter->second), footer.num_rows(),
+                                             _file_reader, &reader));
         _column_readers.emplace(column.unique_id(), std::move(reader));
     }
     return Status::OK();

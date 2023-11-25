@@ -1438,9 +1438,9 @@ build_jemalloc() {
 
 # libunwind
 build_libunwind() {
-    # https://github.com/libunwind/libunwind
-    # https://github.com/libunwind/libunwind/issues/189
-    # https://stackoverflow.com/questions/27842377/building-libunwind-for-mac
+    # There are two major variants of libunwind. libunwind on Linux
+    # (https://www.nongnu.org/libunwind/) provides unw_backtrace, and
+    # Apache/LLVM libunwind (notably used on Apple platforms) doesn't
     if [[ "${KERNEL}" != 'Darwin' ]]; then
         check_if_source_exist "${LIBUNWIND_SOURCE}"
         cd "${TP_SOURCE_DIR}/${LIBUNWIND_SOURCE}"
@@ -1675,6 +1675,20 @@ build_ali_sdk() {
     make install
 }
 
+# dragonbox
+build_dragonbox() {
+    check_if_source_exist "${DRAGONBOX_SOURCE}"
+    cd "${TP_SOURCE_DIR}/${DRAGONBOX_SOURCE}"
+
+    rm -rf "${BUILD_DIR}"
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
+
+    "${CMAKE_CMD}" -G "${GENERATOR}" -DCMAKE_INSTALL_PREFIX="${TP_INSTALL_DIR}" -DDRAGONBOX_INSTALL_TO_CHARS=ON ..
+
+    "${BUILD_SYSTEM}" -j "${PARALLEL}"
+    "${BUILD_SYSTEM}" install
+}
 
 if [[ "${#packages[@]}" -eq 0 ]]; then
     packages=(
@@ -1739,6 +1753,7 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
         cos_sdk
         libunwind
         ali_sdk
+        dragonbox
     )
     if [[ "$(uname -s)" == 'Darwin' ]]; then
         read -r -a packages <<<"binutils gettext ${packages[*]}"

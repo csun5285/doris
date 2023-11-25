@@ -520,7 +520,7 @@ public class Auth implements Writable {
 
             // create user
             try {
-                //we should not throw AnalysisException at here,so transfer it
+                // we should not throw AnalysisException at here,so transfer it
                 User user = userManager.createUser(userIdent, password, null, false);
                 if (Strings.isNullOrEmpty(user.getUserId())) {
                     user.setUserId(userId);
@@ -1759,6 +1759,9 @@ public class Auth implements Writable {
         userRoleManager.addUserRole(userIdent, roleManager.getUserDefaultRoleName(userIdent));
     }
 
+    public Set<String> getAllUser() {
+        return userManager.getNameToUsers().keySet();
+    }
 
     /**
      * This is a bug that if created a normal user and grant it with ADMIN_PRIV/RESOURCE_PRIV/NODE_PRIV

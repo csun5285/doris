@@ -135,7 +135,8 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
         } else if (st.is<ErrorCode::END_OF_FILE>()) {
             break;
         }
-        vectorized::Block block(pblock);
+        vectorized::Block block;
+        EXPECT_TRUE(block.deserialize(pblock).ok());
         EXPECT_EQ(block_rows, block.rows());
     }
     wal_reader.finalize();

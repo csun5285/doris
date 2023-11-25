@@ -48,6 +48,13 @@ dataPath = "${DORIS_HOME}/regression-test/data"
 pluginPath = "${DORIS_HOME}/regression-test/plugins"
 realDataPath = "${DORIS_HOME}/regression-test/realdata"
 
+// docker image
+image = ""
+dockerEndDeleteFiles = false
+dorisComposePath = "${DORIS_HOME}/docker/runtime/doris-compose/doris-compose.py"
+// do run docker test because pipeline not support build image now
+excludeDockerTest = true
+
 // will test <group>/<suite>.groovy
 // empty group will test all group
 testGroups = ""
@@ -109,13 +116,16 @@ oracle_11_port=1521
 sqlserver_2022_port=1433
 clickhouse_22_port=8123
 doris_port=9030
+mariadb_10_port=3326
 
 // hive catalog test config
-// To enable hive test, you need first start hive container.
+// To enable hive/paimon test, you need first start hive container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`
 enableHiveTest=false
+enablePaimonTest=false
 hms_port=9183
 hdfs_port=8120
+hiveServerPort=10000
 
 // kafka test config
 // to enable kafka test, you need firstly to start kafka container
@@ -144,6 +154,7 @@ enableExternalHiveTest = false
 extHiveHmsHost = "***.**.**.**"
 extHiveHmsPort = 7004
 extHdfsPort = 4007
+extHiveServerPort= 7001
 extHiveHmsUser = "****"
 extHiveHmsPassword= "***********"
 
@@ -179,6 +190,22 @@ stageIamSk = ""
 
 // used for cos, which sdk does not return arn, so construct arn by user id.
 stageIamUserId = ""
+
+enableObjStorageTest=false
+enableMaxComputeTest=false
+aliYunAk="***********"
+dlfUid="***********"
+aliYunSk="***********"
+hwYunAk="***********"
+hwYunSk="***********"
+
+s3Endpoint = "cos.ap-hongkong.myqcloud.com"
+s3BucketName = "doris-build-hk-1308700295"
+s3Region = "ap-hongkong"
+
+// iceberg rest catalog config
+iceberg_rest_uri_port=18181
+
 // If the failure suite num exceeds this config
 // all following suite will be skipped to fast quit the run.
 // <=0 means no limit.

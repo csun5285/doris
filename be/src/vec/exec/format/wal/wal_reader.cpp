@@ -47,7 +47,8 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
         LOG(WARNING) << "Failed to read wal on path = " << _wal_path;
         return st;
     }
-    vectorized::Block tmp_block(pblock);
+    vectorized::Block tmp_block;
+    RETURN_IF_ERROR(tmp_block.deserialize(pblock));
     block->swap(tmp_block);
     *read_rows = block->rows();
     VLOG_DEBUG << "read block rows:" << *read_rows;

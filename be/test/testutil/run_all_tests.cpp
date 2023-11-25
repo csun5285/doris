@@ -33,6 +33,8 @@
 #include "runtime/memory/thread_mem_tracker_mgr.h"
 #include "runtime/thread_context.h"
 #include "service/backend_options.h"
+#include "service/http_service.h"
+#include "testutil/http_utils.h"
 #include "util/cpu_info.h"
 #include "util/disk_info.h"
 #include "util/mem_info.h"
@@ -55,7 +57,14 @@ int main(int argc, char** argv) {
     doris::DiskInfo::init();
     doris::MemInfo::init();
     doris::BackendOptions::init();
+
     config::tmp_file_dirs = R"([{"path":")" + std::string(getenv("DORIS_HOME")) + "/tmp" + R"(","max_upload_bytes":1073741824}])";
     doris::io::TmpFileMgr::create_tmp_file_mgrs();
-    return RUN_ALL_TESTS();
+
+    auto service = std::make_unique<doris::HttpService>(doris::ExecEnv::GetInstance(), 0, 1);
+    service->start();
+    doris::global_test_http_host = "http://127.0.0.1:" + std::to_string(service->get_real_port());
+
+    int res = RUN_ALL_TESTS();
+    return res;
 }
