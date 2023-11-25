@@ -2496,8 +2496,6 @@ public class Config extends ConfigBase {
     })
     public static int sync_image_timeout_second = 300;
 
-<<<<<<< HEAD
-=======
     @ConfField(mutable = true, masterOnly = true)
     public static int publish_topic_info_interval_ms = 30000; // 30s
 
@@ -2506,5 +2504,5 @@ public class Config extends ConfigBase {
             "the max package size fe thrift server can receive,avoid accepting error"
             + "or too large package causing OOM,default 20000000(20M),set -1 for unlimited. "})
     public static int fe_thrift_max_pkg_bytes = 20000000;
->>>>>>> merge-doris-2.0.3
+
 }

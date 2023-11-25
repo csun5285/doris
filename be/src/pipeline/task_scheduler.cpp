@@ -331,14 +331,6 @@ void TaskScheduler::_try_close_task(PipelineTask* task, PipelineTaskState state)
                                          status.to_string());
         state = PipelineTaskState::CANCELED;
     };
-<<<<<<< HEAD
-    auto try_close_failed = !status.ok() && state != PipelineTaskState::CANCELED;
-    if (try_close_failed) {
-        cancel();
-    }
-
-    if (!task->is_pending_finish()) {
-=======
 
     auto try_close_failed = !status.ok() && state != PipelineTaskState::CANCELED;
     if (try_close_failed) {
@@ -346,22 +338,15 @@ void TaskScheduler::_try_close_task(PipelineTask* task, PipelineTaskState state)
         // Call `close` if `try_close` failed to make sure allocated resources are released
         static_cast<void>(task->close());
     } else if (!task->is_pending_finish()) {
->>>>>>> merge-doris-2.0.3
         status = task->close();
         if (!status.ok() && state != PipelineTaskState::CANCELED) {
             cancel();
         }
-<<<<<<< HEAD
-    } else {
-        task->set_state(PipelineTaskState::PENDING_FINISH);
-        _blocked_task_scheduler->add_blocked_task(task);
-=======
     }
 
     if (task->is_pending_finish()) {
         task->set_state(PipelineTaskState::PENDING_FINISH);
         static_cast<void>(_blocked_task_scheduler->add_blocked_task(task));
->>>>>>> merge-doris-2.0.3
         return;
     }
 

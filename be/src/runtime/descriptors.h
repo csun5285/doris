@@ -110,10 +110,8 @@ public:
     bool is_key() const { return _is_key; }
     bool need_materialize() const { return _need_materialize; }
 
-<<<<<<< HEAD
-=======
     const std::string& col_default_value() const { return _col_default_value; }
->>>>>>> merge-doris-2.0.3
+
     PrimitiveType col_type() const { return _col_type; }
 
 private:
