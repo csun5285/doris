@@ -381,6 +381,7 @@ class SuiteContext implements Closeable {
         scriptContext.eventListeners.each { it.onSuiteFinished(this, throwable == null, elapsed) }
     }
 
+    /*
     void resetConnection() {
         def originConn = threadLocalConn.get()
         if (originConn != null) {
@@ -402,4 +403,5 @@ class SuiteContext implements Closeable {
             sleep(10000)
         }
     }
+    */
 }
