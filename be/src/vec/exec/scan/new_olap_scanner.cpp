@@ -143,6 +143,7 @@ Status NewOlapScanner::init() {
         if (cached_schema) {
             tablet_schema = cached_schema;
         } else {
+            tablet_schema = std::make_shared<TabletSchema>();
             tablet_schema->copy_from(*tablet->tablet_schema());
             if (olap_scan_node.__isset.columns_desc && !olap_scan_node.columns_desc.empty() &&
                 olap_scan_node.columns_desc[0].col_unique_id >= 0) {
@@ -174,10 +175,10 @@ Status NewOlapScanner::init() {
 #ifdef CLOUD_MODE
                 cloud::TabletHotspot::instance()->count(tablet);
                 auto st = tablet->cloud_capture_rs_readers(_tablet_reader_params.version,
-                                                           &_tablet_reader_params.rs_splits);
+                                                           &read_source.rs_splits);
 #else
-                auto st = _tablet->capture_rs_readers(_tablet_reader_params.version,
-                                                      &read_source.rs_splits);
+                auto st = tablet->capture_rs_readers(_tablet_reader_params.version,
+                                                     &read_source.rs_splits);
 #endif
                 if (!st.ok()) {
                     LOG(WARNING) << "fail to init reader. status=" << st;
