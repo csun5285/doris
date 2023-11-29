@@ -36,8 +36,8 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
     request.WithBucket(bucket).WithKey(key_name);
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObject(request), "io::_download_part",
-                                                std::cref(request).get(), &s);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
+                                                "io::_download_part", std::cref(request).get(), &s);
     s3_bvar::s3_get_total << 1;
 
     TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);
@@ -245,7 +245,7 @@ void FileCacheSegmentDownloader::polling_download_task() {
 }
 
 void FileCacheSegmentDownloader::check_download_task(const std::vector<int64_t>& tablets,
-                                                       std::map<int64_t, bool>* done) {
+                                                     std::map<int64_t, bool>* done) {
     std::lock_guard lock(_inflight_mtx);
     for (int64_t tablet_id : tablets) {
         done->insert({tablet_id, _inflight_tablets.count(tablet_id) == 0});
@@ -307,11 +307,12 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
                 return std::make_unique<FileBlocksHolder>(std::move(h));
             };
             std::string key_name = s3_file_system->s3_conf().prefix + '/' +
-                                  BetaRowset::remote_segment_path(
-                                          meta.tablet_id(), meta.rowset_id(), meta.segment_id());
+                                   BetaRowset::remote_segment_path(
+                                           meta.tablet_id(), meta.rowset_id(), meta.segment_id());
             TEST_SYNC_POINT_CALLBACK("BlockFileCache::mock_key", &key_name);
-            download_file(client, key_name, meta.offset(), meta.size(), s3_file_system->s3_conf().bucket,
-                          std::move(alloc_holder), download_callback);
+            download_file(client, key_name, meta.offset(), meta.size(),
+                          s3_file_system->s3_conf().bucket, std::move(alloc_holder),
+                          download_callback);
         }
     });
 }
@@ -347,8 +348,7 @@ void FileCacheSegmentS3Downloader::download_s3_file(S3FileMeta& meta) {
     };
     std::string key_name = s3_file_system->s3_conf().prefix + '/' + meta.path.native();
     TEST_SYNC_POINT_CALLBACK("BlockFileCache::remove_prefix", &key_name);
-    download_file(s3_file_system->get_client(),
-                  key_name, 0, file_size,
+    download_file(s3_file_system->get_client(), key_name, 0, file_size,
                   s3_file_system->s3_conf().bucket, std::move(alloc_holder),
                   std::move(meta.download_callback));
 }

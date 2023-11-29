@@ -191,6 +191,8 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
         aws_config.scheme = Aws::Http::Scheme::HTTP;
     }
 
+    aws_config.executor = ExecEnv::GetInstance()->s3_pool_executor();
+
     std::shared_ptr<Aws::S3::S3Client> new_client = std::make_shared<Aws::S3::S3Client>(
             std::move(aws_cred), std::move(aws_config),
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,

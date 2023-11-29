@@ -939,6 +939,7 @@ DEFINE_mInt32(file_cache_exit_disk_resource_limit_mode_percent, "80");
 
 DEFINE_Int32(s3_transfer_buffer_size_mb, "500");
 DEFINE_Int32(s3_transfer_executor_pool_size, "2");
+DEFINE_Int32(s3_operation_pool_size, "100");
 
 DEFINE_Bool(enable_time_lut, "true");
 DEFINE_mBool(enable_simdjson_reader, "true");

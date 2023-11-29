@@ -16,6 +16,7 @@
 // under the License.
 
 // IWYU pragma: no_include <bthread/errno.h>
+#include <aws/core/utils/threading/Executor.h>
 #include <errno.h> // IWYU pragma: keep
 #include <gen_cpp/HeartbeatService_types.h>
 #include <gen_cpp/Metrics_types.h>
@@ -138,16 +139,19 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_min_threads(16)
             .set_max_threads(64)
             .build(&_buffered_reader_prefetch_thread_pool);
-    
+
     ThreadPoolBuilder("S3FileWriterUploadThreadPool")
             .set_min_threads(16)
             .set_max_threads(64)
             .build(&_s3_file_writer_upload_thread_pool);
-    
+
     ThreadPoolBuilder("S3DownloaderDownloadThreadPool")
             .set_min_threads(16)
             .set_max_threads(64)
             .build(&_s3_downloader_download_thread_pool);
+
+    _s3_pooled_executor = Aws::MakeShared<Aws::Utils::Threading::PooledThreadExecutor>(
+            "s3_pooled_executor", config::s3_operation_pool_size);
 
     // min num equal to fragment pool's min num
     // max num is useless because it will start as many as requested in the past

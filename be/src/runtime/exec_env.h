@@ -31,6 +31,10 @@
 #include "olap/options.h"
 #include "util/threadpool.h"
 
+namespace Aws::Utils::Threading {
+class PooledThreadExecutor;
+} // namespace Aws::Utils::Threading
+
 namespace doris {
 namespace vectorized {
 class VDataStreamMgr;
@@ -139,6 +143,9 @@ public:
     ThreadPool* s3_downloader_download_thread_pool() {
         return _s3_downloader_download_thread_pool.get();
     }
+    std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> s3_pool_executor() {
+        return _s3_pooled_executor;
+    }
     ThreadPool* send_report_thread_pool() { return _send_report_thread_pool.get(); }
     ThreadPool* join_node_thread_pool() { return _join_node_thread_pool.get(); }
     ThreadPool* sync_load_for_tablets_thread_pool() {
@@ -245,6 +252,8 @@ private:
     std::unique_ptr<ThreadPool> _s3_file_writer_upload_thread_pool;
     // Threadpool used to do s3 get operation for s3 downloader
     std::unique_ptr<ThreadPool> _s3_downloader_download_thread_pool;
+    // Threadpool for S3 client's operation
+    std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> _s3_pooled_executor;
     std::unique_ptr<ThreadPool> _sync_load_for_tablets_thread_pool;
     // Threadpool used to write data to file cache async
     std::unique_ptr<ThreadPool> _async_write_file_cache_thread_pool;

@@ -101,8 +101,9 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
         return Status::InternalError("init s3 client error");
     }
     s3_file_reader_counter << 1;
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            client->GetObject(request), "s3_file_reader::get_object", std::ref(request).get(), &result);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
+                                                "s3_file_reader::get_object",
+                                                std::ref(request).get(), &result);
     s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}, ErrorCode {}, Exception {}",

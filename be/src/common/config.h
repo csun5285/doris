@@ -952,6 +952,7 @@ DECLARE_mInt64(file_cache_max_size_per_disk); // zero for no limit
 
 DECLARE_Int32(s3_transfer_buffer_size_mb);
 DECLARE_Int32(s3_transfer_executor_pool_size);
+DECLARE_Int32(s3_operation_pool_size);
 
 DECLARE_Bool(enable_time_lut);
 DECLARE_mBool(enable_simdjson_reader);

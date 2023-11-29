@@ -146,9 +146,9 @@ Status S3FileWriter::_open() {
         create_request.WithServerSideEncryption(Aws::S3::Model::ServerSideEncryption::AES256);
     }
 
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->CreateMultipartUpload(create_request),
-                                                "s3_file_writer::create_multi_part_upload",
-                                                std::cref(create_request).get());
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            _client->CreateMultipartUploadCallable(create_request).get(),
+            "s3_file_writer::create_multi_part_upload", std::cref(create_request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
     SYNC_POINT_CALLBACK("s3_file_writer::_open", &outcome);
 
@@ -187,9 +187,9 @@ Status S3FileWriter::_abort() {
     _wait_until_finish("early quit");
     AbortMultipartUploadRequest request;
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->AbortMultipartUpload(request),
-                                                "s3_file_writer::abort_multi_part",
-                                                std::cref(request).get());
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            _client->AbortMultipartUploadCallable(request).get(),
+            "s3_file_writer::abort_multi_part", std::cref(request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
     if (outcome.IsSuccess() ||
         outcome.GetError().GetErrorType() == Aws::S3::S3Errors::NO_SUCH_UPLOAD ||
@@ -331,9 +331,9 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     upload_request.SetContentLength(buf.get_size());
 
-    auto upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(_client->UploadPart(upload_request),
-                                                            "s3_file_writer::upload_part",
-                                                            std::cref(upload_request).get(), &buf);
+    auto upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+            _client->UploadPartCallable(upload_request).get(), "s3_file_writer::upload_part",
+            std::cref(upload_request).get(), &buf);
     s3_bvar::s3_multi_part_upload_total << 1;
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
@@ -406,7 +406,7 @@ Status S3FileWriter::_complete() {
 
     TEST_SYNC_POINT_RETURN_WITH_VALUE("S3FileWriter::_complete:3", Status(), this);
     auto compute_outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->CompleteMultipartUpload(complete_request),
+            _client->CompleteMultipartUploadCallable(complete_request).get(),
             "s3_file_writer::complete_multi_part", std::cref(complete_request).get());
     s3_bvar::s3_multi_part_upload_total << 1;
 
@@ -462,9 +462,9 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetContentLength(buf.get_size());
     request.SetContentType("application/octet-stream");
     TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
-    auto response =
-            SYNC_POINT_HOOK_RETURN_VALUE(_client->PutObject(request), "s3_file_writer::put_object",
-                                         std::cref(request).get(), &buf);
+    auto response = SYNC_POINT_HOOK_RETURN_VALUE(_client->PutObjectCallable(request).get(),
+                                                 "s3_file_writer::put_object",
+                                                 std::cref(request).get(), &buf);
     s3_bvar::s3_put_total << 1;
     if (!response.IsSuccess()) {
         _st = Status::IOError(
