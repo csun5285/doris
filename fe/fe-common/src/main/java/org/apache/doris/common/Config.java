@@ -2341,6 +2341,12 @@ public class Config extends ConfigBase {
     // the white list for ShowProcStmt
     @ConfField(mutable = true)
     public static String[] cloud_show_proc_white_list = {"/current_query_stmts"};
+
+    // The threshold to do manual GC when doing checkpoint but not enough memory.
+    // The default checkpoint interval is 1min.
+    @ConfField(mutable = true)
+    public static int cloud_checkpoint_manual_gc_threshold = 10;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
