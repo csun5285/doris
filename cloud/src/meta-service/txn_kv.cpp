@@ -73,6 +73,9 @@ constexpr fdb_error_t FDB_ERROR_CODE_INVALID_OPTION_VALUE = 2006;
 constexpr fdb_error_t FDB_ERROR_CODE_INVALID_OPTION = 2007;
 constexpr fdb_error_t FDB_ERROR_CODE_VERSION_INVALID = 2011;
 constexpr fdb_error_t FDB_ERROR_CODE_RANGE_LIMITS_INVALID = 2012;
+constexpr fdb_error_t FDB_ERROR_CODE_TXN_TOO_LARGE = 2101;
+constexpr fdb_error_t FDB_ERROR_CODE_KEY_TOO_LARGE = 2102;
+constexpr fdb_error_t FDB_ERROR_CODE_VALUE_TOO_LARGE = 2103;
 constexpr fdb_error_t FDB_ERROR_CODE_CONNECTION_STRING_INVALID = 2104;
 
 static bool fdb_error_is_txn_conflict(fdb_error_t err) {
@@ -89,6 +92,12 @@ static TxnErrorCode cast_as_txn_code(fdb_error_t err) {
     case FDB_ERROR_CODE_RANGE_LIMITS_INVALID:
     case FDB_ERROR_CODE_CONNECTION_STRING_INVALID:
         return TxnErrorCode::TXN_INVALID_ARGUMENT;
+    case FDB_ERROR_CODE_TXN_TOO_LARGE:
+        return TxnErrorCode::TXN_BYTES_TOO_LARGE;
+    case FDB_ERROR_CODE_KEY_TOO_LARGE:
+        return TxnErrorCode::TXN_KEY_TOO_LARGE;
+    case FDB_ERROR_CODE_VALUE_TOO_LARGE:
+        return TxnErrorCode::TXN_VALUE_TOO_LARGE;
     case FDB_ERROR_CODE_TIMED_OUT:
     case FDB_ERROR_CODE_TXN_TIMED_OUT:
         return TxnErrorCode::TXN_TIMEOUT;
