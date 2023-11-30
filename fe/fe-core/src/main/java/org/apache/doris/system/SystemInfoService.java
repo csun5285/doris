@@ -187,6 +187,17 @@ public class SystemInfoService {
         }
     };
 
+    public boolean availableBackendsExists() {
+        if (FeConstants.runningUnitTest) {
+            return true;
+        }
+        if (null == clusterNameToId || clusterNameToId.isEmpty()) {
+            return false;
+        }
+        return clusterIdToBackend != null && !clusterIdToBackend.isEmpty()
+               && clusterIdToBackend.values().stream().anyMatch(list -> list != null && !list.isEmpty());
+    }
+
     public boolean containClusterName(String clusterName) {
         return clusterNameToId.containsKey(clusterName);
     }

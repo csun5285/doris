@@ -446,6 +446,9 @@ public class StatisticsUtil {
         }
 
         if (Config.isCloudMode()) {
+            if (!Env.getCurrentSystemInfo().availableBackendsExists()) {
+                return false;
+            }
             try (AutoCloseConnectContext r = buildConnectContext()) {
                 r.connectContext.setCloudCluster();
                 for (OlapTable table : statsTbls) {
