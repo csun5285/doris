@@ -90,7 +90,6 @@ import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.common.AuditLog;
 import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
@@ -458,6 +457,11 @@ public class StmtExecutor {
     }
 
     public void execute(TUniqueId queryId) throws Exception {
+        String stmtStr = originStmt.originStmt;
+        LOG.info("begin to execute query: {}, stmt: {}", DebugUtil.printId(queryId),
+                parsedStmt != null && (parsedStmt instanceof InsertStmt)
+                && stmtStr.length() > Config.insert_stmt_size_in_audit_log_limit
+                ? stmtStr.substring(0, Config.insert_stmt_size_in_audit_log_limit + 1) : stmtStr);
         SessionVariable sessionVariable = context.getSessionVariable();
         Span executeSpan = context.getTracer().spanBuilder("execute").setParent(Context.current()).startSpan();
         try (Scope scope = executeSpan.makeCurrent()) {
@@ -653,8 +657,8 @@ public class StmtExecutor {
                         UUID uuid = UUID.randomUUID();
                         TUniqueId newQueryId = new TUniqueId(uuid.getMostSignificantBits(),
                                 uuid.getLeastSignificantBits());
-                        AuditLog.getQueryAudit().log("Query {} {} times with new query id: {}, stmt: {}",
-                                DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId), originStmt.originStmt);
+                        LOG.info("Query {} {} times with new query id: {}",
+                                DebugUtil.printId(queryId), i, DebugUtil.printId(newQueryId));
                         context.setQueryId(newQueryId);
                         if (Config.isCloudMode()) {
                             // sleep random millis [1000, 1500] ms
