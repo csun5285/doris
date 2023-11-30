@@ -353,6 +353,10 @@ std::shared_ptr<FileBuffer> FileBufferBuilder::build() {
 void S3FileBufferPool::init(size_t s3_write_buffer_whole_size, size_t s3_write_buffer_size,
                             ThreadPool* thread_pool) {
     // the nums could be one configuration
+    if (config::allocate_s3_writer_buffer_with_new) {
+        LOG_INFO("allocate s3 buffer with new and delete");
+        return;
+    }
     size_t buf_num = s3_write_buffer_whole_size / s3_write_buffer_size;
     DCHECK((s3_write_buffer_size >= 5 * 1024 * 1024) &&
            (s3_write_buffer_whole_size > s3_write_buffer_size));
@@ -377,7 +381,8 @@ Slice S3FileBufferPool::allocate(bool reserve) {
     s3_file_buffer_allocating << 1;
     if (config::allocate_s3_writer_buffer_with_new) {
         auto memory = new char[config::s3_write_buffer_size];
-        return Slice {memory, static_cast<size_t>(config::s3_write_buffer_size)};
+        buf = Slice {memory, static_cast<size_t>(config::s3_write_buffer_size)};
+        return buf;
     }
     // if need reserve or no cache then we must ensure return buf with memory preserved
     if (reserve || !config::enable_file_cache) {
