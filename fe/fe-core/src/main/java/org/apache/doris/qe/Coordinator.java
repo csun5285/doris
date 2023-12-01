@@ -2301,9 +2301,7 @@ public class Coordinator implements CoordInterface {
     // In cloud mode, meta read lock is not enough to keep a snapshot of the partition versions.
     // After all scan node are collected, it is possible to gain a snapshot of the partition version.
     private void setVisibleVersionForOlapScanNode() throws RpcException, UserException {
-        List<Long> dbs = new ArrayList<>();
-        List<Long> tables = new ArrayList<>();
-        List<Long> partitions = new ArrayList<>();
+        List<CloudPartition> partitions = new ArrayList<>();
         Set<Long> partitionSet = new HashSet<>();
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {
@@ -2312,13 +2310,10 @@ public class Coordinator implements CoordInterface {
 
             OlapScanNode scanNode = (OlapScanNode) node;
             OlapTable table = scanNode.getOlapTable();
-            for (Long partitionId : scanNode.getSelectedPartitionIds()) {
-                if (!partitionSet.contains(partitionId)) {
-                    CloudPartition partition = (CloudPartition) table.getPartition(partitionId);
-                    dbs.add(partition.getDbId());
-                    tables.add(table.getId());
-                    partitions.add(partitionId);
-                    partitionSet.add(partitionId);
+            for (Long id : scanNode.getSelectedPartitionIds()) {
+                if (!partitionSet.contains(id)) {
+                    partitionSet.add(id);
+                    partitions.add((CloudPartition) table.getPartition(id));
                 }
             }
         }
@@ -2327,15 +2322,15 @@ public class Coordinator implements CoordInterface {
             return;
         }
 
-        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(dbs, tables, partitions);
+        List<Long> versions = CloudPartition.getSnapshotVisibleVersion(partitions);
         assert versions.size() == partitions.size() : "the got num versions is not equals to acquired num versions";
         if (versions.stream().anyMatch(x -> x <= 0)) {
             int size = versions.size();
             for (int i = 0; i < size; ++i) {
                 if (versions.get(i) <= 0) {
                     LOG.warn("partition {} getVisibleVersion error, the visibleVersion is {}",
-                            partitions.get(i), versions.get(i));
-                    throw new UserException("partition " + partitions.get(i)
+                            partitions.get(i).getId(), versions.get(i));
+                    throw new UserException("partition " + partitions.get(i).getId()
                             + " getVisibleVersion error, the visibleVersion is " + versions.get(i));
                 }
             }
@@ -2344,7 +2339,7 @@ public class Coordinator implements CoordInterface {
         // ATTN: the table ids are ignored here because the both id are allocated from a same id generator.
         Map<Long, Long> visibleVersionMap = IntStream.range(0, versions.size())
                 .boxed()
-                .collect(Collectors.toMap(partitions::get, versions::get));
+                .collect(Collectors.toMap(i -> partitions.get(i).getId(), versions::get));
 
         for (ScanNode node : scanNodes) {
             if (!(node instanceof OlapScanNode)) {

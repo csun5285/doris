@@ -983,6 +983,17 @@ public class OlapTable extends Table {
     //
     // ATTN: partitions not belonging to this table will be filtered.
     public List<Long> selectNonEmptyPartitionIds(Collection<Long> partitionIds) {
+        if (Config.isCloudMode() && Config.enable_cloud_snapshot_version) {
+            // Assumption: all partitions are CloudPartition.
+            List<CloudPartition> partitions = partitionIds.stream()
+                    .map(this::getPartition)
+                    .filter(p -> p != null)
+                    .filter(p -> p instanceof CloudPartition)
+                    .map(p -> (CloudPartition) p)
+                    .collect(Collectors.toList());
+            return CloudPartition.selectNonEmptyPartitionIds(partitions);
+        }
+
         return partitionIds.stream()
                 .map(this::getPartition)
                 .filter(p -> p != null)

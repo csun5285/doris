@@ -25,12 +25,16 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 /**
  * Internal representation of partition-related metadata.
  */
 // TODO(dx): cache version
 public class CloudPartition extends Partition {
+    // Every partition starts from version 1, version 1 has no data
+    public static long EMPTY_VERSION = 1;
+
     private static final Logger LOG = LogManager.getLogger(CloudPartition.class);
 
     // not Serialized
@@ -59,6 +63,10 @@ public class CloudPartition extends Partition {
         this.dbId = dbId;
     }
 
+    public long getTableId() {
+        return this.tableId;
+    }
+
     public void setTableId(long tableId) {
         this.tableId = tableId;
     }
@@ -66,6 +74,10 @@ public class CloudPartition extends Partition {
     protected void setVisibleVersion(long visibleVersion) {
         LOG.debug("setVisibleVersion use CloudPartition {}", super.getName());
         return;
+    }
+
+    protected void setCachedVisibleVersion(long version) {
+        super.setVisibleVersion(version);
     }
 
     @Override
@@ -98,6 +110,72 @@ public class CloudPartition extends Partition {
         } catch (RpcException e) {
             throw new RuntimeException("get version from meta service failed");
         }
+    }
+
+    // Select the non-empty partitions and return the ids.
+    public static List<Long> selectNonEmptyPartitionIds(List<CloudPartition> partitions) {
+        List<Long> nonEmptyPartitionIds = partitions.stream()
+                .filter(CloudPartition::hasDataCached)
+                .map(CloudPartition::getId)
+                .collect(Collectors.toList());
+        if (nonEmptyPartitionIds.size() == partitions.size()) {
+            return nonEmptyPartitionIds;
+        }
+
+        List<CloudPartition> unknowns = partitions.stream()
+                .filter(p -> !p.hasDataCached())
+                .collect(Collectors.toList());
+
+        SummaryProfile profile = getSummaryProfile();
+        if (profile != null) {
+            profile.incGetPartitionVersionByHasDataCount();
+        }
+
+        try {
+            List<Long> versions = CloudPartition.getSnapshotVisibleVersion(unknowns);
+
+            int size = versions.size();
+            for (int i = 0; i < size; i++) {
+                if (versions.get(i) > CloudPartition.EMPTY_VERSION) {
+                    nonEmptyPartitionIds.add(unknowns.get(i).getId());
+                }
+            }
+
+            return nonEmptyPartitionIds;
+        } catch (RpcException e) {
+            throw new RuntimeException("get version from meta service failed");
+        }
+    }
+
+    // Get visible version from the specified partitions;
+    //
+    // Return the visible version in order of the specified partition ids, -1 means version NOT FOUND.
+    public static List<Long> getSnapshotVisibleVersion(List<CloudPartition> partitions) throws RpcException {
+        if (partitions.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Long> dbIds = new ArrayList<>();
+        List<Long> tableIds = new ArrayList<>();
+        List<Long> partitionIds = new ArrayList<>();
+        for (CloudPartition partition : partitions) {
+            dbIds.add(partition.getDbId());
+            tableIds.add(partition.getTableId());
+            partitionIds.add(partition.getId());
+        }
+
+        List<Long> versions = getSnapshotVisibleVersion(dbIds, tableIds, partitionIds);
+
+        // Cache visible version, see hasData() for details.
+        int size = versions.size();
+        for (int i = 0; i < size; ++i) {
+            Long version = versions.get(i);
+            if (version > EMPTY_VERSION) {
+                partitions.get(i).setCachedVisibleVersion(versions.get(i));
+            }
+        }
+
+        return versions;
     }
 
     // Get visible versions for the specified partitions.
@@ -141,6 +219,7 @@ public class CloudPartition extends Partition {
             }
             return news;
         }
+
         return versions;
     }
 
@@ -178,11 +257,8 @@ public class CloudPartition extends Partition {
     public void updateVisibleVersionAndTime(long visibleVersion, long visibleVersionTime) {
     }
 
-    /**
-     * CloudPartition always has data
-     */
-    @Override
-    public boolean hasData() {
+    // Determine whether data this partition has, according to the cached visible version.
+    public boolean hasDataCached() {
         // In order to determine whether a partition is empty, a get_version RPC is issued to
         // the meta service. The pruning process will be very slow when there are lots of empty
         // partitions. This option disables the empty partition prune optimization to speed SQL
@@ -191,12 +267,18 @@ public class CloudPartition extends Partition {
             return true;
         }
 
-        // Every partition starts from version 1, version 1 has no data
-        final long versionNoData = 1;
+        // Every partition starts from version 1, version 1 has no data.
+        // So as long as version is greater than 1, it can be determined that there is data here.
+        return super.getVisibleVersion() > EMPTY_VERSION;
+    }
 
-        // As long as version is greater than 1, it can be determined that there is data here.
+    /**
+     * CloudPartition always has data
+     */
+    @Override
+    public boolean hasData() {
         // To avoid sending an RPC request, see the cached visible version here first.
-        if (super.getVisibleVersion() > versionNoData) {
+        if (hasDataCached()) {
             return true;
         }
 
@@ -204,7 +286,8 @@ public class CloudPartition extends Partition {
         if (profile != null) {
             profile.incGetPartitionVersionByHasDataCount();
         }
-        return getVisibleVersion() > versionNoData;
+
+        return getVisibleVersion() > EMPTY_VERSION;
     }
 
     private static SelectdbCloud.GetVersionResponse getVersionFromMeta(SelectdbCloud.GetVersionRequest req)
