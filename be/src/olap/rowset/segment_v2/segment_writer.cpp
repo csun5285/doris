@@ -69,6 +69,7 @@ using namespace ErrorCode;
 
 const char* k_segment_magic = "D0R1";
 const uint32_t k_segment_magic_length = 4;
+bvar::Adder<uint64_t> segment_writer_cnt("segment_writer_cnt");
 
 SegmentWriter::SegmentWriter(io::FileWriter* file_writer, uint32_t segment_id,
                              TabletSchemaSPtr tablet_schema, TabletSharedPtr tablet,
@@ -100,10 +101,12 @@ SegmentWriter::SegmentWriter(io::FileWriter* file_writer, uint32_t segment_id,
         const auto& column = _tablet_schema->column(_tablet_schema->sequence_col_idx());
         _seq_coder = get_key_coder(column.type());
     }
+    segment_writer_cnt << 1;
 }
 
 SegmentWriter::~SegmentWriter() {
     _mem_tracker->release(_mem_tracker->consumption());
+    segment_writer_cnt << -1;
 }
 
 void SegmentWriter::init_column_meta(ColumnMetaPB* meta, uint32_t column_id,
