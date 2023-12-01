@@ -96,6 +96,8 @@ public class StatisticConstants {
 
     public static final int SUBMIT_JOB_LIMIT = 5;
 
+    public static final int MSG_LEN_UPPER_BOUND = 1024;
+
     static {
         SYSTEM_DBS.add(SystemInfoService.DEFAULT_CLUSTER
                 + ClusterNamespace.CLUSTER_DELIMITER + FeConstants.INTERNAL_DB_NAME);
