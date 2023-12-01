@@ -1229,11 +1229,13 @@ public class Env {
                 if (Strings.isNullOrEmpty(token)) {
                     token = Config.auth_token;
                 }
+                LOG.info("get version file from helper, cluster id {}, token {}", clusterId, token);
             } else {
                 // If the version file exist, read the cluster id and check the
                 // id with helper node to make sure they are identical
                 clusterId = storage.getClusterID();
                 token = storage.getToken();
+                LOG.info("check local cluster id {} and token via helper node", clusterId, token);
                 try {
                     String url = "http://" + NetUtils
                             .getHostPortInAccessibleFormat(rightHelperNode.getHost(), Config.http_port) + "/check";
@@ -1261,8 +1263,8 @@ public class Env {
                         Preconditions.checkNotNull(remoteToken);
                         if (!token.equals(remoteToken)) {
                             throw new IOException(
-                                    "token is not equal with helper node "
-                                            + rightHelperNode.getHost() + ". will exit.");
+                                    "token is not equal with helper node " + rightHelperNode.getHost()
+                                    + ", local token " + token + ", remote token " + remoteToken + ". will exit.");
                         }
                     }
                 } catch (Exception e) {
@@ -1285,8 +1287,8 @@ public class Env {
         }
 
         Preconditions.checkState(helperNodes.size() == 1);
-        LOG.info("finished to get cluster id: {}, isElectable: {}, role: {} and node name: {}",
-                clusterId, isElectable, role.name(), nodeName);
+        LOG.info("finished to get cluster id: {}, isElectable: {}, role: {}, node name: {}, token: {}",
+                clusterId, isElectable, role.name(), nodeName, token);
     }
 
     public static String genFeNodeName(String host, int port, boolean isOldStyle) {
