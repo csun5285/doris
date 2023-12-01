@@ -365,7 +365,9 @@ Status S3FileSystem::list_impl(const Path& dir, bool only_file, std::vector<File
     request.WithBucket(_s3_conf.bucket).WithPrefix(prefix);
     bool is_trucated = false;
     do {
-        auto outcome = client->ListObjectsV2(request);
+        auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->ListObjectsV2(request),
+                                                    "s3_file_system::list_object",
+                                                    std::ref(request).get());
         s3_bvar::s3_list_total << 1;
         if (!outcome.IsSuccess()) {
             return Status::IOError("failed to list {}: {}", dir.native(),
