@@ -1046,10 +1046,19 @@ public class LoadManager implements Writable {
     public void readFields(DataInput in) throws IOException {
         long currentTimeMs = System.currentTimeMillis();
         int size = in.readInt();
+        int expired = 0;
         for (int i = 0; i < size; i++) {
             LoadJob loadJob = LoadJob.read(in);
             if (loadJob.isExpired(currentTimeMs)) {
+                expired += 1;
                 continue;
+            }
+
+            if (i > Config.cloud_max_copy_job_per_table
+                    && Config.cloud_max_copy_job_per_table > 0
+                    && i % Config.cloud_max_copy_job_per_table == 0) {
+                // Like skipping expired load jobs, we need to maintain max copy jobs per table here.
+                removeCopyJobs();
             }
 
             if (loadJob.getJobType() == EtlJobType.MINI) {
@@ -1077,6 +1086,10 @@ public class LoadManager implements Writable {
                 Env.getCurrentGlobalTransactionMgr().getCallbackFactory().addCallback(loadJob);
             }
         }
+
+        // Like skipping expired load jobs, we need to maintain max copy jobs per table here.
+        removeCopyJobs();
+        LOG.info("read total {} jobs, left {} jobs, expired {} jobs", size, idToLoadJob.size(), expired);
     }
 
     // ------------------------ for load refactor ------------------------
