@@ -170,6 +170,7 @@ extern bvar::LatencyRecorder g_bvar_txn_kv_remove;
 extern bvar::LatencyRecorder g_bvar_txn_kv_range_remove;
 extern bvar::LatencyRecorder g_bvar_txn_kv_get_read_version;
 extern bvar::LatencyRecorder g_bvar_txn_kv_get_committed_version;
+extern bvar::LatencyRecorder g_bvar_txn_kv_batch_get;
 
 extern bvar::Adder<int64_t> g_bvar_txn_kv_commit_error_counter;
 extern bvar::Adder<int64_t> g_bvar_txn_kv_commit_conflict_counter;

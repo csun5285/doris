@@ -13,12 +13,16 @@
 #include "common/util.h"
 #include "meta-service/txn_kv_error.h"
 
+#include <algorithm>
 #include <atomic>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <cstring>
+#include <vector>
 // clang-format on
 
 // =============================================================================
@@ -466,6 +470,57 @@ TxnErrorCode RangeGetIterator::init() {
     if (err) {
         LOG(WARNING) << "fdb_future_get_keyvalue_array failed, err=" << fdb_get_error(err);
         return cast_as_txn_code(err);
+    }
+    return TxnErrorCode::TXN_OK;
+}
+
+TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
+                           const BatchGetOptions& opts) {
+    if (keys.empty()) {
+        return TxnErrorCode::TXN_OK;
+    }
+    StopWatch sw;
+    std::vector<FDBFuture*> futs;
+    futs.reserve(keys.size());
+    for (const auto& k: keys) {
+        futs.push_back(fdb_transaction_get(txn_, (uint8_t*)k.data(), k.size(), opts.snapshot));
+    }
+
+    auto release_futs = [&futs, &sw](int*) {
+        std::for_each(futs.begin(), futs.end(), [](FDBFuture* fut) { fdb_future_destroy(fut); });
+        g_bvar_txn_kv_batch_get << sw.elapsed_us();
+    };
+    std::unique_ptr<int, decltype(release_futs)> defer((int*)0x01, std::move(release_futs));
+
+    res->reserve(keys.size());
+    DCHECK(keys.size() == futs.size());
+    auto size = futs.size();
+    for (auto i = 0; i < size; ++i) {
+        const auto& fut = futs[i];
+        RETURN_IF_ERROR(await_future(fut));
+        auto err = fdb_future_get_error(fut);
+        if (err) {
+            LOG(WARNING) << __PRETTY_FUNCTION__
+                         << " failed to fdb_future_get_error err=" << fdb_get_error(err)
+                         << " key=" << hex(keys[i]);
+            return cast_as_txn_code(err);
+        }
+        fdb_bool_t found;
+        const uint8_t* ret;
+        int len;
+        err = fdb_future_get_value(fut, &found, &ret, &len);
+
+        if (err) {
+            LOG(WARNING) << __PRETTY_FUNCTION__
+                         << " failed to fdb_future_get_value err=" << fdb_get_error(err)
+                         << " key=" << hex(keys[i]);
+            return cast_as_txn_code(err);
+        }
+        if (!found) {
+            res->push_back(std::nullopt);
+            continue;
+        }
+        res->push_back(std::string((char*)ret, len));
     }
     return TxnErrorCode::TXN_OK;
 }
