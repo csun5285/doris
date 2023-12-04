@@ -133,8 +133,14 @@ void S3FileWriter::_wait_until_finish(std::string_view task_name) {
     current_time.tv_nsec = 0;
     // bthread::countdown_event::timed_wait() should use absolute time
     while (0 != _countdown_event.timed_wait(current_time)) {
+        uint64_t finish_num = 0;
+        {
+            std::unique_lock lck {_completed_lock};
+            finish_num = _completed_parts.size();
+        }
+        auto progess = fmt::format(" progress {}/{}", finish_num, _cur_part_num);
         current_time.tv_sec += timeout_duration;
-        LOG(WARNING) << msg;
+        LOG(WARNING) << msg << progess;
     }
 }
 
@@ -257,7 +263,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                                 std::unique_lock<std::mutex> _lck {_completed_lock};
                                 _failed = true;
                                 ret = true;
-                                this->_st = std::move(s);
+                                _st = std::move(s);
                             }
                             // After the signal, there is a scenario where the previous invocation of _wait_until_finish
                             // returns to the caller, and subsequently, the S3 file writer is destructed.

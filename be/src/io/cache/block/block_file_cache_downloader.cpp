@@ -155,8 +155,9 @@ struct DownloadTaskExecutor {
         // bthread::countdown_event::timed_wait() should use absolute time
         while (0 != _countdown_event.timed_wait(current_time)) {
             current_time.tv_sec += timeout_duration;
-            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds", bucket, key_name,
-                        offset, size, timeout_duration);
+            auto cur_finish_num = _finished_num.load();
+            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds, progress {}/{}", bucket,
+                        key_name, offset, size, timeout_duration, cur_finish_num, task_num);
         }
     }
 
