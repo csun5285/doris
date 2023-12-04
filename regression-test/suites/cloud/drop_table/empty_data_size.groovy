@@ -24,7 +24,7 @@ import groovy.json.JsonSlurper
 def http_get(url, data = null) {
     def dst = "http://"+ context.config.feHttpAddress
     def conn = new URL(dst + url).openConnection()
-    conn.setRequestMethod("POST")
+    conn.setRequestMethod("GET")
     conn.setRequestProperty("Content-Type", "application/json")
     conn.setRequestProperty("Authorization", "Basic cm9vdDo=")
     if (data) {
