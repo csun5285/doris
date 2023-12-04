@@ -79,14 +79,14 @@ suite("insert_group_commit_with_exception") {
             def result = sql """ insert into ${table} values(1, 'a', 10, 100)  """
             assertTrue(false)
         } catch (Exception e) {
-            assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+            assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
         }
 
         try {
             def result = sql """ insert into ${table} values(2, 'b')  """
             assertTrue(false)
         } catch (Exception e) {
-            assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+            assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
         }
 
         result = sql """ insert into ${table} values(3, 'c', 30)  """
@@ -102,14 +102,14 @@ suite("insert_group_commit_with_exception") {
             result = sql """ insert into ${table}(id, name) values(5, 'd', 50)  """
             assertTrue(false)
         } catch (Exception e) {
-            assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+            assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
         }
 
         try {
             result = sql """ insert into ${table}(id, name) values(6)  """
             assertTrue(false)
         } catch (Exception e) {
-            assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+            assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
         }
 
         try {
@@ -138,7 +138,7 @@ suite("insert_group_commit_with_exception") {
                 int[] result = ps.executeBatch();
                 assertTrue(false)
             } catch (Exception e) {
-                assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+                assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
             }
 
             try (PreparedStatement ps = connection.prepareStatement("insert into ${table} values(?, ?)")) {
@@ -148,7 +148,7 @@ suite("insert_group_commit_with_exception") {
                 int[] result = ps.executeBatch();
                 assertTrue(false)
             } catch (Exception e) {
-                assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+                assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
             }
 
             try (PreparedStatement ps = connection.prepareStatement("insert into ${table} values(?, ?, ?)")) {
@@ -177,7 +177,7 @@ suite("insert_group_commit_with_exception") {
                 int[] result = ps.executeBatch();
                 assertTrue(false)
             } catch (Exception e) {
-                assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+                assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
             }
 
             try (PreparedStatement ps = connection.prepareStatement("insert into ${table}(id, name) values(?)")) {
@@ -186,7 +186,7 @@ suite("insert_group_commit_with_exception") {
                 int[] result = ps.executeBatch();
                 assertTrue(false)
             } catch (Exception e) {
-                assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+                assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
             }
 
             try (PreparedStatement ps = connection.prepareStatement("insert into ${table}(id, names) values(?, ?)")) {
@@ -250,7 +250,7 @@ suite("insert_group_commit_with_exception") {
                     result = ps.executeBatch()
                     assertTrue(false)
                 } catch (Exception e) {
-                    assertTrue(e.getMessage().contains("Column count doesn't match value count"))
+                    assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
                 }
             }
             getRowCount(14)
