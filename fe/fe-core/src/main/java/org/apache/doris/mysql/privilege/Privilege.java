@@ -33,7 +33,7 @@ public enum Privilege {
     USAGE_PRIV("Usage_priv", 8, "Privilege for using resource or workloadGroup"),
     CLUSTER_USAGE_PRIV("Cluster_Usage_priv", 9, "Privilege for using cluster"),
     STAGE_USAGE_PRIV("Stage_Usage_priv", 10, "Privilege for using stage"),
-    SHOW_VIEW_PRIV("Show_view_priv", 9, "Privilege for show create view");
+    SHOW_VIEW_PRIV("Show_view_priv", 11, "Privilege for show create view");
 
     public static Privilege[] privileges = {
             NODE_PRIV,
