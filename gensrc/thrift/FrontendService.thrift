@@ -1130,6 +1130,10 @@ struct TRequestGroupCommitFragmentResult {
     4: optional PaloInternalService.TPipelineFragmentParams pipeline_params
 }
 
+struct TInvalidateFollowerStatsCacheRequest {
+    1: optional string key;
+}
+
 struct TGetMetaReplica {
     1: optional i64 id
 }
@@ -1312,4 +1316,6 @@ service FrontendService {
     TGetMetaResult getMeta(1: TGetMetaRequest request)
 
     TGetBackendMetaResult getBackendMeta(1: TGetBackendMetaRequest request)
+
+    Status.TStatus invalidateStatsCache(1: TInvalidateFollowerStatsCacheRequest request)
 }
