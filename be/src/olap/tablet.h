@@ -858,6 +858,7 @@ public:
     IntCounter* flush_bytes;
     IntCounter* flush_finish_count;
     std::atomic<int64_t> publised_count = 0;
+    std::atomic<int64_t> read_block_count = 0;
     // For auto compaction scheduling
     int64_t last_load_time_ms = 0;
 };

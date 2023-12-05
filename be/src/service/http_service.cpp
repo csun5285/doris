@@ -44,6 +44,7 @@
 #include "http/action/reload_tablet_action.h"
 #include "http/action/reset_rpc_channel_action.h"
 #include "http/action/restore_tablet_action.h"
+#include "http/action/show_hotspot_action.h"
 #include "http/action/shrink_mem_action.h"
 #include "http/action/snapshot_action.h"
 #include "http/action/stream_load.h"
@@ -379,6 +380,9 @@ Status HttpService::cloud_start() {
     PadRowsetAction* pad_rowset_action =
             _pool.add(new PadRowsetAction(_env, TPrivilegeHier::GLOBAL, TPrivilegeType::ADMIN));
     _ev_http_server->register_handler(HttpMethod::POST, "api/pad_rowset", pad_rowset_action);
+
+    auto* show_hotspot_action = _pool.add(new ShowHotspotAction);
+    _ev_http_server->register_handler(HttpMethod::GET, "/api/hotspot/tablet", show_hotspot_action);
 
     _ev_http_server->start();
     return Status::OK();

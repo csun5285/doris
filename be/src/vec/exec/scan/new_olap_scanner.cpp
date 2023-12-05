@@ -16,6 +16,7 @@
 // under the License.
 
 #include "vec/exec/scan/new_olap_scanner.h"
+#include <atomic>
 
 #include <gen_cpp/Descriptors_types.h>
 #include <gen_cpp/PlanNodes_types.h>
@@ -455,6 +456,7 @@ Status NewOlapScanner::_get_block_impl(RuntimeState* state, Block* block, bool* 
         _profile_updated = _tablet_reader->update_profile(_profile);
     }
     if (block->rows() > 0) {
+        _tablet_reader_params.tablet->read_block_count.fetch_add(1, std::memory_order_relaxed);
         *eof = false;
     }
     _update_realtime_counters();
