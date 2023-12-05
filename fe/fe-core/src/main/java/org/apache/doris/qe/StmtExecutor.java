@@ -457,7 +457,7 @@ public class StmtExecutor {
     }
 
     public void execute(TUniqueId queryId) throws Exception {
-        String stmtStr = originStmt.originStmt;
+        String stmtStr = getOriginStmtInString();
         LOG.info("begin to execute query: {}, stmt: {}", DebugUtil.printId(queryId),
                 parsedStmt != null && (parsedStmt instanceof InsertStmt)
                 && stmtStr.length() > Config.insert_stmt_size_in_audit_log_limit
