@@ -163,10 +163,10 @@ Status S3FileWriter::_open() {
         return Status::OK();
     }
     return Status::IOError(
-            "failed to create multipart upload(bucket={}, key={}, upload_id={}, exception={}, "
-            "error code={}): {}",
-            _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
-            outcome.GetError().GetResponseCode(), outcome.GetError().GetMessage());
+            "failed to create multipart upload(bucket={}, key={}, upload_id={}): {}, exception {}, "
+            "error code {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage(),
+            outcome.GetError().GetExceptionName(), outcome.GetError().GetResponseCode());
 }
 
 Status S3FileWriter::_abort() {
@@ -207,10 +207,10 @@ Status S3FileWriter::_abort() {
         return Status::OK();
     }
     return Status::IOError(
-            "failed to abort multipart upload(bucket={}, key={}, upload_id={}, exception={}, error "
-            "code={}): {}",
-            _bucket, _path.native(), _upload_id, outcome.GetError().GetExceptionName(),
-            outcome.GetError().GetResponseCode(), outcome.GetError().GetMessage());
+            "failed to abort multipart upload(bucket={}, key={}, upload_id={}): {}, exception {}, "
+            "error code {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage(),
+            outcome.GetError().GetExceptionName(), outcome.GetError().GetResponseCode());
 }
 
 Status S3FileWriter::close() {

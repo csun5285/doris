@@ -298,14 +298,14 @@ TEST_F(BufferedReaderTest, test_read_amplify) {
     ASSERT_TRUE(st.ok()) << st;
     EXPECT_EQ(bytes_read, 1024 * kb);
     EXPECT_EQ(merge_reader.statistics().request_bytes, 1024 * kb);
-    EXPECT_EQ(merge_reader.statistics().read_bytes, 1024 * kb);
+    EXPECT_EQ(merge_reader.statistics().merged_bytes, 1024 * kb);
     // read column0
     result.size = 1 * kb;
     // will merge column 0 ~ 3
     st = merge_reader.read_at(0, result, &bytes_read, nullptr);
     ASSERT_TRUE(st.ok()) << st;
     EXPECT_EQ(bytes_read, 1 * kb);
-    EXPECT_EQ(merge_reader.statistics().read_bytes, 1024 * kb + 12 * kb);
+    EXPECT_EQ(merge_reader.statistics().merged_bytes, 1024 * kb + 12 * kb);
     // read column1
     result.size = 1 * kb;
     st = merge_reader.read_at(3 * kb, result, &bytes_read, nullptr);
@@ -319,7 +319,7 @@ TEST_F(BufferedReaderTest, test_read_amplify) {
     st = merge_reader.read_at(7 * kb, result, &bytes_read, nullptr);
     ASSERT_TRUE(st.ok()) << st;
     EXPECT_EQ(merge_reader.statistics().request_bytes, 1024 * kb + 8 * kb);
-    EXPECT_EQ(merge_reader.statistics().read_bytes, 1024 * kb + 12 * kb);
+    EXPECT_EQ(merge_reader.statistics().merged_bytes, 1024 * kb + 12 * kb);
 }
 
 TEST_F(BufferedReaderTest, test_merged_io) {

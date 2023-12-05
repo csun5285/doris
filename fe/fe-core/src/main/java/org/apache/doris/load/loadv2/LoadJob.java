@@ -881,7 +881,11 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
         // error tablets
         jobInfo.add(errorTabletsToJson());
         // user
-        jobInfo.add(userInfo.getQualifiedUser());
+        if (userInfo == null || userInfo.getQualifiedUser() == null) {
+            jobInfo.add(FeConstants.null_string);
+        } else {
+            jobInfo.add(userInfo.getQualifiedUser());
+        }
         // comment
         jobInfo.add(comment);
         return jobInfo;

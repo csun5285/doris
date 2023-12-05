@@ -1179,6 +1179,7 @@ public class OlapTable extends Table {
         }
         if (!tblStats.analyzeColumns().containsAll(getBaseSchema()
                 .stream()
+                .filter(c -> !StatisticsUtil.isUnsupportedType(c.getType()))
                 .map(Column::getName)
                 .collect(Collectors.toSet()))) {
             return true;
@@ -2385,10 +2386,14 @@ public class OlapTable extends Table {
         Set<String> allPartitions = table.getPartitionNames().stream().map(table::getPartition)
                 .filter(Partition::hasData).map(Partition::getName).collect(Collectors.toSet());
         if (tableStats == null) {
-            return table.getBaseSchema().stream().collect(Collectors.toMap(Column::getName, v -> allPartitions));
+            return table.getBaseSchema().stream().filter(c -> !StatisticsUtil.isUnsupportedType(c.getType()))
+                    .collect(Collectors.toMap(Column::getName, v -> allPartitions));
         }
         Map<String, Set<String>> colToPart = new HashMap<>();
         for (Column col : table.getBaseSchema()) {
+            if (StatisticsUtil.isUnsupportedType(col.getType())) {
+                continue;
+            }
             long lastUpdateTime = tableStats.findColumnLastUpdateTime(col.getName());
             Set<String> partitions = table.getPartitionNames().stream()
                     .map(table::getPartition)
@@ -2418,6 +2423,17 @@ public class OlapTable extends Table {
     @Override
     public boolean isPartitionColumn(String columnName) {
         return getPartitionInfo().getPartitionColumns().stream()
-            .anyMatch(c -> c.getName().equalsIgnoreCase(columnName));
+                .anyMatch(c -> c.getName().equalsIgnoreCase(columnName));
+    }
+
+    /**
+     * For olap table, we need to acquire read lock when plan.
+     * Because we need to make sure the partition's version remain unchanged when plan.
+     *
+     * @return
+     */
+    @Override
+    public boolean needReadLockWhenPlan() {
+        return true;
     }
 }
