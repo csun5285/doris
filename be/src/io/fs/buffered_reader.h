@@ -82,7 +82,8 @@ public:
         int64_t request_io = 0;
         int64_t merged_io = 0;
         int64_t request_bytes = 0;
-        int64_t read_bytes = 0;
+        int64_t merged_bytes = 0;
+        int64_t apply_bytes = 0;
     };
 
     struct RangeCachedData {
@@ -149,6 +150,9 @@ public:
         // Equivalent min size of each IO that can reach the maximum storage speed limit:
         // 512KB for oss, 4KB for hdfs
         _equivalent_io_size = _is_oss ? OSS_MIN_IO_SIZE : HDFS_MIN_IO_SIZE;
+        for (const PrefetchRange& range : _random_access_ranges) {
+            _statistics.apply_bytes += range.end_offset - range.start_offset;
+        }
         if (_profile != nullptr) {
             const char* random_profile = "MergedSmallIO";
             ADD_TIMER(_profile, random_profile);
@@ -158,7 +162,9 @@ public:
             _merged_io = ADD_CHILD_COUNTER(_profile, "MergedIO", TUnit::UNIT, random_profile);
             _request_bytes =
                     ADD_CHILD_COUNTER(_profile, "RequestBytes", TUnit::BYTES, random_profile);
-            _read_bytes = ADD_CHILD_COUNTER(_profile, "MergedBytes", TUnit::BYTES, random_profile);
+            _merged_bytes =
+                    ADD_CHILD_COUNTER(_profile, "MergedBytes", TUnit::BYTES, random_profile);
+            _apply_bytes = ADD_CHILD_COUNTER(_profile, "ApplyBytes", TUnit::BYTES, random_profile);
         }
     }
 
@@ -178,6 +184,7 @@ public:
             _closed = true;
             // the underlying buffer is closed in its own destructor
             // return _reader->close();
+<<<<<<< HEAD
             // Fixme(AlexYue): Temporiraly comment the profile update logic
             // if (_profile != nullptr) {
             //     COUNTER_UPDATE(_copy_time, _statistics.copy_time);
@@ -194,6 +201,17 @@ public:
                     _reader->path().string(), _statistics.copy_time, _statistics.read_time,
                     _statistics.request_io, _statistics.merged_io, _statistics.request_bytes,
                     _statistics.read_bytes);
+=======
+            if (_profile != nullptr) {
+                COUNTER_UPDATE(_copy_time, _statistics.copy_time);
+                COUNTER_UPDATE(_read_time, _statistics.read_time);
+                COUNTER_UPDATE(_request_io, _statistics.request_io);
+                COUNTER_UPDATE(_merged_io, _statistics.merged_io);
+                COUNTER_UPDATE(_request_bytes, _statistics.request_bytes);
+                COUNTER_UPDATE(_merged_bytes, _statistics.merged_bytes);
+                COUNTER_UPDATE(_apply_bytes, _statistics.apply_bytes);
+            }
+>>>>>>> 0e52a1a806
         }
         return Status::OK();
     }
@@ -228,7 +246,8 @@ private:
     RuntimeProfile::Counter* _request_io;
     RuntimeProfile::Counter* _merged_io;
     RuntimeProfile::Counter* _request_bytes;
-    RuntimeProfile::Counter* _read_bytes;
+    RuntimeProfile::Counter* _merged_bytes;
+    RuntimeProfile::Counter* _apply_bytes;
 
     int _search_read_range(size_t start_offset, size_t end_offset);
     void _clean_cached_data(RangeCachedData& cached_data);

@@ -808,7 +808,84 @@ public abstract class LoadJob extends AbstractTxnStateChangeCallback implements 
     public List<Comparable> getShowInfo() throws DdlException {
         readLock();
         try {
+<<<<<<< HEAD
             return getShowInfoUnderLock();
+=======
+            // check auth
+            checkAuth("SHOW LOAD");
+            List<Comparable> jobInfo = Lists.newArrayList();
+            // jobId
+            jobInfo.add(id);
+            // label
+            jobInfo.add(label);
+            // state
+            jobInfo.add(state.name());
+
+            // progress
+            // check null
+            String progress = Env.getCurrentProgressManager().getProgressInfo(String.valueOf(id));
+            switch (state) {
+                case PENDING:
+                    jobInfo.add("0%");
+                    break;
+                case CANCELLED:
+                    jobInfo.add(progress);
+                    break;
+                case ETL:
+                    jobInfo.add(progress);
+                    break;
+                default:
+                    jobInfo.add(progress);
+                    break;
+            }
+
+            // type
+            jobInfo.add(jobType);
+
+            // etl info
+            if (loadingStatus.getCounters().size() == 0) {
+                jobInfo.add(FeConstants.null_string);
+            } else {
+                jobInfo.add(Joiner.on("; ").withKeyValueSeparator("=").join(loadingStatus.getCounters()));
+            }
+
+            // task info
+            jobInfo.add("cluster:" + getResourceName() + "; timeout(s):" + getTimeout()
+                    + "; max_filter_ratio:" + getMaxFilterRatio() + "; priority:" + getPriority());
+            // error msg
+            if (failMsg == null) {
+                jobInfo.add(FeConstants.null_string);
+            } else {
+                jobInfo.add("type:" + failMsg.getCancelType() + "; msg:" + failMsg.getMsg());
+            }
+
+            // create time
+            jobInfo.add(TimeUtils.longToTimeString(createTimestamp));
+            // etl start time
+            jobInfo.add(TimeUtils.longToTimeString(getEtlStartTimestamp()));
+            // etl end time
+            jobInfo.add(TimeUtils.longToTimeString(loadStartTimestamp));
+            // load start time
+            jobInfo.add(TimeUtils.longToTimeString(loadStartTimestamp));
+            // load end time
+            jobInfo.add(TimeUtils.longToTimeString(finishTimestamp));
+            // tracking url
+            jobInfo.add(loadingStatus.getTrackingUrl());
+            jobInfo.add(loadStatistic.toJson());
+            // transaction id
+            jobInfo.add(transactionId);
+            // error tablets
+            jobInfo.add(errorTabletsToJson());
+            // user, some load job may not have user info
+            if (userInfo == null || userInfo.getQualifiedUser() == null) {
+                jobInfo.add(FeConstants.null_string);
+            } else {
+                jobInfo.add(userInfo.getQualifiedUser());
+            }
+            // comment
+            jobInfo.add(comment);
+            return jobInfo;
+>>>>>>> 0e52a1a806
         } finally {
             readUnlock();
         }

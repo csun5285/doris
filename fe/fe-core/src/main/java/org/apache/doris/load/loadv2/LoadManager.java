@@ -742,8 +742,9 @@ public class LoadManager implements Writable {
                 try {
                     // add load job info
                     loadJobInfos.add(loadJob.getShowInfo());
-                } catch (DdlException e) {
-                    continue;
+                } catch (RuntimeException | DdlException e) {
+                    // ignore this load job
+                    LOG.warn("get load job info failed. job id: {}", loadJob.getId(), e);
                 }
             }
             return loadJobInfos;
