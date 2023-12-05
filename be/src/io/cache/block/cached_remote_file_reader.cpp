@@ -107,7 +107,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         if (io_ctx->file_cache_stats && _metrics_hook) {
             stats.bytes_read += bytes_req;
             _update_state(stats, io_ctx->file_cache_stats);
-            _metrics_hook(io_ctx->file_cache_stats);
+            _metrics_hook(stats);
         }
         return Status::OK();
     }
@@ -246,7 +246,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
     if (io_ctx && io_ctx->file_cache_stats && _metrics_hook) {
         _update_state(stats, io_ctx->file_cache_stats);
-        _metrics_hook(io_ctx->file_cache_stats);
+        _metrics_hook(stats);
     }
     return Status::OK();
 }

@@ -46,6 +46,8 @@
 namespace doris {
 namespace segment_v2 {
 
+bvar::Adder<uint64_t> page_io_read_bytes("page_io", "read_and_decompress_page");
+
 using strings::Substitute;
 
 Status PageIO::compress_page_body(BlockCompressionCodec* codec, double min_space_saving,
@@ -115,6 +117,7 @@ Status PageIO::write_page(io::FileWriter* writer, const std::vector<Slice>& body
 
 Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle* handle,
                                         Slice* body, PageFooterPB* footer) {
+    page_io_read_bytes << opts.page_pointer.size;
     opts.sanity_check();
     opts.stats->total_pages_num++;
 

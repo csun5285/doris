@@ -2783,7 +2783,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;
@@ -2907,7 +2907,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_tail) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;
@@ -2972,7 +2972,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_error_handle) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;
@@ -3045,7 +3045,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_init) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;
@@ -3102,7 +3102,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_concurrent) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;
@@ -3178,7 +3178,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_concurrent_2) {
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileReaderSPtr local_reader;
     ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
-    auto count = [](io::FileCacheStatistics* stats) {
+    auto count = [](const io::ReadStatistics& stats) {
         io::FileCacheProfile::instance().update(1, stats);
     };
     io::FileBlockCachePathPolicy cache_policy;

@@ -35,6 +35,16 @@ enum class ReaderType {
 
 namespace io {
 
+struct ReadStatistics {
+    bool hit_cache = true;
+    bool skip_cache = false;
+    int64_t bytes_read = 0;
+    int64_t bytes_write_into_file_cache = 0;
+    int64_t remote_read_timer = 0;
+    int64_t local_read_timer = 0;
+    int64_t local_write_timer = 0;
+};
+
 struct FileCacheStatistics {
     int64_t num_local_io_total = 0;
     int64_t num_remote_io_total = 0;

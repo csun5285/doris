@@ -68,15 +68,6 @@ private:
     MetricsHook _metrics_hook;
     bool _is_doris_table;
 
-    struct ReadStatistics {
-        bool hit_cache = true;
-        bool skip_cache = false;
-        int64_t bytes_read = 0;
-        int64_t bytes_write_into_file_cache = 0;
-        int64_t remote_read_timer = 0;
-        int64_t local_read_timer = 0;
-        int64_t local_write_timer = 0;
-    };
     void _update_state(const ReadStatistics& stats, FileCacheStatistics* state) const;
 
     Status _read_from_cache(size_t offset, Slice result, size_t* bytes_read,

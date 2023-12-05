@@ -65,11 +65,11 @@ struct FileCacheProfile {
     }
 
     FileCacheProfile() {
-        FileCacheStatistics stats;
-        update(0, &stats);
+        ReadStatistics stats;
+        update(0, stats);
     }
 
-    void update(int64_t table_id, FileCacheStatistics* stats);
+    void update(int64_t table_id, const ReadStatistics& stats);
 
     std::mutex _mtx;
     // use shared_ptr for concurrent
