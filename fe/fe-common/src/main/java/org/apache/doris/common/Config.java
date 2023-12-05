@@ -2523,10 +2523,8 @@ public class Config extends ConfigBase {
             + "or too large package causing OOM,default 20000000(20M),set -1 for unlimited. "})
     public static int fe_thrift_max_pkg_bytes = 20000000;
 
-<<<<<<< HEAD
-=======
     @ConfField(description = {"是否开启通过http接口获取log文件的功能",
             "Whether to enable the function of getting log files through http interface"})
     public static boolean enable_get_log_file_api = false;
->>>>>>> 0e52a1a806
+
 }

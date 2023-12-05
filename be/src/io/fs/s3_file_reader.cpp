@@ -106,17 +106,10 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                                 std::ref(request).get(), &result);
     s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
-<<<<<<< HEAD
-        return Status::IOError("failed to read from {}: {}, ErrorCode {}, Exception {}",
-                               _path.native(), outcome.GetError().GetMessage(),
-                               outcome.GetError().GetResponseCode(),
-                               outcome.GetError().GetExceptionName());
-=======
         return Status::IOError("failed to read from {}: {}, exception {}, error code {}",
                                _path.native(), outcome.GetError().GetMessage(),
                                outcome.GetError().GetExceptionName(),
                                outcome.GetError().GetResponseCode());
->>>>>>> 0e52a1a806
     }
     *bytes_read = outcome.GetResult().GetContentLength();
     LOG_INFO("the returned file size is {}", *bytes_read);

@@ -74,9 +74,6 @@ using strings::SkipWhitespace;
 namespace doris {
 using namespace ErrorCode;
 
-<<<<<<< HEAD
-#ifndef CLOUD_MODE
-=======
 namespace {
 /// if binlog file exist, then check if binlog file md5sum equal
 /// if equal, then skip link file
@@ -129,7 +126,7 @@ Result<std::string> check_dest_binlog_valid(const std::string& tablet_dir,
 }
 } // namespace
 
->>>>>>> 0e52a1a806
+#ifndef CLOUD_MODE
 #define RETURN_IF_ERROR_(status, stmt) \
     do {                               \
         status = (stmt);               \

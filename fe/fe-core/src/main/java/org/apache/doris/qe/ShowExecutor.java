@@ -1763,10 +1763,6 @@ public class ShowExecutor {
         HMSExternalCatalog catalog = (HMSExternalCatalog) (showStmt.getCatalog());
         List<List<String>> rows = new ArrayList<>();
         String dbName = ClusterNamespace.getNameFromFullName(showStmt.getTableName().getDb());
-<<<<<<< HEAD
-        List<String> partitionNames = catalog.getClient().listPartitionNames(dbName,
-                showStmt.getTableName().getTbl());
-=======
 
         List<String> partitionNames;
         LimitElement limit = showStmt.getLimitElement();
@@ -1777,7 +1773,6 @@ public class ShowExecutor {
         } else {
             partitionNames = catalog.getClient().listPartitionNames(dbName, showStmt.getTableName().getTbl());
         }
->>>>>>> 0e52a1a806
         for (String partition : partitionNames) {
             List<String> list = new ArrayList<>();
             list.add(partition);
