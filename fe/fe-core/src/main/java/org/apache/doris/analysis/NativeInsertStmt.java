@@ -643,11 +643,8 @@ public class NativeInsertStmt extends InsertStmt {
                 // INSERT INTO VALUES(...)
                 List<ArrayList<Expr>> rows = selectStmt.getValueList().getRows();
                 for (int rowIdx = 0; rowIdx < rows.size(); ++rowIdx) {
-<<<<<<< HEAD
-                    analyzeRow(analyzer, targetColumns, rows, rowIdx, origColIdxsForExtendCols, slotToIndex, skipCheck);
-=======
-                    analyzeRow(analyzer, targetColumns, rows, rowIdx, origColIdxsForExtendCols, realTargetColumnNames);
->>>>>>> 0e52a1a806
+                    analyzeRow(analyzer, targetColumns, rows, rowIdx, origColIdxsForExtendCols, realTargetColumnNames,
+                            skipCheck);
                 }
 
                 // clear these 2 structures, rebuild them using VALUES exprs
@@ -665,11 +662,8 @@ public class NativeInsertStmt extends InsertStmt {
                 // `selectStmt.getResultExprs().clear();` will clear the `rows` too, causing
                 // error.
                 rows.add(Lists.newArrayList(selectStmt.getResultExprs()));
-<<<<<<< HEAD
-                analyzeRow(analyzer, targetColumns, rows, 0, origColIdxsForExtendCols, slotToIndex, skipCheck);
-=======
-                analyzeRow(analyzer, targetColumns, rows, 0, origColIdxsForExtendCols, realTargetColumnNames);
->>>>>>> 0e52a1a806
+                analyzeRow(analyzer, targetColumns, rows, 0, origColIdxsForExtendCols, realTargetColumnNames,
+                        skipCheck);
                 // rows may be changed in analyzeRow(), so rebuild the result exprs
                 selectStmt.getResultExprs().clear();
                 for (Expr expr : rows.get(0)) {
@@ -751,11 +745,6 @@ public class NativeInsertStmt extends InsertStmt {
         }
     }
 
-<<<<<<< HEAD
-    private void analyzeRow(Analyzer analyzer, List<Column> targetColumns, List<ArrayList<Expr>> rows,
-            int rowIdx, List<Pair<Integer, Column>> origColIdxsForExtendCols, Map<String, Expr> slotToIndex,
-            boolean skipCheck) throws AnalysisException {
-=======
     private Map<String, Expr> buildSlotToIndex(ArrayList<Expr> row, List<String> realTargetColumnNames,
             Analyzer analyzer) throws AnalysisException {
         Map<String, Expr> slotToIndex = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
@@ -783,9 +772,8 @@ public class NativeInsertStmt extends InsertStmt {
     }
 
     private void analyzeRow(Analyzer analyzer, List<Column> targetColumns, List<ArrayList<Expr>> rows, int rowIdx,
-            List<Pair<Integer, Column>> origColIdxsForExtendCols, List<String> realTargetColumnNames)
+            List<Pair<Integer, Column>> origColIdxsForExtendCols, List<String> realTargetColumnNames, boolean skipCheck)
             throws AnalysisException {
->>>>>>> 0e52a1a806
         // 1. check number of fields if equal with first row
         // targetColumns contains some shadow columns, which is added by system,
         // so we should minus this
