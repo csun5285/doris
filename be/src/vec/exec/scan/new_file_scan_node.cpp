@@ -60,8 +60,9 @@ Status NewFileScanNode::prepare(RuntimeState* state) {
 
 void NewFileScanNode::set_scan_ranges(RuntimeState* state,
                                       const std::vector<TScanRangeParams>& scan_ranges) {
-    int max_scanners =
-            config::doris_scanner_thread_pool_thread_num / state->query_parallel_instance_num();
+    auto parallel_inst = state->query_parallel_instance_num();
+    parallel_inst = parallel_inst <= 0 ? 1 : parallel_inst;
+    int max_scanners = config::doris_scanner_thread_pool_thread_num / parallel_inst;
     max_scanners = max_scanners == 0 ? 1 : max_scanners;
     if (scan_ranges.size() <= max_scanners) {
         _scan_ranges = scan_ranges;
