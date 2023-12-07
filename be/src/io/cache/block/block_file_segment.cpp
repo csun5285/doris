@@ -39,7 +39,7 @@ namespace doris {
 namespace io {
 
 FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache,
-                     State download_state, FileCacheType cache_type, int64_t expiration_time)
+                     State download_state, FileCacheType cache_type, uint64_t expiration_time)
         : _segment_range(offset, offset + size - 1),
           _download_state(download_state),
           _file_key(key),
@@ -255,11 +255,7 @@ FileBlock::State FileBlock::wait() {
     if (_download_state == State::DOWNLOADING) {
         DCHECK(_downloader_id != 0);
         DCHECK(_downloader_id != get_caller_id());
-#if !defined(USE_BTHREAD_SCANNER)
         _cv.wait_for(segment_lock, std::chrono::seconds(1));
-#else
-        _cv.wait_for(segment_lock, 1000000);
-#endif
     }
 
     return _download_state;

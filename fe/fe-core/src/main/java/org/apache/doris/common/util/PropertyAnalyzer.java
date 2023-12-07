@@ -425,8 +425,12 @@ public class PropertyAnalyzer {
             String ttlSecondsStr = properties.get(PROPERTIES_FILE_CACHE_TTL_SECONDS);
             try {
                 ttlSeconds = Long.parseLong(ttlSecondsStr);
+                if (ttlSeconds < 0) {
+                    throw new NumberFormatException();
+                }
             } catch (NumberFormatException e) {
-                throw new AnalysisException("TTL integer format error: " + ttlSecondsStr);
+                throw new AnalysisException("The value " + ttlSecondsStr + " formats error or  is out of range "
+                           + "(0 < integer < Long.MAX_VALUE)");
             }
         }
         return ttlSeconds;

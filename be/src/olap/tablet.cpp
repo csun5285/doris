@@ -907,9 +907,7 @@ void Tablet::cloud_add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version
                             dynamic_cast<io::S3FileSystem*>(download_file_meta.file_system.get());
                     DCHECK(s3_file_system);
                     download_file_meta.path = io::Path(rs->segment_file_path(seg_id));
-                    download_file_meta.expiration_time =
-                            _tablet_meta->is_persistent() ? INT64_MAX
-                            : _tablet_meta->ttl_seconds() == 0
+                    download_file_meta.expiration_time = _tablet_meta->ttl_seconds() == 0
                                     ? 0
                                     : rowset_meta->newest_write_timestamp() +
                                               _tablet_meta->ttl_seconds();

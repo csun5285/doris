@@ -3113,7 +3113,7 @@ public class SchemaChangeHandler extends AlterHandler {
         UpdatePartitionMetaParam param = new UpdatePartitionMetaParam();
 
         if (properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)) {
-            long ttlSeconds = Long.parseLong(properties.get(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+            long ttlSeconds = PropertyAnalyzer.analyzeTTL(properties);
             olapTable.readLock();
             try {
                 if (ttlSeconds == olapTable.getTTLSeconds()) {

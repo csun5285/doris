@@ -1,1 +1,1 @@
-DELETE FROM customer where C_CUSTKEY >= 0;
+DROP TABLE IF EXISTS customer;

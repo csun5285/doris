@@ -28,7 +28,7 @@
 #include "http/action/check_rpc_channel_action.h"
 #include "http/action/check_tablet_segment_action.h"
 #include "http/action/checksum_action.h"
-#include "http/action/clear_file_cache_async_action.h"
+#include "http/action/clear_file_cache_action.h"
 #include "http/action/compaction_action.h"
 #include "http/action/config_action.h"
 #include "http/action/debug_point_action.h"
@@ -372,10 +372,10 @@ Status HttpService::cloud_start() {
     ShrinkMemAction* shrink_mem_action = _pool.add(new ShrinkMemAction());
     _ev_http_server->register_handler(HttpMethod::GET, "/api/shrink_mem", shrink_mem_action);
 
-    ClearFileCacheAsyncAction* clear_file_cache_async_action =
-            _pool.add(new ClearFileCacheAsyncAction());
-    _ev_http_server->register_handler(HttpMethod::GET, "/api/clear_file_cache_async",
-                                      clear_file_cache_async_action);
+    ClearFileCacheAction* clear_file_cache_action =
+            _pool.add(new ClearFileCacheAction());
+    _ev_http_server->register_handler(HttpMethod::POST, "/api/clear_file_cache",
+                                      clear_file_cache_action);
 
     PadRowsetAction* pad_rowset_action =
             _pool.add(new PadRowsetAction(_env, TPrivilegeHier::GLOBAL, TPrivilegeType::ADMIN));

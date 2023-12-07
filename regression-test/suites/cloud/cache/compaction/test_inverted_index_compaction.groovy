@@ -1,7 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_inverted_index_compcation"){
-
+    sql """ SET GLOBAL enable_auto_analyze = false """
     //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,Tag,ErrMsg,Version,Status
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
@@ -15,6 +15,22 @@ suite("test_inverted_index_compcation"){
             backendId_to_backendHttpPort.put(backend[0], backend[4])
             backendId_to_backendBrpcPort.put(backend[0], backend[5])
         }
+    }
+    String backendId = backendId_to_backendIP.keySet()[0]
+    def url = backendId_to_backendIP.get(backendId) + ":" + backendId_to_backendHttpPort.get(backendId) + """/api/clear_file_cache"""
+    logger.info(url)
+    def clearFileCache = { check_func ->
+        httpTest {
+            endpoint ""
+            uri url
+            op "post"
+            body "{\"sync\"=\"true\"}"
+            check check_func
+        }
+    }
+
+    clearFileCache.call() {
+        respCode, body -> {}
     }
 
     def getCurCacheSize = {
@@ -85,7 +101,7 @@ suite("test_inverted_index_compcation"){
         """
     }
 
-    sleep(60000);
+    sleep(30000);
     def backendIdToAfterLoadCacheSize = getCurCacheSize()
     for (String[] backend in backends) {
         logger.info(backend[0] + " size: " + backendIdToAfterLoadCacheSize.get(backend[0]))
@@ -149,11 +165,13 @@ suite("test_inverted_index_compcation"){
     select count(*) from ${indexTbName1};
     """
 
-    sleep(120000);
+    sleep(60000);
     def backendIdToAfterCompactionCacheSize = getCurCacheSize()
     for (String[] backend in backends) {
-        assertTrue(backendIdToAfterLoadCacheSize.get(backend[0]) >=
-            backendIdToAfterCompactionCacheSize.get(backend[0]))
+        if (backend[8].equals("true")) {
+            assertTrue(backendIdToAfterLoadCacheSize.get(backend[0]) >
+                backendIdToAfterCompactionCacheSize.get(backend[0]))
+        }
     }
 
     // case1. test <

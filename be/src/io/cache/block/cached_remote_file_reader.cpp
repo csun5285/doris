@@ -42,6 +42,8 @@
 namespace doris {
 namespace io {
 bvar::Adder<uint64_t> cache_skipped_bytes_read("cached_remote_reader", "cache_skipped_read_bytes");
+bvar::Adder<uint64_t> s3_read_counter("cached_remote_reader_s3_read");
+
 
 CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader,
                                                const FileReaderOptions* opts)
@@ -147,6 +149,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         std::unique_ptr<char[]> buffer(new char[size]);
         {
             SCOPED_RAW_TIMER(&stats.remote_read_timer);
+            s3_read_counter << 1;
             RETURN_IF_ERROR(
                     _remote_file_reader->read_at(empty_start, Slice(buffer.get(), size), &size));
         }
@@ -233,6 +236,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                 size_t bytes_read {0};
                 stats.hit_cache = false;
                 SCOPED_RAW_TIMER(&stats.remote_read_timer);
+                s3_read_counter << 1;
                 RETURN_IF_ERROR(_remote_file_reader->read_at(
                         current_offset, Slice(result.data + (current_offset - offset), read_size),
                         &bytes_read));

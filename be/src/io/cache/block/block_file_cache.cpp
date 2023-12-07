@@ -26,6 +26,9 @@
 
 #include <chrono> // IWYU pragma: keep
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
 #include <utility>
 
 #include "common/logging.h"
@@ -33,6 +36,7 @@
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
 #include "io/fs/local_file_system.h"
+#include "util/defer_op.h"
 #include "util/time.h"
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
@@ -121,14 +125,14 @@ FileCacheType BlockFileCache::string_to_cache_type(const std::string& str) {
     return FileCacheType::DISPOSABLE;
 }
 
-std::string BlockFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time,
+std::string BlockFileCache::get_path_in_local_cache(const Key& key, uint64_t expiration_time,
                                                     size_t offset, FileCacheType type,
                                                     bool is_tmp) const {
     return get_path_in_local_cache(key, expiration_time) /
            (std::to_string(offset) + (is_tmp ? "_tmp" : cache_type_to_string(type)));
 }
 
-std::string BlockFileCache::get_path_in_local_cache(const Key& key, int64_t expiration_time) const {
+std::string BlockFileCache::get_path_in_local_cache(const Key& key, uint64_t expiration_time) const {
     auto key_str = key.to_string();
     try {
         return Path(_cache_base_path) /
@@ -213,10 +217,7 @@ Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
     if (bool is_exist = std::filesystem::exists(_cache_base_path, ec); is_exist && !ec) {
         _cache_background_load_thread = std::thread([&]() {
             _lazy_open_done = false;
-            Status st = load_cache_info_into_memory();
-            if (!st) [[unlikely]] {
-                LOG(ERROR) << st;
-            }
+            load_cache_info_into_memory();
             _lazy_open_done = true;
             std::lock_guard cache_lock(_mutex);
             LOG(INFO) << fmt::format(
@@ -271,6 +272,27 @@ void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, boo
     cell.is_deleted = false;
 }
 
+Status BlockFileCache::clear_file_cache_directly() {
+    using namespace std::chrono;
+    auto start_time = steady_clock::time_point();
+    std::lock_guard cache_lock(_mutex);
+    LOG_INFO("Start clear file cache directly").tag("path", _cache_base_path);
+    RETURN_IF_ERROR(global_local_filesystem()->delete_directory(_cache_base_path));
+    RETURN_IF_ERROR(global_local_filesystem()->create_directory(_cache_base_path));
+    _files.clear();
+    _cur_cache_size = 0;
+    _time_to_key.clear();
+    _key_to_time.clear();
+    _index_queue.clear(cache_lock);
+    _normal_queue.clear(cache_lock);
+    _disposable_queue.clear(cache_lock);
+    auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
+    LOG_INFO("End clear file cache directly")
+        .tag("path", _async_clear_file_cache)
+        .tag("use_time", static_cast<int64_t>(use_time.count()));
+    return Status::OK();
+}
+
 void BlockFileCache::clear_file_cache_async() {
     {
         std::lock_guard cache_lock(_mutex);
@@ -291,6 +313,9 @@ void BlockFileCache::clear_file_cache_async() {
 void BlockFileCache::recycle_deleted_blocks() {
     std::unique_lock cache_lock(_mutex);
     if (_async_clear_file_cache) {
+        using namespace std::chrono;
+        auto start_time = steady_clock::time_point();
+        LOG_INFO("Start clear file cache async").tag("path", _cache_base_path);
         auto remove_file_block = [&cache_lock, this](FileBlockCell* cell) {
             std::lock_guard segment_lock(cell->file_block->_mutex);
             remove(cell->file_block, cache_lock, segment_lock);
@@ -349,6 +374,10 @@ void BlockFileCache::recycle_deleted_blocks() {
             }
         }
         _async_clear_file_cache = false;
+        auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
+        LOG_INFO("End clear file cache async")
+        .tag("path", _async_clear_file_cache)
+        .tag("use_time", static_cast<int64_t>(use_time.count()));
     }
 }
 
@@ -409,7 +438,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
         }
         for (; check_it != std::filesystem::directory_iterator(); ++check_it) {
             uint64_t offset = 0;
-            auto offset_with_suffix = check_it->path().filename().native();
+            std::string offset_with_suffix = check_it->path().filename().native();
             auto delim_pos1 = offset_with_suffix.find('_');
             FileCacheType cache_type = FileCacheType::NORMAL;
             bool parsed = true;
@@ -431,14 +460,18 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 parsed = false;
             }
 
-            if (!parsed && !is_tmp) [[unlikely]] {
+            if (!parsed) [[unlikely]] {
                 LOG(WARNING) << "parse offset err, path=" << offset_with_suffix;
                 continue;
             }
-
-            size_t size = check_it->file_size();
-            if (size == 0) [[unlikely]] {
-                std::error_code ec;
+            TEST_SYNC_POINT_CALLBACK("BlockFileCache::REMOVE_FILE_1", &offset_with_suffix);
+            std::error_code ec;
+            size_t size = check_it->file_size(ec);
+            if (ec) {
+                LOG(WARNING) << "failed to file_size: error=" << ec.message();
+                continue;
+            }
+            if (size == 0 && !is_tmp) [[unlikely]] {
                 std::filesystem::remove(check_it->path(), ec);
                 if (ec) [[unlikely]] {
                     LOG(WARNING) << "filesystem error, failed to remove file, file="
@@ -1266,33 +1299,21 @@ void BlockFileCache::remove(FileBlockSPtr file_block, T& cache_lock, U& segment_
     }
 }
 
-Status BlockFileCache::load_cache_info_into_memory() {
+void BlockFileCache::load_cache_info_into_memory() {
     Key key;
     uint64_t offset = 0;
     size_t size = 0;
 
-    // upgrade the cache
-    std::error_code dec;
-    std::filesystem::directory_iterator upgrade_key_it(_cache_base_path, dec);
-    if (dec) [[unlikely]] {
-        LOG(WARNING) << dec.message();
-        return Status::IOError(dec.message());
-    }
-    for (; upgrade_key_it != std::filesystem::directory_iterator(); ++upgrade_key_it) {
-        if (upgrade_key_it->path().filename().native().find('_') == std::string::npos) {
-            RETURN_IF_ERROR(global_local_filesystem()->rename(upgrade_key_it->path(), upgrade_key_it->path().native() + "_0"));
-        }
-    }
     int scan_length = 10000;
     std::vector<BatchLoadArgs> batch_load_buffer;
     batch_load_buffer.reserve(scan_length);
 
     std::vector<std::string> need_to_check_if_empty_dir;
+    std::error_code ec;
     /// cache_base_path / key / offset
-    std::filesystem::directory_iterator key_it(_cache_base_path, dec);
-    if (dec) [[unlikely]] {
-        LOG(ERROR) << dec.message();
-        return Status::IOError(dec.message());
+    std::filesystem::directory_iterator key_it(_cache_base_path, ec);
+    if (ec) [[unlikely]] {
+        LOG(ERROR) << ec.message();
     }
     auto add_cell_batch_func = [&]() {
         std::lock_guard cache_lock(_mutex);
@@ -1302,7 +1323,6 @@ Status BlockFileCache::load_cache_info_into_memory() {
                     if (_files.count(args.key) == 0 || _files[args.key].count(args.offset) == 0) {
                         // if the file is tmp, it means it is the old file and it should be removed
                         if (args.is_tmp) {
-                            std::error_code ec;
                             std::filesystem::remove(args.offset_path, ec);
                             if (ec) {
                                 LOG(WARNING) << fmt::format("cannot remove {}: {}",
@@ -1335,9 +1355,9 @@ Status BlockFileCache::load_cache_info_into_memory() {
         }
         CacheContext context;
         context.query_id = TUniqueId();
-        context.expiration_time = std::stol(expiration_time_str);
+        context.expiration_time = std::stoul(expiration_time_str);
         for (; offset_it != std::filesystem::directory_iterator(); ++offset_it) {
-            auto offset_with_suffix = offset_it->path().filename().native();
+            std::string offset_with_suffix = offset_it->path().filename().native();
             auto delim_pos1 = offset_with_suffix.find('_');
             FileCacheType cache_type = FileCacheType::NORMAL;
             bool parsed = true;
@@ -1363,15 +1383,18 @@ Status BlockFileCache::load_cache_info_into_memory() {
 
             if (!parsed) {
                 LOG(WARNING) << "parse offset err, path=" << offset_it->path().native();
-                return Status::IOError("Unexpected file: {}", offset_it->path().native());
+                continue;
             }
-
-            size = offset_it->file_size();
+            TEST_SYNC_POINT_CALLBACK("BlockFileCache::REMOVE_FILE_2", &offset_with_suffix);
+            size = offset_it->file_size(ec);
+            if (ec) {
+                LOG(WARNING) << "failed to file_size: file_name=" << offset_with_suffix << "error=" << ec.message();
+                continue;
+            }
             if (size == 0 && !is_tmp) {
-                std::error_code ec;
                 std::filesystem::remove(offset_it->path(), ec);
                 if (ec) {
-                    return Status::IOError(ec.message());
+                    LOG(WARNING) << "failed to remove: error=" << ec.message();
                 }
                 continue;
             }
@@ -1397,7 +1420,6 @@ Status BlockFileCache::load_cache_info_into_memory() {
         add_cell_batch_func();
     }
     TEST_SYNC_POINT_CALLBACK("CloudFileCache::TmpFile2");
-    return Status::OK();
 }
 
 size_t BlockFileCache::get_used_cache_size(FileCacheType cache_type) const {
@@ -1591,12 +1613,7 @@ void BlockFileCache::run_background_operation() {
         check_disk_resource_limit(_cache_base_path);
         {
             std::unique_lock close_lock(_close_mtx);
-            if (_close) break;
-#if !defined(USE_BTHREAD_SCANNER)
             _close_cv.wait_for(close_lock, std::chrono::seconds(interval_time_seconds));
-#else
-            _close_cv.wait_for(close_lock, interval_time_seconds * 1000000);
-#endif
             if (_close) break;
         }
         recycle_deleted_blocks();

@@ -72,7 +72,7 @@ public:
     };
 
     FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache, State download_state,
-                FileCacheType cache_type, int64_t expiration_time);
+                FileCacheType cache_type, uint64_t expiration_time);
     
     ~FileBlock();
 
@@ -134,9 +134,9 @@ public:
 
     void change_cache_type_self(FileCacheType new_type);
 
-    void update_expiration_time(int64_t expiration_time) { _expiration_time = expiration_time; }
+    void update_expiration_time(uint64_t expiration_time) { _expiration_time = expiration_time; }
 
-    int64_t expiration_time() const { return _expiration_time; }
+    uint64_t expiration_time() const { return _expiration_time; }
 
     State state_unlock(std::lock_guard<doris::Mutex>&) const;
 

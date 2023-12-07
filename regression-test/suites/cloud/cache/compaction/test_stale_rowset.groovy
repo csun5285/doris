@@ -1,18 +1,36 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_compaction") {
-
+suite("test_stale_rowset") {
+    sql """ SET GLOBAL enable_auto_analyze = false """
     //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,Tag,ErrMsg,Version,Status
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
     String backend_id;
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
+    def backendId_to_backendBrpcPort = [:]
     for (String[] backend in backends) {
         if (backend[8].equals("true")) {
             backendId_to_backendIP.put(backend[0], backend[1])
             backendId_to_backendHttpPort.put(backend[0], backend[4])
+            backendId_to_backendBrpcPort.put(backend[0], backend[5])
         }
+    }
+    String backendId = backendId_to_backendIP.keySet()[0]
+    def url = backendId_to_backendIP.get(backendId) + ":" + backendId_to_backendHttpPort.get(backendId) + """/api/clear_file_cache"""
+    logger.info(url)
+    def clearFileCache = { check_func ->
+        httpTest {
+            endpoint ""
+            uri url
+            op "post"
+            body "{\"sync\"=\"true\"}"
+            check check_func
+        }
+    }
+
+    clearFileCache.call() {
+        respCode, body -> {}
     }
 
     backend_id = backendId_to_backendIP.keySet()[0]
@@ -39,9 +57,9 @@ suite("test_compaction") {
             disableAutoCompaction = Boolean.parseBoolean(((List<String>) ele)[2])
         }
     }
-
-    def tables = [customer: 15000000]
-    def tableName = "customer"
+    def tables = [nation: 25]
+    // def tables = [nation: 15000000]
+    def tableName = "nation"
     def s3BucketName = getS3BucketName()
     def s3WithProperties = """WITH S3 (
         |"AWS_ACCESS_KEY" = "${getS3AK()}",
@@ -54,14 +72,16 @@ suite("test_compaction") {
     // set fe configuration
     sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
 
-    def load_customer_once =  { 
+    def table = "nation"
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
+    // create table if not exists
+    sql new File("""${context.file.parent}/../ddl/${table}.sql""").text
+
+    def load_nation_once =  { 
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
-        def table = "customer"
-        // create table if not exists
-        sql new File("""${context.file.parent}/ddl/${table}.sql""").text
         def loadLabel = table + "_" + uniqueID
         // load data from cos
-        def loadSql = new File("""${context.file.parent}/ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
+        def loadSql = new File("""${context.file.parent}/../ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
         loadSql = loadSql.replaceAll("\\\$\\{loadLabel\\}", loadLabel) + s3WithProperties
         sql loadSql
 
@@ -77,16 +97,47 @@ suite("test_compaction") {
             sleep(5000)
         }
     }
-    load_customer_once()
-    load_customer_once()
-
-    // 记录查询时间
-    long startTimestamp = System.currentTimeMillis()
+    def getCurCacheSize = {
+        backendIdToCacheSize = [:]
+        for (String[] backend in backends) {
+            if (backend[8].equals("true")) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("curl http://")
+                sb.append(backendId_to_backendIP.get(backend[0]))
+                sb.append(":")
+                sb.append(backendId_to_backendBrpcPort.get(backend[0]))
+                sb.append("/vars/*file_cache_cache_size")
+                String command = sb.toString()
+                logger.info(command);
+                process = command.execute()
+                code = process.waitFor()
+                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+                out = process.getText()
+                logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
+                assertEquals(code, 0)
+                String[] str = out.split(':')
+                assertEquals(str.length, 2)
+                logger.info(str[1].trim())
+                backendIdToCacheSize.put(backend[0], Long.parseLong(str[1].trim()))
+            }
+        }
+        return backendIdToCacheSize
+    }
+    load_nation_once()
+    load_nation_once()
+    load_nation_once()
+    load_nation_once()
+    load_nation_once()
+    sleep(30000);
+    def backendIdToAfterLoadCacheSize = getCurCacheSize()
+    for (String[] backend in backends) {
+        if (backend[8].equals("true")) {
+            logger.info(backend[0] + " size: " + backendIdToAfterLoadCacheSize.get(backend[0]))
+        }
+    }
     sql """
     select count(*) from ${tableName};
     """
-    long endTimestamp = System.currentTimeMillis()
-    long queryCost = endTimestamp - startTimestamp
 
     String[][] tablets = sql """ show tablets from ${tableName}; """
 
@@ -119,8 +170,7 @@ suite("test_compaction") {
             assertEquals("success", compactJson.status.toLowerCase())
         }
     }
-    def retry_time = 120
-    def i = 0
+
     // wait for all compactions done
     for (String[] tablet in tablets) {
         boolean running = true
@@ -147,16 +197,19 @@ suite("test_compaction") {
             def compactionStatus = parseJson(out.trim())
             assertEquals("success", compactionStatus.status.toLowerCase())
             running = compactionStatus.run_status
-        } while (running && i++ < retry_time)
+        } while (running)
     }
 
-    // compaction之后再次查询 时间应该相差不大
-    startTimestamp = System.currentTimeMillis()
     sql """
     select count(*) from ${tableName};
     """
-    endTimestamp = System.currentTimeMillis()
-    long secondQueryCost = endTimestamp - startTimestamp
-    // 执行时间相差不大(应该至少小于1秒吧)
-    assertTrue(Math.abs(queryCost - secondQueryCost) < 1000)
+
+    sleep(60000);
+    def backendIdToAfterCompactionCacheSize = getCurCacheSize()
+    for (String[] backend in backends) {
+        if (backend[8].equals("true")) {
+            assertTrue(backendIdToAfterLoadCacheSize.get(backend[0]) >
+                backendIdToAfterCompactionCacheSize.get(backend[0]))
+        }
+    }
 }

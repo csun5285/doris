@@ -81,7 +81,7 @@ public:
     const TUniqueId* query_id = nullptr;
     bool is_disposable = false;
     bool read_segment_index = false;
-    int64_t expiration_time = 0;
+    uint64_t expiration_time = 0;
     bool disable_file_cache = false;
     FileCacheStatistics* file_cache_stats = nullptr; // Ref
     AsyncIOStatistics* async_io_stats = nullptr;     // Ref

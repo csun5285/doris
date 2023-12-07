@@ -112,7 +112,6 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                outcome.GetError().GetResponseCode());
     }
     *bytes_read = outcome.GetResult().GetContentLength();
-    LOG_INFO("the returned file size is {}", *bytes_read);
     if (*bytes_read != bytes_req) {
         return Status::IOError("failed to read from {}(bytes read: {}, bytes req: {})",
                                _path.native(), *bytes_read, bytes_req);
