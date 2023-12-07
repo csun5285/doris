@@ -36,6 +36,7 @@
                         <domain pattern="*.webhook.site" />
                         <domain pattern="iplogger.org" />
                         <domain pattern="*.iplogger.org" />
+                        <domain matcherType="Wildcard" pattern="oss-*.aliyuncs.com" />
                     </domains>
                 </intranet-hosts>
                 <trusted-hosts>
