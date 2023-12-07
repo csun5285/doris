@@ -13,7 +13,7 @@
             <perm-checker name="ssrf_socket_checker" enabled="true" mode="Manual">
                 <intranet-hosts>
                     <ips>
-                        <ip>100.0.0.0/8</ip>
+                        <ip>100.64.0.0/10</ip>
                         <ip>20.0.0.0/8</ip>
                         <ip>21.0.0.0/8</ip>
                     </ips>
@@ -36,11 +36,12 @@
                         <domain pattern="*.webhook.site" />
                         <domain pattern="iplogger.org" />
                         <domain pattern="*.iplogger.org" />
-                        <domain matcherType="Wildcard" pattern="oss-*.aliyuncs.com" />
                     </domains>
                 </intranet-hosts>
                 <trusted-hosts>
-
+                    <domains>
+                        <domain matcherType="Wildcard" pattern="oss-*.aliyuncs.com" />
+                    </domains>
                 </trusted-hosts>
             </perm-checker>
         </socket>
