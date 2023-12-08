@@ -249,7 +249,12 @@ void WriteCooldownMetaExecutors::WriteCooldownMetaExecutors::submit(TabletShared
 
 TabletSharedPtr Tablet::create_tablet_from_meta(TabletMetaSharedPtr tablet_meta,
                                                 DataDir* data_dir) {
-    return std::make_shared<Tablet>(std::move(tablet_meta), data_dir);
+    if (tablet_meta->partition_id() <= 0) {
+        LOG(WARNING) << "invalid partition id " << tablet_meta->partition_id() << ", tablet "
+                     << tablet_meta->tablet_id();
+        return nullptr;
+    }
+    return std::make_shared<Tablet>(tablet_meta, data_dir);
 }
 
 Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
@@ -751,7 +756,7 @@ Status Tablet::cloud_sync_meta() {
     TabletMetaSharedPtr tablet_meta;
     auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
     if (!st.ok()) {
-        if (st.is<NOT_FOUND>()) {
+        if (st.is<ErrorCode::NOT_FOUND>()) {
             recycle_resources_by_self();
         }
         return st;
@@ -818,7 +823,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
         TabletMetaSharedPtr tablet_meta;
         auto st = cloud::meta_mgr()->get_tablet_meta(tablet_id(), &tablet_meta);
         if (!st.ok()) {
-            if (st.is<NOT_FOUND>()) {
+            if (st.is<ErrorCode::NOT_FOUND>()) {
                 recycle_resources_by_self();
             }
             return st;
@@ -839,7 +844,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
             _max_version = -1;
         }
         st = cloud::meta_mgr()->sync_tablet_rowsets(this);
-        if (st.is<NOT_FOUND>()) {
+        if (st.is<ErrorCode::NOT_FOUND>()) {
             recycle_resources_by_self();
         }
         return st;
@@ -860,7 +865,7 @@ Status Tablet::cloud_sync_rowsets(int64_t query_version, bool warmup_delta_data)
         }
     }
     auto st = cloud::meta_mgr()->sync_tablet_rowsets(this, warmup_delta_data);
-    if (st.is<NOT_FOUND>()) {
+    if (st.is<ErrorCode::NOT_FOUND>()) {
         recycle_resources_by_self();
     }
     return st;
