@@ -417,6 +417,7 @@ public class TabletRepairAndBalanceTest {
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt1));
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt2));
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt3));
+        Thread.sleep(1000);
         Assert.assertEquals(0, replicaMetaTable.size());
 
         // set all backends' tag to default
