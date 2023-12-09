@@ -2355,6 +2355,9 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true)
     public static int cloud_cold_read_percent = 10; // 10%
+    // To control the default value of the session variable `enable_auto_analyze`
+    @ConfField(mutable = true)
+    public static boolean enable_auto_analyze = false;
 
     //==========================================================================
     //                    end of cloud config
