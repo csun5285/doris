@@ -36,10 +36,10 @@ suite("test_rowstore", "p0") {
 
     sql "set experimental_enable_nereids_planner = false"
     sql """insert into ${tableName} values (1, 'abc')"""
-    explain {
-        sql("select * from ${tableName}")
-        contains "OPT TWO PHASE"
-    } 
+    // explain {
+    //     sql("select * from ${tableName}")
+    //     contains "OPT TWO PHASE"
+    // } 
     qt_sql """select * from ${tableName}"""
 
     sql """

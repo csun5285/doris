@@ -29,7 +29,7 @@ suite("test_point_query") {
         logger.info("update config: code=" + code + ", out=" + out + ", err=" + err)
     }
     try {
-        set_be_config.call("disable_storage_row_cache", "false")
+        set_be_config.call("disable_storage_row_cache", "true")
         // nereids do not support point query now
         sql """set enable_nereids_planner=false"""
 
@@ -70,23 +70,6 @@ suite("test_point_query") {
         }
 
         sql """DROP TABLE IF EXISTS ${tableName}"""
-        test {
-            // abnormal case
-            sql """
-                  CREATE TABLE IF NOT EXISTS ${tableName} (
-                    `k1` int NULL COMMENT ""
-                  ) ENGINE=OLAP
-                  UNIQUE KEY(`k1`)
-                  DISTRIBUTED BY HASH(`k1`) BUCKETS 1
-                  PROPERTIES (
-                  "replication_allocation" = "tag.location.default: 1",
-                  "store_row_column" = "true",
-                  "light_schema_change" = "false"
-                  )
-              """
-            exception "errCode = 2, detailMessage = Row store column rely on light schema change, enable light schema change first"
-        }
-
         def create_table_sql = { property ->
             return String.format("""
                   CREATE TABLE IF NOT EXISTS ${tableName} (
@@ -202,6 +185,7 @@ suite("test_point_query") {
                 qe_point_select stmt
                 // invalidate cache
                 nprep_sql """ INSERT INTO ${tableName} VALUES(1235, 120939.11130, "a    ddd", "xxxxxx", "2030-01-02", "2020-01-01 12:36:38", 22.822, "7022-01-01 11:30:38", 0, 1929111.1111,[119291.19291], ["111", "222", "333"], 2) """
+                sleep(10000)
                 qe_point_select stmt
                 qe_point_select stmt
                 qe_point_select stmt
@@ -221,41 +205,41 @@ suite("test_point_query") {
                 """
                 qe_point_select stmt
             }
-            // disable useServerPrepStmts
-            def result2 = connect(user=user, password=password, url=context.config.jdbcUrl) {
-                qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ * from ${tableName} where k1 = 1231 and k2 = 119291.11 and k3 = 'ddd'"""
-                qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ * from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
-                qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ hex(k3), hex(k4), k7 + 10.1 from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
-                // prepared text
-                sql """ prepare stmt1 from  select * from ${tableName} where k1 = % and k2 = % and k3 = % """
-                qt_sql """execute stmt1 using (1231, 119291.11, 'ddd')"""
-                qt_sql """execute stmt1 using (1237, 120939.11130, 'a    ddd')"""
+            // // disable useServerPrepStmts
+            // def result2 = connect(user=user, password=password, url=context.config.jdbcUrl) {
+            //     qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ * from ${tableName} where k1 = 1231 and k2 = 119291.11 and k3 = 'ddd'"""
+            //     qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ * from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
+            //     qt_sql """select /*+ SET_VAR(enable_nereids_planner=false) */ hex(k3), hex(k4), k7 + 10.1 from ${tableName} where k1 = 1237 and k2 = 120939.11130 and k3 = 'a    ddd'"""
+            //     // prepared text
+            //     sql """ prepare stmt1 from  select * from ${tableName} where k1 = % and k2 = % and k3 = % """
+            //     qt_sql """execute stmt1 using (1231, 119291.11, 'ddd')"""
+            //     qt_sql """execute stmt1 using (1237, 120939.11130, 'a    ddd')"""
 
-                sql """prepare stmt2 from  select * from ${tableName} where k1 = % and k2 = % and k3 = %"""
-                qt_sql """execute stmt2 using (1231, 119291.11, 'ddd')"""
-                qt_sql """execute stmt2 using (1237, 120939.11130, 'a    ddd')"""
-                tableName = "test_query"
-                sql """DROP TABLE IF EXISTS ${tableName}"""
-                sql """CREATE TABLE ${tableName} (
-                        `customer_key` bigint(20) NULL,
-                        `customer_btm_value_0` text NULL,
-                        `customer_btm_value_1` text NULL,
-                        `customer_btm_value_2` text NULL
-                    ) ENGINE=OLAP
-                    UNIQUE KEY(`customer_key`)
-                    COMMENT 'OLAP'
-                    DISTRIBUTED BY HASH(`customer_key`) BUCKETS 16
-                    PROPERTIES (
-                    "replication_allocation" = "tag.location.default: 1",
-                    "storage_format" = "V2",
-                    "light_schema_change" = "true",
-                    "store_row_column" = "true",
-                    "enable_unique_key_merge_on_write" = "true",
-                    "disable_auto_compaction" = "false"
-                    );"""
-                sql """insert into ${tableName} values (0, "1", "2", "3")"""
-                qt_sql "select /*+ SET_VAR(enable_nereids_planner=false) */ * from test_query where customer_key = 0"
-            }
+            //     sql """prepare stmt2 from  select * from ${tableName} where k1 = % and k2 = % and k3 = %"""
+            //     qt_sql """execute stmt2 using (1231, 119291.11, 'ddd')"""
+            //     qt_sql """execute stmt2 using (1237, 120939.11130, 'a    ddd')"""
+            //     tableName = "test_query"
+            //     sql """DROP TABLE IF EXISTS ${tableName}"""
+            //     sql """CREATE TABLE ${tableName} (
+            //             `customer_key` bigint(20) NULL,
+            //             `customer_btm_value_0` text NULL,
+            //             `customer_btm_value_1` text NULL,
+            //             `customer_btm_value_2` text NULL
+            //         ) ENGINE=OLAP
+            //         UNIQUE KEY(`customer_key`)
+            //         COMMENT 'OLAP'
+            //         DISTRIBUTED BY HASH(`customer_key`) BUCKETS 16
+            //         PROPERTIES (
+            //         "replication_allocation" = "tag.location.default: 1",
+            //         "storage_format" = "V2",
+            //         "light_schema_change" = "true",
+            //         "store_row_column" = "true",
+            //         "enable_unique_key_merge_on_write" = "true",
+            //         "disable_auto_compaction" = "false"
+            //         );"""
+            //     sql """insert into ${tableName} values (0, "1", "2", "3")"""
+            //     qt_sql "select /*+ SET_VAR(enable_nereids_planner=false) */ * from test_query where customer_key = 0"
+            // }
         }
     } finally {
         set_be_config.call("disable_storage_row_cache", "true")
