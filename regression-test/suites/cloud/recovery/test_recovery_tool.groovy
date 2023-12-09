@@ -41,7 +41,8 @@ suite("test_recovery_tool") {
     S3Client s3Client = S3Client.builder().endpointOverride(endpointUri).credentialsProvider(scp)
             .region(Region.of(region)).build();
 
-    String checkKey = "test_recovery/test.txt";
+    def now = System.currentTimeMillis()
+    String checkKey = "test_recovery/test_${now}.txt";
     String content = "check";
 
     // put checkKey
