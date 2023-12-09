@@ -24,6 +24,7 @@ import com.google.gson.annotations.SerializedName;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Replica;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.io.Text;
@@ -38,6 +39,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CloudReplica extends Replica {
@@ -56,6 +58,10 @@ public class CloudReplica extends Replica {
     private long indexId = -1;
     @SerializedName(value = "idx")
     private long idx = -1;
+
+    private Random rand = new Random();
+
+    private Map<String, List<Long>> memClusterToBackends = new ConcurrentHashMap<String, List<Long>>();
 
     public CloudReplica() {
     }
@@ -145,6 +151,42 @@ public class CloudReplica extends Replica {
             return getColocatedBeId(clusterId);
         }
 
+        if (Config.enable_cloud_multi_replica) {
+            int indexRand = rand.nextInt(Config.cloud_replica_num);
+            int coldReadRand = rand.nextInt(100);
+            boolean allowColdRead = coldReadRand < Config.cloud_cold_read_percent;
+            boolean replicaEnough = memClusterToBackends.get(clusterId) != null
+                    && memClusterToBackends.get(clusterId).size() > indexRand;
+
+            long backendId = -1;
+            if (replicaEnough) {
+                backendId = memClusterToBackends.get(clusterId).get(indexRand);
+            }
+
+            if (!replicaEnough && !allowColdRead && clusterToBackends.containsKey(clusterId)) {
+                backendId = clusterToBackends.get(clusterId).get(0);
+            }
+
+            if (backendId > 0) {
+                Backend be = Env.getCurrentSystemInfo().getBackend(backendId);
+                if (be != null && be.isQueryAvailable()) {
+                    LOG.debug("backendId={} ", backendId);
+                    return backendId;
+                }
+            }
+
+            List<Long> res = hashReplicaToBes(clusterId, false, Config.cloud_replica_num);
+            if (res.size() < indexRand + 1) {
+                if (res.isEmpty()) {
+                    return -1;
+                } else {
+                    return res.get(0);
+                }
+            } else {
+                return res.get(indexRand);
+            }
+        }
+
         if (clusterToBackends.containsKey(clusterId)) {
             long backendId = clusterToBackends.get(clusterId).get(0);
             Backend be = Env.getCurrentSystemInfo().getBackend(backendId);
@@ -201,6 +243,57 @@ public class CloudReplica extends Replica {
         clusterToBackends.put(clusterId, bes);
 
         return pickedBeId;
+    }
+
+    public List<Long> hashReplicaToBes(String clusterId, boolean isBackGround, int replicaNum) {
+        // TODO(luwei) list shoule be sorted
+        List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterId(clusterId);
+        // use alive be to exec sql
+        List<Backend> availableBes = new ArrayList<>();
+        for (Backend be : clusterBes) {
+            long lastUpdateMs = be.getLastUpdateMs();
+            long missTimeMs = Math.abs(lastUpdateMs - System.currentTimeMillis());
+            // be core or restart must in heartbeat_interval_second
+            if ((be.isAlive() || missTimeMs <= FeConstants.heartbeat_interval_second * 1000L)
+                    && !be.isSmoothUpgradeSrc()) {
+                availableBes.add(be);
+            }
+        }
+        if (availableBes == null || availableBes.size() == 0) {
+            if (!isBackGround) {
+                LOG.warn("failed to get available be, clusterId: {}", clusterId);
+            }
+            return new ArrayList<Long>();
+        }
+        LOG.debug("availableBes={}", availableBes);
+
+        int realReplicaNum = replicaNum > availableBes.size() ? availableBes.size() : replicaNum;
+        List<Long> bes = new ArrayList<Long>();
+        for (int i = 0; i < realReplicaNum; ++i) {
+            long index = -1;
+            HashCode hashCode = null;
+            if (idx == -1) {
+                index = getId() % availableBes.size();
+            } else {
+                hashCode = Hashing.murmur3_128().hashLong(partitionId + i);
+                int beNum = availableBes.size();
+                // (hashCode.asLong() + idx) % beNum may be a negative value, so we
+                // need to take the modulus of beNum again to ensure that index is
+                // a positive value
+                index = ((hashCode.asLong() + idx) % beNum + beNum) % beNum;
+            }
+            long pickedBeId = availableBes.get((int) index).getId();
+            availableBes.remove((int) index);
+            LOG.info("picked beId {}, replicaId {}, partId {}, beNum {}, replicaIdx {}, picked Index {}, hashVal {}",
+                    pickedBeId, getId(), partitionId, availableBes.size(), idx, index,
+                    hashCode == null ? -1 : hashCode.asLong());
+            // save to memClusterToBackends map
+            bes.add(pickedBeId);
+        }
+
+        memClusterToBackends.put(clusterId, bes);
+
+        return bes;
     }
 
     @Override

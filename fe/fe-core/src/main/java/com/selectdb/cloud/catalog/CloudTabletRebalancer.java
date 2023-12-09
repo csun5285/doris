@@ -150,6 +150,11 @@ public class CloudTabletRebalancer extends MasterDaemon {
     // 9 check whether all tablets of decomission node have been migrated
     @Override
     protected void runAfterCatalogReady() {
+        if (Config.enable_cloud_multi_replica) {
+            LOG.info("Tablet balance is temporarily not supported when multi replica enabled");
+            return;
+        }
+
         LOG.info("cloud tablet rebalance begin");
 
         clusterToBes = new HashMap<String, List<Long>>();

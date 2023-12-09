@@ -2347,6 +2347,15 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int cloud_checkpoint_manual_gc_threshold = 10;
 
+    @ConfField(mutable = true)
+    public static boolean enable_cloud_multi_replica = false;
+
+    @ConfField(mutable = true)
+    public static int cloud_replica_num = 3;
+
+    @ConfField(mutable = true)
+    public static int cloud_cold_read_percent = 10; // 10%
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
