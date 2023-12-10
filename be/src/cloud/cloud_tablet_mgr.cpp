@@ -318,6 +318,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     DCHECK(compaction_type == CompactionType::BASE_COMPACTION ||
            compaction_type == CompactionType::CUMULATIVE_COMPACTION);
     *max_score = 0;
+    int64_t max_score_tablet_id = 0;
     // clang-format off
     auto score = [compaction_type](Tablet* t) {
         return compaction_type == CompactionType::BASE_COMPACTION ? t->get_cloud_base_compaction_score()
@@ -350,7 +351,10 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         if (t == nullptr) continue;
 
         int64_t s = score(t.get());
-        *max_score = std::max(*max_score, s);
+        if (s > *max_score) {
+            max_score_tablet_id = t->tablet_id();
+            *max_score = s;
+        }
 
         if (filter_out(t.get())) { ++num_filtered; continue; }
         //if (disable(t.get())) { ++num_disabled; continue; }
@@ -365,7 +369,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     LOG_EVERY_N(INFO, 1000) << "get_topn_compaction_score, n=" << n << " type=" << compaction_type
                << " num_tablets=" << weak_tablets.size() << " num_skipped=" << num_skipped
                << " num_disabled=" << num_disabled << " num_filtered=" << num_filtered
-               << " max_score=" << *max_score
+               << " max_score=" << *max_score << " max_score_tablet=" << max_score_tablet_id
                << " tablets=[" << [&buf] { std::stringstream ss; for (auto& i : buf) ss << i.first->tablet_id() << ":" << i.second << ","; return ss.str(); }() << "]"
                ;
     // clang-format on
