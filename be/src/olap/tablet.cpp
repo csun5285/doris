@@ -3917,11 +3917,18 @@ Status Tablet::update_delete_bitmap(const RowsetSharedPtr& rowset,
     }
     auto t3 = watch.get_elapse_time_us();
 
-    auto token = StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
-    RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
-                                       cur_version - 1, token.get(), rowset_writer));
-    RETURN_IF_ERROR(token->wait());
+    // When there is only one segment, it will be calculated in the current thread.
+    // Otherwise, it will be submitted to the thread pool for calculation.
+    if (segments.size() <= 1) {
+        RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
+                                           cur_version - 1, nullptr, rowset_writer));
 
+    } else {
+        auto token = StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
+        RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
+                                           cur_version - 1, token.get(), rowset_writer));
+        RETURN_IF_ERROR(token->wait());
+    }
     std::stringstream ss;
     if (watch.get_elapse_time_us() < 1 * 1000 * 1000) {
         ss << "cost: " << watch.get_elapse_time_us() - t3 << "(us)";
