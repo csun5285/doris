@@ -357,8 +357,6 @@ Status HttpService::cloud_start() {
                                       reset_rpc_channel_action);
 
 #ifdef ENABLE_INJECTION_POINT
-    InjectionPointAction::register_suites();
-    SyncPoint::get_instance()->enable_processing();
     InjectionPointAction* injection_point_action = _pool.add(new InjectionPointAction);
     _ev_http_server->register_handler(HttpMethod::GET, "/api/injection_point/{op}/{name}",
                                       injection_point_action);

@@ -68,6 +68,7 @@
 #include "common/logging.h"
 #include "common/signal_handler.h"
 #include "common/status.h"
+#include "common/sync_point.h"
 #include "gutil/ref_counted.h"
 #include "gutil/strings/stringpiece.h"
 #include "gutil/strings/substitute.h"
@@ -732,12 +733,19 @@ Versions Tablet::cloud_calc_missed_versions(int64_t spec_version) {
 
 Status Tablet::cloud_capture_rs_readers(const Version& version_range,
                                         std::vector<RowSetSplits>* rs_readers) {
+    TEST_INJECTION_POINT_RETURN_WITH_VALUE("Tablet::cloud_capture_rs_readers", Status::OK());
     Versions version_path;
     std::shared_lock rlock(_meta_lock);
     // clang-format off
     auto st = _timestamped_version_tracker.capture_consistent_versions(version_range, &version_path);
     if (!st.ok()) {
+        // Check no missed versions or req version is merged
+        std::vector<Version> missed_versions;
+        calc_missed_versions_unlocked(version_range.second, &missed_versions);
         rlock.unlock(); // avoid logging in lock range
+        if (missed_versions.empty()) {
+            st.set_code(VERSION_ALREADY_MERGED); // Reset error code
+        }
         st.append(" tablet_id=" + std::to_string(tablet_id()));
         LOG(WARNING) << st << '\n' << [this]() { std::string json; get_compaction_status(&json); return json; }();
         DCHECK(st.ok()) << st;
@@ -4145,10 +4153,9 @@ Status Tablet::cloud_calc_delete_bitmap_for_compaciton(
             this, COMPACTION_DELETE_BITMAP_LOCK_ID, initiator));
     RETURN_IF_ERROR(cloud::meta_mgr()->sync_tablet_rowsets(this));
 
-    calc_compaction_output_rowset_delete_bitmap(input_rowsets, rowid_conversion, version.second,
-                                                UINT64_MAX, &missed_rows, &location_map,
-                                                tablet_meta()->delete_bitmap(),
-                                                output_rowset_delete_bitmap.get());
+    calc_compaction_output_rowset_delete_bitmap(
+            input_rowsets, rowid_conversion, version.second, UINT64_MAX, &missed_rows,
+            &location_map, tablet_meta()->delete_bitmap(), output_rowset_delete_bitmap.get());
     if (config::enable_rowid_conversion_correctness_check) {
         RETURN_IF_ERROR(check_rowid_conversion(output_rowset, location_map));
     }
@@ -4226,8 +4233,8 @@ std::vector<RowsetSharedPtr> Tablet::get_snapshot_rowset(bool include_stale_rows
     std::transform(_rs_version_map.cbegin(), _rs_version_map.cend(), std::back_inserter(rowsets),
                    [](auto& kv) { return kv.second; });
     if (include_stale_rowset) {
-        std::transform(_stale_rs_version_map.cbegin(), _stale_rs_version_map.cend(), std::back_inserter(rowsets),
-                   [](auto& kv) { return kv.second; });
+        std::transform(_stale_rs_version_map.cbegin(), _stale_rs_version_map.cend(),
+                       std::back_inserter(rowsets), [](auto& kv) { return kv.second; });
     }
     return rowsets;
 }

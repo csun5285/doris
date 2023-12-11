@@ -516,10 +516,8 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
                 auto st = tablet->capture_rs_readers({0, version}, &read_source.rs_splits);
 #endif
                 if (!st.ok()) {
-                    LOG(WARNING) << "fail to init reader.res=" << st;
-                    return Status::InternalError(
-                            "failed to initialize storage reader. tablet_id={} : {}",
-                            tablet->tablet_id(), st.to_string());
+                    LOG(WARNING) << "fail to init reader. status=" << st;
+                    return st;
                 }
             }
             if (!_state->skip_delete_predicate()) {
