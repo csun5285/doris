@@ -47,13 +47,13 @@ suite("test_delete_sign") {
         qt_sql "select * from ${tableName} order by id, name, score asc;"
     }
 
-    def copyIntoWithException = { copySql, exp ->
+    def copyIntoWithException = { copySql ->
         try {
             def result = sql """ ${copySql} """
             assertTrue(false, "should throw exception, result=" + result)
         } catch (Exception e) {
             // logger.info("catch exception", e)
-            assertTrue(e.getMessage().contains(exp), "real message=" + e.getMessage())
+            assertTrue(e.getMessage().contains("Column count") && e.getMessage().contains("doesn't match value count"))
         }
     }
 
@@ -145,30 +145,30 @@ suite("test_delete_sign") {
             // 4.1 load data with unmatched columns
             createTable()
             sql = """copy into ${tableName} (id, name) from (select id, name, score from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
             // 4.2 load data with unmatched columns
             sql = """copy into ${tableName} (id, name, score) from (select id, name from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
 
             // 4.3 load data with unmatched columns
             sql = """copy into ${tableName} (id, name) from (select id, name, __DORIS_DELETE_SIGN__ from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
             // 4.4 load data with unmatched columns
             sql = """copy into ${tableName} (id, name) from (select id, __DORIS_DELETE_SIGN__, name from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
             // 4.5 load data with unmatched columns
             sql = """copy into ${tableName} (id, __DORIS_DELETE_SIGN__, name) from (select id, name from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
             // 4.6 load data with unmatched columns
             sql = """copy into ${tableName} (id, name, __DORIS_DELETE_SIGN__) from (select id, name from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
 
             // 5.1 load data with transfer delete sign
             sql = """copy into ${tableName} (id, name, score, __DORIS_DELETE_SIGN__) from (select id, name, score, __DORIS_DELETE_SIGN__ = 0 from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
             copyInto(sql)
             // 5.2 load data with transfer delete sign (ANNT: should this success?)
             sql = """copy into ${tableName} from (select id, name, score, score <= 40 from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.use_delete_sign' = 'true', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
-            copyIntoWithException(sql, "Column count doesn't match value count")
+            copyIntoWithException(sql)
 
             // 6.1 load data with __DORIS_DELETE_SIGN__ column and copy.use_delete_sign = false
             sql = """copy into ${tableName} (id, name, score, __DORIS_DELETE_SIGN__) from (select id, name, score, __DORIS_DELETE_SIGN__ from @~('${fileName}')) properties ('file.type' = '${fileType}', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.4', 'copy.force' = 'true')"""
