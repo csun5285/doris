@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 #include <gen_cpp/internal_service.pb.h>
 
+#include <memory>
 #include <mutex>
 #include <variant>
 
@@ -142,10 +143,15 @@ struct DownloadTaskExecutor {
                 };
                 builder.set_write_to_use_buffer(std::move(write_to_use_buffer));
             }
-            auto buffer = builder.build();
-            buffer->submit();
+            std::shared_ptr<io::FileBuffer> buffer;
+            if (auto st = builder.build(&buffer); !st.ok()) {
+                LOG_WARNING("build download buffer failed due to {}", st);
+                sync_task(std::move(st));
+                continue;
+            }
+            buffer->submit(std::move(buffer));
         }
-        auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
+        auto timeout_duration = config::s3_task_check_interval;
         timespec current_time;
         // We don't need high accuracy here, so we use time(nullptr)
         // since it's the fastest way to get current time(second)

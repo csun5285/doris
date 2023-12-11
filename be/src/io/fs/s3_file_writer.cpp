@@ -121,7 +121,7 @@ S3FileWriter::~S3FileWriter() {
 }
 
 void S3FileWriter::_wait_until_finish(std::string_view task_name) {
-    auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
+    auto timeout_duration = config::s3_task_check_interval;
     auto msg = fmt::format(
             "{} multipart upload already takes {} seconds, bucket={}, key={}, upload_id={}",
             task_name, timeout_duration, _bucket, _path.native(), _upload_id);
@@ -177,7 +177,6 @@ Status S3FileWriter::_abort() {
     }
     // we need to reclaim the memory
     if (_pending_buf) {
-        _pending_buf->on_finish();
         _pending_buf = nullptr;
     }
     // upload id is empty means there was no create multi upload
@@ -227,7 +226,7 @@ Status S3FileWriter::close() {
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
-        _pending_buf->submit();
+        _pending_buf->submit(std::move(_pending_buf));
         _pending_buf = nullptr;
     }
     SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::close", Status());
@@ -290,7 +289,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                                 return std::make_unique<FileBlocksHolder>(std::move(holder));
                             });
                 }
-                _pending_buf = builder.build();
+                RETURN_IF_ERROR(builder.build(&_pending_buf));
             }
             // we need to make sure all parts except the last one to be 5MB or more
             // and shouldn't be larger than buf
@@ -313,7 +312,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                 }
                 _cur_part_num++;
                 _countdown_event.add_count();
-                _pending_buf->submit();
+                _pending_buf->submit(std::move(_pending_buf));
                 _pending_buf = nullptr;
             }
             _bytes_appended += data_size_to_append;
@@ -323,7 +322,7 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 }
 
 void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
-    if (buf.is_cancelled()) {
+    if (_failed) {
         return;
     }
     UploadPartRequest upload_request;
@@ -343,15 +342,15 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     s3_bvar::s3_multi_part_upload_total << 1;
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
-        auto s = Status::IOError(
+        _st = Status::IOError(
                 "failed to upload part (bucket={}, key={}, part_num={}, upload_id={}, "
                 "exception={}, error code={}): {}",
                 _bucket, _path.native(), part_num, _upload_id,
                 upload_part_outcome.GetError().GetExceptionName(),
                 upload_part_outcome.GetError().GetResponseCode(),
                 upload_part_outcome.GetError().GetMessage());
-        LOG(WARNING) << s;
-        buf.set_val(s);
+        LOG(WARNING) << _st;
+        buf.set_status(_st);
         return;
     }
 
@@ -385,11 +384,10 @@ Status S3FileWriter::_complete() {
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:1",
                              std::make_pair(&_failed, &_completed_parts));
     if (_failed || _completed_parts.size() != _cur_part_num) {
-        auto st = Status::IOError("error status {}, complete parts {}, cur part num {}", _st,
+        _st = Status::IOError("error status {}, complete parts {}, cur part num {}", _st,
                                   _completed_parts.size(), _cur_part_num);
-        LOG(WARNING) << st;
-        _st = st;
-        return st;
+        LOG(WARNING) << _st;
+        return _st;
     }
     // make sure _completed_parts are ascending order
     std::sort(_completed_parts.begin(), _completed_parts.end(),
@@ -398,12 +396,11 @@ Status S3FileWriter::_complete() {
     CompletedMultipartUpload completed_upload;
     for (size_t i = 0; i < _completed_parts.size(); i++) {
         if (_completed_parts[i]->GetPartNumber() != i + 1) [[unlikely]] {
-            auto st = Status::IOError(
+            _st = Status::IOError(
                     "error status {}, part num not continous, expected num {}, actual num {}", _st,
                     i + 1, _completed_parts[i]->GetPartNumber());
-            LOG(WARNING) << st;
-            _st = st;
-            return st;
+            LOG(WARNING) << _st;
+            return _st;
         }
         completed_upload.AddParts(*_completed_parts[i]);
     }
@@ -417,14 +414,13 @@ Status S3FileWriter::_complete() {
     s3_bvar::s3_multi_part_upload_total << 1;
 
     if (!compute_outcome.IsSuccess()) {
-        auto s = Status::IOError(
+        _st = Status::IOError(
                 "failed to complete multi part upload (bucket={}, key={}, upload_id={}, "
                 "exception={}, error code={}): {}",
                 _bucket, _path.native(), _upload_id, compute_outcome.GetError().GetExceptionName(),
                 compute_outcome.GetError().GetResponseCode(),
                 compute_outcome.GetError().GetMessage());
-        LOG(WARNING) << s;
-        _st = std::move(s);
+        LOG(WARNING) << _st;
         return _st;
     }
     s3_file_created_total << 1;
@@ -444,7 +440,7 @@ Status S3FileWriter::finalize() {
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
-        _pending_buf->submit();
+        _pending_buf->submit(std::move(_pending_buf));
         _pending_buf = nullptr;
     }
     return Status::OK();
@@ -452,9 +448,6 @@ Status S3FileWriter::finalize() {
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     DCHECK(!_closed) << "closed " << _closed;
-    if (_failed) {
-        return;
-    }
     LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     // the task might already be aborted
     if (_failed) [[unlikely]] {
@@ -479,7 +472,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
                 _bucket, _path.native(), _upload_id, response.GetError().GetExceptionName(),
                 response.GetError().GetResponseCode(), response.GetError().GetMessage());
         LOG(WARNING) << _st;
-        buf.set_val(_st);
+        buf.set_status(_st);
         return;
     }
     _bytes_written += buf.get_size();

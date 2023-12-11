@@ -1070,12 +1070,6 @@ DECLARE_mInt32(tablet_path_check_batch_size);
 DECLARE_mInt64(row_column_page_size);
 // it must be larger than or equal to 5MB
 DECLARE_mInt64(s3_write_buffer_size);
-// the size of the whole s3 buffer pool, which indicates the s3 file writer
-// can at most buffer 50MB data. And the num of multi part upload task is
-// s3_write_buffer_whole_size / s3_write_buffer_size
-DECLARE_mInt64(s3_write_buffer_whole_size);
-// Directly mem allocation using new and delelte
-DECLARE_Bool(allocate_s3_writer_buffer_with_new);
 //enable shrink memory
 DECLARE_Bool(enable_shrink_memory);
 // enable cache for high concurrent point query work load
@@ -1157,7 +1151,7 @@ DECLARE_mInt32(lease_compaction_interval_seconds);
 DECLARE_mInt32(check_enable_versioning_interval_seconds); // 1 hours
 DECLARE_mInt32(meta_service_rpc_retry_times);
 // The timeout config for S3 buffer allocation
-DECLARE_mInt32(s3_writer_buffer_allocation_timeout);
+DECLARE_mInt32(s3_task_check_interval);
 DECLARE_mInt64(file_cache_max_file_reader_cache_size);
 // use for selectdb cloud read/write seperate mode
 DECLARE_mInt64(cu_compaction_freeze_interval_seconds);

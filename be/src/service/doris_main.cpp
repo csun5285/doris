@@ -468,12 +468,6 @@ int main(int argc, char** argv) {
     doris::ExecEnv::init(exec_env, paths);
     doris::TabletSchemaCache::create_global_schema_cache();
 
-    // init s3 write buffer pool
-    doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
-    s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
-                         doris::config::s3_write_buffer_size,
-                         exec_env->buffered_reader_prefetch_thread_pool());
-
     // init and open storage engine
     doris::EngineOptions options;
     options.store_paths = paths;
@@ -533,8 +527,6 @@ int main(int argc, char** argv) {
     doris::HttpService http_service(exec_env, doris::config::webserver_port,
                                     doris::config::webserver_num_workers);
 
-    // construct s3 file buffer pool to reduce the cost of lazy loading
-    doris::io::S3FileBufferPool::GetInstance();
 #ifdef CLOUD_MODE
     status = http_service.cloud_start();
 #else

@@ -1064,14 +1064,8 @@ DEFINE_mInt32(tablet_path_check_batch_size, "1000");
 DEFINE_mInt64(row_column_page_size, "4096");
 // it must be larger than or equal to 5MB
 DEFINE_mInt64(s3_write_buffer_size, "5242880");
-// the size of the whole s3 buffer pool, which indicates the s3 file writer
-// can at most buffer 50MB data. And the num of multi part upload task is
-// s3_write_buffer_whole_size / s3_write_buffer_size
-DEFINE_mInt64(s3_write_buffer_whole_size, "524288000");
-// The timeout config for S3 buffer allocation
-DEFINE_mInt32(s3_writer_buffer_allocation_timeout, "60");
+DEFINE_mInt32(s3_task_check_interval, "60");
 DEFINE_mBool(enable_file_cache_block_prefetch, "false")
-DEFINE_Bool(allocate_s3_writer_buffer_with_new, "false");
 
 //disable shrink memory by default
 DEFINE_Bool(enable_shrink_memory, "false");

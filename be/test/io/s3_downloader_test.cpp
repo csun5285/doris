@@ -183,13 +183,6 @@ public:
                 .set_max_threads(10)
                 .build(&_pool);
         ExecEnv::GetInstance()->_s3_downloader_download_thread_pool = std::move(_pool);
-        doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
-        if (s3_buffer_pool->_whole_mem_buffer != nullptr) {
-            return;
-        }
-        s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
-                             doris::config::s3_write_buffer_size,
-                             ExecEnv::GetInstance()->_s3_downloader_download_thread_pool.get());
         bool exists {false};
         ASSERT_TRUE(global_local_filesystem()->exists(tmp_file_1, &exists).ok());
         if (!exists) {

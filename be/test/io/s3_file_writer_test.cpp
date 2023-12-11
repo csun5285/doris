@@ -117,7 +117,7 @@ public:
             }
         }
         {
-            Slice slice = buf._buffer;
+            Slice slice = buf.get_slice();
             std::string str;
             str.resize(slice.get_size());
             std::memcpy(str.data(), slice.get_data(), slice.get_size());
@@ -163,7 +163,7 @@ public:
         file_size = request.GetContentLength();
         key = request.GetKey();
         bucket = request.GetBucket();
-        Slice s = buf._buffer;
+        Slice s = buf.get_slice();
         std::string str;
         str.resize(s.get_size());
         std::memcpy(str.data(), s.get_data(), s.get_size());
@@ -296,13 +296,6 @@ public:
                 .set_max_threads(10)
                 .build(&_pool);
         ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool = std::move(_pool);
-        doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
-        if (s3_buffer_pool->_whole_mem_buffer != nullptr) {
-            return;
-        }
-        s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
-                             doris::config::s3_write_buffer_size,
-                             ExecEnv::GetInstance()->_s3_file_writer_upload_thread_pool.get());
     }
 
     static void TearDownTestSuite() {
@@ -399,8 +392,9 @@ TEST_F(S3FileWriterTest, offset_test) {
         pair->second = true;
     });
     sp->set_call_back("UploadFileBuffer::submit", [](auto&& outcome) {
-        io::UploadFileBuffer* upload_buf = try_any_cast<io::UploadFileBuffer*>(outcome.at(0));
-        upload_buf->set_val(Status::OK());
+        auto buf = try_any_cast<io::FileBuffer*>(outcome.at(0));
+        io::UploadFileBuffer* upload_buf = dynamic_cast<io::UploadFileBuffer*>(buf);
+        upload_buf->set_status(Status::OK());
         bool* pred = try_any_cast<bool*>(outcome.back());
         *pred = true;
     });
@@ -479,7 +473,7 @@ TEST_F(S3FileWriterTest, put_object_io_error) {
                 "error): "
                 "inject error",
                 writer->_bucket, writer->_path.native(), writer->_upload_id);
-        buf->set_val(writer->_st);
+        buf->set_status(writer->_st);
         bool* pred = try_any_cast<bool*>(outcome.back());
         *pred = true;
     });
