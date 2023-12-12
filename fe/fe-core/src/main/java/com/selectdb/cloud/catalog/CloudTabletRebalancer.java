@@ -348,7 +348,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             for (long beId : beList) {
                 tabletNum = beToTabletsGlobal.get(beId) == null ? 0 : beToTabletsGlobal.get(beId).size();
                 Backend backend = Env.getCurrentSystemInfo().getBackend(beId);
-                if (backend.isDecommissioned() && tabletNum == 0 && !backend.isActive()) {
+                if ((backend.isDecommissioned() && tabletNum == 0 && !backend.isActive())
+                        || (backend.isDecommissioned() && beList.size() == 1)) {
+                    LOG.info("check decommission be {} state {} tabletNum {} isActive {} beList {}",
+                            backend.getId(), backend.isDecommissioned(), tabletNum, backend.isActive(), beList);
                     if (!beToDecommissionedTime.containsKey(beId)) {
                         LOG.info("prepare to notify meta service be {} decommissioned", backend.getId());
                         SelectdbCloud.AlterClusterRequest.Builder builder =
@@ -753,6 +756,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
                 beNum++;
             }
             totalTabletsNum += tabletNum;
+        }
+        if (beNum == 0) {
+            LOG.warn("zero be, but want balance, skip");
+            return;
         }
         long avgNum = totalTabletsNum / beNum;
         long transferNum = Math.max(Math.round(avgNum * Config.balance_tablet_percent_per_run),
