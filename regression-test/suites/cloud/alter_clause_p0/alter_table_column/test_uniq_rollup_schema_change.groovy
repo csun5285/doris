@@ -145,10 +145,17 @@ suite ("test_uniq_rollup_schema_change") {
 
     qt_sc """ select count(*) from ${tableName} """
 
+    test {
+        sql "ALTER TABLE ${tableName} DROP COLUMN cost"
+        exception "Can not drop column contained by mv, mv=rollup_cost"
+    }
+
+    sql """ drop materialized view rollup_cost on ${tableName}; """
+
     // drop column
     sql """
           ALTER TABLE ${tableName} DROP COLUMN cost
-          """
+    """
 
     max_try_time = 600
     while(max_try_time--){

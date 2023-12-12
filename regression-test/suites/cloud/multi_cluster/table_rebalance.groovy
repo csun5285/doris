@@ -70,6 +70,7 @@ suite("table_rebalance") {
             println row
         }
 
+        sql """ use @regression_cluster_name0"""
         sql """ drop table IF EXISTS table100 """
         sql """ drop table IF EXISTS table_p2 """
         sql """
@@ -123,7 +124,7 @@ suite("table_rebalance") {
 
         add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                       "regression_cluster_name0", "regression_cluster_id0");
-        sleep(150000)
+        sleep(240000)
 
         sql """ use @regression_cluster_name0 """
 
