@@ -1279,7 +1279,8 @@ public class OlapScanNode extends ScanNode {
         // so here we need count distinct be_num to do the work. make sure get right instance
         if (ConnectContext.get().getSessionVariable().getEnablePipelineEngine()
                 && ConnectContext.get().getSessionVariable().getEnableSharedScan()) {
-            return ConnectContext.get().getSessionVariable().getParallelExecInstanceNum();
+            String cluster = ConnectContext.get().getCurrentCloudCluster();
+            return ConnectContext.get().getSessionVariable().getParallelExecInstanceNum(cluster);
         }
         return scanRangeLocations.size();
     }

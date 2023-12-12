@@ -1409,12 +1409,13 @@ public class SystemInfoService {
         }
     }
 
-    public int getMinPipelineExecutorSize() {
-        if (idToBackendRef.size() == 0) {
+    public int getMinPipelineExecutorSize(String cluster) {
+        List<Backend> currentBackends = getBackendsByClusterName(cluster);
+        if (currentBackends.size() == 0) {
             return 1;
         }
         int minPipelineExecutorSize = Integer.MAX_VALUE;
-        for (Backend be : idToBackendRef.values()) {
+        for (Backend be : currentBackends) {
             int size = be.getPipelineExecutorSize();
             if (size > 0) {
                 minPipelineExecutorSize = Math.min(minPipelineExecutorSize, size);

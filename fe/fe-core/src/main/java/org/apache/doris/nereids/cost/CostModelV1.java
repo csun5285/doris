@@ -304,7 +304,9 @@ class CostModelV1 extends PlanVisitor<Cost, PlanContext> {
             //                    on the output rows, taken on outputRowCount()
             double probeSideFactor = 1.0;
             double buildSideFactor = ConnectContext.get().getSessionVariable().getBroadcastRightTableScaleFactor();
-            int parallelInstance = Math.max(1, ConnectContext.get().getSessionVariable().getParallelExecInstanceNum());
+            String cluster = ConnectContext.get().getCurrentCloudCluster();
+            int parallelInstance = Math.max(1,
+                    ConnectContext.get().getSessionVariable().getParallelExecInstanceNum(cluster));
             int totalInstanceNumber = parallelInstance * beNumber;
             if (buildSideFactor <= 1.0) {
                 if (buildSideFactor <= 1.0) {

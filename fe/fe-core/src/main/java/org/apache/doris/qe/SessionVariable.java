@@ -1765,9 +1765,9 @@ public class SessionVariable implements Serializable, Writable {
         this.enableFoldConstantByBe = foldConstantByBe;
     }
 
-    public int getParallelExecInstanceNum() {
+    public int getParallelExecInstanceNum(String cloudCluster) {
         if (enablePipelineEngine && parallelPipelineTaskNum == 0) {
-            int size = Env.getCurrentSystemInfo().getMinPipelineExecutorSize();
+            int size = Env.getCurrentSystemInfo().getMinPipelineExecutorSize(cloudCluster);
             int autoInstance = (size + 1) / 2;
             return Math.min(autoInstance, maxInstanceNum);
         } else if (enablePipelineEngine) {
@@ -2418,7 +2418,8 @@ public class SessionVariable implements Serializable, Writable {
         tResult.setCodegenLevel(codegenLevel);
         tResult.setBeExecVersion(Config.be_exec_version);
         tResult.setEnablePipelineEngine(enablePipelineEngine);
-        tResult.setParallelInstance(getParallelExecInstanceNum());
+        String cluster = ConnectContext.get().getCurrentCloudCluster();
+        tResult.setParallelInstance(getParallelExecInstanceNum(cluster));
         tResult.setReturnObjectDataAsBinary(returnObjectDataAsBinary);
         tResult.setTrimTailingSpacesForExternalTableQuery(trimTailingSpacesForExternalTableQuery);
         tResult.setEnableShareHashTableForBroadcastJoin(enableShareHashTableForBroadcastJoin);

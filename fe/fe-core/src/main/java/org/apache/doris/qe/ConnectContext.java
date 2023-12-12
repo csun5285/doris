@@ -899,10 +899,22 @@ public class ConnectContext {
         return "stmt[" + stmtId + ", " + DebugUtil.printId(queryId) + "]";
     }
 
+    // maybe user set cluster by SQL hint of session variable: cloud_cluster
+    // so first check it and then get from connect context.
+    public String getCurrentCloudCluster() {
+        String cluster = getSessionVariable().getCloudCluster();
+        if (Strings.isNullOrEmpty(cluster)) {
+            cluster = getCloudCluster();
+        }
+        return cluster;
+    }
+
+    // Set cloud cluster by `use @clusterName`
     public void setCloudCluster(String cluster) {
         this.cloudCluster = cluster;
     }
 
+    // The returned cluster is set by `use @clusterName`
     public String getCloudCluster() {
         return cloudCluster;
     }

@@ -197,7 +197,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
      */
     public void setParallelExecNumIfExists() {
         if (ConnectContext.get() != null) {
-            parallelExecNum = ConnectContext.get().getSessionVariable().getParallelExecInstanceNum();
+            String cluster = ConnectContext.get().getCurrentCloudCluster();
+            parallelExecNum = ConnectContext.get().getSessionVariable().getParallelExecInstanceNum(cluster);
         }
     }
 

@@ -93,9 +93,10 @@ public class VariableMgrTest {
         stmt = (SetStmt) UtFrameUtils.parseAndAnalyzeStmt("set global parallel_pipeline_task_num=5", ctx);
         executor = new SetExecutor(ctx, stmt);
         executor.execute();
-        Assert.assertEquals(1L, var.getParallelExecInstanceNum());
+        String cluster = ctx.getCurrentCloudCluster();
+        Assert.assertEquals(1L, var.getParallelExecInstanceNum(cluster));
         var = VariableMgr.newSessionVariable();
-        Assert.assertEquals(5L, var.getParallelExecInstanceNum());
+        Assert.assertEquals(5L, var.getParallelExecInstanceNum(cluster));
 
         // Test checkTimeZoneValidAndStandardize
         stmt = (SetStmt) UtFrameUtils.parseAndAnalyzeStmt("set global time_zone='+8:00'", ctx);

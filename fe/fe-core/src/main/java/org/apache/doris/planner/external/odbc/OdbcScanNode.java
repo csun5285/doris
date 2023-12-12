@@ -223,8 +223,9 @@ public class OdbcScanNode extends ExternalScanNode {
 
     @Override
     public int getNumInstances() {
+        String cluster = ConnectContext.get().getCurrentCloudCluster();
         return ConnectContext.get().getSessionVariable().getEnablePipelineEngine()
-            ? ConnectContext.get().getSessionVariable().getParallelExecInstanceNum() : 1;
+            ? ConnectContext.get().getSessionVariable().getParallelExecInstanceNum(cluster) : 1;
     }
 
     public static boolean shouldPushDownConjunct(TOdbcTableType tableType, Expr expr) {
