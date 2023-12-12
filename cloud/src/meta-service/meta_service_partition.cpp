@@ -1,5 +1,7 @@
 #include <gen_cpp/selectdb_cloud.pb.h>
 
+#include <fmt/format.h>
+
 #include "common/logging.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_helper.h"
@@ -43,7 +45,7 @@ static TxnErrorCode index_exists(Transaction* txn, const std::string& instance_i
 
     TxnErrorCode err = txn->get(tablet_key, tablet_key_end, &it, false, 1);
     if (err != TxnErrorCode::TXN_OK) {
-        LOG_WARNING("failed to get kv");
+        LOG_WARNING("failed to get kv").tag("err", err);
         return err;
     }
     return it->has_next() ? TxnErrorCode::TXN_OK : TxnErrorCode::TXN_KEY_NOT_FOUND;
@@ -86,7 +88,7 @@ void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controlle
     }
     if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         code = cast_as<ErrCategory::READ>(err);
-        msg = "failed to check index existence";
+        msg = fmt::format("failed to check index existence, err={}", err);
         return;
     }
 
@@ -110,7 +112,7 @@ void MetaServiceImpl::prepare_index(::google::protobuf::RpcController* controlle
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
+            msg = fmt::format("failed to get kv, err={}", err);
             LOG_WARNING(msg);
             return;
         }
@@ -186,7 +188,7 @@ void MetaServiceImpl::commit_index(::google::protobuf::RpcController* controller
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
+            msg = fmt::format("failed to get kv, err={}", err);
             LOG_WARNING(msg);
             return;
         }
@@ -263,7 +265,7 @@ void MetaServiceImpl::drop_index(::google::protobuf::RpcController* controller,
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
+            msg = fmt::format("failed to get kv, err={}", err);
             LOG_WARNING(msg);
             return;
         }
@@ -380,8 +382,8 @@ void MetaServiceImpl::prepare_partition(::google::protobuf::RpcController* contr
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
-            LOG_WARNING(msg).tag("err", err);
+            msg = fmt::format("failed to get kv, err={}", err);
+            LOG_WARNING(msg);
             return;
         }
         RecyclePartitionPB pb;
@@ -459,8 +461,8 @@ void MetaServiceImpl::commit_partition(::google::protobuf::RpcController* contro
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
-            LOG_WARNING(msg).tag("err", err);
+            msg = fmt::format("failed to get kv, err={}", err);
+            LOG_WARNING(msg);
             return;
         }
         RecyclePartitionPB pb;
@@ -538,8 +540,8 @@ void MetaServiceImpl::drop_partition(::google::protobuf::RpcController* controll
         }
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get kv";
-            LOG_WARNING(msg).tag("err", err);
+            msg = fmt::format("failed to get kv, err={}", err);
+            LOG_WARNING(msg);
             return;
         }
         RecyclePartitionPB pb;

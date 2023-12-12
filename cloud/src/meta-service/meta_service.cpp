@@ -241,7 +241,7 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
         code = MetaServiceCode::VERSION_NOT_FOUND;
         return;
     }
-    msg = "failed to get txn";
+    msg = fmt::format("failed to get txn, err={}", err);
     code = cast_as<ErrCategory::READ>(err);
 }
 
@@ -319,7 +319,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
                              << request->partition_ids_size() << ", index=" << i;
                 break;
             } else {
-                msg = "failed to get txn";
+                msg = fmt::format("failed to get txn, err={}", err);
                 code = cast_as<ErrCategory::READ>(err);
                 break;
             }
