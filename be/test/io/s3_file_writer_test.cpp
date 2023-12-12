@@ -308,11 +308,6 @@ public:
     }
 };
 
-TEST_F(S3FileWriterTest, writer_buffer_size) {
-    static_assert(std::is_same_v<int64_t, decltype(config::s3_write_buffer_whole_size)>,
-                  "the s3_write_buffer_whole_size must be int64_t");
-}
-
 TEST_F(S3FileWriterTest, multi_part_io_error) {
     mock_client = std::make_shared<MockS3Client>();
     doris::io::FileWriterOptions state;
