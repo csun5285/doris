@@ -121,7 +121,7 @@ public class CloudReplica extends Replica {
                 LOG.debug("get cluster by context {}", cluster);
             }
         } else {
-            LOG.warn("connect context is null in getBackendId");
+            LOG.debug("connect context is null in getBackendId");
             return -1;
         }
 
