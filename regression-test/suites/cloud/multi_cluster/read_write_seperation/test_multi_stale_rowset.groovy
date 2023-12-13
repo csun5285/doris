@@ -1,7 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_multi_stale_rowset") {
-
+    sql """ SET GLOBAL enable_auto_analyze = false """
     def token = context.config.metaServiceToken;
     def instance_id = context.config.multiClusterInstance
 
@@ -53,8 +53,28 @@ suite("test_multi_stale_rowset") {
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
 
-    def tables = [nation: 25]
-    def tableName = "nation"
+    def clearFileCache = { ip, port ->
+        httpTest {
+            endpoint ""
+            uri ip + ":" + port + """/api/clear_file_cache"""
+            op "post"
+            body "{\"sync\"=\"true\"}"
+        }
+    }
+
+    def getMetricsMethod = { ip, port, check_func ->
+        httpTest {
+            endpoint ip + ":" + port
+            uri "/brpc_metrics"
+            op "get"
+            check check_func
+        }
+    }
+
+    clearFileCache.call(ipList[0], httpPortList[0]);
+    clearFileCache.call(ipList[1], httpPortList[1]);
+
+    def tableName = "customer"
     def s3BucketName = getS3BucketName()
     def s3WithProperties = """WITH S3 (
         |"AWS_ACCESS_KEY" = "${getS3AK()}",
@@ -69,13 +89,13 @@ suite("test_multi_stale_rowset") {
 
     sql "use @regression_cluster_name0"
 
-    def table = "nation"
+    def table = "customer"
     sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
     // create table if not exists
     sql new File("""${context.file.parent}/ddl/${table}.sql""").text
     sleep(10000)
 
-    def load_nation_once =  { 
+    def load_customer_once =  { 
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
         def loadLabel = table + "_" + uniqueID
         // load data from cos
@@ -120,12 +140,12 @@ suite("test_multi_stale_rowset") {
         return backendIdToCacheSize
     }
     sql """ set enable_multi_cluster_sync_load=true """
-    load_nation_once()
-    load_nation_once()
-    load_nation_once()
-    load_nation_once()
-    load_nation_once()
-    sleep(60000);
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    sleep(30000);
     def backendIdToAfterLoadCacheSize = getCurCacheSize()
     sql "use @regression_cluster_name1"
     qt_sql1 """
@@ -186,12 +206,54 @@ suite("test_multi_stale_rowset") {
         } while (running)
     }
 
-    sleep(180000);
+    sleep(90000);
     def backendIdToAfterCompactionCacheSize = getCurCacheSize()
     assertEquals(backendIdToAfterCompactionCacheSize.get(beUniqueIdList[0]) - backendIdToAfterLoadCacheSize.get(beUniqueIdList[0]),
                 backendIdToAfterCompactionCacheSize.get(beUniqueIdList[1]) - backendIdToAfterLoadCacheSize.get(beUniqueIdList[1]));
     sql "use @regression_cluster_name1"
+
+    long s3_read_count = 0
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def i = line.indexOf(' ')
+                    s3_read_count = line.substring(i).toLong()
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
+
     qt_sql2 """
     select count(*) from ${tableName};
     """
+
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def i = line.indexOf(' ')
+                    assertEquals(s3_read_count, line.substring(i).toLong())
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
 }

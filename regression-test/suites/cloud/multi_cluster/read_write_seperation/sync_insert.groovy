@@ -1,6 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("sync_insert") {
+    sql """ SET GLOBAL enable_auto_analyze = false """
     def token = context.config.metaServiceToken;
     def instance_id = context.config.multiClusterInstance
 
@@ -52,31 +53,26 @@ suite("sync_insert") {
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
 
-    def getCurCacheSize = {
-        backendIdToCacheSize = [:]
-        for (int i = 0; i < ipList.size(); i++) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("curl http://")
-            sb.append(ipList[i])
-            sb.append(":")
-            sb.append(brpcPortList[i])
-            sb.append("/vars/*file_cache_cache_size")
-            String command = sb.toString()
-            logger.info(command);
-            process = command.execute()
-            code = process.waitFor()
-            err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-            out = process.getText()
-            logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-            assertEquals(code, 0)
-            String[] str = out.split(':')
-            assertEquals(str.length, 2)
-            logger.info(str[1].trim())
-            backendIdToCacheSize.put(beUniqueIdList[i], Long.parseLong(str[1].trim()))
+    def clearFileCache = { ip, port ->
+        httpTest {
+            endpoint ""
+            uri ip + ":" + port + """/api/clear_file_cache"""
+            op "post"
+            body "{\"sync\"=\"true\"}"
         }
-        return backendIdToCacheSize
     }
-    def originalSize = getCurCacheSize();
+
+    def getMetricsMethod = { ip, port, check_func ->
+        httpTest {
+            endpoint ip + ":" + port
+            uri "/brpc_metrics"
+            op "get"
+            check check_func
+        }
+    }
+
+    clearFileCache.call(ipList[0], httpPortList[0]);
+    clearFileCache.call(ipList[1], httpPortList[1]);
 
     sql "use @regression_cluster_name0"
 
@@ -97,7 +93,7 @@ DUPLICATE KEY(`siteid`)
 COMMENT "OLAP"
 DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
 """
-    sleep(10000)
+    sleep(10000) // wait for rebalance
     sql """insert into ${table1} values
         (9,10,11,12),
         (9,10,11,12),
@@ -117,12 +113,29 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
         (5,6,7,8)
 """
     sleep(30000)
-    def afterLoadSize = getCurCacheSize();
-
-    assertEquals(afterLoadSize.get(beUniqueIdList[0]) - originalSize.get(beUniqueIdList[0]),
-                afterLoadSize.get(beUniqueIdList[1]) - originalSize.get(beUniqueIdList[1]));
 
     sql "use @regression_cluster_name1"
+
+    long s3_read_count = 0
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def i = line.indexOf(' ')
+                    s3_read_count = line.substring(i).toLong()
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
 
     qt_sql1 "select siteid,citycode,userid,pv from ${table1} where siteid = 21 "
 
@@ -169,4 +182,23 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
 
     qt_sql22 "select citycode from ${table1} where citycode!=18 order by citycode"
 
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def i = line.indexOf(' ')
+                    assertEquals(s3_read_count, line.substring(i).toLong())
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
 }

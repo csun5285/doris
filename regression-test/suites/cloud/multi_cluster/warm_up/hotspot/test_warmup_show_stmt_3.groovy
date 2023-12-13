@@ -1,10 +1,14 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_warm_up_cluster") {
-    def getJobState = { jobId ->
-         def jobStateResult = sql """  SHOW WARM UP JOB WHERE ID = ${jobId} """
-         return jobStateResult[0][2]
-    }
+suite("test_warmup_show_stmt_3") {
+    def table = "customer"
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
+    sql new File("""${context.file.parent}/../ddl/supplier_delete.sql""").text
+    // create table if not exists
+    sql new File("""${context.file.parent}/../ddl/${table}.sql""").text
+
+    sql """ TRUNCATE TABLE __internal_schema.selectdb_cache_hotspot; """
+    sleep(30000)
 
     def token = context.config.metaServiceToken;
     def instance_id = context.config.multiClusterInstance
@@ -49,9 +53,9 @@ suite("test_warm_up_cluster") {
     assertEquals(result.size(), 0);
 
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
-                     "regression_cluster_name0", "lightman_cluster_id0");
+                     "regression_cluster_name0", "regression_cluster_id0");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                     "regression_cluster_name1", "lightman_cluster_id1");
+                     "regression_cluster_name1", "regression_cluster_id1");
     sleep(20000)
 
     result  = sql "show clusters"
@@ -69,19 +73,11 @@ suite("test_warm_up_cluster") {
     // set fe configuration
     sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
 
-    sql "use @regression_cluster_name1"
-
-    def table = "supplier"
-    sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
-    // create table if not exists
-    sql new File("""${context.file.parent}/ddl/${table}.sql""").text
-    sleep(10000)
-
-    def load_supplier_once =  { 
+    def load_customer_once =  { 
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
         def loadLabel = table + "_" + uniqueID
         // load data from cos
-        def loadSql = new File("""${context.file.parent}/ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
+        def loadSql = new File("""${context.file.parent}/../ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
         loadSql = loadSql.replaceAll("\\\$\\{loadLabel\\}", loadLabel) + s3WithProperties
         sql loadSql
 
@@ -97,36 +93,29 @@ suite("test_warm_up_cluster") {
             sleep(5000)
         }
     }
-    load_supplier_once()
-    for (int j = 0; j < 10; j++) {
-        sql "select count(*) from supplier"
-    }
-    // wait the hotspot rpc
-    sleep(120000);
-    def jobId = sql "warm up cluster regression_cluster_name0 with cluster regression_cluster_name1;"
-    int retryTime = 300
-    int i = 0
-    for (; i < retryTime; i++) {
-        sleep(1000)
-        def status = getJobState(jobId[0][0])
-        logger.info(status)
-        if (status.equals("CANCELLED")) {
-            assertTrue(false);
-        }
-        if (status.equals("FINISHED")) {
-            break;
-        }
-    }
-    if (i == retryTime) {
-        sql "cancel warm up job where id = ${jobId[0][0]}"
-        assertTrue(false);
-    }
-
+    
     sql "use @regression_cluster_name0"
-    // warm up 之后查询应该很快返回
-    def startTimestamp = System.currentTimeMillis()
-    sql """ select count(*) from ${table}; """
-    def endTimestamp = System.currentTimeMillis()
-    long secondQueryCost = endTimestamp - startTimestamp
-    assertTrue(secondQueryCost < 100)
+    load_customer_once()
+    sql "select count(*) from customer"
+    def thread = Thread.start {
+        Random random = new Random()
+        for (int i = 0; i < 40; i++) {
+            long number = random.nextLong() % 10l;
+            if (number < 8) {
+                sql "select count(*) from customer"
+            } else {
+                load_customer_once()
+            }
+            sleep(5000)
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        sleep(40000)
+        result = sql """ show cache hotspot "/regression_cluster_name0/regression_test_cloud_multi_cluster_warm_up_hotspot.customer" """
+        assertTrue(result.size() > 0);
+    }
+    thread.join()
+    sleep(40000)
+    result = sql """ show cache hotspot "/regression_cluster_name0/regression_test_cloud_multi_cluster_warm_up_hotspot.customer" """
+    assertTrue(result.size() > 0);
 }

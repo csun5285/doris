@@ -1,6 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_warm_up_table") {
+    sql """ SET GLOBAL enable_auto_analyze = false """
     def getJobState = { jobId ->
          def jobStateResult = sql """  SHOW WARM UP JOB WHERE ID = ${jobId} """
          return jobStateResult[0][2]
@@ -71,17 +72,17 @@ suite("test_warm_up_table") {
 
     sql "use @regression_cluster_name0"
 
-    def table = "supplier"
-    sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
+    def table = "customer"
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
     // create table if not exists
-    sql new File("""${context.file.parent}/ddl/${table}.sql""").text
+    sql new File("""${context.file.parent}/../ddl/${table}.sql""").text
     sleep(10000)
 
-    def load_supplier_once =  { 
+    def load_customer_once =  { 
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
         def loadLabel = table + "_" + uniqueID
         // load data from cos
-        def loadSql = new File("""${context.file.parent}/ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
+        def loadSql = new File("""${context.file.parent}/../ddl/${table}_load.sql""").text.replaceAll("\\\$\\{s3BucketName\\}", s3BucketName)
         loadSql = loadSql.replaceAll("\\\$\\{loadLabel\\}", loadLabel) + s3WithProperties
         sql loadSql
 
@@ -97,34 +98,49 @@ suite("test_warm_up_table") {
             sleep(5000)
         }
     }
-    def getCurCacheSize = {
-        backendIdToCacheSize = [:]
-        for (int i = 0; i < ipList.size(); i++) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("curl http://")
-            sb.append(ipList[i])
-            sb.append(":")
-            sb.append(brpcPortList[i])
-            sb.append("/vars/*file_cache_cache_size")
-            String command = sb.toString()
-            logger.info(command);
-            process = command.execute()
-            code = process.waitFor()
-            err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-            out = process.getText()
-            logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-            assertEquals(code, 0)
-            String[] str = out.split(':')
-            assertEquals(str.length, 2)
-            logger.info(str[1].trim())
-            backendIdToCacheSize.put(beUniqueIdList[i], Long.parseLong(str[1].trim()))
+
+    def clearFileCache = { ip, port ->
+        httpTest {
+            endpoint ""
+            uri ip + ":" + port + """/api/clear_file_cache"""
+            op "post"
+            body "{\"sync\"=\"true\"}"
         }
-        return backendIdToCacheSize
     }
-    def backendIdToBeforeLoadCacheSize = getCurCacheSize()
-    load_supplier_once()
-    sleep(10000);
-    def jobId = sql "warm up cluster regression_cluster_name1 with table supplier;"
+
+    def getMetricsMethod = { ip, port, check_func ->
+        httpTest {
+            endpoint ip + ":" + port
+            uri "/brpc_metrics"
+            op "get"
+            check check_func
+        }
+    }
+
+    clearFileCache.call(ipList[0], httpPortList[0]);
+    clearFileCache.call(ipList[1], httpPortList[1]);
+    
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+    load_customer_once()
+
+    def jobId = sql "warm up cluster regression_cluster_name1 with table customer;"
+    try {
+        sql "warm up cluster regression_cluster_name1 with table customer;"
+        assertTrue(false)
+    } catch (Exception e) {
+        assertTrue(true)
+    }
     int retryTime = 120
     int i = 0
     for (; i < retryTime; i++) {
@@ -142,11 +158,64 @@ suite("test_warm_up_table") {
         sql "cancel warm up job where id = ${jobId[0][0]}"
         assertTrue(false);
     }
-    sleep(60000)
-    def backendIdToAfterWarmUpCacheSize = getCurCacheSize()
-    assertTrue(backendIdToAfterWarmUpCacheSize.get(beUniqueIdList[1]) > backendIdToBeforeLoadCacheSize.get(beUniqueIdList[1]));
+
+    long s3_read_count = 0
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def j = line.indexOf(' ')
+                    s3_read_count = line.substring(j).toLong()
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
     sql "use @regression_cluster_name1"
     qt_sql2 """
     select count(*) from ${table};
     """
+
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def j = line.indexOf(' ')
+                    assertEquals(s3_read_count, line.substring(j).toLong())
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
+
+    try {
+        sql "warm up cluster regression_cluster_name2 with table customer;"
+        assertTrue(false)
+    } catch (Exception e) {
+        assertTrue(true)
+    }
+
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
+    try {
+        sql "warm up cluster regression_cluster_name1 with table customer;"
+        assertTrue(false)
+    } catch (Exception e) {
+        assertTrue(true)
+    }
 }

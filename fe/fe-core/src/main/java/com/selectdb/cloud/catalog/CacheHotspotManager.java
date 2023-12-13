@@ -69,7 +69,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -91,11 +90,6 @@ public class CacheHotspotManager extends MasterDaemon {
     // periodically clear and re-build <id, table> message for
     // efficiency and memory consumption issue
     private Map<Long, Table> idToTable = new HashMap<>();
-
-    // to count should we rebuild idToTable for memory consumption issue
-    // rebuild every 48 hour
-    private Long rebuildIdToTableCnt = 0L;
-    private Long rebuildIdToTableAlert = 96L;
 
     private boolean tableCreated = false;
 
@@ -134,12 +128,12 @@ public class CacheHotspotManager extends MasterDaemon {
             try {
                 CacheHotspotManagerUtils.execCreateCacheTable();
                 tableCreated = true;
-                traverseAllDatabaseForTable();
             } catch (Exception e) {
                 LOG.warn("Create cache hot spot table failed", e);
                 return;
             }
         }
+        traverseAllDatabaseForTable();
         // it's thread safe to iterate through this concurrent map's ref
         nodeMgr.getCloudClusterIdToBackend().entrySet().forEach(clusterToBeList -> {
             List<Pair<CompletableFuture<TGetTopNHotPartitionsResponse>, Backend>> futureList
@@ -169,19 +163,14 @@ public class CacheHotspotManager extends MasterDaemon {
                 triggerBatchInsert();
             });
         });
-        if (Objects.equals(rebuildIdToTableCnt, rebuildIdToTableAlert)) {
-            idToTable.clear();
-            traverseAllDatabaseForTable();
-            rebuildIdToTableCnt = 0L;
-        }
-        rebuildIdToTableCnt++;
+        idToTable.clear();
     }
 
     public boolean containsCluster(String clusterName) {
         return CacheHotspotManagerUtils.clusterContains(nodeMgr.getCloudClusterIdByName(clusterName));
     }
 
-    // table_name, index_id, partition_id
+    // table_id table_name, index_id, partition_id
     public List<List<String>> getClusterTopNHotPartitions(String clusterName) {
         return CacheHotspotManagerUtils.getClusterTopNPartitions(nodeMgr.getCloudClusterIdByName(clusterName));
     }
@@ -236,14 +225,10 @@ public class CacheHotspotManager extends MasterDaemon {
         params.put("insert_day", insertDay);
         Table t;
         if (!idToTable.containsKey(tableId)) {
-            traverseAllDatabaseForTable();
+            return;
         }
         // it might be null?
         t = idToTable.get(tableId);
-        if (t == null) {
-            LOG.warn("table id {} is invalid", tableId);
-            return;
-        }
         params.put("table_id", String.valueOf(tableId));
         params.put("table_name", String.format("%s.%s", t.getDBName(), t.getName()));
         OlapTable olapTable = (OlapTable) t;
@@ -456,16 +441,16 @@ public class CacheHotspotManager extends MasterDaemon {
         Long warmUpTabletsSize = 0L;
         List<Tablet> tablets = new ArrayList<>();
         for (List<String> line : result) {
-            String[] tmp = line.get(0).split("\\.");
+            Long tableId = Long.parseLong(line.get(0));
+            String[] tmp = line.get(1).split("\\.");
             String dbName = tmp[0];
-            String tableName = tmp[1];
-            Long indexId = Long.parseLong(line.get(1));
             Long partitionId = Long.parseLong(line.get(2));
+            Long indexId = Long.parseLong(line.get(3));
             Database db = Env.getCurrentInternalCatalog().getDbNullable("default_cluster:" + dbName);
             if (db == null) {
                 continue;
             }
-            OlapTable table = (OlapTable) db.getTableNullable(tableName);
+            OlapTable table = (OlapTable) db.getTableNullable(tableId);
             if (table == null) {
                 continue;
             }

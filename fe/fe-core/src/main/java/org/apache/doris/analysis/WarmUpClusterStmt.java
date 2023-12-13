@@ -60,7 +60,7 @@ public class WarmUpClusterStmt extends StatementBase {
     public void analyze(Analyzer analyzer) throws AnalysisException, UserException {
         super.analyze(analyzer);
         if (!Env.getCurrentSystemInfo().containClusterName(dstClusterName)) {
-            throw new AnalysisException("The dstClusterName doesn't exist");
+            throw new AnalysisException("The dstClusterName " + dstClusterName + " doesn't exist");
         }
         if (!isWarmUpWithTable && !Env.getCurrentSystemInfo().containClusterName(srcClusterName)) {
             boolean contains = false;
@@ -81,15 +81,15 @@ public class WarmUpClusterStmt extends StatementBase {
             tableName.analyze(analyzer);
             dbName = tableName.getDb();
             if (Strings.isNullOrEmpty(dbName)) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR);
+                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
             }
             Database db = Env.getCurrentInternalCatalog().getDbNullable(dbName);
             if (db == null) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR);
+                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
             }
             OlapTable table = (OlapTable) db.getTableNullable(tableName.getTbl());
             if (table == null) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_TABLE_ERROR);
+                ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_TABLE_ERROR, tableName.getTbl());
             }
             if (partitionName.length() != 0 && !table.containPartition(partitionName)) {
                 throw new AnalysisException("The partition " + partitionName + " doesn't exist");

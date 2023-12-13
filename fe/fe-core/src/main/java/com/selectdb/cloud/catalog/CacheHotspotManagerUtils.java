@@ -86,30 +86,17 @@ public class CacheHotspotManagerUtils {
             "SELECT COUNT(*) FROM " + TABLE_NAME
             + " WHERE '${cluster_id}' = 'cluster'";
 
-    private static final String GET_CLUSTER_FILE_CACHE_SIZE_TEMPLATE = "SELECT sum(file_cache_size)\n"
-            + "FROM\n"
-            + "  (SELECT *,\n"
-            + "          row_number() OVER (PARTITION BY cluster_id,\n"
-            + "                                          backend_id,\n"
-            + "                                          table_id,\n"
-            + "                                          index_id,\n"
-            + "                                          partition_id\n"
-            + "                             ORDER BY insert_day DESC) AS rn\n"
-            + "   FROM " + TABLE_NAME + " t\n"
-            + "WHERE rn = 1 and t.cluster_id = '${cluster_id}'";
+    private static final String GET_CLUSTER_PARTITIONS_TEMPLATE = "WITH t as (SELECT\n"
+            + "table_name, table_id, partition_id,\n"
+            + "partition_name, index_id, insert_day, sum(query_per_day) as query_per_day_total,\n"
+            + "sum(query_per_week) as query_per_week_total\n"
+            + "FROM " + TABLE_NAME + "\n"
+            + "where cluster_id = '${cluster_id}' \n"
+            + "group by cluster_id, cluster_name, table_id, table_name, partition_id,\n"
+            + "partition_name, index_id, insert_day order by insert_day desc,\n"
+            + "query_per_day_total desc, query_per_week_total desc)\n"
+            + "select distinct table_id, table_name, partition_id, index_id from t;";
 
-    private static final String GET_CLUSTER_PARTITIONS_TEMPLATE = "SELECT table_name, index_id, partition_id\n"
-            + "FROM\n"
-            + "  (SELECT *,\n"
-            + "          row_number() OVER (PARTITION BY cluster_id,\n"
-            + "                                          backend_id,\n"
-            + "                                          table_id,\n"
-            + "                                          index_id,\n"
-            + "                                          partition_id\n"
-            + "                             ORDER BY insert_day DESC) AS rn\n"
-            + "   FROM " + TABLE_NAME + " ) t\n"
-            + "WHERE rn = 1 and t.cluster_id = '${cluster_id}' \n"
-            + "order by t.query_per_day desc, t.query_per_week desc";
     private static String INTERNAL_TABLE_ID;
 
     public static boolean clusterContains(String clusterId) {
@@ -130,7 +117,7 @@ public class CacheHotspotManagerUtils {
         return !(result == null || result.size() == 0);
     }
 
-    // table_name, index_name, partition_name
+    // table_id, table_name, index_name, partition_name
     public static List<List<String>> getClusterTopNPartitions(String clusterId) {
         if (clusterId == null) {
             String err = String.format("cluster doesn't exist, clusterId %s", clusterId);
