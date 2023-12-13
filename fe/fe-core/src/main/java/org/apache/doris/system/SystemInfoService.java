@@ -1410,6 +1410,9 @@ public class SystemInfoService {
     }
 
     public int getMinPipelineExecutorSize(String cluster) {
+        if (Strings.isNullOrEmpty(cluster)) {
+            return 1;
+        }
         List<Backend> currentBackends = getBackendsByClusterName(cluster);
         if (currentBackends.size() == 0) {
             return 1;
