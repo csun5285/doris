@@ -103,6 +103,7 @@ import org.apache.doris.common.Version;
 import org.apache.doris.common.profile.Profile;
 import org.apache.doris.common.profile.SummaryProfile;
 import org.apache.doris.common.profile.SummaryProfile.SummaryBuilder;
+import org.apache.doris.common.util.DebugPointUtil;
 import org.apache.doris.common.util.DebugUtil;
 import org.apache.doris.common.util.MetaLockUtils;
 import org.apache.doris.common.util.ProfileManager.ProfileType;
@@ -454,8 +455,40 @@ public class StmtExecutor {
     // query with a random sql
     public void execute() throws Exception {
         UUID uuid = UUID.randomUUID();
-        TUniqueId queryId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
-        execute(queryId);
+        TUniqueId firstQueryId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
+        TUniqueId queryId = firstQueryId;
+
+        int retryTime = Config.max_query_retry_time;
+        if (Config.isCloudMode()) {
+            retryTime = Config.cloud_query_failed_retry_times;
+        }
+        retryTime = retryTime <= 0 ? 1 : retryTime + 1;
+        for (int i = 1; i <= retryTime; i++) {
+            try {
+                execute(queryId);
+                return;
+            } catch (UserException e) {
+                if (!e.getMessage().contains("E-230") || i == retryTime) {
+                    throw e;
+                }
+                TUniqueId lastQueryId = queryId;
+                uuid = UUID.randomUUID();
+                queryId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
+                int randomMillis = 10 + (int) (Math.random() * 10);
+                if (i > retryTime / 2) {
+                    randomMillis = 20 + (int) (Math.random() * 10);
+                }
+                if (DebugPointUtil.isEnable("StmtExecutor.retry.longtime")) {
+                    randomMillis = 1000;
+                }
+                LOG.warn("receive E-230 tried={} first queryId={} last queryId={} new queryId={} sleep={}ms",
+                        i, DebugUtil.printId(firstQueryId), DebugUtil.printId(lastQueryId),
+                        DebugUtil.printId(queryId), randomMillis);
+                Thread.sleep(randomMillis);
+            } catch (Exception e) {
+                throw e;
+            }
+        }
     }
 
     public void execute(TUniqueId queryId) throws Exception {
