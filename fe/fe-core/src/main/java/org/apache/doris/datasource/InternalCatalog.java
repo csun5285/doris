@@ -3712,8 +3712,9 @@ public class InternalCatalog implements CatalogIf<Database> {
                 requestBuilder.addTabletMetas(builder);
             }
 
-            LOG.info("create tablets, dbId: {}, tableId: {}, partitionId: {} indexId: {}",
-                    dbId, tableId, partitionId, indexId);
+            LOG.info("create tablets, dbId: {}, tableId: {}, tableName: {}, partitionId: {}, partitionName: {}, "
+                    + "indexId: {}",
+                    dbId, tableId, tableName, partitionId, partitionName, indexId);
             sendCreateTabletsRpc(requestBuilder);
             if (index.getId() != baseIndexId) {
                 // add rollup index to partition
