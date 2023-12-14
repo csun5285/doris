@@ -55,12 +55,13 @@ public:
 
     FileReader* get_remote_reader() { return _remote_file_reader.get(); }
 
+    static std::pair<size_t, size_t> s_align_size(size_t offset, size_t read_size, size_t length);
+
 protected:
     [[nodiscard]] Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                         const IOContext* io_ctx) override;
 
 private:
-    std::pair<size_t, size_t> _align_size(size_t offset, size_t size) const;
 
     FileReaderSPtr _remote_file_reader;
     Key _cache_key;

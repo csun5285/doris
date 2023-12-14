@@ -37,6 +37,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <random>
+#include <ranges>
 
 #include "common/config.h"
 #include "common/exception.h"
@@ -65,7 +67,7 @@ namespace fs = std::filesystem;
 
 fs::path caches_dir = fs::current_path() / "lru_cache_test";
 std::string cache_base_path = caches_dir / "cache1" / "";
-std::string tmp_file = caches_dir / "tmp_file";
+std::string tmp_file = caches_dir / "block_file_cache_test_tmp_file";
 
 void assert_range([[maybe_unused]] size_t assert_n, io::FileBlockSPtr file_block,
                   const io::FileBlock::Range& expected_range, io::FileBlock::State expected_state) {
@@ -2801,7 +2803,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader) {
     opts.is_doris_table = true;
     opts.metrics_hook = count;
     CachedRemoteFileReader reader(local_reader, &opts);
-    auto key = io::BlockFileCache::hash("tmp_file");
+    auto key = io::BlockFileCache::hash("block_file_cache_test_tmp_file");
     EXPECT_EQ(reader._cache_key, key);
     EXPECT_EQ(local_reader->path().native(), reader.path().native());
     EXPECT_EQ(global_local_filesystem()->id(), reader.fs()->id());
@@ -2941,7 +2943,7 @@ TEST_F(BlockFileCacheTest, cached_remote_file_reader_tail) {
     EXPECT_TRUE(reader.close().ok());
     EXPECT_TRUE(reader.closed());
     {
-        auto key = io::BlockFileCache::hash("tmp_file");
+        auto key = io::BlockFileCache::hash("block_file_cache_test_tmp_file");
         auto cache = FileCacheFactory::instance().get_by_path(key);
         auto holder = cache->get_or_set(key, 9*1024*1024, 1024*1024+1, context);
         auto segments = fromHolder(holder);
@@ -3560,6 +3562,71 @@ TEST_F(BlockFileCacheTest, test_check_disk_reource_limit_3) {
     if (fs::exists(cache_base_path)) {
         fs::remove_all(cache_base_path);
     }
+}
+
+constexpr unsigned long long operator"" _mb(unsigned long long m)
+{
+  return m * 1024 * 1024;
+}
+
+TEST_F(BlockFileCacheTest, test_align_size) {
+    const size_t total_size = 10_mb + 10086;
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(0, 100, total_size);
+        EXPECT_EQ(offset, 0);
+        EXPECT_EQ(size, 1_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(1_mb - 1, 2, total_size);
+        EXPECT_EQ(offset, 0);
+        EXPECT_EQ(size, 2_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(0, 1_mb + 10086, total_size);
+        EXPECT_EQ(offset, 0);
+        EXPECT_EQ(size, 2_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(10_mb + 1, 1086, total_size);
+        EXPECT_EQ(offset, 9_mb);
+        EXPECT_EQ(size, 1_mb + 10086);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(10_mb + 1, 108600, total_size);
+        EXPECT_EQ(offset, 9_mb);
+        EXPECT_EQ(size, 1_mb + 10086);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(4_mb + 108600, 108600, total_size);
+        EXPECT_EQ(offset, 4_mb);
+        EXPECT_EQ(size, 1_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(4_mb, 1_mb, total_size);
+        EXPECT_EQ(offset, 4_mb);
+        EXPECT_EQ(size, 1_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(4_mb, 1, total_size);
+        EXPECT_EQ(offset, 4_mb);
+        EXPECT_EQ(size, 1_mb);
+    }
+    { 
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(4_mb + 108600, 1_mb, total_size);
+        EXPECT_EQ(offset, 4_mb);
+        EXPECT_EQ(size, 2_mb);
+    }
+    std::random_device rd;  // a seed source for the random number engine
+    std::mt19937 gen(rd()); // mersenne_twister_engine seeded with rd()
+    std::uniform_int_distribution<> distrib(0, 10_mb + 10086);
+    std::ranges::for_each(std::ranges::iota_view{0, 1000}, [&](int){
+        size_t read_size = distrib(gen) % 1_mb;
+        size_t read_offset = distrib(gen);
+        auto [offset, size] = CachedRemoteFileReader::s_align_size(read_offset, read_size, total_size);
+        EXPECT_EQ(offset % 1_mb, 0);
+        EXPECT_GE(size, 1_mb);
+        EXPECT_LE(size, 2_mb);
+    });
 }
 
 } // namespace doris::io

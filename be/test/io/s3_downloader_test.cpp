@@ -370,6 +370,60 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_1) {
     FileCacheFactory::instance()._total_cache_size = 0;
 }
 
+TEST_F(S3DownloaderTest, block_file_cache_downloader_test_with_file_cache_error) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 15728640;
+    settings.query_queue_elements = 15;
+    settings.total_size = 15728640;
+    settings.max_file_block_size = 1048576;
+    settings.max_query_cache_size = 0;
+    io::CacheContext context;
+    context.cache_type = io::FileCacheType::NORMAL;
+    auto sp = SyncPoint::get_instance();
+    sp->set_call_back("BlockFileCache::remove_prefix", [](auto&& args) { 
+        *try_any_cast<std::string*>(args[0]) = tmp_file_1;
+    });
+    sp->set_call_back("LocalFileWriter::appendv", [&](auto&& values) {
+        std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+        pairs->second = true;
+    });
+    Defer defer {[sp] { 
+        sp->clear_call_back("BlockFileCache::remove_prefix"); 
+        sp->clear_call_back("LocalFileWriter::appendv"); 
+    }};
+    ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
+    FileCacheSegmentS3Downloader::create_preheating_s3_downloader();
+    S3FileMeta meta;
+    meta.path = tmp_file_1;
+    meta.file_size = 10 * 1024 * 1024 + 1;
+    CountDownLatch latch(1);
+    meta.file_system = downloader_s3_fs;
+    meta.download_callback = [&](Status s) { 
+        ASSERT_TRUE(s.ok());
+        latch.count_down(1);
+    };
+    FileCacheSegmentDownloader::instance()->submit_download_task(std::move(meta));
+    latch.wait();
+    {
+        auto key = io::BlockFileCache::hash("tmp_file");
+        auto cache = FileCacheFactory::instance().get_by_path(key);
+        EXPECT_EQ(cache->_cur_cache_size, 0);
+    }
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    FileCacheFactory::instance()._caches.clear();
+    FileCacheFactory::instance()._path_to_cache.clear();
+    FileCacheFactory::instance()._total_cache_size = 0;
+}
+
 TEST_F(S3DownloaderTest, block_file_cache_downloader_test_2) {
     StorageEngine storage_engine({});
     auto sp = SyncPoint::get_instance();
