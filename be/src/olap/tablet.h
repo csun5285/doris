@@ -19,6 +19,7 @@
 
 #include <butil/macros.h>
 #include <glog/logging.h>
+#include <bthread/mutex.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -750,7 +751,7 @@ private:
 
     // CLOUD_MODE
     // this mutex MUST ONLY be used in `Tablet::cloud_sync_rowsets`
-    doris::Mutex _sync_rowsets_lock;
+    bthread::Mutex _sync_rowsets_lock;
 
     // TODO(lingbin): There is a _meta_lock TabletMeta too, there should be a comment to
     // explain how these two locks work together.
