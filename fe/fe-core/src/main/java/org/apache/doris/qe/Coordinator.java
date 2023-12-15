@@ -617,7 +617,10 @@ public class Coordinator implements CoordInterface {
         if (Config.isCloudMode()) {
             if (idToBackend == null || idToBackend.isEmpty()) {
                 LOG.warn("no available backends, idToBackend {}", idToBackend);
-                throw new Exception("no available backends, the cluster maybe not be set");
+                String clusterName = ConnectContext.get() != null
+                        ? ConnectContext.get().getCloudCluster() : "ctx empty cant get clusterName";
+                throw new Exception("no available backends, the cluster maybe not be set or been dropped clusterName = "
+                        + clusterName);
             }
         }
 

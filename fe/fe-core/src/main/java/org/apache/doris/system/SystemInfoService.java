@@ -424,6 +424,10 @@ public class SystemInfoService {
 
     public ImmutableMap<Long, Backend> getCloudIdToBackend(String clusterName) {
         String clusterId = clusterNameToId.get(clusterName);
+        if (Strings.isNullOrEmpty(clusterId)) {
+            LOG.warn("cant find clusterId, this cluster may be has been dropped, clusterName={}", clusterName);
+            return ImmutableMap.of();
+        }
         List<Backend> backends = clusterIdToBackend.get(clusterId);
         Map<Long, Backend> idToBackend = Maps.newHashMap();
         for (Backend be : backends) {
