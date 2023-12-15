@@ -24,6 +24,7 @@
 #include "io/fs/s3_file_system.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/tablet.h"
+#include "util/bvar_helper.h"
 #include "util/s3_util.h"
 
 namespace doris::io {
@@ -37,9 +38,9 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
     request.WithBucket(bucket).WithKey(key_name);
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
+    SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
                                                 "io::_download_part", std::cref(request).get(), &s);
-    s3_bvar::s3_get_total << 1;
 
     TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);
     if (!outcome.IsSuccess()) {

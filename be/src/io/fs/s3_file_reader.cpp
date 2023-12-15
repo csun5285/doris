@@ -37,6 +37,7 @@
 #include "io/fs/s3_common.h"
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
+#include "util/bvar_helper.h"
 #include "util/doris_metrics.h"
 #include "util/s3_util.h"
 #include "util/trace.h"
@@ -101,10 +102,10 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
         return Status::InternalError("init s3 client error");
     }
     s3_file_reader_counter << 1;
+    SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
                                                 "s3_file_reader::get_object",
                                                 std::ref(request).get(), &result);
-    s3_bvar::s3_get_total << 1;
     if (!outcome.IsSuccess()) {
         return Status::IOError("failed to read from {}: {}, exception {}, error code {}",
                                _path.native(), outcome.GetError().GetMessage(),
