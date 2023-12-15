@@ -774,7 +774,7 @@ Status SegmentWriter::append_block(const vectorized::Block* block, size_t row_po
             if (config::enable_check_max_min_key && min_key.compare(max_key) > 0) {
                 auto first_100 = block->dump_key_data(0, _num_key_columns, 100);
                 LOG(WARNING) << "wrong min_max key first_100:" << first_100;
-                if (num_rows - 100 >= 0) {
+                if (num_rows >= 100 ) {
                     auto last_100 = block->dump_key_data(num_rows - 100, _num_key_columns, 100);
                     LOG(WARNING) << "wrong min_max key last_100:" << last_100;
                 } else {

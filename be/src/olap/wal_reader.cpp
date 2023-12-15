@@ -56,7 +56,6 @@ Status WalReader::read_block(PBlock& block) {
     _offset += WalWriter::LENGTH_SIZE;
     size_t block_len;
     memcpy(&block_len, row_len_buf, WalWriter::LENGTH_SIZE);
-    DCHECK(block_len >= 0);
     // read block
     std::string block_buf;
     block_buf.resize(block_len);

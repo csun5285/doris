@@ -36,6 +36,7 @@ TEST(TabletMetaTest, SaveAndParse) {
 
     TabletMeta old_tablet_meta(1, 2, 3, 3, 4, 5, TTabletSchema(), 6, {{7, 8}}, UniqueId(9, 10),
                                TTabletType::TABLET_TYPE_DISK, TCompressionType::LZ4F, false, false);
+    old_tablet_meta._index_id = 10086;
     EXPECT_EQ(Status::OK(), old_tablet_meta.save(meta_path));
 
     {

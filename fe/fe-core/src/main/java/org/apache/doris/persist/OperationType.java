@@ -329,6 +329,7 @@ public class OperationType {
     // For backward compatible with 2.0.3
     public static final short OP_DELETE_TABLE_STATS = 457;
 
+    // For backward compatible with 2.0.3
     public static final short OP_ALTER_CATALOG_COMMENT = 458;
 
     // cloud
