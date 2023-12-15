@@ -77,7 +77,8 @@ suite("decommission") {
     for (row : result) {
         println row
     }
-
+    sql """ drop table IF EXISTS table100 """
+    sql """ drop table IF EXISTS table_p2 """
     sql """
         CREATE TABLE table100 (
         class INT,

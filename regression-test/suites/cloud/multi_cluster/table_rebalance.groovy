@@ -69,7 +69,8 @@ suite("table_rebalance") {
         for (row : result) {
             println row
         }
-
+        sql """ drop table IF EXISTS table100 """
+        sql """ drop table IF EXISTS table_p2 """
         sql """ use @regression_cluster_name0"""
         sql """
             CREATE TABLE table100 (
