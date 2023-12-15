@@ -75,9 +75,6 @@ suite("default_cluster") {
     def before_cluster1_flush = get_be_metric(ipList[1], httpPortList[1], "memtable_flush_total");
     log.info("before_cluster1_flush : ${before_cluster1_flush}".toString())
 
-    sql """
-        drop table if exists test_table
-    """
 
     sql """
         CREATE TABLE test_table (
@@ -166,4 +163,8 @@ suite("default_cluster") {
             assertTrue(row[1].toString().isEmpty())
         }
     }
+
+    sql """
+        drop table if exists test_table
+    """
 }

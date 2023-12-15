@@ -78,8 +78,6 @@ suite("sync_insert") {
 
     def table1 = "test_dup_tab_basic_int_tab_nullable"
 
-    sql "drop table if exists ${table1}"
-
     sql """ set enable_multi_cluster_sync_load=true """
 
     sql """
@@ -201,4 +199,5 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
             }
             assertTrue(flag)
     }
+    sql "drop table if exists ${table1}"
 }

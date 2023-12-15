@@ -126,7 +126,6 @@ suite("test_routine_load") {
     pool.shutdown()                 //all tasks submitted
 
     def tableName = "test_routine_load"
-    sql """ DROP TABLE IF EXISTS ${tableName}; """
     sql """
         CREATE TABLE IF NOT EXISTS ${tableName}
         (
@@ -178,5 +177,6 @@ suite("test_routine_load") {
 
     assertTrue(before_cluster1_load_rows != after_cluster1_load_rows)
     assertTrue(before_cluster1_flush != after_cluster1_flush)
+    sql """ DROP TABLE IF EXISTS ${tableName}; """
 }
 

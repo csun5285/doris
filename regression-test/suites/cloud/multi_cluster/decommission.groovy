@@ -78,8 +78,6 @@ suite("decommission") {
         println row
     }
 
-    sql """ drop table IF EXISTS table100 """
-    sql """ drop table IF EXISTS table_p2 """
     sql """
         CREATE TABLE table100 (
         class INT,
@@ -143,5 +141,6 @@ suite("decommission") {
     }
 
     sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-
+    sql """ drop table IF EXISTS table100 """
+    sql """ drop table IF EXISTS table_p2 """
 }

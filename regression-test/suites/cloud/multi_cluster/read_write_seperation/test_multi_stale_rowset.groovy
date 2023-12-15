@@ -90,7 +90,6 @@ suite("test_multi_stale_rowset") {
     sql "use @regression_cluster_name0"
 
     def table = "customer"
-    sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
     // create table if not exists
     sql new File("""${context.file.parent}/ddl/${table}.sql""").text
     sleep(10000)
@@ -256,4 +255,5 @@ suite("test_multi_stale_rowset") {
             }
             assertTrue(flag)
     }
+    sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
 }

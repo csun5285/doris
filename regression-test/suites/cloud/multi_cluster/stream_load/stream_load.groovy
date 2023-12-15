@@ -71,7 +71,7 @@ suite("stream_load") {
 
     // case1 specific cluster
     def tableName3 = "test_all"
-    sql """ drop table if exists ${tableName3} """
+    
 
     sql """
     CREATE TABLE IF NOT EXISTS ${tableName3} (
@@ -312,5 +312,6 @@ suite("stream_load") {
 
     assertTrue(before_cluster1_load_rows == after_cluster1_load_rows)
     assertTrue(before_cluster1_flush == after_cluster1_flush)
+    sql """ drop table if exists ${tableName3} """
 }
 
