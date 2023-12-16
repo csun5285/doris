@@ -2,9 +2,13 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     def role = "admin"
     def user1 = "regression_test_cloud_user1"
     def user2 = "regression_test_cloud_user2"
+    def user3 = "regression_test_cloud_user3"
+    def tbl = "test_auth_tbl"
 
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""
+    sql """drop user if exists ${user3}"""
+    sql """drop table if exists ${tbl}"""
 
     def getCluster = { cluster ->
         def result = sql " SHOW CLUSTERS; "
@@ -32,6 +36,39 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     // for use default_cluster:regression_test
     sql """grant select_priv on *.*.* to ${user2}"""
 
+
+    sql """
+    CREATE TABLE ${tbl} (
+    `k1` int(11) NULL,
+    `k2` char(5) NULL
+    )
+    DUPLICATE KEY(`k1`, `k2`)
+    COMMENT 'OLAP'
+    DISTRIBUTED BY HASH(`k1`) BUCKETS 1
+    PROPERTIES (
+    "replication_num"="1"
+    );
+    """
+
+    sql """
+        insert into ${tbl} (k1, k2) values (1, "10");
+    """
+
+    sql """create user ${user3} identified by 'Cloud12345'"""
+    sql """GRANT SELECT_PRIV ON *.*.* TO '${user3}'@'%'"""
+    result = connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql """SHOW CLUSTERS"""
+    }
+    // not grant any cluster to user3
+    assertTrue(result.isEmpty())
+    def db = context.dbName
+
+    connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        test {
+            sql """select * from ${db}.${tbl}"""
+            exception "you may be not have this cluster's Usage priv, pls check it"
+        }
+    }
 
     // 2. grant cluster
     def cluster1 = "clusterA"
@@ -104,6 +141,7 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
 
     sql """drop user if exists ${user1}"""
     sql """drop user if exists ${user2}"""
+    sql """drop user if exists ${user3}"""
 }
 
 

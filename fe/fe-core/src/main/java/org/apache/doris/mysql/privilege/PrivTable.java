@@ -128,6 +128,12 @@ public abstract class PrivTable {
 
         // check if privs to be revoked exist in priv entry.
         PrivBitSet tmp = existingEntry.getPrivSet().copy();
+        // fix bug, compatible with stock data
+        if (tmp.containsPrivs(Privilege.USAGE_PRIV) && (entry.getPrivSet().containsPrivs(Privilege.CLUSTER_USAGE_PRIV)
+                || entry.getPrivSet().containsPrivs(Privilege.STAGE_USAGE_PRIV))) {
+            entry.privSet.xor(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV, Privilege.STAGE_USAGE_PRIV));
+            entry.privSet.or(PrivBitSet.of(Privilege.USAGE_PRIV));
+        }
         tmp.and(entry.getPrivSet());
         if (tmp.isEmpty()) {
             if (errOnNonExist) {

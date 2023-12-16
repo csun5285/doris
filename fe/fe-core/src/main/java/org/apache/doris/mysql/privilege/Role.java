@@ -459,7 +459,7 @@ public class Role implements Writable, GsonPostProcessable {
 
         PrivBitSet savedPrivs = PrivBitSet.of();
         if (checkGlobalInternal(wanted, savedPrivs)
-                || checkCloudInternal(cloudName, wanted, savedPrivs, cloudPrivTable)) {
+                || checkCloudInternal(cloudName, wanted, savedPrivs, cloudPrivTable, type)) {
             return true;
         }
 
@@ -504,18 +504,22 @@ public class Role implements Writable, GsonPostProcessable {
     }
 
     private boolean checkCloudInternal(String cloudName, PrivPredicate wanted,
-                                       PrivBitSet savedPrivs, ResourcePrivTable table) {
+                                       PrivBitSet savedPrivs, ResourcePrivTable table, ResourceTypeEnum type) {
         table.getPrivs(cloudName, savedPrivs);
         if (Privilege.satisfy(savedPrivs, wanted)) {
             return true;
         }
         // for fix bug
-        savedPrivs.or(PrivBitSet.of(Privilege.USAGE_PRIV));
-        LOG.info("compatible with stock data, savedPrivs {} , wanted {}", savedPrivs, wanted);
-        if (Privilege.satisfy(savedPrivs, wanted)) {
-            return true;
+        if (savedPrivs.containsPrivs(Privilege.USAGE_PRIV) && !savedPrivs.containsPrivs(Privilege.CLUSTER_USAGE_PRIV)
+                && !savedPrivs.containsPrivs(Privilege.STAGE_USAGE_PRIV)) {
+            if (type == ResourceTypeEnum.CLUSTER) {
+                savedPrivs.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
+            } else if (type == ResourceTypeEnum.STAGE) {
+                savedPrivs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
+            }
+            LOG.info("compatible with stock data, savedPrivs {} , wanted {}", savedPrivs, wanted);
         }
-        return false;
+        return Privilege.satisfy(savedPrivs, wanted);
     }
 
     public boolean checkWorkloadGroupPriv(String workloadGroupName, PrivPredicate wanted) {
@@ -861,12 +865,6 @@ public class Role implements Writable, GsonPostProcessable {
         } catch (AnalysisException | PatternMatcherException e) {
             throw new DdlException(e.getMessage());
         }
-        // fix bug, compatible with stock data
-        if (entry.privSet.containsPrivs(Privilege.USAGE_PRIV)
-                && !entry.privSet.containsPrivs(Privilege.STAGE_USAGE_PRIV)) {
-            entry.privSet.remove(PrivBitSet.of(Privilege.USAGE_PRIV));
-            entry.privSet.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
-        }
         cloudStagePrivTable.revoke(entry,  false, true);
         LOG.info("cloud stage revoke list {}", cloudStagePrivTable);
     }
@@ -878,13 +876,6 @@ public class Role implements Writable, GsonPostProcessable {
         } catch (AnalysisException | PatternMatcherException e) {
             throw new DdlException(e.getMessage());
         }
-        // fix bug, compatible with stock data
-        if (entry.privSet.containsPrivs(Privilege.USAGE_PRIV)
-                && !entry.privSet.containsPrivs(Privilege.CLUSTER_USAGE_PRIV)) {
-            entry.privSet.remove(PrivBitSet.of(Privilege.USAGE_PRIV));
-            entry.privSet.or(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV));
-        }
-
         cloudClusterPrivTable.revoke(entry, false, true);
         LOG.info("cloud cluster revoke list {}", cloudClusterPrivTable);
     }

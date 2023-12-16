@@ -5489,7 +5489,7 @@ public class Env {
         // check resource usage privilege
         if (!Env.getCurrentEnv().getAuth().checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(),
                 clusterName, PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
-            throw new DdlException("USAGE denied to user"
+            throw new DdlException("USAGE denied to user "
                     + ConnectContext.get().getQualifiedUser() + "'@'" + ConnectContext.get().getRemoteIP()
                     + "' for cloud cluster '" + clusterName + "'", ErrorCode.ERR_CLUSTER_NO_PERMISSIONS);
         }
