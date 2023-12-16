@@ -309,6 +309,7 @@ private:
     std::unique_ptr<vectorized::Block> _result_block;
     Metrics _profile_metrics;
     bool _binary_row_format = false;
+    int64_t _version = -1;
 };
 
 } // namespace doris

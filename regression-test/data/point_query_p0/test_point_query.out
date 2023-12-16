@@ -18,6 +18,7 @@
 252	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	252.0	7022-01-01	false	90696620686827832.374	\N	[0.000000000]
 
 -- !point_select --
+298	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	298.0	7022-01-01	true	90696620686827832.374	[]	[]
 
 -- !point_select --
 1235	991129292901.111380000	dd	\N	2120-01-02	2020-01-01 12:36:38	652.692	5022-01-01	false	90696620686827832.374	[119181.111100000]	["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
@@ -32,8 +33,10 @@
 646464	6C616F6F71
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
@@ -55,6 +58,9 @@
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
+
+-- !point_select --
+1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0
@@ -78,6 +84,7 @@
 252	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	252.0	7022-01-01	false	90696620686827832.374	\N	[0.000000000]
 
 -- !point_select --
+298	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	298.0	7022-01-01	true	90696620686827832.374	[]	[]
 
 -- !point_select --
 1235	991129292901.111380000	dd	\N	2120-01-02	2020-01-01 12:36:38	652.692	5022-01-01	false	90696620686827832.374	[119181.111100000]	["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
@@ -92,8 +99,10 @@
 646464	6C616F6F71
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
@@ -115,6 +124,9 @@
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
+
+-- !point_select --
+1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0
@@ -138,6 +150,7 @@
 252	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	252.0	7022-01-01	false	90696620686827832.374	\N	[0.000000000]
 
 -- !point_select --
+298	120939.111300000	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	laooq	2030-01-02	2020-01-01 12:36:38	298.0	7022-01-01	true	90696620686827832.374	[]	[]
 
 -- !point_select --
 1235	991129292901.111380000	dd	\N	2120-01-02	2020-01-01 12:36:38	652.692	5022-01-01	false	90696620686827832.374	[119181.111100000]	["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
@@ -152,8 +165,10 @@
 646464	6C616F6F71
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
+1235	120939.111300000	a    ddd	laooq	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	true	1.111	[119291.192910000]	["111", "222", "333"]	1
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
@@ -175,6 +190,9 @@
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2
+
+-- !point_select --
+1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0
 
 -- !point_select --
 1235	120939.111300000	a    ddd	xxxxxx	2030-01-02	2020-01-01 12:36:38	22.822	7022-01-01	false	1929111.111	[119291.192910000]	["111", "222", "333"]	2	0

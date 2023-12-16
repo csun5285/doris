@@ -185,7 +185,6 @@ suite("test_point_query") {
                 qe_point_select stmt
                 // invalidate cache
                 nprep_sql """ INSERT INTO ${tableName} VALUES(1235, 120939.11130, "a    ddd", "xxxxxx", "2030-01-02", "2020-01-01 12:36:38", 22.822, "7022-01-01 11:30:38", 0, 1929111.1111,[119291.19291], ["111", "222", "333"], 2) """
-                sleep(10000)
                 qe_point_select stmt
                 qe_point_select stmt
                 qe_point_select stmt
@@ -204,6 +203,14 @@ suite("test_point_query") {
                   ALTER table ${tableName} ADD COLUMN new_column1 INT default "0";
                 """
                 qe_point_select stmt
+
+                // disable snapshot read
+                sql "set enable_snapshot_point_query = false"
+                def new_stmt = prepareStatement "select /*+ SET_VAR(enable_snapshot_point_query=false) */ * from ${tableName} where k1 = 1235 and k2 = ? and k3 = ?"
+                new_stmt.setBigDecimal(1, new BigDecimal("120939.11130"))
+                new_stmt.setString(2, "a    ddd")
+                qe_point_select new_stmt
+                sql "set enable_snapshot_point_query = true"
             }
             // // disable useServerPrepStmts
             // def result2 = connect(user=user, password=password, url=context.config.jdbcUrl) {
