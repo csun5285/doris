@@ -297,6 +297,8 @@ Status HttpService::cloud_start() {
     StreamLoad2PCAction* streamload_2pc_action = _pool.add(new StreamLoad2PCAction(_env));
     _ev_http_server->register_handler(HttpMethod::PUT, "/api/{db}/_stream_load_2pc",
                                       streamload_2pc_action);
+    _ev_http_server->register_handler(HttpMethod::PUT, "/api/{db}/{table}/_stream_load_2pc",
+                                      streamload_2pc_action);
 
     DownloadAction* error_log_download_action =
             _pool.add(new DownloadAction(_env, _env->load_path_mgr()->get_load_error_file_dir()));
