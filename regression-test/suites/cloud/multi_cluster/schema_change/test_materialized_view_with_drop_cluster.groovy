@@ -83,7 +83,6 @@ suite("test_materialized_with_drop_cluster") {
         }
         return jobStateResult[0][8]
     }
-    sql "DROP TABLE IF EXISTS ${tbName1}"
     sql """
             CREATE TABLE IF NOT EXISTS ${tbName1}(
                 siteid INT(11) NOT NULL,
@@ -119,4 +118,5 @@ suite("test_materialized_with_drop_cluster") {
             }
         }
     }
+    sql "DROP TABLE IF EXISTS ${tbName1}"
 }

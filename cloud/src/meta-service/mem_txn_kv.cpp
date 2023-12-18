@@ -408,4 +408,24 @@ TxnErrorCode Transaction::abort() {
     return TxnErrorCode::TXN_OK;
 }
 
+TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
+                           const BatchGetOptions& opts) {
+    if (keys.empty()) {
+        return TxnErrorCode::TXN_OK;
+    }
+    std::lock_guard<std::mutex> l(lock_);
+    res->reserve(keys.size());
+    for (const auto& k : keys) {
+        if (unreadable_keys_.count(k) != 0) {
+            aborted_ = true;
+            LOG(WARNING) << "read unreadable key, abort";
+            return TxnErrorCode::TXN_UNIDENTIFIED_ERROR;
+        }
+        std::string val;
+        auto ret = inner_get(k, &val, opts.snapshot);
+        ret == TxnErrorCode::TXN_OK ? res->push_back(val) : res->push_back(std::nullopt);
+    }
+    return TxnErrorCode::TXN_OK;
+}
+
 } // namespace selectdb::memkv

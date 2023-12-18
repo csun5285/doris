@@ -35,20 +35,22 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/sync_point.h"
+#include "runtime/exec_env.h"
 #include "s3_uri.h"
+#include "vec/exec/scan/scanner_scheduler.h"
 
 namespace doris {
 
 namespace s3_bvar {
-bvar::Adder<uint64_t> s3_get_total("s3_get_total_num");
-bvar::Adder<uint64_t> s3_put_total("s3_put_total_num");
-bvar::Adder<uint64_t> s3_delete_total("s3_delete_total_num");
-bvar::Adder<uint64_t> s3_head_total("s3_head_total_num");
-bvar::Adder<uint64_t> s3_multi_part_upload_total("s3_multi_part_upload_total_num");
-bvar::Adder<uint64_t> s3_list_total("s3_list_total_num");
-bvar::Adder<uint64_t> s3_list_object_versions_total("s3_list_object_versions_total_num");
-bvar::Adder<uint64_t> s3_get_bucket_version_total("s3_get_bucket_version_total_num");
-bvar::Adder<uint64_t> s3_copy_object_total("s3_copy_object_total_num");
+bvar::LatencyRecorder s3_get_latency("s3_get");
+bvar::LatencyRecorder s3_put_latency("s3_put");
+bvar::LatencyRecorder s3_delete_latency("s3_delete");
+bvar::LatencyRecorder s3_head_latency("s3_head");
+bvar::LatencyRecorder s3_multi_part_upload_latency("s3_multi_part_upload");
+bvar::LatencyRecorder s3_list_latency("s3_list");
+bvar::LatencyRecorder s3_list_object_versions_latency("s3_list_object_versions");
+bvar::LatencyRecorder s3_get_bucket_version_latency("s3_get_bucket_version");
+bvar::LatencyRecorder s3_copy_object_latency("s3_copy_object");
 } // namespace s3_bvar
 
 class DorisAWSLogger final : public Aws::Utils::Logging::LogSystemInterface {
@@ -155,8 +157,9 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
 
     Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
     DCHECK(!aws_cred.IsExpiredOrEmpty());
-    if (!s3_conf.sts.empty()) {
-        aws_cred.SetSessionToken(s3_conf.sts);
+
+    if (!s3_conf.token.empty()) {
+        aws_cred.SetSessionToken(s3_conf.token);
     }
 
     Aws::Client::ClientConfiguration aws_config = S3ClientFactory::getClientConfiguration();
@@ -165,7 +168,14 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
     if (s3_conf.max_connections > 0) {
         aws_config.maxConnections = s3_conf.max_connections;
     } else {
-        aws_config.maxConnections = config::doris_remote_scanner_thread_pool_thread_num;
+#ifdef BE_TEST
+        // the S3Client may shared by many threads.
+        // So need to set the number of connections large enough.
+        aws_config.maxConnections = config::doris_scanner_thread_pool_thread_num;
+#else
+        aws_config.maxConnections =
+                ExecEnv::GetInstance()->scanner_scheduler()->remote_thread_pool_max_size();
+#endif
     }
     if (aws_config.maxConnections < config::async_remote_io_thread_pool_thread_num) {
         aws_config.maxConnections = config::async_remote_io_thread_pool_thread_num;
@@ -180,6 +190,8 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
     if (config::s3_client_http_scheme == "http") {
         aws_config.scheme = Aws::Http::Scheme::HTTP;
     }
+
+    aws_config.executor = ExecEnv::GetInstance()->s3_pool_executor();
 
     std::shared_ptr<Aws::S3::S3Client> new_client = std::make_shared<Aws::S3::S3Client>(
             std::move(aws_cred), std::move(aws_config),
@@ -201,6 +213,9 @@ Status S3ClientFactory::convert_properties_to_s3_conf(
     StringCaseMap<std::string> properties(prop.begin(), prop.end());
     s3_conf->ak = properties.find(S3_AK)->second;
     s3_conf->sk = properties.find(S3_SK)->second;
+    if (properties.find(S3_TOKEN) != properties.end()) {
+        s3_conf->token = properties.find(S3_TOKEN)->second;
+    }
     s3_conf->endpoint = properties.find(S3_ENDPOINT)->second;
     s3_conf->region = properties.find(S3_REGION)->second;
 
@@ -214,9 +229,6 @@ Status S3ClientFactory::convert_properties_to_s3_conf(
     if (properties.find(S3_CONN_TIMEOUT_MS) != properties.end()) {
         s3_conf->connect_timeout_ms =
                 std::atoi(properties.find(S3_CONN_TIMEOUT_MS)->second.c_str());
-    }
-    if (properties.find(S3_TOKEN) != properties.end()) {
-        s3_conf->sts = properties.find(S3_TOKEN)->second;
     }
     if (s3_uri.get_bucket() == "") {
         return Status::InvalidArgument("Invalid S3 URI {}, bucket is not specified",

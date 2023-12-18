@@ -140,6 +140,12 @@ suite ("test_uniq_mv_schema_change") {
 
     qt_sc """ select count(*) from ${tableName} """
 
+    test {
+        sql "ALTER TABLE ${tableName} DROP COLUMN cost"
+        exception "Can not drop column contained by mv, mv=mv2"
+    }
+
+    sql""" drop materialized view mv2 on ${tableName}; """
 
     // drop column
     sql """

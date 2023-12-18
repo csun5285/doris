@@ -44,7 +44,10 @@ import org.apache.doris.nereids.trees.expressions.Subtract;
 import org.apache.doris.nereids.trees.expressions.TimestampArithmetic;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonArray;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonInsert;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonObject;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonReplace;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonSet;
 import org.apache.doris.nereids.trees.expressions.literal.BigIntLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.DateLiteral;
@@ -90,7 +93,6 @@ import org.apache.doris.nereids.types.coercion.FractionalType;
 import org.apache.doris.nereids.types.coercion.IntegralType;
 import org.apache.doris.nereids.types.coercion.NumericType;
 import org.apache.doris.nereids.types.coercion.PrimitiveType;
-import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -438,6 +440,11 @@ public class TypeCoercionUtils {
         if (boundFunction instanceof JsonArray || boundFunction instanceof JsonObject) {
             boundFunction = TypeCoercionUtils.fillJsonTypeArgument(boundFunction, boundFunction instanceof JsonObject);
         }
+        if (boundFunction instanceof JsonInsert
+                || boundFunction instanceof JsonReplace
+                || boundFunction instanceof JsonSet) {
+            boundFunction = TypeCoercionUtils.fillJsonValueModifyTypeArgument(boundFunction);
+        }
 
         // type coercion
         return implicitCastInputTypes(boundFunction, boundFunction.expectedInputTypes());
@@ -447,6 +454,9 @@ public class TypeCoercionUtils {
      * process divide
      */
     public static Expression processDivide(Divide divide, Expression left, Expression right) {
+        // check
+        divide.checkLegalityBeforeTypeCoercion();
+
         DataType t1 = TypeCoercionUtils.getNumResultType(left.getDataType());
         DataType t2 = TypeCoercionUtils.getNumResultType(right.getDataType());
 
@@ -461,20 +471,15 @@ public class TypeCoercionUtils {
         if (t1.isDoubleType() || t1.isFloatType()
                 || t2.isDoubleType() || t2.isFloatType()) {
             // double type
-        } else if (t1.isDecimalV3Type() || t2.isDecimalV3Type()) {
+        } else if (t1.isDecimalV3Type() || t2.isDecimalV3Type()
+                // decimalv2 vs bigint, largeint treat as decimalv3
+                || ((t1.isBigIntType() || t1.isLargeIntType()) && t2.isDecimalV2Type())
+                || (t1.isDecimalV2Type() && (t2.isBigIntType() || t2.isLargeIntType()))) {
             // divide should cast to precision and target scale
-            DecimalV3Type retType;
             DecimalV3Type dt1 = DecimalV3Type.forType(t1);
             DecimalV3Type dt2 = DecimalV3Type.forType(t2);
-            try {
-                retType = divide.getDataTypeForDecimalV3(dt1, dt2);
-            } catch (Exception e) {
-                // exception means overflow.
-                return castChildren(divide, left, right, DoubleType.INSTANCE);
-            }
-            return divide.withChildren(castIfNotSameType(left,
-                    DecimalV3Type.createDecimalV3Type(retType.getPrecision(), retType.getScale())),
-                    castIfNotSameType(right, dt2));
+            DecimalV3Type retType = divide.getDataTypeForDecimalV3(dt1, dt2);
+            return divide.withChildren(castIfNotSameType(left, retType), castIfNotSameType(right, dt2));
         } else if (t1.isDecimalV2Type() || t2.isDecimalV2Type()) {
             commonType = DecimalV2Type.SYSTEM_DEFAULT;
         }
@@ -488,6 +493,9 @@ public class TypeCoercionUtils {
      * process divide
      */
     public static Expression processIntegralDivide(IntegralDivide divide, Expression left, Expression right) {
+        // check
+        divide.checkLegalityBeforeTypeCoercion();
+
         DataType t1 = TypeCoercionUtils.getNumResultType(left.getDataType());
         DataType t2 = TypeCoercionUtils.getNumResultType(right.getDataType());
         left = castIfNotSameType(left, t1);
@@ -517,6 +525,9 @@ public class TypeCoercionUtils {
      */
     public static Expression processBinaryArithmetic(BinaryArithmetic binaryArithmetic,
             Expression left, Expression right) {
+        // check
+        binaryArithmetic.checkLegalityBeforeTypeCoercion();
+
         // characterLiteralTypeCoercion
         // we do this because string is cast to double by default
         // but if string literal could be cast to small type, we could use smaller type than double.
@@ -556,18 +567,16 @@ public class TypeCoercionUtils {
             commonType = DoubleType.INSTANCE;
         }
 
-        if (t1.isDecimalV3Type() && t2.isDecimalV2Type()
-                || t1.isDecimalV2Type() && t2.isDecimalV3Type()) {
+        // we treat decimalv2 vs dicimalv3, largeint or bigint as decimalv3 way.
+        if ((t1.isDecimalV3Type() || t1.isBigIntType() || t1.isLargeIntType()) && t2.isDecimalV2Type()
+                || t1.isDecimalV2Type() && (t2.isDecimalV3Type() || t2.isBigIntType() || t2.isLargeIntType())) {
             return processDecimalV3BinaryArithmetic(binaryArithmetic, left, right);
         }
 
         if (t1.isDecimalV2Type() || t2.isDecimalV2Type()) {
-            // to be consitent with old planner
+            // to be consistent with old planner
             // see findCommonType() method in ArithmeticExpr.java
-            commonType = t1.isDecimalV2Type() && t2.isDecimalV2Type()
-                    || (ConnectContext.get() != null
-                    && ConnectContext.get().getSessionVariable().roundPreciseDecimalV2Value)
-                    ? DecimalV2Type.SYSTEM_DEFAULT : DoubleType.INSTANCE;
+            commonType = DecimalV2Type.SYSTEM_DEFAULT;
         }
 
         boolean isBitArithmetic = binaryArithmetic instanceof BitAnd
@@ -597,7 +606,7 @@ public class TypeCoercionUtils {
             return castChildren(binaryArithmetic, left, right, commonType);
         }
 
-        // double and float already process, we only process decimalv2 and fixed point number.
+        // double and float already process, we only process decimalv3 and fixed point number.
         if (t1 instanceof DecimalV3Type || t2 instanceof DecimalV3Type) {
             return processDecimalV3BinaryArithmetic(binaryArithmetic, left, right);
         }
@@ -621,6 +630,9 @@ public class TypeCoercionUtils {
      */
     public static Expression processTimestampArithmetic(TimestampArithmetic timestampArithmetic,
             Expression left, Expression right) {
+        // check
+        timestampArithmetic.checkLegalityBeforeTypeCoercion();
+
         // left
         DataType leftType = left.getDataType();
 
@@ -667,6 +679,9 @@ public class TypeCoercionUtils {
      */
     public static Expression processComparisonPredicate(ComparisonPredicate comparisonPredicate,
             Expression left, Expression right) {
+        // check
+        comparisonPredicate.checkLegalityBeforeTypeCoercion();
+
         // same type
         if (left.getDataType().equals(right.getDataType())) {
             return comparisonPredicate.withChildren(left, right);
@@ -691,6 +706,9 @@ public class TypeCoercionUtils {
      * process in predicate type coercion.
      */
     public static Expression processInPredicate(InPredicate inPredicate) {
+        // check
+        inPredicate.checkLegalityBeforeTypeCoercion();
+
         if (inPredicate.getOptions().stream().map(Expression::getDataType)
                 .allMatch(dt -> dt.equals(inPredicate.getCompareExpr().getDataType()))) {
             return inPredicate;
@@ -715,6 +733,9 @@ public class TypeCoercionUtils {
      * process case when type coercion.
      */
     public static Expression processCaseWhen(CaseWhen caseWhen) {
+        // check
+        caseWhen.checkLegalityBeforeTypeCoercion();
+
         // type coercion
         List<DataType> dataTypesForCoercion = caseWhen.dataTypesForCoercion();
         if (dataTypesForCoercion.size() <= 1) {
@@ -759,6 +780,9 @@ public class TypeCoercionUtils {
      * process compound predicate type coercion.
      */
     public static Expression processCompoundPredicate(CompoundPredicate compoundPredicate) {
+        // check
+        compoundPredicate.checkLegalityBeforeTypeCoercion();
+
         compoundPredicate.children().forEach(e -> {
                     if (!e.getDataType().isBooleanType() && !e.getDataType().isNullType()
                             && !(e instanceof SubqueryExpr)) {
@@ -1201,6 +1225,38 @@ public class TypeCoercionUtils {
         }
     }
 
+    /**
+     * add json type info as the last argument of the function.
+     * used for json_insert, json_replace, json_set.
+     *
+     * @param function function need to add json type info
+     * @return function already processed
+     */
+    public static BoundFunction fillJsonValueModifyTypeArgument(BoundFunction function) {
+        List<Expression> arguments = function.getArguments();
+        List<Expression> newArguments = Lists.newArrayList();
+        StringBuilder jsonTypeStr = new StringBuilder();
+        for (int i = 0; i < arguments.size(); i++) {
+            Expression argument = arguments.get(i);
+            Type type = argument.getDataType().toCatalogDataType();
+            int jsonType = FunctionCallExpr.computeJsonDataType(type);
+            jsonTypeStr.append(jsonType);
+
+            if (i > 0 && (i & 1) == 0 && type.isNull()) {
+                newArguments.add(new StringLiteral("NULL"));
+            } else {
+                newArguments.add(argument);
+            }
+        }
+        if (arguments.isEmpty()) {
+            newArguments.add(new StringLiteral(""));
+        } else {
+            // add json type string to the last
+            newArguments.add(new StringLiteral(jsonTypeStr.toString()));
+        }
+        return (BoundFunction) function.withChildren(newArguments);
+    }
+
     private static Expression processDecimalV3BinaryArithmetic(BinaryArithmetic binaryArithmetic,
             Expression left, Expression right) {
         DecimalV3Type dt1 =
@@ -1209,13 +1265,7 @@ public class TypeCoercionUtils {
                 DecimalV3Type.forType(TypeCoercionUtils.getNumResultType(right.getDataType()));
 
         // check return type whether overflow, if true, turn to double
-        DecimalV3Type retType;
-        try {
-            retType = binaryArithmetic.getDataTypeForDecimalV3(dt1, dt2);
-        } catch (Exception e) {
-            // exception means overflow.
-            return castChildren(binaryArithmetic, left, right, DoubleType.INSTANCE);
-        }
+        DecimalV3Type retType = binaryArithmetic.getDataTypeForDecimalV3(dt1, dt2);
 
         // add, subtract and mod should cast children to exactly same type as return type
         if (binaryArithmetic instanceof Add || binaryArithmetic instanceof Subtract

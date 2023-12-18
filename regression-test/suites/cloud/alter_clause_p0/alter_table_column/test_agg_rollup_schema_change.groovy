@@ -104,6 +104,13 @@ suite ("test_agg_rollup_schema_change") {
 
         qt_sc """ select * from ${tableName} order by user_id """
 
+        test {
+            sql "ALTER TABLE ${tableName} DROP COLUMN cost"
+            exception "Can not drop column contained by mv, mv=rollup_cost"
+        }
+
+        sql""" drop materialized view rollup_cost on ${tableName}; """
+
         // drop value column with rollup, not light schema change
         sql """
             ALTER TABLE ${tableName} DROP COLUMN cost

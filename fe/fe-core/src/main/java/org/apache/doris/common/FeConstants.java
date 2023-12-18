@@ -20,9 +20,6 @@ package org.apache.doris.common;
 import org.apache.doris.persist.meta.FeMetaFormat;
 
 public class FeConstants {
-    // Database and table's default configurations, we will never change them
-    public static short default_replication_num = 3;
-
     // The default value of bucket setting && auto bucket without estimate_partition_size
     public static int default_bucket_num = 10;
 
@@ -39,7 +36,6 @@ public class FeConstants {
 
     public static int heartbeat_interval_second = 5;
     public static int checkpoint_interval_second = 60; // 1 minutes
-    public static int ip_check_interval_second = 5;
 
     // dpp version
     public static String dpp_version = "3_2_0";
@@ -71,10 +67,6 @@ public class FeConstants {
     public static long tablet_checker_interval_ms = 20 * 1000L;
     public static long tablet_schedule_interval_ms = 1000L;
 
-    public static String csv = "csv";
-    public static String csv_with_names = "csv_with_names";
-    public static String csv_with_names_and_types = "csv_with_names_and_types";
-
     public static String text = "hive_text";
 
     public static int cloud_cluster_check_interval_second = 10;
@@ -94,6 +86,7 @@ public class FeConstants {
     public static String FS_PREFIX_HDFS = "hdfs";
     public static String FS_PREFIX_VIEWFS = "viewfs";
     public static String FS_PREFIX_FILE = "file";
+
     public static final String INTERNAL_DB_NAME = "__internal_schema";
     public static String TEMP_MATERIZLIZE_DVIEW_PREFIX = "internal_tmp_materialized_view_";
     public static final String INTERNAL_FILE_CACHE_HOTSPOT_TABLE_NAME = "selectdb_cache_hotspot";

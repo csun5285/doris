@@ -87,6 +87,7 @@ void put_schema_kv(MetaServiceCode& code, std::string& msg, Transaction* txn,
         code = cast_as<ErrCategory::READ>(err);
         return;
     }
+    LOG_INFO("put schema kv").tag("key", hex(schema_key));
     uint8_t ver = config::meta_schema_value_version;
     if (ver > 0) {
         selectdb::put(txn, schema_key, schema, ver);

@@ -468,12 +468,6 @@ int main(int argc, char** argv) {
     doris::ExecEnv::init(exec_env, paths);
     doris::TabletSchemaCache::create_global_schema_cache();
 
-    // init s3 write buffer pool
-    doris::io::S3FileBufferPool* s3_buffer_pool = doris::io::S3FileBufferPool::GetInstance();
-    s3_buffer_pool->init(doris::config::s3_write_buffer_whole_size,
-                         doris::config::s3_write_buffer_size,
-                         exec_env->buffered_reader_prefetch_thread_pool());
-
     // init and open storage engine
     doris::EngineOptions options;
     options.store_paths = paths;
@@ -513,35 +507,36 @@ int main(int argc, char** argv) {
             doris::BackendService::create_service(exec_env, doris::config::be_port, &be_server));
     status = be_server->start();
     if (!status.ok()) {
-        LOG(ERROR) << "Doris Be server did not start correctly, exiting";
-        doris::shutdown_logging();
-        exit(1);
+        LOG(FATAL) << fmt::format(
+                "Doris be server did not start correctly, maybe be_port {} is conflect, "
+                "aborting...",
+                doris::config::be_port);
     }
 
     // 2. bprc service
     doris::BRpcService brpc_service(exec_env);
     status = brpc_service.start(doris::config::brpc_port, doris::config::brpc_num_threads);
     if (!status.ok()) {
-        LOG(ERROR) << "BRPC service did not start correctly, exiting";
-        doris::shutdown_logging();
-        exit(1);
+        LOG(FATAL) << fmt::format(
+                "Doris brpc service server did not start correctly, maybe brpc_port {} is "
+                "conflect, aborting...",
+                doris::config::brpc_port);
     }
 
     // 3. http service
     doris::HttpService http_service(exec_env, doris::config::webserver_port,
                                     doris::config::webserver_num_workers);
 
-    // construct s3 file buffer pool to reduce the cost of lazy loading
-    doris::io::S3FileBufferPool::GetInstance();
 #ifdef CLOUD_MODE
     status = http_service.cloud_start();
 #else
     status = http_service.start();
 #endif
     if (!status.ok()) {
-        LOG(ERROR) << "Doris Be http service did not start correctly, exiting";
-        doris::shutdown_logging();
-        exit(1);
+        LOG(FATAL) << fmt::format(
+                "Doris http service server did not start correctly, maybe webserver_port {} is "
+                "conflect, aborting...",
+                doris::config::webserver_port);
     }
 
     // 4. heart beat server
@@ -552,16 +547,14 @@ int main(int argc, char** argv) {
             doris::config::heartbeat_service_thread_count, master_info);
 
     if (!heartbeat_status.ok()) {
-        LOG(ERROR) << "Heartbeat services did not start correctly, exiting";
-        doris::shutdown_logging();
-        exit(1);
+        LOG(FATAL) << fmt::format("Heartbeat services did not start correctly, {}, exiting",
+                                  heartbeat_status.to_string());
     }
 
     status = heartbeat_thrift_server->start();
     if (!status.ok()) {
-        LOG(ERROR) << "Doris BE HeartBeat Service did not start correctly, exiting: " << status;
-        doris::shutdown_logging();
-        exit(1);
+        LOG(FATAL) << fmt::format("Heartbeat server did not start correctly, {}, exiting",
+                                  status.to_string());
     }
 
     auto end = std::chrono::steady_clock::now();

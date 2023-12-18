@@ -288,6 +288,8 @@ message PTabletKeyLookupRequest {
     optional bytes output_expr = 5;
     // return binary mysql row format if true
     optional bool is_binary_row = 6;
+    // version to read
+    optional int64 version = 7;
 }
 
 message PTabletKeyLookupResponse {
@@ -499,6 +501,8 @@ enum PFilterType {
     MINMAX_FILTER = 2;
     IN_FILTER = 3;
     IN_OR_BLOOM_FILTER = 4;
+    MIN_FILTER = 5;
+    MAX_FILTER = 6;
 };
 
 message PMergeFilterRequest {

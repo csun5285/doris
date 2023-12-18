@@ -22,7 +22,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
-#include <shared_mutex>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,16 +30,21 @@
 #include "common/status.h"
 #include "olap/options.h"
 #include "util/threadpool.h"
-#include "vec/common/hash_table/phmap_fwd_decl.h"
+
+namespace Aws::Utils::Threading {
+class PooledThreadExecutor;
+} // namespace Aws::Utils::Threading
 
 namespace doris {
 namespace vectorized {
 class VDataStreamMgr;
 class ScannerScheduler;
-using ZoneList = std::unordered_map<std::string, cctz::time_zone>;
 } // namespace vectorized
 namespace pipeline {
 class TaskScheduler;
+}
+namespace taskgroup {
+class TaskGroupManager;
 }
 class BfdParser;
 class BrokerMgr;
@@ -112,6 +117,7 @@ public:
     pipeline::TaskScheduler* pipeline_task_group_scheduler() {
         return _pipeline_task_group_scheduler;
     }
+    taskgroup::TaskGroupManager* task_group_manager() { return _task_group_manager; }
 
     // using template to simplify client cache management
     template <typename T>
@@ -136,6 +142,9 @@ public:
     }
     ThreadPool* s3_downloader_download_thread_pool() {
         return _s3_downloader_download_thread_pool.get();
+    }
+    std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> s3_pool_executor() {
+        return _s3_pooled_executor;
     }
     ThreadPool* send_report_thread_pool() { return _send_report_thread_pool.get(); }
     ThreadPool* join_node_thread_pool() { return _join_node_thread_pool.get(); }
@@ -187,7 +196,7 @@ public:
     HeartbeatFlags* heartbeat_flags() { return _heartbeat_flags; }
     doris::vectorized::ScannerScheduler* scanner_scheduler() { return _scanner_scheduler; }
     FileMetaCache* file_meta_cache() { return _file_meta_cache; }
-    vectorized::ZoneList& global_zone_cache() { return *_global_zone_cache; }
+
     std::shared_mutex& zone_cache_rw_lock() { return _zone_cache_rw_lock; }
     WalManager* wal_mgr() { return _wal_manager.get(); }
 
@@ -243,6 +252,8 @@ private:
     std::unique_ptr<ThreadPool> _s3_file_writer_upload_thread_pool;
     // Threadpool used to do s3 get operation for s3 downloader
     std::unique_ptr<ThreadPool> _s3_downloader_download_thread_pool;
+    // Threadpool for S3 client's operation
+    std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> _s3_pooled_executor;
     std::unique_ptr<ThreadPool> _sync_load_for_tablets_thread_pool;
     // Threadpool used to write data to file cache async
     std::unique_ptr<ThreadPool> _async_write_file_cache_thread_pool;
@@ -257,6 +268,7 @@ private:
     FragmentMgr* _fragment_mgr = nullptr;
     pipeline::TaskScheduler* _pipeline_task_scheduler = nullptr;
     pipeline::TaskScheduler* _pipeline_task_group_scheduler = nullptr;
+    taskgroup::TaskGroupManager* _task_group_manager = nullptr;
 
     ResultCache* _result_cache = nullptr;
     TMasterInfo* _master_info = nullptr;
@@ -281,7 +293,6 @@ private:
     // To save meta info of external file, such as parquet footer.
     FileMetaCache* _file_meta_cache = nullptr;
 
-    std::unique_ptr<vectorized::ZoneList> _global_zone_cache;
     std::shared_mutex _zone_cache_rw_lock;
     GroupCommitMgr* _group_commit_mgr = nullptr;
     std::shared_ptr<WalManager> _wal_manager;

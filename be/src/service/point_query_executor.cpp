@@ -49,7 +49,7 @@
 namespace doris {
 
 Reusable::~Reusable() {}
-constexpr static int s_preallocted_blocks_num = 64;
+constexpr static int s_preallocted_blocks_num = 32;
 Status Reusable::init(const TDescriptorTable& t_desc_tbl, const std::vector<TExpr>& output_exprs,
                       size_t block_size) {
     SCOPED_MEM_COUNT(&_mem_size);
@@ -69,8 +69,11 @@ Status Reusable::init(const TDescriptorTable& t_desc_tbl, const std::vector<TExp
     RETURN_IF_ERROR(vectorized::VExpr::prepare(_output_exprs_ctxs, _runtime_state.get(), row_desc));
     _create_timestamp = butil::gettimeofday_ms();
     _data_type_serdes = vectorized::create_data_type_serdes(tuple_desc()->slots());
+    _col_default_values.resize(tuple_desc()->slots().size());
     for (int i = 0; i < tuple_desc()->slots().size(); ++i) {
-        _col_uid_to_idx[tuple_desc()->slots()[i]->col_unique_id()] = i;
+        auto slot = tuple_desc()->slots()[i];
+        _col_uid_to_idx[slot->col_unique_id()] = i;
+        _col_default_values[i] = slot->col_default_value();
     }
     return Status::OK();
 }
@@ -197,6 +200,9 @@ Status PointQueryExecutor::init(const PTabletKeyLookupRequest* request,
         _tablet = StorageEngine::instance()->tablet_manager()->get_tablet(
                 request->tablet_id(), true /*include deleted*/);
 #endif
+    if (request->has_version() && request->version() >= 0) {
+        _version = request->version();
+    }
     if (_tablet == nullptr) {
         LOG(WARNING) << "failed to do tablet_fetch_data. tablet [" << request->tablet_id()
                      << "] is not exist";
@@ -235,12 +241,13 @@ std::string PointQueryExecutor::print_profile() {
             ", hit_cached_pages:{}, total_pages_read:{}, compressed_bytes_read:{}, "
             "io_latency:{}ns, "
             "uncompressed_bytes_read:{}, result_data_bytes:{}"
+            "version:{}, "
             "",
             total_us, init_us, init_key_us, lookup_key_us, lookup_data_us, output_data_us,
             _profile_metrics.hit_lookup_cache, _binary_row_format, _reusable->output_exprs().size(),
             _row_read_ctxs.size(), _profile_metrics.row_cache_hits, read_stats.cached_pages_num,
             read_stats.total_pages_num, read_stats.compressed_bytes_read, read_stats.io_ns,
-            read_stats.uncompressed_bytes_read, _profile_metrics.result_data_bytes);
+            read_stats.uncompressed_bytes_read, _profile_metrics.result_data_bytes, _version);
 }
 
 Status PointQueryExecutor::_init_keys(const PTabletKeyLookupRequest* request) {
@@ -272,6 +279,11 @@ Status PointQueryExecutor::_lookup_row_key() {
     // 2. lookup row location
     Status st;
     std::vector<RowsetSharedPtr> specified_rowsets;
+#ifdef CLOUD_MODE
+    if (_version >= 0) {
+        RETURN_IF_ERROR(_tablet->cloud_sync_rowsets(_version));
+    }
+#endif
     {
         std::shared_lock rlock(_tablet->get_header_lock());
         specified_rowsets = _tablet->get_rowset_by_ids(nullptr);
@@ -291,7 +303,7 @@ Status PointQueryExecutor::_lookup_row_key() {
         }
         // Get rowlocation and rowset, ctx._rowset_ptr will acquire wrap this ptr
         auto rowset_ptr = std::make_unique<RowsetSharedPtr>();
-        st = (_tablet->lookup_row_key(_row_read_ctxs[i]._primary_key, true, specified_rowsets,
+        st = (_tablet->lookup_row_key(_row_read_ctxs[i]._primary_key, false, specified_rowsets,
                                       &location, INT32_MAX /*rethink?*/, segment_caches,
                                       rowset_ptr.get()));
         if (st.is<ErrorCode::KEY_NOT_FOUND>()) {
@@ -317,7 +329,7 @@ Status PointQueryExecutor::_lookup_row_data() {
                     _reusable->get_data_type_serdes(),
                     _row_read_ctxs[i]._cached_row_data.data().data,
                     _row_read_ctxs[i]._cached_row_data.data().size, _reusable->get_col_uid_to_idx(),
-                    *_result_block);
+                    *_result_block, _reusable->get_col_default_values());
             continue;
         }
         if (!_row_read_ctxs[i]._row_location.has_value()) {
@@ -332,7 +344,8 @@ Status PointQueryExecutor::_lookup_row_data() {
         // serilize value to block, currently only jsonb row formt
         vectorized::JsonbSerializeUtil::jsonb_to_block(
                 _reusable->get_data_type_serdes(), value.data(), value.size(),
-                _reusable->get_col_uid_to_idx(), *_result_block);
+                _reusable->get_col_uid_to_idx(), *_result_block,
+                _reusable->get_col_default_values());
     }
     return Status::OK();
 }
@@ -340,6 +353,7 @@ Status PointQueryExecutor::_lookup_row_data() {
 template <typename MysqlWriter>
 Status _serialize_block(MysqlWriter& mysql_writer, vectorized::Block& block,
                         PTabletKeyLookupResponse* response) {
+    block.clear_names();
     RETURN_IF_ERROR(mysql_writer.append_block(block));
     assert(mysql_writer.results().size() == 1);
     uint8_t* buf = nullptr;

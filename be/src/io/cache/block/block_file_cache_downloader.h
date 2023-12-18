@@ -23,7 +23,7 @@ struct S3FileMeta {
     Path path;
     size_t file_size {0};
     io::FileSystemSPtr file_system;
-    int64_t expiration_time {0};
+    uint64_t expiration_time {0};
     bool is_cold_data {false};
     std::function<void(Status)> download_callback;
 };
@@ -61,8 +61,8 @@ public:
 
     void polling_download_task();
 
-    virtual void check_download_task(const std::vector<int64_t>& tablets,
-                                     std::map<int64_t, bool>* done) = 0;
+    void check_download_task(const std::vector<int64_t>& tablets,
+                                     std::map<int64_t, bool>* done);
 
 protected:
     std::mutex _mtx;
@@ -90,9 +90,6 @@ public:
     ~FileCacheSegmentS3Downloader() override = default;
 
     void download_segments(DownloadTask& task) override;
-
-    void check_download_task(const std::vector<int64_t>& tablets,
-                             std::map<int64_t, bool>* done) override;
 
 private:
     std::mutex _mtx;

@@ -519,7 +519,7 @@ vectorized::AggregateFunctionPtr TabletColumn::get_aggregate_function(std::strin
     if (function) {
         return function;
     }
-    if (type->get_type_as_primitive_type() != PrimitiveType::TYPE_AGG_STATE) {
+    if (type->get_type_as_type_descriptor().type != PrimitiveType::TYPE_AGG_STATE) {
         LOG(WARNING) << "get column aggregate function failed, aggregation_name=" << origin_name
                      << ", column_type=" << type->get_name();
         return nullptr;
@@ -773,6 +773,9 @@ void TabletSchema::build_current_tablet_schema(int64_t index_id, int32_t version
     _indexes.clear();
     _field_name_to_index.clear();
     _field_id_to_index.clear();
+    _delete_sign_idx = -1;
+    _sequence_col_idx = -1;
+    _version_col_idx = -1;
 
     for (auto& column : index->columns) {
         if (column->is_key()) {
@@ -810,12 +813,12 @@ void TabletSchema::build_current_tablet_schema(int64_t index_id, int32_t version
     }
 }
 
-void TabletSchema::merge_dropped_columns(TabletSchemaSPtr src_schema) {
+void TabletSchema::merge_dropped_columns(const TabletSchema& src_schema) {
     // If they are the same tablet schema object, then just return
-    if (this == src_schema.get()) {
+    if (this == &src_schema) {
         return;
     }
-    for (const auto& src_col : src_schema->columns()) {
+    for (const auto& src_col : src_schema.columns()) {
         if (_field_id_to_index.find(src_col.unique_id()) == _field_id_to_index.end()) {
             CHECK(!src_col.is_key()) << src_col.name() << " is key column, should not be dropped.";
             ColumnPB src_col_pb;

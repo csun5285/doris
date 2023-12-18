@@ -131,8 +131,8 @@ int decrypt_instance_info(InstanceInfoPB& instance, const std::string& instance_
         instance.mutable_iam_user()->CopyFrom(iam_user);
     } else {
         code = cast_as<ErrCategory::READ>(err);
-        msg = "failed to get arn_info_key";
-        LOG(WARNING) << msg << " err=" << err;
+        msg = fmt::format("failed to get arn_info_key, err={}", err);
+        LOG(WARNING) << msg;
         return -1;
     }
 
@@ -2446,8 +2446,8 @@ void MetaServiceImpl::begin_copy(google::protobuf::RpcController* controller,
             continue;
         } else if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) { // error
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get copy file";
-            LOG(WARNING) << msg << " err=" << err;
+            msg = fmt::format("failed to get copy file, err={}", err);
+            LOG(WARNING) << msg;
             return;
         }
         // 2. check if reach any limit
@@ -2649,7 +2649,7 @@ void MetaServiceImpl::get_copy_job(google::protobuf::RpcController* controller,
         return;
     } else if (err != TxnErrorCode::TXN_OK) { // error
         code = cast_as<ErrCategory::READ>(err);
-        msg = "failed to get copy job";
+        msg = fmt::format("failed to get copy job, err={}", err);
         LOG(WARNING) << msg << " err=" << err;
         return;
     }
@@ -2703,7 +2703,7 @@ void MetaServiceImpl::get_copy_files(google::protobuf::RpcController* controller
         TxnErrorCode err = txn->get(key0, key1, &it);
         if (err != TxnErrorCode::TXN_OK) {
             code = cast_as<ErrCategory::READ>(err);
-            msg = "failed to get copy jobs";
+            msg = fmt::format("failed to get copy jobs, err={}", err);
             LOG(WARNING) << msg << " err=" << err;
             return;
         }
@@ -2769,7 +2769,7 @@ void MetaServiceImpl::filter_copy_files(google::protobuf::RpcController* control
         if (err == TxnErrorCode::TXN_OK) { // found key
             continue;
         } else if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) { // error
-            msg = "failed to get copy file";
+            msg = fmt::format("failed to get copy file, err={}", err);
             LOG(WARNING) << msg << " err=" << err;
             return;
         } else {

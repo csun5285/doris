@@ -82,7 +82,8 @@ public:
         int64_t request_io = 0;
         int64_t merged_io = 0;
         int64_t request_bytes = 0;
-        int64_t read_bytes = 0;
+        int64_t merged_bytes = 0;
+        int64_t apply_bytes = 0;
     };
 
     struct RangeCachedData {
@@ -132,8 +133,9 @@ public:
     static constexpr size_t READ_SLICE_SIZE = 8 * 1024 * 1024;      // 8MB
     static constexpr size_t BOX_SIZE = 1 * 1024 * 1024;             // 1MB
     static constexpr size_t SMALL_IO = 2 * 1024 * 1024;             // 2MB
+    static constexpr size_t HDFS_MIN_IO_SIZE = 4 * 1024;            // 4KB
+    static constexpr size_t OSS_MIN_IO_SIZE = 512 * 1024;           // 512KB
     static constexpr size_t NUM_BOX = TOTAL_BUFFER_SIZE / BOX_SIZE; // 128
-    static constexpr size_t MIN_READ_SIZE = 4096;                   // 4KB
 
     MergeRangeFileReader(RuntimeProfile* profile, io::FileReaderSPtr reader,
                          const std::vector<PrefetchRange>& random_access_ranges)
@@ -143,6 +145,14 @@ public:
         _range_cached_data.resize(random_access_ranges.size());
         _size = _reader->size();
         _remaining = TOTAL_BUFFER_SIZE;
+        _is_oss = typeid_cast<io::S3FileReader*>(_reader.get()) != nullptr;
+        _max_amplified_ratio = config::max_amplified_read_ratio;
+        // Equivalent min size of each IO that can reach the maximum storage speed limit:
+        // 512KB for oss, 4KB for hdfs
+        _equivalent_io_size = _is_oss ? OSS_MIN_IO_SIZE : HDFS_MIN_IO_SIZE;
+        for (const PrefetchRange& range : _random_access_ranges) {
+            _statistics.apply_bytes += range.end_offset - range.start_offset;
+        }
         if (_profile != nullptr) {
             const char* random_profile = "MergedSmallIO";
             ADD_TIMER(_profile, random_profile);
@@ -152,7 +162,9 @@ public:
             _merged_io = ADD_CHILD_COUNTER(_profile, "MergedIO", TUnit::UNIT, random_profile);
             _request_bytes =
                     ADD_CHILD_COUNTER(_profile, "RequestBytes", TUnit::BYTES, random_profile);
-            _read_bytes = ADD_CHILD_COUNTER(_profile, "MergedBytes", TUnit::BYTES, random_profile);
+            _merged_bytes =
+                    ADD_CHILD_COUNTER(_profile, "MergedBytes", TUnit::BYTES, random_profile);
+            _apply_bytes = ADD_CHILD_COUNTER(_profile, "ApplyBytes", TUnit::BYTES, random_profile);
         }
     }
 
@@ -172,7 +184,7 @@ public:
             _closed = true;
             // the underlying buffer is closed in its own destructor
             // return _reader->close();
-            // Fixme(AlexYue): Temporiraly comment the profile update logic
+            // fIXME(AlexYue): Temporiraly comment the profile update logic
             // if (_profile != nullptr) {
             //     COUNTER_UPDATE(_copy_time, _statistics.copy_time);
             //     COUNTER_UPDATE(_read_time, _statistics.read_time);
@@ -184,10 +196,10 @@ public:
             // _profile = nullptr;
             LOG_INFO(
                     "The merge range reader's profile, path {}, copy time {}, read time {}, "
-                    "request io {}, merged io {}, request bytes {}, merged bytes {}",
+                    "request io {}, merged io {}, request bytes {}, merged bytes {}, apply_bytes {}",
                     _reader->path().string(), _statistics.copy_time, _statistics.read_time,
                     _statistics.request_io, _statistics.merged_io, _statistics.request_bytes,
-                    _statistics.read_bytes);
+                    _statistics.merged_bytes, _statistics.apply_bytes);
         }
         return Status::OK();
     }
@@ -222,7 +234,8 @@ private:
     RuntimeProfile::Counter* _request_io;
     RuntimeProfile::Counter* _merged_io;
     RuntimeProfile::Counter* _request_bytes;
-    RuntimeProfile::Counter* _read_bytes;
+    RuntimeProfile::Counter* _merged_bytes;
+    RuntimeProfile::Counter* _apply_bytes;
 
     int _search_read_range(size_t start_offset, size_t end_offset);
     void _clean_cached_data(RangeCachedData& cached_data);
@@ -245,6 +258,9 @@ private:
     int16 _last_box_ref = -1;
     uint32 _last_box_usage = 0;
     std::vector<int16> _box_ref;
+    bool _is_oss;
+    double _max_amplified_ratio;
+    size_t _equivalent_io_size;
 
     Statistics _statistics;
 };

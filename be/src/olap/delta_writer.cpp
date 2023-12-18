@@ -240,7 +240,7 @@ Status DeltaWriter::init() {
             }
             _rowset_ids.clear();
         } else {
-            _rowset_ids = _tablet->all_rs_id(_cur_max_version);
+            RETURN_IF_ERROR(_tablet->all_rs_id(_cur_max_version, &_rowset_ids));
         }
     }
 
@@ -287,7 +287,7 @@ Status DeltaWriter::init() {
     context.tablet_id = _tablet->table_id();
     context.is_direct_write = true;
     context.tablet = _tablet;
-    context.disable_file_cache = _req.disable_file_cache;
+    context.write_file_cache = !_req.disable_file_cache;
     context.newest_write_timestamp = UnixSeconds();
     context.write_type = DataWriteType::TYPE_DIRECT;
     context.mow_context = std::make_shared<MowContext>(_cur_max_version, _req.txn_id, _rowset_ids,
@@ -534,9 +534,9 @@ Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
         return Status::InternalError("rows number written by delta writer dosen't match");
     }
     // use rowset meta manager to save meta
-    _cur_rowset = _rowset_writer->build();
-    if (_cur_rowset == nullptr) {
-        return Status::InternalError("fail to build rowset");
+    st = _rowset_writer->build(_cur_rowset);
+    if (!st.ok()) {
+        return st;
     }
 
     _delta_written_success = true;
@@ -601,10 +601,7 @@ Status DeltaWriter::build_rowset() {
         return Status::InternalError("rows number written by delta writer dosen't match");
     }
     // use rowset meta manager to save meta
-    _cur_rowset = _rowset_writer->build();
-    if (_cur_rowset == nullptr) {
-        return Status::Error<MEM_ALLOC_FAILED>("fail to build rowset");
-    }
+    RETURN_NOT_OK_STATUS_WITH_WARN(_rowset_writer->build(_cur_rowset), "fail to build rowset");
     return Status::OK();
 }
 
@@ -650,7 +647,6 @@ Status DeltaWriter::wait_calc_delete_bitmap() {
     }
     std::lock_guard<std::mutex> l(_lock);
     RETURN_IF_ERROR(_calc_delete_bitmap_token->wait());
-    RETURN_IF_ERROR(_calc_delete_bitmap_token->get_delete_bitmap(_delete_bitmap));
     LOG(INFO) << "Got result of calc delete bitmap task from executor, tablet_id: "
               << _tablet->tablet_id() << ", txn_id: " << _req.txn_id;
     return Status::OK();
@@ -660,8 +656,7 @@ Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
                                const bool write_single_replica) {
     if (_tablet->enable_unique_key_merge_on_write() &&
         config::enable_merge_on_write_correctness_check && _cur_rowset->num_rows() != 0 &&
-        !(_tablet->tablet_state() == TABLET_NOTREADY &&
-          SchemaChangeHandler::tablet_in_converting(_tablet->tablet_id()))) {
+        _tablet->tablet_state() != TABLET_NOTREADY) {
         auto st = _tablet->check_delete_bitmap_correctness(
                 _delete_bitmap, _cur_rowset->end_version() - 1, _req.txn_id, _rowset_ids);
         if (!st.ok()) {
@@ -687,7 +682,7 @@ Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
     if (_tablet->enable_unique_key_merge_on_write()) {
         _storage_engine->txn_manager()->set_txn_related_delete_bitmap(
                 _req.partition_id, _req.txn_id, _tablet->tablet_id(), _tablet->schema_hash(),
-                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids);
+                _tablet->tablet_uid(), true, _delete_bitmap, _rowset_ids, _partial_update_info);
     }
 
     _delta_written_success = true;
@@ -774,20 +769,8 @@ int64_t DeltaWriter::mem_consumption(MemType mem) {
 }
 
 int64_t DeltaWriter::active_memtable_mem_consumption() {
-    if (_flush_token == nullptr) {
-        // This method may be called before this writer is initialized.
-        // So _flush_token may be null.
-        return 0;
-    }
-    int64_t mem_usage = 0;
-    {
-        std::lock_guard<SpinLock> l(_mem_table_tracker_lock);
-        if (_mem_table_insert_trackers.size() > 0) {
-            mem_usage += (*_mem_table_insert_trackers.rbegin())->consumption();
-            mem_usage += (*_mem_table_flush_trackers.rbegin())->consumption();
-        }
-    }
-    return mem_usage;
+    std::lock_guard<std::mutex> l(_lock);
+    return _mem_table != nullptr ? _mem_table->memory_usage() : 0;
 }
 
 int64_t DeltaWriter::partition_id() const {

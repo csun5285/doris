@@ -77,7 +77,6 @@ suite("test_bitmap_index_with_readd_cluster") {
         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE TableName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
         return jobStateResult[0][9]
     }
-    sql "DROP TABLE IF EXISTS ${tbName1}"
     sql """
             CREATE TABLE IF NOT EXISTS ${tbName1} (
                 k1 TINYINT,
@@ -150,4 +149,5 @@ suite("test_bitmap_index_with_readd_cluster") {
             }
         }
     }
+    sql "DROP TABLE IF EXISTS ${tbName1}"
 }

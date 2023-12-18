@@ -42,6 +42,8 @@
 namespace doris {
 namespace io {
 bvar::Adder<uint64_t> cache_skipped_bytes_read("cached_remote_reader", "cache_skipped_read_bytes");
+bvar::Adder<uint64_t> s3_read_counter("cached_remote_reader_s3_read");
+
 
 CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader,
                                                const FileReaderOptions* opts)
@@ -78,15 +80,19 @@ Status CachedRemoteFileReader::close() {
     return _remote_file_reader->close();
 }
 
-std::pair<size_t, size_t> CachedRemoteFileReader::_align_size(size_t offset,
-                                                              size_t read_size) const {
+std::pair<size_t, size_t> CachedRemoteFileReader::s_align_size(size_t offset,
+                                                              size_t read_size, size_t length) {
     size_t left = offset;
     size_t right = offset + read_size - 1;
     size_t align_left, align_right;
     align_left = (left / FILE_CACHE_MAX_FILE_BLOCK_SIZE) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     align_right = (right / FILE_CACHE_MAX_FILE_BLOCK_SIZE + 1) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
-    align_right = align_right < size() ? align_right : size();
+    align_right = align_right < length ? align_right : length;
     size_t align_size = align_right - align_left;
+    if (config::enable_file_cache_block_prefetch && align_size < FILE_CACHE_MAX_FILE_BLOCK_SIZE && align_left != 0) {
+        align_size += FILE_CACHE_MAX_FILE_BLOCK_SIZE;
+        align_left -= FILE_CACHE_MAX_FILE_BLOCK_SIZE;
+    }
     return std::make_pair(align_left, align_size);
 }
 
@@ -103,11 +109,11 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         if (io_ctx->file_cache_stats && _metrics_hook) {
             stats.bytes_read += bytes_req;
             _update_state(stats, io_ctx->file_cache_stats);
-            _metrics_hook(io_ctx->file_cache_stats);
+            _metrics_hook(stats);
         }
         return Status::OK();
     }
-    auto [align_left, align_size] = _align_size(offset, bytes_req);
+    auto [align_left, align_size] = s_align_size(offset, bytes_req, size());
     CacheContext cache_context(io_ctx);
     FileBlocksHolder holder = _cache->get_or_set(_cache_key, align_left, align_size, cache_context);
     std::vector<FileBlockSPtr> empty_segments;
@@ -143,6 +149,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         std::unique_ptr<char[]> buffer(new char[size]);
         {
             SCOPED_RAW_TIMER(&stats.remote_read_timer);
+            s3_read_counter << 1;
             RETURN_IF_ERROR(
                     _remote_file_reader->read_at(empty_start, Slice(buffer.get(), size), &size));
         }
@@ -195,8 +202,8 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
         }
         FileBlock::State segment_state = segment->state();
         int64_t wait_time = 0;
-        static int64_t MAX_WAIT_TIME = 10;
-        TEST_SYNC_POINT_CALLBACK("CachedRemoteFileReader::max_wait_time", &MAX_WAIT_TIME);
+        static int64_t max_wait_time = 10;
+        TEST_SYNC_POINT_CALLBACK("CachedRemoteFileReader::max_wait_time", &max_wait_time);
         if (segment_state != FileBlock::State::DOWNLOADED) {
             do {
                 {
@@ -207,9 +214,9 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                 if (segment_state != FileBlock::State::DOWNLOADING) {
                     break;
                 }
-            } while (++wait_time < MAX_WAIT_TIME);
+            } while (++wait_time < max_wait_time);
         }
-        if (wait_time == MAX_WAIT_TIME) [[unlikely]] {
+        if (wait_time == max_wait_time) [[unlikely]] {
             LOG_WARNING("Waiting too long for the download to complete");
         }
         {
@@ -229,6 +236,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                 size_t bytes_read {0};
                 stats.hit_cache = false;
                 SCOPED_RAW_TIMER(&stats.remote_read_timer);
+                s3_read_counter << 1;
                 RETURN_IF_ERROR(_remote_file_reader->read_at(
                         current_offset, Slice(result.data + (current_offset - offset), read_size),
                         &bytes_read));
@@ -242,7 +250,7 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
     if (io_ctx && io_ctx->file_cache_stats && _metrics_hook) {
         _update_state(stats, io_ctx->file_cache_stats);
-        _metrics_hook(io_ctx->file_cache_stats);
+        _metrics_hook(stats);
     }
     return Status::OK();
 }

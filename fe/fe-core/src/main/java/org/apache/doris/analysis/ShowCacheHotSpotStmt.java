@@ -18,6 +18,8 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.Database;
+import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.common.AnalysisException;
@@ -39,18 +41,20 @@ import java.util.List;
 public class ShowCacheHotSpotStmt extends ShowStmt {
     public static final ShowResultSetMetaData[] RESULT_SET_META_DATAS = {
         ShowResultSetMetaData.builder()
+            .addColumn(new Column("cluster_id", ScalarType.createType(PrimitiveType.BIGINT)))
             .addColumn(new Column("cluster_name", ScalarType.createVarchar(128)))
-            .addColumn(new Column("file_cache_size", ScalarType.createType(PrimitiveType.BIGINT)))
+            .addColumn(new Column("table_id", ScalarType.createType(PrimitiveType.BIGINT)))
             .addColumn(new Column("table_name", ScalarType.createVarchar(128)))
             .build(),
         ShowResultSetMetaData.builder()
+            .addColumn(new Column("table_id", ScalarType.createType(PrimitiveType.BIGINT)))
             .addColumn(new Column("table_name", ScalarType.createVarchar(128)))
-            .addColumn(new Column("last_access_time", ScalarType.createDatetimeType()))
+            .addColumn(new Column("partition_id", ScalarType.createType(PrimitiveType.BIGINT)))
             .addColumn(new Column("partition_name", ScalarType.createVarchar(65535)))
             .build(),
         ShowResultSetMetaData.builder()
+            .addColumn(new Column("partition_id", ScalarType.createType(PrimitiveType.BIGINT)))
             .addColumn(new Column("partition_name", ScalarType.createVarchar(65535)))
-            .addColumn(new Column("last_access_time", ScalarType.createDatetimeType()))
             .build()
     };
     private int metaDataPos;
@@ -79,11 +83,29 @@ public class ShowCacheHotSpotStmt extends ShowStmt {
         }
         String[] parts = tablePath.split("/");
         if (parts.length > 3) {
-            throw new AnalysisException("Path must in format '/cluster/table/'");
+            throw new AnalysisException("Path must in format '/cluster/db.table/'");
+        }
+        if (parts.length >= 2) {
+            if (!Env.getCurrentSystemInfo().containClusterName(parts[1])) {
+                throw new AnalysisException("The cluster " + parts[1] + " doesn't exist");
+            }
+            if (parts.length == 3) {
+                String[] dbAndTable = parts[2].split("\\.");
+                if (dbAndTable.length != 2) {
+                    throw new AnalysisException("The tableName must in format 'dbName.tableName'");
+                }
+                Database db = Env.getCurrentInternalCatalog().getDbNullable("default_cluster:" + dbAndTable[0]);
+                if (db == null) {
+                    throw new AnalysisException("The db " + dbAndTable[0] + " doesn't exist");
+                }
+                if (!db.isTableExist(dbAndTable[1])) {
+                    throw new AnalysisException("The table " + dbAndTable[1] + " doesn't exist");
+                }
+            }
         }
         whereExprValues = Arrays.asList(parts);
         for (int i = 1; i < whereExprValues.size(); i++) {
-            whereExpr.add(String.format(" and t.%s = '%s' ", whereExprVariables.get(i - 1), whereExprValues.get(i)));
+            whereExpr.add(String.format("%s = '%s' ", whereExprVariables.get(i - 1), whereExprValues.get(i)));
         }
         metaDataPos = whereExpr.size();
     }
@@ -95,73 +117,43 @@ public class ShowCacheHotSpotStmt extends ShowStmt {
 
     private String generateQueryString() {
         StringBuilder query = null;
-        StringBuilder orderClause = null;
-        StringBuilder groupByClause = null;
         if (metaDataPos == 0) {
-            query = new StringBuilder("SELECT cluster_name,\n"
-                + "       sum(file_cache_size) AS total_file_cache_size,\n"
-                + "       max_by(table_name, query_per_day) as top_hot_table\n"
-                + "FROM\n"
-                + "  (SELECT *,\n"
-                + "          row_number() OVER (PARTITION BY cluster_id,\n"
-                + "                                          backend_id,\n"
-                + "                                          table_id,\n"
-                + "                                          index_id,\n"
-                + "                                          partition_id\n"
-                + "                             ORDER BY insert_day DESC) AS rn\n"
-                + "   FROM " +  TABLE_NAME.toString() + " ) t \n"
-                + "WHERE rn = 1 group by t.cluster_name");
-        }
-        if (metaDataPos == 1) {
-            query = new StringBuilder("SELECT table_name,\n"
-                + "       last_access_time,\n"
-                + "       max_by(partition_name, query_per_day) as top_hot_partition\n"
-                + "FROM\n"
-                + "  (SELECT *,\n"
-                + "          row_number() OVER (PARTITION BY cluster_id,\n"
-                + "                                          backend_id,\n"
-                + "                                          table_id,\n"
-                + "                                          index_id,\n"
-                + "                                          partition_id\n"
-                + "                             ORDER BY insert_day DESC) AS rn\n"
-                + "   FROM " +  TABLE_NAME.toString() + " ) t \n"
-                + "WHERE rn = 1 ");
-            groupByClause = new StringBuilder("group by t.table_name, t.last_access_time order by t.table_name");
-        }
-        if (metaDataPos == 2) {
-            query = new StringBuilder("SELECT partition_name,\n"
-                + "       last_access_time\n"
-                + "FROM\n"
-                + "  (SELECT partition_name,\n"
-                + "          sum(query_per_day) AS qpd,\n"
-                + "          sum(query_per_week) AS qpw,\n"
-                + "          max(last_access_time) AS last_access_time\n"
-                + "   FROM\n"
-                + "     (SELECT *,\n"
-                + "             row_number() OVER (PARTITION BY cluster_id,\n"
-                + "                                             backend_id,\n"
-                + "                                             table_id,\n"
-                + "                                             index_id,\n"
-                + "                                             partition_id\n"
-                + "                                ORDER BY insert_day DESC) AS rn\n"
-                + "   FROM " +  TABLE_NAME.toString() + " ) t \n"
-                + "   WHERE rn = 1");
-
-            orderClause = new StringBuilder("   GROUP BY partition_name) d\n"
-                + "WHERE TRUE\n"
-                + "ORDER BY qpd DESC,\n"
-                + "         qpw DESC");
+            StringBuilder q1 = new StringBuilder("with t1 as (select cluster_id, "
+                            + "cluster_name, table_id, table_name, insert_day, "
+                            + "sum(query_per_day) as query_per_day_total, "
+                            + "sum(query_per_week) as query_per_week_total "
+                            + "FROM " + TABLE_NAME.toString()
+                            + " group by cluster_id, cluster_name, table_id, table_name, insert_day) ");
+            StringBuilder q2 = new StringBuilder("select cluster_id, cluster_name, "
+                            + "table_id, table_name as hot_table_name from (select row_number() "
+                            + "over (partition by cluster_id order by insert_day desc, "
+                            + "query_per_day_total desc, query_per_week_total desc) as dr2, "
+                            + "* from t1) t2 where dr2 = 1;");
+            query = q1.append(q2);
+        } else if (metaDataPos == 1) {
+            StringBuilder q1 = new StringBuilder("with t1 as (select cluster_id, "
+                            + "cluster_name, table_id, table_name, partition_id, "
+                            + "partition_name, insert_day, sum(query_per_day) as query_per_day_total, "
+                            + "sum(query_per_week) as query_per_week_total "
+                            + "FROM " + TABLE_NAME.toString()
+                            + " where " +  whereExpr.get(0)
+                            + "group by cluster_id, cluster_name, table_id, "
+                            + "table_name, partition_id, partition_name, insert_day)");
+            StringBuilder q2 = new StringBuilder("select table_id, table_name, "
+                            + "partition_id, partition_name as hot_partition_name from (select row_number() "
+                            + "over (partition by cluster_id, table_id order by insert_day desc, "
+                            + "query_per_day_total desc, query_per_week_total desc) as dr2, "
+                            + "* from t1) t2 where dr2 = 1;");
+            query = q1.append(q2);
+        } else if (metaDataPos == 2) {
+            query = new StringBuilder("select partition_id, partition_name "
+            + "FROM " + TABLE_NAME.toString()
+            + " where " +  whereExpr.get(0)
+            + " and " + whereExpr.get(1)
+            + "group by cluster_id, cluster_name, table_id, "
+            + "table_name, partition_id, partition_name;");
         }
         Preconditions.checkState(query != null);
-        for (String s : whereExpr) {
-            query.append(s);
-        }
-        if (orderClause != null) {
-            query.append(orderClause);
-        }
-        if (groupByClause != null) {
-            query.append(groupByClause);
-        }
         return query.toString();
     }
 

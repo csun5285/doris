@@ -69,9 +69,9 @@ suite("table_rebalance") {
         for (row : result) {
             println row
         }
-
         sql """ drop table IF EXISTS table100 """
         sql """ drop table IF EXISTS table_p2 """
+        sql """ use @regression_cluster_name0"""
         sql """
             CREATE TABLE table100 (
             class INT,
@@ -123,7 +123,7 @@ suite("table_rebalance") {
 
         add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                       "regression_cluster_name0", "regression_cluster_id0");
-        sleep(150000)
+        sleep(240000)
 
         sql """ use @regression_cluster_name0 """
 
@@ -212,4 +212,6 @@ suite("table_rebalance") {
         sql """ admin set frontend config("enable_table_balance"="true"); """
         sql """ admin set frontend config("preheating_enabled"="true"); """
     }
+    sql """ drop table IF EXISTS table100 """
+        sql """ drop table IF EXISTS table_p2 """
 }

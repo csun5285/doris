@@ -4,13 +4,11 @@ namespace doris {
 
 class InjectionPointAction : public HttpHandler {
 public:
-    InjectionPointAction() = default;
+    InjectionPointAction();
 
     ~InjectionPointAction() override = default;
 
     void handle(HttpRequest* req) override;
-
-    static void register_suites();
 };
 
 } // namespace doris

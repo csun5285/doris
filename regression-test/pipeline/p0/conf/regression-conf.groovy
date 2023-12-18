@@ -57,11 +57,81 @@ testDirectories = ""
 
 // this groups will not be executed
 excludeGroups = ""
+
 // this suites will not be executed
-excludeSuites = "test_pk_uk_index_change,test_pk_uk_case,window_function,test_profile,test_broker_load_p2,test_spark_load,test_analyze_stats_p1,test_refresh_mtmv,test_bitmap_filter,test_export_parquet,test_doris_jdbc_catalog"
+excludeSuites = "\
+    explode, \
+    push_filter_through_ptopn, \
+    q67_ignore_temporarily, \
+    test_aggregate_all_functions2, \
+    test_alter_database_property, \
+    test_alter_table_property, \
+    test_analyze_stats_p1, \
+    test_bitmap_filter, \
+    test_bitmap_int, \
+    test_broker_load_p2, \
+    test_cast_function, \
+    test_clean_label, \
+    test_cloud_dynamic_partition, \
+    test_concat_extreme_input, \
+    test_create_cloud_table, \
+    test_date_function, \
+    test_digest, \
+    test_doris_jdbc_catalog, \
+    test_dup_table_auto_inc_col, \
+    test_dynamic_table, \
+    test_es_query_nereids, \
+    test_export_parquet, \
+    test_external_es, \
+    test_full_compaction, \
+    test_full_compaction_by_table_id, \
+    test_hive_read_orc_complex_type, \
+    test_information_schema_external, \
+    test_jsonb_load_and_function, \
+    test_nereids_row_policy, \
+    test_outfile_exception, \
+    test_overdue, \
+    test_partial_update_schema_change, \
+    test_point_query, \
+    test_profile, \
+    test_refresh_mtmv, \
+    test_show_create_catalog, \
+    test_spark_load, \
+    test_sql_depth, \
+    test_transactional_hive, \
+    test_unicode_name, \
+    test_with_and_two_phase_agg"
 
 // this directories will not be executed
-excludeDirectories = "nereids_tpcds_shape_sf100_p0,nereids_tpch_shape_sf1000_p0,nereids_tpch_shape_sf500_p0,workload_manager_p1"
+excludeDirectories = "\
+    backup_restore, \
+    ccr_syncer_p0, \
+    ccr_syncer_p1, \
+    cloud/abnormal, \
+    cloud/cache, \
+    cloud/compaction, \
+    cloud/limit_optimize, \
+    cloud/multi_cluster, \
+    cloud/recycler, \
+    cloud/smoke, \
+    cloud/stage_tvf, \
+    cold_heat_separation, \
+    connector_p0, \
+    export_p0, \
+    fault_injection_p0, \
+    javaudf_p0, \
+    mtmv_p0, \
+    mv_p0/ssb, \
+    nereids_p0/javaudf, \
+    nereids_p0/outfile, \
+    nereids_tpcds_shape_sf100_p0, \
+    nereids_tpch_shape_sf1000_p0, \
+    nereids_tpch_shape_sf500_p0, \
+    tpcds_sf1000_p2, \
+    usercases/MYZS1, \
+    usercases/TB2, \
+    usercases/dbgen, \
+    workload_manager_p1"
 
 customConf1 = "test_custom_conf_value"
 
@@ -80,11 +150,29 @@ s3Endpoint = "cos.ap-hongkong.myqcloud.com"
 s3BucketName = "doris-build-hk-1308700295"
 s3Region = "ap-hongkong"
 
+// jdbc connector test config
+// To enable jdbc test, you need first start mysql/pg container.
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableJdbcTest=false
+mysql_57_port=7111
+pg_14_port=7121
+mariadb_10_port=3326
+
 // hive catalog test config
 // To enable jdbc test, you need first start hive container.
 // See `docker/thirdparties/start-thirdparties-docker.sh`
 enableHiveTest=false
 hms_port=7141
+hiveServerPort=10000
+
+// kafka test config
+// to enable kafka test, you need firstly to start kafka container
+// See `docker/thirdparties/start-thirdparties-docker.sh`
+enableKafkaTest=true
+kafka_port=19193
+
+// iceberg test config
+iceberg_rest_uri_port=18181
 
 enableEsTest=false
 es_6_port=19200

@@ -2,6 +2,7 @@
 #pragma once
 
 // clang-format off
+#include <optional>
 #define FDB_API_VERSION 710
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_options.g.h"
@@ -130,6 +131,23 @@ public:
      * @return TXN_OK for success otherwise error
      */
     virtual TxnErrorCode abort() = 0;
+
+    struct BatchGetOptions {
+        BatchGetOptions() : snapshot(false) {};
+        bool snapshot;
+        // TODO: Avoid consuming too many resources in one batch
+        // int limit = 1000;
+    };
+    /**
+     * @brief batch get keys
+     *
+     * @param res
+     * @param keys
+     * @param opts
+     * @return If all keys are successfully retrieved, return TXN_OK. Otherwise, return the code of the first occurring error
+     */
+    virtual TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
+                          const BatchGetOptions& opts = BatchGetOptions()) = 0;
 };
 
 class RangeGetIterator {
@@ -414,6 +432,9 @@ public:
     TxnErrorCode get_committed_version(int64_t* version) override;
 
     TxnErrorCode abort() override;
+
+    TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
+                  const BatchGetOptions& opts = BatchGetOptions()) override;
 
 private:
     std::shared_ptr<Database> db_ {nullptr};

@@ -37,7 +37,7 @@ std::shared_ptr<AtomicStatistics> FileCacheProfile::report(int64_t table_id) {
     return stats;
 }
 
-void FileCacheProfile::update(int64_t table_id, FileCacheStatistics* stats) {
+void FileCacheProfile::update(int64_t table_id, const ReadStatistics& stats) {
     std::shared_ptr<AtomicStatistics> count;
     std::shared_ptr<FileCacheMetric> table_metric;
     {
@@ -52,8 +52,11 @@ void FileCacheProfile::update(int64_t table_id, FileCacheStatistics* stats) {
     if (table_metric) [[unlikely]] {
         table_metric->register_entity();
     }
-    count->num_io_bytes_read_from_cache += stats->bytes_read_from_local;
-    count->num_io_bytes_read_from_remote += stats->bytes_read_from_remote;
+    if (stats.hit_cache) {
+        count->num_io_bytes_read_from_cache += stats.bytes_read;
+    } else {
+        count->num_io_bytes_read_from_remote += stats.bytes_read;
+    }
 }
 
 void FileCacheMetric::register_entity() {

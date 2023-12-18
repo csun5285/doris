@@ -121,6 +121,10 @@ public:
 private:
     int32_t _unique_id;
     std::string _col_name;
+    // the field _type will change from TPrimitiveType
+    // to string by 'EnumToString(TPrimitiveType, tcolumn.column_type.type, data_type);' (reference: TabletMeta::init_column_from_tcolumn)
+    // to FieldType by 'TabletColumn::get_field_type_by_string' (reference: TabletColumn::init_from_pb).
+    // And the _type in columnPB is string and it changed from FieldType by 'get_string_by_field_type' (reference: TabletColumn::to_schema_pb).
     FieldType _type;
     bool _is_key = false;
     FieldAggregationMethod _aggregation;
@@ -296,7 +300,7 @@ public:
     // 7. insert value  4, 5
     // Then the read schema should be ColA, ColB, ColB' because the delete predicate need ColB to remove related data.
     // Because they have same name, so that the dropped column should not be added to the map, only with unique id.
-    void merge_dropped_columns(std::shared_ptr<TabletSchema> src_schema);
+    void merge_dropped_columns(const TabletSchema& src_schema);
 
     bool is_dropped_column(const TabletColumn& col) const;
 

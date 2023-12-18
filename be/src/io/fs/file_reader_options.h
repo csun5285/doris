@@ -21,6 +21,7 @@
 
 #include <string>
 #include <functional>
+#include "io/io_common.h"
 
 namespace doris {
 namespace io {
@@ -67,8 +68,7 @@ public:
     }
 };
 
-struct FileCacheStatistics;
-using MetricsHook = std::function<void(FileCacheStatistics*)>;
+using MetricsHook = std::function<void(const ReadStatistics&)>;
 
 class FileReaderOptions {
 public:

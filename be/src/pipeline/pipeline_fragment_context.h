@@ -48,10 +48,6 @@ class RuntimeFilterMergeControllerEntity;
 class TDataSink;
 class TPipelineFragmentParams;
 
-namespace taskgroup {
-class TaskGroup;
-} // namespace taskgroup
-
 namespace pipeline {
 
 class PipelineFragmentContext : public std::enable_shared_from_this<PipelineFragmentContext> {
@@ -122,7 +118,9 @@ public:
         return _exec_status;
     }
 
-    taskgroup::TaskGroup* get_task_group() const { return _query_ctx->get_task_group(); }
+    taskgroup::TaskGroupPipelineTaskEntity* get_task_group_entity() const {
+        return _task_group_entity;
+    }
 
     bool is_group_commit() { return _group_commit; }
 
@@ -179,6 +177,8 @@ private:
 
     std::shared_ptr<QueryContext> _query_ctx;
 
+    taskgroup::TaskGroupPipelineTaskEntity* _task_group_entity = nullptr;
+
     std::shared_ptr<RuntimeFilterMergeControllerEntity> _merge_controller_handler;
 
     MonotonicStopWatch _fragment_watcher;
@@ -204,6 +204,8 @@ private:
     // This executor will not report status to FE on being cancelled.
     bool _is_report_on_cancel;
     bool _group_commit;
+
+    DescriptorTbl* _desc_tbl;
 };
 } // namespace pipeline
 } // namespace doris

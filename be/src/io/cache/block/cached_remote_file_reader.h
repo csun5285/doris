@@ -55,12 +55,13 @@ public:
 
     FileReader* get_remote_reader() { return _remote_file_reader.get(); }
 
+    static std::pair<size_t, size_t> s_align_size(size_t offset, size_t read_size, size_t length);
+
 protected:
     [[nodiscard]] Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
                         const IOContext* io_ctx) override;
 
 private:
-    std::pair<size_t, size_t> _align_size(size_t offset, size_t size) const;
 
     FileReaderSPtr _remote_file_reader;
     Key _cache_key;
@@ -68,15 +69,6 @@ private:
     MetricsHook _metrics_hook;
     bool _is_doris_table;
 
-    struct ReadStatistics {
-        bool hit_cache = true;
-        bool skip_cache = false;
-        int64_t bytes_read = 0;
-        int64_t bytes_write_into_file_cache = 0;
-        int64_t remote_read_timer = 0;
-        int64_t local_read_timer = 0;
-        int64_t local_write_timer = 0;
-    };
     void _update_state(const ReadStatistics& stats, FileCacheStatistics* state) const;
 
     Status _read_from_cache(size_t offset, Slice result, size_t* bytes_read,

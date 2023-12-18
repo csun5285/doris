@@ -15,8 +15,11 @@ enum class [[nodiscard]] TxnErrorCode : int {
     TXN_RETRYABLE_NOT_COMMITTED = -4,
     TXN_TIMEOUT = -5,
     TXN_INVALID_ARGUMENT = -6,
+    TXN_KEY_TOO_LARGE = -7,
+    TXN_VALUE_TOO_LARGE = -8,
+    TXN_BYTES_TOO_LARGE = -9,
     // other unidentified errors.
-    TXN_UNIDENTIFIED_ERROR = -7,
+    TXN_UNIDENTIFIED_ERROR = -10,
 };
 
 inline const char* format_as(TxnErrorCode code) {
@@ -30,6 +33,9 @@ inline const char* format_as(TxnErrorCode code) {
     case TxnErrorCode::TXN_RETRYABLE_NOT_COMMITTED: return "RetryableNotCommitted";
     case TxnErrorCode::TXN_TIMEOUT: return "Timeout";
     case TxnErrorCode::TXN_INVALID_ARGUMENT: return "InvalidArgument";
+    case TxnErrorCode::TXN_KEY_TOO_LARGE: return "Key length exceeds limit";
+    case TxnErrorCode::TXN_VALUE_TOO_LARGE: return "Value length exceeds limit";
+    case TxnErrorCode::TXN_BYTES_TOO_LARGE: return "Transaction exceeds byte limit";
     case TxnErrorCode::TXN_UNIDENTIFIED_ERROR: return "Unknown";
     }
     return "NotImplemented";

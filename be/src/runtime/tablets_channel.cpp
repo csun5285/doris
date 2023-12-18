@@ -666,9 +666,9 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
         RETURN_IF_ERROR(_init_writes_by_parition_ids(partition_ids));
     }
 
-    auto get_send_data = [&]() { return vectorized::Block(request.block()); };
+    vectorized::Block send_data;
+    RETURN_IF_ERROR(send_data.deserialize(request.block()));
 
-    auto send_data = get_send_data();
     CHECK(send_data.rows() == request.tablet_ids_size())
             << "block rows: " << send_data.rows()
             << ", tablet_ids_size: " << request.tablet_ids_size();

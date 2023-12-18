@@ -86,7 +86,6 @@ public:
     Block() = default;
     Block(std::initializer_list<ColumnWithTypeAndName> il);
     Block(const ColumnsWithTypeAndName& data_);
-    Block(const PBlock& pblock);
     Block(const std::vector<SlotDescriptor*>& slots, size_t block_size,
           bool ignore_trivial_slot = false);
 
@@ -160,6 +159,12 @@ public:
                     reinterpret_cast<vectorized::ColumnNullable*>(raw_res_ptr.get());
             col_ptr_nullable->get_null_map_column().insert_many_defaults(select_size);
             raw_res_ptr = col_ptr_nullable->get_nested_column_ptr();
+        } else if (!raw_res_ptr->is_nullable() && input_col_ptr->is_nullable()) {
+            LOG(WARNING) << "nullable mismatch for raw_res_column: "
+                         << this->get_by_position(block_cid).dump_structure()
+                         << " input_column: " << input_col_ptr->dump_structure()
+                         << " block_cid: " << block_cid << " select_size: " << select_size;
+            return Status::RuntimeError("copy_column_data_to_block nullable mismatch");
         }
 
         return input_col_ptr->filter_by_selector(sel_rowid_idx, select_size, raw_res_ptr);
@@ -319,6 +324,8 @@ public:
                      size_t* compressed_bytes, segment_v2::CompressionTypePB compression_type,
                      bool allow_transfer_large_data = false) const;
 
+    Status deserialize(const PBlock& pblock);
+
     std::unique_ptr<Block> create_same_struct_block(size_t size) const;
 
     /** Compares (*this) n-th row and rhs m-th row.
@@ -404,6 +411,10 @@ public:
     }
 
     void clear_same_bit() { row_same_bit.clear(); }
+
+    // return string contains use_count() of each columns
+    // for debug purpose.
+    std::string print_use_count();
 
 private:
     void erase_impl(size_t position);

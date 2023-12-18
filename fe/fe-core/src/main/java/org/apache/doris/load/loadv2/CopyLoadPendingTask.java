@@ -143,6 +143,7 @@ public class CopyLoadPendingTask extends BrokerLoadPendingTask {
             }
             if (fileStatusList.stream().flatMap(List::stream).map(l -> l.second).count() == 0) {
                 retryTime = 0;
+                copyJob.retryTimes = 0;
                 copyJob.setAbortedCopy(true);
                 throw new UserException(String.format(NO_FILES_ERROR_MSG + ", matched %d files, "
                         + "filtered %d files because files may be loading or loaded"

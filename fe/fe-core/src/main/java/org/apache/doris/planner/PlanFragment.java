@@ -197,7 +197,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
      */
     public void setParallelExecNumIfExists() {
         if (ConnectContext.get() != null) {
-            parallelExecNum = ConnectContext.get().getSessionVariable().getParallelExecInstanceNum();
+            String cluster = ConnectContext.get().getCurrentCloudCluster();
+            parallelExecNum = ConnectContext.get().getSessionVariable().getParallelExecInstanceNum(cluster);
         }
     }
 
@@ -319,6 +320,8 @@ public class PlanFragment extends TreeNode<PlanFragment> {
         }
         str.append("\n");
         str.append("  PARTITION: " + dataPartition.getExplainString(explainLevel) + "\n");
+        str.append("  HAS_COLO_PLAN_NODE: " + hasColocatePlanNode + "\n");
+        str.append("\n");
         if (sink != null) {
             str.append(sink.getExplainString("  ", explainLevel) + "\n");
         }

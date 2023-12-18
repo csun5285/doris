@@ -82,8 +82,10 @@ public:
     Status safe_glob(const std::string& path, std::vector<FileInfo>* res);
 
 protected:
-    Status create_file_impl(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts) override;
-    Status open_file_impl(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts) override;
+    Status create_file_impl(const Path& file, FileWriterPtr* writer,
+                            const FileWriterOptions* opts) override;
+    Status open_file_impl(const Path& file, FileReaderSPtr* reader,
+                          const FileReaderOptions* opts) override;
     Status create_directory_impl(const Path& dir, bool failed_if_exists = false) override;
     Status delete_file_impl(const Path& file) override;
     Status delete_directory_impl(const Path& dir) override;

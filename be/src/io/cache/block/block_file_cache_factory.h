@@ -50,7 +50,7 @@ public:
     BlockFileCachePtr get_by_path(const std::string& cache_base_path);
     std::vector<BlockFileCache::QueryFileCacheContextHolderPtr> get_query_context_holders(
             const TUniqueId& query_id);
-    void clear_file_caches();
+    void clear_file_caches(bool sync);
     FileCacheFactory() = default;
     FileCacheFactory& operator=(const FileCacheFactory&) = delete;
     FileCacheFactory(const FileCacheFactory&) = delete;

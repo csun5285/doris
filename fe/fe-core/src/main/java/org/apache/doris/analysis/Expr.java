@@ -28,6 +28,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.Function.NullableMode;
 import org.apache.doris.catalog.FunctionSet;
+import org.apache.doris.catalog.MapType;
 import org.apache.doris.catalog.MaterializedIndexMeta;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarFunction;
@@ -37,7 +38,6 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.TreeNode;
 import org.apache.doris.common.io.Writable;
-import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rewrite.mvrewrite.MVExprEquivalent;
 import org.apache.doris.statistics.ExprStats;
 import org.apache.doris.thrift.TExpr;
@@ -2179,10 +2179,10 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     }
 
 
-    protected void recursiveResetChildrenResult(boolean inView) throws AnalysisException {
+    protected void recursiveResetChildrenResult(boolean forPushDownPredicatesToView) throws AnalysisException {
         for (int i = 0; i < children.size(); i++) {
             final Expr child = children.get(i);
-            final Expr newChild = child.getResultValue(inView);
+            final Expr newChild = child.getResultValue(forPushDownPredicatesToView);
             if (newChild != child) {
                 setChild(i, newChild);
             }
@@ -2340,22 +2340,12 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
         }
         if (fn.functionName().equalsIgnoreCase(Operator.MULTIPLY.getName())
                 && fn.getReturnType().isDecimalV3()) {
-            if (ConnectContext.get() != null
-                    && ConnectContext.get().getSessionVariable().checkOverflowForDecimal()) {
-                return true;
-            } else {
-                return hasNullableChild(children);
-            }
+            return hasNullableChild(children);
         }
         if ((fn.functionName().equalsIgnoreCase(Operator.ADD.getName())
                 || fn.functionName().equalsIgnoreCase(Operator.SUBTRACT.getName()))
                 && fn.getReturnType().isDecimalV3()) {
-            if (ConnectContext.get() != null
-                    && ConnectContext.get().getSessionVariable().checkOverflowForDecimal()) {
-                return true;
-            } else {
-                return hasNullableChild(children);
-            }
+            return hasNullableChild(children);
         }
         if (fn.functionName().equalsIgnoreCase("group_concat")) {
             int size = Math.min(fn.getNumArgs(), children.size());
@@ -2492,6 +2482,8 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
             return getActualScalarType(originType);
         } else if (originType.getPrimitiveType() == PrimitiveType.ARRAY) {
             return getActualArrayType((ArrayType) originType);
+        } else if (originType.getPrimitiveType().isMapType()) {
+            return getActualMapType((MapType) originType);
         } else {
             return originType;
         }
@@ -2522,6 +2514,10 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
 
     protected Type[] getActualArgTypes(Type[] originType) {
         return Arrays.stream(originType).map(this::getActualType).toArray(Type[]::new);
+    }
+
+    private MapType getActualMapType(MapType originMapType) {
+        return new MapType(originMapType.getKeyType(), originMapType.getValueType());
     }
 
     private ArrayType getActualArrayType(ArrayType originArrayType) {

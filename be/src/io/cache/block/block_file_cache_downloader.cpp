@@ -7,6 +7,7 @@
 #include <fmt/core.h>
 #include <gen_cpp/internal_service.pb.h>
 
+#include <memory>
 #include <mutex>
 #include <variant>
 
@@ -23,6 +24,7 @@
 #include "io/fs/s3_file_system.h"
 #include "olap/rowset/beta_rowset.h"
 #include "olap/tablet.h"
+#include "util/bvar_helper.h"
 #include "util/s3_util.h"
 
 namespace doris::io {
@@ -36,9 +38,9 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
     request.WithBucket(bucket).WithKey(key_name);
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObject(request), "io::_download_part",
-                                                std::cref(request).get(), &s);
-    s3_bvar::s3_get_total << 1;
+    SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
+                                                "io::_download_part", std::cref(request).get(), &s);
 
     TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);
     if (!outcome.IsSuccess()) {
@@ -142,10 +144,15 @@ struct DownloadTaskExecutor {
                 };
                 builder.set_write_to_use_buffer(std::move(write_to_use_buffer));
             }
-            auto buffer = builder.build();
-            buffer->submit();
+            std::shared_ptr<io::FileBuffer> buffer;
+            if (auto st = builder.build(&buffer); !st.ok()) {
+                LOG_WARNING("build download buffer failed due to {}", st);
+                sync_task(std::move(st));
+                continue;
+            }
+            buffer->submit(std::move(buffer));
         }
-        auto timeout_duration = config::s3_writer_buffer_allocation_timeout;
+        auto timeout_duration = config::s3_task_check_interval;
         timespec current_time;
         // We don't need high accuracy here, so we use time(nullptr)
         // since it's the fastest way to get current time(second)
@@ -155,8 +162,9 @@ struct DownloadTaskExecutor {
         // bthread::countdown_event::timed_wait() should use absolute time
         while (0 != _countdown_event.timed_wait(current_time)) {
             current_time.tv_sec += timeout_duration;
-            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds", bucket, key_name,
-                        offset, size, timeout_duration);
+            auto cur_finish_num = _finished_num.load();
+            LOG_WARNING("Downloading {} {} {} {} already takes {} seconds, progress {}/{}", bucket,
+                        key_name, offset, size, timeout_duration, cur_finish_num, task_num);
         }
     }
 
@@ -221,7 +229,7 @@ void FileCacheSegmentDownloader::submit_download_task(DownloadTask task) {
 }
 
 void FileCacheSegmentDownloader::polling_download_task() {
-    const int64_t hot_interval = 2 * 60 * 60; // 2 hours
+    static int64_t hot_interval = 2 * 60 * 60; // 2 hours
     while (true) {
         DownloadTask task;
         {
@@ -244,8 +252,8 @@ void FileCacheSegmentDownloader::polling_download_task() {
     }
 }
 
-void FileCacheSegmentS3Downloader::check_download_task(const std::vector<int64_t>& tablets,
-                                                       std::map<int64_t, bool>* done) {
+void FileCacheSegmentDownloader::check_download_task(const std::vector<int64_t>& tablets,
+                                                     std::map<int64_t, bool>* done) {
     std::lock_guard lock(_inflight_mtx);
     for (int64_t tablet_id : tablets) {
         done->insert({tablet_id, _inflight_tablets.count(tablet_id) == 0});
@@ -254,11 +262,12 @@ void FileCacheSegmentS3Downloader::check_download_task(const std::vector<int64_t
 
 void FileCacheSegmentS3Downloader::download_file_cache_segment(
         std::vector<FileCacheSegmentMeta>& metas) {
-    std::for_each(metas.cbegin(), metas.cend(), [&](const FileCacheSegmentMeta& meta) {
+    std::ranges::for_each(metas, [&](const FileCacheSegmentMeta& meta) {
         TabletSharedPtr tablet;
         auto download_callback = [&, tablet_id = meta.tablet_id()](Status) {
             std::lock_guard lock(_inflight_mtx);
             auto it = _inflight_tablets.find(tablet_id);
+            TEST_SYNC_POINT_CALLBACK("FileCacheSegmentS3Downloader::download_file_cache_segment");
             if (it == _inflight_tablets.end()) {
                 LOG(WARNING) << "inflight ref cnt not exist, tablet id " << tablet_id;
             } else {
@@ -305,12 +314,13 @@ void FileCacheSegmentS3Downloader::download_file_cache_segment(
                 auto h = c->get_or_set(k, off, size, ctx);
                 return std::make_unique<FileBlocksHolder>(std::move(h));
             };
-            download_file(client,
-                          s3_file_system->s3_conf().prefix + '/' +
-                                  BetaRowset::remote_segment_path(
-                                          meta.tablet_id(), meta.rowset_id(), meta.segment_id()),
-                          meta.offset(), meta.size(), s3_file_system->s3_conf().bucket,
-                          std::move(alloc_holder), download_callback);
+            std::string key_name = s3_file_system->s3_conf().prefix + '/' +
+                                   BetaRowset::remote_segment_path(
+                                           meta.tablet_id(), meta.rowset_id(), meta.segment_id());
+            TEST_SYNC_POINT_CALLBACK("BlockFileCache::mock_key", &key_name);
+            download_file(client, key_name, meta.offset(), meta.size(),
+                          s3_file_system->s3_conf().bucket, std::move(alloc_holder),
+                          download_callback);
         }
     });
 }
@@ -344,8 +354,9 @@ void FileCacheSegmentS3Downloader::download_s3_file(S3FileMeta& meta) {
         auto h = c->get_or_set(k, off, size, ctx);
         return std::make_unique<FileBlocksHolder>(std::move(h));
     };
-    download_file(s3_file_system->get_client(),
-                  s3_file_system->s3_conf().prefix + '/' + meta.path.native(), 0, file_size,
+    std::string key_name = s3_file_system->s3_conf().prefix + '/' + meta.path.native();
+    TEST_SYNC_POINT_CALLBACK("BlockFileCache::remove_prefix", &key_name);
+    download_file(s3_file_system->get_client(), key_name, 0, file_size,
                   s3_file_system->s3_conf().bucket, std::move(alloc_holder),
                   std::move(meta.download_callback));
 }

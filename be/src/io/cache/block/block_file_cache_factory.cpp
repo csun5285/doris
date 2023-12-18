@@ -98,9 +98,16 @@ FileCacheFactory::get_query_context_holders(const TUniqueId& query_id) {
     return holders;
 }
 
-void FileCacheFactory::clear_file_caches() {
+void FileCacheFactory::clear_file_caches(bool sync) {
     for (const auto& cache : _caches) {
-        cache->clear_file_cache_async();
+        if (sync) {
+            Status st = cache->clear_file_cache_directly();
+            if (st.ok()) {
+                LOG_WARNING("").error(st);
+            }
+        } else {
+            cache->clear_file_cache_async();
+        }
     }
 }
 

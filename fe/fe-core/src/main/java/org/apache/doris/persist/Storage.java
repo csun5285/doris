@@ -213,6 +213,7 @@ public class Storage {
         setFields(properties);
 
         writePropertiesToFile(properties, VERSION_FILE);
+        LOG.info("write cluster id {} and token {} to VERSION file", clusterID, token);
     }
 
     public void writeFrontendRoleAndNodeName(FrontendNodeType role, String nameNode) throws IOException {
@@ -222,6 +223,8 @@ public class Storage {
         properties.setProperty(NODE_NAME, nameNode);
 
         writePropertiesToFile(properties, ROLE_FILE);
+
+        LOG.info("write frontend role {} and node name {} to ROLE file", role.name(), nameNode);
     }
 
     private void writePropertiesToFile(Properties properties, String fileName) throws IOException {

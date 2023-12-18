@@ -29,8 +29,8 @@ import org.apache.doris.common.FeConstants;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.qe.StmtExecutor;
+import org.apache.doris.statistics.ResultRow;
 import org.apache.doris.statistics.util.InternalQuery;
-import org.apache.doris.statistics.util.InternalQueryResult;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TUniqueId;
 import org.apache.logging.log4j.LogManager;
@@ -86,30 +86,17 @@ public class CacheHotspotManagerUtils {
             "SELECT COUNT(*) FROM " + TABLE_NAME
             + " WHERE '${cluster_id}' = 'cluster'";
 
-    private static final String GET_CLUSTER_FILE_CACHE_SIZE_TEMPLATE = "SELECT sum(file_cache_size)\n"
-            + "FROM\n"
-            + "  (SELECT *,\n"
-            + "          row_number() OVER (PARTITION BY cluster_id,\n"
-            + "                                          backend_id,\n"
-            + "                                          table_id,\n"
-            + "                                          index_id,\n"
-            + "                                          partition_id\n"
-            + "                             ORDER BY insert_day DESC) AS rn\n"
-            + "   FROM " + TABLE_NAME + " t\n"
-            + "WHERE rn = 1 and t.cluster_id = '${cluster_id}'";
+    private static final String GET_CLUSTER_PARTITIONS_TEMPLATE = "WITH t as (SELECT\n"
+            + "table_name, table_id, partition_id,\n"
+            + "partition_name, index_id, insert_day, sum(query_per_day) as query_per_day_total,\n"
+            + "sum(query_per_week) as query_per_week_total\n"
+            + "FROM " + TABLE_NAME + "\n"
+            + "where cluster_id = '${cluster_id}' \n"
+            + "group by cluster_id, cluster_name, table_id, table_name, partition_id,\n"
+            + "partition_name, index_id, insert_day order by insert_day desc,\n"
+            + "query_per_day_total desc, query_per_week_total desc)\n"
+            + "select distinct table_id, table_name, partition_id, index_id from t;";
 
-    private static final String GET_CLUSTER_PARTITIONS_TEMPLATE = "SELECT table_name, index_id, partition_id\n"
-            + "FROM\n"
-            + "  (SELECT *,\n"
-            + "          row_number() OVER (PARTITION BY cluster_id,\n"
-            + "                                          backend_id,\n"
-            + "                                          table_id,\n"
-            + "                                          index_id,\n"
-            + "                                          partition_id\n"
-            + "                             ORDER BY insert_day DESC) AS rn\n"
-            + "   FROM " + TABLE_NAME + " ) t\n"
-            + "WHERE rn = 1 and t.cluster_id = '${cluster_id}' \n"
-            + "order by t.query_per_day desc, t.query_per_week desc";
     private static String INTERNAL_TABLE_ID;
 
     public static boolean clusterContains(String clusterId) {
@@ -121,16 +108,16 @@ public class CacheHotspotManagerUtils {
         StringSubstitutor stringSubstitutor = new StringSubstitutor(params);
         String sql = stringSubstitutor.replace(CONTAINS_CLUSTER_TEMPLATE);
         InternalQuery query = new InternalQuery(FeConstants.INTERNAL_DB_NAME, sql);
-        InternalQueryResult result = null;
+        List<ResultRow> result = null;
         try {
             result = query.query();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return !(result == null || result.getResultRows().size() == 0);
+        return !(result == null || result.size() == 0);
     }
 
-    // table_name, index_name, partition_name
+    // table_id, table_name, index_name, partition_name
     public static List<List<String>> getClusterTopNPartitions(String clusterId) {
         if (clusterId == null) {
             String err = String.format("cluster doesn't exist, clusterId %s", clusterId);
@@ -142,19 +129,18 @@ public class CacheHotspotManagerUtils {
         StringSubstitutor stringSubstitutor = new StringSubstitutor(params);
         String sql = stringSubstitutor.replace(GET_CLUSTER_PARTITIONS_TEMPLATE);
         InternalQuery query = new InternalQuery(FeConstants.INTERNAL_DB_NAME, sql);
-        InternalQueryResult result = null;
+        List<ResultRow> result = null;
         try {
             result = query.query();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        if (result == null || result.getResultRows().size() == 0) {
+        if (result == null || result.size() == 0) {
             String err = String.format("cluster doesn't exist, clusterId %s", clusterId);
             LOG.warn(err);
             throw new RuntimeException(err);
         }
-        return result.getResultRows().stream().map(InternalQueryResult.ResultRow::getValues)
-                .collect(Collectors.toList());
+        return result.stream().map(ResultRow::getValues).collect(Collectors.toList());
     }
 
     public static void transformIntoCacheHotSpotTableValue(Map<String, String> params, List<String> values) {

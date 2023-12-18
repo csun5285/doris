@@ -69,8 +69,8 @@ Status sync_dir(const io::Path& dirname) {
 
 namespace io {
 
-LocalFileWriter::LocalFileWriter(Path path, int fd, FileSystemSPtr fs)
-        : FileWriter(std::move(path), fs), _fd(fd) {
+LocalFileWriter::LocalFileWriter(Path path, int fd, FileSystemSPtr fs, bool sync_data)
+        : FileWriter(std::move(path), fs), _fd(fd), _sync_data(sync_data) {
     _opened = true;
     DorisMetrics::instance()->local_file_open_writing->increment(1);
     DorisMetrics::instance()->local_file_writer_total->increment(1);
@@ -89,7 +89,7 @@ LocalFileWriter::~LocalFileWriter() {
 }
 
 Status LocalFileWriter::close() {
-    return _close(true);
+    return _close(_sync_data);
 }
 
 void LocalFileWriter::_abort() {
@@ -110,7 +110,6 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
         return Status::InternalError("append to closed file: ", _path.native());
     }
     _dirty = true;
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("local_file_writer::appendv", Status());
 
     // Convert the results into the iovec vector to request
     // and calculate the total bytes requested.

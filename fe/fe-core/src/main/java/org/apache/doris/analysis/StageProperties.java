@@ -18,7 +18,7 @@
 package org.apache.doris.analysis;
 
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.tablefunction.ExternalFileTableValuedFunction;
+import org.apache.doris.common.util.FileFormatConstants;
 
 import com.google.common.collect.ImmutableSet;
 import com.selectdb.cloud.proto.SelectdbCloud.ObjectStoreInfoPB;
@@ -214,9 +214,9 @@ public class StageProperties extends CopyProperties {
                 continue;
             }
             if (entry.getKey().equals(TYPE)) {
-                otherProperties.put(ExternalFileTableValuedFunction.FORMAT, entry.getValue());
+                otherProperties.put(FileFormatConstants.PROP_FORMAT, entry.getValue());
             } else if (entry.getKey().equals(COMPRESSION)) {
-                otherProperties.put(ExternalFileTableValuedFunction.COMPRESS, entry.getValue());
+                otherProperties.put(FileFormatConstants.PROP_COMPRESS, entry.getValue());
             } else {
                 otherProperties.put(removeFilePrefix(entry.getKey()), entry.getValue());
             }

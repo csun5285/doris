@@ -83,7 +83,7 @@ struct CacheContext {
 
     TUniqueId query_id;
     FileCacheType cache_type;
-    int64_t expiration_time {0};
+    uint64_t expiration_time {0};
     bool is_cold_data {false};
 };
 
@@ -129,10 +129,10 @@ public:
 
     static Key hash(const std::string& path);
 
-    std::string get_path_in_local_cache(const Key& key, int64_t expiration_time, size_t offset,
+    std::string get_path_in_local_cache(const Key& key, uint64_t expiration_time, size_t offset,
                                         FileCacheType type, bool is_tmp = false) const;
 
-    std::string get_path_in_local_cache(const Key& key, int64_t expiration_time) const;
+    std::string get_path_in_local_cache(const Key& key, uint64_t expiration_time) const;
 
     const std::string& get_base_path() const { return _cache_base_path; }
 
@@ -173,6 +173,8 @@ public:
             const Key& key) const;
 
     void clear_file_cache_async();
+    // use for test
+    Status clear_file_cache_directly();
 
     bool get_lazy_open_success() { return _lazy_open_done; }
 
@@ -263,6 +265,12 @@ protected:
                      std::lock_guard<doris::Mutex>& /* cache_lock */) const;
 
         int64_t get_hot_data_interval() const { return hot_data_interval; }
+
+        void clear(std::lock_guard<doris::Mutex>& cache_lock) {
+            queue.clear();
+            map.clear();
+            cache_size = 0;
+        }
 
         size_t max_size;
         size_t max_element_size;
@@ -392,8 +400,8 @@ private:
 
     CachedFiles _files;
     size_t _cur_cache_size = 0;
-    std::multimap<int64_t, Key> _time_to_key;
-    std::unordered_map<Key, int64_t, HashCachedFileKey> _key_to_time;
+    std::multimap<uint64_t, Key> _time_to_key;
+    std::unordered_map<Key, uint64_t, HashCachedFileKey> _key_to_time;
 
     // The three queues are level queue.
     // It means as level1/level2/level3 queue.
@@ -432,7 +440,7 @@ private:
     bool try_reserve_from_other_queue(FileCacheType cur_cache_type, size_t offset, int64_t cur_time,
                                       std::lock_guard<doris::Mutex>& cache_lock);
 
-    [[nodiscard]] Status load_cache_info_into_memory();
+    void load_cache_info_into_memory();
 
     bool try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
 

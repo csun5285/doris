@@ -150,6 +150,8 @@ CloudTabletMgr::~CloudTabletMgr() {
 }
 
 Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bool warmup_data) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("CloudTabletMgr::get_tablet_2", Status::OK(), tablet_id,
+                                      tablet);
     // LRU value type. `Value`'s lifetime MUST NOT be longer than `CloudTabletMgr`
     struct Value {
         // FIXME(plat1ko): The ownership of tablet seems to belong to 'TabletMap', while `Value`
@@ -316,6 +318,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     DCHECK(compaction_type == CompactionType::BASE_COMPACTION ||
            compaction_type == CompactionType::CUMULATIVE_COMPACTION);
     *max_score = 0;
+    int64_t max_score_tablet_id = 0;
     // clang-format off
     auto score = [compaction_type](Tablet* t) {
         return compaction_type == CompactionType::BASE_COMPACTION ? t->get_cloud_base_compaction_score()
@@ -348,7 +351,10 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         if (t == nullptr) continue;
 
         int64_t s = score(t.get());
-        *max_score = std::max(*max_score, s);
+        if (s > *max_score) {
+            max_score_tablet_id = t->tablet_id();
+            *max_score = s;
+        }
 
         if (filter_out(t.get())) { ++num_filtered; continue; }
         //if (disable(t.get())) { ++num_disabled; continue; }
@@ -363,7 +369,7 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     LOG_EVERY_N(INFO, 1000) << "get_topn_compaction_score, n=" << n << " type=" << compaction_type
                << " num_tablets=" << weak_tablets.size() << " num_skipped=" << num_skipped
                << " num_disabled=" << num_disabled << " num_filtered=" << num_filtered
-               << " max_score=" << *max_score
+               << " max_score=" << *max_score << " max_score_tablet=" << max_score_tablet_id
                << " tablets=[" << [&buf] { std::stringstream ss; for (auto& i : buf) ss << i.first->tablet_id() << ":" << i.second << ","; return ss.str(); }() << "]"
                ;
     // clang-format on
@@ -434,9 +440,7 @@ void CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets() {
             download_file_meta.file_size = rowset_meta->get_segment_file_size(seg_id);
             download_file_meta.file_system = rowset_meta->fs();
             download_file_meta.path = io::Path(download_rowset->segment_file_path(seg_id));
-            download_file_meta.expiration_time =
-                    tablet_meta->is_persistent() ? INT64_MAX
-                    : tablet_meta->ttl_seconds() == 0
+            download_file_meta.expiration_time = tablet_meta->ttl_seconds() == 0
                             ? 0
                             : rowset_meta->newest_write_timestamp() + tablet_meta->ttl_seconds();
             download_file_meta.download_callback = [wait](Status st) {

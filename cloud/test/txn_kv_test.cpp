@@ -482,4 +482,52 @@ TEST(TxnKvTest, KvErrorCodeFormat) {
     }
 }
 
+TEST(TxnKvTest, BatchGet) {
+    std::vector<std::string> keys;
+    std::vector<std::string> values;
+    constexpr int nums = 100;
+    for (int i = 0; i < nums; ++i) {
+        keys.push_back("BatchGet_" + std::to_string(i));
+    }
+    std::unique_ptr<Transaction> txn;
+    // put kv
+    {
+        auto ret = txn_kv->create_txn(&txn);
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+        for (const auto& k: keys) {
+            txn->put(k, k);
+            values.push_back(k);
+        }
+        ret = txn->commit();
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+    }
+    // batch get
+    {
+        auto ret = txn_kv->create_txn(&txn);
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+        std::vector<std::optional<std::string>> res;
+        ret = txn->batch_get(&res, keys);
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+        ASSERT_EQ(res.size(), values.size());
+        for (auto i = 0; i < res.size(); ++i) {
+            ASSERT_EQ(res[i].has_value(), true);
+            ASSERT_EQ(res[i].value(), values[i]);
+        }
+    }
+
+    // batch get with no-exists keys
+    {
+        auto ret = txn_kv->create_txn(&txn);
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+        std::vector<std::optional<std::string>> res;
+        std::vector<std::string> keys{"BatchGet_empty1", "BatchGet_empty2", "BatchGet_empty3"};
+        ret = txn->batch_get(&res, keys);
+        ASSERT_EQ(ret, TxnErrorCode::TXN_OK);
+        ASSERT_EQ(res.size(), keys.size());
+        for (const auto& r : res) {
+            ASSERT_EQ(r.has_value(), false);
+        }
+    }
+}
+
 // vim: et tw=100 ts=4 sw=4 cc=80:

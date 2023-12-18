@@ -87,9 +87,6 @@ suite("test_cloud_cluster") {
     sql "create database if not exists test_jdbc_url_db"
     sql "use test_jdbc_url_db"
     sql """
-        drop table if exists test_table
-    """
-    sql """
         CREATE TABLE test_table (
             class INT,
             id INT,
@@ -199,4 +196,7 @@ suite("test_cloud_cluster") {
     executeMySQLCommand(cmd1);
     String cmd2 = "mysql -uroot -h" + mysqlHost + " -P" + mysqlPort + " -D@regression_cluster_name0 " + " -e \" use test_jdbc_url_db; select * from test_table \"";
     executeMySQLCommand(cmd2);
+    sql """
+        drop table if exists test_table
+    """
 }

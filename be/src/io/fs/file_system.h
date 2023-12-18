@@ -37,23 +37,22 @@
 namespace doris {
 namespace io {
 class FileSystem;
-class FileReaderOptions;
-struct FileWriterOptions;
 
 #ifndef FILESYSTEM_M
-#define FILESYSTEM_M(stmt)                    \
-    do {                                      \
-        Status _s;                            \
-        if (bthread_self() == 0) {            \
-            _s = (stmt);                      \
-        } else {                              \
-            auto task = [&] { _s = (stmt); }; \
-            AsyncIO::run_task(task, _type);   \
-        }                                     \
-        if (!_s) {                            \
-            LOG(WARNING) << _s;               \
-        }                                     \
-        return _s;                            \
+#define FILESYSTEM_M(stmt)                                  \
+    do {                                                    \
+        Status _s;                                          \
+        if (bthread_self() == 0) {                          \
+            _s = (stmt);                                    \
+        } else {                                            \
+            auto task = [&] { _s = (stmt); };               \
+            AsyncIO::run_task(task, _type);                 \
+        }                                                   \
+        if (!_s) {                                          \
+            LOG(WARNING) << _s;                             \
+            _s = Status::Error<false>(_s.code(), _s.msg()); \
+        }                                                   \
+        return _s;                                          \
     } while (0);
 #endif
 
@@ -75,13 +74,11 @@ class FileSystem : public std::enable_shared_from_this<FileSystem> {
 public:
     // The following are public interface.
     // And derived classes should implement all xxx_impl methods.
-    [[nodiscard]] Status create_file(const Path& file, FileWriterPtr* writer,
-                       const FileWriterOptions* opts = nullptr);
+    [[nodiscard]] Status create_file(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts = nullptr);
     // FIXME(plat1ko): Will deprecate in future
     [[nodiscard]] Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
                      FileReaderSPtr* reader);
-    [[nodiscard]] Status open_file(const Path& file, FileReaderSPtr* reader,
-                     const FileReaderOptions* opts = nullptr);
+    [[nodiscard]] Status open_file(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts = nullptr);
     [[nodiscard]] Status create_directory(const Path& dir, bool failed_if_exists = false);
     Status delete_file(const Path& file);
     Status delete_directory(const Path& dir);

@@ -109,5 +109,5 @@ suite("test_rename_cluster") {
     sql """
          select * from table_p2;
     """
-
+    sql """ drop table IF EXISTS table_p2 """
 }

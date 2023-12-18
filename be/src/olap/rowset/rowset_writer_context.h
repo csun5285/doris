@@ -21,6 +21,7 @@
 
 #include "io/fs/file_system.h"
 #include "olap/olap_define.h"
+#include "olap/partial_update_info.h"
 #include "olap/tablet.h"
 #include "olap/tablet_schema.h"
 
@@ -106,7 +107,7 @@ struct RowsetWriterContext {
     bool is_persistent {false};
     // If it is true the content would also write into file cache
     // it would be only written into s3 if it's false
-    bool disable_file_cache = false;
+    bool write_file_cache = true;
 
     // segcompaction for this RowsetWriter, disable it for some transient writers
     bool enable_segcompaction = false;

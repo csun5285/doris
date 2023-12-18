@@ -754,10 +754,10 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
             }
             for (AgentTask task : tasks) {
                 LOG.debug("schema change task: {}, {}", task, task.getFailedTimes());
-                if (task.getFailedTimes() >= 3) {
+                if (task.getFailedTimes() > 0) {
                     task.setFinished(true);
                     AgentTaskQueue.removeTask(task.getBackendId(), TTaskType.ALTER, task.getSignature());
-                    LOG.warn("schema change task failed after try three times: " + task.getErrorMsg());
+                    LOG.warn("schema change task failed: " + task.getErrorMsg());
                     if (!failedAgentTasks.containsKey(task.getTabletId())) {
                         failedAgentTasks.put(task.getTabletId(), Lists.newArrayList(task));
                     } else {
@@ -1030,7 +1030,7 @@ public class SchemaChangeJobV2 extends AlterJobV2 {
         }
 
         this.watershedTxnId = replayedJob.watershedTxnId;
-        jobState = JobState.WAITING_TXN;
+        jobState = JobState.PENDING;
         LOG.info("replay pending schema change job: {}, table id: {}", jobId, tableId);
     }
 

@@ -18,7 +18,6 @@
 suite("test_hdfs_json_load", "p0,external,external_docker,external_docker_hive,hive") {
     // define a sql table
     def testTable = "test_hdfs_json_load"
-    String externalEnvIp = context.config.otherConfigs.get("externalEnvIp")
 
     def create_test_table1 = {testTablex ->
         // multi-line sql
@@ -99,6 +98,7 @@ suite("test_hdfs_json_load", "p0,external,external_docker,external_docker_hive,h
 
 
     String hdfs_port = context.config.otherConfigs.get("hdfs_port")
+    String externalEnvIp = context.config.otherConfigs.get("externalEnvIp")
     def fsPath = "hdfs://${externalEnvIp}:${hdfs_port}"
     // It's okay to use random `hdfsUser`, but can not be empty.
     def hdfsUser = "doris"

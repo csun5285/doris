@@ -331,31 +331,33 @@ public class ConnectProcessor {
             MetricRepo.USER_COUNTER_QUERY_ALL.getOrAdd(ctx.getQualifiedUser()).increase(1L);
             if (Config.isCloudMode() && ctx.cloudCluster != null) {
                 String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(ctx.cloudCluster);
-                MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
-                    LongCounterMetric counterQueryAll = new LongCounterMetric("query_total", MetricUnit.REQUESTS,
-                            "total query");
-                    counterQueryAll.addLabel(new MetricLabel("cluster_id", clusterId));
-                    counterQueryAll.addLabel(new MetricLabel("cluster_name", key));
-                    MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterQueryAll);
-                    return counterQueryAll;
-                }).increase(1L);
+                if (!Strings.isNullOrEmpty(clusterId)) {
+                    MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
+                        LongCounterMetric counterQueryAll = new LongCounterMetric("query_total", MetricUnit.REQUESTS,
+                                "total query");
+                        counterQueryAll.addLabel(new MetricLabel("cluster_id", clusterId));
+                        counterQueryAll.addLabel(new MetricLabel("cluster_name", key));
+                        MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterQueryAll);
+                        return counterQueryAll;
+                    }).increase(1L);
 
-                // registered metrics
-                MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.computeIfAbsent(ctx.cloudCluster, key -> {
-                    LongCounterMetric counterQueryErr = new LongCounterMetric("query_err", MetricUnit.REQUESTS,
-                            "total error query");
-                    counterQueryErr.addLabel(new MetricLabel("cluster_id", clusterId));
-                    counterQueryErr.addLabel(new MetricLabel("cluster_name", key));
-                    MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterQueryErr);
-                    return counterQueryErr;
-                });
+                    // registered metrics
+                    MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.computeIfAbsent(ctx.cloudCluster, key -> {
+                        LongCounterMetric counterQueryErr = new LongCounterMetric("query_err", MetricUnit.REQUESTS,
+                                "total error query");
+                        counterQueryErr.addLabel(new MetricLabel("cluster_id", clusterId));
+                        counterQueryErr.addLabel(new MetricLabel("cluster_name", key));
+                        MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterQueryErr);
+                        return counterQueryErr;
+                    });
 
-                MetricRepo.CLOUD_CLUSTER_HISTO_QUERY_LATENCY.computeIfAbsent(ctx.cloudCluster, key -> {
-                    Histogram histoQueryLatency = MetricRepo.METRIC_REGISTER.histogram(
-                            MetricRegistry.name("query", "latency", "ms",
-                                        MetricRepo.SELECTDB_TAG, key));
-                    return histoQueryLatency;
-                });
+                    MetricRepo.CLOUD_CLUSTER_HISTO_QUERY_LATENCY.computeIfAbsent(ctx.cloudCluster, key -> {
+                        Histogram histoQueryLatency = MetricRepo.METRIC_REGISTER.histogram(
+                                MetricRegistry.name("query", "latency", "ms",
+                                MetricRepo.SELECTDB_TAG, key));
+                        return histoQueryLatency;
+                    });
+                }
             }
             if (ctx.getState().getStateType() == MysqlStateType.ERR
                     && ctx.getState().getErrType() != QueryState.ErrType.ANALYSIS_ERR) {
@@ -446,14 +448,16 @@ public class ConnectProcessor {
         }
         if (Config.isCloudMode() && ctx.cloudCluster != null) {
             String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(ctx.cloudCluster);
-            MetricRepo.CLOUD_CLUSTER_COUNTER_REQUEST_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
-                LongCounterMetric counterRequestAll = new LongCounterMetric("request_total", MetricUnit.REQUESTS,
-                        "total request");
-                counterRequestAll.addLabel(new MetricLabel("cluster_id", clusterId));
-                counterRequestAll.addLabel(new MetricLabel("cluster_name", key));
-                MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterRequestAll);
-                return counterRequestAll;
-            }).increase(1L);
+            if (!Strings.isNullOrEmpty(clusterId)) {
+                MetricRepo.CLOUD_CLUSTER_COUNTER_REQUEST_ALL.computeIfAbsent(ctx.cloudCluster, key -> {
+                    LongCounterMetric counterRequestAll = new LongCounterMetric("request_total", MetricUnit.REQUESTS,
+                            "total request");
+                    counterRequestAll.addLabel(new MetricLabel("cluster_id", clusterId));
+                    counterRequestAll.addLabel(new MetricLabel("cluster_name", key));
+                    MetricRepo.DORIS_METRIC_REGISTER.addMetrics(counterRequestAll);
+                    return counterRequestAll;
+                }).increase(1L);
+            }
         }
         // convert statement to Java string
         byte[] bytes = packetBuf.array();

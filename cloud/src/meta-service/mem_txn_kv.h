@@ -160,6 +160,9 @@ public:
 
     TxnErrorCode abort() override;
 
+    TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
+                  const BatchGetOptions& opts = BatchGetOptions()) override;
+
 private:
     TxnErrorCode inner_get(const std::string& key, std::string* val, bool snapshot);
 

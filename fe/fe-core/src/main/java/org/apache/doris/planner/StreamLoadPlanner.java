@@ -219,7 +219,11 @@ public class StreamLoadPlanner {
             slotDesc.setIsNullable(false);
             LOG.debug("plan tupleDesc {}", scanTupleDesc.toString());
         }
-
+        scanTupleDesc.setTable(destTable);
+        analyzer.registerTupleDescriptor(scanTupleDesc);
+        if (null != taskInfo.getWhereExpr()) {
+            taskInfo.getWhereExpr().analyze(analyzer);
+        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
 
@@ -409,7 +413,11 @@ public class StreamLoadPlanner {
             slotDesc.setIsNullable(false);
             LOG.debug("plan tupleDesc {}", scanTupleDesc.toString());
         }
-
+        scanTupleDesc.setTable(destTable);
+        analyzer.registerTupleDescriptor(scanTupleDesc);
+        if (null != taskInfo.getWhereExpr()) {
+            taskInfo.getWhereExpr().analyze(analyzer);
+        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
 

@@ -1,6 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("file_size_test") {
+    sql """ SET GLOBAL enable_auto_analyze = false """
     def table1 = "test_file_size"
 
     sql "drop table if exists ${table1}"

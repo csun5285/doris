@@ -155,6 +155,8 @@ suite("test_compaction_uniq_keys_row_store") {
             """
         //TabletId,ReplicaIdBackendId,SchemaHash,Version,LstSuccessVersion,LstFailedVersion,LstFailedTime,LocalDataSize,RemoteDataSize,RowCount,State,LstConsistencyCheckTime,CheckVersion,VersionCount,QueryHits,PathHash,MetaUrl,CompactionStatus
         tablets = sql """ show tablets from ${tableName}; """
+        sql "sync"
+        sleep(5000)
 
         checkValue()
 

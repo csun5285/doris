@@ -21,9 +21,11 @@ import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
 import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeMetaVersion;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
+import org.apache.doris.common.util.Daemon;
 import org.apache.doris.common.util.DynamicPartitionUtil;
 import org.apache.doris.common.util.MasterDaemon;
 import org.apache.doris.common.util.RangeUtils;
@@ -67,7 +69,7 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
     private Map<Long, Long> idToRecycleTime;
 
     public CatalogRecycleBin() {
-        super("recycle bin");
+        super("recycle bin", FeConstants.runningUnitTest ? 10L : Daemon.DEFAULT_INTERVAL_SECONDS * 1000L);
         idToDatabase = Maps.newHashMap();
         idToTable = Maps.newHashMap();
         idToPartition = Maps.newHashMap();
@@ -200,6 +202,17 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
 
     public synchronized void setRecycleTimeByIdForReplay(long id, Long recycleTime) {
         idToRecycleTime.put(id, recycleTime);
+    }
+
+    public synchronized boolean isRecyclePartition(long dbId, long tableId, long partitionId) {
+        return idToDatabase.containsKey(dbId) || idToTable.containsKey(tableId)
+                || idToPartition.containsKey(partitionId);
+    }
+
+    public synchronized void getRecycleIds(Set<Long> dbIds, Set<Long> tableIds, Set<Long> partitionIds) {
+        dbIds.addAll(idToDatabase.keySet());
+        tableIds.addAll(idToTable.keySet());
+        partitionIds.addAll(idToPartition.keySet());
     }
 
     private synchronized boolean isExpire(long id, long currentTimeMs) {
@@ -422,7 +435,7 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
             return;
         }
         Table table = tableInfo.getTable();
-        if (table.getType() == TableType.OLAP && !Env.isCheckpointThread()) {
+        if (table.getType() == TableType.OLAP) {
             Env.getCurrentEnv().onEraseOlapTable((OlapTable) table, true);
         }
         LOG.info("replay erase table[{}]", tableId);
@@ -532,9 +545,7 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
         }
 
         Partition partition = partitionInfo.getPartition();
-        if (!Env.isCheckpointThread()) {
-            Env.getCurrentEnv().onErasePartition(partition);
-        }
+        Env.getCurrentEnv().onErasePartition(partition);
 
         LOG.info("replay erase partition[{}]", partitionId);
     }

@@ -25,7 +25,6 @@ suite("test_jdbc_query_pg", "p0,external,pg,external_docker,external_docker_pg")
     String bucket = getS3BucketName()
     String driver_url = "https://${bucket}.${s3_endpoint}/regression/jdbc_driver/postgresql-42.5.0.jar"
 
-
     if (enabled != null && enabled.equalsIgnoreCase("true")) {
         String pg_14_port = context.config.otherConfigs.get("pg_14_port")
         String jdbcResourcePg14 = "jdbc_resource_pg_14"

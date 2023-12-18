@@ -17,9 +17,11 @@
 
 package org.apache.doris.mysql.privilege;
 
+import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
+import org.apache.doris.common.PatternMatcherException;
 import org.apache.doris.common.io.Text;
 
 import com.google.common.collect.Lists;
@@ -63,6 +65,20 @@ public abstract class PrivTable {
      */
     public PrivEntry addEntry(PrivEntry newEntry,
             boolean errOnExist, boolean errOnNonExist) throws DdlException {
+        return addEntry(newEntry, errOnExist, errOnNonExist, false);
+    }
+
+    public PrivEntry addEntry(PrivEntry entry, boolean errOnExist, boolean errOnNonExist, boolean isMerge)
+            throws DdlException {
+        PrivEntry newEntry = entry;
+        if (isMerge) {
+            try {
+                newEntry = entry.copy();
+            } catch (AnalysisException | PatternMatcherException e) {
+                LOG.error("exception when copy PrivEntry", e);
+            }
+        }
+
         PrivEntry existingEntry = getExistingEntry(newEntry);
         if (existingEntry == null) {
             if (errOnNonExist) {
@@ -112,6 +128,12 @@ public abstract class PrivTable {
 
         // check if privs to be revoked exist in priv entry.
         PrivBitSet tmp = existingEntry.getPrivSet().copy();
+        // fix bug, compatible with stock data
+        if (tmp.containsPrivs(Privilege.USAGE_PRIV) && (entry.getPrivSet().containsPrivs(Privilege.CLUSTER_USAGE_PRIV)
+                || entry.getPrivSet().containsPrivs(Privilege.STAGE_USAGE_PRIV))) {
+            entry.privSet.xor(PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV, Privilege.STAGE_USAGE_PRIV));
+            entry.privSet.or(PrivBitSet.of(Privilege.USAGE_PRIV));
+        }
         tmp.and(entry.getPrivSet());
         if (tmp.isEmpty()) {
             if (errOnNonExist) {
@@ -201,7 +223,7 @@ public abstract class PrivTable {
     public void merge(PrivTable privTable) {
         for (PrivEntry entry : privTable.entries) {
             try {
-                addEntry(entry, false, false);
+                addEntry(entry, false, false, true);
             } catch (DdlException e) {
                 //will no exception
                 LOG.debug(e.getMessage());

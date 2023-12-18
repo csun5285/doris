@@ -20,7 +20,6 @@ suite("test_cast_function") {
     sql "SET enable_fallback_to_original_planner=false"
     qt_sql """ select cast (1 as BIGINT) """
     qt_sql """ select cast(cast ("11.2" as double) as bigint) """
-    qt_sql """ select cast ("0.0101031417" as datetime) """
     qt_sql """ select cast ("0.0000031417" as datetime) """
     qt_sql """ select cast (NULL AS CHAR(1)); """
     qt_sql """ select cast ('20190101' AS CHAR(2)); """

@@ -89,7 +89,7 @@ public class StageTableValuedFunction extends ExternalFileTableValuedFunction {
             throw new AnalysisException(e.getMessage());
         }
 
-        parseProperties(validParams);
+        parseCommonProperties(validParams);
         parseFile();
     }
 

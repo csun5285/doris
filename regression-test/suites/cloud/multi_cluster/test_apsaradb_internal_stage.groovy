@@ -55,7 +55,6 @@ suite("test_apsarad_internal_stage_copy_into") {
     }
 
     try {
-        sql """ DROP TABLE IF EXISTS ${tableNamExternal}; """
         sql """
             CREATE TABLE IF NOT EXISTS ${tableNamExternal} (
             C_CUSTKEY     INTEGER NOT NULL,
@@ -70,6 +69,7 @@ suite("test_apsarad_internal_stage_copy_into") {
             UNIQUE KEY(C_CUSTKEY)
             DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 1
         """
+        sql """ DROP TABLE IF EXISTS ${tableNamExternal}; """
     } finally {
         //try_sql("DROP TABLE IF EXISTS ${tableNamExternal}")
     }
@@ -176,5 +176,6 @@ suite("test_apsarad_internal_stage_copy_into") {
 
     } finally {
         sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'false')"
+        sql """ DROP TABLE IF EXISTS ${tableName}; """
     }
 }

@@ -187,6 +187,17 @@ public class SystemInfoService {
         }
     };
 
+    public boolean availableBackendsExists() {
+        if (FeConstants.runningUnitTest) {
+            return true;
+        }
+        if (null == clusterNameToId || clusterNameToId.isEmpty()) {
+            return false;
+        }
+        return clusterIdToBackend != null && !clusterIdToBackend.isEmpty()
+               && clusterIdToBackend.values().stream().anyMatch(list -> list != null && !list.isEmpty());
+    }
+
     public boolean containClusterName(String clusterName) {
         return clusterNameToId.containsKey(clusterName);
     }
@@ -413,6 +424,10 @@ public class SystemInfoService {
 
     public ImmutableMap<Long, Backend> getCloudIdToBackend(String clusterName) {
         String clusterId = clusterNameToId.get(clusterName);
+        if (Strings.isNullOrEmpty(clusterId)) {
+            LOG.warn("cant find clusterId, this cluster may be has been dropped, clusterName={}", clusterName);
+            return ImmutableMap.of();
+        }
         List<Backend> backends = clusterIdToBackend.get(clusterId);
         Map<Long, Backend> idToBackend = Maps.newHashMap();
         for (Backend be : backends) {
@@ -613,7 +628,8 @@ public class SystemInfoService {
         for (HostInfo hostInfo : hostInfos) {
             // check is already exist
             if (getBackendWithHeartbeatPort(hostInfo.getHost(), hostInfo.getPort()) == null) {
-                String backendIdentifier = hostInfo.getHost() + ":" + hostInfo.getPort();
+                String backendIdentifier = NetUtils
+                        .getHostPortInAccessibleFormat(hostInfo.getHost(), hostInfo.getPort());
                 throw new DdlException("backend does not exists[" + backendIdentifier + "]");
             }
         }
@@ -635,8 +651,8 @@ public class SystemInfoService {
     public void dropBackend(String host, int heartbeatPort) throws DdlException {
         Backend droppedBackend = getBackendWithHeartbeatPort(host, heartbeatPort);
         if (droppedBackend == null) {
-            throw new DdlException("backend does not exists[" + host
-                    + ":" + heartbeatPort + "]");
+            throw new DdlException("backend does not exists[" + NetUtils
+                    .getHostPortInAccessibleFormat(host, heartbeatPort) + "]");
         }
         // update idToBackend
         Map<Long, Backend> copiedBackends = Maps.newHashMap(idToBackendRef);
@@ -1272,7 +1288,8 @@ public class SystemInfoService {
     public void modifyBackendHost(ModifyBackendHostNameClause clause) throws UserException {
         Backend be = getBackendWithHeartbeatPort(clause.getHost(), clause.getPort());
         if (be == null) {
-            throw new DdlException("backend does not exists[" + clause.getHost() + ":" + clause.getPort() + "]");
+            throw new DdlException("backend does not exists[" + NetUtils
+                    .getHostPortInAccessibleFormat(clause.getHost(), clause.getPort()) + "]");
         }
         if (be.getHost().equals(clause.getNewHost())) {
             // no need to modify
@@ -1289,7 +1306,8 @@ public class SystemInfoService {
             Backend be = getBackendWithHeartbeatPort(hostInfo.getHost(), hostInfo.getPort());
             if (be == null) {
                 throw new DdlException(
-                        "backend does not exists[" + hostInfo.getHost() + ":" + hostInfo.getPort() + "]");
+                        "backend does not exists[" + NetUtils
+                                .getHostPortInAccessibleFormat(hostInfo.getHost(), hostInfo.getPort()) + "]");
             }
             backends.add(be);
         }
@@ -1395,12 +1413,16 @@ public class SystemInfoService {
         }
     }
 
-    public int getMinPipelineExecutorSize() {
-        if (idToBackendRef.size() == 0) {
+    public int getMinPipelineExecutorSize(String cluster) {
+        if (Strings.isNullOrEmpty(cluster)) {
+            return 1;
+        }
+        List<Backend> currentBackends = getBackendsByClusterName(cluster);
+        if (currentBackends.size() == 0) {
             return 1;
         }
         int minPipelineExecutorSize = Integer.MAX_VALUE;
-        for (Backend be : idToBackendRef.values()) {
+        for (Backend be : currentBackends) {
             int size = be.getPipelineExecutorSize();
             if (size > 0) {
                 minPipelineExecutorSize = Math.min(minPipelineExecutorSize, size);

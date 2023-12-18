@@ -27,6 +27,7 @@
 #include <string>
 #include <thread>
 
+#include "common/logging.h"
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache.h"
@@ -38,7 +39,7 @@ namespace doris {
 namespace io {
 
 FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache,
-                     State download_state, FileCacheType cache_type, int64_t expiration_time)
+                     State download_state, FileCacheType cache_type, uint64_t expiration_time)
         : _segment_range(offset, offset + size - 1),
           _download_state(download_state),
           _file_key(key),
@@ -143,7 +144,8 @@ Status FileBlock::append(Slice data) {
     SYNC_POINT_RETURN_WITH_VALUE("file_block::append", st);
     if (!_cache_writer) {
         auto download_path = get_path_in_local_cache(true);
-        st = global_local_filesystem()->create_file(download_path, &_cache_writer);
+        FileWriterOptions not_sync {.sync_file_data = false};
+        st = global_local_filesystem()->create_file(download_path, &_cache_writer, &not_sync);
         if (!st) {
             _cache_writer.reset();
             return st;
@@ -192,12 +194,10 @@ bool FileBlock::change_cache_type(FileCacheType new_type) {
         return true;
     }
     if (_download_state == State::DOWNLOADED) {
-        std::error_code ec;
-        std::filesystem::rename(
-                get_path_in_local_cache(),
-                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
             return false;
         }
     }
@@ -212,12 +212,11 @@ void FileBlock::change_cache_type_self(FileCacheType new_type) {
         return;
     }
     if (_download_state == State::DOWNLOADED) {
-        std::error_code ec;
-        std::filesystem::rename(
-                get_path_in_local_cache(),
-                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type), ec);
-        if (ec) {
-            LOG(ERROR) << ec.message();
+        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+                _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
+        if (!st.ok()) {
+            LOG_WARNING("").error(st);
+            return;
         }
     }
     _cache_type = new_type;
@@ -232,7 +231,6 @@ FileBlock::~FileBlock() {
 }
 
 Status FileBlock::finalize_write() {
-    TEST_SYNC_POINT_RETURN_WITH_VALUE("file_block::finalize_write", Status());
     if (_downloaded_size != 0 && _downloaded_size != _segment_range.size()) {
         std::lock_guard cache_lock(_cache->_mutex);
         size_t old_size = _segment_range.size();
@@ -257,11 +255,7 @@ FileBlock::State FileBlock::wait() {
     if (_download_state == State::DOWNLOADING) {
         DCHECK(_downloader_id != 0);
         DCHECK(_downloader_id != get_caller_id());
-#if !defined(USE_BTHREAD_SCANNER)
         _cv.wait_for(segment_lock, std::chrono::seconds(1));
-#else
-        _cv.wait_for(segment_lock, 1000000);
-#endif
     }
 
     return _download_state;
@@ -286,13 +280,7 @@ Status FileBlock::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock 
     }
     
     if (status.ok()) {
-        std::error_code ec;
-        std::filesystem::rename(get_path_in_local_cache(true), get_path_in_local_cache(), ec);
-        if (ec) {
-            LOG(ERROR) << fmt::format("failed to rename {} to {} : {}", get_path_in_local_cache(true),
-                                    get_path_in_local_cache(), ec.message());
-            status = Status::IOError(ec.message());
-        }
+        status = global_local_filesystem()->rename(get_path_in_local_cache(true), get_path_in_local_cache());
     }
     TEST_SYNC_POINT_CALLBACK("FileBlock::rename_error", &status);
 
