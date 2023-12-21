@@ -437,7 +437,7 @@ TRY_AGAIN:
 }
 
 Status CloudMetaMgr::sync_tablet_delete_bitmap(
-        const Tablet* tablet, int64_t old_max_version,
+        Tablet* tablet, int64_t old_max_version,
         const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
         const selectdb::TabletStatsPB& stats, const selectdb::TabletIndexPB& idx,
         DeleteBitmap* delete_bitmap) {
@@ -472,7 +472,10 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
     // old rowset sync incremental versions of delete bitmap
     if (old_max_version > 0 && old_max_version < new_max_version) {
         RowsetIdUnorderedSet all_rs_ids;
-        RETURN_IF_ERROR(tablet->all_rs_id(old_max_version, &all_rs_ids));
+        {
+            std::shared_lock rlock(tablet->get_header_lock());
+            RETURN_IF_ERROR(tablet->all_rs_id(old_max_version, &all_rs_ids));
+        }
         for (auto& rs_id : all_rs_ids) {
             req.add_rowset_ids(rs_id.to_string());
             req.add_begin_versions(old_max_version + 1);

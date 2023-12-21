@@ -53,7 +53,7 @@ public:
 
 private:
     Status sync_tablet_delete_bitmap(
-            const Tablet* tablet, int64_t old_max_version,
+            Tablet* tablet, int64_t old_max_version,
             const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
             const selectdb::TabletStatsPB& stas, const selectdb::TabletIndexPB& idx,
             DeleteBitmap* delete_bitmap);
