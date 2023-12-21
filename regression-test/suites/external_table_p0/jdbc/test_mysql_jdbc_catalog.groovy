@@ -14,6 +14,7 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+import org.junit.Assert;
 
 suite("test_mysql_jdbc_catalog", "p0,external,mysql,external_docker,external_docker_mysql") {
     qt_sql """select current_catalog()"""
@@ -57,8 +58,8 @@ suite("test_mysql_jdbc_catalog", "p0,external,mysql,external_docker,external_doc
         String ex_tb21 = "test_key_word";
         String test_insert = "test_insert";
         String test_insert2 = "test_insert2";
-        String test_insert_all_types = "test_insert_all_types";
-        String test_ctas = "test_ctas";
+        String test_insert_all_types = "test_mysql_insert_all_types";
+        String test_ctas = "test_mysql_ctas";
         String auto_default_t = "auto_default_t";
         String dt = "dt";
         String dt_null = "dt_null";
@@ -180,7 +181,7 @@ suite("test_mysql_jdbc_catalog", "p0,external,mysql,external_docker,external_doc
             connect(user=user, password="${pwd}", url=url) {
                 try {
                     sql """ insert into ${catalog_name}.${ex_db_name}.${test_insert} values ('${uuid1}', 'doris1', 18) """
-                    fail()
+                    Assert.fail()
                 } catch (Exception e) {
                     log.info(e.getMessage())
                 }
@@ -192,7 +193,8 @@ suite("test_mysql_jdbc_catalog", "p0,external,mysql,external_docker,external_doc
                 try {
                     sql """ insert into ${catalog_name}.${ex_db_name}.${test_insert} values ('${uuid1}', 'doris1', 18) """
                 } catch (Exception e) {
-                    fail();
+                    log.info(e.getMessage())
+                    Assert.fail()
                 }
             }
             order_qt_test_insert1 """ select name, age from ${test_insert} where id = '${uuid1}' order by age """
