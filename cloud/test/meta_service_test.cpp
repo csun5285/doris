@@ -330,6 +330,20 @@ TEST(MetaServiceTest, CreateInstanceTest) {
                                      &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
+
+    // case: rpc get instance
+    {
+        brpc::Controller cntl;
+        GetInstanceRequest req;
+        GetInstanceResponse res;
+        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+                                   &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
+        req.set_cloud_unique_id("1:test_instance:m-n3qdpyal27rh8iprxx");
+        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+                                   &req, &res, nullptr);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
 }
 
 TEST(MetaServiceTest, AlterClusterTest) {

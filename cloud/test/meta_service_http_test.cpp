@@ -427,6 +427,33 @@ TEST(MetaServiceHttpTest, InstanceTest) {
         ASSERT_EQ(instance.status(), InstanceInfoPB::NORMAL);
     }
 
+    // case: set over_due instance
+    {
+        AlterInstanceRequest req;
+        req.set_op(AlterInstanceRequest::SET_OVERDUE);
+        req.set_instance_id("test_instance");
+        auto [status_code, resp] =
+            ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_EQ(instance.status(), InstanceInfoPB::OVERDUE);
+    }
+
+    // case: set_normal instance
+    {
+        AlterInstanceRequest req;
+        req.set_op(AlterInstanceRequest::SET_NORMAL);
+        req.set_instance_id("test_instance");
+        auto [status_code, resp] =
+            ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
+        ASSERT_EQ(status_code, 200);
+        ASSERT_EQ(resp.code(), MetaServiceCode::OK);
+
+        InstanceInfoPB instance = ctx.get_instance_info("test_instance");
+        ASSERT_EQ(instance.status(), InstanceInfoPB::NORMAL);
+    }
+
     // case: get instance by cloud_unique_id
     {
         auto [status_code, resp] = ctx.query_with_result<InstanceInfoPB>(
