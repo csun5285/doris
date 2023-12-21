@@ -143,6 +143,9 @@ public:
     ThreadPool* s3_downloader_download_thread_pool() {
         return _s3_downloader_download_thread_pool.get();
     }
+    ThreadPool* s3_downloader_download_poller_thread_pool() {
+        return _s3_downloader_download_poller_thread_pool.get();
+    }
     std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> s3_pool_executor() {
         return _s3_pooled_executor;
     }
@@ -252,6 +255,8 @@ private:
     std::unique_ptr<ThreadPool> _s3_file_writer_upload_thread_pool;
     // Threadpool used to do s3 get operation for s3 downloader
     std::unique_ptr<ThreadPool> _s3_downloader_download_thread_pool;
+    // Threadpool used to do s3 get operation for s3 downloader's polling operation
+    std::unique_ptr<ThreadPool> _s3_downloader_download_poller_thread_pool;
     // Threadpool for S3 client's operation
     std::shared_ptr<Aws::Utils::Threading::PooledThreadExecutor> _s3_pooled_executor;
     std::unique_ptr<ThreadPool> _sync_load_for_tablets_thread_pool;
