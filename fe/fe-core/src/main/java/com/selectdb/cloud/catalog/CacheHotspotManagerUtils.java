@@ -135,8 +135,9 @@ public class CacheHotspotManagerUtils {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        if (result == null || result.size() == 0) {
-            String err = String.format("cluster doesn't exist, clusterId %s", clusterId);
+        if (result == null) {
+            String err = String.format("Could not find the src cluster id {}"
+                    + " in __internal_schema.selectdb_cache_hotspot", clusterId);
             LOG.warn(err);
             throw new RuntimeException(err);
         }

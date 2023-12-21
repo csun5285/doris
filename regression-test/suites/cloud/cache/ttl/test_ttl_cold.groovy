@@ -6,7 +6,7 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 // 4. load 19.5G normal table data to evict origin ttl table data
 // 5. select ttl table data and it will read some datas from s3
 suite("test_ttl_cold") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
+    sql """ use @regression_cluster_name1 """
     def ttlProperties = """ PROPERTIES("file_cache_ttl_seconds"="60") """
     String[][] backends = sql """ show backends """
     String backendId;
@@ -14,7 +14,7 @@ suite("test_ttl_cold") {
     def backendIdToBackendHttpPort = [:]
     def backendIdToBackendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             backendIdToBackendIP.put(backend[0], backend[1])
             backendIdToBackendHttpPort.put(backend[0], backend[4])
             backendIdToBackendBrpcPort.put(backend[0], backend[5])

@@ -1,10 +1,6 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("sync_insert") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
-    def token = context.config.metaServiceToken;
-    def instance_id = context.config.multiClusterInstance
-
     List<String> ipList = new ArrayList<>();
     List<String> hbPortList = new ArrayList<>()
     List<String> httpPortList = new ArrayList<>()
@@ -31,28 +27,6 @@ suite("sync_insert") {
     println("the be unique id is " + beUniqueIdList);
     println("the brpc port is " + brpcPortList);
 
-    for (unique_id : beUniqueIdList) {
-        resp = get_cluster.call(unique_id);
-        for (cluster : resp) {
-            if (cluster.type == "COMPUTE") {
-                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
-            }
-        }
-    }
-    sleep(20000)
-
-    List<List<Object>> result  = sql "show clusters"
-    assertEquals(result.size(), 0);
-
-    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
-                     "regression_cluster_name0", "regression_cluster_id0");
-    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                     "regression_cluster_name1", "regression_cluster_id1");
-    sleep(20000)
-
-    result  = sql "show clusters"
-    assertEquals(result.size(), 2);
-
     def clearFileCache = { ip, port ->
         httpTest {
             endpoint ""
@@ -77,8 +51,8 @@ suite("sync_insert") {
     sql "use @regression_cluster_name0"
 
     def table1 = "test_dup_tab_basic_int_tab_nullable"
-
-    sql """ set enable_multi_cluster_sync_load=true """
+    sql """ drop table if exists ${table1} """
+    sql """ set enable_multi_cluster_sync_load = true """
 
     sql """
 CREATE TABLE IF NOT EXISTS `${table1}` (

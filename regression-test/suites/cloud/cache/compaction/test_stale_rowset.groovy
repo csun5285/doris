@@ -1,7 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_stale_rowset") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
+    sql """ use @regression_cluster_name1 """
     //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,Tag,ErrMsg,Version,Status
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
@@ -10,7 +10,7 @@ suite("test_stale_rowset") {
     def backendId_to_backendHttpPort = [:]
     def backendId_to_backendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             backendId_to_backendIP.put(backend[0], backend[1])
             backendId_to_backendHttpPort.put(backend[0], backend[4])
             backendId_to_backendBrpcPort.put(backend[0], backend[5])
@@ -100,7 +100,7 @@ suite("test_stale_rowset") {
     def getCurCacheSize = {
         backendIdToCacheSize = [:]
         for (String[] backend in backends) {
-            if (backend[8].equals("true")) {
+            if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
                 StringBuilder sb = new StringBuilder();
                 sb.append("curl http://")
                 sb.append(backendId_to_backendIP.get(backend[0]))
@@ -131,7 +131,7 @@ suite("test_stale_rowset") {
     sleep(30000);
     def backendIdToAfterLoadCacheSize = getCurCacheSize()
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             logger.info(backend[0] + " size: " + backendIdToAfterLoadCacheSize.get(backend[0]))
         }
     }
@@ -207,7 +207,7 @@ suite("test_stale_rowset") {
     sleep(60000);
     def backendIdToAfterCompactionCacheSize = getCurCacheSize()
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             assertTrue(backendIdToAfterLoadCacheSize.get(backend[0]) >
                 backendIdToAfterCompactionCacheSize.get(backend[0]))
         }

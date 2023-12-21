@@ -1,14 +1,11 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_warm_up_cluster_batch") {
+suite("test_warm_up_cluster_bigsize") {
     def getJobState = { jobId ->
          def jobStateResult = sql """  SHOW WARM UP JOB WHERE ID = ${jobId} """
          return jobStateResult[0][2]
     }
     def table = "customer"
-
-    def token = context.config.metaServiceToken;
-    def instance_id = context.config.multiClusterInstance
 
     List<String> ipList = new ArrayList<>();
     List<String> hbPortList = new ArrayList<>()
@@ -35,29 +32,6 @@ suite("test_warm_up_cluster_batch") {
     println("the http port is " + httpPortList);
     println("the be unique id is " + beUniqueIdList);
     println("the brpc port is " + brpcPortList);
-
-    for (unique_id : beUniqueIdList) {
-        resp = get_cluster.call(unique_id);
-        for (cluster : resp) {
-            if (cluster.type == "COMPUTE") {
-                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
-            }
-        }
-    }
-    sleep(20000)
-
-    List<List<Object>> result  = sql "show clusters"
-    assertEquals(result.size(), 0);
-
-    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
-                     "regression_cluster_name0", "regression_cluster_id0");
-    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                     "regression_cluster_name1", "regression_cluster_id1");
-    sleep(20000)
-
-    result  = sql "show clusters"
-    sql """ SET PROPERTY 'default_cloud_cluster' = "regression_cluster_name0"; """
-    assertEquals(result.size(), 2);
 
     sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
     sql new File("""${context.file.parent}/../ddl/supplier_delete.sql""").text
@@ -123,6 +97,15 @@ suite("test_warm_up_cluster_batch") {
     }
     
     sql "use @regression_cluster_name0"
+    for (int k = 0; k < 17; k++) {
+        load_customer_once()
+    }
+
+    for (int i = 0; i < 1000; i++) {
+        sql "select count(*) from customer"
+    }
+    sleep(40000)
+    def jobId_ = sql "WARM UP CLUSTER regression_cluster_name1 WITH CLUSTER regression_cluster_name0"
     def waitJobDone = { jobId ->
         int retryTime = 120
         int i = 0
@@ -142,62 +125,50 @@ suite("test_warm_up_cluster_batch") {
             assertTrue(false);
         }
     }
-    for (int k = 0; k < 10; k++) {
-        load_customer_once()
-        for (int i = 0; i < 10; i++) {
-            sql "select count(*) from customer"
-        }
-        if (k % 2 == 1) {
-            sleep(40000)
-            def jobId_ = sql "WARM UP CLUSTER regression_cluster_name1 WITH CLUSTER regression_cluster_name0"
-            waitJobDone(jobId_)
-            long s3_read_count = 0
-            getMetricsMethod.call(ipList[1], brpcPortList[1]) {
-                respCode, body ->
-                    assertEquals("${respCode}".toString(), "200")
-                    String out = "${body}".toString()
-                    def strs = out.split('\n')
-                    Boolean flag = false;
-                    for (String line in strs) {
-                        if (line.contains("cached_remote_reader_s3_read")) {
-                            if (line.startsWith("#")) {
-                                continue
-                            }
-                            def j = line.indexOf(' ')
-                            s3_read_count = line.substring(j).toLong()
-                            flag = true
-                            break
-                        }
+    waitJobDone(jobId_)
+    long s3_read_count = 0
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
                     }
-                    assertTrue(flag)
+                    def j = line.indexOf(' ')
+                    s3_read_count = line.substring(j).toLong()
+                    flag = true
+                    break
+                }
             }
-
-            sql "use @regression_cluster_name1"
-            sql """
-            select count(*) from ${table};
-            """
-
-            getMetricsMethod.call(ipList[1], brpcPortList[1]) {
-                respCode, body ->
-                    assertEquals("${respCode}".toString(), "200")
-                    String out = "${body}".toString()
-                    def strs = out.split('\n')
-                    Boolean flag = false;
-                    for (String line in strs) {
-                        if (line.contains("cached_remote_reader_s3_read")) {
-                            if (line.startsWith("#")) {
-                                continue
-                            }
-                            def j = line.indexOf(' ')
-                            assertEquals(s3_read_count, line.substring(j).toLong())
-                            flag = true
-                            break
-                        }
-                    }
-                    assertTrue(flag)
-            }
-            sql "use @regression_cluster_name0"
-        }
+            assertTrue(flag)
     }
-    
+
+    sql "use @regression_cluster_name1"
+    sql """
+    select count(*) from ${table};
+    """
+
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def j = line.indexOf(' ')
+                    assertTrue(s3_read_count < line.substring(j).toLong())
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
+    }
 }

@@ -1,7 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("file_size_test") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
+    sql """ use @regression_cluster_name1 """
     def table1 = "test_file_size"
 
     sql "drop table if exists ${table1}"
@@ -44,7 +44,7 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
     def backendIdToBackendIP = [:]
     def backendIdToBackendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             backendIdToBackendIP.put(backend[0], backend[1])
             backendIdToBackendBrpcPort.put(backend[0], backend[5])
         }

@@ -1,14 +1,10 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_warm_up_table") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
+suite("test_warm_up_partition") {
     def getJobState = { jobId ->
          def jobStateResult = sql """  SHOW WARM UP JOB WHERE ID = ${jobId} """
          return jobStateResult[0][2]
     }
-
-    def token = context.config.metaServiceToken;
-    def instance_id = context.config.multiClusterInstance
 
     List<String> ipList = new ArrayList<>();
     List<String> hbPortList = new ArrayList<>()
@@ -35,29 +31,7 @@ suite("test_warm_up_table") {
     println("the http port is " + httpPortList);
     println("the be unique id is " + beUniqueIdList);
     println("the brpc port is " + brpcPortList);
-
-    for (unique_id : beUniqueIdList) {
-        resp = get_cluster.call(unique_id);
-        for (cluster : resp) {
-            if (cluster.type == "COMPUTE") {
-                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
-            }
-        }
-    }
-    sleep(20000)
-
-    List<List<Object>> result  = sql "show clusters"
-    assertEquals(result.size(), 0);
-
-    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
-                     "regression_cluster_name0", "lightman_cluster_id0");
-    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                     "regression_cluster_name1", "lightman_cluster_id1");
-    sleep(20000)
-
-    result  = sql "show clusters"
-    assertEquals(result.size(), 2);
-
+    
     def s3BucketName = getS3BucketName()
     def s3WithProperties = """WITH S3 (
         |"AWS_ACCESS_KEY" = "${getS3AK()}",
@@ -75,7 +49,7 @@ suite("test_warm_up_table") {
     def table = "customer"
     sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
     // create table if not exists
-    sql new File("""${context.file.parent}/../ddl/${table}.sql""").text
+    sql new File("""${context.file.parent}/../ddl/customer_with_partition.sql""").text
     sleep(10000)
 
     def load_customer_once =  { 
@@ -121,43 +95,30 @@ suite("test_warm_up_table") {
     clearFileCache.call(ipList[1], httpPortList[1]);
     
     load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
-    load_customer_once()
 
-    def jobId = sql "warm up cluster regression_cluster_name1 with table customer;"
-    try {
-        sql "warm up cluster regression_cluster_name1 with table customer;"
-        assertTrue(false)
-    } catch (Exception e) {
-        assertTrue(true)
-    }
-    int retryTime = 120
-    int i = 0
-    for (; i < retryTime; i++) {
-        sleep(1000)
-        def status = getJobState(jobId[0][0])
-        logger.info(status)
-        if (status.equals("CANCELLED")) {
+    def jobId_ = sql "warm up cluster regression_cluster_name1 with table customer partition p1;"
+    def waitJobDone = { jobId ->
+        int retryTime = 120
+        int i = 0
+        for (; i < retryTime; i++) {
+            sleep(1000)
+            def status = getJobState(jobId[0][0])
+            logger.info(status)
+            if (status.equals("CANCELLED")) {
+                assertTrue(false);
+            }
+            if (status.equals("FINISHED")) {
+                break;
+            }
+        }
+        if (i == retryTime) {
+            sql "cancel warm up job where id = ${jobId[0][0]}"
             assertTrue(false);
         }
-        if (status.equals("FINISHED")) {
-            break;
-        }
     }
-    if (i == retryTime) {
-        sql "cancel warm up job where id = ${jobId[0][0]}"
-        assertTrue(false);
-    }
+    waitJobDone(jobId_)
+    jobId_ = sql "warm up cluster regression_cluster_name1 with table customer partition p2;"
+    waitJobDone(jobId_)
 
     long s3_read_count = 0
     getMetricsMethod.call(ipList[1], brpcPortList[1]) {
@@ -180,8 +141,8 @@ suite("test_warm_up_table") {
             assertTrue(flag)
     }
     sql "use @regression_cluster_name1"
-    qt_sql2 """
-    select count(*) from ${table};
+    sql """
+    select count(*) from ${table} where C_CUSTKEY < 10000000;
     """
 
     getMetricsMethod.call(ipList[1], brpcPortList[1]) {
@@ -204,18 +165,35 @@ suite("test_warm_up_table") {
             assertTrue(flag)
     }
 
-    try {
-        sql "warm up cluster regression_cluster_name2 with table customer;"
-        assertTrue(false)
-    } catch (Exception e) {
-        assertTrue(true)
+    sql """
+    select count(*) from ${table} where C_CUSTKEY > 10000000;
+    """
+
+    getMetricsMethod.call(ipList[1], brpcPortList[1]) {
+        respCode, body ->
+            assertEquals("${respCode}".toString(), "200")
+            String out = "${body}".toString()
+            def strs = out.split('\n')
+            Boolean flag = false;
+            for (String line in strs) {
+                if (line.contains("cached_remote_reader_s3_read")) {
+                    if (line.startsWith("#")) {
+                        continue
+                    }
+                    def j = line.indexOf(' ')
+                    assertTrue(s3_read_count < line.substring(j).toLong())
+                    flag = true
+                    break
+                }
+            }
+            assertTrue(flag)
     }
 
-    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
     try {
-        sql "warm up cluster regression_cluster_name1 with table customer;"
+        sql "warm up cluster regression_cluster_name1 with table customer partition p5;"
         assertTrue(false)
     } catch (Exception e) {
         assertTrue(true)
     }
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
 }

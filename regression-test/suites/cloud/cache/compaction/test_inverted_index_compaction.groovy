@@ -1,16 +1,15 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_inverted_index_compcation"){
-    sql """ SET GLOBAL enable_auto_analyze = false """
+suite("test_inverted_index_compaction"){
+    sql """ use @regression_cluster_name1 """
     //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,Tag,ErrMsg,Version,Status
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
-    String backend_id;
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
     def backendId_to_backendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             backendId_to_backendIP.put(backend[0], backend[1])
             backendId_to_backendHttpPort.put(backend[0], backend[4])
             backendId_to_backendBrpcPort.put(backend[0], backend[5])
@@ -35,28 +34,24 @@ suite("test_inverted_index_compcation"){
 
     def getCurCacheSize = {
         backendIdToCacheSize = [:]
-        for (String[] backend in backends) {
-            if (backend[8].equals("true")) {
-                StringBuilder sb = new StringBuilder();
-                sb.append("curl http://")
-                sb.append(backendId_to_backendIP.get(backend[0]))
-                sb.append(":")
-                sb.append(backendId_to_backendBrpcPort.get(backend[0]))
-                sb.append("/vars/*file_cache_cache_size")
-                String command = sb.toString()
-                logger.info(command);
-                process = command.execute()
-                code = process.waitFor()
-                err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
-                out = process.getText()
-                logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
-                assertEquals(code, 0)
-                String[] str = out.split(':')
-                assertEquals(str.length, 2)
-                logger.info(str[1].trim())
-                backendIdToCacheSize.put(backend[0], Long.parseLong(str[1].trim()))
-            }
-        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("curl http://")
+        sb.append(backendId_to_backendIP.get(backendId))
+        sb.append(":")
+        sb.append(backendId_to_backendBrpcPort.get(backendId))
+        sb.append("/vars/*file_cache_cache_size")
+        String command = sb.toString()
+        logger.info(command);
+        process = command.execute()
+        code = process.waitFor()
+        err = IOGroovyMethods.getText(new BufferedReader(new InputStreamReader(process.getErrorStream())));
+        out = process.getText()
+        logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
+        assertEquals(code, 0)
+        String[] str = out.split(':')
+        assertEquals(str.length, 2)
+        logger.info(str[1].trim())
+        backendIdToCacheSize.put(backendId, Long.parseLong(str[1].trim()))
         return backendIdToCacheSize
     }
 
@@ -167,12 +162,8 @@ suite("test_inverted_index_compcation"){
 
     sleep(60000);
     def backendIdToAfterCompactionCacheSize = getCurCacheSize()
-    for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
-            assertTrue(backendIdToAfterLoadCacheSize.get(backend[0]) >
-                backendIdToAfterCompactionCacheSize.get(backend[0]))
-        }
-    }
+    assertTrue(backendIdToAfterLoadCacheSize.get(backendId) >
+        backendIdToAfterCompactionCacheSize.get(backendId))
 
     // case1. test <
     // case1.0: test only <

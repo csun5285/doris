@@ -1,9 +1,6 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_multi_stale_rowset") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
-    def token = context.config.metaServiceToken;
-    def instance_id = context.config.multiClusterInstance
 
     List<String> ipList = new ArrayList<>();
     List<String> hbPortList = new ArrayList<>()
@@ -30,28 +27,6 @@ suite("test_multi_stale_rowset") {
     println("the http port is " + httpPortList);
     println("the be unique id is " + beUniqueIdList);
     println("the brpc port is " + brpcPortList);
-
-    for (unique_id : beUniqueIdList) {
-        resp = get_cluster.call(unique_id);
-        for (cluster : resp) {
-            if (cluster.type == "COMPUTE") {
-                drop_cluster.call(cluster.cluster_name, cluster.cluster_id);
-            }
-        }
-    }
-    sleep(20000)
-
-    List<List<Object>> result  = sql "show clusters"
-    assertEquals(result.size(), 0);
-
-    add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
-                     "regression_cluster_name0", "lightman_cluster_id0");
-    add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
-                     "regression_cluster_name1", "lightman_cluster_id1");
-    sleep(20000)
-
-    result  = sql "show clusters"
-    assertEquals(result.size(), 2);
 
     def clearFileCache = { ip, port ->
         httpTest {
@@ -90,6 +65,7 @@ suite("test_multi_stale_rowset") {
     sql "use @regression_cluster_name0"
 
     def table = "customer"
+    sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
     // create table if not exists
     sql new File("""${context.file.parent}/ddl/${table}.sql""").text
     sleep(10000)

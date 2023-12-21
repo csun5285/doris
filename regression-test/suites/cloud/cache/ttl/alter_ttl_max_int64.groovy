@@ -1,7 +1,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_ttl_max_int64") {
-    sql """ SET GLOBAL enable_auto_analyze = false """
+    sql """ use @regression_cluster_name1 """
     def ttlProperties = """ PROPERTIES("file_cache_ttl_seconds"="9223372036854775807") """
     String[][] backends = sql """ show backends """
     String backendId;
@@ -9,7 +9,7 @@ suite("test_ttl_max_int64") {
     def backendIdToBackendHttpPort = [:]
     def backendIdToBackendBrpcPort = [:]
     for (String[] backend in backends) {
-        if (backend[8].equals("true")) {
+        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
             backendIdToBackendIP.put(backend[0], backend[1])
             backendIdToBackendHttpPort.put(backend[0], backend[4])
             backendIdToBackendBrpcPort.put(backend[0], backend[5])
