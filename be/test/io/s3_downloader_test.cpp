@@ -22,15 +22,16 @@
 #include <cstdint>
 #include <future>
 #include <ostream>
+#include <ranges>
 #include <regex>
 #include <string_view>
 #include <thread>
 #include <vector>
-#include <ranges>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/sync_point.h"
-#include "io/cache/block/block_file_cache_downloader.h"
 #include "io/cache/block/block_file_cache.h"
+#include "io/cache/block/block_file_cache_downloader.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
@@ -39,13 +40,12 @@
 #include "io/fs/local_file_system.h"
 #include "io/fs/s3_file_bufferpool.h"
 #include "io/fs/s3_file_system.h"
-#include "runtime/exec_env.h"
-#include "util/s3_util.h"
-#include "util/slice.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/unique_rowset_id_generator.h"
 #include "olap/tablet.h"
-#include "cloud/olap/storage_engine.h"
+#include "runtime/exec_env.h"
+#include "util/s3_util.h"
+#include "util/slice.h"
 
 namespace fs = std::filesystem;
 
@@ -178,17 +178,24 @@ public:
         ASSERT_EQ(Status::OK(), downloader_s3_fs->connect());
 
         std::unique_ptr<ThreadPool> _pool;
-        ThreadPoolBuilder("s3_upload_file_thread_pool")
+        ThreadPoolBuilder("s3_download_file_thread_pool")
                 .set_min_threads(5)
                 .set_max_threads(10)
                 .build(&_pool);
         ExecEnv::GetInstance()->_s3_downloader_download_thread_pool = std::move(_pool);
+        std::unique_ptr<ThreadPool> _poller_pool;
+        ThreadPoolBuilder("s3_download_file_poller_thread_pool")
+                .set_min_threads(5)
+                .set_max_threads(10)
+                .build(&_poller_pool);
+        ExecEnv::GetInstance()->_s3_downloader_download_poller_thread_pool =
+                std::move(_poller_pool);
         bool exists {false};
         ASSERT_TRUE(global_local_filesystem()->exists(tmp_file_1, &exists).ok());
         if (!exists) {
             FileWriterPtr writer;
             ASSERT_TRUE(global_local_filesystem()->create_file(tmp_file_1, &writer).ok());
-            for (int i = 0 ; i < 10; i++) {
+            for (int i = 0; i < 10; i++) {
                 std::string data(1 * 1024 * 1024, '0' + i);
                 ASSERT_TRUE(writer->append(Slice(data.data(), data.size())).ok());
             }
@@ -332,9 +339,8 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_1) {
     io::CacheContext context;
     context.cache_type = io::FileCacheType::NORMAL;
     auto sp = SyncPoint::get_instance();
-    sp->set_call_back("BlockFileCache::remove_prefix", [](auto&& args) { 
-        *try_any_cast<std::string*>(args[0]) = tmp_file_1;
-    });
+    sp->set_call_back("BlockFileCache::remove_prefix",
+                      [](auto&& args) { *try_any_cast<std::string*>(args[0]) = tmp_file_1; });
     Defer defer {[sp] { sp->clear_call_back("BlockFileCache::remove_prefix"); }};
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileCacheSegmentS3Downloader::create_preheating_s3_downloader();
@@ -343,7 +349,7 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_1) {
     meta.file_size = 10 * 1024 * 1024 + 1;
     CountDownLatch latch(1);
     meta.file_system = downloader_s3_fs;
-    meta.download_callback = [&](Status s) { 
+    meta.download_callback = [&](Status s) {
         ASSERT_TRUE(s.ok());
         latch.count_down(1);
     };
@@ -356,9 +362,9 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_1) {
         int i = 0;
         std::ranges::for_each(holders.file_segments, [&](FileBlockSPtr& block) {
             std::string buffer;
-            buffer.resize(i == 10 ? 1 : 1024*1024);
+            buffer.resize(i == 10 ? 1 : 1024 * 1024);
             ASSERT_TRUE(block->read_at(Slice(buffer.data(), buffer.size()), 0).ok());
-            EXPECT_EQ(std::string(i == 10 ? 1 : 1024*1024, '0' + (i % 10)), buffer);
+            EXPECT_EQ(std::string(i == 10 ? 1 : 1024 * 1024, '0' + (i % 10)), buffer);
             i++;
         });
     }
@@ -387,16 +393,15 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_with_file_cache_error)
     io::CacheContext context;
     context.cache_type = io::FileCacheType::NORMAL;
     auto sp = SyncPoint::get_instance();
-    sp->set_call_back("BlockFileCache::remove_prefix", [](auto&& args) { 
-        *try_any_cast<std::string*>(args[0]) = tmp_file_1;
-    });
+    sp->set_call_back("BlockFileCache::remove_prefix",
+                      [](auto&& args) { *try_any_cast<std::string*>(args[0]) = tmp_file_1; });
     sp->set_call_back("LocalFileWriter::appendv", [&](auto&& values) {
         std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
         pairs->second = true;
     });
-    Defer defer {[sp] { 
-        sp->clear_call_back("BlockFileCache::remove_prefix"); 
-        sp->clear_call_back("LocalFileWriter::appendv"); 
+    Defer defer {[sp] {
+        sp->clear_call_back("BlockFileCache::remove_prefix");
+        sp->clear_call_back("LocalFileWriter::appendv");
     }};
     ASSERT_TRUE(FileCacheFactory::instance().create_file_cache(cache_base_path, settings).ok());
     FileCacheSegmentS3Downloader::create_preheating_s3_downloader();
@@ -405,7 +410,7 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_with_file_cache_error)
     meta.file_size = 10 * 1024 * 1024 + 1;
     CountDownLatch latch(1);
     meta.file_system = downloader_s3_fs;
-    meta.download_callback = [&](Status s) { 
+    meta.download_callback = [&](Status s) {
         ASSERT_TRUE(s.ok());
         latch.count_down(1);
     };
@@ -434,9 +439,8 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_2) {
     }};
     sp->enable_processing();
     RowsetId rowset_id = id_generator.next_id();
-    sp->set_call_back("BlockFileCache::mock_key", [](auto&& args) { 
-        *try_any_cast<std::string*>(args[0]) = tmp_file_1;
-    });
+    sp->set_call_back("BlockFileCache::mock_key",
+                      [](auto&& args) { *try_any_cast<std::string*>(args[0]) = tmp_file_1; });
     sp->set_call_back("CloudTabletMgr::get_tablet_2", [&](auto&& args) {
         auto tablet_id = try_any_cast<int64_t>(args[0]);
         auto tablet = try_any_cast<TabletSharedPtr*>(args[1]);
@@ -489,7 +493,8 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_2) {
     FileCacheSegmentDownloader::instance()->check_download_task(tablets, &done);
     EXPECT_FALSE(done[1000]);
     flag1 = true;
-    while (!flag2) {}
+    while (!flag2) {
+    }
     {
         auto key = io::BlockFileCache::hash("tmp_file");
         auto cache = FileCacheFactory::instance().get_by_path(key);
@@ -497,9 +502,9 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_2) {
         int i = 0;
         std::ranges::for_each(holders.file_segments, [&](FileBlockSPtr& block) {
             std::string buffer;
-            buffer.resize(i == 10 ? 1 : 1024*1024);
+            buffer.resize(i == 10 ? 1 : 1024 * 1024);
             ASSERT_TRUE(block->read_at(Slice(buffer.data(), buffer.size()), 0).ok());
-            EXPECT_EQ(std::string(i == 10 ? 1 : 1024*1024, '0' + (i % 10)), buffer);
+            EXPECT_EQ(std::string(i == 10 ? 1 : 1024 * 1024, '0' + (i % 10)), buffer);
             i++;
         });
     }
@@ -510,6 +515,5 @@ TEST_F(S3DownloaderTest, block_file_cache_downloader_test_2) {
     FileCacheFactory::instance()._path_to_cache.clear();
     FileCacheFactory::instance()._total_cache_size = 0;
 }
-
 
 } // namespace doris::io

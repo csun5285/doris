@@ -185,7 +185,7 @@ void download_file(std::shared_ptr<Aws::S3::S3Client> client, std::string key_na
                    size_t size, std::string bucket,
                    std::function<FileBlocksHolderPtr(size_t, size_t)> alloc_holder,
                    std::function<void(Status)> download_callback, Slice s) {
-    ExecEnv::GetInstance()->s3_downloader_download_thread_pool()->submit_func(
+    ExecEnv::GetInstance()->s3_downloader_download_poller_thread_pool()->submit_func(
             [c = std::move(client), key_name_ = std::move(key_name), offset, size,
              bucket_ = std::move(bucket), s, holder = std::move(alloc_holder),
              cb = std::move(download_callback)]() mutable {

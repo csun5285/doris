@@ -150,6 +150,11 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_threads(64)
             .build(&_s3_downloader_download_thread_pool);
 
+    ThreadPoolBuilder("S3DownloaderDownloadPollerThreadPool")
+            .set_min_threads(4)
+            .set_max_threads(16)
+            .build(&_s3_downloader_download_poller_thread_pool);
+
     _s3_pooled_executor = Aws::MakeShared<Aws::Utils::Threading::PooledThreadExecutor>(
             "s3_pooled_executor", config::s3_operation_pool_size);
 
