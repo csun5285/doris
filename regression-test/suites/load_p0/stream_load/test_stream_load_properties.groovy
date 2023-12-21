@@ -42,12 +42,28 @@ suite("test_stream_load_properties", "p0") {
                   "mow_tbl_array",
                  ]
 
+    def tables2pc = [
+                  "dup_tbl_basic",
+                  "uniq_tbl_basic",
+                  "agg_tbl_basic",
+                  "dup_tbl_array",
+                  "uniq_tbl_array",
+                 ]
+
     def columns = [ 
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18,k19=to_bitmap(k04),k20=HLL_HASH(k04),k21=TO_QUANTILE_STATE(k04,1.0),kd19=to_bitmap(k05),kd20=HLL_HASH(k05),kd21=TO_QUANTILE_STATE(k04,1.0)",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17",
+                    "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17",
+                    "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17",
+                  ]
+
+    def columns2pc = [ 
+                    "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18",
+                    "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18",
+                    "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17,k18,k19=to_bitmap(k04),k20=HLL_HASH(k04),k21=TO_QUANTILE_STATE(k04,1.0),kd19=to_bitmap(k05),kd20=HLL_HASH(k05),kd21=TO_QUANTILE_STATE(k04,1.0)",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17",
                     "k00,k01,k02,k03,k04,k05,k06,k07,k08,k09,k10,k11,k12,k13,k14,k15,k16,k17",
                   ]
@@ -71,6 +87,14 @@ suite("test_stream_load_properties", "p0") {
                   "basic_array_data.csv",
                   "basic_array_data.csv",
                   "basic_array_data.csv"
+                ]
+
+    def files2pc = [
+                  "basic_data.csv",
+                  "basic_data.csv",
+                  "basic_data.csv",
+                  "basic_array_data.csv",
+                  "basic_array_data.csv",
                 ]
 
     def timezoneFiles = [
@@ -505,7 +529,7 @@ suite("test_stream_load_properties", "p0") {
 
     i = 0
     try {
-        for (String tableName in tables) {
+        for (String tableName in tables2pc) {
             sql new File("""${context.file.parent}/ddl/${tableName}_drop.sql""").text
             sql new File("""${context.file.parent}/ddl/${tableName}_create.sql""").text
 
@@ -513,9 +537,9 @@ suite("test_stream_load_properties", "p0") {
             streamLoad {
                 table "stream_load_" + tableName
                 set 'column_separator', '|'
-                set 'columns', columns[i]
+                set 'columns', columns2pc[i]
                 set 'two_phase_commit', 'true'
-                file files[i]
+                file files2pc[i]
                 time 10000 // limit inflight 10s
 
                 check { result, exception, startTime, endTime ->
@@ -551,9 +575,9 @@ suite("test_stream_load_properties", "p0") {
             streamLoad {
                 table "stream_load_" + tableName
                 set 'column_separator', '|'
-                set 'columns', columns[i]
+                set 'columns', columns2pc[i]
                 set 'two_phase_commit', 'true'
-                file files[i]
+                file files2pc[i]
                 time 10000 // limit inflight 10s
 
                 check { result, exception, startTime, endTime ->
@@ -602,7 +626,7 @@ suite("test_stream_load_properties", "p0") {
             i++
         }
     } finally {
-        for (String tableName in tables) {
+        for (String tableName in tables2pc) {
             def tableName1 =  "stream_load_" + tableName
             sql "DROP TABLE IF EXISTS ${tableName1} FORCE"
         }
