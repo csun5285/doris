@@ -184,7 +184,6 @@ void MetaServiceImpl::get_version(::google::protobuf::RpcController* controller,
     }
 
     RPC_PREPROCESS(get_version);
-    // TODO(dx): For auth
     std::string cloud_unique_id;
     if (request->has_cloud_unique_id()) {
         cloud_unique_id = request->cloud_unique_id();

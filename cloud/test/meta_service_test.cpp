@@ -3901,6 +3901,21 @@ TEST(MetaServiceTest, GetVersion) {
     int64_t partition_id = 1;
     int64_t tablet_id = 1;
 
+    // INVALID_ARGUMENT
+    {
+        brpc::Controller ctrl;
+        GetVersionRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_table_id(table_id);
+        req.set_partition_id(partition_id);
+
+        GetVersionResponse resp;
+        service->get_version(&ctrl, &req, &resp, nullptr);
+
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+                << " status is " << resp.status().DebugString();
+    }
+
     {
         brpc::Controller ctrl;
         GetVersionRequest req;
@@ -3997,6 +4012,19 @@ TEST(MetaServiceTest, BatchGetVersion) {
 
         std::vector<int64_t> versions(resp.versions().begin(), resp.versions().end());
         EXPECT_EQ(versions, expected_versions) << "case " << i;
+    }
+
+    // INVALID_ARGUMENT
+    {
+        brpc::Controller ctrl;
+        GetVersionRequest req;
+        req.set_cloud_unique_id("test_cloud_unique_id");
+        req.set_batch_mode(true);
+        GetVersionResponse resp;
+        service->get_version(&ctrl, &req, &resp, nullptr);
+        ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
+            << " status is " << resp.status().msg()
+            << ", code=" << resp.status().code();
     }
 }
 
