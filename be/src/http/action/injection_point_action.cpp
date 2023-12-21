@@ -35,6 +35,20 @@ void register_suites() {
             pair->second = true;
         });
     });
+    suite_map.emplace("test_s3_file_writer", [] {
+        auto sp = SyncPoint::get_instance();
+        sp->set_call_back("UploadFileBuffer::upload_to_local_file_cache", [](auto&&) {
+            std::srand(static_cast<unsigned int>(std::time(nullptr)));
+            int random_sleep_time_second = std::rand() % 10 + 1;
+            std::this_thread::sleep_for(std::chrono::seconds(random_sleep_time_second));
+        });
+        sp->set_call_back("UploadFileBuffer::upload_to_local_file_cache_inject", [](auto&& args) {
+            auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+            pair->first =
+                    Status::IOError<false>("failed to write into file cache due to inject error");
+            pair->second = true;
+        });
+    });
 }
 
 void set_sleep(const std::string& point, HttpRequest* req) {
