@@ -401,6 +401,11 @@ public class LoadManager implements Writable {
         if (job.isCompleted()) {
             Env.getCurrentGlobalTransactionMgr().getCallbackFactory().removeCallback(job.getId());
         }
+
+        // When idToLoadJob size increase 10000 roughly, we run removeOldLoadJob to reduce mem used
+        if ((idToLoadJob.size() > 0) && (idToLoadJob.size() % 10000 == 0)) {
+            removeOldLoadJob();
+        }
     }
 
     /**
@@ -474,7 +479,8 @@ public class LoadManager implements Writable {
      **/
     public void removeOldLoadJob() {
         long currentTimeMs = System.currentTimeMillis();
-
+        long removeJobNum = 0;
+        LOG.info("start to removeOldLoadJob, currentTimeMs:{}", currentTimeMs);
         writeLock();
         try {
             Iterator<Map.Entry<Long, LoadJob>> iter = idToLoadJob.entrySet().iterator();
@@ -494,11 +500,13 @@ public class LoadManager implements Writable {
                     if (map.isEmpty()) {
                         dbIdToLabelToLoadJobs.remove(job.getDbId());
                     }
+                    removeJobNum++;
                 }
             }
         } finally {
             writeUnlock();
         }
+        LOG.info("end to removeOldLoadJob, removeJobNum:{}", removeJobNum);
         removeCopyJobs();
     }
 
