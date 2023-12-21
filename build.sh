@@ -377,7 +377,7 @@ if [[ -z "${USE_BTHREAD_SCANNER}" ]]; then
     USE_BTHREAD_SCANNER='OFF'
 fi
 if [[ -z "${ENABLE_STACKTRACE}" ]]; then
-    ENABLE_STACKTRACE='ON'
+    ENABLE_STACKTRACE='OFF'
 fi
 if [[ -z "${USE_DWARF}" ]]; then
     USE_DWARF='OFF'
