@@ -88,6 +88,7 @@ static void help(const char*);
 
 extern "C" {
 void __lsan_do_leak_check();
+int __llvm_profile_write_file();
 }
 
 namespace doris {
@@ -568,7 +569,11 @@ int main(int argc, char** argv) {
 #endif
         sleep(10);
     }
-
+    LOG(INFO) << "Doris main exiting.";
+#if defined(LLVM_PROFILE)
+    __llvm_profile_write_file();
+    LOG(INFO) << "Flush profile file.";
+#endif
     doris::TabletSchemaCache::stop_and_join();
     http_service.stop();
     brpc_service.join();
