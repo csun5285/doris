@@ -18,6 +18,7 @@
 #include "io/fs/err_utils.h"
 
 // IWYU pragma: no_include <bthread/errno.h>
+#include <aws/s3/S3Errors.h>
 #include <errno.h> // IWYU pragma: keep
 #include <fmt/format.h>
 #include <string.h>
@@ -27,6 +28,8 @@
 #include "io/fs/hdfs.h"
 
 namespace doris {
+using namespace ErrorCode;
+
 namespace io {
 
 std::string errno_to_str() {
@@ -71,6 +74,53 @@ std::string glob_err_to_str(int code) {
         break;
     }
     return fmt::format("({}), {}", code, msg);
+}
+
+Status localfs_error(const std::error_code& ec, std::string_view msg) {
+    if (ec == std::errc::io_error) {
+        return Status::IOError(msg);
+    } else if (ec == std::errc::no_such_file_or_directory) {
+        return Status::NotFound(msg);
+    } else if (ec == std::errc::file_exists) {
+        return Status::AlreadyExist(msg);
+    } else if (ec == std::errc::no_space_on_device) {
+        return Status::Error<DISK_REACH_CAPACITY_LIMIT>(msg);
+    } else if (ec == std::errc::permission_denied) {
+        return Status::Error<PERMISSION_DENIED>(msg);
+    } else {
+        return Status::InternalError("{}: {}", msg, ec.message());
+    }
+}
+
+Status localfs_error(int posix_errno, std::string_view msg) {
+    switch (posix_errno) {
+    case EIO:
+        return Status::IOError(msg);
+    case ENOENT:
+        return Status::NotFound(msg);
+    case EEXIST:
+        return Status::AlreadyExist(msg);
+    case ENOSPC:
+        return Status::Error<DISK_REACH_CAPACITY_LIMIT>(msg);
+    case EACCES:
+        return Status::Error<PERMISSION_DENIED>(msg);
+    default:
+        return Status::InternalError("{}: {}", msg, std::strerror(posix_errno));
+    }
+}
+
+Status s3fs_error(const Aws::S3::S3Error& err, std::string_view msg) {
+    using namespace Aws::Http;
+    switch (err.GetResponseCode()) {
+    case HttpResponseCode::NOT_FOUND:
+        return Status::NotFound("{}: {} {}", msg, err.GetExceptionName(), err.GetMessage());
+    case HttpResponseCode::FORBIDDEN:
+        return Status::Error<PERMISSION_DENIED>("{}: {} {}", msg, err.GetExceptionName(),
+                                                err.GetMessage());
+    default:
+        return Status::InternalError("{}: {} {} code={}", msg, err.GetExceptionName(),
+                                     err.GetMessage(), err.GetResponseCode());
+    }
 }
 
 } // namespace io

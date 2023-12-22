@@ -32,6 +32,7 @@
 #include <utility>
 
 #include "common/logging.h"
+#include "common/status.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
@@ -132,11 +133,11 @@ std::string BlockFileCache::get_path_in_local_cache(const Key& key, uint64_t exp
            (std::to_string(offset) + (is_tmp ? "_tmp" : cache_type_to_string(type)));
 }
 
-std::string BlockFileCache::get_path_in_local_cache(const Key& key, uint64_t expiration_time) const {
+std::string BlockFileCache::get_path_in_local_cache(const Key& key,
+                                                    uint64_t expiration_time) const {
     auto key_str = key.to_string();
     try {
-        return Path(_cache_base_path) /
-               (key_str + "_" + std::to_string(expiration_time));
+        return Path(_cache_base_path) / (key_str + "_" + std::to_string(expiration_time));
     } catch (std::filesystem::filesystem_error& e) {
         LOG(WARNING) << "fail to get_path_in_local_cache=" << e.what();
         return "";
@@ -213,8 +214,9 @@ Status BlockFileCache::initialize() {
 }
 
 Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_lock) {
-    std::error_code ec;
-    if (bool is_exist = std::filesystem::exists(_cache_base_path, ec); is_exist && !ec) {
+    auto& local_fs = io::global_local_filesystem();
+    auto st = local_fs->create_directory(_cache_base_path, true);
+    if (st.is<ErrorCode::ALREADY_EXIST>()) {
         _cache_background_load_thread = std::thread([&]() {
             _lazy_open_done = false;
             load_cache_info_into_memory();
@@ -232,17 +234,9 @@ Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
                     _normal_queue.get_total_cache_size(cache_lock),
                     _normal_queue.get_elements_num(cache_lock));
         });
-    } else if (ec) [[unlikely]] {
-        LOG(WARNING) << "fail to dir exists=" << std::strerror(ec.value());
-        return Status::IOError("filesystem exists {}: {}", _cache_base_path,
-                               std::strerror(ec.value()));
-    } else {
-        std::filesystem::create_directories(_cache_base_path, ec);
-        if (ec) {
-            LOG(WARNING) << "fail to create_directories=" << std::strerror(ec.value());
-            return Status::IOError("cannot create {}: {}", _cache_base_path,
-                                   std::strerror(ec.value()));
-        }
+    } else if (!st.ok()) {
+        return st;
+    } else { // create OK
         _lazy_open_done = true;
     }
     _cache_background_thread = std::thread(&BlockFileCache::run_background_operation, this);
@@ -288,8 +282,8 @@ Status BlockFileCache::clear_file_cache_directly() {
     _disposable_queue.clear(cache_lock);
     auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
     LOG_INFO("End clear file cache directly")
-        .tag("path", _async_clear_file_cache)
-        .tag("use_time", static_cast<int64_t>(use_time.count()));
+            .tag("path", _async_clear_file_cache)
+            .tag("use_time", static_cast<int64_t>(use_time.count()));
     return Status::OK();
 }
 
@@ -376,8 +370,8 @@ void BlockFileCache::recycle_deleted_blocks() {
         _async_clear_file_cache = false;
         auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
         LOG_INFO("End clear file cache async")
-        .tag("path", _async_clear_file_cache)
-        .tag("use_time", static_cast<int64_t>(use_time.count()));
+                .tag("path", _async_clear_file_cache)
+                .tag("use_time", static_cast<int64_t>(use_time.count()));
     }
 }
 
@@ -549,8 +543,9 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
         }
         _key_to_time[key] = context.expiration_time;
         _time_to_key.insert(std::make_pair(context.expiration_time, key));
-        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, 0),
-                                get_path_in_local_cache(key, context.expiration_time));
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(key, 0),
+                get_path_in_local_cache(key, context.expiration_time));
         if (!st.ok()) {
             LOG_WARNING("").error(st);
         } else {
@@ -560,8 +555,9 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
     if (auto iter = _key_to_time.find(key);
         (context.cache_type == FileCacheType::NORMAL || context.cache_type == FileCacheType::TTL) &&
         iter != _key_to_time.end() && iter->second != context.expiration_time) {
-         Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, iter->second),
-                                get_path_in_local_cache(key, context.expiration_time));
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(key, iter->second),
+                get_path_in_local_cache(key, context.expiration_time));
         if (!st.ok()) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
                          << get_path_in_local_cache(key, iter->second)
@@ -977,7 +973,8 @@ bool BlockFileCache::try_reserve(const Key& key, const CacheContext& context, si
         return _disk_resource_limit_mode ? removed_size < size
                                          : cur_cache_size + size - removed_size > _total_size ||
                                                    (queue_size + size - removed_size > max_size) ||
-                                                   (query_context_cache_size + size - (removed_size + ghost_remove_size) >
+                                                   (query_context_cache_size + size -
+                                                            (removed_size + ghost_remove_size) >
                                                     query_context->get_max_cache_size());
     };
 
@@ -1048,8 +1045,9 @@ bool BlockFileCache::remove_if_ttl_file_unlock(const Key& file_key, bool remove_
                     }
                 }
             }
-            Status st = global_local_filesystem()->rename(get_path_in_local_cache(file_key, iter->second),
-                                    get_path_in_local_cache(file_key, 0));
+            Status st = global_local_filesystem()->rename(
+                    get_path_in_local_cache(file_key, iter->second),
+                    get_path_in_local_cache(file_key, 0));
             if (!st.ok()) {
                 LOG_WARNING("").error(st);
             }
@@ -1388,7 +1386,8 @@ void BlockFileCache::load_cache_info_into_memory() {
             TEST_SYNC_POINT_CALLBACK("BlockFileCache::REMOVE_FILE_2", &offset_with_suffix);
             size = offset_it->file_size(ec);
             if (ec) {
-                LOG(WARNING) << "failed to file_size: file_name=" << offset_with_suffix << "error=" << ec.message();
+                LOG(WARNING) << "failed to file_size: file_name=" << offset_with_suffix
+                             << "error=" << ec.message();
                 continue;
             }
             if (size == 0 && !is_tmp) {
@@ -1658,8 +1657,9 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
     }
     // 2. If the key in ttl cache, modify its expiration time.
     if (auto iter = _key_to_time.find(key); iter != _key_to_time.end()) {
-        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, iter->second),
-                                get_path_in_local_cache(key, new_expiration_time));
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(key, iter->second),
+                get_path_in_local_cache(key, new_expiration_time));
         if (!st.ok()) [[unlikely]] {
             LOG(WARNING) << "filesystem error, failed to rename file, from file="
                          << get_path_in_local_cache(key, iter->second)
@@ -1696,8 +1696,8 @@ void BlockFileCache::modify_expiration_time(const Key& key, int64_t new_expirati
         }
         _key_to_time[key] = new_expiration_time;
         _time_to_key.insert(std::make_pair(new_expiration_time, key));
-        Status st = global_local_filesystem()->rename(get_path_in_local_cache(key, 0),
-                                get_path_in_local_cache(key, new_expiration_time));
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(key, 0), get_path_in_local_cache(key, new_expiration_time));
         if (!st.ok()) {
             LOG_WARNING("").error(st);
         } else {

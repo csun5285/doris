@@ -33,16 +33,6 @@ DummyFileCache::DummyFileCache(const Path& cache_dir, int64_t alive_time_sec)
 DummyFileCache::~DummyFileCache() = default;
 
 void DummyFileCache::_add_file_cache(const Path& data_file) {
-    Path cache_file = _cache_dir / data_file;
-    int64_t file_size = -1;
-    time_t m_time = 0;
-    if (io::global_local_filesystem()->file_size(cache_file, &file_size).ok() &&
-        io::global_local_filesystem()->mtime(cache_file, &m_time).ok()) {
-        _gc_lru_queue.push({cache_file, m_time});
-        _cache_file_size += file_size;
-    } else {
-        _unfinished_files.push_back(cache_file);
-    }
 }
 
 void DummyFileCache::_load() {

@@ -45,7 +45,7 @@ Status CGroupUtil::find_global_cgroup(const string& subsystem, string* path) {
     string line;
     while (true) {
         if (proc_cgroups.fail()) {
-            return Status::IOError("Error reading /proc/self/cgroup: {}", get_str_err_msg());
+            return Status::InternalError("Error reading /proc/self/cgroup: {}", get_str_err_msg());
         } else if (proc_cgroups.peek() == std::ifstream::traits_type::eof()) {
             return Status::NotFound("Could not find subsystem {} in /proc/self/cgroup", subsystem);
         }
@@ -87,7 +87,7 @@ static Status read_cgroup_value(const string& limit_file_path, int64_t* val) {
     string line;
     getline(limit_file, line);
     if (limit_file.fail() || limit_file.bad()) {
-        return Status::IOError("Error reading {}: {}", limit_file_path, get_str_err_msg());
+        return Status::InternalError("Error reading {}: {}", limit_file_path, get_str_err_msg());
     }
     StringParser::ParseResult pr;
     // Parse into an int64_t If it overflows, returning the max value of int64_t is ok because that
@@ -104,7 +104,7 @@ Status CGroupUtil::find_cgroup_mounts(const string& subsystem, pair<string, stri
     string line;
     while (true) {
         if (mountinfo.fail() || mountinfo.bad()) {
-            return Status::IOError("Error reading /proc/self/mountinfo: {}", get_str_err_msg());
+            return Status::InternalError("Error reading /proc/self/mountinfo: {}", get_str_err_msg());
         } else if (mountinfo.eof()) {
             return Status::NotFound("Could not find subsystem {} in /proc/self/mountinfo",
                                     subsystem);

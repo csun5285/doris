@@ -19,6 +19,7 @@
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_segment.h"
+#include "io/fs/err_utils.h"
 #include "io/fs/s3_common.h"
 #include "io/fs/s3_file_bufferpool.h"
 #include "io/fs/s3_file_system.h"
@@ -30,10 +31,15 @@
 namespace doris::io {
 using Aws::S3::Model::GetObjectRequest;
 
+namespace {
 bvar::Adder<uint64_t> file_cache_downloader_counter("file_cache_downloader", "size");
 
-static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name,
-                             std::string bucket, size_t offset, size_t size, Slice& s) {
+std::string s3_path(std::string_view bucket, std::string_view key) {
+    return fmt::format("s3://{}/{}", bucket, key);
+}
+
+Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::string key_name,
+                      std::string bucket, size_t offset, size_t size, Slice& s) {
     GetObjectRequest request;
     request.WithBucket(bucket).WithKey(key_name);
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
@@ -44,13 +50,13 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
 
     TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);
     if (!outcome.IsSuccess()) {
-        return Status::IOError("failed to read from {}: {}", key_name,
-                               outcome.GetError().GetMessage());
+        return s3fs_error(outcome.GetError(),
+                          fmt::format("failed to read from {}", s3_path(bucket, key_name)));
     }
     auto bytes_read = outcome.GetResult().GetContentLength();
     if (bytes_read != size) {
-        return Status::IOError("failed to read from {}(bytes read: {}, bytes req: {})", key_name,
-                               bytes_read, size);
+        return Status::InternalError("failed to read from {}(bytes read: {}, bytes req: {})",
+                                     s3_path(bucket, key_name), bytes_read, size);
     }
     s.size = bytes_read;
 
@@ -58,7 +64,7 @@ static Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::str
 }
 
 // maybe we should move this logic inside s3 file bufferpool.cpp
-static void _append_data_to_file_cache(FileBlocksHolderPtr holder, Slice data) {
+void _append_data_to_file_cache(FileBlocksHolderPtr holder, Slice data) {
     size_t offset = 0;
     std::for_each(holder->file_segments.begin(), holder->file_segments.end(),
                   [&](FileBlockSPtr& file_segment) {
@@ -78,6 +84,8 @@ static void _append_data_to_file_cache(FileBlocksHolderPtr holder, Slice data) {
                       offset += file_segment->range().size();
                   });
 }
+
+} // namespace
 
 struct DownloadTaskExecutor {
     DownloadTaskExecutor() = default;

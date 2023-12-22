@@ -247,9 +247,10 @@ public:
         config::storage_root_path = std::string(buffer) + "/" + kTestDir;
         config::min_file_descriptor_number = 1000;
 
-        EXPECT_TRUE(io::global_local_filesystem()
-                            ->delete_and_create_directory(config::storage_root_path)
-                            .ok());
+        auto st = io::global_local_filesystem()->delete_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
+        st = io::global_local_filesystem()->create_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
         EXPECT_TRUE(io::global_local_filesystem()
                             ->create_directory(get_remote_path(fmt::format("data/{}", kTabletId)))
                             .ok());

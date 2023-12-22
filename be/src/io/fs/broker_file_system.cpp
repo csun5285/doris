@@ -338,10 +338,6 @@ Status BrokerFileSystem::rename_impl(const Path& orig_name, const Path& new_name
     return Status::OK();
 }
 
-Status BrokerFileSystem::rename_dir_impl(const Path& orig_name, const Path& new_name) {
-    return rename_impl(orig_name, new_name);
-}
-
 Status BrokerFileSystem::upload_impl(const Path& local_file, const Path& remote_file) {
     // 1. open local file for read
     FileSystemSPtr local_fs = global_local_filesystem();
@@ -389,21 +385,6 @@ Status BrokerFileSystem::batch_upload_impl(const std::vector<Path>& local_files,
     return Status::OK();
 }
 
-Status BrokerFileSystem::direct_upload_impl(const Path& remote_file, const std::string& content) {
-    FileWriterPtr broker_writer = nullptr;
-    RETURN_IF_ERROR(create_file_impl(remote_file, &broker_writer, nullptr));
-    RETURN_IF_ERROR(broker_writer->append({content}));
-    return broker_writer->close();
-}
-
-Status BrokerFileSystem::upload_with_checksum_impl(const Path& local_file, const Path& remote_file,
-                                                   const std::string& checksum) {
-    std::string temp = remote_file.string() + ".part";
-    std::string final_file = remote_file.string() + "." + checksum;
-    RETURN_IF_ERROR(upload_impl(local_file, temp));
-    return rename_impl(temp, final_file);
-}
-
 Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& local_file) {
     // 1. open remote file for read
     FileReaderSPtr broker_reader = nullptr;
@@ -436,30 +417,6 @@ Status BrokerFileSystem::download_impl(const Path& remote_file, const Path& loca
         RETURN_IF_ERROR(local_writer->append({read_buf.get(), read_len}));
     } // file_handler should be closed before calculating checksum
 
-    return Status::OK();
-}
-
-Status BrokerFileSystem::direct_download_impl(const Path& remote_impl, std::string* content) {
-    // 1. open remote file for read
-    FileReaderSPtr broker_reader = nullptr;
-    RETURN_IF_ERROR(open_file_internal(remote_impl, &broker_reader, nullptr));
-
-    constexpr size_t buf_sz = 1024 * 1024;
-    std::unique_ptr<char[]> read_buf(new char[buf_sz]);
-    size_t write_offset = 0;
-    size_t cur_offset = 0;
-    while (true) {
-        size_t read_len = 0;
-        Slice file_slice(read_buf.get(), buf_sz);
-        RETURN_IF_ERROR(broker_reader->read_at(cur_offset, file_slice, &read_len));
-        cur_offset += read_len;
-        if (read_len == 0) {
-            break;
-        }
-
-        content->insert(write_offset, read_buf.get(), read_len);
-        write_offset += read_len;
-    }
     return Status::OK();
 }
 

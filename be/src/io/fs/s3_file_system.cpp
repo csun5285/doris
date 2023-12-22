@@ -57,6 +57,7 @@
 #include <algorithm>
 
 #include "common/sync_point.h"
+#include "io/fs/err_utils.h"
 #include "io/fs/file_reader_options.h"
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
@@ -87,9 +88,9 @@ namespace io {
 bvar::Adder<uint64_t> s3_file_size_counter("s3_file_system", "file_size");
 
 #ifndef CHECK_S3_CLIENT
-#define CHECK_S3_CLIENT(client)                         \
-    if (!client) {                                      \
-        return Status::IOError("init s3 client error"); \
+#define CHECK_S3_CLIENT(client)                               \
+    if (!client) {                                            \
+        return Status::InternalError("init s3 client error"); \
     }
 #endif
 
@@ -210,7 +211,7 @@ Status S3FileSystem::delete_file_impl(const Path& file) {
         outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
         return Status::OK();
     }
-    return Status::IOError("failed to delete file {}: {}", file.native(), error_msg(key, outcome));
+    return s3fs_error(outcome.GetError(), fmt::format("failed to delete file {}", full_path(key)));
 }
 
 Status S3FileSystem::delete_directory_impl(const Path& dir) {
@@ -234,8 +235,9 @@ Status S3FileSystem::delete_directory_impl(const Path& dir) {
             outcome = client->ListObjectsV2(request);
         }
         if (!outcome.IsSuccess()) {
-            return Status::IOError("failed to list objects when delete dir {}: {}", dir.native(),
-                                   error_msg(prefix, outcome));
+            return s3fs_error(
+                    outcome.GetError(),
+                    fmt::format("failed to list objects when delete dir {}", full_path(prefix)));
         }
         const auto& result = outcome.GetResult();
         Aws::Vector<Aws::S3::Model::ObjectIdentifier> objects;
@@ -250,13 +252,13 @@ Status S3FileSystem::delete_directory_impl(const Path& dir) {
             SCOPED_BVAR_LATENCY(s3_bvar::s3_delete_latency);
             auto delete_outcome = client->DeleteObjects(delete_request);
             if (!delete_outcome.IsSuccess()) {
-                return Status::IOError("failed to delete dir {}: {}", dir.native(),
-                                       error_msg(prefix, delete_outcome));
+                return s3fs_error(delete_outcome.GetError(),
+                                  fmt::format("failed to delete dir {}", full_path(prefix)));
             }
             if (!delete_outcome.GetResult().GetErrors().empty()) {
                 const auto& e = delete_outcome.GetResult().GetErrors().front();
-                return Status::IOError("fail to delete object: {}",
-                                       error_msg(e.GetKey(), e.GetMessage()));
+                return Status::InternalError("failed to delete object {}: {}",
+                                             full_path(e.GetKey()), e.GetMessage());
             }
             VLOG_TRACE << "delete " << objects.size()
                        << " s3 objects, endpoint: " << _s3_conf.endpoint
@@ -295,15 +297,16 @@ Status S3FileSystem::batch_delete_impl(const std::vector<Path>& remote_files) {
         SCOPED_BVAR_LATENCY(s3_bvar::s3_delete_latency);
         auto delete_outcome = client->DeleteObjects(delete_request);
         if (UNLIKELY(!delete_outcome.IsSuccess())) {
-            return Status::IOError(
-                    "failed to delete objects: {}",
-                    error_msg(delete_request.GetDelete().GetObjects().front().GetKey(),
-                              delete_outcome));
+            return s3fs_error(
+                    delete_outcome.GetError(),
+                    fmt::format(
+                            "failed to delete objects {}",
+                            full_path(delete_request.GetDelete().GetObjects().front().GetKey())));
         }
         if (UNLIKELY(!delete_outcome.GetResult().GetErrors().empty())) {
             const auto& e = delete_outcome.GetResult().GetErrors().front();
-            return Status::IOError("failed to delete objects: {}",
-                                   error_msg(e.GetKey(), delete_outcome));
+            return Status::InternalError("failed to delete object {}: {}", full_path(e.GetKey()),
+                                         e.GetMessage());
         }
     } while (path_iter != remote_files.end());
 
@@ -326,8 +329,8 @@ Status S3FileSystem::exists_impl(const Path& path, bool* res) const {
     } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
         *res = false;
     } else {
-        return Status::IOError("failed to check exists {}: {}", path.native(),
-                               error_msg(key, outcome));
+        return s3fs_error(outcome.GetError(),
+                          fmt::format("failed to check exists {}", full_path(key)));
     }
     return Status::OK();
 }
@@ -346,8 +349,8 @@ Status S3FileSystem::file_size_impl(const Path& file, int64_t* file_size) const 
     if (outcome.IsSuccess()) {
         *file_size = outcome.GetResult().GetContentLength();
     } else {
-        return Status::IOError("failed to get file size {}, {}", file.native(),
-                               error_msg(key, outcome));
+        return s3fs_error(outcome.GetError(),
+                          fmt::format("failed to get file size {}", full_path(key)));
     }
     s3_file_size_counter << 1;
     return Status::OK();
@@ -377,8 +380,8 @@ Status S3FileSystem::list_impl(const Path& dir, bool only_file, std::vector<File
                                                         std::ref(request).get());
         }
         if (!outcome.IsSuccess()) {
-            return Status::IOError("failed to list {}: {}", dir.native(),
-                                   error_msg(prefix, outcome));
+            return s3fs_error(outcome.GetError(),
+                              fmt::format("failed to list {}", full_path(prefix)));
         }
         for (const auto& obj : outcome.GetResult().GetContents()) {
             std::string key = obj.GetKey();
@@ -401,13 +404,7 @@ Status S3FileSystem::list_impl(const Path& dir, bool only_file, std::vector<File
 }
 
 Status S3FileSystem::rename_impl(const Path& orig_name, const Path& new_name) {
-    RETURN_IF_ERROR(copy(orig_name, new_name));
-    return delete_file_impl(orig_name);
-}
-
-Status S3FileSystem::rename_dir_impl(const Path& orig_name, const Path& new_name) {
-    RETURN_IF_ERROR(copy_dir(orig_name, new_name));
-    return delete_directory_impl(orig_name);
+    return Status::NotSupported("S3FileSystem::rename_impl");
 }
 
 Status S3FileSystem::upload_impl(const Path& local_file, const Path& remote_file) {
@@ -423,8 +420,8 @@ Status S3FileSystem::upload_impl(const Path& local_file, const Path& remote_file
     auto duration = std::chrono::duration<float>(std::chrono::steady_clock::now() - start);
 
     if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
-        return Status::IOError("failed to upload {}: {}", remote_file.native(),
-                               error_msg(key, handle->GetLastError().GetMessage()));
+        return s3fs_error(handle->GetLastError(), fmt::format("failed to upload {} to {}",
+                                                              local_file.native(), full_path(key)));
     }
 
     auto file_size = std::filesystem::file_size(local_file);
@@ -460,42 +457,11 @@ Status S3FileSystem::batch_upload_impl(const std::vector<Path>& local_files,
         handle->WaitUntilFinished();
         if (handle->GetStatus() != Aws::Transfer::TransferStatus::COMPLETED) {
             // TODO(cyx): Maybe we can cancel remaining handles.
-            return Status::IOError(
-                    "failed to upload: {}",
-                    error_msg(handle->GetKey(), handle->GetLastError().GetMessage()));
+            return s3fs_error(handle->GetLastError(),
+                              fmt::format("failed to upload to {}", full_path(handle->GetKey())));
         }
     }
     return Status::OK();
-}
-
-Status S3FileSystem::direct_upload_impl(const Path& remote_file, const std::string& content) {
-    CHECK_S3_CLIENT(_client);
-    Aws::S3::Model::PutObjectRequest request;
-    GET_KEY(key, remote_file);
-    request.WithBucket(_s3_conf.bucket).WithKey(key);
-    const std::shared_ptr<Aws::IOStream> input_data =
-            Aws::MakeShared<Aws::StringStream>("upload_directly");
-    *input_data << content.c_str();
-    if (input_data->good()) {
-        request.SetBody(input_data);
-    }
-    if (!input_data->good()) {
-        return Status::IOError("failed to direct upload {}: failed to read from string",
-                               remote_file.native());
-    }
-    SCOPED_BVAR_LATENCY(s3_bvar::s3_put_latency);
-    Aws::S3::Model::PutObjectOutcome response = _client->PutObject(request);
-    if (response.IsSuccess()) {
-        return Status::OK();
-    } else {
-        return Status::IOError("failed to direct upload {}: {}", remote_file.native(),
-                               error_msg(key, response));
-    }
-}
-
-Status S3FileSystem::upload_with_checksum_impl(const Path& local_file, const Path& remote_file,
-                                               const std::string& checksum) {
-    return upload_impl(local_file, remote_file.string() + "." + checksum);
 }
 
 Status S3FileSystem::download_impl(const Path& remote_file, const Path& local_file) {
@@ -514,70 +480,13 @@ Status S3FileSystem::download_impl(const Path& remote_file, const Path& local_fi
         local_file_s.open(local_file, std::ios::out | std::ios::binary);
         if (local_file_s.good()) {
             local_file_s << response.GetResult().GetBody().rdbuf();
+        } else {
+            return localfs_error(errno,
+                                 fmt::format("failed to write file {}", local_file.native()));
         }
-        if (!local_file_s.good()) {
-            return Status::IOError("failed to download {}: failed to write file: {}",
-                                   remote_file.native(), local_file.native());
-        }
     } else {
-        return Status::IOError("failed to download {}: {}", remote_file.native(),
-                               error_msg(key, response));
-    }
-    return Status::OK();
-}
-
-Status S3FileSystem::direct_download_impl(const Path& remote, std::string* content) {
-    CHECK_S3_CLIENT(_client);
-    Aws::S3::Model::GetObjectRequest request;
-    GET_KEY(key, remote);
-    request.WithBucket(_s3_conf.bucket).WithKey(key);
-    Aws::S3::Model::GetObjectOutcome response;
-    {
-        SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
-        response = _client->GetObject(request);
-    }
-    if (response.IsSuccess()) {
-        std::stringstream ss;
-        ss << response.GetResult().GetBody().rdbuf();
-        *content = ss.str();
-    } else {
-        return Status::IOError("failed to direct download {}: {}", remote.native(),
-                               error_msg(key, response));
-    }
-    return Status::OK();
-}
-
-Status S3FileSystem::copy(const Path& src, const Path& dst) {
-    CHECK_S3_CLIENT(_client);
-    Aws::S3::Model::CopyObjectRequest request;
-    GET_KEY(src_key, src);
-    GET_KEY(dst_key, dst);
-    request.WithCopySource(_s3_conf.bucket + "/" + src_key)
-            .WithKey(dst_key)
-            .WithBucket(_s3_conf.bucket);
-    SCOPED_BVAR_LATENCY(s3_bvar::s3_copy_object_latency);
-    Aws::S3::Model::CopyObjectOutcome response = _client->CopyObject(request);
-    if (response.IsSuccess()) {
-        return Status::OK();
-    } else {
-        return Status::IOError("failed to copy from {} to {}: {}", src.native(), dst.native(),
-                               error_msg(src_key, response));
-    }
-}
-
-Status S3FileSystem::copy_dir(const Path& src, const Path& dst) {
-    std::vector<FileInfo> files;
-    bool exists = false;
-    RETURN_IF_ERROR(list_impl(src, true, &files, &exists));
-    if (!exists) {
-        return Status::IOError("path not found: {}", src.native());
-    }
-    if (files.empty()) {
-        LOG(WARNING) << "Nothing need to copy: " << src << " -> " << dst;
-        return Status::OK();
-    }
-    for (auto& file : files) {
-        RETURN_IF_ERROR(copy(src / file.file_name, dst / file.file_name));
+        return s3fs_error(response.GetError(),
+                          fmt::format("failed to download {}", full_path(key)));
     }
     return Status::OK();
 }
@@ -588,17 +497,8 @@ Status S3FileSystem::get_key(const Path& path, std::string* key) const {
     return Status::OK();
 }
 
-template <typename AwsOutcome>
-std::string S3FileSystem::error_msg(const std::string& key, const AwsOutcome& outcome) const {
-    return fmt::format("(endpoint: {}, bucket: {}, key:{}, {}), {}, error code {}",
-                       _s3_conf.endpoint, _s3_conf.bucket, key,
-                       outcome.GetError().GetExceptionName(), outcome.GetError().GetMessage(),
-                       outcome.GetError().GetResponseCode());
-}
-
-std::string S3FileSystem::error_msg(const std::string& key, const std::string& err) const {
-    return fmt::format("(endpoint: {}, bucket: {}, key:{}), {}", _s3_conf.endpoint, _s3_conf.bucket,
-                       key, err);
+std::string S3FileSystem::full_path(std::string_view key) const {
+    return fmt::format("{}/{}/{}", _s3_conf.endpoint, _s3_conf.bucket, key);
 }
 
 // oss has public endpoint and private endpoint, is_public_endpoint determines
@@ -628,18 +528,11 @@ Status S3FileSystem::check_bucket_versioning() const {
 
     auto ip = BackendOptions::get_localhost();
     if (ip.empty() || ip == "127.0.0.1") {
-        return Status::InternalError("Versioning Err: fail to get correct host ip, ip=" + ip);
+        return Status::InternalError("Versioning Err: fail to get correct host ip, ip={}", ip);
     }
     const std::string check_key = _s3_conf.prefix + "/error_log/" + ip + "_check_versioning.txt";
-    const std::string check_value = "check bucket versioning";
-    const std::string bucket = _s3_conf.bucket;
-
-    auto log_with_s3_info = [&]() {
-        std::stringstream ss;
-        ss << " s3info: endpoint: " << _s3_conf.endpoint << " bucket:" << _s3_conf.bucket
-           << " key: " << check_key;
-        return ss.str();
-    };
+    std::string_view check_value = "check bucket versioning";
+    const auto& bucket = _s3_conf.bucket;
 
     Aws::S3::Model::GetBucketVersioningRequest request;
     request.SetBucket(bucket);
@@ -654,12 +547,14 @@ Status S3FileSystem::check_bucket_versioning() const {
         if (versioning_configuration == Aws::S3::Model::BucketVersioningStatus::Enabled) {
             LOG(INFO) << "Bucket versioning is enabled";
         } else {
-            return Status::InternalError("Versioning Err: Bucket versioning is not enabled" +
-                                         log_with_s3_info());
+            return Status::InternalError("Versioning Err: Bucket versioning is not enabled: {}",
+                                         full_path(check_key));
         }
     } else {
-        return Status::InternalError("Versioning Err: Error get bucket versioning configuration: " +
-                                     outcome.GetError().GetMessage() + log_with_s3_info());
+        return s3fs_error(
+                outcome.GetError(),
+                fmt::format("Versioning Err: Error get bucket versioning configuration: {}",
+                            full_path(bucket)));
     }
 
     // Todo: cos does not support the ListObjectVersions yet
@@ -682,8 +577,9 @@ Status S3FileSystem::check_bucket_versioning() const {
         upload_response = s3_client->PutObject(upload_request);
     }
     if (!upload_response.IsSuccess()) {
-        return Status::InternalError("Versioning Err: Error uploading check object : " +
-                                     upload_response.GetError().GetMessage() + log_with_s3_info());
+        return s3fs_error(upload_response.GetError(),
+                          fmt::format("Versioning Err: Error uploading check object: {}",
+                                      full_path(check_key)));
     }
     std::string check_version_id = upload_response.GetResult().GetVersionId();
     VLOG_DEBUG << "put verison_id:" << upload_response.GetResult().GetVersionId();
@@ -697,8 +593,9 @@ Status S3FileSystem::check_bucket_versioning() const {
         delete_response = s3_client->DeleteObject(delete_request);
     }
     if (!delete_response.IsSuccess()) {
-        return Status::InternalError("Versioning Err: Error deleting check object : " +
-                                     delete_response.GetError().GetMessage() + log_with_s3_info());
+        return s3fs_error(delete_response.GetError(),
+                          fmt::format("Versioning Err: Error deleting check object: {}",
+                                      full_path(check_key)));
     } else {
         VLOG_DEBUG << "delete version_id: " << delete_response.GetResult().GetVersionId();
     }
@@ -713,8 +610,9 @@ Status S3FileSystem::check_bucket_versioning() const {
         list_response = s3_client->ListObjectVersions(list_request);
     }
     if (!list_response.IsSuccess()) {
-        return Status::InternalError("Versioning Err: Error listing object versions: " +
-                                     list_response.GetError().GetMessage() + log_with_s3_info());
+        return s3fs_error(list_response.GetError(),
+                          fmt::format("Versioning Err: Error listing object versions: {}",
+                                      full_path(check_key)));
     } else {
         const auto& object_version_list = list_response.GetResult().GetVersions();
         bool hit_check_version_id = false;
@@ -725,12 +623,14 @@ Status S3FileSystem::check_bucket_versioning() const {
             }
         }
         const auto& delete_marker_list = list_response.GetResult().GetDeleteMarkers();
-        for (const auto& delete_marker : delete_marker_list) {
-            VLOG_DEBUG << "object deleteMarker version_id: " << delete_marker.GetVersionId();
+        if (VLOG_DEBUG_IS_ON) {
+            for (const auto& delete_marker : delete_marker_list) {
+                LOG(INFO) << "object deleteMarker version_id: " << delete_marker.GetVersionId();
+            }
         }
         if (!hit_check_version_id) {
-            return Status::InternalError("Versioning Err: do not contain check version obj." +
-                                         log_with_s3_info());
+            return Status::InternalError("Versioning Err: do not contain check version obj: {}",
+                                         full_path(check_key));
         }
     }
 
@@ -743,8 +643,9 @@ Status S3FileSystem::check_bucket_versioning() const {
         get_response = s3_client->GetObject(get_request);
     }
     if (!get_response.IsSuccess()) {
-        return Status::InternalError("Versioning Err: Error getting check object with version: " +
-                                     get_response.GetError().GetMessage() + log_with_s3_info());
+        return s3fs_error(get_response.GetError(),
+                          fmt::format("Versioning Err: Error getting check object with version: {}",
+                                      full_path(check_key)));
     }
 
     auto res_stream = std::stringstream {};
@@ -753,8 +654,8 @@ Status S3FileSystem::check_bucket_versioning() const {
 
     if (res_string != check_value) {
         return Status::InternalError(
-                "Versioning Err: check object value does not match original value." +
-                log_with_s3_info());
+                "Versioning Err: check object value does not match original value: {}",
+                full_path(check_key));
     }
 
     // put obj again
@@ -769,9 +670,9 @@ Status S3FileSystem::check_bucket_versioning() const {
         reupload_response = s3_client->PutObject(reupload_request);
     }
     if (!reupload_response.IsSuccess()) {
-        return Status::InternalError("Versioning Err: Error re-uploading check object: " +
-                                     reupload_response.GetError().GetMessage() +
-                                     log_with_s3_info());
+        return s3fs_error(reupload_response.GetError(),
+                          fmt::format("Versioning Err: Error re-uploading check object: {}",
+                                      full_path(check_key)));
     }
     return Status::OK();
 }

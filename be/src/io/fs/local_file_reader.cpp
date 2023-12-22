@@ -69,9 +69,7 @@ Status LocalFileReader::close() {
         }
 #endif
         if (-1 == res) {
-            std::string err = errno_to_str();
-            LOG(WARNING) << fmt::format("failed to close {}: {}", _path.native(), err);
-            return Status::IOError("failed to close {}: {}", _path.native(), err);
+            return localfs_error(errno, fmt::format("failed to close {}", _path.native()));
         }
         _fd = -1;
     }
@@ -84,8 +82,9 @@ Status LocalFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_
                                       Status::IOError("inject io error"));
     DCHECK(!closed());
     if (offset > _file_size) {
-        return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
-                               offset, _file_size, _path.native());
+        return Status::InternalError(
+                "offset exceeds file size(offset: {}, file size: {}, path: {})", offset, _file_size,
+                _path.native());
     }
     size_t bytes_req = result.size;
     char* to = result.data;
@@ -95,10 +94,10 @@ Status LocalFileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_
         auto res = SYNC_POINT_HOOK_RETURN_VALUE(::pread(_fd, to, bytes_req, offset),
                                                 "LocalFileReader::pread", _fd, to);
         if (UNLIKELY(-1 == res && errno != EINTR)) {
-            return Status::IOError("cannot read from {}: {}", _path.native(), std::strerror(errno));
+            return localfs_error(errno, fmt::format("failed to read {}", _path.native()));
         }
         if (UNLIKELY(res == 0)) {
-            return Status::IOError("cannot read from {}: unexpected EOF", _path.native());
+            return Status::InternalError("cannot read from {}: unexpected EOF", _path.native());
         }
         if (res > 0) {
             to += res;

@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/logging.h"
 #include "gutil/strings/split.h"
 #include "http/http_client.h"
@@ -50,7 +51,6 @@
 #include "io/hdfs_builder.h"
 #include "olap/data_dir.h"
 #include "olap/snapshot_manager.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "runtime/client_cache.h"
@@ -178,10 +178,9 @@ Status SnapshotLoader::upload(const std::map<std::string, std::string>& src_to_d
             }
 
             // upload
-            std::string full_remote_file = dest_path + "/" + local_file;
+            std::string full_remote_file = fmt::format("{}/{}.{}", dest_path, local_file, md5sum);
             std::string full_local_file = src_path + "/" + local_file;
-            RETURN_IF_ERROR(
-                    _remote_fs->upload_with_checksum(full_local_file, full_remote_file, md5sum));
+            RETURN_IF_ERROR(_remote_fs->upload(full_local_file, full_remote_file));
         } // end for each tablet's local files
 
         tablet_files->emplace(tablet_id, local_files_with_checksum);

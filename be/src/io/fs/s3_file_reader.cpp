@@ -34,6 +34,7 @@
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/sync_point.h"
+#include "io/fs/err_utils.h"
 #include "io/fs/s3_common.h"
 #include "io/fs/s3_file_writer.h"
 #include "util/async_io.h"
@@ -81,8 +82,9 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                   const IOContext*) {
     DCHECK(!closed());
     if (offset > _file_size) {
-        return Status::IOError("offset exceeds file size(offset: {}, file size: {}, path: {})",
-                               offset, _file_size, _path.native());
+        return Status::InternalError(
+                "offset exceeds file size(offset: {}, file size: {}, path: {})", offset, _file_size,
+                _path.native());
     }
     size_t bytes_req = result.size;
     char* to = result.data;
@@ -107,15 +109,13 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
                                                 "s3_file_reader::get_object",
                                                 std::ref(request).get(), &result);
     if (!outcome.IsSuccess()) {
-        return Status::IOError("failed to read from {}: {}, exception {}, error code {}",
-                               _path.native(), outcome.GetError().GetMessage(),
-                               outcome.GetError().GetExceptionName(),
-                               outcome.GetError().GetResponseCode());
+        return s3fs_error(outcome.GetError(),
+                          fmt::format("failed to read from {}", _path.native()));
     }
     *bytes_read = outcome.GetResult().GetContentLength();
     if (*bytes_read != bytes_req) {
-        return Status::IOError("failed to read from {}(bytes read: {}, bytes req: {})",
-                               _path.native(), *bytes_read, bytes_req);
+        return Status::InternalError("failed to read from {}(bytes read: {}, bytes req: {})",
+                                     _path.native(), *bytes_read, bytes_req);
     }
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
     s3_bytes_read << *bytes_read;

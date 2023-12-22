@@ -30,6 +30,7 @@
 #include "common/config.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/cache/block/block_file_cache_settings.h"
+#include "io/fs/err_utils.h"
 #include "io/fs/local_file_system.h"
 #include "vec/common/hash_table/hash_table.h"
 
@@ -57,8 +58,7 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
 
     struct statfs stat;
     if (statfs(cache_base_path.c_str(), &stat) < 0) {
-        LOG_ERROR("").tag("file cache path", cache_base_path).tag("error", strerror(errno));
-        return Status::IOError("{} statfs error {}", cache_base_path, strerror(errno));
+        return localfs_error(errno, fmt::format("{} statfs error", cache_base_path));
     }
     size_t disk_total_size = static_cast<size_t>(stat.f_blocks) * static_cast<size_t>(stat.f_bsize);
     if (disk_total_size < file_cache_settings.total_size) {

@@ -614,8 +614,7 @@ DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(
 
     const char* file = _file;
 
-    LOG_AND_THROW_IF_ERROR(_fs->create_directory(file),
-                           "Get directory create directory IO error")
+    LOG_AND_THROW_IF_ERROR(_fs->create_directory(file), "Get directory create directory IO error")
 
     dir = _CLNEW DorisCompoundDirectory();
     dir->init(_fs, file, lock_factory, _cfs, cfs_file);
@@ -703,8 +702,7 @@ void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
     if (exists) {
         LOG_AND_THROW_IF_ERROR(fs->delete_directory(nu), fmt::format("Delete {} IO error", nu))
     }
-    LOG_AND_THROW_IF_ERROR(fs->rename_dir(old, nu),
-                           fmt::format("Rename {} to {} IO error", old, nu))
+    LOG_AND_THROW_IF_ERROR(fs->rename(old, nu), fmt::format("Rename {} to {} IO error", old, nu))
 }
 
 lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* name) {

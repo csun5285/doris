@@ -37,12 +37,14 @@
 #include "common/status.h"
 #include "common/sync_point.h"
 #include "gutil/macros.h"
+#include "io/fs/err_utils.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "util/doris_metrics.h"
 
 namespace doris {
+namespace io {
 namespace {
 
 Status sync_dir(const io::Path& dirname) {
@@ -50,24 +52,22 @@ Status sync_dir(const io::Path& dirname) {
     int fd;
     RETRY_ON_EINTR(fd, ::open(dirname.c_str(), O_DIRECTORY | O_RDONLY));
     if (-1 == fd) {
-        return Status::IOError("cannot open {}: {}", dirname.native(), std::strerror(errno));
+        return localfs_error(errno, fmt::format("failed to open {}", dirname.native()));
     }
+    Defer defer {[fd] { ::close(fd); }};
 #ifdef __APPLE__
     if (fcntl(fd, F_FULLFSYNC) < 0) {
-        return Status::IOError("cannot sync {}: {}", dirname.native(), std::strerror(errno));
+        return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
 #else
     if (0 != ::fdatasync(fd)) {
-        return Status::IOError("cannot fdatasync {}: {}", dirname.native(), std::strerror(errno));
+        return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
 #endif
-    ::close(fd);
     return Status::OK();
 }
 
 } // namespace
-
-namespace io {
 
 LocalFileWriter::LocalFileWriter(Path path, int fd, FileSystemSPtr fs, bool sync_data)
         : FileWriter(std::move(path), fs), _fd(fd), _sync_data(sync_data) {
@@ -131,7 +131,7 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
                        SYNC_POINT_HOOK_RETURN_VALUE(::writev(_fd, iov + completed_iov, iov_count),
                                                     "LocalFileWriter::writev", _fd));
         if (UNLIKELY(res < 0)) {
-            return Status::IOError("cannot write to {}: {}", _path.native(), std::strerror(errno));
+            return localfs_error(errno, fmt::format("failed to write {}", _path.native()));
         }
 
         if (LIKELY(res == n_left)) {
@@ -169,7 +169,7 @@ Status LocalFileWriter::finalize() {
 #if defined(__linux__)
         int flags = SYNC_FILE_RANGE_WRITE;
         if (sync_file_range(_fd, 0, 0, flags) < 0) {
-            return Status::IOError("cannot sync {}: {}", _path.native(), std::strerror(errno));
+            return localfs_error(errno, fmt::format("failed to finalize {}", _path.native()));
         }
 #endif
     }
@@ -185,12 +185,11 @@ Status LocalFileWriter::_close(bool sync) {
         if (_dirty) {
 #ifdef __APPLE__
             if (fcntl(_fd, F_FULLFSYNC) < 0) [[unlikely]] {
-                return Status::IOError("cannot sync {}: {}", _path.native(), std::strerror(errno));
+                return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
             }
 #else
             if (0 != ::fdatasync(_fd)) [[unlikely]] {
-                return Status::IOError("cannot fdatasync {}: {}", _path.native(),
-                                       std::strerror(errno));
+                return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
             }
 #endif
             _dirty = false;
@@ -199,7 +198,7 @@ Status LocalFileWriter::_close(bool sync) {
     }
 
     if (0 != ::close(_fd)) {
-        return Status::IOError("cannot close {}: {}", _path.native(), std::strerror(errno));
+        return localfs_error(errno, fmt::format("failed to close {}", _path.native()));
     }
 
     _closed = true;

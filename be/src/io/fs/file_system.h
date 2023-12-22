@@ -87,7 +87,6 @@ public:
     [[nodiscard]] Status file_size(const Path& file, int64_t* file_size) const;
     [[nodiscard]] Status list(const Path& dir, bool only_file, std::vector<FileInfo>* files, bool* exists);
     [[nodiscard]] Status rename(const Path& orig_name, const Path& new_name);
-    [[nodiscard]] Status rename_dir(const Path& orig_name, const Path& new_name);
 
     std::shared_ptr<FileSystem> getSPtr() { return shared_from_this(); }
 
@@ -152,9 +151,6 @@ protected:
 
     /// rename file from orig_name to new_name
     virtual Status rename_impl(const Path& orig_name, const Path& new_name) = 0;
-
-    /// rename dir from orig_name to new_name
-    virtual Status rename_dir_impl(const Path& orig_name, const Path& new_name) = 0;
 
     virtual Path absolute_path(const Path& path) const {
         if (path.is_absolute()) {

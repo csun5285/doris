@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -72,13 +73,13 @@ Status parse_stat(const std::string& buffer, std::string* name, ThreadStats* sta
         close_paren == string::npos ||      // ')' must exist
         open_paren >= close_paren ||        // '(' must come before ')'
         close_paren + 2 == buffer.size()) { // there must be at least two chars after ')'
-        return Status::IOError("Unrecognised /proc format");
+        return Status::InternalError("Unrecognised /proc format");
     }
     string extracted_name = buffer.substr(open_paren + 1, close_paren - (open_paren + 1));
     string rest = buffer.substr(close_paren + 2);
     std::vector<string> splits = Split(rest, " ", strings::SkipEmpty());
     if (splits.size() < kMaxOffset) {
-        return Status::IOError("Unrecognised /proc format");
+        return Status::InternalError("Unrecognised /proc format");
     }
 
     int64_t tmp;
@@ -103,8 +104,17 @@ Status get_thread_stats(int64_t tid, ThreadStats* stats) {
         return Status::NotSupported("ThreadStats not supported");
     }
     std::string buf;
-    RETURN_IF_ERROR(io::global_local_filesystem()->read_file_to_string(
-            strings::Substitute("/proc/self/task/$0/stat", tid), &buf));
+    auto path = fmt::format("/proc/self/task/{}/stat", tid);
+    std::ifstream file(path);
+    if (file.is_open()) {
+        std::ostringstream oss;
+        oss << file.rdbuf();
+        buf = oss.str();
+        file.close();
+    } else {
+        return Status::InternalError("failed to open {}: {}", path, std::strerror(errno));
+    }
+
     return parse_stat(buf, nullptr, stats);
 }
 void disable_core_dumps() {

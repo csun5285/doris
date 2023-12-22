@@ -38,6 +38,7 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "gutil/strings/substitute.h"
+#include "io/fs/file_reader.h"
 #include "io/fs/file_reader_writer_fwd.h"
 #include "io/fs/file_writer.h"
 #include "io/fs/fs_utils.h"
@@ -153,17 +154,18 @@ Status DataDir::_init_cluster_id() {
 Status DataDir::read_cluster_id(const std::string& cluster_id_path, int32_t* cluster_id) {
     bool exists = false;
     RETURN_IF_ERROR(io::global_local_filesystem()->exists(cluster_id_path, &exists));
+    *cluster_id = -1;
     if (exists) {
-        std::string content;
-        RETURN_IF_ERROR(
-                io::global_local_filesystem()->read_file_to_string(cluster_id_path, &content));
-        if (content.size() > 0) {
+        io::FileReaderSPtr reader;
+        RETURN_IF_ERROR(io::global_local_filesystem()->open_file(cluster_id_path, &reader));
+        size_t fsize = reader->size();
+        if (fsize > 0) {
+            std::string content;
+            content.reserve(fsize);
+            size_t bytes_read = 0;
+            RETURN_IF_ERROR(reader->read_at(0, {content.data(), fsize}, &bytes_read));
             *cluster_id = std::stoi(content);
-        } else {
-            *cluster_id = -1;
-        }
-    } else {
-        *cluster_id = -1;
+        } 
     }
     return Status::OK();
 }

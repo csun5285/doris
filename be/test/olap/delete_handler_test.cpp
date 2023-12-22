@@ -62,12 +62,16 @@ static void set_up() {
     char buffer[MAX_PATH_LEN];
     EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
     config::storage_root_path = string(buffer) + "/data_test";
-    EXPECT_TRUE(io::global_local_filesystem()
-                        ->delete_and_create_directory(config::storage_root_path)
-                        .ok());
-    EXPECT_TRUE(io::global_local_filesystem()
-                        ->delete_directory(string(getenv("DORIS_HOME")) + "/" + UNUSED_PREFIX)
-                        .ok());
+    auto st = io::global_local_filesystem()->delete_directory(config::storage_root_path);
+    ASSERT_TRUE(st.ok()) << st;
+    st = io::global_local_filesystem()->create_directory(config::storage_root_path);
+    ASSERT_TRUE(st.ok()) << st;
+    st = io::global_local_filesystem()->delete_directory(string(getenv("DORIS_HOME")) + "/" +
+                                                         UNUSED_PREFIX);
+    ASSERT_TRUE(st.ok()) << st;
+    st = io::global_local_filesystem()->create_directory(string(getenv("DORIS_HOME")) + "/" +
+                                                         UNUSED_PREFIX);
+    ASSERT_TRUE(st.ok()) << st;
 
     std::vector<StorePath> paths;
     paths.emplace_back(config::storage_root_path, -1);
@@ -285,9 +289,10 @@ protected:
         char buffer[MAX_PATH_LEN];
         EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
         config::storage_root_path = string(buffer) + "/data_delete_condition";
-        EXPECT_TRUE(io::global_local_filesystem()
-                            ->delete_and_create_directory(config::storage_root_path)
-                            .ok());
+        auto st = io::global_local_filesystem()->delete_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
+        st = io::global_local_filesystem()->create_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
 
         // 1. Prepare for query split key.
         // create base tablet
@@ -465,9 +470,10 @@ protected:
         char buffer[MAX_PATH_LEN];
         EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
         config::storage_root_path = string(buffer) + "/data_delete_condition";
-        EXPECT_TRUE(io::global_local_filesystem()
-                            ->delete_and_create_directory(config::storage_root_path)
-                            .ok());
+        auto st = io::global_local_filesystem()->delete_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
+        st = io::global_local_filesystem()->create_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
 
         // 1. Prepare for query split key.
         // create base tablet
@@ -840,9 +846,10 @@ protected:
         char buffer[MAX_PATH_LEN];
         EXPECT_NE(getcwd(buffer, MAX_PATH_LEN), nullptr);
         config::storage_root_path = string(buffer) + "/data_delete_condition";
-        EXPECT_TRUE(io::global_local_filesystem()
-                            ->delete_and_create_directory(config::storage_root_path)
-                            .ok());
+        auto st = io::global_local_filesystem()->delete_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
+        st = io::global_local_filesystem()->create_directory(config::storage_root_path);
+        ASSERT_TRUE(st.ok()) << st;
 
         // 1. Prepare for query split key.
         // create base tablet
