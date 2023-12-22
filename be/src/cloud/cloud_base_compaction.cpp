@@ -1,5 +1,7 @@
 #include "cloud/cloud_base_compaction.h"
 
+#include <boost/container_hash/hash.hpp>
+
 #include "cloud/meta_mgr.h"
 #include "cloud/utils.h"
 #include "common/config.h"
