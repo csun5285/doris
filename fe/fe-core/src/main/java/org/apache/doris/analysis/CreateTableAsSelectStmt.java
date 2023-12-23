@@ -55,7 +55,7 @@ public class CreateTableAsSelectStmt extends DdlStmt {
     private final InsertStmt insertStmt;
 
     protected CreateTableAsSelectStmt(CreateTableStmt createTableStmt,
-                                      List<String> columnNames, QueryStmt queryStmt) {
+            List<String> columnNames, QueryStmt queryStmt) {
         this.createTableStmt = createTableStmt;
         this.columnNames = columnNames;
         this.queryStmt = queryStmt;
@@ -88,11 +88,11 @@ public class CreateTableAsSelectStmt extends DdlStmt {
                 queryStmt.getResultExprs().get(i).getSrcSlotRef().getDesc().setColumn(columnCopy);
             }
             if (Config.enable_date_conversion) {
-                if (queryStmt.getResultExprs().get(i).getType() == Type.DATE) {
+                if (queryStmt.getResultExprs().get(i).getType().isDate()) {
                     Expr castExpr = queryStmt.getResultExprs().get(i).castTo(Type.DATEV2);
                     queryStmt.getResultExprs().set(i, castExpr);
                 }
-                if (queryStmt.getResultExprs().get(i).getType() == Type.DATETIME) {
+                if (queryStmt.getResultExprs().get(i).getType().isDatetime()) {
                     Expr castExpr = queryStmt.getResultExprs().get(i).castTo(Type.DATETIMEV2);
                     queryStmt.getResultExprs().set(i, castExpr);
                 }
