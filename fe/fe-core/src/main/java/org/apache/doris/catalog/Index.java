@@ -18,7 +18,6 @@
 package org.apache.doris.catalog;
 
 import org.apache.doris.analysis.IndexDef;
-import org.apache.doris.analysis.IndexDef.IndexType;
 import org.apache.doris.analysis.InvertedIndexUtil;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.io.Text;
@@ -225,10 +224,25 @@ public class Index implements Writable {
             }
         }
 
-        if (indexType == IndexType.BITMAP) {
-            builder.setIndexType(OlapFile.IndexType.BITMAP);
-        } else if (indexType == IndexType.INVERTED) {
-            builder.setIndexType(OlapFile.IndexType.INVERTED);
+        switch (indexType) {
+            case BITMAP:
+                builder.setIndexType(OlapFile.IndexType.BITMAP);
+                break;
+
+            case INVERTED:
+                builder.setIndexType(OlapFile.IndexType.INVERTED);
+                break;
+
+            case NGRAM_BF:
+                builder.setIndexType(OlapFile.IndexType.NGRAM_BF);
+                break;
+
+            case BLOOMFILTER:
+                builder.setIndexType(OlapFile.IndexType.BLOOMFILTER);
+                break;
+
+            default:
+                throw new RuntimeException("indexType " + indexType + " is not processed in toPb");
         }
 
         if (properties != null) {
