@@ -232,4 +232,5 @@ suite("test_multi_stale_rowset") {
             assertTrue(flag)
     }
     sql new File("""${context.file.parent}/ddl/${table}_delete.sql""").text
+    sql """ set enable_multi_cluster_sync_load=false """
 }

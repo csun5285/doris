@@ -105,4 +105,5 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
             }
             assertTrue(flag);
     }
+    sql "drop table if exists ${table1}"
 }

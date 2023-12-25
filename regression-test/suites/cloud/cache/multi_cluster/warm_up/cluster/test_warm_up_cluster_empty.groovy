@@ -142,4 +142,6 @@ suite("test_warm_up_cluster_empty") {
             }
             assertTrue(flag)
     }
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
+    sql new File("""${context.file.parent}/../ddl/supplier_delete.sql""").text
 }

@@ -234,7 +234,7 @@ def clearFileCache = { check_func ->
             }
             assertTrue(flag1 && flag2)
     }
-    sql """ select * from customer_ttl_like limit 10 """
+    sql """ select * from customer_ttl_as_select limit 10 """
     sleep(10000)
     getMetricsMethod.call() {
         respCode, body ->
@@ -257,4 +257,6 @@ def clearFileCache = { check_func ->
             }
             assertTrue(flag)
     }
+    sql new File("""${context.file.parent}/../ddl/customer_ttl_delete.sql""").text
+    sql """ DROP TABLE IF EXISTS customer_ttl_as_select """
 }

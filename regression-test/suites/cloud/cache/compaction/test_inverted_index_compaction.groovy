@@ -228,4 +228,5 @@ suite("test_inverted_index_compaction"){
     qt_sql """
         select * from ${indexTbName1} where selfComment<'i like' or grade<'grade 5' and fatherName< 'zhang yi' or studentInfo<"tall:120cm, weight: 35kg," order by name
         """
+    sql "DROP TABLE IF EXISTS ${indexTbName1}"
 }

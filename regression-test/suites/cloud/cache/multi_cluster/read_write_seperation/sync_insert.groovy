@@ -174,4 +174,5 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
             assertTrue(flag)
     }
     sql "drop table if exists ${table1}"
+    sql """ set enable_multi_cluster_sync_load = false """
 }

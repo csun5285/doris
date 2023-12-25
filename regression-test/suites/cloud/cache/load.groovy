@@ -59,6 +59,6 @@ suite("load") {
     sql """ SET PROPERTY 'default_cloud_cluster' = "regression_cluster_name0"; """
     assertEquals(result.size(), 2);
     sql """ set global enable_auto_analyze = false; """
-    sql """ drop table __internal_schema.column_statistics; """
-    sql """ drop table __internal_schema.histogram_statistics; """
+    sql """ drop table if exists __internal_schema.column_statistics; """
+    sql """ drop table if exists __internal_schema.histogram_statistics; """
 }

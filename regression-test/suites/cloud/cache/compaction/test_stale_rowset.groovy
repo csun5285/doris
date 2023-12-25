@@ -212,4 +212,5 @@ suite("test_stale_rowset") {
                 backendIdToAfterCompactionCacheSize.get(backend[0]))
         }
     }
+    sql new File("""${context.file.parent}/../ddl/${table}_delete.sql""").text
 }

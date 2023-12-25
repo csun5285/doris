@@ -220,4 +220,6 @@ def clearFileCache = { check_func ->
             }
             assertTrue(flag)
     }
+    sql new File("""${context.file.parent}/../ddl/customer_ttl_delete.sql""").text
+    sql """ DROP TABLE IF EXISTS customer_ttl_like """
 }

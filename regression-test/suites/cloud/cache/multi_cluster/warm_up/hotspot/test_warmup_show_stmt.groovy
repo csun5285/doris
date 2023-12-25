@@ -87,11 +87,11 @@ suite("test_warmup_show_stmt") {
     sleep(40000)
     result = sql """ show cache hotspot "/" """
     if (result[0][0].equals("regression_cluster_id0")) {
-        assertEquals(result[0][3], "regression_test_cloud_multi_cluster_warm_up_hotspot.customer")
-        assertEquals(result[1][3], "regression_test_cloud_multi_cluster_warm_up_hotspot.supplier")
+        assertEquals(result[0][3], "regression_test_cloud_cache_multi_cluster_warm_up_hotspot.customer")
+        assertEquals(result[1][3], "regression_test_cloud_cache_multi_cluster_warm_up_hotspot.supplier")
     } else {
-        assertEquals(result[1][3], "regression_test_cloud_multi_cluster_warm_up_hotspot.customer")
-        assertEquals(result[0][3], "regression_test_cloud_multi_cluster_warm_up_hotspot.supplier")
+        assertEquals(result[1][3], "regression_test_cloud_cache_multi_cluster_warm_up_hotspot.customer")
+        assertEquals(result[0][3], "regression_test_cloud_cache_multi_cluster_warm_up_hotspot.supplier")
     }
 
     try {
@@ -102,7 +102,7 @@ suite("test_warmup_show_stmt") {
     }
 
     try {
-        sql """ show cache hotspot "/regression_cluster_name1/regression_test_cloud_multi_cluster_warm_up_hotspot.error_table """ 
+        sql """ show cache hotspot "/regression_cluster_name1/regression_test_cloud_cache_multi_cluster_warm_up_hotspot.error_table """ 
         assertTrue(false)
     } catch (Exception e) {
         assertTrue(true)
