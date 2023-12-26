@@ -12,6 +12,7 @@
 #include "meta-service/keys.h"
 #include "meta-service/txn_kv_error.h"
 #include "recycler/checker.h"
+#include "recycler/meta_checker.h"
 #include "recycler/recycler.h"
 
 namespace selectdb {
@@ -214,6 +215,14 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
     msg = proto_to_json(job_info);
 }
 
+void check_meta(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
+                const std::string& host, const std::string& port,
+                const std::string& user, const std::string& password,
+                std::string& msg) {
+    std::unique_ptr<MetaChecker> meta_checker = std::make_unique<MetaChecker>(txn_kv);
+    meta_checker->do_check(host, port, user, password, msg);
+}
+
 void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
                                const ::selectdb::MetaServiceHttpRequest* request,
                                ::selectdb::MetaServiceHttpResponse* response,
@@ -342,6 +351,33 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
         std::string key;
         job_check_key({*instance_id}, &key);
         recycle_job_info(txn_kv_, *instance_id, key, code, msg);
+        response_body = msg;
+        return;
+    }
+
+    if (unresolved_path == "check_meta") {
+        auto instance_id = uri.GetQuery("instance_id");
+        auto host = uri.GetQuery("host");
+        auto port = uri.GetQuery("port");
+        auto user = uri.GetQuery("user");
+        auto password = uri.GetQuery("password");
+        LOG(INFO) << " host " << *host;
+        LOG(INFO) << " port " << *port;
+        LOG(INFO) << " user " << *user;
+        LOG(INFO) << " passwd " << *password;
+        LOG(INFO) << " instance " << *instance_id;
+        if (instance_id == nullptr || instance_id->empty()
+                || host == nullptr || host->empty()
+                || port == nullptr || port->empty()
+                || password == nullptr
+                || user == nullptr || user->empty()) {
+            msg = "no instance id or mysql conn str info";
+            response_body = msg;
+            status_code = 400;
+            return;
+        }
+        check_meta(txn_kv_, *instance_id, *host, *port, *user, *password, msg);
+        status_code = 200;
         response_body = msg;
         return;
     }

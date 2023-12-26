@@ -1159,7 +1159,6 @@ enum MetaServiceCode {
     UNDEFINED_ERR = 1000000;
 }
 
-
 message UpdateDeleteBitmapRequest {
     optional string cloud_unique_id = 1; // For auth
     optional int64 table_id = 2;

@@ -9,8 +9,9 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lfdb_c -L${THIRDPARTY_DIR
 
 add_library(Recycler
     checker.cpp
-    recycler_service.cpp
+    meta_checker.cpp
     recycler.cpp
+    recycler_service.cpp
     s3_accessor.cpp
     util.cpp
     white_black_list.cpp
