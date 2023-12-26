@@ -163,6 +163,10 @@ public class StmtExecutorTest {
                 ctx.getStmtId();
                 minTimes = 0;
                 result = 1L;
+
+                ConnectContext.get().getCloudCluster();
+                minTimes = 0;
+                result = "test_cluster";
             }
         };
     }

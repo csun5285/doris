@@ -105,19 +105,20 @@ public class ConnectContextTest {
         // Thread info
         Assert.assertNotNull(ctx.toThreadInfo(false));
         List<String> row = ctx.toThreadInfo(false).toRow(101, 1000);
-        Assert.assertEquals(12, row.size());
+        Assert.assertEquals(13, row.size());
         Assert.assertEquals("Yes", row.get(0));
         Assert.assertEquals("101", row.get(1));
         Assert.assertEquals("testUser", row.get(2));
         Assert.assertEquals("", row.get(3));
-        Assert.assertEquals("2023-09-06 20:13:16", row.get(4));
-        Assert.assertEquals("internal", row.get(5));
-        Assert.assertEquals("testDb", row.get(6));
-        Assert.assertEquals("Ping", row.get(7));
-        Assert.assertEquals("1", row.get(8));
-        Assert.assertEquals("OK", row.get(9));
-        Assert.assertEquals("", row.get(10));
+        Assert.assertEquals("testCluster", row.get(4));
+        Assert.assertEquals("2023-09-06 20:13:16", row.get(5));
+        Assert.assertEquals("internal", row.get(6));
+        Assert.assertEquals("testDb", row.get(7));
+        Assert.assertEquals("Ping", row.get(8));
+        Assert.assertEquals("1", row.get(9));
+        Assert.assertEquals("OK", row.get(10));
         Assert.assertEquals("", row.get(11));
+        Assert.assertEquals("", row.get(12));
 
         // Start time
         Assert.assertEquals(0, ctx.getStartTime());
