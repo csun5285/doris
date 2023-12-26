@@ -198,12 +198,15 @@ Status DeltaWriter::init() {
 
 #ifdef CLOUD_MODE
     auto version_cnt = _tablet->fetch_add_approximate_num_rowsets(0);
+
+    using namespace std::chrono;
+    int64_t now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+    _tablet->last_load_time_ms = now;
     // to cooperate with load backoff algorithm,  we try to make sure submit one
     // compaction task to reduce the load pressure each time we meet high load
     // pressure condition
     if (version_cnt > config::max_tablet_version_num / 2) {
         using namespace std::chrono;
-        auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         if (now - _tablet->last_cumu_no_suitable_version_ms() >
             config::min_compaction_failure_interval_ms) {
             // trigger compaction early to reduce -235
@@ -504,9 +507,6 @@ void DeltaWriter::update_tablet_stats() {
     _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
     _tablet->fetch_add_approximate_cumu_num_rowsets(1);
     _tablet->fetch_add_approximate_cumu_num_deltas(_cur_rowset->num_segments());
-    using namespace std::chrono;
-    _tablet->last_load_time_ms =
-            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {
