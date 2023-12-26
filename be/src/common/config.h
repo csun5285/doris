@@ -1267,6 +1267,8 @@ DECLARE_Int32(download_binlog_rate_limit_kbs);
 // whether to enable /api/snapshot api
 DECLARE_Bool(enable_snapshot_action);
 
+DECLARE_mBool(prioritize_query_perf_in_compaction);
+
 #ifdef BE_TEST
 // test s3
 DECLARE_String(test_s3_resource);
