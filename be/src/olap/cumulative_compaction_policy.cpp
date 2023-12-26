@@ -316,7 +316,7 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         ++rs_begin;
     }
     if (rs_begin == input_rowsets->end()) { // No suitable level size found in `input_rowsets`
-        if (tablet->keys_type() != DUP_KEYS) {
+        if (config::prioritize_query_perf_in_compaction && tablet->keys_type() != DUP_KEYS) {
             // While tablet's key type is not `DUP_KEYS`, compacting rowset in such tablets has a significant
             // positive impact on queries and reduces space amplification, so we ignore level limitation and
             // pick candidate rowsets as input rowsets.

@@ -399,7 +399,7 @@ DEFINE_mInt64(compaction_promotion_version_count, "1000");
 DEFINE_mInt64(compaction_min_size_mbytes, "64");
 
 // cumulative compaction policy: min and max delta file's number
-DEFINE_mInt64(cumulative_compaction_min_deltas, "5");
+DEFINE_mInt64(cumulative_compaction_min_deltas, "20");
 DEFINE_mInt64(cumulative_compaction_max_deltas, "1000");
 
 // This config can be set to limit thread number in  multiget thread pool.
@@ -1245,6 +1245,8 @@ DEFINE_Int32(ingest_binlog_work_pool_size, "-1");
 DEFINE_Int32(download_binlog_rate_limit_kbs, "0");
 
 DEFINE_Bool(enable_snapshot_action, "false");
+
+DEFINE_mBool(prioritize_query_perf_in_compaction, "false");
 
 // clang-format off
 #ifdef BE_TEST
