@@ -68,9 +68,6 @@ using namespace ErrorCode;
 static void update_tablet_stats(Tablet* tablet) {
     tablet->fetch_add_approximate_num_rowsets(1);
     tablet->fetch_add_approximate_cumu_num_rowsets(1);
-    using namespace std::chrono;
-    tablet->last_load_time_ms =
-            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
 Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tablet,
@@ -79,6 +76,10 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
     if (push_type != PushType::PUSH_FOR_DELETE) {
         LOG(FATAL) << "Not support for push_type " << static_cast<int>(push_type);
     }
+
+    using namespace std::chrono;
+    tablet->last_load_time_ms =
+            duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     // check if version number exceed limit
     if (tablet->fetch_add_approximate_num_rowsets(0) > config::max_tablet_version_num) {
         LOG_WARNING("tablet exceeds max version num limit")

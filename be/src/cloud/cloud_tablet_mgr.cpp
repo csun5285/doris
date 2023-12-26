@@ -336,7 +336,8 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         // regardless of whether there is a load job recently.
         return now - t->last_cumu_no_suitable_version_ms() < config::min_compaction_failure_interval_ms ||
                (now - t->last_load_time_ms > config::cu_compaction_freeze_interval_seconds * 1000
-               && now - t->last_cumu_compaction_success_time() < config::cumu_compaction_interval_seconds * 1000);
+               && now - t->last_cumu_compaction_success_time() < config::cumu_compaction_interval_seconds * 1000
+               && t->fetch_add_approximate_num_rowsets(0) < config::max_tablet_version_num / 2);
     };
     // We don't schedule tablets that are disabled for compaction
     //auto disable = [](Tablet* t) { return t->tablet_meta()->tablet_schema()->disable_auto_compaction(); };
