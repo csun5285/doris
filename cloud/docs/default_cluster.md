@@ -46,6 +46,14 @@ SHOW CLUSTERS;
    - 不能SHOW CLUSTERS，会提示需要grant ADMIN权限
 - 若当前用户没有配置默认cluster，目前实现在读写数据的时候，会报错。可以使用`use @cluster`设置当前context使用的cluster，也可以使用SET PROPERTY设置默认cluster
 - 若当前用户配置了默认cluster，但是后面此cluster被drop掉了，读写数据会报错，可以使用`use @cluster`设置当前context使用的cluster，也可以使用SET PROPERTY设置默认cluster
+- 若userA 设置 default cluster 为 ClusterA，drop clusterA后，用户的default cluster不会被修改，但是读写等操作会报错，报错内容类似下面
+   ```
+   mysql> select * from t1;
+   ERROR 1105 (HY000): errCode = 2, detailMessage = 10444 have no queryable replicas. err: 10445's backend -1 does not exist or not alive, or you may not have permission to access the current cluster,  clusterName=regression_test_cluster_name2
+   mysql> insert into t1 values(2, "bbb", 30);
+   ERROR 1105 (HY000): errCode = 3, detailMessage = tablet 10444 alive replica num 0 < quorum replica num 1, alive backends: []or you may not have permission to access the current cluster clusterName=regression_test_cluster_name2
+   ```
+   用户遇到类似错误，可以自行排查下，通过SET PROPERTY FOR {user} 'default_cloud_cluster' = '{newClusterName}';更新default cluster，并注意用户需要newClusterName的usage_priv
 
 3. 示例：
 

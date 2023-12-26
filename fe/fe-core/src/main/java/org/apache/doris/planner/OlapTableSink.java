@@ -40,12 +40,14 @@ import org.apache.doris.catalog.RandomDistributionInfo;
 import org.apache.doris.catalog.RangePartitionItem;
 import org.apache.doris.catalog.Tablet;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.Status;
 import org.apache.doris.common.UserException;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.thrift.TColumn;
@@ -434,10 +436,16 @@ public class OlapTableSink extends DataSink {
                 for (Tablet tablet : index.getTablets()) {
                     Multimap<Long, Long> bePathsMap = tablet.getNormalReplicaBackendPathMap();
                     if (bePathsMap.keySet().size() < quorum) {
-                        throw new UserException(InternalErrorCode.REPLICA_FEW_ERR,
-                                "tablet " + tablet.getId() + " alive replica num " + bePathsMap.keySet().size()
+                        String errMsg = "tablet " + tablet.getId() + " alive replica num " + bePathsMap.keySet().size()
                                         + " < quorum replica num " + quorum
-                                        + ", alive backends: [" + StringUtils.join(bePathsMap.keySet(), ",") + "]");
+                                        + ", alive backends: [" + StringUtils.join(bePathsMap.keySet(), ",") + "]";
+                        if (Config.isCloudMode()) {
+                            errMsg += " or you may not have permission to access the current cluster";
+                            if (ConnectContext.get() != null) {
+                                errMsg += " clusterName=" + ConnectContext.get().getCloudCluster();
+                            }
+                        }
+                        throw new UserException(InternalErrorCode.REPLICA_FEW_ERR, errMsg);
                     }
 
                     if (singleReplicaLoad) {

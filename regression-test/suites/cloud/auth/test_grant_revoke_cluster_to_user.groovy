@@ -66,7 +66,7 @@ suite("test_grant_revoke_cluster_to_user", "cloud_auth") {
     connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
         test {
             sql """select * from ${db}.${tbl}"""
-            exception "you may be not have this cluster's Usage priv, pls check it"
+            exception "or you may not have permission to access the current cluster"
         }
     }
 
